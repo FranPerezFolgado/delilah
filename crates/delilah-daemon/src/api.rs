@@ -13,7 +13,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
-use crate::{actions, hooks, jira, projects, run, session_api, terminal};
+use crate::{actions, hooks, jira, preferences, projects, run, session_api, terminal};
 
 /// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
 /// API from a browser: JSON requests need a preflight that other origins fail.
@@ -45,6 +45,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/sessions", get(session_api::list_all))
         .route(
+            "/api/v1/preferences/{key}",
+            get(preferences::get).put(preferences::put),
+        )
+        .route(
             "/api/v1/sessions/{id}/terminal",
             get(terminal::session_terminal),
         )
@@ -61,6 +65,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/projects",
             get(projects::list_projects).post(projects::add_project),
         )
+        .route("/api/v1/projects/inspect", post(projects::inspect))
         .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),

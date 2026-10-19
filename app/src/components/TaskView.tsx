@@ -67,9 +67,9 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
   const s = task.status;
   return (
     <>
-      <div className="view-head">
+      <div className="view-head" data-tauri-drag-region>
         <span className="mono muted">{task.key}</span>
-        <h1 className="trunc">{task.title}</h1>
+        <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
         <span className={`pill ${cls}`} style={{ marginLeft: "auto" }}>
           <Icon name={icon} /> {statusLabel(s)}
         </span>

@@ -166,3 +166,114 @@ pub async fn suggest_submodules(
 }
 
 const SUGGEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+#[derive(Debug, Deserialize)]
+pub struct InspectRequest {
+    pub path: PathBuf,
+}
+
+/// What a folder would be as a project, to prefill the "add project" form.
+#[derive(Debug, serde::Serialize)]
+pub struct Inspection {
+    /// Root of the repo containing the folder.
+    pub path: PathBuf,
+    pub name: String,
+    pub kind: ProjectKind,
+    pub submodules: usize,
+}
+
+pub async fn inspect(Json(req): Json<InspectRequest>) -> Result<Json<Inspection>, ApiError> {
+    let path = req.path.clone();
+    let inspection = tokio::task::spawn_blocking(move || -> Result<Inspection, String> {
+        let root = delilah_git::repo_root(&path)
+            .map_err(|_| format!("{} is not a git repo", path.display()))?;
+        let submodules = delilah_git::list_submodules(&root)
+            .map_err(|e| e.to_string())?
+            .len();
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(Inspection {
+            kind: if submodules > 0 {
+                ProjectKind::Parent
+            } else {
+                ProjectKind::Repo
+            },
+            path: root,
+            name,
+            submodules,
+        })
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    .map_err(ApiError::unprocessable)?;
+    Ok(Json(inspection))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+
+    use crate::config::Config;
+    use crate::state::AppState;
+    use crate::store::Store;
+
+    async fn inspect(path: &std::path::Path) -> (axum::http::StatusCode, Value) {
+        let config = Config {
+            home: std::env::temp_dir(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+        };
+        let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
+        let req = Request::post("/api/v1/projects/inspect")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "path": path }).to_string()))
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = http_body_util::BodyExt::collect(res.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[tokio::test]
+    async fn proposes_kind_and_name_from_the_folder() {
+        let dir = std::env::temp_dir().join(format!("delilah-inspect-{}", uuid::Uuid::new_v4()));
+        let fixture = Command::new("bash")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../scripts/make-fixture-parent.sh"
+            ))
+            .arg(dir.join("env"))
+            .output()
+            .unwrap();
+        assert!(fixture.status.success());
+
+        // A subfolder of the parent: the project is its root, with submodules.
+        let (_, parent) = inspect(&dir.join("env/parent/svc-payments/..")).await;
+        assert_eq!(parent["kind"], "parent");
+        assert_eq!(parent["name"], "parent");
+        assert_eq!(parent["submodules"], 4);
+
+        let (_, repo) = inspect(&dir.join("env/parent/svc-orders/src")).await;
+        assert_eq!(repo["kind"], "repo");
+        assert_eq!(repo["name"], "svc-orders");
+
+        let (status, body) = inspect(&dir).await;
+        assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body["error"].as_str().unwrap().contains("not a git repo"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

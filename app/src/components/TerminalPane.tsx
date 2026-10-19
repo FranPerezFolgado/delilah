@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { terminalUrl } from "../api";
+import { actionFor } from "../shortcuts";
 
 const THEME = {
   background: "#0c0d0f",
@@ -47,6 +48,8 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
       // No WebGL: xterm falls back to its DOM renderer.
     }
     termRef.current = t;
+    // App shortcuts (⌘T, ⌘W…) are for the app, not the shell.
+    t.attachCustomKeyEventHandler((e) => !(e.type === "keydown" && actionFor(e)));
 
     const ws = new WebSocket(terminalUrl(sessionId));
     ws.binaryType = "arraybuffer";

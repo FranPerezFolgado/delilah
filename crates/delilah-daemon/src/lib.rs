@@ -6,6 +6,7 @@ pub mod config;
 mod hooks;
 mod jira;
 pub mod notify;
+mod preferences;
 mod projects;
 mod run;
 pub mod scheduler;

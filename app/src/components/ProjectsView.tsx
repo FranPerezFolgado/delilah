@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api, type Project, type ProjectKind } from "../api";
+import { api, type FolderInspection, type Project, type ProjectKind } from "../api";
+import { isDesktop, pickFolder } from "../platform";
 
 export function ProjectsView({ projects, onChanged }: { projects: Project[]; onChanged: () => void }) {
   const [path, setPath] = useState("");
@@ -7,6 +8,31 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [found, setFound] = useState<FolderInspection | null>(null);
+
+  // Fill the rest of the form from what the folder is.
+  const inspect = async (folder: string) => {
+    setFound(null);
+    if (!folder.trim()) return;
+    try {
+      const info = await api.inspectFolder(folder.trim());
+      setFound(info);
+      setPath(info.path);
+      setKind(info.kind);
+      setName((n) => n || info.name);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const choose = async () => {
+    const folder = await pickFolder("Elige la carpeta del repositorio");
+    if (folder) {
+      setName("");
+      await inspect(folder);
+    }
+  };
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -16,6 +42,7 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
       await api.addProject({ path: path.trim(), kind, name: name.trim() || undefined });
       setPath("");
       setName("");
+      setFound(null);
       onChanged();
     } catch (err) {
       setError((err as Error).message);
@@ -26,8 +53,8 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
 
   return (
     <>
-      <div className="view-head">
-        <h1>Proyectos</h1>
+      <div className="view-head" data-tauri-drag-region>
+        <h1 data-tauri-drag-region>Proyectos</h1>
         <span className="muted" style={{ fontSize: 12 }}>{projects.length}</span>
       </div>
       <div className="view-body">
@@ -56,7 +83,20 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
           <div className="sec">Añadir proyecto</div>
           <label className="field">
             <span>Carpeta del repo</span>
-            <input className="input mono" placeholder="/Users/tu/dev/projects/mi-proyecto" value={path} onChange={(e) => setPath(e.target.value)} required />
+            <span style={{ display: "flex", gap: 8 }}>
+              <input className="input mono" style={{ flex: 1 }} placeholder="/Users/tu/dev/projects/mi-proyecto" value={path}
+                onChange={(e) => setPath(e.target.value)} onBlur={(e) => inspect(e.target.value)} required />
+              {isDesktop && (
+                <button type="button" className="btn" style={{ height: 30 }} onClick={choose}>Elegir carpeta…</button>
+              )}
+            </span>
+            {found && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                {found.submodules > 0
+                  ? `Repo con ${found.submodules} submódulos: se añadirá como parent.`
+                  : "Repo sin submódulos: se añadirá como repo."}
+              </span>
+            )}
           </label>
           <div className="field">
             <span>Tipo</span>

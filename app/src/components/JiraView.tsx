@@ -72,8 +72,8 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
 
   return (
     <>
-      <div className="view-head">
-        <h1>Jira</h1>
+      <div className="view-head" data-tauri-drag-region>
+        <h1 data-tauri-drag-region>Jira</h1>
         <span className="muted" style={{ fontSize: 12 }}>
           {settings.mode === "sample" ? "datos de ejemplo" : settings.site} · {issues.length} tickets
         </span>
@@ -186,7 +186,7 @@ function ConnectForm({ current, onConnected, onCancel }: {
 
   return (
     <>
-      <div className="view-head"><h1>Conectar Jira</h1></div>
+      <div className="view-head" data-tauri-drag-region><h1 data-tauri-drag-region>Conectar Jira</h1></div>
       <div className="view-body">
         <form className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 620 }} onSubmit={submit}>
           <div className="choices" role="radiogroup" aria-label="Tipo de Jira">

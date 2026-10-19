@@ -2,14 +2,17 @@
 //! WebSocket API, never through Tauri commands, so the shell could be swapped for
 //! Electron without touching the UI. Window behaviour is the one thing it owns.
 
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
 
 fn main() {
     tauri::Builder::default()
+        // Native folder picker, e.g. to add a project.
+        .plugin(tauri_plugin_dialog::init())
+        .menu(menu)
         .on_window_event(|window, event| {
-            // macOS convention: closing the window (Cmd+W, the red button) keeps the
-            // app running in the Dock; Cmd+Q quits. The agents live in the daemon
-            // either way.
+            // macOS convention: the red button hides the window and the app stays in
+            // the Dock; Cmd+Q quits. The agents live in the daemon either way.
             if let WindowEvent::CloseRequested { api, .. } = event
                 && cfg!(target_os = "macos")
             {
@@ -31,4 +34,50 @@ fn main() {
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+/// The usual macOS menus, minus "Close Window": in a terminal app Cmd+W closes the
+/// active tab, so the shortcut has to reach the UI (see `app/src/shortcuts.ts`).
+/// Edit stays, or copy and paste would not work in the webview.
+fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let app_menu = Submenu::with_items(
+        app,
+        "Delilah",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some("Acerca de Delilah"), None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, Some("Ocultar Delilah"))?,
+            &PredefinedMenuItem::hide_others(app, Some("Ocultar otros"))?,
+            &PredefinedMenuItem::show_all(app, Some("Mostrar todo"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, Some("Salir de Delilah"))?,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edición",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, Some("Deshacer"))?,
+            &PredefinedMenuItem::redo(app, Some("Rehacer"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, Some("Cortar"))?,
+            &PredefinedMenuItem::copy(app, Some("Copiar"))?,
+            &PredefinedMenuItem::paste(app, Some("Pegar"))?,
+            &PredefinedMenuItem::select_all(app, Some("Seleccionar todo"))?,
+        ],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Ventana",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, Some("Minimizar"))?,
+            &PredefinedMenuItem::maximize(app, Some("Zoom"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::fullscreen(app, Some("Pantalla completa"))?,
+        ],
+    )?;
+    Menu::with_items(app, &[&app_menu, &edit, &window])
 }

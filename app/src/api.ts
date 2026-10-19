@@ -112,6 +112,13 @@ export interface Session {
   state: SessionState | null;
 }
 
+export interface FolderInspection {
+  path: string;
+  name: string;
+  kind: ProjectKind;
+  submodules: number;
+}
+
 export class ApiError extends Error {}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -141,6 +148,7 @@ export const api = {
   suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
+  inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
@@ -151,6 +159,9 @@ export const api = {
     request<{ account: string; settings: JiraSettings }>("/api/v1/jira", { method: "PUT", body: JSON.stringify(c) }),
   jiraIssues: () => request<JiraIssue[]>("/api/v1/jira/issues"),
   sessions: () => request<Session[]>("/api/v1/sessions"),
+  preference: <T>(key: string) => request<T | null>(`/api/v1/preferences/${key}`),
+  setPreference: (key: string, value: unknown) =>
+    request<unknown>(`/api/v1/preferences/${key}`, { method: "PUT", body: JSON.stringify(value) }),
   openSession: (task: string, s: { kind: SessionKind; label?: string; prompt?: string }) =>
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),

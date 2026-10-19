@@ -2,16 +2,27 @@ import { useState } from "react";
 import { api, isActive, type Session, type Task } from "../api";
 import { Icon } from "./Icon";
 import { sessionStatus } from "./sessionLabels";
+import { keyOf } from "../shortcuts";
 import { TerminalPane } from "./TerminalPane";
 
-type Layout = 1 | 2 | 4;
+export type Layout = 1 | 2 | 4;
 const GRIDS: Record<Layout, React.CSSProperties> = {
   1: { gridTemplateColumns: "minmax(0,1fr)", gridTemplateRows: "minmax(0,1fr)" },
   2: { gridTemplateColumns: "repeat(2,minmax(0,1fr))", gridTemplateRows: "minmax(0,1fr)" },
   4: { gridTemplateColumns: "repeat(2,minmax(0,1fr))", gridTemplateRows: "repeat(2,minmax(0,1fr))" },
 };
 
+/** Sessions the console shows, in pane order: the selected task's first, its primary
+ *  one first, and the focused one on top. */
+export function consoleOrder(tasks: Task[], sessions: Session[], task: string | null, focus: string | null): Session[] {
+  const taskOf = (s: Session) => tasks.find((t) => t.key === s.task);
+  const rank = (s: Session) => (s.task === task ? 0 : 10) + (s.primary ? 0 : 1) + (s.id === focus ? -5 : 0);
+  return sessions.filter((s) => s.live || (taskOf(s) && isActive(taskOf(s)!.status))).sort((a, b) => rank(a) - rank(b));
+}
+
 interface Props {
+  layout: Layout;
+  onLayout: (l: Layout) => void;
   tasks: Task[];
   sessions: Session[];
   /** Selected task: its sessions come first. */
@@ -24,17 +35,11 @@ interface Props {
 }
 
 /** Live terminals of every session, side by side; a task's sessions sit together. */
-export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, onNewTask, onOpenTask }: Props) {
-  const [layout, setLayout] = useState<Layout>(4);
+export function ConsoleView({ layout, onLayout: setLayout, tasks, sessions, task, focus, onFocus, onChanged, onNewTask, onOpenTask }: Props) {
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const taskOf = (s: Session) => tasks.find((t) => t.key === s.task);
-  const shown = sessions
-    .filter((s) => s.live || (taskOf(s) && isActive(taskOf(s)!.status)))
-    .sort((a, b) => rank(a) - rank(b));
-  function rank(s: Session) {
-    return (s.task === task ? 0 : 10) + (s.primary ? 0 : 1) + (s.id === focus ? -5 : 0);
-  }
+  const shown = consoleOrder(tasks, sessions, task, focus);
   const panes = shown.slice(0, layout);
   const focused = panes.find((s) => s.id === focus) ?? panes[0];
   const grid: Layout = panes.length <= 1 ? 1 : panes.length === 2 ? 2 : 4;
@@ -57,8 +62,8 @@ export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, 
 
   return (
     <>
-      <div className="view-head">
-        <h1>Consola</h1>
+      <div className="view-head" data-tauri-drag-region>
+        <h1 data-tauri-drag-region>Consola</h1>
         <span className="muted" style={{ fontSize: 12 }}>
           {shown.length} {shown.length === 1 ? "sesión" : "sesiones"}
         </span>
@@ -110,8 +115,8 @@ export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, 
                     </button>
                     {menu === s.id && (
                       <div className="menu" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => open(s, "claude")}>Nueva sesión de Claude</button>
-                        <button onClick={() => open(s, "shell")}>Nueva terminal</button>
+                        <button onClick={() => open(s, "claude")}>Nueva sesión de Claude <span className="kbd">{keyOf("new-claude")}</span></button>
+                        <button onClick={() => open(s, "shell")}>Nueva terminal <span className="kbd">{keyOf("new-terminal")}</span></button>
                       </div>
                     )}
                   </div>
