@@ -47,12 +47,19 @@ interface Props {
 /** ⌘P: find a file of the workspace by typing part of its name. */
 export function QuickOpen({ taskKey, onOpen, onClose }: Props) {
   const [files, setFiles] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [at, setAt] = useState(0);
   const list = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.files(taskKey).then(setFiles).catch(() => setFiles([]));
+    api
+      .files(taskKey)
+      .then(setFiles)
+      .catch(() => {
+        setFiles([]);
+        setError("El daemon no ha dado la lista de archivos. Si es de antes de ⌘P, reinícialo.");
+      });
   }, [taskKey]);
 
   const matches = useMemo(() => {
@@ -120,7 +127,8 @@ export function QuickOpen({ taskKey, onOpen, onClose }: Props) {
               </button>
             );
           })}
-          {files && matches.length === 0 && <div className="muted" style={{ padding: 10 }}>Ningún archivo coincide.</div>}
+          {error && <div className="error" style={{ padding: 10 }}>{error}</div>}
+          {files && !error && matches.length === 0 && <div className="muted" style={{ padding: 10 }}>Ningún archivo coincide.</div>}
         </div>
       </div>
     </div>
