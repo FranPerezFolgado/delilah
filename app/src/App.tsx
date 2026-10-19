@@ -69,7 +69,7 @@ export function App() {
           selected={selected}
           onSelect={(key) => {
             setSelected(key);
-            if (view === "projects" || view === "jira") setView("tasks");
+            setView("tasks");
           }}
           onNewTask={() => setNewTask(true)}
         />
@@ -104,6 +104,10 @@ export function App() {
               }}
               onChanged={refresh}
               onNewTask={() => setNewTask(true)}
+              onOpenTask={(key) => {
+                setSelected(key);
+                setView("tasks");
+              }}
             />
           )}
           {view === "jira" && (

@@ -18,7 +18,8 @@ const THEME = {
  * A PTY has one size, and several windows may show it (the app, a browser, the
  * phone). If each imposed its own, the agent's TUI would erase the wrong number of
  * lines and leave leftovers on screen. So, as in tmux, the focused pane drives the
- * size and every other viewer draws at the size the daemon announces.
+ * size and every other viewer draws at the size the daemon announces. Only the
+ * window in use drives: a pane focused in a window in the background does not.
  */
 export function TerminalPane({ sessionId, focused }: { sessionId: string; focused: boolean }) {
   const host = useRef<HTMLDivElement>(null);
@@ -61,9 +62,15 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
     };
     claimRef.current = claim;
 
+    const driving = () => focusedRef.current && document.hasFocus();
     ws.onopen = () => {
+      if (driving()) claim();
+    };
+    // Coming back to this window: its focused pane takes the size back.
+    const onWindowFocus = () => {
       if (focusedRef.current) claim();
     };
+    window.addEventListener("focus", onWindowFocus);
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
         t.write(new Uint8Array(e.data));
@@ -72,7 +79,7 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
       try {
         const msg = JSON.parse(e.data as string);
         // Someone else is driving: draw at their size.
-        if (msg.type === "size" && (t.cols !== msg.cols || t.rows !== msg.rows) && !focusedRef.current) {
+        if (msg.type === "size" && (t.cols !== msg.cols || t.rows !== msg.rows) && !driving()) {
           t.resize(msg.cols, msg.rows);
         }
       } catch {
@@ -84,17 +91,18 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
     const encoder = new TextEncoder();
     const input = t.onData((data) => {
       if (ws.readyState !== WebSocket.OPEN) return;
-      // Typing here makes this pane the driver, even if the click did not focus it.
-      if (!focusedRef.current) claim();
+      // Typing here makes this pane the driver.
+      claim();
       ws.send(encoder.encode(data));
     });
 
     const observer = new ResizeObserver(() => {
-      if (focusedRef.current) claim();
+      if (driving()) claim();
     });
     observer.observe(el);
 
     return () => {
+      window.removeEventListener("focus", onWindowFocus);
       observer.disconnect();
       input.dispose();
       ws.close();
@@ -105,7 +113,7 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
 
   useEffect(() => {
     focusedRef.current = focused;
-    if (focused) {
+    if (focused && document.hasFocus()) {
       claimRef.current();
       termRef.current?.focus();
     }

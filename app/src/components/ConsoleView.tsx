@@ -20,10 +20,11 @@ interface Props {
   onFocus: (sessionId: string, task: string) => void;
   onChanged: () => void;
   onNewTask: () => void;
+  onOpenTask: (key: string) => void;
 }
 
 /** Live terminals of every session, side by side; a task's sessions sit together. */
-export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, onNewTask }: Props) {
+export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, onNewTask, onOpenTask }: Props) {
   const [layout, setLayout] = useState<Layout>(4);
   const [menu, setMenu] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +62,11 @@ export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, 
         <span className="muted" style={{ fontSize: 12 }}>
           {shown.length} {shown.length === 1 ? "sesión" : "sesiones"}
         </span>
+        {task && (
+          <button className="btn" style={{ marginLeft: 8 }} onClick={() => onOpenTask(task)}>
+            ← Ver tarea <span className="mono">{task}</span>
+          </button>
+        )}
         <div className="segs" style={{ marginLeft: "auto" }} role="group" aria-label="Disposición">
           {([1, 2, 4] as Layout[]).map((n) => (
             <button key={n} className={`seg ${layout === n ? "on" : ""}`} aria-pressed={layout === n} onClick={() => setLayout(n)}>
@@ -93,6 +99,10 @@ export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, 
                   <span className="mono" style={{ color: "var(--tx2)" }}>{s.task}</span>
                   <span className="trunc muted" style={{ flex: 1 }}>{t?.title}</span>
                   <span className={`pill ${status.cls}`} style={{ height: 18, fontSize: 11 }}>{status.label}</span>
+                  <button className="btn btn-ghost" style={{ height: 22, padding: "0 4px" }} aria-label="Ver la tarea" title="Ver la tarea"
+                    onClick={(e) => { e.stopPropagation(); onOpenTask(s.task); }}>
+                    <Icon name="open" />
+                  </button>
                   <div style={{ position: "relative" }}>
                     <button className="btn btn-ghost" style={{ height: 22, padding: "0 4px" }} aria-label="Nueva sesión en este workspace"
                       onClick={(e) => { e.stopPropagation(); setMenu(menu === s.id ? null : s.id); }}>
