@@ -35,7 +35,7 @@ pub struct EventRecord {
 /// Durable state of the daemon, so a restart (or a reboot) loses nothing.
 #[derive(Debug, Clone)]
 pub struct Store {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl Store {

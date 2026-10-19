@@ -4,15 +4,17 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use delilah_core::{Event, Task, TaskKey};
 use serde::{Deserialize, Serialize};
 
+use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
+use crate::{hooks, run, terminal};
 
-pub fn router(store: Store) -> Router {
+pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
@@ -21,7 +23,11 @@ pub fn router(store: Store) -> Router {
             "/api/v1/tasks/{key}/events",
             get(list_events).post(post_event),
         )
-        .with_state(store)
+        .route("/api/v1/tasks/{key}/terminal", get(terminal::terminal))
+        .route("/api/v1/runs", post(run::start_run))
+        .route("/hooks/claude", post(hooks::claude_hook))
+        .route("/hooks/claude/statusline", post(hooks::claude_statusline))
+        .with_state(state)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,28 +102,58 @@ pub struct ErrorBody {
     pub error: String,
 }
 
-pub struct ApiError(StoreError);
+pub struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl ApiError {
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, message)
+    }
+
+    pub fn unprocessable(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, message)
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
+
+    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+}
 
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> Self {
-        Self(e)
+        let status = match &e {
+            StoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            StoreError::AlreadyExists(_) | StoreError::Transition(_) => StatusCode::CONFLICT,
+            StoreError::Db(_) | StoreError::Migrate(_) | StoreError::Json(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        };
+        Self::new(status, e.to_string())
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match &self.0 {
-            StoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            StoreError::AlreadyExists(_) | StoreError::Transition(_) => StatusCode::CONFLICT,
-            StoreError::Db(_) | StoreError::Migrate(_) | StoreError::Json(_) => {
-                tracing::error!(error = %self.0, "request failed");
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
-        };
+        if self.status.is_server_error() {
+            tracing::error!(error = %self.message, "request failed");
+        }
         (
-            status,
+            self.status,
             Json(ErrorBody {
-                error: self.0.to_string(),
+                error: self.message,
             }),
         )
             .into_response()
@@ -160,7 +196,12 @@ mod tests {
     }
 
     async fn app() -> Router {
-        router(Store::in_memory().await.unwrap())
+        let config = crate::config::Config {
+            home: std::env::temp_dir().join(format!("delilah-api-{}", uuid::Uuid::new_v4())),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+        };
+        router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
 
     #[tokio::test]

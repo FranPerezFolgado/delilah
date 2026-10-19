@@ -1,6 +1,10 @@
 //! `delilah`: a client of the daemon's HTTP API. It never touches the database.
 
+mod attach;
+
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
@@ -43,6 +47,31 @@ enum Command {
     Show { key: String },
     /// Sends a raw event to a task, e.g. '{"type":"start"}'. For development.
     Event { key: String, json: String },
+    /// Creates a task, builds its workspace and starts Claude on it.
+    Run {
+        key: String,
+        #[arg(long)]
+        title: String,
+        /// Main checkout of the parent repo.
+        #[arg(long, env = "DELILAH_PARENT")]
+        parent: PathBuf,
+        /// Submodules the task touches, comma separated.
+        #[arg(long, value_delimiter = ',', required = true)]
+        submodules: Vec<String>,
+        #[arg(long, default_value = "feature")]
+        workflow: String,
+        /// Defaults to feature/<KEY>.
+        #[arg(long)]
+        branch: Option<String>,
+        /// First prompt; defaults to `/feature <KEY>`.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Attach to the agent's terminal right away.
+        #[arg(long)]
+        attach: bool,
+    },
+    /// Opens the live terminal of a task's agent (Ctrl-] detaches).
+    Attach { key: String },
 }
 
 #[derive(Deserialize)]
@@ -63,8 +92,13 @@ struct ErrorBody {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Creating a workspace clones submodules: allow for slow ones.
+    let client = Client::builder()
+        .timeout(Duration::from_secs(600))
+        .build()
+        .expect("HTTP client");
     let api = Api {
-        client: Client::new(),
+        client,
         base: cli.url.trim_end_matches('/').to_string(),
     };
     match run(&api, cli.command) {
@@ -127,6 +161,38 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/events"), &event)?;
             println!("{} is now {}", task.key, status_label(&task.status));
         }
+        Command::Run {
+            key,
+            title,
+            parent,
+            submodules,
+            workflow,
+            branch,
+            prompt,
+            attach,
+        } => {
+            // The daemon runs in another folder: send it an absolute path.
+            let parent = std::fs::canonicalize(&parent)
+                .map_err(|e| format!("parent repo {}: {e}", parent.display()))?;
+            let task: Task = api.post(
+                "/api/v1/runs",
+                &json!({
+                    "key": key, "title": title, "workflow": workflow, "parent": parent,
+                    "submodules": submodules, "branch": branch, "prompt": prompt,
+                }),
+            )?;
+            println!(
+                "{} is {}: Claude is working on it.",
+                task.key,
+                status_label(&task.status)
+            );
+            if attach {
+                attach::attach(&api.base, &key)?;
+            } else {
+                println!("Watch it with `delilah attach {key}`.");
+            }
+        }
+        Command::Attach { key } => attach::attach(&api.base, &key)?,
     }
     Ok(())
 }

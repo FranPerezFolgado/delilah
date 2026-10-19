@@ -9,10 +9,13 @@ pub struct Config {
     pub home: PathBuf,
     /// Loopback only: the API has no authentication yet.
     pub addr: SocketAddr,
+    /// Submodules over `file://`, needed only by the local fixture repos.
+    pub allow_file_protocol: bool,
 }
 
 impl Config {
-    /// Reads `DELILAH_HOME` (default `~/.delilah`) and `DELILAH_ADDR` (default 127.0.0.1:7420).
+    /// Reads `DELILAH_HOME` (default `~/.delilah`), `DELILAH_ADDR` (default
+    /// 127.0.0.1:7420) and `DELILAH_ALLOW_FILE_PROTOCOL=1`.
     pub fn from_env() -> Result<Self, String> {
         let home = match std::env::var_os("DELILAH_HOME") {
             Some(dir) => PathBuf::from(dir),
@@ -30,10 +33,29 @@ impl Config {
                 "DELILAH_ADDR must be a loopback address, got {addr}"
             ));
         }
-        Ok(Self { home, addr })
+        let allow_file_protocol =
+            std::env::var("DELILAH_ALLOW_FILE_PROTOCOL").is_ok_and(|v| v == "1");
+        Ok(Self {
+            home,
+            addr,
+            allow_file_protocol,
+        })
     }
 
     pub fn database_path(&self) -> PathBuf {
         self.home.join("delilah.db")
+    }
+
+    pub fn workspaces_dir(&self) -> PathBuf {
+        self.home.join("workspaces")
+    }
+
+    /// Per-task files that must stay out of the repo: agent settings, logs, raw hooks.
+    pub fn task_dir(&self, key: &str) -> PathBuf {
+        self.home.join("tasks").join(key)
+    }
+
+    pub fn url(&self) -> String {
+        format!("http://{}", self.addr)
     }
 }

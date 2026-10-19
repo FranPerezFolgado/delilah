@@ -9,7 +9,9 @@ license = "MIT"
 repository = "https://github.com/FranPerezFolgado/delilah"
 
 [workspace.dependencies]
+delilah-agents = { path = "crates/delilah-agents" }
 delilah-core = { path = "crates/delilah-core" }
+delilah-git = { path = "crates/delilah-git" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
