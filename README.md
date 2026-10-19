@@ -79,6 +79,18 @@ The Delilah menu has "Reiniciar el daemon" and "Detener el daemon"; the log is
 `~/Library/Logs/Delilah/delilahd.log`. Development builds (`tauri dev`) leave
 launchd alone and expect `scripts/dev-daemon.sh`.
 
+**Board and specs.** The Tasks view is a board with one column per SpecKit phase:
+Especificación, Plan, Implementación, Revisión and Hecha. The daemon reads the
+task's spec folder in its workspace every few seconds and works out the phase from
+the files: no `plan.md` yet means Especificación, `plan.md` means Plan, unchecked
+items in `tasks.md` mean Implementación, all of them checked means Revisión. The
+folder is `specs/<folder>/` in the workspace (or in one of its submodules), the one
+whose name has the ticket key or the branch name, or failing that the one the
+branch has been writing to. Inside a task you see the phases, the spec's documents
+and the `tasks.md` checklist with the item the agent is on. Phase changes go to
+the task's history. Delilah only reads these files; the repo stays the source of
+truth.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use

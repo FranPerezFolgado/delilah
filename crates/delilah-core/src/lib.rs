@@ -1,7 +1,9 @@
 //! Task model and state machine. Pure logic, no I/O.
 
 mod project;
+mod spec;
 mod task;
 
 pub use project::{Project, ProjectKind};
+pub use spec::{SpecGroup, SpecItem, SpecPhase, parse_tasks};
 pub use task::{Event, Task, TaskKey, TaskStatus, TransitionError};

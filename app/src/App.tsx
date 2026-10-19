@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Project, type Session, type SessionKind, type Task, type UsageReport } from "./api";
+import { api, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { BoardView } from "./components/BoardView";
 import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
 import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
@@ -11,8 +12,9 @@ import { TaskView } from "./components/TaskView";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
 
 export function App() {
-  const [view, setView] = useState<View>("tasks");
+  const [view, setView] = useState<View>("board");
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [specs, setSpecs] = useState<Record<string, SpecSummary>>({});
   const [sessions, setSessions] = useState<Session[]>([]);
   const [focusSession, setFocusSession] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -28,8 +30,16 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, p, u, s] = await Promise.all([api.tasks(), api.projects(), api.usage(), api.sessions()]);
+      const [t, p, u, s, sp] = await Promise.all([
+        api.tasks(),
+        api.projects(),
+        api.usage(),
+        api.sessions(),
+        // An older daemon has no specs: the board still works, without phases.
+        api.specs().catch(() => ({})),
+      ]);
       setTasks(t);
+      setSpecs(sp);
       setSessions(s);
       setProjects(p);
       setUsage(u);
@@ -143,7 +153,7 @@ export function App() {
       case "new-task":
         return setNewTask(true);
       case "view-tasks":
-        return setView("tasks");
+        return setView("board");
       case "view-console":
         return setView("console");
       case "view-jira":
@@ -204,13 +214,24 @@ export function App() {
               </span>
             </div>
           )}
+          {view === "board" && (
+            <BoardView
+              tasks={tasks}
+              specs={specs}
+              onOpen={(key) => {
+                setSelected(key);
+                setView("tasks");
+              }}
+              onNewTask={() => setNewTask(true)}
+            />
+          )}
           {view === "tasks" &&
             (task ? (
               <TaskView task={task} sessions={sessions.filter((s) => s.task === task.key)} onOpenConsole={openConsole} onChanged={refresh} />
             ) : (
               <div className="empty">
-                <span>Todavía no hay tareas.</span>
-                <button className="btn btn-p" onClick={() => setNewTask(true)}>Nueva tarea</button>
+                <span>Elige una tarea del tablero.</span>
+                <button className="btn" onClick={() => setView("board")}>Ir al tablero</button>
               </div>
             ))}
           {view === "console" && (

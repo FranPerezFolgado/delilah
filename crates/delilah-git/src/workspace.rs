@@ -202,3 +202,55 @@ pub fn archive_workspace(root: &Path, ws: &Workspace, opts: &GitOptions) -> Resu
 fn path_str(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
+
+/// Files under `pathspec` that the task's branch touched, newest first: uncommitted
+/// changes, then those of the commits that are on no remote and no other local branch
+/// (the same commits archiving refuses to lose). Paths are relative to `dir`.
+pub fn changed_paths(
+    dir: &Path,
+    pathspec: &str,
+    branch: &str,
+    opts: &GitOptions,
+) -> Result<Vec<String>, GitError> {
+    let status = git(
+        dir,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            pathspec,
+        ],
+        opts,
+    )?;
+    let uncommitted = status.lines().filter_map(|line| {
+        let path = line.get(3..)?;
+        // A rename reads `old -> new`.
+        Some(path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"'))
+    });
+    let only_this_branch = format!("--exclude={branch}");
+    let log = git(
+        dir,
+        &[
+            "log",
+            "--format=",
+            "--name-only",
+            "HEAD",
+            "--not",
+            "--remotes",
+            &only_this_branch,
+            "--branches",
+            "--",
+            pathspec,
+        ],
+        opts,
+    )?;
+    let committed = log.lines().filter(|l| !l.is_empty());
+    let mut paths: Vec<String> = Vec::new();
+    for path in uncommitted.chain(committed) {
+        if !paths.iter().any(|p| p == path) {
+            paths.push(path.to_string());
+        }
+    }
+    Ok(paths)
+}

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::FromRef;
@@ -9,6 +10,7 @@ use crate::config::Config;
 use crate::notify::Notifier;
 use crate::secrets::Secrets;
 use crate::sessions::Sessions;
+use crate::specs::SpecSummary;
 use crate::store::Store;
 
 /// The subscription's usage windows, as last reported by any agent's status line:
@@ -28,6 +30,8 @@ pub struct AppState {
     pub usage: Arc<Mutex<Option<UsageReport>>>,
     pub notifier: Notifier,
     pub secrets: Secrets,
+    /// Each task's spec as last read, by task key (see `specs.rs`).
+    pub specs: Arc<Mutex<HashMap<String, SpecSummary>>>,
 }
 
 impl AppState {
@@ -49,6 +53,7 @@ impl AppState {
             } else {
                 Secrets::Keychain
             },
+            specs: Arc::default(),
         }
     }
 

@@ -112,6 +112,32 @@ export interface Session {
   state: SessionState | null;
 }
 
+export type SpecPhase = "specify" | "plan" | "implement" | "review";
+
+/** What the board shows of a task's SpecKit spec. */
+export interface SpecSummary {
+  phase: SpecPhase;
+  /** The spec folder, relative to the workspace; null until the agent creates it. */
+  dir: string | null;
+  done: number;
+  total: number;
+  /** The first item of tasks.md left to do. */
+  current: string | null;
+}
+
+export interface SpecItem {
+  id: string | null;
+  text: string;
+  done: boolean;
+  parallel: boolean;
+  story: string | null;
+}
+
+export interface SpecProgress extends SpecSummary {
+  files: string[];
+  groups: { title: string; items: SpecItem[] }[];
+}
+
 export interface FolderInspection {
   path: string;
   name: string;
@@ -166,6 +192,13 @@ export const api = {
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
+  specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
+  spec: (key: string) => request<SpecProgress | null>(`/api/v1/tasks/${key}/spec`),
+  specFile: async (key: string, name: string) => {
+    const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/spec/files/${encodeURIComponent(name)}`);
+    if (!res.ok) throw new ApiError(`No se pudo leer ${name}`);
+    return res.text();
+  },
 };
 
 export const terminalUrl = (sessionId: string) => `${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/terminal`;

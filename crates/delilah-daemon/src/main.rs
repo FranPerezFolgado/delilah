@@ -1,4 +1,4 @@
-use delilah_daemon::{api, config::Config, scheduler, state::AppState, store::Store};
+use delilah_daemon::{api, config::Config, scheduler, specs, state::AppState, store::Store};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -28,6 +28,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(addr = %config.addr, home = %config.home.display(), "delilahd listening");
     let app = AppState::new(store, config);
     scheduler::spawn(app.clone());
+    specs::spawn(app.clone());
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
         .await?;

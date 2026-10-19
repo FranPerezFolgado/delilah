@@ -13,6 +13,7 @@ pub mod scheduler;
 pub mod secrets;
 mod session_api;
 pub mod sessions;
+pub mod specs;
 pub mod state;
 pub mod store;
 mod store_projects;

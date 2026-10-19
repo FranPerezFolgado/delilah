@@ -13,7 +13,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
-use crate::{actions, hooks, jira, preferences, projects, run, session_api, terminal};
+use crate::{actions, hooks, jira, preferences, projects, run, session_api, specs, terminal};
 
 /// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
 /// API from a browser: JSON requests need a preflight that other origins fail.
@@ -58,6 +58,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
         .route("/api/v1/usage", get(actions::usage))
+        .route("/api/v1/specs", get(specs::list))
+        .route("/api/v1/tasks/{key}/spec", get(specs::of_task))
+        .route("/api/v1/tasks/{key}/spec/files/{name}", get(specs::file))
         .route("/api/v1/jira", get(jira::status).put(jira::connect))
         .route("/api/v1/jira/issues", get(jira::issues))
         .route("/api/v1/jira/issues/{key}", get(jira::issue))

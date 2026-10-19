@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** Just enough Markdown for ticket descriptions: headings, lists, code, paragraphs.
+/** Just enough Markdown for tickets and specs: headings, lists, code, bold, paragraphs.
  *  Builds React elements, never HTML, so ticket text cannot inject markup. */
 export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
@@ -39,7 +39,9 @@ export function Markdown({ text }: { text: string }) {
 }
 
 function inline(text: string): ReactNode[] {
-  return text.split(/(`[^`]+`)/g).map((part, i) =>
-    part.startsWith("`") && part.endsWith("`") && part.length > 1 ? <code key={i}>{part.slice(1, -1)}</code> : part,
-  );
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((part, i) => {
+    if (part.length > 1 && part.startsWith("`") && part.endsWith("`")) return <code key={i}>{part.slice(1, -1)}</code>;
+    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) return <b key={i}>{part.slice(2, -2)}</b>;
+    return part;
+  });
 }

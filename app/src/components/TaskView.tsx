@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api, hhmm, isActive, REVIEW_PROMPT, statusLabel, type EventRecord, type Session, type SessionKind, type Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { Icon } from "./Icon";
+import { SpecPanel } from "./SpecPanel";
+import { phaseLabel, type Column } from "../phases";
 import { statusIcon } from "./status";
 
 const EVENT_LABELS: Record<string, string> = {
@@ -77,11 +79,6 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
       <div className="view-body">
         <div className="muted" style={{ fontSize: 12 }}>
           {task.project ?? "sin proyecto"} · workflow <span className="mono">{task.workflow}</span>
-          {task.phase && (
-            <>
-              {" "}· fase <span className="mono">{task.phase}</span>
-            </>
-          )}
         </div>
 
         {s.type === "paused-by-limit" && (
@@ -129,6 +126,8 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
           )}
         </div>
         {error && <div className="error selectable">{error}</div>}
+
+        <SpecPanel task={task} />
 
         {hasWorkspace && (
           <div>
@@ -181,7 +180,7 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
                   {e.event.type === "limit-reached" && typeof e.event.resume_at === "string" && (
                     <span className="muted"> · hasta las {hhmm(e.event.resume_at)}</span>
                   )}
-                  {e.event.type === "phase-reached" && <span className="muted mono"> · {String(e.event.phase)}</span>}
+                  {e.event.type === "phase-reached" && <span className="muted"> · {phaseLabel(String(e.event.phase) as Column)}</span>}
                 </span>
               </div>
             ))}
