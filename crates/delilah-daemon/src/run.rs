@@ -177,6 +177,7 @@ pub fn launch_session(
                 &app.config.url(),
                 &session.task,
                 &session.id,
+                workspace,
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             claude::command(&claude::Launch {

@@ -80,29 +80,77 @@ pub fn command(launch: &Launch) -> CommandBuilder {
     cmd
 }
 
-/// Settings for one task: every hook and the status line post their JSON to the daemon.
-/// Lives outside the repo and is passed with `--settings`.
-pub fn settings(daemon_url: &str, task: &str, session: &str) -> Value {
-    let post = |path: &str| {
-        format!(
-            "curl -sS -m 3 -X POST -H 'content-type: application/json' --data-binary @- \
-             '{daemon_url}{path}?task={task}&session={session}' >/dev/null 2>&1 || true"
-        )
-    };
+/// Settings for one session: every hook posts its JSON to the daemon, and the status
+/// line runs `status_script` (see [`status_script`]). Lives outside the repo and is
+/// passed with `--settings`.
+pub fn settings(
+    daemon_url: &str,
+    task: &str,
+    session: &str,
+    status_script: &Path,
+    padding: Option<&Value>,
+) -> Value {
+    let post = post_command(daemon_url, "/hooks/claude", task, session);
     let hooks: serde_json::Map<String, Value> = HOOK_EVENTS
         .iter()
         .map(|event| {
-            let entry = json!([{ "matcher": "*", "hooks": [{ "type": "command", "command": post("/hooks/claude") }] }]);
+            let entry =
+                json!([{ "matcher": "*", "hooks": [{ "type": "command", "command": post }] }]);
             (event.to_string(), entry)
         })
         .collect();
-    json!({
-        "hooks": hooks,
-        "statusLine": {
-            "type": "command",
-            "command": format!("{}; echo 'Delilah · {task}'", post("/hooks/claude/statusline")),
-        },
+    let mut status_line =
+        json!({ "type": "command", "command": format!("sh '{}'", status_script.display()) });
+    if let Some(padding) = padding {
+        status_line["padding"] = padding.clone();
+    }
+    json!({ "hooks": hooks, "statusLine": status_line })
+}
+
+fn post_command(daemon_url: &str, path: &str, task: &str, session: &str) -> String {
+    format!(
+        "curl -sS -m 3 -X POST -H 'content-type: application/json' --data-binary @- \
+         '{daemon_url}{path}?task={task}&session={session}' >/dev/null 2>&1 || true"
+    )
+}
+
+/// The status line the user configured for Claude, looked up the way Claude does:
+/// the project's local settings, the project's, then the user's. `--settings` would
+/// otherwise replace it, so Delilah runs it itself.
+pub fn user_status_line(workspace: &Path) -> Option<Value> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let candidates = [
+        Some(workspace.join(".claude/settings.local.json")),
+        Some(workspace.join(".claude/settings.json")),
+        home.map(|h| h.join(".claude/settings.json")),
+    ];
+    candidates.into_iter().flatten().find_map(|path| {
+        let settings: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+        let line = settings.get("statusLine")?;
+        (line["type"] == "command" && line["command"].is_string()).then(|| line.clone())
     })
+}
+
+/// The status line script: forwards Claude's status JSON (with the usage windows) to
+/// the daemon, then draws the user's own status line from the same JSON, or a plain
+/// "Delilah · KEY" if they have none.
+pub fn status_script(
+    daemon_url: &str,
+    task: &str,
+    session: &str,
+    user_command: Option<&str>,
+) -> String {
+    let forward = post_command(daemon_url, "/hooks/claude/statusline", task, session);
+    let draw = match user_command {
+        // The user's command goes in verbatim, as the body of a function: no quoting to break.
+        Some(cmd) => format!(
+            "user_status_line() {{\n{cmd}\n}}\nprintf '%s' \"$payload\" | user_status_line\n"
+        ),
+        None => format!("echo 'Delilah · {task}'\n"),
+    };
+    format!(
+        "#!/bin/sh\n# Written by Delilah for one session.\npayload=$(cat)\nprintf '%s' \"$payload\" | {forward} &\n{draw}"
+    )
 }
 
 pub fn write_settings(
@@ -110,14 +158,29 @@ pub fn write_settings(
     daemon_url: &str,
     task: &str,
     session: &str,
+    workspace: &Path,
 ) -> std::io::Result<PathBuf> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let user = user_status_line(workspace);
+    let script = dir.join(format!("statusline-{session}.sh"));
     std::fs::write(
-        path,
-        serde_json::to_vec_pretty(&settings(daemon_url, task, session))?,
+        &script,
+        status_script(
+            daemon_url,
+            task,
+            session,
+            user.as_ref().and_then(|u| u["command"].as_str()),
+        ),
     )?;
+    let settings = settings(
+        daemon_url,
+        task,
+        session,
+        &script,
+        user.as_ref().and_then(|u| u.get("padding")),
+    );
+    std::fs::write(path, serde_json::to_vec_pretty(&settings)?)?;
     Ok(path.to_path_buf())
 }
 
@@ -164,7 +227,13 @@ mod tests {
 
     #[test]
     fn every_hook_and_the_status_line_post_to_the_daemon() {
-        let s = settings("http://127.0.0.1:7420", "PROJ-1", "sess-1");
+        let s = settings(
+            "http://127.0.0.1:7420",
+            "PROJ-1",
+            "sess-1",
+            Path::new("/tmp/statusline-sess-1.sh"),
+            None,
+        );
         for event in HOOK_EVENTS {
             let command = s["hooks"][event][0]["hooks"][0]["command"]
                 .as_str()
@@ -174,11 +243,24 @@ mod tests {
                 "{command}"
             );
         }
-        let status = s["statusLine"]["command"].as_str().unwrap();
-        assert!(
-            status.contains("/hooks/claude/statusline?task=PROJ-1"),
-            "{status}"
+        assert_eq!(s["statusLine"]["command"], "sh '/tmp/statusline-sess-1.sh'");
+    }
+
+    #[test]
+    fn the_status_line_forwards_usage_and_then_draws_the_users_own() {
+        let script = status_script(
+            "http://127.0.0.1:7420",
+            "PROJ-1",
+            "sess-1",
+            Some("bash ~/.claude/statusline.sh"),
         );
+        assert!(
+            script.contains("/hooks/claude/statusline?task=PROJ-1&session=sess-1"),
+            "{script}"
+        );
+        assert!(script.contains("bash ~/.claude/statusline.sh"), "{script}");
+        let plain = status_script("http://127.0.0.1:7420", "PROJ-1", "sess-1", None);
+        assert!(plain.contains("Delilah · PROJ-1"), "{plain}");
     }
 
     #[test]

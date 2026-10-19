@@ -7,6 +7,8 @@ async fn main() {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
+    // Read the binary's details now: after an update the file on disk is a new one.
+    api::health_init();
     if let Err(e) = run().await {
         tracing::error!("{e}");
         std::process::exit(1);
@@ -27,9 +29,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = AppState::new(store, config);
     scheduler::spawn(app.clone());
     axum::serve(listener, api::router(app))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
+}
+
+/// Ctrl+C in a terminal, or SIGTERM from launchd when the app stops the service.
+async fn shutdown_signal() {
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+            }
+            Err(_) => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate => {}
+    }
+    tracing::info!("shutting down");
 }

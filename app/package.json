@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "tauri": "tauri"
+    "sidecar": "bash ../scripts/build-sidecar.sh release",
+    "sidecar:dev": "bash ../scripts/build-sidecar.sh debug",
+    "tauri": "tauri",
+    "dist": "CI=true tauri build"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.8.3",

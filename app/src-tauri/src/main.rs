@@ -1,15 +1,47 @@
 //! The desktop shell. Deliberately thin: the UI talks to `delilahd` over its HTTP and
 //! WebSocket API, never through Tauri commands, so the shell could be swapped for
-//! Electron without touching the UI. Window behaviour is the one thing it owns.
+//! Electron without touching the UI. It owns window behaviour and keeping the daemon
+//! running (see `daemon.rs`).
 
-use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+mod daemon;
+
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+const RESTART_DAEMON: &str = "daemon-restart";
+const STOP_DAEMON: &str = "daemon-stop";
 
 fn main() {
     tauri::Builder::default()
         // Native folder picker, e.g. to add a project.
         .plugin(tauri_plugin_dialog::init())
         .menu(menu)
+        .on_menu_event(|app, event| {
+            let result = match event.id().as_ref() {
+                RESTART_DAEMON => daemon::ensure_running().and_then(|()| daemon::restart()),
+                STOP_DAEMON => daemon::stop(),
+                _ => return,
+            };
+            if let Err(e) = result {
+                app.dialog()
+                    .message(e)
+                    .title("Delilah")
+                    .kind(MessageDialogKind::Error)
+                    .show(|_| {});
+            }
+        })
+        .setup(|_app| {
+            // Release builds start the bundled daemon; in development it runs on its own.
+            if cfg!(all(target_os = "macos", not(debug_assertions))) {
+                std::thread::spawn(|| {
+                    if let Err(e) = daemon::ensure_running() {
+                        eprintln!("delilahd: {e}");
+                    }
+                });
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             // macOS convention: the red button hides the window and the app stays in
             // the Dock; Cmd+Q quits. The agents live in the daemon either way.
@@ -46,6 +78,9 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         true,
         &[
             &PredefinedMenuItem::about(app, Some("Acerca de Delilah"), None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, RESTART_DAEMON, "Reiniciar el daemon", true, None::<&str>)?,
+            &MenuItem::with_id(app, STOP_DAEMON, "Detener el daemon", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, Some("Ocultar Delilah"))?,
             &PredefinedMenuItem::hide_others(app, Some("Ocultar otros"))?,

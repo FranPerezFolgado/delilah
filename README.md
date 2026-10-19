@@ -64,11 +64,50 @@ cargo run -p delilah-daemon
 # 2. The app (first time: npm install)
 cd app && npm run tauri dev
 
-# A Delilah.app bundle in app/src-tauri/target/release/bundle/
-cd app && npm run tauri build
+# Delilah.app and a .dmg in app/src-tauri/target/release/bundle/ (builds delilahd too)
+cd app && npm run dist
 ```
 
 `npm run dev` alone serves the same UI at http://localhost:1420 for a browser.
+
+The bundle carries `delilahd` inside (`Delilah.app/Contents/MacOS/delilahd`). When
+the installed app opens, it installs a LaunchAgent
+(`~/Library/LaunchAgents/dev.delilah.daemon.plist`) and launchd keeps the daemon
+running from then on: at login, after a crash, and with the window closed, so
+agents keep working. Opening a newer app restarts the daemon with the new binary.
+The Delilah menu has "Reiniciar el daemon" and "Detener el daemon"; the log is
+`~/Library/Logs/Delilah/delilahd.log`. Development builds (`tauri dev`) leave
+launchd alone and expect `scripts/dev-daemon.sh`.
+
+## Installing on another Mac
+
+Delilah is not signed, so the simplest way is to build it on the Mac that will use
+it. Needs Xcode Command Line Tools (`xcode-select --install`), Rust (rustup), Node
+22+, git and Claude Code logged in.
+
+```bash
+# The repo is private: clone it with a read-only deploy key or your personal
+# account, not a work one.
+git clone git@github.com:FranPerezFolgado/delilah.git && cd delilah/app
+npm install
+npm run dist   # tauri build, with a .dmg that needs no Finder automation
+# Install it
+cp -R src-tauri/target/release/bundle/macos/Delilah.app /Applications/
+open /Applications/Delilah.app
+```
+
+The `.dmg` in `src-tauri/target/release/bundle/dmg/` also works on another Apple
+Silicon Mac. Copied over (AirDrop, a download), macOS will say the app is damaged
+or from an unidentified developer, because it is not signed or notarized. Once it
+is in /Applications, clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Delilah.app
+```
+
+State lives in `~/.delilah` (database, workspaces, task files) and the Jira token
+in the Keychain. To uninstall: Delilah → Detener el daemon, then delete the app,
+`~/Library/LaunchAgents/dev.delilah.daemon.plist` and, if you want, `~/.delilah`.
 
 **Jira.** Connect it from the app's Jira view: Jira Cloud (email + API token),
 Server/Data Center (personal access token) or built-in sample data. The token is

@@ -197,8 +197,10 @@ export function App() {
             <div className="notice" style={{ margin: 12, borderColor: "var(--err)" }}>
               <span className="c-err">●</span>
               <span>
-                No hay conexión con <span className="mono">delilahd</span>. Arráncalo con{" "}
-                <span className="mono selectable">cargo run -p delilah-daemon</span>.
+                No hay conexión con <span className="mono">delilahd</span>. Delilah lo arranca al abrirse; si sigue
+                así, prueba <b>Delilah → Reiniciar el daemon</b> y mira{" "}
+                <span className="mono selectable">~/Library/Logs/Delilah/delilahd.log</span>. En desarrollo:{" "}
+                <span className="mono selectable">scripts/dev-daemon.sh</span>.
               </span>
             </div>
           )}

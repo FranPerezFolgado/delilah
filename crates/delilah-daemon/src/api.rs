@@ -84,6 +84,13 @@ pub fn router(state: AppState) -> Router {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Health {
     pub version: String,
+    /// The binary this daemon runs and its modification time (Unix seconds) when it
+    /// started: the app compares them with the `delilahd` it bundles and restarts the
+    /// daemon after an update.
+    #[serde(default)]
+    pub exe: Option<String>,
+    #[serde(default)]
+    pub exe_mtime: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,9 +106,31 @@ fn default_workflow() -> String {
 }
 
 async fn health() -> Json<Health> {
+    let (exe, exe_mtime) = EXE.get_or_init(running_binary).clone();
     Json(Health {
         version: env!("CARGO_PKG_VERSION").into(),
+        exe,
+        exe_mtime,
     })
+}
+
+static EXE: std::sync::OnceLock<(Option<String>, Option<u64>)> = std::sync::OnceLock::new();
+
+/// Records which binary is running. Call it first thing, before an update can replace it.
+pub fn health_init() {
+    EXE.get_or_init(running_binary);
+}
+
+fn running_binary() -> (Option<String>, Option<u64>) {
+    let Ok(exe) = std::env::current_exe() else {
+        return (None, None);
+    };
+    let mtime = std::fs::metadata(&exe)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    (Some(exe.display().to_string()), mtime)
 }
 
 async fn list_tasks(State(store): State<Store>) -> Result<Json<Vec<Task>>, ApiError> {

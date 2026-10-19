@@ -14,6 +14,8 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
   const inspect = async (folder: string) => {
     setFound(null);
     if (!folder.trim()) return;
+    // Show the chosen folder even if it turns out not to be usable.
+    setPath(folder.trim());
     try {
       const info = await api.inspectFolder(folder.trim());
       setFound(info);
@@ -113,7 +115,15 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
             <span>Nombre (opcional, por defecto el de la carpeta)</span>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
-          {error && <div className="error selectable">{error}</div>}
+          {error && (
+            <div className="notice" style={{ borderColor: "var(--err)" }}>
+              <span className="c-err">●</span>
+              <span className="selectable">
+                {error}
+                {error.includes("not a git repo") && " — inicializa el repositorio (git init) y vuelve a elegirlo."}
+              </span>
+            </div>
+          )}
           <div><button className="btn btn-p" disabled={busy}>Añadir</button></div>
         </form>
       </div>
