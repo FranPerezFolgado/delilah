@@ -206,6 +206,9 @@ fn path_str(path: &Path) -> String {
 /// Files under `pathspec` that the task's branch touched, newest first: uncommitted
 /// changes, then those of the commits that are on no remote and no other local branch
 /// (the same commits archiving refuses to lose). Paths are relative to `dir`.
+///
+/// Ignored files count as changes: a new worktree starts without them, so any there
+/// were made in it (e.g. SpecKit's `specs/`, which some setups keep out of git).
 pub fn changed_paths(
     dir: &Path,
     pathspec: &str,
@@ -218,6 +221,7 @@ pub fn changed_paths(
             "status",
             "--porcelain",
             "--untracked-files=all",
+            "--ignored",
             "--",
             pathspec,
         ],
@@ -229,6 +233,7 @@ pub fn changed_paths(
         Some(path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"'))
     });
     let only_this_branch = format!("--exclude={branch}");
+    // A repo with no commits yet has no history to read.
     let log = git(
         dir,
         &[
@@ -244,7 +249,8 @@ pub fn changed_paths(
             pathspec,
         ],
         opts,
-    )?;
+    )
+    .unwrap_or_default();
     let committed = log.lines().filter(|l| !l.is_empty());
     let mut paths: Vec<String> = Vec::new();
     for path in uncommitted.chain(committed) {

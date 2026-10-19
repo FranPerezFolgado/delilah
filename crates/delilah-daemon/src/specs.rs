@@ -339,7 +339,10 @@ mod tests {
         };
         std::fs::create_dir_all(&dir).unwrap();
         git(&["init", "-q", "-b", "main"]);
-        write(dir.join("specs/001-old-feature/tasks.md"), "- [x] T001 old\n");
+        write(
+            dir.join("specs/001-old-feature/tasks.md"),
+            "- [x] T001 old\n",
+        );
         git(&["add", "."]);
         git(&["commit", "-qm", "old feature"]);
         git(&["switch", "-qc", "proj-7-retries"]);
@@ -354,6 +357,30 @@ mod tests {
         git(&["commit", "-qm", "spec"]);
         let spec = read_spec(&workspace(&dir), "PROJ-7", &GitOptions::default());
         assert_eq!(spec.summary.dir.as_deref(), Some("specs/002-card-retries"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn finds_a_spec_folder_kept_out_of_git() {
+        // The `feature` workflow adds `specs/` to .gitignore and names the folder
+        // after the feature, not the ticket.
+        let dir = std::env::temp_dir().join(format!("delilah-spec-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["init", "-q", "-b", "main"])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        write(dir.join(".gitignore"), ".specify/\nspecs/\n");
+        write(dir.join("specs/003-card-retries/spec.md"), "# Spec\n");
+        write(dir.join("specs/003-card-retries/plan.md"), "# Plan\n");
+
+        let spec = read_spec(&workspace(&dir), "PROJ-7", &GitOptions::default());
+        assert_eq!(spec.summary.dir.as_deref(), Some("specs/003-card-retries"));
+        assert_eq!(spec.summary.phase, SpecPhase::Plan);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

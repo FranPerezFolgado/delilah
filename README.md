@@ -86,7 +86,7 @@ the files: no `plan.md` yet means Especificación, `plan.md` means Plan, uncheck
 items in `tasks.md` mean Implementación, all of them checked means Revisión. The
 folder is `specs/<folder>/` in the workspace (or in one of its submodules), the one
 whose name has the ticket key or the branch name, or failing that the one the
-branch has been writing to. Inside a task you see the phases, the spec's documents
+branch has been writing to (a `specs/` kept in `.gitignore` counts too). Inside a task you see the phases, the spec's documents
 and the `tasks.md` checklist with the item the agent is on. Phase changes go to
 the task's history. Delilah only reads these files; the repo stays the source of
 truth.
