@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use delilah_core::ProjectKind;
 use delilah_git::{
     GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, create_workspace,
-    list_submodules,
+    list_submodules, repo_root,
 };
 use tempfile::TempDir;
 
@@ -41,7 +42,31 @@ impl Fixture {
         WorkspaceSpec {
             path: self.root.join("workspaces/PROJ-1234"),
             branch: BRANCH.into(),
+            kind: ProjectKind::Parent,
             submodules: submodules.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// A plain repo with an `origin`, like a personal project: one of the fixture's
+    /// modules cloned on its own.
+    fn repo(&self) -> PathBuf {
+        let repo = self.root.join("repo");
+        if !repo.exists() {
+            let remote = self.root.join("env/remotes/svc-orders.git");
+            git(
+                &self.root,
+                &["clone", "-q", &remote.to_string_lossy(), "repo"],
+            );
+        }
+        repo
+    }
+
+    fn repo_spec(&self) -> WorkspaceSpec {
+        WorkspaceSpec {
+            path: self.root.join("workspaces/SIGNAL-12"),
+            branch: "feature/SIGNAL-12".into(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
         }
     }
 }
@@ -180,4 +205,62 @@ fn refuses_to_archive_while_work_would_be_lost() {
     git(&sub, &["push", "-q", "origin", BRANCH]);
     archive_workspace(&fx.parent(), &ws, &opts()).unwrap();
     assert!(!ws.path.exists());
+}
+
+#[test]
+fn repo_workspace_is_a_worktree_on_its_own_branch() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let ws = create_workspace(&repo, &fx.repo_spec(), &opts()).unwrap();
+
+    assert_eq!(
+        git(&ws.path, &["branch", "--show-current"]),
+        "feature/SIGNAL-12"
+    );
+    assert!(ws.path.join("src/service.sh").exists());
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
+    assert_eq!(
+        repo_root(&ws.path.join("src")).unwrap(),
+        std::fs::canonicalize(&ws.path).unwrap()
+    );
+}
+
+#[test]
+fn repo_projects_take_no_submodules() {
+    let fx = Fixture::new();
+    let mut spec = fx.repo_spec();
+    spec.submodules = vec!["svc-payments".into()];
+
+    let err = create_workspace(&fx.repo(), &spec, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::SubmodulesInRepo), "{err}");
+}
+
+#[test]
+fn repo_archive_ignores_unpushed_work_that_is_not_the_tasks() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    // Local `main` is ahead of origin before the task even starts.
+    std::fs::write(repo.join("local.txt"), "local only\n").unwrap();
+    git(&repo, &["add", "local.txt"]);
+    git(&repo, &["commit", "-m", "Local change"]);
+
+    let ws = create_workspace(&repo, &fx.repo_spec(), &opts()).unwrap();
+    archive_workspace(&repo, &ws, &opts()).unwrap();
+    assert!(!ws.path.exists());
+    // The branch stays in the repo: it is what the PR is opened from.
+    assert!(git(&repo, &["branch", "--list", "feature/SIGNAL-12"]).contains("SIGNAL-12"));
+}
+
+#[test]
+fn repo_archive_refuses_while_the_tasks_commits_are_not_pushed() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let ws = create_workspace(&repo, &fx.repo_spec(), &opts()).unwrap();
+    commit_change(&ws, ".");
+
+    let err = archive_workspace(&repo, &ws, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Unpushed { count: 1, .. }), "{err}");
+
+    git(&ws.path, &["push", "-q", "origin", "feature/SIGNAL-12"]);
+    archive_workspace(&repo, &ws, &opts()).unwrap();
 }

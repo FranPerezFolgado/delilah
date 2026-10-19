@@ -15,6 +15,10 @@ pub enum StoreError {
     NotFound(TaskKey),
     #[error("task {0} already exists")]
     AlreadyExists(TaskKey),
+    #[error("project `{0}` does not exist; add it with `delilah project add`")]
+    ProjectNotFound(String),
+    #[error("project `{0}` already exists (same name or folder)")]
+    ProjectExists(String),
     #[error(transparent)]
     Transition(#[from] TransitionError),
     #[error("database error: {0}")]
@@ -23,6 +27,8 @@ pub enum StoreError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("corrupt stored value: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("corrupt stored value: {0}")]
+    Corrupt(String),
 }
 
 /// One applied event, as kept in a task's history.
@@ -66,11 +72,12 @@ impl Store {
     pub async fn create_task(&self, task: &Task) -> Result<(), StoreError> {
         let now = Utc::now().to_rfc3339();
         let result = sqlx::query(
-            "INSERT INTO tasks (key, title, workflow, phase, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (key, title, project, workflow, phase, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(task.key.as_str())
         .bind(&task.title)
+        .bind(&task.project)
         .bind(&task.workflow)
         .bind(&task.phase)
         .bind(serde_json::to_string(&task.status)?)
@@ -87,17 +94,18 @@ impl Store {
     }
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
-        let row =
-            sqlx::query("SELECT key, title, workflow, phase, status FROM tasks WHERE key = ?")
-                .bind(key.as_str())
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query(
+            "SELECT key, title, project, workflow, phase, status FROM tasks WHERE key = ?",
+        )
+        .bind(key.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(task_from_row).transpose()
     }
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT key, title, workflow, phase, status FROM tasks ORDER BY created_at, key",
+            "SELECT key, title, project, workflow, phase, status FROM tasks ORDER BY created_at, key",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -113,12 +121,13 @@ impl Store {
         at: DateTime<Utc>,
     ) -> Result<Task, StoreError> {
         let mut tx = self.pool.begin().await?;
-        let row =
-            sqlx::query("SELECT key, title, workflow, phase, status FROM tasks WHERE key = ?")
-                .bind(key.as_str())
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+        let row = sqlx::query(
+            "SELECT key, title, project, workflow, phase, status FROM tasks WHERE key = ?",
+        )
+        .bind(key.as_str())
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StoreError::NotFound(key.clone()))?;
         let mut task = task_from_row(&row)?;
 
         task.apply(event.clone())?;
@@ -168,6 +177,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
     Ok(Task {
         key: TaskKey::new(row.try_get::<String, _>("key")?),
         title: row.try_get("title")?,
+        project: row.try_get("project")?,
         workflow: row.try_get("workflow")?,
         phase: row.try_get("phase")?,
         status: serde_json::from_str::<TaskStatus>(&status)?,

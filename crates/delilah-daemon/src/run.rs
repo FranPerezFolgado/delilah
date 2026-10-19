@@ -1,6 +1,5 @@
 //! `POST /api/v1/runs`: creates a task, builds its workspace and starts the agent.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +9,7 @@ use axum::http::StatusCode;
 use chrono::Utc;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
-use delilah_core::{Event, Task, TaskKey};
+use delilah_core::{Event, ProjectKind, Task, TaskKey};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -26,19 +25,17 @@ const TRUST_WATCH: Duration = Duration::from_secs(60);
 pub struct RunRequest {
     pub key: String,
     pub title: String,
-    #[serde(default = "default_workflow")]
-    pub workflow: String,
-    /// Main checkout of the parent repo.
-    pub parent: PathBuf,
+    /// Name of a registered project.
+    pub project: String,
+    /// Defaults to the project's workflow.
+    pub workflow: Option<String>,
+    /// `parent` projects only: the submodules the task touches.
+    #[serde(default)]
     pub submodules: Vec<String>,
     /// Defaults to `feature/<key>`.
     pub branch: Option<String>,
     /// Defaults to `/feature <key>` for the `feature` workflow.
     pub prompt: Option<String>,
-}
-
-fn default_workflow() -> String {
-    "feature".into()
 }
 
 pub async fn start_run(
@@ -57,7 +54,27 @@ pub async fn start_run(
             req.key
         )));
     }
-    let prompt = match (&req.prompt, req.workflow.as_str()) {
+    let project = app.store.project(&req.project).await?;
+    match (project.kind, req.submodules.is_empty()) {
+        (ProjectKind::Parent, true) => {
+            return Err(ApiError::bad_request(format!(
+                "{} is a parent project: say which --submodules the task touches",
+                project.name
+            )));
+        }
+        (ProjectKind::Repo, false) => {
+            return Err(ApiError::bad_request(format!(
+                "{} is a repo project: it has no --submodules",
+                project.name
+            )));
+        }
+        _ => {}
+    }
+    let workflow = req
+        .workflow
+        .clone()
+        .unwrap_or_else(|| project.workflow.clone());
+    let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
         (None, "feature") => format!("/feature {}", req.key),
         (None, other) => {
@@ -68,9 +85,9 @@ pub async fn start_run(
     };
 
     let key = TaskKey::new(&req.key);
-    app.store
-        .create_task(&Task::new(key.clone(), &req.title, &req.workflow))
-        .await?;
+    let mut task = Task::new(key.clone(), &req.title, &workflow);
+    task.project = Some(project.name.clone());
+    app.store.create_task(&task).await?;
     app.store
         .apply_event(&key, Event::Start, Utc::now())
         .await?;
@@ -81,14 +98,15 @@ pub async fn start_run(
             .branch
             .clone()
             .unwrap_or_else(|| format!("feature/{}", req.key)),
+        kind: project.kind,
         submodules: req.submodules.clone(),
     };
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
-    let parent = req.parent.clone();
+    let root = project.path.clone();
     let created =
-        tokio::task::spawn_blocking(move || delilah_git::create_workspace(&parent, &spec, &opts))
+        tokio::task::spawn_blocking(move || delilah_git::create_workspace(&root, &spec, &opts))
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
     let ws = match created {
@@ -107,7 +125,7 @@ pub async fn start_run(
             return Err(ApiError::unprocessable(reason));
         }
     };
-    app.store.save_workspace(&key, &req.parent, &ws).await?;
+    app.store.save_workspace(&key, &project.path, &ws).await?;
     app.store
         .apply_event(&key, Event::WorkspaceReady, Utc::now())
         .await?;

@@ -24,10 +24,12 @@ pub enum GitError {
     InvalidBranch(String),
     #[error("the workspace folder already exists: {0}")]
     WorkspaceExists(PathBuf),
-    #[error("{submodule} has uncommitted changes; commit or discard them before archiving")]
-    Dirty { submodule: String },
-    #[error("{submodule} has {count} commit(s) that are on no remote; push them before archiving")]
-    Unpushed { submodule: String, count: u32 },
+    #[error("{location} has uncommitted changes; commit or discard them before archiving")]
+    Dirty { location: String },
+    #[error("{location} has {count} commit(s) that are on no remote; push them before archiving")]
+    Unpushed { location: String, count: u32 },
+    #[error("a `repo` project has no submodules; drop --submodules")]
+    SubmodulesInRepo,
 }
 
 pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String, GitError> {

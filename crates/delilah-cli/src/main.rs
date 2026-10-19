@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
 use clap::{Parser, Subcommand};
-use delilah_core::{Event, Task, TaskStatus};
+use delilah_core::{Event, Project, Task, TaskStatus};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::json;
@@ -52,14 +52,15 @@ enum Command {
         key: String,
         #[arg(long)]
         title: String,
-        /// Main checkout of the parent repo.
-        #[arg(long, env = "DELILAH_PARENT")]
-        parent: PathBuf,
-        /// Submodules the task touches, comma separated.
-        #[arg(long, value_delimiter = ',', required = true)]
+        /// Registered project (see `delilah project ls`).
+        #[arg(long, env = "DELILAH_PROJECT")]
+        project: String,
+        /// Parent projects: the submodules the task touches, comma separated.
+        #[arg(long, value_delimiter = ',')]
         submodules: Vec<String>,
-        #[arg(long, default_value = "feature")]
-        workflow: String,
+        /// Defaults to the project's workflow.
+        #[arg(long)]
+        workflow: Option<String>,
         /// Defaults to feature/<KEY>.
         #[arg(long)]
         branch: Option<String>,
@@ -72,6 +73,26 @@ enum Command {
     },
     /// Opens the live terminal of a task's agent (Ctrl-] detaches).
     Attach { key: String },
+    /// Registers and lists projects.
+    #[command(subcommand)]
+    Project(ProjectCommand),
+}
+
+#[derive(Subcommand)]
+enum ProjectCommand {
+    /// Registers a repo: `parent` (submodules, as at work) or `repo` (one repo).
+    Add {
+        path: PathBuf,
+        #[arg(long, value_parser = ["parent", "repo"])]
+        kind: String,
+        /// Defaults to the folder name.
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long, default_value = "feature")]
+        workflow: String,
+    },
+    /// Lists the registered projects.
+    Ls,
 }
 
 #[derive(Deserialize)]
@@ -123,8 +144,9 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             }
             for task in tasks {
                 println!(
-                    "{:<12} {:<20} {:<10} {}",
+                    "{:<12} {:<14} {:<20} {:<10} {}",
                     task.key,
+                    task.project.as_deref().unwrap_or("-"),
                     status_label(&task.status),
                     task.phase.as_deref().unwrap_or("-"),
                     task.title
@@ -164,20 +186,17 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         Command::Run {
             key,
             title,
-            parent,
+            project,
             submodules,
             workflow,
             branch,
             prompt,
             attach,
         } => {
-            // The daemon runs in another folder: send it an absolute path.
-            let parent = std::fs::canonicalize(&parent)
-                .map_err(|e| format!("parent repo {}: {e}", parent.display()))?;
             let task: Task = api.post(
                 "/api/v1/runs",
                 &json!({
-                    "key": key, "title": title, "workflow": workflow, "parent": parent,
+                    "key": key, "title": title, "project": project, "workflow": workflow,
                     "submodules": submodules, "branch": branch, "prompt": prompt,
                 }),
             )?;
@@ -193,6 +212,43 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             }
         }
         Command::Attach { key } => attach::attach(&api.base, &key)?,
+        Command::Project(ProjectCommand::Add {
+            path,
+            kind,
+            name,
+            workflow,
+        }) => {
+            // The daemon runs in another folder: send it an absolute path.
+            let path =
+                std::fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let project: Project = api.post(
+                "/api/v1/projects",
+                &json!({ "path": path, "kind": kind, "name": name, "workflow": workflow }),
+            )?;
+            println!(
+                "Added {} ({}) at {}",
+                project.name,
+                project.kind.name(),
+                project.path.display()
+            );
+        }
+        Command::Project(ProjectCommand::Ls) => {
+            let projects: Vec<Project> = api.get("/api/v1/projects")?;
+            if projects.is_empty() {
+                println!(
+                    "No projects yet. Add one with `delilah project add <PATH> --kind parent|repo`"
+                );
+            }
+            for p in projects {
+                println!(
+                    "{:<16} {:<7} {:<10} {}",
+                    p.name,
+                    p.kind.name(),
+                    p.workflow,
+                    p.path.display()
+                );
+            }
+        }
     }
     Ok(())
 }

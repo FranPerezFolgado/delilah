@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
 use crate::command::{GitError, GitOptions, git};
@@ -11,14 +12,14 @@ pub struct Submodule {
     pub path: String,
 }
 
-/// What to build: a worktree of the parent with only `submodules` initialised,
-/// each on a new `branch`.
+/// What to build for a task.
 #[derive(Debug, Clone)]
 pub struct WorkspaceSpec {
     /// Folder of the new workspace, e.g. `~/.delilah/workspaces/PROJ-1234`.
     pub path: PathBuf,
     pub branch: String,
-    /// Submodule paths, as listed by [`list_submodules`].
+    pub kind: ProjectKind,
+    /// `parent` only: submodule paths, as listed by [`list_submodules`].
     pub submodules: Vec<String>,
 }
 
@@ -26,7 +27,32 @@ pub struct WorkspaceSpec {
 pub struct Workspace {
     pub path: PathBuf,
     pub branch: String,
+    pub kind: ProjectKind,
     pub submodules: Vec<String>,
+}
+
+impl Workspace {
+    /// Folders that hold the task's branch: each submodule, or the repo itself.
+    fn branch_dirs(&self) -> Vec<(String, PathBuf)> {
+        match self.kind {
+            ProjectKind::Parent => self
+                .submodules
+                .iter()
+                .map(|sub| (sub.clone(), self.path.join(sub)))
+                .collect(),
+            ProjectKind::Repo => vec![("the workspace".into(), self.path.clone())],
+        }
+    }
+}
+
+/// Top folder of the repo containing `path`.
+pub fn repo_root(path: &Path) -> Result<PathBuf, GitError> {
+    let root = git(
+        path,
+        &["rev-parse", "--show-toplevel"],
+        &GitOptions::default(),
+    )?;
+    Ok(PathBuf::from(root))
 }
 
 pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
@@ -60,51 +86,61 @@ pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
         .collect())
 }
 
-/// Creates the workspace. The parent worktree is detached at the parent's `HEAD`:
-/// branches and PRs live in the submodules, not in the parent.
+/// Creates the workspace of `root` (the parent or the repo) described by `spec`.
+///
+/// - `parent`: a worktree detached at the parent's `HEAD`, with only `submodules`
+///   initialised, each on `branch`. Branches and PRs live in the submodules.
+/// - `repo`: a worktree of the repo on a new `branch`.
 pub fn create_workspace(
-    parent: &Path,
+    root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
 ) -> Result<Workspace, GitError> {
     if spec.path.exists() {
         return Err(GitError::WorkspaceExists(spec.path.clone()));
     }
-    if git(
-        parent,
-        &["check-ref-format", "--branch", &spec.branch],
-        opts,
-    )
-    .is_err()
-    {
+    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
         return Err(GitError::InvalidBranch(spec.branch.clone()));
     }
-    let known = list_submodules(parent)?;
-    if let Some(unknown) = spec
-        .submodules
-        .iter()
-        .find(|s| !known.iter().any(|k| &k.path == *s))
-    {
-        return Err(GitError::UnknownSubmodule(unknown.clone()));
-    }
-
     let ws_path = path_str(&spec.path);
-    git(
-        parent,
-        &["worktree", "add", "--detach", &ws_path, "HEAD"],
-        opts,
-    )?;
 
-    let result = init_submodules(&spec.path, spec, opts);
-    if let Err(e) = result {
-        // Leave nothing half-built behind.
-        let _ = git(parent, &["worktree", "remove", "--force", &ws_path], opts);
-        return Err(e);
+    match spec.kind {
+        ProjectKind::Repo => {
+            if !spec.submodules.is_empty() {
+                return Err(GitError::SubmodulesInRepo);
+            }
+            git(
+                root,
+                &["worktree", "add", "-b", &spec.branch, &ws_path, "HEAD"],
+                opts,
+            )?;
+        }
+        ProjectKind::Parent => {
+            let known = list_submodules(root)?;
+            if let Some(unknown) = spec
+                .submodules
+                .iter()
+                .find(|s| !known.iter().any(|k| &k.path == *s))
+            {
+                return Err(GitError::UnknownSubmodule(unknown.clone()));
+            }
+            git(
+                root,
+                &["worktree", "add", "--detach", &ws_path, "HEAD"],
+                opts,
+            )?;
+            if let Err(e) = init_submodules(&spec.path, spec, opts) {
+                // Leave nothing half-built behind.
+                let _ = git(root, &["worktree", "remove", "--force", &ws_path], opts);
+                return Err(e);
+            }
+        }
     }
 
     Ok(Workspace {
         path: spec.path.clone(),
         branch: spec.branch.clone(),
+        kind: spec.kind,
         submodules: spec.submodules.clone(),
     })
 }
@@ -123,37 +159,43 @@ fn init_submodules(ws: &Path, spec: &WorkspaceSpec, opts: &GitOptions) -> Result
     Ok(())
 }
 
-/// Removes the workspace. Refuses while any submodule has uncommitted changes or
-/// commits on no remote: removing the worktree also deletes the submodules' git data.
-pub fn archive_workspace(parent: &Path, ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
-    for sub in &ws.submodules {
-        let dir = ws.path.join(sub);
+/// Removes the workspace. Refuses while the task's branch has uncommitted changes or
+/// commits on no remote: in a `parent` workspace, removing the worktree also deletes
+/// the submodules' git data. A `repo` workspace keeps its branch in the repo.
+pub fn archive_workspace(root: &Path, ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
+    let only_this_branch = format!("--exclude={}", ws.branch);
+    for (location, dir) in ws.branch_dirs() {
         if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
-            return Err(GitError::Dirty {
-                submodule: sub.clone(),
-            });
+            return Err(GitError::Dirty { location });
         }
+        // Commits of this branch that are neither pushed nor on another local branch
+        // (so a local, unpushed `main` it started from does not count).
         let ahead = git(
             &dir,
-            &["rev-list", "--count", "HEAD", "--not", "--remotes"],
+            &[
+                "rev-list",
+                "--count",
+                "HEAD",
+                "--not",
+                "--remotes",
+                &only_this_branch,
+                "--branches",
+            ],
             opts,
         )?;
         let count = ahead.parse().unwrap_or(0);
         if count > 0 {
-            return Err(GitError::Unpushed {
-                submodule: sub.clone(),
-                count,
-            });
+            return Err(GitError::Unpushed { location, count });
         }
     }
     // `--force` is required by git for worktrees with submodules; the checks above
     // are what keep it safe.
     git(
-        parent,
+        root,
         &["worktree", "remove", "--force", &path_str(&ws.path)],
         opts,
     )?;
-    git(parent, &["worktree", "prune"], opts)?;
+    git(root, &["worktree", "prune"], opts)?;
     Ok(())
 }
 

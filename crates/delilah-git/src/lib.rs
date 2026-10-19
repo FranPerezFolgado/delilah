@@ -6,4 +6,5 @@ mod workspace;
 pub use command::{GitError, GitOptions};
 pub use workspace::{
     Submodule, Workspace, WorkspaceSpec, archive_workspace, create_workspace, list_submodules,
+    repo_root,
 };

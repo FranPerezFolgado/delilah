@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
-use crate::{hooks, run, terminal};
+use crate::{hooks, projects, run, terminal};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -24,6 +24,10 @@ pub fn router(state: AppState) -> Router {
             get(list_events).post(post_event),
         )
         .route("/api/v1/tasks/{key}/terminal", get(terminal::terminal))
+        .route(
+            "/api/v1/projects",
+            get(projects::list_projects).post(projects::add_project),
+        )
         .route("/api/v1/runs", post(run::start_run))
         .route("/hooks/claude", post(hooks::claude_hook))
         .route("/hooks/claude/statusline", post(hooks::claude_statusline))
@@ -135,11 +139,14 @@ impl ApiError {
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> Self {
         let status = match &e {
-            StoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            StoreError::AlreadyExists(_) | StoreError::Transition(_) => StatusCode::CONFLICT,
-            StoreError::Db(_) | StoreError::Migrate(_) | StoreError::Json(_) => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
+            StoreError::NotFound(_) | StoreError::ProjectNotFound(_) => StatusCode::NOT_FOUND,
+            StoreError::AlreadyExists(_)
+            | StoreError::ProjectExists(_)
+            | StoreError::Transition(_) => StatusCode::CONFLICT,
+            StoreError::Db(_)
+            | StoreError::Migrate(_)
+            | StoreError::Json(_)
+            | StoreError::Corrupt(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, e.to_string())
     }

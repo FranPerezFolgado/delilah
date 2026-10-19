@@ -124,6 +124,9 @@ pub enum TransitionError {
 pub struct Task {
     pub key: TaskKey,
     pub title: String,
+    /// Name of the project the task runs against, if it has a workspace.
+    #[serde(default)]
+    pub project: Option<String>,
     /// Name of the workflow that drives the task, e.g. `feature`.
     pub workflow: String,
     pub phase: Option<String>,
@@ -135,6 +138,7 @@ impl Task {
         Self {
             key,
             title: title.into(),
+            project: None,
             workflow: workflow.into(),
             phase: None,
             status: TaskStatus::Queued,

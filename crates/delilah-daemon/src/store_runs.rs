@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use delilah_core::TaskKey;
+use delilah_core::{ProjectKind, TaskKey};
 use delilah_git::Workspace;
 use sqlx::Row;
 
@@ -23,13 +23,14 @@ impl Store {
         ws: &Workspace,
     ) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT OR REPLACE INTO workspaces (task_key, parent, path, branch, submodules)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO workspaces (task_key, parent, path, branch, kind, submodules)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(key.as_str())
         .bind(parent.to_string_lossy())
         .bind(ws.path.to_string_lossy())
         .bind(&ws.branch)
+        .bind(ws.kind.name())
         .bind(serde_json::to_string(&ws.submodules)?)
         .execute(&self.pool)
         .await?;
@@ -42,18 +43,22 @@ impl Store {
         key: &TaskKey,
     ) -> Result<Option<(PathBuf, Workspace)>, StoreError> {
         let row = sqlx::query(
-            "SELECT parent, path, branch, submodules FROM workspaces WHERE task_key = ?",
+            "SELECT parent, path, branch, kind, submodules FROM workspaces WHERE task_key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&self.pool)
         .await?;
         let Some(row) = row else { return Ok(None) };
         let submodules: String = row.try_get("submodules")?;
+        let kind: String = row.try_get("kind")?;
+        let kind = ProjectKind::parse(&kind)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown workspace kind `{kind}`")))?;
         Ok(Some((
             PathBuf::from(row.try_get::<String, _>("parent")?),
             Workspace {
                 path: PathBuf::from(row.try_get::<String, _>("path")?),
                 branch: row.try_get("branch")?,
+                kind,
                 submodules: serde_json::from_str(&submodules)?,
             },
         )))
@@ -109,6 +114,7 @@ mod tests {
         let ws = Workspace {
             path: "/tmp/ws/PROJ-1".into(),
             branch: "feature/PROJ-1".into(),
+            kind: ProjectKind::Parent,
             submodules: vec!["svc-payments".into()],
         };
         store
