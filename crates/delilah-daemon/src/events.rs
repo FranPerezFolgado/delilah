@@ -51,6 +51,11 @@ impl Events {
     pub fn subscribe(&self) -> broadcast::Receiver<Topic> {
         self.0.subscribe()
     }
+
+    /// Whether a client (the app) follows the feed right now.
+    pub fn listening(&self) -> bool {
+        self.0.receiver_count() > 0
+    }
 }
 
 /// Keeps idle connections from being dropped and notices dead ones.

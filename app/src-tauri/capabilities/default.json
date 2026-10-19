@@ -1,12 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window. No Tauri commands are exposed: data comes from the daemon's API. The title bar is drawn by the UI, so it needs to start drags and zoom on double-click itself.",
-  "windows": ["main"],
+  "description": "The main window. Data comes from the daemon's API, not Tauri commands. The shell adds what only a desktop app can: the title bar drawn by the UI (drags, zoom on double-click), the folder picker, notifications and the Dock badge.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "core:window:allow-set-badge-count",
+    "notification:default"
   ]
 }

@@ -16,6 +16,8 @@ fn main() {
     tauri::Builder::default()
         // Native folder picker, e.g. to add a project.
         .plugin(tauri_plugin_dialog::init())
+        // Native notifications for what waits on you (see app/src/platform.ts).
+        .plugin(tauri_plugin_notification::init())
         .menu(menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();

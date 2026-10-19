@@ -99,6 +99,14 @@ Each item opens the task on the right tab. The sidebar counts what blocks an
 agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
 
+**macOS.** The Dock icon counts what blocks an agent. While you are in another
+app, each new item of the Bandeja is a notification with the agent's own words
+(and a task resuming after the usage limit is one too). Coming back to Delilah
+within 10 minutes, by clicking the notification or the Dock icon, opens that item
+on its tab. macOS does not tell a desktop app which notification was clicked, so
+coming back is the signal. While the app is open the daemon stays quiet; when it is
+closed, the daemon notifies as before.
+
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself
 (status, actions, spec, history), its sessions, Cambios when opened, and files.

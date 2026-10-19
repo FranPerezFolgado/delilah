@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { api, BLOCKING, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
 import { connect, on, type Topic } from "./live";
+import { useDesktopAlerts } from "./alerts";
 import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
 import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
@@ -174,6 +175,14 @@ export function App() {
     setSelected(key);
     setView("tasks");
   };
+
+  /** Where an inbox item is dealt with: its session's tab, Cambios, or the task. */
+  const openItem = (item: InboxItem) => {
+    if (item.kind === "review") return openChanges(item.task);
+    const primary = sessions.find((s) => s.task === item.task && s.primary);
+    openTask(item.task, item.session?.id ?? (item.kind === "waiting" ? primary?.id : undefined));
+  };
+  useDesktopAlerts(inbox, tasks, openItem);
 
   const run = (action: ActionId) => {
     switch (action) {

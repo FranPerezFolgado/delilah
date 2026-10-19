@@ -11,3 +11,19 @@ export async function pickFolder(title: string): Promise<string | null> {
   const chosen = await open({ directory: true, multiple: false, title });
   return typeof chosen === "string" ? chosen : null;
 }
+
+/** The count on the Dock icon; 0 clears it. */
+export async function setBadge(count: number): Promise<void> {
+  if (!isDesktop) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().setBadgeCount(count > 0 ? count : undefined);
+}
+
+/** A native notification. macOS asks once for permission; if it is refused, nothing shows. */
+export async function notify(title: string, body: string): Promise<void> {
+  if (!isDesktop) return;
+  const n = await import("@tauri-apps/plugin-notification");
+  let granted = await n.isPermissionGranted();
+  if (!granted) granted = (await n.requestPermission()) === "granted";
+  if (granted) n.sendNotification({ title, body });
+}

@@ -22,6 +22,11 @@ impl AppState {
     }
 
     fn notify_change(&self, task: &Task, before: &TaskStatus) {
+        // The app, when open, notifies itself (with the agent's question, and opening
+        // it on click); the daemon covers the rest of the time.
+        if self.events.listening() {
+            return;
+        }
         let key = &task.key;
         let (title, body) = match (&task.status, before) {
             (TaskStatus::WaitingForUser, _) => {
