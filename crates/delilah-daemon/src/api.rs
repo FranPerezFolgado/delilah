@@ -57,6 +57,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/sessions/{id}/close", post(session_api::close))
         .route("/api/v1/sessions/{id}/reopen", post(session_api::reopen))
+        .route(
+            "/api/v1/sessions/{id}/allow-edits",
+            post(session_api::allow_edits),
+        )
+        .route(
+            "/api/v1/projects/{name}/sessions",
+            post(session_api::open_in_project),
+        )
         .route("/api/v1/tasks/{key}/resume", post(actions::resume))
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))

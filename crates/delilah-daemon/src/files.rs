@@ -129,10 +129,7 @@ pub fn read(path: &FsPath, rel: &str) -> std::io::Result<FileContent> {
 }
 
 async fn root(app: &AppState, key: &TaskKey) -> Result<PathBuf, ApiError> {
-    let ws = app.store.workspace(key).await?.map(|(_, ws)| ws);
-    ws.filter(|ws| ws.path.is_dir())
-        .map(|ws| ws.path)
-        .ok_or_else(|| ApiError::not_found(format!("{key} has no workspace")))
+    Ok(crate::owners::workspace(app, key.as_str()).await?.path)
 }
 
 fn io_error(e: std::io::Error) -> ApiError {
@@ -162,14 +159,7 @@ pub async fn all(
     State(app): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<Vec<String>>, ApiError> {
-    let key = TaskKey::new(key);
-    let ws = app
-        .store
-        .workspace(&key)
-        .await?
-        .map(|(_, ws)| ws)
-        .filter(|ws| ws.path.is_dir())
-        .ok_or_else(|| ApiError::not_found(format!("{key} has no workspace")))?;
+    let ws = crate::owners::workspace(&app, &key).await?;
     let opts = delilah_git::GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };

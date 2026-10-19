@@ -190,7 +190,7 @@ export function App() {
       case "new-claude": {
         const kind: SessionKind = action === "new-terminal" ? "shell" : "claude";
         // In a task the new session opens as one of its tabs.
-        if (view === "tasks" && sessions.some((s) => s.task === selected)) return void window.dispatchEvent(new CustomEvent("delilah:new-session", { detail: kind }));
+        if (view === "tasks" && (selected?.startsWith("@") || sessions.some((s) => s.task === selected))) return void window.dispatchEvent(new CustomEvent("delilah:new-session", { detail: kind }));
         return openSession(kind);
       }
       case "close-session":
@@ -249,14 +249,17 @@ export function App() {
   }, []);
 
   const task = tasks.find((t) => t.key === selected);
+  // `@<name>` selects a project's own screen (sessions on its checkout).
+  const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
+  const owner = task?.key ?? (project ? `@${project.name}` : null);
   const active = tasks.filter((t) => t.status.type === "running").length;
 
   return (
     <div className="window">
       <header className="titlebar" data-tauri-drag-region>
         <span data-tauri-drag-region>Delilah</span>
-        {task && view === "tasks" && (
-          <span data-tauri-drag-region className="mono" style={{ color: "var(--tx)" }}>/ {task.key}</span>
+        {owner && view === "tasks" && (
+          <span data-tauri-drag-region className="mono" style={{ color: "var(--tx)" }}>/ {task?.key ?? project?.name}</span>
         )}
       </header>
       <div className="body">
@@ -264,11 +267,23 @@ export function App() {
           view={view}
           onView={setView}
           tasks={tasks}
+          projects={projects}
+          sessions={sessions}
           selected={selected}
           onSelect={(key) => {
             setSelected(key);
             setView("tasks");
           }}
+          onOpenSession={openTask}
+          onAsk={(name) =>
+            api
+              .openProjectSession(name, { kind: "claude" })
+              .then((s) => {
+                refresh();
+                openTask(`@${name}`, s.id);
+              })
+              .catch((e) => setToast((e as Error).message))
+          }
           onNewTask={() => setNewTask(true)}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
@@ -304,14 +319,17 @@ export function App() {
             />
           )}
           {view === "tasks" &&
-            (task ? (
+            (owner ? (
               <Suspense fallback={<div className="empty">Cargando…</div>}>
                 <TaskScreen
-                  key={task.key}
+                  key={owner}
+                  owner={owner}
                   task={task}
-                  sessions={sessions.filter((s) => s.task === task.key)}
-                  asks={inbox.filter((i) => i.task === task.key && i.ask)}
+                  project={project}
+                  sessions={sessions.filter((s) => s.task === owner)}
+                  asks={inbox.filter((i) => i.task === owner && i.ask)}
                   onChanged={refresh}
+                  onNewTask={() => setNewTask(true)}
                 />
               </Suspense>
             ) : (

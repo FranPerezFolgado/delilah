@@ -109,6 +109,8 @@ export interface Session {
   closed: boolean;
   /** Whether its process is running now. */
   live: boolean;
+  /** Claude in plan mode: reads and explains, does not edit. */
+  read_only: boolean;
   state: SessionState | null;
 }
 
@@ -255,6 +257,9 @@ export const api = {
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
+  openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean }) =>
+    post<Session>(`/api/v1/projects/${project}/sessions`, s),
+  allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),

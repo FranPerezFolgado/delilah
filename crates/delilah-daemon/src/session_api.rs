@@ -13,7 +13,7 @@ use crate::run::launch_session;
 use crate::sessions::LiveState;
 use crate::state::AppState;
 use crate::store::StoreError;
-use crate::store_sessions::{SessionKind, SessionRecord};
+use crate::store_sessions::{SessionKind, SessionRecord, project_of, project_owner};
 
 #[derive(Debug, Serialize)]
 pub struct SessionView {
@@ -31,6 +31,9 @@ pub struct OpenSession {
     pub label: Option<String>,
     /// Claude only: a first message, e.g. "Revisa los cambios de esta rama".
     pub prompt: Option<String>,
+    /// Claude in plan mode. Defaults to true in a project (its checkout is yours),
+    /// false in a task.
+    pub read_only: Option<bool>,
 }
 
 /// Every open session, of every task.
@@ -58,11 +61,30 @@ pub async fn open(
         .get_task(&task_key)
         .await?
         .ok_or(StoreError::NotFound(task_key.clone()))?;
-    let (_, ws) = app
-        .store
-        .workspace(&task_key)
-        .await?
-        .ok_or_else(|| ApiError::conflict(format!("{key} has no workspace (archived?)")))?;
+    open_for(&app, key, req).await
+}
+
+/// Opens a session in a project's own checkout, to ask about the code without a task:
+/// Claude starts read-only unless asked otherwise.
+pub async fn open_in_project(
+    State(app): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<OpenSession>,
+) -> Result<(StatusCode, Json<SessionView>), ApiError> {
+    app.store.project(&name).await?;
+    open_for(&app, project_owner(&name), req).await
+}
+
+async fn open_for(
+    app: &AppState,
+    key: String,
+    req: OpenSession,
+) -> Result<(StatusCode, Json<SessionView>), ApiError> {
+    let ws = crate::owners::workspace(app, &key)
+        .await
+        .map_err(|_| ApiError::conflict(format!("{key} has no workspace (archived?)")))?;
+    let read_only =
+        req.kind == SessionKind::Claude && req.read_only.unwrap_or(project_of(&key).is_some());
 
     let existing = app.store.open_sessions(Some(&key)).await?;
     let label = req
@@ -88,12 +110,37 @@ pub async fn open(
         label,
         primary: false,
         closed: false,
+        read_only,
     };
     app.store.create_session(&record).await?;
     app.emit(Topic::Sessions);
     let prompt = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
-    launch_session(&app, &record, &ws.path, prompt, false)?;
-    Ok((StatusCode::CREATED, Json(view(&app, record))))
+    launch_session(app, &record, &ws.path, prompt, false)?;
+    Ok((StatusCode::CREATED, Json(view(app, record))))
+}
+
+/// Lets a read-only Claude edit: it starts again in normal mode on the same
+/// conversation (`--resume`), so nothing said so far is lost.
+pub async fn allow_edits(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<SessionView>, ApiError> {
+    let mut record = app
+        .store
+        .session(&id)
+        .await?
+        .filter(|r| !r.closed && r.kind == SessionKind::Claude)
+        .ok_or_else(|| ApiError::not_found(format!("no open Claude session {id}")))?;
+    app.store.set_read_only(&id, false).await?;
+    record.read_only = false;
+    if let Some(live) = app.sessions.get(&id) {
+        let _ = live.pty.kill();
+        live.pty.wait().await;
+    }
+    let ws = crate::owners::workspace(&app, &record.task).await?;
+    launch_session(&app, &record, &ws.path, None, true)?;
+    app.emit(Topic::Sessions);
+    Ok(Json(view(&app, record)))
 }
 
 /// Stops an extra session and removes it from the task. The primary one stays: it
@@ -136,13 +183,9 @@ pub async fn reopen(
     if app.sessions.get(&id).is_some_and(|l| !l.pty.has_exited()) {
         return Err(ApiError::conflict("the session is already running"));
     }
-    let (_, ws) = app
-        .store
-        .workspace(&TaskKey::new(&record.task))
-        .await?
-        .ok_or_else(|| {
-            ApiError::conflict(format!("{} has no workspace (archived?)", record.task))
-        })?;
+    let ws = crate::owners::workspace(&app, &record.task)
+        .await
+        .map_err(|_| ApiError::conflict(format!("{} has no workspace (archived?)", record.task)))?;
     launch_session(
         &app,
         &record,
@@ -216,6 +259,7 @@ mod tests {
                 label: id.into(),
                 primary,
                 closed: false,
+                read_only: false,
             };
             app.store.create_session(&record).await.unwrap();
             let mut cmd = CommandBuilder::new("bash");
@@ -364,5 +408,90 @@ mod tests {
         )
         .await;
         assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    }
+}
+
+#[cfg(test)]
+mod project_tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use delilah_core::{Project, ProjectKind};
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::config::Config;
+    use crate::store::Store;
+
+    async fn call(app: &AppState, req: Request<Body>) -> (StatusCode, Value) {
+        let res = crate::api::router(app.clone()).oneshot(req).await.unwrap();
+        let status = res.status();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test]
+    async fn a_project_session_runs_in_the_project_checkout() {
+        let home = std::env::temp_dir().join(format!("delilah-proj-{}", uuid::Uuid::new_v4()));
+        let repo = home.join("plataforma");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let config = Config {
+            home: home.clone(),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&Project {
+                name: "plataforma".into(),
+                path: repo.clone(),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+
+        let req = Request::post("/api/v1/projects/plataforma/sessions")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "kind": "shell" }).to_string()))
+            .unwrap();
+        let (status, session) = call(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "{session}");
+        assert_eq!(session["task"], "@plataforma");
+        assert_eq!(session["read_only"], false, "a terminal is never read-only");
+
+        let (_, listed) = call(
+            &app,
+            Request::get("/api/v1/sessions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["task"] == "@plataforma")
+        );
+        let (status, tree) = call(
+            &app,
+            Request::get("/api/v1/tasks/@plataforma/tree?path=")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tree[0]["name"], "src");
+
+        let id = session["id"].as_str().unwrap();
+        if let Some(live) = app.sessions.get(id) {
+            let _ = live.pty.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
     }
 }

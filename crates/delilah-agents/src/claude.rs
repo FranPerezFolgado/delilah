@@ -52,6 +52,30 @@ pub struct Launch<'a> {
     pub resume: bool,
     /// Folders outside the workspace the agent may read, e.g. the task's ticket.
     pub extra_dirs: &'a [&'a Path],
+    /// Plan mode: Claude reads and explains, it does not edit.
+    pub read_only: bool,
+}
+
+/// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
+/// whether `--resume` will find it: a session closed before its first message has none.
+pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let dir = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    // Claude names a project's folder after its path, every other character a dash.
+    let folder: String = dir
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    Path::new(&home)
+        .join(".claude/projects")
+        .join(folder)
+        .join(format!("{session_id}.jsonl"))
+        .is_file()
 }
 
 pub fn command(launch: &Launch) -> CommandBuilder {
@@ -76,6 +100,9 @@ pub fn command(launch: &Launch) -> CommandBuilder {
     }
     cmd.arg("--settings");
     cmd.arg(launch.settings);
+    if launch.read_only {
+        cmd.args(["--permission-mode", "plan"]);
+    }
     if let Some(prompt) = launch.prompt {
         cmd.arg(prompt);
     }
@@ -350,6 +377,7 @@ mod tests {
             prompt: Some("/feature PROJ-1"),
             resume: false,
             extra_dirs: &[],
+            read_only: false,
         };
         let args = |l: &Launch| {
             command(l)
@@ -398,6 +426,7 @@ mod tests {
             prompt: Some("/feature PROJ-1"),
             resume: false,
             extra_dirs: &[ticket_dir],
+            read_only: false,
         });
         let argv: Vec<String> = cmd
             .get_argv()
@@ -428,6 +457,7 @@ mod tests {
             prompt: None,
             resume: false,
             extra_dirs: &[],
+            read_only: false,
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());

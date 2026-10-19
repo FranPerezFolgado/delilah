@@ -32,29 +32,46 @@ impl SessionKind {
     }
 }
 
+/// Sessions of a project (not of a task) are owned by `@<project>`: the key every
+/// other part of the daemon (hooks, inbox, files) uses for them.
+pub const PROJECT_OWNER: char = '@';
+
+pub fn project_of(owner: &str) -> Option<&str> {
+    owner.strip_prefix(PROJECT_OWNER)
+}
+
+pub fn project_owner(project: &str) -> String {
+    format!("{PROJECT_OWNER}{project}")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SessionRecord {
     pub id: String,
+    /// The task's key, or `@<project>` for a project's session.
     pub task: String,
     pub kind: SessionKind,
     pub label: String,
     pub primary: bool,
     pub closed: bool,
+    /// Claude in plan mode: it reads and explains, but does not edit.
+    pub read_only: bool,
 }
 
 impl Store {
     pub async fn create_session(&self, s: &SessionRecord) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO sessions (id, task_key, kind, label, is_primary, closed, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (id, task_key, project, kind, label, is_primary, closed, created_at, read_only)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&s.id)
-        .bind(&s.task)
+        .bind(project_of(&s.task).is_none().then_some(&s.task))
+        .bind(project_of(&s.task))
         .bind(s.kind.name())
         .bind(&s.label)
         .bind(s.primary)
         .bind(s.closed)
         .bind(Utc::now().to_rfc3339())
+        .bind(s.read_only)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -74,11 +91,16 @@ impl Store {
         task: Option<&str>,
     ) -> Result<Vec<SessionRecord>, StoreError> {
         let rows = match task {
-            Some(task) => {
+            Some(owner) => {
+                let column = if project_of(owner).is_some() {
+                    "project"
+                } else {
+                    "task_key"
+                };
                 sqlx::query(&format!(
-                    "{SELECT} WHERE closed = 0 AND task_key = ? ORDER BY created_at, id"
+                    "{SELECT} WHERE closed = 0 AND {column} = ? ORDER BY created_at, id"
                 ))
-                .bind(task)
+                .bind(project_of(owner).unwrap_or(owner))
                 .fetch_all(&self.pool)
                 .await?
             }
@@ -101,6 +123,15 @@ impl Store {
         row.as_ref().map(session_from_row).transpose()
     }
 
+    pub async fn set_read_only(&self, id: &str, read_only: bool) -> Result<(), StoreError> {
+        sqlx::query("UPDATE sessions SET read_only = ? WHERE id = ?")
+            .bind(read_only)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn close_session(&self, id: &str) -> Result<(), StoreError> {
         sqlx::query("UPDATE sessions SET closed = 1 WHERE id = ?")
             .bind(id)
@@ -110,7 +141,8 @@ impl Store {
     }
 }
 
-const SELECT: &str = "SELECT id, task_key, kind, label, is_primary, closed FROM sessions";
+const SELECT: &str =
+    "SELECT id, task_key, project, kind, label, is_primary, closed, read_only FROM sessions";
 
 impl Store {
     /// Records what a session waits on the user for, or clears it.
@@ -146,7 +178,7 @@ impl Store {
         &self,
     ) -> Result<Vec<(SessionRecord, crate::inbox::Attention)>, StoreError> {
         let rows = sqlx::query(
-            "SELECT id, task_key, kind, label, is_primary, closed, attention FROM sessions
+            "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, attention FROM sessions
              WHERE closed = 0 AND attention IS NOT NULL ORDER BY created_at, id",
         )
         .fetch_all(&self.pool)
@@ -164,12 +196,16 @@ fn session_from_row(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
     let kind: String = row.try_get("kind")?;
     Ok(SessionRecord {
         id: row.try_get("id")?,
-        task: row.try_get("task_key")?,
+        task: match row.try_get::<Option<String>, _>("task_key")? {
+            Some(task) => task,
+            None => project_owner(&row.try_get::<String, _>("project")?),
+        },
         kind: SessionKind::parse(&kind)
             .ok_or_else(|| StoreError::Corrupt(format!("unknown session kind `{kind}`")))?,
         label: row.try_get("label")?,
         primary: row.try_get("is_primary")?,
         closed: row.try_get("closed")?,
+        read_only: row.try_get("read_only")?,
     })
 }
 
@@ -187,6 +223,7 @@ mod tests {
             label: id.into(),
             primary,
             closed: false,
+            read_only: false,
         }
     }
 

@@ -109,6 +109,8 @@ pub async fn claude_hook(
         (Signal::NeedsUser | Signal::TurnEnded | Signal::TurnFailed, _) => Some(Event::AgentAsked),
         _ => None,
     };
+    // A project's session has no task to move: only the session and the inbox change.
+    let event = event.filter(|_| crate::store_sessions::project_of(&q.task).is_none());
     if let Some(event) = event {
         match app.transition(&TaskKey::new(&q.task), event).await {
             // Hooks repeat and overlap (a Notification after Stop, the first prompt
@@ -242,6 +244,7 @@ mod tests {
                 label: "Principal".into(),
                 primary: true,
                 closed: false,
+                read_only: false,
             })
             .await
             .unwrap();

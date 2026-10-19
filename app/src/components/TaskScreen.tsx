@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type InboxItem, type Session, type SessionKind, type Task } from "../api";
+import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
 import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
 import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
@@ -12,11 +12,19 @@ import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
+import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
 import { TerminalPane } from "./TerminalPane";
 
 interface Props {
-  task: Task;
+  /** The task's key, or `@<project>` for a project's own checkout. */
+  owner: string;
+  /** The task, when the owner is one. */
+  task?: Task;
+  /** The project, when the owner is one. */
+  project?: Project;
+  /** Opens the new task dialog (from a project). */
+  onNewTask?: () => void;
   /** The task's open sessions: each one is a tab. */
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
@@ -32,8 +40,8 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
-  const session = useMemo(() => sessionFor(task.key), [task.key]);
+export function TaskScreen({ owner, task, project, sessions, asks, onChanged, onNewTask }: Props) {
+  const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
@@ -48,7 +56,8 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
   const [starting, setStarting] = useState<string | null>(null);
   // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
   const [mounted, setMounted] = useState<Set<string>>(() => new Set());
-  const hasWorkspace = sessions.length > 0;
+  // A project always has its checkout; a task only once its workspace exists.
+  const hasWorkspace = !!project || sessions.length > 0;
 
   const tab = (path: string) => session.tabs.find((t) => t.path === path);
 
@@ -100,7 +109,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
       const state = path === session.active && view.current ? view.current.state : session.states.get(path);
       if (!t || !state || !t.saved) return;
       try {
-        const f = await api.saveFile(task.key, path, state.doc.toString(), t.version);
+        const f = await api.saveFile(owner, path, state.doc.toString(), t.version);
         t.version = f.version;
         t.saved = state.doc;
         t.dirty = false;
@@ -113,7 +122,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
       }
       redraw();
     },
-    [session, task.key],
+    [session, owner],
   );
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -127,7 +136,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
       view.current.focus();
     }
     setError(null);
-    persist(task.key, session);
+    persist(owner, session);
     redraw();
   };
 
@@ -135,7 +144,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
     if (!tab(path)) {
       let f: FileContent;
       try {
-        f = await api.file(task.key, path);
+        f = await api.file(owner, path);
       } catch (e) {
         setError((e as Error).message);
         return;
@@ -180,7 +189,9 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
 
   /** Starts a Claude or a terminal in the workspace and shows its tab. */
   const newSession = async (kind: SessionKind, prompt?: string, label?: string) => {
-    const created = await api.openSession(task.key, { kind, prompt, label });
+    const created = project
+      ? await api.openProjectSession(project.name, { kind, prompt, label })
+      : await api.openSession(owner, { kind, prompt, label });
     setStarting(created.id);
     activate(sessionTab(created.id));
     onChanged();
@@ -240,7 +251,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
       session.active = OVERVIEW;
       activate(strip[at + 1] ?? strip[at - 1] ?? OVERVIEW);
     } else {
-      persist(task.key, session);
+      persist(owner, session);
       redraw();
     }
   };
@@ -320,7 +331,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
     const t = tab(session.active);
     if (!t || t.conflict) return;
     try {
-      const f = await api.file(task.key, t.path);
+      const f = await api.file(owner, t.path);
       if (f.version === t.version || tab(t.path) !== t) return;
       if (t.dirty) t.conflict = true;
       else setText(t.path, f);
@@ -347,7 +358,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
     if (!hasWorkspace) return;
     let alive = true;
     api
-      .changes(task.key)
+      .changes(owner)
       .then((repos) => {
         if (!alive) return;
         const m = new Map<string, ChangeKind>();
@@ -358,11 +369,11 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
     return () => {
       alive = false;
     };
-  }, [task.key, treeRefresh, hasWorkspace]);
+  }, [owner, treeRefresh, hasWorkspace]);
 
   const keepMine = async () => {
     if (!active) return;
-    const f = await api.file(task.key, active.path);
+    const f = await api.file(owner, active.path);
     active.version = f.version;
     active.conflict = false;
     await save(active.path);
@@ -370,22 +381,32 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
   };
   const takeDisk = async () => {
     if (!active) return;
-    setText(active.path, await api.file(task.key, active.path));
+    setText(active.path, await api.file(owner, active.path));
     redraw();
   };
 
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
   const toggleTree = () => window.dispatchEvent(new Event("delilah:toggle-tree"));
-  const { icon, cls } = statusIcon(task.status);
+  const status = task ? statusIcon(task.status) : null;
 
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
-        <span className="mono muted">{task.key}</span>
-        <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
-        <span className={`pill ${cls}`} style={{ marginLeft: "auto" }}>
-          <Icon name={icon} /> {statusLabel(task.status)}
-        </span>
+        {task && status ? (
+          <>
+            <span className="mono muted">{owner}</span>
+            <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
+            <span className={`pill ${status.cls}`} style={{ marginLeft: "auto" }}>
+              <Icon name={status.icon} /> {statusLabel(task.status)}
+            </span>
+          </>
+        ) : (
+          <>
+            <Icon name="folder" />
+            <h1 data-tauri-drag-region className="trunc">{project?.name}</h1>
+            <span className="mono muted trunc" style={{ marginRight: "auto" }}>{project?.path}</span>
+          </>
+        )}
         {hasWorkspace && (
           <button
             className={`btn btn-ghost ${showTree ? "is-on" : ""}`}
@@ -400,7 +421,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
       <div className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}>
         <div className="tmain">
           <div className="etabs" role="tablist">
-            <TabButton id={OVERVIEW} label="Tarea" icon="tasks" shown={shown} onActivate={activate} />
+            <TabButton id={OVERVIEW} label={project ? "Proyecto" : "Tarea"} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
             {sessions.map((s) => {
               const st = sessionStatus(s, task);
               return (
@@ -437,7 +458,16 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
             ))}
           </div>
 
-          {shown === OVERVIEW && (
+          {shown === OVERVIEW && project && (
+            <ProjectView
+              project={project}
+              sessions={sessions}
+              onOpenSession={showSession}
+              onNewSession={newSession}
+              onNewTask={onNewTask}
+            />
+          )}
+          {shown === OVERVIEW && task && (
             <TaskView
               task={task}
               sessions={sessions}
@@ -447,7 +477,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
               onViewChanges={openChanges}
             />
           )}
-          {shown === CHANGES && <ChangesView task={task} onEdit={openFile} />}
+          {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 
           {closingSession && (
             <div className="ebar warn">
@@ -465,6 +495,25 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
               const on = shownSession === s.id;
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                  {s.read_only && s.kind === "claude" && s.live && (
+                    <div className="ebar warn">
+                      <Icon name="lock" />
+                      <span style={{ flex: 1 }}>
+                        <b>Solo lectura.</b> Este Claude lee, busca y explica, pero no edita.
+                      </span>
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          api
+                            .allowEdits(s.id)
+                            .then(onChanged)
+                            .catch((e) => setError((e as Error).message))
+                        }
+                      >
+                        Permitir cambios en esta sesión
+                      </button>
+                    </div>
+                  )}
                   {asks
                     .filter((a) => a.session?.id === s.id && a.ask)
                     .map((a) => (
@@ -490,7 +539,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
                     </div>
                   )}
                   {/* A new connection once it comes back to life. */}
-                  <TerminalPane key={`${s.id}:${s.live}`} sessionId={s.id} focused={on} />
+                  <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} focused={on} />
                 </div>
               );
             })}
@@ -532,7 +581,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
           )}
         </div>
 
-        {finding && hasWorkspace && <QuickOpen taskKey={task.key} onOpen={openFile} onClose={() => setFinding(false)} />}
+        {finding && hasWorkspace && <QuickOpen taskKey={owner} onOpen={openFile} onClose={() => setFinding(false)} />}
         {showTree && hasWorkspace && (
           <aside className="tpanel" aria-label="Archivos del workspace">
             <div className="tpanel-head">
@@ -548,7 +597,7 @@ export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
               </button>
             </div>
             <FileTree
-              taskKey={task.key}
+              taskKey={owner}
               changed={changed}
               active={tab(session.active) ? session.active : null}
               expanded={session.expanded}

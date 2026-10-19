@@ -156,7 +156,9 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
     let mut asking: HashSet<String> = HashSet::new();
 
     for ask in app.asks.list() {
-        let Some(t) = task(&ask.task) else { continue };
+        let Some(title) = owner_title(&ask.task, task(&ask.task)) else {
+            continue;
+        };
         let record = match &ask.session {
             Some(id) => app.store.session(id).await.ok().flatten(),
             None => None,
@@ -169,7 +171,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         items.push(InboxItem {
             kind: ItemKind::Question,
             task: ask.task.clone(),
-            title: t.title.clone(),
+            title: title.clone(),
             session: record.map(|r| ItemSession {
                 live: app.sessions.get(&r.id).is_some(),
                 id: r.id,
@@ -186,7 +188,8 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
     }
 
     for (s, attention) in app.store.attentions().await? {
-        let Some(t) = task(&s.task).filter(|t| !t.status.is_terminal()) else {
+        let Some(title) = owner_title(&s.task, task(&s.task).filter(|t| !t.status.is_terminal()))
+        else {
             continue;
         };
         if asking.contains(&s.id) {
@@ -205,7 +208,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 AttentionKind::Error => ItemKind::Error,
             },
             task: s.task.clone(),
-            title: t.title.clone(),
+            title: title.clone(),
             session: Some(ItemSession {
                 id: s.id,
                 label: s.label,
@@ -261,6 +264,15 @@ async fn last_event(app: &AppState, t: &Task, name: &str) -> Option<DateTime<Utc
         .rev()
         .find(|e| e.event.name() == name)
         .map(|e| e.at)
+}
+
+/// What an item is titled by: its task's title, or for a project's session the
+/// project itself. None when the task is gone or finished.
+fn owner_title(owner: &str, task: Option<&Task>) -> Option<String> {
+    match crate::store_sessions::project_of(owner) {
+        Some(project) => Some(format!("Proyecto {project}")),
+        None => task.map(|t| t.title.clone()),
+    }
 }
 
 fn is_open(t: &Task) -> bool {

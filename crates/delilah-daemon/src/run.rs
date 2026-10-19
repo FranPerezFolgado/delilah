@@ -146,6 +146,7 @@ pub async fn start_run(
         label: "Principal".into(),
         primary: true,
         closed: false,
+        read_only: false,
     };
     app.store.create_session(&session).await?;
     launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
@@ -167,6 +168,8 @@ pub fn launch_session(
     prompt: Option<&str>,
     resume: bool,
 ) -> Result<(), ApiError> {
+    // Nothing to resume if Claude never got a first message: start it afresh.
+    let resume = resume && claude::has_conversation(workspace, &session.id);
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
@@ -187,6 +190,7 @@ pub fn launch_session(
                 prompt,
                 resume,
                 extra_dirs: &[task_dir.as_path()],
+                read_only: session.read_only && session.kind == SessionKind::Claude,
             })
         }
         SessionKind::Shell => shell_command(workspace),

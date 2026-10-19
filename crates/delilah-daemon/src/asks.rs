@@ -132,7 +132,8 @@ pub async fn hook(
         // The question replaces whatever the session last said.
         let _ = app.store.set_attention(&live.id, None).await;
     }
-    if live.as_ref().is_none_or(|l| l.primary) {
+    let of_task = crate::store_sessions::project_of(&q.task).is_none();
+    if of_task && live.as_ref().is_none_or(|l| l.primary) {
         match app
             .transition(&TaskKey::new(&q.task), Event::AgentAsked)
             .await

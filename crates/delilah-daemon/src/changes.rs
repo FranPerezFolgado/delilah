@@ -25,9 +25,7 @@ pub struct DiffQuery {
 }
 
 async fn workspace(app: &AppState, key: &TaskKey) -> Result<Workspace, ApiError> {
-    let ws = app.store.workspace(key).await?.map(|(_, ws)| ws);
-    ws.filter(|ws| ws.path.is_dir())
-        .ok_or_else(|| ApiError::not_found(format!("{key} has no workspace")))
+    crate::owners::workspace(app, key.as_str()).await
 }
 
 fn options(app: &AppState) -> GitOptions {

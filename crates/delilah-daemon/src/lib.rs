@@ -11,6 +11,7 @@ mod hooks;
 pub mod inbox;
 mod jira;
 pub mod notify;
+mod owners;
 mod preferences;
 mod projects;
 mod run;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type ChangeKind, type FileChange, type RepoChanges, type Task } from "../api";
+import { api, type ChangeKind, type FileChange, type RepoChanges } from "../api";
 import { Icon } from "./Icon";
 
 const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> = {
@@ -11,7 +11,8 @@ const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> =
 };
 
 interface Props {
-  task: Task;
+  /** A task's key, or `@<project>`. */
+  owner: string;
   /** Opens a workspace file in a tab. */
   onEdit: (path: string) => void;
 }
@@ -20,7 +21,7 @@ type Selected = { repo: string; path: string };
 
 /** Everything the task's branch changed, per repo of the workspace, with each file's diff.
  *  Compared against where the branch started, uncommitted work included. */
-export function ChangesView({ task, onEdit }: Props) {
+export function ChangesView({ owner, onEdit }: Props) {
   const [repos, setRepos] = useState<RepoChanges[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
@@ -29,14 +30,14 @@ export function ChangesView({ task, onEdit }: Props) {
   const load = useCallback(() => {
     setLoading(true);
     api
-      .changes(task.key)
+      .changes(owner)
       .then((r) => {
         setRepos(r);
         setError(null);
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
-  }, [task.key]);
+  }, [owner]);
 
   useEffect(load, [load]);
   // The agent keeps working: coming back to the window refreshes the list.
@@ -134,7 +135,7 @@ export function ChangesView({ task, onEdit }: Props) {
             ))}
           </div>
           <div className="changes-diff">
-            {current && <Diff taskKey={task.key} repo={current.repo} file={current.file} plainRepo={plainRepo} onEdit={onEdit} />}
+            {current && <Diff taskKey={owner} repo={current.repo} file={current.file} plainRepo={plainRepo} onEdit={onEdit} />}
           </div>
         </div>
       )}
