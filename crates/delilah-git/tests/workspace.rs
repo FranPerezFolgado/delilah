@@ -3,8 +3,8 @@ use std::process::Command;
 
 use delilah_core::ProjectKind;
 use delilah_git::{
-    GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, create_workspace,
-    list_submodules, repo_root,
+    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
+    create_workspace, file_diff, list_submodules, repo_root,
 };
 use tempfile::TempDir;
 
@@ -263,4 +263,42 @@ fn repo_archive_refuses_while_the_tasks_commits_are_not_pushed() {
 
     git(&ws.path, &["push", "-q", "origin", "feature/SIGNAL-12"]);
     archive_workspace(&repo, &ws, &opts()).unwrap();
+}
+
+#[test]
+fn lists_what_the_branch_changed_committed_or_not() {
+    let fx = Fixture::new();
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    let dir = ws.path.join("svc-payments");
+    commit_change(&ws, "svc-payments");
+    std::fs::write(dir.join("README.md"), "Payments, now with retries\n").unwrap();
+    std::fs::write(dir.join("notes.md"), "one\ntwo\n").unwrap();
+    git(&dir, &["mv", "tests/test.sh", "tests/retry_test.sh"]);
+
+    let found = changes(&dir, &opts()).unwrap();
+    assert!(found.base.is_some());
+    assert_eq!(found.commits, 1);
+    let kinds: Vec<_> = found
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("README.md", ChangeKind::Modified),
+            ("change.txt", ChangeKind::Added),
+            ("notes.md", ChangeKind::Untracked),
+            ("tests/retry_test.sh", ChangeKind::Renamed),
+        ]
+    );
+    let readme = &found.files[0];
+    assert_eq!(readme.additions, Some(1));
+    assert_eq!(found.files[2].additions, Some(2));
+    assert_eq!(found.files[3].old_path.as_deref(), Some("tests/test.sh"));
+
+    let diff = file_diff(&dir, readme, &opts()).unwrap();
+    assert!(diff.contains("+Payments, now with retries"), "{diff}");
+    let new = file_diff(&dir, &found.files[2], &opts()).unwrap();
+    assert!(new.contains("@@ -0,0 +1,2 @@\n+one\n+two"), "{new}");
 }

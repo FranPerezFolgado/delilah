@@ -138,6 +138,26 @@ export interface SpecProgress extends SpecSummary {
   groups: { title: string; items: SpecItem[] }[];
 }
 
+export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "untracked";
+
+export interface FileChange {
+  path: string;
+  old_path: string | null;
+  kind: ChangeKind;
+  /** Null for binary files. */
+  additions: number | null;
+  deletions: number | null;
+}
+
+/** What the task's branch changed in one repo of its workspace. */
+export interface RepoChanges {
+  /** Submodule path, or "." for a plain repo. */
+  repo: string;
+  base: string | null;
+  commits: number;
+  files: FileChange[];
+}
+
 export interface FolderInspection {
   path: string;
   name: string;
@@ -193,6 +213,13 @@ export const api = {
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
+  changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
+  diff: async (key: string, repo: string, path: string) => {
+    const q = new URLSearchParams({ repo, path });
+    const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/changes/diff?${q}`);
+    if (!res.ok) throw new ApiError(`No se pudo leer el diff de ${path}`);
+    return res.text();
+  },
   spec: (key: string) => request<SpecProgress | null>(`/api/v1/tasks/${key}/spec`),
   specFile: async (key: string, name: string) => {
     const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/spec/files/${encodeURIComponent(name)}`);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { BoardView } from "./components/BoardView";
+import { ChangesView } from "./components/ChangesView";
 import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
 import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
@@ -186,7 +187,7 @@ export function App() {
     <div className="window">
       <header className="titlebar" data-tauri-drag-region>
         <span data-tauri-drag-region>Delilah</span>
-        {task && view === "tasks" && (
+        {task && (view === "tasks" || view === "changes") && (
           <span data-tauri-drag-region className="mono" style={{ color: "var(--tx)" }}>/ {task.key}</span>
         )}
       </header>
@@ -227,13 +228,23 @@ export function App() {
           )}
           {view === "tasks" &&
             (task ? (
-              <TaskView task={task} sessions={sessions.filter((s) => s.task === task.key)} onOpenConsole={openConsole} onChanged={refresh} />
+              <TaskView
+                task={task}
+                sessions={sessions.filter((s) => s.task === task.key)}
+                onOpenConsole={openConsole}
+                onChanged={refresh}
+                onViewChanges={(key) => {
+                  setSelected(key);
+                  setView("changes");
+                }}
+              />
             ) : (
               <div className="empty">
                 <span>Elige una tarea del tablero.</span>
                 <button className="btn" onClick={() => setView("board")}>Ir al tablero</button>
               </div>
             ))}
+          {view === "changes" && task && <ChangesView task={task} onBack={() => setView("tasks")} />}
           {view === "console" && (
             <ConsoleView
               layout={layout}

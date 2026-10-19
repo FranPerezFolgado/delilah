@@ -2,6 +2,7 @@
 
 mod actions;
 pub mod api;
+mod changes;
 pub mod config;
 mod hooks;
 mod jira;

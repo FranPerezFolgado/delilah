@@ -26,9 +26,10 @@ interface Props {
   /** Opens the console on a session of this task (its primary one if none given). */
   onOpenConsole: (key: string, sessionId?: string) => void;
   onChanged: () => void;
+  onViewChanges: (key: string) => void;
 }
 
-export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
+export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChanges }: Props) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,6 +102,18 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
             </button>
           </div>
         )}
+        {task.phase === "review" && isActive(s) && hasWorkspace && (
+          <div className="notice">
+            <Icon name="review" className="c-done" />
+            <span style={{ flex: 1 }}>Todas las subtareas están hechas: toca revisar los cambios de la rama.</span>
+            <button className="btn" onClick={() => onViewChanges(task.key)}>
+              <Icon name="diff" /> Ver cambios
+            </button>
+            <button className="btn btn-p" disabled={busy} onClick={() => openSession("claude", REVIEW_PROMPT, "Revisión")}>
+              Revisar con Claude
+            </button>
+          </div>
+        )}
         {s.type === "failed" && (
           <div className="notice">
             <Icon name="failed" className="c-err" />
@@ -112,6 +125,11 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
           {isActive(s) && (
             <button className="btn" onClick={() => onOpenConsole(task.key)}>
               <Icon name="console" /> Consola
+            </button>
+          )}
+          {hasWorkspace && (
+            <button className="btn" onClick={() => onViewChanges(task.key)}>
+              <Icon name="diff" /> Ver cambios
             </button>
           )}
           {isActive(s) && (

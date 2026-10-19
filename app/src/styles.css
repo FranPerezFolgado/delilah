@@ -190,3 +190,35 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .tag { font-size: 10.5px; padding: 0 5px; border: 1px solid var(--bd2); border-radius: 4px; color: var(--tx3); white-space: nowrap; }
 .tag-run { border-color: var(--acc); color: var(--acc); }
 .dialog.doc { width: 760px; }
+
+/* Changes: files of the branch and the diff of one */
+:root { --addbg: rgba(98, 187, 109, 0.13); --delbg: rgba(242, 102, 95, 0.13); --hunkbg: rgba(91, 168, 240, 0.08); }
+@media (prefers-color-scheme: light) {
+  :root { --addbg: rgba(44, 123, 54, 0.1); --delbg: rgba(191, 52, 44, 0.09); --hunkbg: rgba(31, 109, 179, 0.06); }
+}
+.changes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(240px, 320px) 1fr; }
+.changes-files { overflow-y: auto; border-right: 1px solid var(--bd); padding: 6px; outline: 0; background: var(--side); }
+.changes-repo { display: flex; align-items: center; gap: 6px; padding: 8px 6px 2px; font-size: 12px; color: var(--tx2); }
+.changes-repo b { flex: 1; font-weight: 600; }
+.changes-meta { font-size: 11px; padding: 0 6px 6px 27px; }
+.frow { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 6px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--tx); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.frow:hover { background: var(--hov); }
+.frow.on { background: var(--sel); }
+.frow .kind { width: 14px; text-align: center; font-size: 11px; font-weight: 700; flex: none; }
+.frow .counts { display: flex; gap: 5px; font-size: 11px; flex: none; }
+.changes-diff { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--term); }
+.diff-head { display: flex; align-items: center; gap: 10px; height: 34px; flex: none; padding: 0 14px; border-bottom: 1px solid var(--bd);
+  background: var(--panel); font-size: 12px; }
+.diff { flex: 1; min-height: 0; overflow: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.5;
+  padding-bottom: 24px; }
+.dl { display: grid; grid-template-columns: 48px 48px 1fr; min-width: max-content; }
+.dl .ln { color: var(--tx3); text-align: right; padding-right: 10px; user-select: none; -webkit-user-select: none; }
+.dl .code { white-space: pre; padding-right: 16px; }
+.dl .sign { display: inline-block; width: 16px; color: var(--tx3); user-select: none; -webkit-user-select: none; }
+.dl.add { background: var(--addbg); }
+.dl.add .sign { color: var(--done); }
+.dl.del { background: var(--delbg); }
+.dl.del .sign { color: var(--err); }
+.dl.hunk { background: var(--hunkbg); color: var(--run); margin-top: 6px; }
+.dl.note { color: var(--tx3); font-style: italic; }

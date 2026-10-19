@@ -32,6 +32,15 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// The repos where the task's branch lives, by path in the workspace: each
+    /// submodule of a parent, or `.` for a plain repo.
+    pub fn repos(&self) -> Vec<(String, PathBuf)> {
+        match self.kind {
+            ProjectKind::Parent => self.branch_dirs(),
+            ProjectKind::Repo => vec![(".".into(), self.path.clone())],
+        }
+    }
+
     /// Folders that hold the task's branch: each submodule, or the repo itself.
     fn branch_dirs(&self) -> Vec<(String, PathBuf)> {
         match self.kind {

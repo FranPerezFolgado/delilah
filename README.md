@@ -91,6 +91,13 @@ and the `tasks.md` checklist with the item the agent is on. Phase changes go to
 the task's history. Delilah only reads these files; the repo stays the source of
 truth.
 
+**Changes.** "Ver cambios" in a task shows what its branch changed in each repo of
+the workspace (each submodule of a parent): the files, with their line counts, and
+the diff of each. It compares against where the branch started (its merge-base with
+`origin/HEAD`, or `main`), so commits, uncommitted edits and new files all count.
+Arrow keys or j/k move through the files. When every item of `tasks.md` is checked,
+the task offers to review the changes or start a "Revisión" session with Claude.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use
