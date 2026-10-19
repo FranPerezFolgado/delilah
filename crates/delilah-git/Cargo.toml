@@ -7,6 +7,11 @@ license.workspace = true
 
 [dependencies]
 delilah-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
