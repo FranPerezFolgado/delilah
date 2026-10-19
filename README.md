@@ -36,7 +36,16 @@ delilah run SIGNAL-12 --project signal --title "Better feed"
 
 delilah ls                 # tasks and their state
 delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
+delilah usage              # subscription usage windows, as Claude reports them
+delilah resume PROJ-1234   # resume a task paused by the usage limit right away
+delilah done PROJ-1234     # mark it done and stop its agent
+delilah archive PROJ-1234  # remove its workspace (refuses while work is unpushed)
 ```
+
+A task whose turn ends on a usage limit is paused until the window resets; the
+daemon then resumes it on its own and tells the agent to carry on. The daemon
+sends macOS notifications when a task needs you, pauses, resumes or ends
+(`DELILAH_NOTIFY=0` turns them off).
 
 With the fake fixture, start the daemon with `DELILAH_ALLOW_FILE_PROTOCOL=1`
 (its submodules use `file://`).

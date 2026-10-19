@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
-use crate::{hooks, projects, run, terminal};
+use crate::{actions, hooks, projects, run, terminal};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -24,6 +24,10 @@ pub fn router(state: AppState) -> Router {
             get(list_events).post(post_event),
         )
         .route("/api/v1/tasks/{key}/terminal", get(terminal::terminal))
+        .route("/api/v1/tasks/{key}/resume", post(actions::resume))
+        .route("/api/v1/tasks/{key}/done", post(actions::done))
+        .route("/api/v1/tasks/{key}/archive", post(actions::archive))
+        .route("/api/v1/usage", get(actions::usage))
         .route(
             "/api/v1/projects",
             get(projects::list_projects).post(projects::add_project),
@@ -124,6 +128,14 @@ impl ApiError {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, message)
     }
 
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, message)
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
     }
@@ -207,6 +219,7 @@ mod tests {
             home: std::env::temp_dir().join(format!("delilah-api-{}", uuid::Uuid::new_v4())),
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
+            notify: false,
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }

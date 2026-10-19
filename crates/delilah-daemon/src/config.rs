@@ -11,6 +11,8 @@ pub struct Config {
     pub addr: SocketAddr,
     /// Submodules over `file://`, needed only by the local fixture repos.
     pub allow_file_protocol: bool,
+    /// Desktop notifications; `DELILAH_NOTIFY=0` turns them off.
+    pub notify: bool,
 }
 
 impl Config {
@@ -35,10 +37,12 @@ impl Config {
         }
         let allow_file_protocol =
             std::env::var("DELILAH_ALLOW_FILE_PROTOCOL").is_ok_and(|v| v == "1");
+        let notify = std::env::var("DELILAH_NOTIFY").map_or(true, |v| v != "0");
         Ok(Self {
             home,
             addr,
             allow_file_protocol,
+            notify,
         })
     }
 

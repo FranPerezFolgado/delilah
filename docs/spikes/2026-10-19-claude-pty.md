@@ -32,13 +32,16 @@ Example status line payload:
 - **`rate_limits` only for subscribers**, and only after the first API response of
   the session.
 
-## Limit detection (not observed yet)
+## Limit detection (implemented, real limit not observed yet)
 
-The limit could not be triggered on demand. Plan, to confirm when it happens:
+The limit could not be triggered on demand. `delilah-agents::limits` implements
+this rule; confirm it against the logged hooks the first time a real limit hits:
 
 1. Keep the latest `rate_limits` per session from the status line.
-2. A turn that ends in `StopFailure` (Claude emits it instead of `Stop` after API
-   errors, per Orca's integration) while `five_hour` or `seven_day` is at 100 %
-   means "paused by limit", resuming at that window's `resets_at`.
+2. A turn that ends (`Stop`, or `StopFailure`, which Claude emits instead after API
+   errors) while `five_hour` or `seven_day` is at 100 % means "paused by limit",
+   resuming at the latest `resets_at` among the full windows. A `StopFailure` whose
+   payload mentions a limit also pauses, until the nearly full window resets (or
+   for 30 minutes if none is known).
 3. Log every raw hook payload so the real `StopFailure` shape can be checked the
    first time it happens on the work Mac.

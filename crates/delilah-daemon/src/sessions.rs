@@ -1,6 +1,7 @@
 //! Agent terminals currently alive in this daemon, by task.
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use delilah_agents::pty::PtySession;
@@ -11,6 +12,8 @@ pub struct Live {
     pub pty: Arc<PtySession>,
     /// Fired by the agent's SessionStart hook.
     pub started: Arc<Notify>,
+    /// Clients attached to the terminal right now.
+    pub viewers: Arc<AtomicUsize>,
 }
 
 #[derive(Default)]
@@ -23,6 +26,7 @@ impl Sessions {
         let live = Live {
             pty,
             started: Arc::new(Notify::new()),
+            viewers: Arc::default(),
         };
         self.live
             .lock()

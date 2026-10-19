@@ -73,6 +73,14 @@ enum Command {
     },
     /// Opens the live terminal of a task's agent (Ctrl-] detaches).
     Attach { key: String },
+    /// Resumes a task paused by the usage limit now, without waiting for the reset.
+    Resume { key: String },
+    /// Marks a task as done and stops its agent.
+    Done { key: String },
+    /// Removes the workspace of a finished task (refuses while work is unpushed).
+    Archive { key: String },
+    /// Shows the subscription's usage windows, as Claude last reported them.
+    Usage,
     /// Registers and lists projects.
     #[command(subcommand)]
     Project(ProjectCommand),
@@ -104,6 +112,13 @@ struct Health {
 struct EventRecord {
     at: DateTime<Utc>,
     event: Event,
+}
+
+#[derive(Deserialize)]
+struct UsageReport {
+    at: DateTime<Utc>,
+    task: String,
+    rate_limits: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -212,6 +227,39 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             }
         }
         Command::Attach { key } => attach::attach(&api.base, &key)?,
+        Command::Resume { key } => {
+            let task: Task = api.post(&format!("/api/v1/tasks/{key}/resume"), &json!({}))?;
+            println!("{} is {} again.", task.key, status_label(&task.status));
+        }
+        Command::Done { key } => {
+            let task: Task = api.post(&format!("/api/v1/tasks/{key}/done"), &json!({}))?;
+            println!(
+                "{} is done. Remove its workspace with `delilah archive {key}`.",
+                task.key
+            );
+        }
+        Command::Archive { key } => {
+            let task: Task = api.post(&format!("/api/v1/tasks/{key}/archive"), &json!({}))?;
+            println!("Archived the workspace of {}.", task.key);
+        }
+        Command::Usage => {
+            let report: Option<UsageReport> = api.get("/api/v1/usage")?;
+            let Some(report) = report else {
+                println!("No usage reported yet: it arrives with the first turn of an agent.");
+                return Ok(());
+            };
+            let at = report.at.with_timezone(&Local).format("%H:%M");
+            println!("Claude usage (reported at {at} by {}):", report.task);
+            for (name, window) in report.rate_limits.as_object().into_iter().flatten() {
+                let used = window["used_percentage"].as_f64().unwrap_or(0.0);
+                let reset = window["resets_at"]
+                    .as_i64()
+                    .and_then(|t| DateTime::from_timestamp(t, 0))
+                    .map(|t| t.with_timezone(&Local).format("%a %H:%M").to_string())
+                    .unwrap_or_else(|| "-".into());
+                println!("  {name:<10} {used:>5.0}%   resets {reset}");
+            }
+        }
         Command::Project(ProjectCommand::Add {
             path,
             kind,

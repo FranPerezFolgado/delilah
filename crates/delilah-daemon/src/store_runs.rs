@@ -64,6 +64,14 @@ impl Store {
         )))
     }
 
+    pub async fn delete_workspace(&self, key: &TaskKey) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM workspaces WHERE task_key = ?")
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn save_agent_session(
         &self,
         key: &TaskKey,

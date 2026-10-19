@@ -5,12 +5,13 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use chrono::Utc;
 use delilah_agents::claude::{self, Signal};
+use delilah_agents::limits;
 use delilah_core::{Event, TaskKey};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
-use crate::state::AppState;
+use crate::state::{AppState, UsageReport};
 use crate::store::StoreError;
 
 #[derive(Deserialize)]
@@ -36,16 +37,22 @@ pub async fn claude_hook(
         live.started.notify_one();
     }
     let event = match signal {
-        Signal::PromptSubmitted => Some(Event::UserAnswered),
-        Signal::NeedsUser | Signal::TurnEnded | Signal::TurnFailed => Some(Event::AgentAsked),
+        Signal::PromptSubmitted | Signal::Working => Some(Event::UserAnswered),
+        Signal::NeedsUser => Some(Event::AgentAsked),
+        Signal::TurnEnded | Signal::TurnFailed => {
+            let limits = app.latest_limits();
+            match limits::limit_reset(signal, &hook, limits.as_ref(), Utc::now()) {
+                Some(resume_at) => {
+                    tracing::info!(task = %q.task, %resume_at, "turn ended on the usage limit");
+                    Some(Event::LimitReached { resume_at })
+                }
+                None => Some(Event::AgentAsked),
+            }
+        }
         Signal::SessionStarted | Signal::SessionEnded | Signal::Other => None,
     };
     if let Some(event) = event {
-        match app
-            .store
-            .apply_event(&TaskKey::new(&q.task), event, Utc::now())
-            .await
-        {
+        match app.transition(&TaskKey::new(&q.task), event).await {
             // Hooks repeat and overlap (a Notification after Stop, the first prompt
             // while already running): a transition that does not apply is not an error.
             Ok(_) | Err(StoreError::Transition(_)) => {}
@@ -61,7 +68,11 @@ pub async fn claude_statusline(
     Json(payload): Json<Value>,
 ) -> StatusCode {
     if let Some(limits) = payload.get("rate_limits").filter(|v| v.is_object()) {
-        app.usage.lock().unwrap().insert(q.task, limits.clone());
+        *app.usage.lock().unwrap() = Some(UsageReport {
+            at: Utc::now(),
+            task: q.task,
+            rate_limits: limits.clone(),
+        });
     }
     StatusCode::NO_CONTENT
 }
@@ -96,6 +107,7 @@ mod tests {
             home: std::env::temp_dir().join(format!("delilah-hooks-{}", uuid::Uuid::new_v4())),
             addr: "127.0.0.1:7420".parse().unwrap(),
             allow_file_protocol: false,
+            notify: false,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -180,7 +192,114 @@ mod tests {
         let payload = json!({ "rate_limits": { "five_hour": { "used_percentage": 82, "resets_at": 1792422000 } } });
 
         post(&state, "/hooks/claude/statusline?task=PROJ-1", payload).await;
-        let usage = state.usage.lock().unwrap().get("PROJ-1").cloned().unwrap();
+        let usage = state.latest_limits().unwrap();
         assert_eq!(usage["five_hour"]["used_percentage"], 82);
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use delilah_core::{Task, TaskStatus};
+    use serde_json::json;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::config::Config;
+    use crate::store::Store;
+
+    async fn running() -> AppState {
+        let config = Config {
+            home: std::env::temp_dir().join(format!("delilah-limits-{}", uuid::Uuid::new_v4())),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+        };
+        let state = AppState::new(Store::in_memory().await.unwrap(), config);
+        let key = TaskKey::new("PROJ-1");
+        state
+            .store
+            .create_task(&Task::new(key.clone(), "Card retries", "feature"))
+            .await
+            .unwrap();
+        state.transition(&key, Event::Start).await.unwrap();
+        state.transition(&key, Event::WorkspaceReady).await.unwrap();
+        state
+    }
+
+    async fn post(state: &AppState, path: &str, body: Value) {
+        let req = Request::post(path)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_turn_ending_with_a_full_window_pauses_until_its_reset() {
+        let state = running().await;
+        let reset = (Utc::now() + chrono::Duration::hours(1)).timestamp();
+        post(&state, "/hooks/claude/statusline?task=PROJ-1", json!({ "rate_limits": { "five_hour": { "used_percentage": 100, "resets_at": reset } } })).await;
+        post(
+            &state,
+            "/hooks/claude?task=PROJ-1",
+            json!({ "hook_event_name": "StopFailure" }),
+        )
+        .await;
+
+        let task = state
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        let TaskStatus::PausedByLimit { resume_at } = task.status else {
+            panic!("{:?}", task.status)
+        };
+        assert_eq!(resume_at.timestamp(), reset);
+        let sent = state.notifier.recorded();
+        assert_eq!(sent.last().unwrap().title, "PROJ-1 pausada por límite");
+    }
+
+    #[tokio::test]
+    async fn a_normal_turn_end_waits_for_the_user_and_notifies() {
+        let state = running().await;
+        post(
+            &state,
+            "/hooks/claude?task=PROJ-1",
+            json!({ "hook_event_name": "Stop" }),
+        )
+        .await;
+
+        let task = state
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::WaitingForUser);
+        assert_eq!(
+            state.notifier.recorded().last().unwrap().title,
+            "PROJ-1 te espera"
+        );
+
+        // A tool running again (e.g. after approving a permission) means it is working.
+        post(
+            &state,
+            "/hooks/claude?task=PROJ-1",
+            json!({ "hook_event_name": "PostToolUse" }),
+        )
+        .await;
+        let task = state
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
     }
 }

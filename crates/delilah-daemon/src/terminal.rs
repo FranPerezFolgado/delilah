@@ -5,6 +5,7 @@
 //! scrollback, then the live output, and closes when the agent exits.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
@@ -31,7 +32,11 @@ pub async fn terminal(
         .sessions
         .get(&key)
         .ok_or_else(|| ApiError::not_found(format!("task {key} has no running agent")))?;
-    Ok(ws.on_upgrade(move |socket| pump(socket, live.pty)))
+    Ok(ws.on_upgrade(move |socket| async move {
+        live.viewers.fetch_add(1, Ordering::Relaxed);
+        pump(socket, live.pty).await;
+        live.viewers.fetch_sub(1, Ordering::Relaxed);
+    }))
 }
 
 async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
@@ -97,6 +102,7 @@ mod tests {
             home: std::env::temp_dir().join(format!("delilah-term-{}", uuid::Uuid::new_v4())),
             addr: "127.0.0.1:0".parse().unwrap(),
             allow_file_protocol: false,
+            notify: false,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

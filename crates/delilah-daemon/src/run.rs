@@ -6,7 +6,6 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use chrono::Utc;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_core::{Event, ProjectKind, Task, TaskKey};
@@ -88,9 +87,7 @@ pub async fn start_run(
     let mut task = Task::new(key.clone(), &req.title, &workflow);
     task.project = Some(project.name.clone());
     app.store.create_task(&task).await?;
-    app.store
-        .apply_event(&key, Event::Start, Utc::now())
-        .await?;
+    app.transition(&key, Event::Start).await?;
 
     let spec = WorkspaceSpec {
         path: app.config.workspaces_dir().join(&req.key),
@@ -113,22 +110,18 @@ pub async fn start_run(
         Ok(ws) => ws,
         Err(e) => {
             let reason = format!("workspace: {e}");
-            app.store
-                .apply_event(
-                    &key,
-                    Event::Fail {
-                        reason: reason.clone(),
-                    },
-                    Utc::now(),
-                )
-                .await?;
+            app.transition(
+                &key,
+                Event::Fail {
+                    reason: reason.clone(),
+                },
+            )
+            .await?;
             return Err(ApiError::unprocessable(reason));
         }
     };
     app.store.save_workspace(&key, &project.path, &ws).await?;
-    app.store
-        .apply_event(&key, Event::WorkspaceReady, Utc::now())
-        .await?;
+    app.transition(&key, Event::WorkspaceReady).await?;
 
     let session = AgentSession {
         agent: "claude".into(),

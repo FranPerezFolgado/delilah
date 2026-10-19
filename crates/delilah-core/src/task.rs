@@ -84,6 +84,8 @@ pub enum Event {
     /// The user resumes a paused task before the reset (e.g. with another agent).
     ManualResume,
     AgentFinished,
+    /// The user declares the task finished, whatever the agent is doing.
+    MarkDone,
     Fail {
         reason: String,
     },
@@ -101,6 +103,7 @@ impl Event {
             Self::ResetDue { .. } => "reset-due",
             Self::ManualResume => "manual-resume",
             Self::AgentFinished => "agent-finished",
+            Self::MarkDone => "mark-done",
             Self::Fail { .. } => "fail",
         }
     }
@@ -181,7 +184,9 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         (S::PreparingWorkspace, Event::WorkspaceReady) => Ok(S::Running),
         (S::Running, Event::AgentAsked) => Ok(S::WaitingForUser),
         (S::WaitingForUser, Event::UserAnswered) => Ok(S::Running),
-        (S::Running, Event::LimitReached { resume_at }) => Ok(S::PausedByLimit { resume_at }),
+        (S::Running | S::WaitingForUser, Event::LimitReached { resume_at }) => {
+            Ok(S::PausedByLimit { resume_at })
+        }
         (S::PausedByLimit { resume_at }, Event::ResetDue { now }) => {
             if now >= *resume_at {
                 Ok(S::Running)
@@ -194,6 +199,7 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         }
         (S::PausedByLimit { .. }, Event::ManualResume) => Ok(S::Running),
         (S::Running, Event::AgentFinished) => Ok(S::Done),
+        (S::Running | S::WaitingForUser | S::PausedByLimit { .. }, Event::MarkDone) => Ok(S::Done),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
         _ => Err(invalid),
     }
@@ -279,16 +285,39 @@ mod tests {
     }
 
     #[test]
-    fn limit_is_only_reported_while_running() {
+    fn limit_pauses_a_task_waiting_for_the_user_too_but_not_a_queued_one() {
         let mut task = running_task();
         task.apply(Event::AgentAsked).unwrap();
+        task.apply(Event::LimitReached {
+            resume_at: at(15, 0),
+        })
+        .unwrap();
+        assert_eq!(task.status.name(), "paused-by-limit");
 
-        let err = task
+        let mut queued = Task::new(TaskKey::new("PROJ-9"), "t", "feature");
+        let err = queued
             .apply(Event::LimitReached {
                 resume_at: at(15, 0),
             })
             .unwrap_err();
         assert!(matches!(err, TransitionError::Invalid { .. }));
+    }
+
+    #[test]
+    fn the_user_can_mark_an_active_task_done() {
+        for prepare in [
+            Event::AgentAsked,
+            Event::LimitReached {
+                resume_at: at(15, 0),
+            },
+        ] {
+            let mut task = running_task();
+            task.apply(prepare).unwrap();
+            task.apply(Event::MarkDone).unwrap();
+            assert_eq!(task.status, TaskStatus::Done);
+        }
+        let mut queued = Task::new(TaskKey::new("PROJ-9"), "t", "feature");
+        assert!(queued.apply(Event::MarkDone).is_err());
     }
 
     #[test]

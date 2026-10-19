@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
+    "PostToolUse",
     "Notification",
     "Stop",
     "StopFailure",
@@ -25,7 +26,7 @@ pub struct Launch<'a> {
     pub workspace: &'a Path,
     pub session_id: &'a str,
     pub settings: &'a Path,
-    /// First prompt, sent as soon as the session starts. Ignored when resuming.
+    /// First prompt, sent as soon as the session starts (also when resuming).
     pub prompt: Option<&'a str>,
     pub resume: bool,
 }
@@ -48,7 +49,7 @@ pub fn command(launch: &Launch) -> CommandBuilder {
     }
     cmd.arg("--settings");
     cmd.arg(launch.settings);
-    if let (Some(prompt), false) = (launch.prompt, launch.resume) {
+    if let Some(prompt) = launch.prompt {
         cmd.arg(prompt);
     }
     cmd.cwd(launch.workspace);
@@ -97,6 +98,8 @@ pub enum Signal {
     SessionStarted,
     /// The user (or Delilah) sent a prompt: the agent is working again.
     PromptSubmitted,
+    /// A tool just ran: the agent is working (e.g. after the user approved it).
+    Working,
     /// The agent is blocked on the user: a permission prompt or an idle notification.
     NeedsUser,
     /// The turn ended normally and the agent waits for the next message.
@@ -111,6 +114,7 @@ pub fn classify(hook: &Value) -> Signal {
     match hook["hook_event_name"].as_str() {
         Some("SessionStart") => Signal::SessionStarted,
         Some("UserPromptSubmit") => Signal::PromptSubmitted,
+        Some("PostToolUse") => Signal::Working,
         Some("Notification") => Signal::NeedsUser,
         Some("Stop") => Signal::TurnEnded,
         Some("StopFailure") => Signal::TurnFailed,
@@ -149,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn new_sessions_get_the_id_and_prompt_resumed_ones_do_not() {
+    fn new_sessions_get_the_id_and_resumed_ones_resume_it() {
         let base = Launch {
             workspace: Path::new("/tmp/ws"),
             session_id: "abc",
@@ -178,11 +182,19 @@ mod tests {
         );
         let resumed = Launch {
             resume: true,
+            prompt: Some("continúa"),
             ..base
         };
         assert_eq!(
             args(&resumed),
-            ["claude", "--resume", "abc", "--settings", "/tmp/s.json"]
+            [
+                "claude",
+                "--resume",
+                "abc",
+                "--settings",
+                "/tmp/s.json",
+                "continúa"
+            ]
         );
     }
 
