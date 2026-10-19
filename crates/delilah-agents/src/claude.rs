@@ -221,6 +221,59 @@ pub fn shows_trust_dialog(screen: &[u8]) -> bool {
     text.contains("trust") && (text.contains("folder") || text.contains("project"))
 }
 
+const DOWN: &[u8] = b"\x1b[B";
+const ENTER: &[u8] = b"\r";
+
+/// The keys that accept the folder-trust dialog on `screen`, once its options are
+/// drawn: Enter when "Yes" is selected, else Down then Enter. Recent versions select
+/// "No, exit" first, so a bare Enter would close Claude.
+pub fn trust_dialog_keys(screen: &[u8]) -> Option<&'static [&'static [u8]]> {
+    if !shows_trust_dialog(screen) {
+        return None;
+    }
+    let text = strip_ansi(&String::from_utf8_lossy(screen)).to_lowercase();
+    // The marker as last drawn, and the option right after it.
+    let after = &text[text.rfind('❯')?..];
+    match (after.find("yes,"), after.find("no,")) {
+        (Some(yes), Some(no)) if yes < no => Some(&[ENTER]),
+        (Some(_), None) => Some(&[ENTER]),
+        (_, Some(_)) => Some(&[DOWN, ENTER]),
+        (None, None) => None,
+    }
+}
+
+/// The text of a terminal stream without its escape sequences (colours, cursor moves).
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            // CSI: parameters, then a final byte in @..~
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL or ESC \\
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +425,24 @@ mod tests {
             b"Quick safety check: Is this a project you created or one you trust?"
         ));
         assert!(!shows_trust_dialog(b"Welcome to Claude Code"));
+    }
+
+    #[test]
+    fn picks_yes_on_the_trust_dialog_wherever_it_is() {
+        // 2.1.x: "No, exit" comes first and selected; spaces drawn as cursor moves.
+        let no_first = "Quick safety check: Is this a project you created or one you trust?\x1b[1C\r\n\
+            \x1b[38;5;153m\u{276f}\x1b[39mNo,\x1b[1Cexit\r\n  Yes,\x1b[1CI\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder";
+        assert_eq!(
+            trust_dialog_keys(no_first.as_bytes()),
+            Some(&[DOWN, ENTER][..])
+        );
+        let yes_first =
+            "Do you trust the files in this folder?\r\n \u{276f} Yes, proceed\r\n   No, exit";
+        assert_eq!(trust_dialog_keys(yes_first.as_bytes()), Some(&[ENTER][..]));
+        // The question is up but the options are not drawn yet: wait.
+        assert_eq!(
+            trust_dialog_keys(b"Do you trust the files in this folder?"),
+            None
+        );
     }
 }

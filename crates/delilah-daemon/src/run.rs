@@ -229,15 +229,20 @@ fn shell_command(workspace: &std::path::Path) -> portable_pty::CommandBuilder {
     cmd
 }
 
-/// A new workspace path shows Claude's folder-trust dialog once: accept it with Enter.
-/// Stops as soon as the session starts, so it never presses Enter on the user's input.
+/// A new workspace path shows Claude's folder-trust dialog once: answer "Yes" (see
+/// `claude::trust_dialog_keys`). Stops as soon as the session starts, so it never
+/// types into the user's input.
 async fn accept_trust_dialog(pty: Arc<PtySession>, started: Arc<tokio::sync::Notify>) {
     let (mut screen, mut rx) = pty.attach();
     let deadline = tokio::time::sleep(TRUST_WATCH);
     tokio::pin!(deadline);
     loop {
-        if claude::shows_trust_dialog(&screen) {
-            let _ = pty.write(b"\r");
+        if let Some(keys) = claude::trust_dialog_keys(&screen) {
+            for key in keys {
+                let _ = pty.write(key);
+                // Apart, or the TUI may read them as one paste.
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
             tracing::info!("accepted the folder-trust dialog");
             return;
         }
