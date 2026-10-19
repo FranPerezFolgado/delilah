@@ -14,8 +14,8 @@ in the design doc's "MVP" section.
 - Developed on a personal Mac, tested on the work Mac. Never reference or copy
   anything from the work repos; use `scripts/make-fixture-parent.sh` and Jira
   JSON fixtures instead.
-- Hooks for agents are installed per workspace (`.claude/settings.local.json`
-  in the worktree, excluded from git), never in the global `~/.claude`.
+- Agent hooks go in a settings file outside the repo, passed with `claude --settings`;
+  never in the worktree or the global `~/.claude`. Spawn agents with a clean env.
 - Git and gh here run as the personal account (FranPerezFolgado). The machine
   also has work credentials: confirm the account before any remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.

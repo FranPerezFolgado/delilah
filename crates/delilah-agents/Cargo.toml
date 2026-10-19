@@ -7,6 +7,9 @@ license.workspace = true
 
 [dependencies]
 delilah-core.workspace = true
+portable-pty = "0.9"
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [lints]
 workspace = true
