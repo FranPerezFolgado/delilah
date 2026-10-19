@@ -102,10 +102,11 @@ so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply
 **macOS.** The Dock icon counts what blocks an agent. While you are in another
 app, each new item of the Bandeja is a notification with the agent's own words
 (and a task resuming after the usage limit is one too). Coming back to Delilah
-within 10 minutes, by clicking the notification or the Dock icon, opens that item
-on its tab. macOS does not tell a desktop app which notification was clicked, so
-coming back is the signal. While the app is open the daemon stays quiet; when it is
-closed, the daemon notifies as before.
+within 10 minutes (e.g. from the Dock icon) opens that item on its tab. Clicking
+the notification itself does not bring Delilah forward: Tauri's notifications
+report no clicks on desktop, and in development builds they are even sent as
+Terminal. While the app is open the daemon stays quiet; when it is closed, the
+daemon notifies as before.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself

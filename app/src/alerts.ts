@@ -1,7 +1,7 @@
 // The desktop side of the inbox: the count on the Dock icon, a notification for each
-// new item while you are elsewhere, and, when you come back to Delilah (clicking the
-// notification or the Dock), the last item notified opens. macOS does not tell a
-// desktop app which notification was clicked, so coming back is the signal.
+// new item while you are elsewhere, and, when you come back to Delilah (e.g. from the
+// Dock), the last item notified opens. Tauri's notifications report no clicks on
+// desktop, so coming back is the signal.
 import { useEffect, useRef } from "react";
 import { BLOCKING, type InboxItem, type InboxKind, type Task } from "./api";
 import { notify, setBadge } from "./platform";
