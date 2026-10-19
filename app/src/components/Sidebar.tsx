@@ -3,7 +3,7 @@ import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 
-export type View = "board" | "tasks" | "console" | "jira" | "projects" | "settings";
+export type View = "inbox" | "board" | "tasks" | "console" | "jira" | "projects" | "settings";
 
 const GROUPS: { name: string; match: (t: Task) => boolean }[] = [
   { name: "En ejecución", match: (t) => ["queued", "preparing-workspace", "running"].includes(t.status.type) },
@@ -20,12 +20,19 @@ interface Props {
   selected: string | null;
   onSelect: (key: string) => void;
   onNewTask: () => void;
+  /** Items in the inbox that block an agent. */
+  waiting: number;
 }
 
-export function Sidebar({ view, onView, tasks, selected, onSelect, onNewTask }: Props) {
+export function Sidebar({ view, onView, tasks, selected, onSelect, onNewTask, waiting }: Props) {
   const live = tasks.filter((t) => ["running", "waiting-for-user", "paused-by-limit"].includes(t.status.type)).length;
   return (
     <nav className="sidebar" aria-label="Navegación">
+      <button className={`nav ${view === "inbox" ? "on" : ""}`} onClick={() => onView("inbox")}>
+        <Icon name="inbox" /> Bandeja
+        {waiting > 0 ? <span className="count badge mono">{waiting}</span> : <span className="count mono" />}
+        <span className="kbd">{keyOf("view-inbox")}</span>
+      </button>
       <button className={`nav ${view === "board" ? "on" : ""}`} onClick={() => onView("board")}>
         <Icon name="tasks" /> Tareas <span className="count mono">{tasks.length}</span>
         <span className="kbd">{keyOf("view-tasks")}</span>

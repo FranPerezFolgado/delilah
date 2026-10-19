@@ -1,5 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { api, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { api, BLOCKING, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { InboxView } from "./components/InboxView";
+import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
 import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
 import { JiraView } from "./components/JiraView";
@@ -17,6 +19,7 @@ export function App() {
   const [view, setView] = useState<View>("board");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [specs, setSpecs] = useState<Record<string, SpecSummary>>({});
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [focusSession, setFocusSession] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -32,16 +35,18 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, p, u, s, sp] = await Promise.all([
+      const [t, p, u, s, sp, ib] = await Promise.all([
         api.tasks(),
         api.projects(),
         api.usage(),
         api.sessions(),
         // An older daemon has no specs: the board still works, without phases.
         api.specs().catch(() => ({})),
+        api.inbox().catch(() => []),
       ]);
       setTasks(t);
       setSpecs(sp);
+      setInbox(ib);
       setSessions(s);
       setProjects(p);
       setUsage(u);
@@ -132,6 +137,25 @@ export function App() {
     setSelected(next.task);
   };
 
+  /** Shows a task's screen, on one of its session tabs if given. */
+  const openTask = (key: string, sessionId?: string) => {
+    if (sessionId) {
+      const ts = sessionFor(key);
+      ts.active = sessionTab(sessionId);
+      persist(key, ts);
+    }
+    setSelected(key);
+    setView("tasks");
+  };
+  const openChanges = (key: string) => {
+    const ts = sessionFor(key);
+    ts.changesOpen = true;
+    ts.active = CHANGES;
+    persist(key, ts);
+    setSelected(key);
+    setView("tasks");
+  };
+
   const run = (action: ActionId) => {
     switch (action) {
       case "new-terminal":
@@ -164,6 +188,8 @@ export function App() {
         return;
       case "new-task":
         return setNewTask(true);
+      case "view-inbox":
+        return setView("inbox");
       case "view-tasks":
         return setView("board");
       case "view-console":
@@ -213,6 +239,7 @@ export function App() {
             setView("tasks");
           }}
           onNewTask={() => setNewTask(true)}
+          waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
         <main>
           {!online && (
@@ -233,6 +260,7 @@ export function App() {
               </span>
             </div>
           )}
+          {view === "inbox" && <InboxView items={inbox} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
           {view === "board" && (
             <BoardView
               tasks={tasks}

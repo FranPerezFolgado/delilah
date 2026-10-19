@@ -6,6 +6,7 @@ mod changes;
 pub mod config;
 mod files;
 mod hooks;
+pub mod inbox;
 mod jira;
 pub mod notify;
 mod preferences;

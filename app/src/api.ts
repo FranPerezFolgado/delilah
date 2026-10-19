@@ -176,6 +176,21 @@ export interface FileContent {
 /** The file changed on disk (usually the agent) since the editor loaded it. */
 export class ConflictError extends Error {}
 
+export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "paused" | "failed";
+
+/** Something that waits on you, from any task. */
+export interface InboxItem {
+  kind: InboxKind;
+  task: string;
+  title: string;
+  session: { id: string; label: string; primary: boolean; live: boolean } | null;
+  text: string | null;
+  since: string | null;
+}
+
+/** The kinds that block an agent until you act: they count in the badge. */
+export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting"];
+
 export interface FolderInspection {
   path: string;
   name: string;
@@ -231,6 +246,8 @@ export const api = {
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
+  inbox: () => request<InboxItem[]>("/api/v1/inbox"),
+  reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
   tree: (key: string, path: string) => request<TreeEntry[]>(`/api/v1/tasks/${key}/tree?${new URLSearchParams({ path })}`),
   file: (key: string, path: string) => request<FileContent>(`/api/v1/tasks/${key}/file?${new URLSearchParams({ path })}`),
@@ -288,5 +305,14 @@ export const statusLabel = (s: TaskStatus): string => {
       return "Fallida";
   }
 };
+
+/** "hace 5 min", "hace 2 h", "ayer"… */
+export function ago(iso: string): string {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "ahora";
+  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
+  return s < 172800 ? "ayer" : `hace ${Math.floor(s / 86400)} días`;
+}
 
 export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });

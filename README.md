@@ -91,6 +91,14 @@ and the `tasks.md` checklist with the item the agent is on. Phase changes go to
 the task's history. Delilah only reads these files; the repo stays the source of
 truth.
 
+**Bandeja.** Everything that waits on you, from every task, most urgent first:
+what an agent asks at the end of its turn (its last message, with a box to answer
+it right there), a permission it needs (answered in its terminal), a failed turn,
+tasks ready for review, paused by the usage limit (with "Reanudar ahora") or failed.
+Each item opens the task on the right tab. The sidebar counts what blocks an
+agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,
+so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
+
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself
 (status, actions, spec, history), its sessions, Cambios when opened, and files.

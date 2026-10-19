@@ -21,6 +21,7 @@ const PATHS = {
   back: "M15 6l-6 6 6 6",
   code: "M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16",
   sidebar: "M4 5h16v14H4zM15 5v14",
+  inbox: "M4 13l2.5-7h11l2.5 7v6H4zM4 13h5l1 2h4l1-2h5",
 } as const;
 
 export type IconName = keyof typeof PATHS;

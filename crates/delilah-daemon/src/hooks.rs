@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
+use crate::inbox::{self, Change};
 use crate::sessions::LiveState;
 use crate::state::{AppState, UsageReport};
 use crate::store::StoreError;
@@ -60,6 +61,31 @@ pub async fn claude_hook(
             (Signal::NeedsUser | Signal::TurnEnded | Signal::TurnFailed, _) => LiveState::Waiting,
             _ => live.state(),
         });
+    }
+
+    // What the session now waits on you for, for the inbox.
+    if let Some(id) = q
+        .session
+        .clone()
+        .or_else(|| live.as_ref().map(|l| l.id.clone()))
+    {
+        let current = app.store.attention(&id).await.ok().flatten();
+        let change = inbox::attention_change(
+            signal,
+            &hook,
+            limit_reset.is_some(),
+            current.as_ref(),
+            Utc::now(),
+        );
+        let saved = match change {
+            Change::Keep => Ok(()),
+            Change::Clear if current.is_none() => Ok(()),
+            Change::Clear => app.store.set_attention(&id, None).await,
+            Change::Set(attention) => app.store.set_attention(&id, Some(&attention)).await,
+        };
+        if let Err(e) = saved {
+            tracing::warn!(session = %id, "cannot record what the session waits for: {e}");
+        }
     }
 
     let event = match (signal, limit_reset) {
@@ -172,6 +198,55 @@ mod tests {
             .unwrap()
             .unwrap()
             .status
+    }
+
+    async fn inbox(state: &AppState) -> Vec<Value> {
+        let req = Request::get("/api/v1/inbox").body(Body::empty()).unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn what_the_agent_asks_reaches_the_inbox_until_answered() {
+        let state = running_task().await;
+        state
+            .store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "s-1".into(),
+                task: "PROJ-1".into(),
+                kind: crate::store_sessions::SessionKind::Claude,
+                label: "Principal".into(),
+                primary: true,
+                closed: false,
+            })
+            .await
+            .unwrap();
+        let url = "/hooks/claude?task=PROJ-1&session=s-1";
+        let stop = json!({ "hook_event_name": "Stop", "last_assistant_message": "¿Pagino con cursor u offset?" });
+        post(&state, url, stop).await;
+        // The idle reminder that follows does not hide the question.
+        let idle = json!({ "hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input" });
+        post(&state, url, idle).await;
+
+        let items = inbox(&state).await;
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0]["kind"], "question");
+        assert_eq!(items[0]["text"], "¿Pagino con cursor u offset?");
+        assert_eq!(items[0]["session"]["id"], "s-1");
+
+        post(
+            &state,
+            url,
+            json!({ "hook_event_name": "UserPromptSubmit" }),
+        )
+        .await;
+        assert!(inbox(&state).await.is_empty());
     }
 
     #[tokio::test]

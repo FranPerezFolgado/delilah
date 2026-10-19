@@ -112,6 +112,54 @@ impl Store {
 
 const SELECT: &str = "SELECT id, task_key, kind, label, is_primary, closed FROM sessions";
 
+impl Store {
+    /// Records what a session waits on the user for, or clears it.
+    pub async fn set_attention(
+        &self,
+        session: &str,
+        attention: Option<&crate::inbox::Attention>,
+    ) -> Result<(), StoreError> {
+        let json = attention.map(serde_json::to_string).transpose()?;
+        sqlx::query("UPDATE sessions SET attention = ? WHERE id = ?")
+            .bind(json)
+            .bind(session)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn attention(
+        &self,
+        session: &str,
+    ) -> Result<Option<crate::inbox::Attention>, StoreError> {
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT attention FROM sessions WHERE id = ?")
+                .bind(session)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+        Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
+    }
+
+    /// Open sessions that wait on the user, with what for.
+    pub async fn attentions(
+        &self,
+    ) -> Result<Vec<(SessionRecord, crate::inbox::Attention)>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, task_key, kind, label, is_primary, closed, attention FROM sessions
+             WHERE closed = 0 AND attention IS NOT NULL ORDER BY created_at, id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let json: String = row.try_get("attention")?;
+                Ok((session_from_row(row)?, serde_json::from_str(&json)?))
+            })
+            .collect()
+    }
+}
+
 fn session_from_row(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
     let kind: String = row.try_get("kind")?;
     Ok(SessionRecord {

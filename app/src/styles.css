@@ -271,3 +271,17 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .tterm { flex: 1; min-height: 0; flex-direction: column; background: var(--term); }
 .tterm .pane-term { flex: 1; min-height: 0; }
 .ehost .cm-editor { height: 100%; }
+
+/* Inbox */
+.nav .count.badge { color: var(--acctx); background: var(--acc); border-radius: 9px; padding: 0 6px; font-weight: 600; }
+.inbox { gap: 10px; max-width: 900px; }
+.inbox-item { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
+.inbox-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; }
+.inbox-head b { font-weight: 600; flex: none; }
+.inbox-task { min-width: 0; height: 22px; padding: 0 6px; gap: 6px; color: var(--tx); }
+.inbox-text { border-left: 2px solid var(--bd2); padding-left: 12px; }
+.inbox-text.clamped { max-height: 11.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.inbox-reply { display: flex; gap: 8px; }
+.inbox-reply .input { flex: 1; }
+.inbox-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inbox-actions:empty { display: none; }
