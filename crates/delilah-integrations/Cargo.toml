@@ -1,0 +1,12 @@
+[package]
+name = "delilah-integrations"
+description = "External services: Jira (real and JSON fixtures)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delilah-core.workspace = true
+
+[lints]
+workspace = true

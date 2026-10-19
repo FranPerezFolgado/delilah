@@ -1,0 +1,17 @@
+[package]
+name = "delilah-cli"
+description = "The `delilah` command-line client."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "delilah"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+delilah-core.workspace = true
+
+[lints]
+workspace = true

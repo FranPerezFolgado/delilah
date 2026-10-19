@@ -1,0 +1,14 @@
+[package]
+name = "delilah-core"
+description = "Task model and state machine. Pure logic, no I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
