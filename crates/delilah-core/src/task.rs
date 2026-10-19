@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Jira key of the ticket a task works on, e.g. `PROJ-1234`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct TaskKey(String);
 
 impl TaskKey {
@@ -26,6 +27,7 @@ impl fmt::Display for TaskKey {
 /// Where a task is in its lifecycle. The workflow phase (`analysis`,
 /// `implement`…) is tracked separately in [`Task::phase`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum TaskStatus {
     Queued,
     PreparingWorkspace,
@@ -62,6 +64,7 @@ impl TaskStatus {
 
 /// Something that happened to a task, reported by the daemon, an agent hook or the user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Event {
     Start,
     WorkspaceReady,
