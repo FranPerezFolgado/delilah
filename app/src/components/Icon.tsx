@@ -19,6 +19,7 @@ const PATHS = {
   review: "M4 6h16M4 12h10M4 18h7M16 15l2 2 4-4",
   diff: "M8 4v8M4 8h8M12 19h8M18 4L6 20",
   back: "M15 6l-6 6 6 6",
+  code: "M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16",
 } as const;
 
 export type IconName = keyof typeof PATHS;

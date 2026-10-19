@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { BoardView } from "./components/BoardView";
 import { ChangesView } from "./components/ChangesView";
@@ -11,6 +11,9 @@ import { Sidebar, type View } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TaskView } from "./components/TaskView";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
+
+// CodeMirror is most of the bundle: load it the first time the editor opens.
+const EditorScreen = lazy(() => import("./components/EditorScreen").then((m) => ({ default: m.EditorScreen })));
 
 export function App() {
   const [view, setView] = useState<View>("board");
@@ -28,6 +31,7 @@ export function App() {
   const [restoreLayout, setRestoreLayout] = useState<Layout>(4);
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
+  const [editorRequest, setEditorRequest] = useState<{ path: string; n: number } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -138,6 +142,8 @@ export function App() {
       case "new-claude":
         return openSession("claude");
       case "close-session":
+        // In the editor, ⌘W closes the file's tab, as in any editor.
+        if (view === "editor") return void window.dispatchEvent(new Event("delilah:close-tab"));
         return closeFocused();
       case "next-pane":
         return movePane(1);
@@ -187,7 +193,7 @@ export function App() {
     <div className="window">
       <header className="titlebar" data-tauri-drag-region>
         <span data-tauri-drag-region>Delilah</span>
-        {task && (view === "tasks" || view === "changes") && (
+        {task && (view === "tasks" || view === "changes" || view === "editor") && (
           <span data-tauri-drag-region className="mono" style={{ color: "var(--tx)" }}>/ {task.key}</span>
         )}
       </header>
@@ -208,10 +214,17 @@ export function App() {
             <div className="notice" style={{ margin: 12, borderColor: "var(--err)" }}>
               <span className="c-err">●</span>
               <span>
-                No hay conexión con <span className="mono">delilahd</span>. Delilah lo arranca al abrirse; si sigue
-                así, prueba <b>Delilah → Reiniciar el daemon</b> y mira{" "}
-                <span className="mono selectable">~/Library/Logs/Delilah/delilahd.log</span>. En desarrollo:{" "}
-                <span className="mono selectable">scripts/dev-daemon.sh</span>.
+                No hay conexión con <span className="mono">delilahd</span>.{" "}
+                {import.meta.env.DEV ? (
+                  <>
+                    En desarrollo arráncalo con <span className="mono selectable">scripts/dev-daemon.sh</span>.
+                  </>
+                ) : (
+                  <>
+                    Delilah lo arranca al abrirse; si sigue así, prueba <b>Delilah → Reiniciar el daemon</b> y mira{" "}
+                    <span className="mono selectable">~/Library/Logs/Delilah/delilahd.log</span>.
+                  </>
+                )}
               </span>
             </div>
           )}
@@ -237,6 +250,11 @@ export function App() {
                   setSelected(key);
                   setView("changes");
                 }}
+                onOpenEditor={(key) => {
+                  setSelected(key);
+                  setEditorRequest(null);
+                  setView("editor");
+                }}
               />
             ) : (
               <div className="empty">
@@ -244,7 +262,21 @@ export function App() {
                 <button className="btn" onClick={() => setView("board")}>Ir al tablero</button>
               </div>
             ))}
-          {view === "changes" && task && <ChangesView task={task} onBack={() => setView("tasks")} />}
+          {view === "changes" && task && (
+            <ChangesView
+              task={task}
+              onBack={() => setView("tasks")}
+              onEdit={(path) => {
+                setEditorRequest((r) => ({ path, n: (r?.n ?? 0) + 1 }));
+                setView("editor");
+              }}
+            />
+          )}
+          {view === "editor" && task && (
+            <Suspense fallback={<div className="empty">Cargando el editor…</div>}>
+              <EditorScreen key={task.key} task={task} request={editorRequest} onBack={() => setView("tasks")} />
+            </Suspense>
+          )}
           {view === "console" && (
             <ConsoleView
               layout={layout}

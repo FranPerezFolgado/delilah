@@ -158,6 +158,24 @@ export interface RepoChanges {
   files: FileChange[];
 }
 
+export interface TreeEntry {
+  name: string;
+  dir: boolean;
+}
+
+/** A workspace file as the editor gets it. */
+export interface FileContent {
+  path: string;
+  /** Null for binary files or files too big to edit. */
+  text: string | null;
+  /** Changes whenever the file does; a save must send the one it started from. */
+  version: string;
+  size: number;
+}
+
+/** The file changed on disk (usually the agent) since the editor loaded it. */
+export class ConflictError extends Error {}
+
 export interface FolderInspection {
   path: string;
   name: string;
@@ -214,6 +232,19 @@ export const api = {
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
+  tree: (key: string, path: string) => request<TreeEntry[]>(`/api/v1/tasks/${key}/tree?${new URLSearchParams({ path })}`),
+  file: (key: string, path: string) => request<FileContent>(`/api/v1/tasks/${key}/file?${new URLSearchParams({ path })}`),
+  saveFile: async (key: string, path: string, text: string, version: string) => {
+    const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/file?${new URLSearchParams({ path })}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, version }),
+    });
+    const data = await res.json().catch(() => null);
+    if (res.status === 409) throw new ConflictError(data?.error ?? "El archivo ha cambiado en disco");
+    if (!res.ok) throw new ApiError(data?.error ?? `delilahd respondió ${res.status}`);
+    return data as FileContent;
+  },
   diff: async (key: string, repo: string, path: string) => {
     const q = new URLSearchParams({ repo, path });
     const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/changes/diff?${q}`);

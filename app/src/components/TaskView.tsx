@@ -27,9 +27,10 @@ interface Props {
   onOpenConsole: (key: string, sessionId?: string) => void;
   onChanged: () => void;
   onViewChanges: (key: string) => void;
+  onOpenEditor: (key: string) => void;
 }
 
-export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChanges }: Props) {
+export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChanges, onOpenEditor }: Props) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -130,6 +131,11 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
           {hasWorkspace && (
             <button className="btn" onClick={() => onViewChanges(task.key)}>
               <Icon name="diff" /> Ver cambios
+            </button>
+          )}
+          {hasWorkspace && (
+            <button className="btn" onClick={() => onOpenEditor(task.key)}>
+              <Icon name="code" /> Editor
             </button>
           )}
           {isActive(s) && (

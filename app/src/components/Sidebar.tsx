@@ -3,7 +3,7 @@ import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 
-export type View = "board" | "tasks" | "changes" | "console" | "jira" | "projects" | "settings";
+export type View = "board" | "tasks" | "changes" | "editor" | "console" | "jira" | "projects" | "settings";
 
 const GROUPS: { name: string; match: (t: Task) => boolean }[] = [
   { name: "En ejecución", match: (t) => ["queued", "preparing-workspace", "running"].includes(t.status.type) },

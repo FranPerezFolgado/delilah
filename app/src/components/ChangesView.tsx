@@ -13,13 +13,15 @@ const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> =
 interface Props {
   task: Task;
   onBack: () => void;
+  /** Opens a workspace file in the editor. */
+  onEdit: (path: string) => void;
 }
 
 type Selected = { repo: string; path: string };
 
 /** Everything the task's branch changed, per repo of the workspace, with each file's diff.
  *  Compared against where the branch started, uncommitted work included. */
-export function ChangesView({ task, onBack }: Props) {
+export function ChangesView({ task, onBack, onEdit }: Props) {
   const [repos, setRepos] = useState<RepoChanges[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
@@ -138,7 +140,7 @@ export function ChangesView({ task, onBack }: Props) {
             ))}
           </div>
           <div className="changes-diff">
-            {current && <Diff taskKey={task.key} repo={current.repo} file={current.file} plainRepo={plainRepo} />}
+            {current && <Diff taskKey={task.key} repo={current.repo} file={current.file} plainRepo={plainRepo} onEdit={onEdit} />}
           </div>
         </div>
       )}
@@ -202,7 +204,19 @@ function parse(diff: string): Line[] {
   return lines;
 }
 
-function Diff({ taskKey, repo, file, plainRepo }: { taskKey: string; repo: string; file: FileChange; plainRepo: boolean }) {
+function Diff({
+  taskKey,
+  repo,
+  file,
+  plainRepo,
+  onEdit,
+}: {
+  taskKey: string;
+  repo: string;
+  file: FileChange;
+  plainRepo: boolean;
+  onEdit: (path: string) => void;
+}) {
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -231,6 +245,11 @@ function Diff({ taskKey, repo, file, plainRepo }: { taskKey: string; repo: strin
           {where}
         </span>
         <span className="muted" style={{ marginLeft: "auto", flex: "none" }}>{KIND[file.kind].label}</span>
+        {file.kind !== "deleted" && (
+          <button className="btn btn-ghost" style={{ flex: "none" }} onClick={() => onEdit(where)}>
+            <Icon name="code" /> Abrir en el editor
+          </button>
+        )}
       </div>
       {error && <div className="error" style={{ padding: 12 }}>{error}</div>}
       {text !== null && lines.length === 0 && <div className="muted" style={{ padding: 12 }}>Sin cambios de contenido.</div>}

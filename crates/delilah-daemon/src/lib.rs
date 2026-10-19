@@ -4,6 +4,7 @@ mod actions;
 pub mod api;
 mod changes;
 pub mod config;
+mod files;
 mod hooks;
 mod jira;
 pub mod notify;

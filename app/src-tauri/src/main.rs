@@ -18,10 +18,18 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .menu(menu)
         .on_menu_event(|app, event| {
-            let result = match event.id().as_ref() {
-                RESTART_DAEMON => daemon::ensure_running().and_then(|()| daemon::restart()),
-                STOP_DAEMON => daemon::stop(),
-                _ => return,
+            let id = event.id().as_ref();
+            if id != RESTART_DAEMON && id != STOP_DAEMON {
+                return;
+            }
+            // Development builds never touch launchd: a LaunchAgent there would point
+            // at a build folder and fight scripts/dev-daemon.sh for the port.
+            let result = if cfg!(debug_assertions) {
+                Err("En desarrollo el daemon no lo gestiona la app: arráncalo con scripts/dev-daemon.sh.".into())
+            } else if id == RESTART_DAEMON {
+                daemon::ensure_running().and_then(|()| daemon::restart())
+            } else {
+                daemon::stop()
             };
             if let Err(e) = result {
                 app.dialog()

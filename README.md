@@ -98,6 +98,14 @@ the diff of each. It compares against where the branch started (its merge-base w
 Arrow keys or j/k move through the files. When every item of `tasks.md` is checked,
 the task offers to review the changes or start a "Revisión" session with Claude.
 
+**Editor.** "Editor" in a task (or "Abrir en el editor" in the changes view) opens
+the workspace's file tree, with the branch's changes marked, beside an editor
+(CodeMirror 6, language picked from the file name). ⌘S saves, ⌘W closes the tab, ⌘F
+searches. The agent works on the same files, so an open file reloads by itself when
+it changes on disk. If you had unsaved edits, the editor asks which version to keep
+rather than overwrite either one. Files above 1 MB and binaries are not editable.
+Paths are confined to the workspace, symlinks included.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use
