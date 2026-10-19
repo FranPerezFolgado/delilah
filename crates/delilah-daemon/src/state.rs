@@ -7,6 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::config::Config;
+use crate::events::{Events, Topic};
 use crate::notify::Notifier;
 use crate::secrets::Secrets;
 use crate::sessions::Sessions;
@@ -32,6 +33,8 @@ pub struct AppState {
     pub secrets: Secrets,
     /// Each task's spec as last read, by task key (see `specs.rs`).
     pub specs: Arc<Mutex<HashMap<String, SpecSummary>>>,
+    /// What changed, for clients listening on `/api/v1/events`.
+    pub events: Events,
 }
 
 impl AppState {
@@ -41,10 +44,11 @@ impl AppState {
         } else {
             Notifier::Recorder(Arc::default())
         };
+        let events = Events::default();
         Self {
             store,
             config: Arc::new(config),
-            sessions: Arc::default(),
+            sessions: Arc::new(Sessions::new(events.clone())),
             usage: Arc::default(),
             notifier,
             // Unit tests must never touch the real Keychain.
@@ -54,7 +58,12 @@ impl AppState {
                 Secrets::Keychain
             },
             specs: Arc::default(),
+            events,
         }
+    }
+
+    pub fn emit(&self, topic: Topic) {
+        self.events.emit(topic);
     }
 
     pub fn latest_limits(&self) -> Option<Value> {

@@ -8,6 +8,7 @@ use delilah_agents::pty::PtySession;
 use serde::Serialize;
 use tokio::sync::Notify;
 
+use crate::events::{Events, Topic};
 use crate::store_sessions::SessionKind;
 
 /// What a live session is doing, from its own hooks. The task's status follows the
@@ -34,6 +35,7 @@ pub struct Live {
     /// Clients attached to the terminal right now.
     pub viewers: Arc<AtomicUsize>,
     pub state: Arc<Mutex<LiveState>>,
+    events: Events,
 }
 
 impl Live {
@@ -42,16 +44,27 @@ impl Live {
     }
 
     pub fn set_state(&self, state: LiveState) {
-        *self.state.lock().unwrap() = state;
+        let changed = std::mem::replace(&mut *self.state.lock().unwrap(), state) != state;
+        if changed {
+            self.events.emit(Topic::Sessions);
+        }
     }
 }
 
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<String, Live>>,
+    events: Events,
 }
 
 impl Sessions {
+    pub fn new(events: Events) -> Self {
+        Self {
+            live: Mutex::default(),
+            events,
+        }
+    }
+
     pub fn insert(
         &self,
         id: &str,
@@ -73,11 +86,13 @@ impl Sessions {
             } else {
                 LiveState::Starting
             })),
+            events: self.events.clone(),
         };
         self.live
             .lock()
             .unwrap()
             .insert(id.to_string(), live.clone());
+        self.events.emit(Topic::Sessions);
         live
     }
 
@@ -112,6 +127,9 @@ impl Sessions {
         let mut live = self.live.lock().unwrap();
         if live.get(id).is_some_and(|l| Arc::ptr_eq(&l.pty, pty)) {
             live.remove(id);
+            // Stopped: its tab shows "Reabrir", and a permission it asked for is gone.
+            self.events.emit(Topic::Sessions);
+            self.events.emit(Topic::Inbox);
         }
     }
 }

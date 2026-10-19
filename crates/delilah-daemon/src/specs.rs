@@ -220,10 +220,16 @@ pub async fn file(
 
 /// Keeps the board's summary and, when the phase moves, the task's history.
 async fn record(app: &AppState, key: &TaskKey, summary: &SpecSummary) {
-    app.specs
+    let before = app
+        .specs
         .lock()
         .unwrap()
         .insert(key.to_string(), summary.clone());
+    if before.as_ref() != Some(summary) {
+        app.emit(crate::events::Topic::Specs);
+        // Reaching review puts the task in the inbox.
+        app.emit(crate::events::Topic::Inbox);
+    }
     if summary.dir.is_none() {
         return;
     }

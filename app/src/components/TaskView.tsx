@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, hhmm, isActive, REVIEW_PROMPT, type EventRecord, type Session, type SessionKind, type Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
+import { on } from "../live";
 import { Icon } from "./Icon";
 import { SpecPanel } from "./SpecPanel";
 import { phaseLabel, type Column } from "../phases";
@@ -37,15 +38,16 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // The history changes with the task: fetched again whenever tasks change.
   useEffect(() => {
     let alive = true;
     const load = () =>
       api.events(task.key).then((e) => alive && setEvents(e)).catch(() => {});
     load();
-    const timer = setInterval(load, 2000);
+    const off = on("tasks", load);
     return () => {
       alive = false;
-      clearInterval(timer);
+      off();
     };
   }, [task.key]);
 

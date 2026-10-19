@@ -3,6 +3,7 @@
 use chrono::{Local, Utc};
 use delilah_core::{Event, Task, TaskKey, TaskStatus};
 
+use crate::events::Topic;
 use crate::state::AppState;
 use crate::store::StoreError;
 
@@ -10,6 +11,8 @@ impl AppState {
     pub async fn transition(&self, key: &TaskKey, event: Event) -> Result<Task, StoreError> {
         let before = self.store.get_task(key).await?.map(|t| t.status);
         let task = self.store.apply_event(key, event, Utc::now()).await?;
+        self.emit(Topic::Tasks);
+        self.emit(Topic::Inbox);
         if let Some(before) = before
             && before != task.status
         {

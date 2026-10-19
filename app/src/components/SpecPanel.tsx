@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type SpecProgress, type Task } from "../api";
+import { on } from "../live";
 import { COLUMNS, columnOf, type Column } from "../phases";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
@@ -17,10 +18,10 @@ export function SpecPanel({ task }: { task: Task }) {
         .then((s) => alive && setSpec(s))
         .catch(() => {});
     load();
-    const timer = setInterval(load, 3000);
+    const off = on("specs", load);
     return () => {
       alive = false;
-      clearInterval(timer);
+      off();
     };
   }, [task.key]);
 

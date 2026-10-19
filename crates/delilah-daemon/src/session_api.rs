@@ -8,6 +8,7 @@ use delilah_core::TaskKey;
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiError;
+use crate::events::Topic;
 use crate::run::launch_session;
 use crate::sessions::LiveState;
 use crate::state::AppState;
@@ -89,6 +90,7 @@ pub async fn open(
         closed: false,
     };
     app.store.create_session(&record).await?;
+    app.emit(Topic::Sessions);
     let prompt = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
     launch_session(&app, &record, &ws.path, prompt, false)?;
     Ok((StatusCode::CREATED, Json(view(&app, record))))
@@ -114,6 +116,8 @@ pub async fn close(
         let _ = live.pty.kill();
     }
     app.store.close_session(&id).await?;
+    app.emit(Topic::Sessions);
+    app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
 }
 

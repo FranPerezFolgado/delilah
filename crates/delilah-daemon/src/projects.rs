@@ -70,6 +70,7 @@ pub async fn add_project(
         workflow: new.workflow,
     };
     app.store.create_project(&project).await?;
+    app.emit(crate::events::Topic::Projects);
     Ok((StatusCode::CREATED, Json(project)))
 }
 

@@ -14,8 +14,8 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
 use crate::{
-    actions, changes, files, hooks, inbox, jira, preferences, projects, run, session_api, specs,
-    terminal,
+    actions, changes, events, files, hooks, inbox, jira, preferences, projects, run, session_api,
+    specs, terminal,
 };
 
 /// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
@@ -61,6 +61,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
         .route("/api/v1/usage", get(actions::usage))
+        .route("/api/v1/events", get(events::stream))
         .route("/api/v1/specs", get(specs::list))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/sessions/{id}/reply", post(inbox::reply))
@@ -150,11 +151,12 @@ async fn list_tasks(State(store): State<Store>) -> Result<Json<Vec<Task>>, ApiEr
 }
 
 async fn create_task(
-    State(store): State<Store>,
+    State(app): State<AppState>,
     Json(new): Json<NewTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
     let task = Task::new(TaskKey::new(new.key), new.title, new.workflow);
-    store.create_task(&task).await?;
+    app.store.create_task(&task).await?;
+    app.emit(crate::events::Topic::Tasks);
     Ok((StatusCode::CREATED, Json(task)))
 }
 

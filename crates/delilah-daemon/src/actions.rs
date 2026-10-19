@@ -8,6 +8,7 @@ use delilah_core::{Event, Task, TaskKey, TaskStatus};
 use delilah_git::GitOptions;
 
 use crate::api::ApiError;
+use crate::events::Topic;
 use crate::run::launch_session;
 use crate::sessions::{Live, LiveState};
 use crate::state::{AppState, UsageReport};
@@ -74,6 +75,8 @@ pub async fn archive(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::conflict(e.to_string()))?;
     app.store.delete_workspace(&key).await?;
+    app.emit(Topic::Tasks);
+    app.emit(Topic::Specs);
     Ok(Json(task))
 }
 

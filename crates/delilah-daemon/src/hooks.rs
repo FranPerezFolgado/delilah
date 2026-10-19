@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
+use crate::events::Topic;
 use crate::inbox::{self, Change};
 use crate::sessions::LiveState;
 use crate::state::{AppState, UsageReport};
@@ -77,12 +78,20 @@ pub async fn claude_hook(
             current.as_ref(),
             Utc::now(),
         );
+        let changes = match &change {
+            Change::Keep => false,
+            Change::Clear => current.is_some(),
+            Change::Set(_) => true,
+        };
         let saved = match change {
             Change::Keep => Ok(()),
             Change::Clear if current.is_none() => Ok(()),
             Change::Clear => app.store.set_attention(&id, None).await,
             Change::Set(attention) => app.store.set_attention(&id, Some(&attention)).await,
         };
+        if changes {
+            app.emit(Topic::Inbox);
+        }
         if let Err(e) = saved {
             tracing::warn!(session = %id, "cannot record what the session waits for: {e}");
         }
@@ -117,11 +126,20 @@ pub async fn claude_statusline(
     Json(payload): Json<Value>,
 ) -> StatusCode {
     if let Some(limits) = payload.get("rate_limits").filter(|v| v.is_object()) {
-        *app.usage.lock().unwrap() = Some(UsageReport {
-            at: Utc::now(),
-            task: q.task,
-            rate_limits: limits.clone(),
-        });
+        // The status line runs every few seconds: only a new reading is news.
+        let changed = {
+            let mut usage = app.usage.lock().unwrap();
+            let changed = usage.as_ref().is_none_or(|u| &u.rate_limits != limits);
+            *usage = Some(UsageReport {
+                at: Utc::now(),
+                task: q.task,
+                rate_limits: limits.clone(),
+            });
+            changed
+        };
+        if changed {
+            app.emit(Topic::Usage);
+        }
     }
     StatusCode::NO_CONTENT
 }

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, BLOCKING, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
+import { connect, on, type Topic } from "./live";
 import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
 import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
@@ -56,11 +57,29 @@ export function App() {
     }
   }, []);
 
-  // No event stream yet: polling every 2 s is plenty for a local daemon.
+  // The daemon says what changed and only that is fetched again. A slow full refresh
+  // stays as a safety net, should a message ever be missed.
   useEffect(() => {
-    refresh();
-    const timer = setInterval(refresh, 2000);
-    return () => clearInterval(timer);
+    const fetchers: Record<Topic, () => Promise<unknown>> = {
+      tasks: () => api.tasks().then(setTasks),
+      sessions: () => api.sessions().then(setSessions),
+      inbox: () => api.inbox().then(setInbox),
+      specs: () => api.specs().then(setSpecs),
+      usage: () => api.usage().then(setUsage),
+      projects: () => api.projects().then(setProjects),
+    };
+    const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
+    const stop = connect((connected) => {
+      setOnline(connected);
+      // Lost the feed: fall back to a full fetch now, and the slow refresh after.
+      if (!connected) refresh();
+    });
+    const timer = setInterval(refresh, 30_000);
+    return () => {
+      offs.forEach((off) => off());
+      stop();
+      clearInterval(timer);
+    };
   }, [refresh]);
 
   useEffect(() => {

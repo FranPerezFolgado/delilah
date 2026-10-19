@@ -246,6 +246,7 @@ pub async fn reply(
     let text = text.replace(['\r', '\n'], " ");
     type_prompt(&live, &text).await?;
     app.store.set_attention(&id, None).await?;
+    app.emit(crate::events::Topic::Inbox);
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 

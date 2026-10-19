@@ -123,6 +123,13 @@ Each task remembers its tabs when you switch tasks or reload the app.
   1 MB and binaries are not editable. Paths are confined to the workspace, symlinks
   included.
 
+**Live updates.** The app does not poll. The daemon announces what changed on
+`GET /api/v1/events` (a WebSocket sending topics like `{"type":"inbox"}`) and the
+app fetches only that again, so a question reaches the Bandeja in well under a
+second. If the connection drops (the daemon restarts or updates), the app
+reconnects by itself and fetches everything again. A full refresh every 30 s
+stays as a safety net.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use
