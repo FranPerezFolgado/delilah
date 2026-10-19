@@ -15,6 +15,7 @@ use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::ApiError;
+use crate::sessions::Live;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -23,20 +24,37 @@ enum Control {
     Resize { cols: u16, rows: u16 },
 }
 
-pub async fn terminal(
+/// The primary session of a task (what `delilah attach` opens).
+pub async fn task_terminal(
     ws: WebSocketUpgrade,
     State(app): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Response, ApiError> {
     let live = app
         .sessions
-        .get(&key)
+        .primary(&key)
         .ok_or_else(|| ApiError::not_found(format!("task {key} has no running agent")))?;
-    Ok(ws.on_upgrade(move |socket| async move {
+    Ok(upgrade(ws, live))
+}
+
+pub async fn session_terminal(
+    ws: WebSocketUpgrade,
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let live = app
+        .sessions
+        .get(&id)
+        .ok_or_else(|| ApiError::not_found(format!("session {id} is not running")))?;
+    Ok(upgrade(ws, live))
+}
+
+fn upgrade(ws: WebSocketUpgrade, live: Live) -> Response {
+    ws.on_upgrade(move |socket| async move {
         live.viewers.fetch_add(1, Ordering::Relaxed);
         pump(socket, live.pty).await;
         live.viewers.fetch_sub(1, Ordering::Relaxed);
-    }))
+    })
 }
 
 async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
@@ -96,6 +114,7 @@ mod tests {
     use crate::config::Config;
     use crate::state::AppState;
     use crate::store::Store;
+    use crate::store_sessions::SessionKind;
 
     async fn serve() -> (AppState, String) {
         let config = Config {
@@ -142,9 +161,13 @@ mod tests {
             "-c",
             "echo ready; read line; echo got:$line",
         ]);
-        state
-            .sessions
-            .insert("PROJ-1", PtySession::spawn(cmd, 80, 24, None).unwrap());
+        state.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            SessionKind::Claude,
+            true,
+            PtySession::spawn(cmd, 80, 24, None).unwrap(),
+        );
 
         let (mut ws, _) =
             tokio_tungstenite::connect_async(format!("{base}/api/v1/tasks/PROJ-1/terminal"))

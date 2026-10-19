@@ -2,7 +2,7 @@ import type { Task } from "../api";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 
-export type View = "tasks" | "console" | "projects";
+export type View = "tasks" | "console" | "jira" | "projects";
 
 const GROUPS: { name: string; match: (t: Task) => boolean }[] = [
   { name: "En ejecución", match: (t) => ["queued", "preparing-workspace", "running"].includes(t.status.type) },
@@ -30,6 +30,9 @@ export function Sidebar({ view, onView, tasks, selected, onSelect, onNewTask }: 
       </button>
       <button className={`nav ${view === "console" ? "on" : ""}`} onClick={() => onView("console")}>
         <Icon name="console" /> Consola <span className="count mono">{live}</span>
+      </button>
+      <button className={`nav ${view === "jira" ? "on" : ""}`} onClick={() => onView("jira")}>
+        <Icon name="ticket" /> Jira
       </button>
       <button className={`nav ${view === "projects" ? "on" : ""}`} onClick={() => onView("projects")}>
         <Icon name="folder" /> Proyectos

@@ -18,8 +18,26 @@ const HOOK_EVENTS: &[&str] = &[
 
 /// Variables passed through to the agent. Everything else is dropped: launched with the
 /// environment of another Claude Code session, Claude does not save its transcript.
-const KEPT_ENV: &[&str] = &[
-    "HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "LC_ALL", "TMPDIR",
+pub(crate) const KEPT_ENV: &[&str] = &[
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    // Corporate networks: proxies and their CA certificates.
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "all_proxy",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
 ];
 
 pub struct Launch<'a> {
@@ -29,6 +47,8 @@ pub struct Launch<'a> {
     /// First prompt, sent as soon as the session starts (also when resuming).
     pub prompt: Option<&'a str>,
     pub resume: bool,
+    /// Folders outside the workspace the agent may read, e.g. the task's ticket.
+    pub extra_dirs: &'a [&'a Path],
 }
 
 pub fn command(launch: &Launch) -> CommandBuilder {
@@ -47,6 +67,12 @@ pub fn command(launch: &Launch) -> CommandBuilder {
     } else {
         cmd.args(["--session-id", launch.session_id]);
     }
+    // `--add-dir` takes several values: keep another option after it so it never
+    // swallows the prompt.
+    for dir in launch.extra_dirs {
+        cmd.arg("--add-dir");
+        cmd.arg(dir);
+    }
     cmd.arg("--settings");
     cmd.arg(launch.settings);
     if let Some(prompt) = launch.prompt {
@@ -58,11 +84,11 @@ pub fn command(launch: &Launch) -> CommandBuilder {
 
 /// Settings for one task: every hook and the status line post their JSON to the daemon.
 /// Lives outside the repo and is passed with `--settings`.
-pub fn settings(daemon_url: &str, task: &str) -> Value {
+pub fn settings(daemon_url: &str, task: &str, session: &str) -> Value {
     let post = |path: &str| {
         format!(
             "curl -sS -m 3 -X POST -H 'content-type: application/json' --data-binary @- \
-             '{daemon_url}{path}?task={task}' >/dev/null 2>&1 || true"
+             '{daemon_url}{path}?task={task}&session={session}' >/dev/null 2>&1 || true"
         )
     };
     let hooks: serde_json::Map<String, Value> = HOOK_EVENTS
@@ -81,13 +107,18 @@ pub fn settings(daemon_url: &str, task: &str) -> Value {
     })
 }
 
-pub fn write_settings(path: &Path, daemon_url: &str, task: &str) -> std::io::Result<PathBuf> {
+pub fn write_settings(
+    path: &Path,
+    daemon_url: &str,
+    task: &str,
+    session: &str,
+) -> std::io::Result<PathBuf> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(
         path,
-        serde_json::to_vec_pretty(&settings(daemon_url, task))?,
+        serde_json::to_vec_pretty(&settings(daemon_url, task, session))?,
     )?;
     Ok(path.to_path_buf())
 }
@@ -135,13 +166,13 @@ mod tests {
 
     #[test]
     fn every_hook_and_the_status_line_post_to_the_daemon() {
-        let s = settings("http://127.0.0.1:7420", "PROJ-1");
+        let s = settings("http://127.0.0.1:7420", "PROJ-1", "sess-1");
         for event in HOOK_EVENTS {
             let command = s["hooks"][event][0]["hooks"][0]["command"]
                 .as_str()
                 .unwrap();
             assert!(
-                command.contains("http://127.0.0.1:7420/hooks/claude?task=PROJ-1"),
+                command.contains("http://127.0.0.1:7420/hooks/claude?task=PROJ-1&session=sess-1"),
                 "{command}"
             );
         }
@@ -160,6 +191,7 @@ mod tests {
             settings: Path::new("/tmp/s.json"),
             prompt: Some("/feature PROJ-1"),
             resume: false,
+            extra_dirs: &[],
         };
         let args = |l: &Launch| {
             command(l)
@@ -199,6 +231,37 @@ mod tests {
     }
 
     #[test]
+    fn extra_dirs_go_before_settings_so_the_prompt_stays_a_prompt() {
+        let ticket_dir = Path::new("/tmp/tasks/PROJ-1");
+        let cmd = command(&Launch {
+            workspace: Path::new("/tmp/ws"),
+            session_id: "abc",
+            settings: Path::new("/tmp/s.json"),
+            prompt: Some("/feature PROJ-1"),
+            resume: false,
+            extra_dirs: &[ticket_dir],
+        });
+        let argv: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            argv,
+            [
+                "claude",
+                "--session-id",
+                "abc",
+                "--add-dir",
+                "/tmp/tasks/PROJ-1",
+                "--settings",
+                "/tmp/s.json",
+                "/feature PROJ-1"
+            ]
+        );
+    }
+
+    #[test]
     fn drops_the_parent_claude_environment() {
         let cmd = command(&Launch {
             workspace: Path::new("/tmp"),
@@ -206,6 +269,7 @@ mod tests {
             settings: Path::new("/tmp/s.json"),
             prompt: None,
             resume: false,
+            extra_dirs: &[],
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());

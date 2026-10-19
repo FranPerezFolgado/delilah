@@ -11,7 +11,12 @@ FIX="$ROOT/fixtures"
 [[ -d "$FIX/signal" ]] || git clone -q "$FIX/parent-env/remotes/svc-orders.git" "$FIX/signal"
 
 cargo build -q -p delilah-daemon --manifest-path "$ROOT/Cargo.toml"
-exec env -i \
+# Corporate proxies and CA certificates survive the cleanup (Jira and Claude need them).
+KEEP=()
+for var in HTTPS_PROXY HTTP_PROXY NO_PROXY ALL_PROXY https_proxy http_proxy no_proxy all_proxy SSL_CERT_FILE NODE_EXTRA_CA_CERTS; do
+  [[ -n "${!var:-}" ]] && KEEP+=("$var=${!var}")
+done
+exec env -i "${KEEP[@]+"${KEEP[@]}"}" \
   HOME="$HOME" USER="$USER" SHELL="${SHELL:-/bin/zsh}" LANG="${LANG:-es_ES.UTF-8}" \
   PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" \
   DELILAH_HOME="$FIX/dev-home" DELILAH_ALLOW_FILE_PROTOCOL=1 DELILAH_NOTIFY="${DELILAH_NOTIFY:-1}" \

@@ -1,7 +1,5 @@
 //! The one way the daemon changes a task's status, so every change is notified.
 
-use std::sync::atomic::Ordering;
-
 use chrono::{Local, Utc};
 use delilah_core::{Event, Task, TaskKey, TaskStatus};
 
@@ -25,11 +23,7 @@ impl AppState {
         let (title, body) = match (&task.status, before) {
             (TaskStatus::WaitingForUser, _) => {
                 // Whoever is attached is already looking at it.
-                let watched = self
-                    .sessions
-                    .get(key.as_str())
-                    .is_some_and(|live| live.viewers.load(Ordering::Relaxed) > 0);
-                if watched {
+                if self.sessions.watched(key.as_str()) {
                     return;
                 }
                 (format!("{key} te espera"), task.title.clone())

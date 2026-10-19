@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
+use delilah_agents::suggest;
 use delilah_core::{Project, ProjectKind};
 use serde::Deserialize;
 
@@ -87,3 +88,81 @@ pub async fn submodules(
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
     Ok(Json(subs))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct SuggestRequest {
+    pub key: String,
+    pub title: String,
+    #[serde(default)]
+    pub components: Vec<String>,
+    /// Defaults to the Jira ticket's description, when Jira has it.
+    pub description: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct SuggestResponse {
+    pub submodules: Vec<suggest::Suggestion>,
+    pub model: &'static str,
+}
+
+/// Asks Claude, read-only and on a small model, which submodules a ticket touches.
+pub async fn suggest_submodules(
+    State(app): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    Json(req): Json<SuggestRequest>,
+) -> Result<Json<SuggestResponse>, ApiError> {
+    let project = app.store.project(&name).await?;
+    if project.kind != ProjectKind::Parent {
+        return Err(ApiError::bad_request(format!(
+            "{name} is a repo project: it has no submodules"
+        )));
+    }
+    let root = project.path.clone();
+    let known: Vec<String> =
+        tokio::task::spawn_blocking(move || delilah_git::list_submodules(&root))
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+            .map_err(|e| ApiError::unprocessable(e.to_string()))?
+            .into_iter()
+            .map(|s| s.path)
+            .collect();
+    let description = match req.description {
+        Some(d) => d,
+        None => crate::jira::fetch_issue(&app, &req.key)
+            .await
+            .map(|i| i.description)
+            .unwrap_or_default(),
+    };
+    let prompt = suggest::prompt(
+        &suggest::Ticket {
+            key: &req.key,
+            title: &req.title,
+            components: &req.components,
+            description: &description,
+        },
+        &known,
+    );
+
+    let mut cmd = tokio::process::Command::new("claude");
+    cmd.env_clear()
+        .envs(suggest::env())
+        .args(suggest::args(&prompt))
+        .current_dir(&project.path)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(SUGGEST_TIMEOUT, cmd.output())
+        .await
+        .map_err(|_| {
+            ApiError::unprocessable("Claude took more than 2 minutes; pick the submodules by hand")
+        })?
+        .map_err(|e| ApiError::internal(format!("cannot run claude: {e}")))?;
+    let submodules = suggest::parse(&String::from_utf8_lossy(&output.stdout), &known)
+        .map_err(ApiError::unprocessable)?;
+    tracing::info!(task = %req.key, suggested = submodules.len(), "suggested submodules");
+    Ok(Json(SuggestResponse {
+        submodules,
+        model: suggest::MODEL,
+    }))
+}
+
+const SUGGEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);

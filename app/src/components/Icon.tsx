@@ -12,6 +12,10 @@ const PATHS = {
   plus: "M12 5v14M5 12h14",
   open: "M14 4h6v6M20 4l-8 8M18 14v6H4V6h6",
   maximize: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  ticket: "M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4zM14 6v12",
+  refresh: "M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4",
+  close: "M7 7l10 10M17 7L7 17",
+  review: "M4 6h16M4 12h10M4 18h7M16 15l2 2 4-4",
 } as const;
 
 export type IconName = keyof typeof PATHS;

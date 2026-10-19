@@ -13,7 +13,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
-use crate::{actions, hooks, projects, run, terminal};
+use crate::{actions, hooks, jira, projects, run, session_api, terminal};
 
 /// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
 /// API from a browser: JSON requests need a preflight that other origins fail.
@@ -38,11 +38,25 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/events",
             get(list_events).post(post_event),
         )
-        .route("/api/v1/tasks/{key}/terminal", get(terminal::terminal))
+        .route("/api/v1/tasks/{key}/terminal", get(terminal::task_terminal))
+        .route(
+            "/api/v1/tasks/{key}/sessions",
+            get(session_api::list_for_task).post(session_api::open),
+        )
+        .route("/api/v1/sessions", get(session_api::list_all))
+        .route(
+            "/api/v1/sessions/{id}/terminal",
+            get(terminal::session_terminal),
+        )
+        .route("/api/v1/sessions/{id}/close", post(session_api::close))
+        .route("/api/v1/sessions/{id}/reopen", post(session_api::reopen))
         .route("/api/v1/tasks/{key}/resume", post(actions::resume))
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
         .route("/api/v1/usage", get(actions::usage))
+        .route("/api/v1/jira", get(jira::status).put(jira::connect))
+        .route("/api/v1/jira/issues", get(jira::issues))
+        .route("/api/v1/jira/issues/{key}", get(jira::issue))
         .route(
             "/api/v1/projects",
             get(projects::list_projects).post(projects::add_project),
@@ -50,6 +64,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),
+        )
+        .route(
+            "/api/v1/projects/{name}/suggest-submodules",
+            post(projects::suggest_submodules),
         )
         .route("/api/v1/runs", post(run::start_run))
         .route("/hooks/claude", post(hooks::claude_hook))

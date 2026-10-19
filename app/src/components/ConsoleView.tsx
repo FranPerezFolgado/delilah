@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { statusLabel, type Task } from "../api";
+import { api, isActive, type Session, type Task } from "../api";
 import { Icon } from "./Icon";
-import { statusIcon } from "./status";
+import { sessionStatus } from "./sessionLabels";
 import { TerminalPane } from "./TerminalPane";
 
 type Layout = 1 | 2 | 4;
@@ -13,27 +13,53 @@ const GRIDS: Record<Layout, React.CSSProperties> = {
 
 interface Props {
   tasks: Task[];
+  sessions: Session[];
+  /** Selected task: its sessions come first. */
+  task: string | null;
   focus: string | null;
-  onFocus: (key: string) => void;
+  onFocus: (sessionId: string, task: string) => void;
+  onChanged: () => void;
   onNewTask: () => void;
 }
 
-/** Live terminals of the agents, side by side. */
-export function ConsoleView({ tasks, focus, onFocus, onNewTask }: Props) {
+/** Live terminals of every session, side by side; a task's sessions sit together. */
+export function ConsoleView({ tasks, sessions, task, focus, onFocus, onChanged, onNewTask }: Props) {
   const [layout, setLayout] = useState<Layout>(4);
-  const live = tasks.filter((t) => ["running", "waiting-for-user", "paused-by-limit"].includes(t.status.type));
-  const focused = live.find((t) => t.key === focus) ?? live[0];
-  const ordered = focused ? [focused, ...live.filter((t) => t !== focused)] : live;
-  const shown = ordered.slice(0, layout);
-  // Fewer sessions than slots: let the ones there are use the space.
-  const grid: Layout = shown.length <= 1 ? 1 : shown.length === 2 ? 2 : 4;
+  const [menu, setMenu] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const taskOf = (s: Session) => tasks.find((t) => t.key === s.task);
+  const shown = sessions
+    .filter((s) => s.live || (taskOf(s) && isActive(taskOf(s)!.status)))
+    .sort((a, b) => rank(a) - rank(b));
+  function rank(s: Session) {
+    return (s.task === task ? 0 : 10) + (s.primary ? 0 : 1) + (s.id === focus ? -5 : 0);
+  }
+  const panes = shown.slice(0, layout);
+  const focused = panes.find((s) => s.id === focus) ?? panes[0];
+  const grid: Layout = panes.length <= 1 ? 1 : panes.length === 2 ? 2 : 4;
+
+  const act = async (action: () => Promise<unknown>) => {
+    setError(null);
+    setMenu(null);
+    try {
+      await action();
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const open = (s: Session, kind: "claude" | "shell") =>
+    act(async () => {
+      const created = await api.openSession(s.task, { kind });
+      onFocus(created.id, s.task);
+    });
 
   return (
     <>
       <div className="view-head">
         <h1>Consola</h1>
         <span className="muted" style={{ fontSize: 12 }}>
-          {live.length} {live.length === 1 ? "sesión" : "sesiones"}
+          {shown.length} {shown.length === 1 ? "sesión" : "sesiones"}
         </span>
         <div className="segs" style={{ marginLeft: "auto" }} role="group" aria-label="Disposición">
           {([1, 2, 4] as Layout[]).map((n) => (
@@ -46,35 +72,62 @@ export function ConsoleView({ tasks, focus, onFocus, onNewTask }: Props) {
           <Icon name="plus" /> Nueva tarea
         </button>
       </div>
-      {live.length === 0 ? (
+      {error && <div className="error selectable" style={{ padding: "6px 14px" }}>{error}</div>}
+      {shown.length === 0 ? (
         <div className="empty">
           <Icon name="console" />
-          <span>No hay agentes trabajando ahora mismo.</span>
-          <button className="btn btn-p" onClick={onNewTask}>
-            Lanzar una tarea
-          </button>
+          <span>No hay sesiones abiertas ahora mismo.</span>
+          <button className="btn btn-p" onClick={onNewTask}>Lanzar una tarea</button>
         </div>
       ) : (
         <div className="grid" style={GRIDS[grid]}>
-          {shown.map((t) => {
-            const { icon, cls } = statusIcon(t.status);
-            const on = t.key === focused?.key;
+          {panes.map((s) => {
+            const t = taskOf(s);
+            const status = sessionStatus(s, t);
+            const on = s.id === focused?.id;
             return (
-              <section key={t.key} className={`pane ${on ? "on" : ""}`} aria-label={`${t.key} · ${statusLabel(t.status)}`}>
-                <div className="pane-head" onClick={() => onFocus(t.key)}>
-                  <Icon name={icon} className={cls} />
-                  <span style={{ fontWeight: 600 }}>Claude Code</span>
-                  <span className="mono" style={{ color: "var(--tx2)" }}>{t.key}</span>
-                  <span className="trunc muted" style={{ flex: 1 }}>{t.title}</span>
-                  <span className={`pill ${cls}`} style={{ height: 18, fontSize: 11 }}>{statusLabel(t.status)}</span>
+              <section key={s.id} className={`pane ${on ? "on" : ""}`} aria-label={`${s.task} · ${s.label}`}>
+                <div className="pane-head" onClick={() => onFocus(s.id, s.task)}>
+                  <Icon name={s.kind === "shell" ? "console" : status.icon} className={status.cls} />
+                  <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{s.label}</span>
+                  <span className="mono" style={{ color: "var(--tx2)" }}>{s.task}</span>
+                  <span className="trunc muted" style={{ flex: 1 }}>{t?.title}</span>
+                  <span className={`pill ${status.cls}`} style={{ height: 18, fontSize: 11 }}>{status.label}</span>
+                  <div style={{ position: "relative" }}>
+                    <button className="btn btn-ghost" style={{ height: 22, padding: "0 4px" }} aria-label="Nueva sesión en este workspace"
+                      onClick={(e) => { e.stopPropagation(); setMenu(menu === s.id ? null : s.id); }}>
+                      <Icon name="plus" />
+                    </button>
+                    {menu === s.id && (
+                      <div className="menu" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => open(s, "claude")}>Nueva sesión de Claude</button>
+                        <button onClick={() => open(s, "shell")}>Nueva terminal</button>
+                      </div>
+                    )}
+                  </div>
                   {layout !== 1 && (
                     <button className="btn btn-ghost" style={{ height: 22, padding: "0 4px" }} aria-label="Maximizar"
-                      onClick={(e) => { e.stopPropagation(); onFocus(t.key); setLayout(1); }}>
+                      onClick={(e) => { e.stopPropagation(); onFocus(s.id, s.task); setLayout(1); }}>
                       <Icon name="maximize" />
                     </button>
                   )}
+                  {!s.primary && (
+                    <button className="btn btn-ghost" style={{ height: 22, padding: "0 4px" }} aria-label="Cerrar sesión"
+                      onClick={(e) => { e.stopPropagation(); act(() => api.closeSession(s.id)); }}>
+                      <Icon name="close" />
+                    </button>
+                  )}
                 </div>
-                <TerminalPane taskKey={t.key} focused={on} />
+                {s.live ? (
+                  <TerminalPane sessionId={s.id} focused={on} />
+                ) : (
+                  <div className="empty" style={{ fontSize: 12.5 }}>
+                    <span>La sesión está parada (el daemon se reinició o el proceso terminó).</span>
+                    <button className="btn btn-p" onClick={() => act(() => api.reopenSession(s.id))}>
+                      Reabrir{s.kind === "claude" ? " la conversación" : ""}
+                    </button>
+                  </div>
+                )}
               </section>
             );
           })}

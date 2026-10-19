@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::notify::Notifier;
+use crate::secrets::Secrets;
 use crate::sessions::Sessions;
 use crate::store::Store;
 
@@ -26,6 +27,7 @@ pub struct AppState {
     pub sessions: Arc<Sessions>,
     pub usage: Arc<Mutex<Option<UsageReport>>>,
     pub notifier: Notifier,
+    pub secrets: Secrets,
 }
 
 impl AppState {
@@ -41,6 +43,12 @@ impl AppState {
             sessions: Arc::default(),
             usage: Arc::default(),
             notifier,
+            // Unit tests must never touch the real Keychain.
+            secrets: if cfg!(test) {
+                Secrets::Memory(Arc::default())
+            } else {
+                Secrets::Keychain
+            },
         }
     }
 

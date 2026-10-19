@@ -1,12 +1,18 @@
 [package]
 name = "delilah-integrations"
-description = "External services: Jira (real and JSON fixtures)."
+description = "External services: Jira (Cloud, Data Center and sample data)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-delilah-core.workspace = true
+reqwest = { version = "0.12", features = ["json"] }
+serde.workspace = true
+serde_json = "1"
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
 
 [lints]
 workspace = true

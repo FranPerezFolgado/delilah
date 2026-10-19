@@ -124,3 +124,21 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .bar { width: 56px; height: 4px; border-radius: 2px; background: var(--bd2); overflow: hidden; display: inline-block; }
 .bar > span { display: block; height: 100%; }
+
+/* Ticket descriptions */
+.md { font-size: 12.5px; color: var(--tx2); line-height: 1.55; }
+.md-p { margin: 0 0 10px; white-space: pre-wrap; }
+.md-h { margin: 14px 0 6px; font-weight: 600; color: var(--tx); font-size: 13px; }
+.md-list { margin: 0 0 10px; padding-left: 18px; }
+.md-list li { margin: 2px 0; }
+.md code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--elev);
+  border: 1px solid var(--bd); border-radius: 4px; padding: 0 4px; color: var(--tx); }
+.md-code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--term);
+  border: 1px solid var(--bd); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 0 0 10px; }
+
+/* Small popup menu (new session) */
+.menu { position: absolute; right: 0; top: 26px; z-index: 5; min-width: 190px; display: flex; flex-direction: column; padding: 4px;
+  background: var(--panel); border: 1px solid var(--bd2); border-radius: 8px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); }
+.menu button { border: 0; background: transparent; color: var(--tx); font: inherit; font-size: 12.5px; text-align: left;
+  padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+.menu button:hover { background: var(--hov); }

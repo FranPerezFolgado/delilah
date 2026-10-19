@@ -13,7 +13,7 @@ const THEME = {
 };
 
 /** The agent's live terminal: the daemon's WebSocket stream drawn by xterm.js. */
-export function TerminalPane({ taskKey, focused }: { taskKey: string; focused: boolean }) {
+export function TerminalPane({ sessionId, focused }: { sessionId: string; focused: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
 
@@ -38,7 +38,7 @@ export function TerminalPane({ taskKey, focused }: { taskKey: string; focused: b
     }
     term.current = t;
 
-    const ws = new WebSocket(terminalUrl(taskKey));
+    const ws = new WebSocket(terminalUrl(sessionId));
     ws.binaryType = "arraybuffer";
     const sendSize = () => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols: t.cols, rows: t.rows }));
@@ -72,7 +72,7 @@ export function TerminalPane({ taskKey, focused }: { taskKey: string; focused: b
       t.dispose();
       term.current = null;
     };
-  }, [taskKey]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (focused) term.current?.focus();

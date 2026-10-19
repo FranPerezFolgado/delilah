@@ -15,7 +15,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::ApiError;
 use crate::state::AppState;
-use crate::store_runs::AgentSession;
+use crate::store_sessions::{SessionKind, SessionRecord};
 
 /// How long a new session may show the folder-trust dialog before we stop watching.
 const TRUST_WATCH: Duration = Duration::from_secs(60);
@@ -123,19 +123,32 @@ pub async fn start_run(
     app.store.save_workspace(&key, &project.path, &ws).await?;
     app.transition(&key, Event::WorkspaceReady).await?;
 
-    let session = AgentSession {
-        agent: "claude".into(),
-        session_id: uuid::Uuid::new_v4().to_string(),
+    // From the default workflow, hand the agent the ticket itself: it may not be able
+    // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
+    let prompt = match (&req.prompt, crate::jira::fetch_issue(&app, &req.key).await) {
+        (None, Some(issue)) => {
+            let path = app.config.task_dir(&req.key).join("ticket.md");
+            match crate::jira::write_ticket(&path, &issue) {
+                Ok(()) => format!("{prompt} (el ticket de Jira está en {})", path.display()),
+                Err(e) => {
+                    tracing::warn!(task = %key, "cannot write the ticket: {e}");
+                    prompt
+                }
+            }
+        }
+        _ => prompt,
     };
-    app.store.save_agent_session(&key, &session).await?;
-    launch_claude(
-        &app,
-        &key,
-        &ws.path,
-        &session.session_id,
-        Some(&prompt),
-        false,
-    )?;
+
+    let session = SessionRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        task: req.key.clone(),
+        kind: SessionKind::Claude,
+        label: "Principal".into(),
+        primary: true,
+        closed: false,
+    };
+    app.store.create_session(&session).await?;
+    launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
 
     let task = app
         .store
@@ -145,46 +158,74 @@ pub async fn start_run(
     Ok((StatusCode::CREATED, Json(task)))
 }
 
-/// Starts (or resumes) Claude for `key` in a daemon-owned PTY.
-pub fn launch_claude(
+/// Starts a session in a daemon-owned PTY: Claude (new, or resumed with `--resume`
+/// on the same id) or the user's login shell, in the task's workspace.
+pub fn launch_session(
     app: &AppState,
-    key: &TaskKey,
+    session: &SessionRecord,
     workspace: &std::path::Path,
-    session_id: &str,
     prompt: Option<&str>,
     resume: bool,
 ) -> Result<(), ApiError> {
-    let task_dir = app.config.task_dir(key.as_str());
-    let settings = claude::write_settings(
-        &task_dir.join("claude-settings.json"),
-        &app.config.url(),
-        key.as_str(),
-    )
-    .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
-    let cmd = claude::command(&claude::Launch {
-        workspace,
-        session_id,
-        settings: &settings,
-        prompt,
-        resume,
-    });
-    let pty = PtySession::spawn(cmd, 120, 40, Some(task_dir.join("terminal.log")))
-        .map_err(|e| ApiError::internal(format!("cannot start claude: {e}")))?;
-    let live = app.sessions.insert(key.as_str(), Arc::clone(&pty));
-    tracing::info!(task = %key, session_id, resume, "claude started");
-
-    tokio::spawn(accept_trust_dialog(
+    let task_dir = app.config.task_dir(&session.task);
+    std::fs::create_dir_all(&task_dir)
+        .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
+    let cmd = match session.kind {
+        SessionKind::Claude => {
+            let settings = claude::write_settings(
+                &task_dir.join(format!("claude-{}.json", session.id)),
+                &app.config.url(),
+                &session.task,
+                &session.id,
+            )
+            .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
+            claude::command(&claude::Launch {
+                workspace,
+                session_id: &session.id,
+                settings: &settings,
+                prompt,
+                resume,
+                extra_dirs: &[task_dir.as_path()],
+            })
+        }
+        SessionKind::Shell => shell_command(workspace),
+    };
+    let log = task_dir.join(format!("{}-{}.log", session.kind.name(), session.id));
+    let pty = PtySession::spawn(cmd, 120, 40, Some(log))
+        .map_err(|e| ApiError::internal(format!("cannot start the session: {e}")))?;
+    let live = app.sessions.insert(
+        &session.id,
+        &session.task,
+        session.kind,
+        session.primary,
         Arc::clone(&pty),
-        Arc::clone(&live.started),
-    ));
+    );
+    tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, "session started");
+
+    if session.kind == SessionKind::Claude {
+        tokio::spawn(accept_trust_dialog(
+            Arc::clone(&pty),
+            Arc::clone(&live.started),
+        ));
+    }
     let sessions = Arc::clone(&app.sessions);
-    let key = key.to_string();
+    let id = session.id.clone();
     tokio::spawn(async move {
         pty.wait().await;
-        sessions.remove_if_same(&key, &pty);
-        tracing::info!(task = %key, "claude exited");
+        sessions.remove_if_same(&id, &pty);
+        tracing::info!(session = %id, "session exited");
     });
     Ok(())
+}
+
+/// The user's login shell, so their PATH and aliases are there.
+fn shell_command(workspace: &std::path::Path) -> portable_pty::CommandBuilder {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let mut cmd = portable_pty::CommandBuilder::new(shell);
+    cmd.arg("-l");
+    cmd.env("TERM", "xterm-256color");
+    cmd.cwd(workspace);
+    cmd
 }
 
 /// A new workspace path shows Claude's folder-trust dialog once: accept it with Enter.

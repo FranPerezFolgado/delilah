@@ -3,3 +3,4 @@
 pub mod claude;
 pub mod limits;
 pub mod pty;
+pub mod suggest;

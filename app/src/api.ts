@@ -60,6 +60,58 @@ export interface RunRequest {
   prompt?: string;
 }
 
+export type JiraMode = "sample" | "cloud" | "data-center";
+
+export interface JiraSettings {
+  mode: JiraMode;
+  site: string | null;
+  email: string | null;
+  jql: string;
+}
+
+export interface JiraIssue {
+  key: string;
+  summary: string;
+  issue_type: string;
+  priority: string | null;
+  status: string;
+  assignee: string | null;
+  components: string[];
+  description: string;
+  url: string | null;
+  /** Status of the Delilah task for this ticket, if any. */
+  task_status?: string | null;
+}
+
+export interface JiraConnect {
+  mode: JiraMode;
+  site?: string;
+  email?: string;
+  token?: string;
+  jql?: string;
+}
+
+export interface SubmoduleSuggestion {
+  path: string;
+  reason: string;
+}
+
+export type SessionKind = "claude" | "shell";
+export type SessionState = "starting" | "working" | "waiting" | "paused";
+
+/** A terminal in a task's workspace: its primary Claude, extra Claudes or shells. */
+export interface Session {
+  id: string;
+  task: string;
+  kind: SessionKind;
+  label: string;
+  primary: boolean;
+  closed: boolean;
+  /** Whether its process is running now. */
+  live: boolean;
+  state: SessionState | null;
+}
+
 export class ApiError extends Error {}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -86,15 +138,31 @@ export const api = {
   events: (key: string) => request<EventRecord[]>(`/api/v1/tasks/${key}/events`),
   projects: () => request<Project[]>("/api/v1/projects"),
   submodules: (project: string) => request<Submodule[]>(`/api/v1/projects/${project}/submodules`),
+  suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
+    post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
   archive: (key: string) => post<Task>(`/api/v1/tasks/${key}/archive`),
   usage: () => request<UsageReport | null>("/api/v1/usage"),
+  jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
+  connectJira: (c: JiraConnect) =>
+    request<{ account: string; settings: JiraSettings }>("/api/v1/jira", { method: "PUT", body: JSON.stringify(c) }),
+  jiraIssues: () => request<JiraIssue[]>("/api/v1/jira/issues"),
+  sessions: () => request<Session[]>("/api/v1/sessions"),
+  openSession: (task: string, s: { kind: SessionKind; label?: string; prompt?: string }) =>
+    post<Session>(`/api/v1/tasks/${task}/sessions`, s),
+  closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
+  reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
 };
 
-export const terminalUrl = (key: string) => `${DAEMON_URL.replace(/^http/, "ws")}/api/v1/tasks/${key}/terminal`;
+export const terminalUrl = (sessionId: string) => `${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/terminal`;
+
+/** What the "Revisar cambios" session is asked first. */
+export const REVIEW_PROMPT =
+  "Revisa los cambios de este workspace respecto a la rama de la que salió (git diff y git log). " +
+  "Dime qué está bien, qué cambiarías y si falta algún test. No modifiques nada todavía.";
 
 // Statuses whose agent may still have a live terminal.
 export const isActive = (s: TaskStatus) =>

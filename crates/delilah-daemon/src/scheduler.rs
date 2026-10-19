@@ -40,6 +40,7 @@ mod tests {
     use crate::actions::CONTINUE_PROMPT;
     use crate::config::Config;
     use crate::store::Store;
+    use crate::store_sessions::SessionKind;
 
     async fn paused_until(
         resume_at: chrono::DateTime<Utc>,
@@ -72,7 +73,8 @@ mod tests {
             "read line; echo \"got:$line\"; sleep 5",
         ]);
         let pty = PtySession::spawn(cmd, 200, 24, None).unwrap();
-        app.sessions.insert("PROJ-1", pty.clone());
+        app.sessions
+            .insert("s-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
         (app, pty)
     }
 

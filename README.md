@@ -70,6 +70,20 @@ cd app && npm run tauri build
 
 `npm run dev` alone serves the same UI at http://localhost:1420 for a browser.
 
+**Jira.** Connect it from the app's Jira view: Jira Cloud (email + API token),
+Server/Data Center (personal access token) or built-in sample data. The token is
+kept in the macOS Keychain. "Analizar con Claude" opens a new task prefilled from
+the ticket; for parent projects, "Sugerir con Claude" runs a quick read-only
+Claude pass (haiku) that picks the submodules and says why. The agent gets the
+ticket as `~/.delilah/tasks/<KEY>/ticket.md`.
+
+**Sessions.** A task's workspace can hold several sessions: its primary Claude
+(whose turns drive the task's status), extra Claude sessions (e.g. "Revisar
+cambios", to review the branch) and plain terminals with your login shell. A usage
+limit hit by any of them pauses the task; after the reset the primary and the
+paused ones carry on. A session that stopped (the daemon restarted, the process
+ended) can be reopened: Claude picks its conversation back up with `--resume`.
+
 ## Design
 
 The design sketch (decisions, architecture, MVP scope) lives in the

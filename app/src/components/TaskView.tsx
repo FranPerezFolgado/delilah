@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, hhmm, isActive, statusLabel, type EventRecord, type Task } from "../api";
+import { api, hhmm, isActive, REVIEW_PROMPT, statusLabel, type EventRecord, type Session, type SessionKind, type Task } from "../api";
+import { sessionStatus } from "./sessionLabels";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 
@@ -19,11 +20,13 @@ const EVENT_LABELS: Record<string, string> = {
 
 interface Props {
   task: Task;
-  onOpenConsole: (key: string) => void;
+  sessions: Session[];
+  /** Opens the console on a session of this task (its primary one if none given). */
+  onOpenConsole: (key: string, sessionId?: string) => void;
   onChanged: () => void;
 }
 
-export function TaskView({ task, onOpenConsole, onChanged }: Props) {
+export function TaskView({ task, sessions, onOpenConsole, onChanged }: Props) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,6 +55,13 @@ export function TaskView({ task, onOpenConsole, onChanged }: Props) {
       setBusy(false);
     }
   };
+
+  const openSession = (kind: SessionKind, prompt?: string, label?: string) =>
+    act(async () => {
+      const s = await api.openSession(task.key, { kind, prompt, label });
+      onOpenConsole(task.key, s.id);
+    });
+  const hasWorkspace = sessions.length > 0;
 
   const { icon, cls } = statusIcon(task.status);
   const s = task.status;
@@ -119,6 +129,45 @@ export function TaskView({ task, onOpenConsole, onChanged }: Props) {
           )}
         </div>
         {error && <div className="error selectable">{error}</div>}
+
+        {hasWorkspace && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span className="sec">Sesiones en el workspace</span>
+              <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <button className="btn" disabled={busy} onClick={() => openSession("claude", REVIEW_PROMPT, "Revisión")}>
+                  <Icon name="review" /> Revisar cambios
+                </button>
+                <button className="btn" disabled={busy} onClick={() => openSession("claude")}>
+                  <Icon name="plus" /> Claude
+                </button>
+                <button className="btn" disabled={busy} onClick={() => openSession("shell")}>
+                  <Icon name="plus" /> Terminal
+                </button>
+              </span>
+            </div>
+            <div className="card history">
+              {sessions.map((s) => {
+                const st = sessionStatus(s, task);
+                return (
+                  <div className="row" key={s.id} style={{ gridTemplateColumns: "1fr auto auto", alignItems: "center" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Icon name={s.kind === "shell" ? "console" : st.icon} className={st.cls} />
+                      <b style={{ fontWeight: 600 }}>{s.label}</b>
+                      <span className="muted">{s.kind === "shell" ? "terminal" : s.primary ? "Claude · principal" : "Claude"}</span>
+                    </span>
+                    <span className={`pill ${st.cls}`} style={{ height: 18, fontSize: 11 }}>{st.label}</span>
+                    {s.live ? (
+                      <button className="btn btn-ghost" onClick={() => onOpenConsole(task.key, s.id)}>Abrir</button>
+                    ) : (
+                      <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.reopenSession(s.id))}>Reabrir</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div>
           <div className="sec" style={{ marginBottom: 8 }}>Historial</div>

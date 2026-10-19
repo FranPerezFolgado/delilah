@@ -11,12 +11,15 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
+use crate::sessions::LiveState;
 use crate::state::{AppState, UsageReport};
 use crate::store::StoreError;
 
 #[derive(Deserialize)]
 pub struct HookQuery {
     task: String,
+    /// Absent in settings written before sessions existed: the primary one.
+    session: Option<String>,
 }
 
 pub async fn claude_hook(
@@ -31,25 +34,45 @@ pub async fn claude_hook(
     }
 
     let signal = claude::classify(&hook);
+    let live = match &q.session {
+        Some(id) => app.sessions.get(id),
+        None => app.sessions.primary(&q.task),
+    };
+    // No live session (e.g. a hook from before a restart): treat it as the primary.
+    let primary = live.as_ref().is_none_or(|l| l.primary);
     if signal == Signal::SessionStarted
-        && let Some(live) = app.sessions.get(&q.task)
+        && let Some(live) = &live
     {
         live.started.notify_one();
     }
-    let event = match signal {
-        Signal::PromptSubmitted | Signal::Working => Some(Event::UserAnswered),
-        Signal::NeedsUser => Some(Event::AgentAsked),
+
+    let limit_reset = match signal {
         Signal::TurnEnded | Signal::TurnFailed => {
             let limits = app.latest_limits();
-            match limits::limit_reset(signal, &hook, limits.as_ref(), Utc::now()) {
-                Some(resume_at) => {
-                    tracing::info!(task = %q.task, %resume_at, "turn ended on the usage limit");
-                    Some(Event::LimitReached { resume_at })
-                }
-                None => Some(Event::AgentAsked),
-            }
+            limits::limit_reset(signal, &hook, limits.as_ref(), Utc::now())
         }
-        Signal::SessionStarted | Signal::SessionEnded | Signal::Other => None,
+        _ => None,
+    };
+    if let Some(live) = &live {
+        live.set_state(match (signal, limit_reset) {
+            (_, Some(_)) => LiveState::Paused,
+            (Signal::PromptSubmitted | Signal::Working, _) => LiveState::Working,
+            (Signal::NeedsUser | Signal::TurnEnded | Signal::TurnFailed, _) => LiveState::Waiting,
+            _ => live.state(),
+        });
+    }
+
+    let event = match (signal, limit_reset) {
+        // The subscription is shared: a limit hit by any session pauses the task.
+        (_, Some(resume_at)) => {
+            tracing::info!(task = %q.task, %resume_at, "turn ended on the usage limit");
+            Some(Event::LimitReached { resume_at })
+        }
+        // Other turns only move the task when they are the primary session's.
+        _ if !primary => None,
+        (Signal::PromptSubmitted | Signal::Working, _) => Some(Event::UserAnswered),
+        (Signal::NeedsUser | Signal::TurnEnded | Signal::TurnFailed, _) => Some(Event::AgentAsked),
+        _ => None,
     };
     if let Some(event) = event {
         match app.transition(&TaskKey::new(&q.task), event).await {

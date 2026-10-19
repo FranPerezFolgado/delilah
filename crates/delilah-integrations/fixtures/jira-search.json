@@ -1,0 +1,81 @@
+{
+  "issues": [
+    {
+      "key": "PROJ-1242",
+      "fields": {
+        "summary": "Rechazar cobros duplicados en una ventana de 30 s",
+        "issuetype": { "name": "Bug" },
+        "priority": { "name": "Alta" },
+        "status": { "name": "Por hacer" },
+        "assignee": { "displayName": "Fran" },
+        "components": [{ "name": "svc-payments" }, { "name": "svc-orders" }],
+        "description": {
+          "type": "doc", "version": 1,
+          "content": [
+            { "type": "paragraph", "content": [
+              { "type": "text", "text": "Si el cliente pulsa dos veces «Pagar» o la app reintenta tras un timeout, " },
+              { "type": "text", "text": "svc-payments", "marks": [{ "type": "code" }] },
+              { "type": "text", "text": " crea dos cargos sobre la misma tarjeta." }
+            ]},
+            { "type": "heading", "attrs": { "level": 3 }, "content": [{ "type": "text", "text": "Criterios de aceptación" }] },
+            { "type": "bulletList", "content": [
+              { "type": "listItem", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Un segundo cobro idéntico en menos de 30 s devuelve 409 DUPLICATE_CHARGE." }] }] },
+              { "type": "listItem", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "svc-orders mantiene el pedido en «pago en curso» sin crear otro intento." }] }] },
+              { "type": "listItem", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Nueva métrica payments_duplicate_rejected_total." }] }] }
+            ]}
+          ]
+        }
+      }
+    },
+    {
+      "key": "PROJ-1243",
+      "fields": {
+        "summary": "Paginación por cursor en GET /invoices",
+        "issuetype": { "name": "Historia" },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer" },
+        "assignee": { "displayName": "Fran" },
+        "components": [{ "name": "svc-billing" }],
+        "description": {
+          "type": "doc", "version": 1,
+          "content": [
+            { "type": "paragraph", "content": [{ "type": "text", "text": "El listado de facturas devuelve todo de golpe y tarda más de 4 s con clientes grandes. Cambiar a paginación por cursor, 100 elementos por página." }] }
+          ]
+        }
+      }
+    },
+    {
+      "key": "PROJ-1244",
+      "fields": {
+        "summary": "Actualizar common-lib a Java 21",
+        "issuetype": { "name": "Tarea" },
+        "priority": { "name": "Baja" },
+        "status": { "name": "En curso" },
+        "assignee": { "displayName": "Fran" },
+        "components": [{ "name": "common-lib" }],
+        "description": null
+      }
+    },
+    {
+      "key": "PROJ-1245",
+      "fields": {
+        "summary": "Métrica de latencia del gateway de pagos por proveedor",
+        "issuetype": { "name": "Historia" },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer" },
+        "assignee": null,
+        "components": [{ "name": "svc-payments" }],
+        "description": {
+          "type": "doc", "version": 1,
+          "content": [
+            { "type": "paragraph", "content": [
+              { "type": "text", "text": "Exponer un histograma " },
+              { "type": "text", "text": "payments_gateway_latency_seconds", "marks": [{ "type": "code" }] },
+              { "type": "text", "text": " con la etiqueta del proveedor." }
+            ]}
+          ]
+        }
+      }
+    }
+  ]
+}
