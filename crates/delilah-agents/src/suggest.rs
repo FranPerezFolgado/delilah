@@ -4,8 +4,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::claude::KEPT_ENV;
-
 /// A small model is plenty to map a ticket onto a handful of folders.
 pub const MODEL: &str = "haiku";
 
@@ -76,10 +74,7 @@ pub fn args(prompt: &str) -> Vec<String> {
 
 /// The same clean environment as the interactive agent.
 pub fn env() -> Vec<(String, std::ffi::OsString)> {
-    let mut vars: Vec<_> = KEPT_ENV
-        .iter()
-        .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
-        .collect();
+    let mut vars = crate::env::agent_env();
     vars.push(("TERM".into(), "dumb".into()));
     vars
 }

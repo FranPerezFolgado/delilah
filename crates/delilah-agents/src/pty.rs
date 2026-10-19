@@ -23,6 +23,8 @@ pub struct PtySession {
     child: Mutex<Box<dyn Child + Send + Sync>>,
     output: Mutex<Output>,
     exited: watch::Receiver<bool>,
+    /// Columns and rows: one size for everyone, set by whoever is driving it.
+    size: watch::Sender<(u16, u16)>,
 }
 
 struct Output {
@@ -66,6 +68,7 @@ impl PtySession {
                 live: broadcast::channel(LIVE_BUFFER_CHUNKS).0,
             }),
             exited,
+            size: watch::channel((cols, rows)).0,
         });
 
         let log_file = match log {
@@ -129,6 +132,9 @@ impl PtySession {
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
+        if *self.size.borrow() == (cols, rows) {
+            return Ok(());
+        }
         self.master
             .lock()
             .unwrap()
@@ -138,7 +144,18 @@ impl PtySession {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(std::io::Error::other)
+            .map_err(std::io::Error::other)?;
+        self.size.send_replace((cols, rows));
+        Ok(())
+    }
+
+    pub fn size(&self) -> (u16, u16) {
+        *self.size.borrow()
+    }
+
+    /// Fires whenever the size changes, so every viewer can draw at the same one.
+    pub fn watch_size(&self) -> watch::Receiver<(u16, u16)> {
+        self.size.subscribe()
     }
 
     pub fn kill(&self) -> std::io::Result<()> {
@@ -219,6 +236,17 @@ mod tests {
         );
         assert!(std::fs::read_to_string(&log).unwrap().contains("second"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn shares_its_size_with_every_viewer() {
+        let session = PtySession::spawn(bash("sleep 5"), 80, 24, None).unwrap();
+        let mut sizes = session.watch_size();
+        session.resize(120, 40).unwrap();
+        sizes.changed().await.unwrap();
+        assert_eq!(*sizes.borrow(), (120, 40));
+        assert_eq!(session.size(), (120, 40));
+        session.kill().unwrap();
     }
 
     #[tokio::test]

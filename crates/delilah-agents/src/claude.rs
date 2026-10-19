@@ -54,10 +54,8 @@ pub struct Launch<'a> {
 pub fn command(launch: &Launch) -> CommandBuilder {
     let mut cmd = CommandBuilder::new("claude");
     cmd.env_clear();
-    for key in KEPT_ENV {
-        if let Some(value) = std::env::var_os(key) {
-            cmd.env(key, value);
-        }
+    for (key, value) in crate::env::agent_env() {
+        cmd.env(key, value);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");

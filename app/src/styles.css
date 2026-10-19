@@ -111,7 +111,7 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .pane.on { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
 .pane-head { display: flex; align-items: center; gap: 8px; height: 32px; flex: none; padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--bd); background: var(--panel); font-size: 12px; cursor: pointer; }
-.pane-term { flex: 1; min-height: 0; padding: 6px 4px 4px 10px; }
+.pane-term { flex: 1; min-height: 0; padding: 6px 4px 4px 10px; overflow: hidden; }
 .pane-term .xterm { height: 100%; }
 .seg { border: 0; background: transparent; color: var(--tx3); font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; }
 .seg + .seg { border-left: 1px solid var(--bd2); }

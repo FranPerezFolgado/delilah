@@ -59,10 +59,13 @@ fn upgrade(ws: WebSocketUpgrade, live: Live) -> Response {
 
 async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
     let (scrollback, mut output) = pty.attach();
-    if socket
-        .send(Message::Binary(scrollback.into()))
-        .await
-        .is_err()
+    let mut sizes = pty.watch_size();
+    // The size first, so the client draws the scrollback at the size it was made for.
+    if socket.send(size_message(pty.size())).await.is_err()
+        || socket
+            .send(Message::Binary(scrollback.into()))
+            .await
+            .is_err()
     {
         return;
     }
@@ -90,6 +93,15 @@ async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
                 Some(Ok(_)) => {}
             },
+            changed = sizes.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let size = *sizes.borrow_and_update();
+                if socket.send(size_message(size)).await.is_err() {
+                    return;
+                }
+            }
             _ = pty.wait() => {
                 // Flush what the agent printed right before exiting.
                 while let Ok(chunk) = output.try_recv() {
@@ -100,6 +112,11 @@ async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
         }
     }
     let _ = socket.send(Message::Close(None)).await;
+}
+
+/// `{"type":"size","cols":120,"rows":40}`: the size every viewer should draw at.
+fn size_message((cols, rows): (u16, u16)) -> Message {
+    Message::Text(format!(r#"{{"type":"size","cols":{cols},"rows":{rows}}}"#).into())
 }
 
 #[cfg(test)]
@@ -185,6 +202,51 @@ mod tests {
             .await
             .unwrap();
         next_text(&mut ws, &mut seen, "got:hola").await;
+    }
+
+    #[tokio::test]
+    async fn every_viewer_hears_about_a_resize() {
+        let (state, base) = serve().await;
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.args(["--noprofile", "--norc", "-c", "sleep 5"]);
+        state.sessions.insert(
+            "s-2",
+            "PROJ-2",
+            SessionKind::Claude,
+            true,
+            PtySession::spawn(cmd, 80, 24, None).unwrap(),
+        );
+        let url = format!("{base}/api/v1/sessions/s-2/terminal");
+        let (mut driver, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let (mut watcher, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+        let first_text = |msg: Option<Result<WsMessage, _>>| match msg {
+            Some(Ok(WsMessage::Text(t))) => Some(t.to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            first_text(watcher.next().await).as_deref(),
+            Some(r#"{"type":"size","cols":80,"rows":24}"#)
+        );
+
+        driver
+            .send(WsMessage::Text(
+                r#"{"type":"resize","cols":132,"rows":40}"#.into(),
+            ))
+            .await
+            .unwrap();
+        let heard = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(text) = first_text(watcher.next().await)
+                    && text.contains("132")
+                {
+                    return text;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(heard, r#"{"type":"size","cols":132,"rows":40}"#);
     }
 
     #[tokio::test]
