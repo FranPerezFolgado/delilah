@@ -5,6 +5,10 @@ import type { EditorState, Text } from "@codemirror/state";
 /** The tabs that are not files. File tabs are keyed by their workspace path. */
 export const OVERVIEW = "\0overview";
 export const CHANGES = "\0changes";
+/** A terminal tab: this prefix and the daemon's session id. */
+export const SESSION = "\0session:";
+export const sessionTab = (id: string) => SESSION + id;
+export const sessionOf = (tab: string) => (tab.startsWith(SESSION) ? tab.slice(SESSION.length) : null);
 
 export interface Tab {
   path: string;
@@ -22,11 +26,47 @@ export interface TaskSession {
   /** Open files, in tab order. */
   tabs: Tab[];
   changesOpen: boolean;
-  /** OVERVIEW, CHANGES or a file path. */
+  /** OVERVIEW, CHANGES, a session tab or a file path. */
   active: string;
   states: Map<string, EditorState>;
   /** Folders open in the tree. */
   expanded: Set<string>;
+  /** Files that were open last time, still to load (see `restore`). */
+  pending: string[];
+}
+
+// What a task had open, so its tabs come back after reloading the app. Per viewer:
+// browser storage, and losing it only means reopening some tabs.
+interface Saved {
+  active: string;
+  files: string[];
+  changesOpen: boolean;
+  expanded: string[];
+}
+const savedKey = (task: string) => `delilah.tabs.${task}`;
+
+function restore(task: string): Saved | null {
+  try {
+    const raw = localStorage.getItem(savedKey(task));
+    return raw ? (JSON.parse(raw) as Saved) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remembers what a task has open. Call it whenever its tabs change. */
+export function persist(task: string, s: TaskSession) {
+  const saved: Saved = {
+    active: s.active,
+    files: [...s.tabs.map((t) => t.path), ...s.pending],
+    changesOpen: s.changesOpen,
+    expanded: [...s.expanded],
+  };
+  try {
+    localStorage.setItem(savedKey(task), JSON.stringify(saved));
+  } catch {
+    // No storage: the tabs just won't come back after a reload.
+  }
 }
 
 const sessions = new Map<string, TaskSession>();
@@ -34,7 +74,15 @@ const sessions = new Map<string, TaskSession>();
 export function sessionFor(task: string): TaskSession {
   let s = sessions.get(task);
   if (!s) {
-    s = { tabs: [], changesOpen: false, active: OVERVIEW, states: new Map(), expanded: new Set() };
+    const saved = restore(task);
+    s = {
+      tabs: [],
+      changesOpen: saved?.changesOpen ?? false,
+      active: saved?.active ?? OVERVIEW,
+      states: new Map(),
+      expanded: new Set(saved?.expanded ?? []),
+      pending: saved?.files ?? [],
+    };
     sessions.set(task, s);
   }
   return s;

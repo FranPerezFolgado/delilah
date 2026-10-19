@@ -135,17 +135,22 @@ export function App() {
   const run = (action: ActionId) => {
     switch (action) {
       case "new-terminal":
-        return openSession("shell");
-      case "new-claude":
-        return openSession("claude");
+      case "new-claude": {
+        const kind: SessionKind = action === "new-terminal" ? "shell" : "claude";
+        // In a task the new session opens as one of its tabs.
+        if (view === "tasks" && sessions.some((s) => s.task === selected)) return void window.dispatchEvent(new CustomEvent("delilah:new-session", { detail: kind }));
+        return openSession(kind);
+      }
       case "close-session":
         // In a task, ⌘W closes its active tab (a file, the changes), as in any editor.
         if (view === "tasks") return void window.dispatchEvent(new Event("delilah:close-tab"));
         return closeFocused();
       case "next-pane":
-        return movePane(1);
-      case "prev-pane":
-        return movePane(-1);
+      case "prev-pane": {
+        const step = action === "next-pane" ? 1 : -1;
+        if (view === "tasks") return void window.dispatchEvent(new CustomEvent("delilah:cycle-tab", { detail: step }));
+        return movePane(step);
+      }
       case "toggle-maximize":
         if (view !== "console") return;
         if (layout === 1) setLayout(restoreLayout);
@@ -246,7 +251,6 @@ export function App() {
                   key={task.key}
                   task={task}
                   sessions={sessions.filter((s) => s.task === task.key)}
-                  onOpenConsole={openConsole}
                   onChanged={refresh}
                 />
               </Suspense>

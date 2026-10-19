@@ -1,32 +1,34 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type Session, type Task } from "../api";
+import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type Session, type SessionKind, type Task } from "../api";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, sessionFor, setTreeOpen, treeOpen, type Tab } from "../editor/session";
+import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
 import { keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
 import { FileTree } from "./FileTree";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
+import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
 import { TaskView } from "./TaskView";
+import { TerminalPane } from "./TerminalPane";
 
 interface Props {
   task: Task;
+  /** The task's open sessions: each one is a tab. */
   sessions: Session[];
-  onOpenConsole: (key: string, sessionId?: string) => void;
   onChanged: () => void;
 }
 
 const WATCH_MS = 3000;
 
 /**
- * A task as Orca shows a worktree: tabs for the task itself, its changes and the files
- * opened from the project tree on the right. The agent keeps working in the same
+ * A task as Orca shows a worktree: tabs for the task itself, its sessions (Claude and
+ * terminals), its changes and the files opened from the project tree on the right. The agent keeps working in the same
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) {
+export function TaskScreen({ task, sessions, onChanged }: Props) {
   const session = useMemo(() => sessionFor(task.key), [task.key]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -36,10 +38,29 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
   const [showTree, setShowTree] = useState(treeOpen);
+  const [closingSession, setClosingSession] = useState<Session | null>(null);
+  // A session just started: its tab shows before the next refresh lists it.
+  const [starting, setStarting] = useState<string | null>(null);
+  // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set());
   const hasWorkspace = sessions.length > 0;
 
   const tab = (path: string) => session.tabs.find((t) => t.path === path);
-  const active = tab(session.active);
+
+  // The tab on screen: the active one if it still exists (a session may have been
+  // closed elsewhere, a file may not have loaded yet), else the task's.
+  const activeSession = sessionOf(session.active);
+  const exists =
+    session.active === OVERVIEW ||
+    (session.active === CHANGES && session.changesOpen) ||
+    !!tab(session.active) ||
+    (activeSession !== null && (sessions.some((s) => s.id === activeSession) || activeSession === starting));
+  const shown = exists ? session.active : OVERVIEW;
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const active = tab(shown);
+  const shownSession = sessionOf(shown);
+  if (shownSession && !mounted.has(shownSession)) setMounted(new Set(mounted).add(shownSession));
 
   // The live state of a file: the view's for the active one, the stored one otherwise.
   const stateOf = (path: string): EditorState | undefined =>
@@ -101,10 +122,11 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
       view.current.focus();
     }
     setError(null);
+    persist(task.key, session);
     redraw();
   };
 
-  const openFile = async (path: string) => {
+  const openFile = async (path: string, show = true) => {
     if (!tab(path)) {
       let f: FileContent;
       try {
@@ -114,7 +136,7 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
         return;
       }
       // Opened meanwhile by another call (a double click, React's dev double effect).
-      if (tab(path)) return activate(path);
+      if (tab(path)) return show ? activate(path) : undefined;
       const t: Tab = { path, version: f.version, size: f.size, saved: null, dirty: false, conflict: false };
       if (f.text !== null) {
         const state = createState(f.text, {
@@ -143,9 +165,24 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
       }
       session.tabs.push(t);
     }
+    if (!show) return;
     // Reveal it in the tree.
     for (let i = path.indexOf("/"); i > 0; i = path.indexOf("/", i + 1)) session.expanded.add(path.slice(0, i));
     activate(path);
+  };
+
+  const sessionById = (id: string | null) => sessions.find((s) => s.id === id);
+
+  /** Starts a Claude or a terminal in the workspace and shows its tab. */
+  const newSession = async (kind: SessionKind, prompt?: string, label?: string) => {
+    const created = await api.openSession(task.key, { kind, prompt, label });
+    setStarting(created.id);
+    activate(sessionTab(created.id));
+    onChanged();
+  };
+  const showSession = (id?: string) => {
+    const s = id ? sessionById(id) : sessions.find((x) => x.primary);
+    if (s) activate(sessionTab(s.id));
   };
 
   const openChanges = () => {
@@ -153,12 +190,38 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
     activate(CHANGES);
   };
 
-  const close = (id: string, force = false) => {
+  // Tabs in strip order: the task, its sessions, the changes, the files.
+  const order = () => [
+    OVERVIEW,
+    ...sessions.map((s) => sessionTab(s.id)),
+    ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
+    ...(session.changesOpen ? [CHANGES] : []),
+    ...session.tabs.map((t) => t.path),
+  ];
+
+  const close = async (id: string, force = false) => {
     if (id === OVERVIEW) return;
-    // Tabs in strip order, to land on the neighbour.
-    const order = [OVERVIEW, ...(session.changesOpen ? [CHANGES] : []), ...session.tabs.map((t) => t.path)];
-    const at = order.indexOf(id);
-    if (id === CHANGES) session.changesOpen = false;
+    const strip = order();
+    const at = strip.indexOf(id);
+    const sid = sessionOf(id);
+    if (sid) {
+      const s = sessionById(sid);
+      if (!s) return;
+      if (s.primary) {
+        setError("La sesión principal no se cierra: termina con la tarea (Marcar como hecha).");
+        return;
+      }
+      // Closing a working Claude stops it: ask first. A terminal just closes.
+      if (s.kind === "claude" && s.live && !force) return setClosingSession(s);
+      setClosingSession(null);
+      try {
+        await api.closeSession(s.id);
+      } catch (e) {
+        setError((e as Error).message);
+        return;
+      }
+      onChanged();
+    } else if (id === CHANGES) session.changesOpen = false;
     else {
       const t = tab(id);
       if (!t) return;
@@ -170,9 +233,24 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
     setClosing(null);
     if (session.active === id) {
       session.active = OVERVIEW;
-      activate(order[at + 1] ?? order[at - 1] ?? OVERVIEW);
-    } else redraw();
+      activate(strip[at + 1] ?? strip[at - 1] ?? OVERVIEW);
+    } else {
+      persist(task.key, session);
+      redraw();
+    }
   };
+
+  // The files that were open last time, loaded in their tab order.
+  useEffect(() => {
+    const paths = session.pending.splice(0);
+    if (paths.length === 0) return;
+    (async () => {
+      for (const p of paths) await openFile(p, false);
+      if (tab(session.active)) activate(session.active);
+      else redraw();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   // One CodeMirror view, its state swapped as tabs change.
   useEffect(() => {
@@ -188,11 +266,33 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
     };
   }, [session]);
 
-  // ⌘W closes the active tab and ⌘B shows or hides the tree (the app sends them).
+  // The app sends the shortcuts that act on tabs: ⌘W closes the active one, ⌘T and
+  // ⌘⇧T start a terminal or a Claude, ⌃Tab moves between tabs, ⌘B toggles the tree.
   const closeRef = useRef(close);
   closeRef.current = close;
+  const newRef = useRef(newSession);
+  newRef.current = newSession;
+  const cycleRef = useRef<(step: number) => void>(() => {});
+  cycleRef.current = (step: number) => {
+    const strip = order();
+    const at = Math.max(0, strip.indexOf(shown));
+    activate(strip[(at + step + strip.length) % strip.length]);
+  };
   useEffect(() => {
-    const onClose = () => closeRef.current(session.active);
+    const onNew = (e: Event) => {
+      const kind = (e as CustomEvent<SessionKind>).detail;
+      newRef.current(kind).catch((err) => setError((err as Error).message));
+    };
+    const onCycle = (e: Event) => cycleRef.current((e as CustomEvent<number>).detail);
+    window.addEventListener("delilah:new-session", onNew);
+    window.addEventListener("delilah:cycle-tab", onCycle);
+    return () => {
+      window.removeEventListener("delilah:new-session", onNew);
+      window.removeEventListener("delilah:cycle-tab", onCycle);
+    };
+  }, []);
+  useEffect(() => {
+    const onClose = () => closeRef.current(shownRef.current);
     const onTree = () =>
       setShowTree((open) => {
         setTreeOpen(!open);
@@ -292,9 +392,28 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
       <div className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}>
         <div className="tmain">
           <div className="etabs" role="tablist">
-            <TabButton id={OVERVIEW} label="Tarea" icon="tasks" session={session} onActivate={activate} />
+            <TabButton id={OVERVIEW} label="Tarea" icon="tasks" shown={shown} onActivate={activate} />
+            {sessions.map((s) => {
+              const st = sessionStatus(s, task);
+              return (
+                <TabButton
+                  key={s.id}
+                  id={sessionTab(s.id)}
+                  label={s.label}
+                  title={`${s.label} · ${s.kind === "shell" ? "terminal" : "Claude"} · ${st.label}`}
+                  icon={s.kind === "shell" ? "console" : st.icon}
+                  iconClass={s.kind === "shell" ? "" : st.cls}
+                  shown={shown}
+                  onActivate={activate}
+                  onClose={s.primary ? undefined : close}
+                />
+              );
+            })}
+            {starting && !sessionById(starting) && (
+              <TabButton id={sessionTab(starting)} label="Arrancando…" icon="run" shown={shown} onActivate={activate} />
+            )}
             {session.changesOpen && (
-              <TabButton id={CHANGES} label="Cambios" icon="diff" session={session} onActivate={activate} onClose={close} />
+              <TabButton id={CHANGES} label="Cambios" icon="diff" shown={shown} onActivate={activate} onClose={close} />
             )}
             {session.tabs.map((t) => (
               <TabButton
@@ -303,17 +422,62 @@ export function TaskScreen({ task, sessions, onOpenConsole, onChanged }: Props) 
                 label={name(t.path)}
                 title={t.path}
                 dirty={t.dirty}
-                session={session}
+                shown={shown}
                 onActivate={activate}
                 onClose={close}
               />
             ))}
           </div>
 
-          {session.active === OVERVIEW && (
-            <TaskView task={task} sessions={sessions} onOpenConsole={onOpenConsole} onChanged={onChanged} onViewChanges={openChanges} />
+          {shown === OVERVIEW && (
+            <TaskView
+              task={task}
+              sessions={sessions}
+              onOpenSession={showSession}
+              onNewSession={newSession}
+              onChanged={onChanged}
+              onViewChanges={openChanges}
+            />
           )}
-          {session.active === CHANGES && <ChangesView task={task} onEdit={openFile} />}
+          {shown === CHANGES && <ChangesView task={task} onEdit={openFile} />}
+
+          {closingSession && (
+            <div className="ebar warn">
+              <span style={{ flex: 1 }}>
+                Cerrar <b>{closingSession.label}</b> detiene ese Claude. Su conversación no se podrá reabrir desde aquí.
+              </span>
+              <button className="btn btn-p" onClick={() => close(sessionTab(closingSession.id), true)}>Cerrar</button>
+              <button className="btn btn-ghost" onClick={() => setClosingSession(null)}>Cancelar</button>
+            </div>
+          )}
+          {shownSession && !sessionById(shownSession) && <div className="empty">Arrancando la sesión…</div>}
+          {sessions
+            .filter((s) => mounted.has(s.id))
+            .map((s) => {
+              const on = shownSession === s.id;
+              return (
+                <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                  {!s.live && (
+                    <div className="ebar">
+                      <span style={{ flex: 1 }}>Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).</span>
+                      <button
+                        className="btn btn-p"
+                        onClick={() =>
+                          api
+                            .reopenSession(s.id)
+                            .then(onChanged)
+                            .catch((e) => setError((e as Error).message))
+                        }
+                      >
+                        Reabrir
+                      </button>
+                    </div>
+                  )}
+                  {/* A new connection once it comes back to life. */}
+                  <TerminalPane key={`${s.id}:${s.live}`} sessionId={s.id} focused={on} />
+                </div>
+              );
+            })}
 
           {active && (
             <div className="epath mono muted">
@@ -383,21 +547,24 @@ function TabButton({
   label,
   title,
   icon,
+  iconClass,
   dirty,
-  session,
+  shown,
   onActivate,
   onClose,
 }: {
   id: string;
   label: string;
   title?: string;
-  icon?: "tasks" | "diff";
+  icon?: IconName;
+  iconClass?: string;
   dirty?: boolean;
-  session: { active: string };
+  /** The tab on screen. */
+  shown: string;
   onActivate: (id: string) => void;
   onClose?: (id: string) => void;
 }) {
-  const on = session.active === id;
+  const on = shown === id;
   return (
     <div
       role="tab"
@@ -407,7 +574,7 @@ function TabButton({
       onClick={() => onActivate(id)}
       onAuxClick={(e) => e.button === 1 && onClose?.(id)}
     >
-      {icon && <Icon name={icon} />}
+      {icon && <Icon name={icon} className={iconClass} />}
       <span className="trunc">{label}</span>
       {onClose && (
         <button

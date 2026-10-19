@@ -92,17 +92,22 @@ the task's history. Delilah only reads these files; the repo stays the source of
 truth.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
-project tree on the right (⌘B shows or hides it). The first tab is the task itself:
-status, actions, spec, sessions and history. "Ver cambios" adds a Cambios tab, and
-files open in their own tabs, from the tree or from Cambios. ⌘W closes the active
-tab, ⌘S saves, ⌘F searches.
+project tree on the right (⌘B shows or hides it). The tabs are the task itself
+(status, actions, spec, history), its sessions, Cambios when opened, and files.
+Each task remembers its tabs when you switch tasks or reload the app.
 
+- **Sessions** are tabs with their live terminal: the primary Claude, extra Claudes
+  and shells. "+ Claude" and "+ Terminal" in the task, or ⌘⇧T and ⌘T, start one
+  as a new tab. ⌘W closes the active tab: a terminal closes at once, a working
+  Claude asks first, and the primary one never closes (it ends with the task). A
+  stopped session offers "Reabrir". ⌃Tab and ⌃⇧Tab move between tabs. The Consola
+  view still shows every task's sessions side by side.
 - **Cambios** lists what the branch changed in each repo of the workspace (each
   submodule of a parent), with line counts and the diff of each file. It compares
   against where the branch started (its merge-base with `origin/HEAD`, or `main`), so
   commits, uncommitted edits and new files all count. Arrow keys or j/k move through
   the files. When every item of `tasks.md` is checked, the task offers to review the
-  changes or start a "Revisión" session with Claude.
+  changes or start a "Revisión" session with Claude. ⌘S saves a file, ⌘F searches.
 - **The tree** marks the branch's changes. **Files** open in CodeMirror 6, with the
   language picked from the file name. The agent works on the same files, so an open
   file reloads by itself when it changes on disk. If you had unsaved edits, the

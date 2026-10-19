@@ -22,15 +22,17 @@ const EVENT_LABELS: Record<string, string> = {
 interface Props {
   task: Task;
   sessions: Session[];
-  /** Opens the console on a session of this task (its primary one if none given). */
-  onOpenConsole: (key: string, sessionId?: string) => void;
+  /** Shows a session's tab (the primary one if none given). */
+  onOpenSession: (sessionId?: string) => void;
+  /** Starts a session in the workspace and shows its tab. */
+  onNewSession: (kind: SessionKind, prompt?: string, label?: string) => Promise<void>;
   onChanged: () => void;
   /** Opens the changes tab. */
   onViewChanges: () => void;
 }
 
 /** The task tab of a task's screen: status, actions, spec, sessions and history. */
-export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChanges }: Props) {
+export function TaskView({ task, sessions, onOpenSession, onNewSession, onChanged, onViewChanges }: Props) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -60,11 +62,7 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
     }
   };
 
-  const openSession = (kind: SessionKind, prompt?: string, label?: string) =>
-    act(async () => {
-      const s = await api.openSession(task.key, { kind, prompt, label });
-      onOpenConsole(task.key, s.id);
-    });
+  const openSession = (kind: SessionKind, prompt?: string, label?: string) => act(() => onNewSession(kind, prompt, label));
   const hasWorkspace = sessions.length > 0;
 
   const s = task.status;
@@ -89,9 +87,9 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
         {s.type === "waiting-for-user" && (
           <div className="notice wait">
             <Icon name="wait" className="c-wait" />
-            <span style={{ flex: 1 }}>El agente terminó su turno y te espera. Contéstale desde su consola.</span>
-            <button className="btn btn-p" onClick={() => onOpenConsole(task.key)}>
-              Abrir consola
+            <span style={{ flex: 1 }}>El agente terminó su turno y te espera. Contéstale en su pestaña.</span>
+            <button className="btn btn-p" onClick={() => onOpenSession()}>
+              Contestar
             </button>
           </div>
         )}
@@ -116,8 +114,8 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
 
         <div style={{ display: "flex", gap: 8 }}>
           {isActive(s) && (
-            <button className="btn" onClick={() => onOpenConsole(task.key)}>
-              <Icon name="console" /> Consola
+            <button className="btn" onClick={() => onOpenSession()}>
+              <Icon name="console" /> Claude principal
             </button>
           )}
           {hasWorkspace && (
@@ -168,9 +166,15 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
                     </span>
                     <span className={`pill ${st.cls}`} style={{ height: 18, fontSize: 11 }}>{st.label}</span>
                     {s.live ? (
-                      <button className="btn btn-ghost" onClick={() => onOpenConsole(task.key, s.id)}>Abrir</button>
+                      <button className="btn btn-ghost" onClick={() => onOpenSession(s.id)}>Abrir</button>
                     ) : (
-                      <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.reopenSession(s.id))}>Reabrir</button>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={busy}
+                        onClick={() => act(async () => (await api.reopenSession(s.id), onOpenSession(s.id)))}
+                      >
+                        Reabrir
+                      </button>
                     )}
                   </div>
                 );
