@@ -12,8 +12,7 @@ const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> =
 
 interface Props {
   task: Task;
-  onBack: () => void;
-  /** Opens a workspace file in the editor. */
+  /** Opens a workspace file in a tab. */
   onEdit: (path: string) => void;
 }
 
@@ -21,7 +20,7 @@ type Selected = { repo: string; path: string };
 
 /** Everything the task's branch changed, per repo of the workspace, with each file's diff.
  *  Compared against where the branch started, uncommitted work included. */
-export function ChangesView({ task, onBack, onEdit }: Props) {
+export function ChangesView({ task, onEdit }: Props) {
   const [repos, setRepos] = useState<RepoChanges[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
@@ -71,19 +70,14 @@ export function ChangesView({ task, onBack, onEdit }: Props) {
 
   return (
     <>
-      <div className="view-head" data-tauri-drag-region>
-        <button className="btn btn-ghost" onClick={onBack} aria-label="Volver a la tarea" style={{ padding: "0 6px" }}>
-          <Icon name="back" />
-        </button>
-        <span className="mono muted">{task.key}</span>
-        <h1 data-tauri-drag-region>Cambios</h1>
+      <div className="ctoolbar">
         {repos && (
           <span className="muted" style={{ fontSize: 12 }}>
             {flat.length} {flat.length === 1 ? "archivo" : "archivos"} · <span className="c-done">+{totals.add}</span>{" "}
             <span className="c-err">−{totals.del}</span>
           </span>
         )}
-        <button className="btn" style={{ marginLeft: "auto" }} onClick={load} disabled={loading}>
+        <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={load} disabled={loading}>
           <Icon name="refresh" /> Actualizar
         </button>
       </div>
@@ -247,7 +241,7 @@ function Diff({
         <span className="muted" style={{ marginLeft: "auto", flex: "none" }}>{KIND[file.kind].label}</span>
         {file.kind !== "deleted" && (
           <button className="btn btn-ghost" style={{ flex: "none" }} onClick={() => onEdit(where)}>
-            <Icon name="code" /> Abrir en el editor
+            <Icon name="code" /> Abrir
           </button>
         )}
       </div>

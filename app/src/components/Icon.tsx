@@ -20,6 +20,7 @@ const PATHS = {
   diff: "M8 4v8M4 8h8M12 19h8M18 4L6 20",
   back: "M15 6l-6 6 6 6",
   code: "M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16",
+  sidebar: "M4 5h16v14H4zM15 5v14",
 } as const;
 
 export type IconName = keyof typeof PATHS;

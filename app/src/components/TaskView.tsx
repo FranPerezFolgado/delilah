@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, hhmm, isActive, REVIEW_PROMPT, statusLabel, type EventRecord, type Session, type SessionKind, type Task } from "../api";
+import { api, hhmm, isActive, REVIEW_PROMPT, type EventRecord, type Session, type SessionKind, type Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { Icon } from "./Icon";
 import { SpecPanel } from "./SpecPanel";
 import { phaseLabel, type Column } from "../phases";
-import { statusIcon } from "./status";
 
 const EVENT_LABELS: Record<string, string> = {
   start: "Tarea creada",
@@ -26,11 +25,12 @@ interface Props {
   /** Opens the console on a session of this task (its primary one if none given). */
   onOpenConsole: (key: string, sessionId?: string) => void;
   onChanged: () => void;
-  onViewChanges: (key: string) => void;
-  onOpenEditor: (key: string) => void;
+  /** Opens the changes tab. */
+  onViewChanges: () => void;
 }
 
-export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChanges, onOpenEditor }: Props) {
+/** The task tab of a task's screen: status, actions, spec, sessions and history. */
+export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChanges }: Props) {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -67,17 +67,9 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
     });
   const hasWorkspace = sessions.length > 0;
 
-  const { icon, cls } = statusIcon(task.status);
   const s = task.status;
   return (
     <>
-      <div className="view-head" data-tauri-drag-region>
-        <span className="mono muted">{task.key}</span>
-        <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
-        <span className={`pill ${cls}`} style={{ marginLeft: "auto" }}>
-          <Icon name={icon} /> {statusLabel(s)}
-        </span>
-      </div>
       <div className="view-body">
         <div className="muted" style={{ fontSize: 12 }}>
           {task.project ?? "sin proyecto"} · workflow <span className="mono">{task.workflow}</span>
@@ -107,7 +99,7 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
           <div className="notice">
             <Icon name="review" className="c-done" />
             <span style={{ flex: 1 }}>Todas las subtareas están hechas: toca revisar los cambios de la rama.</span>
-            <button className="btn" onClick={() => onViewChanges(task.key)}>
+            <button className="btn" onClick={onViewChanges}>
               <Icon name="diff" /> Ver cambios
             </button>
             <button className="btn btn-p" disabled={busy} onClick={() => openSession("claude", REVIEW_PROMPT, "Revisión")}>
@@ -129,13 +121,8 @@ export function TaskView({ task, sessions, onOpenConsole, onChanged, onViewChang
             </button>
           )}
           {hasWorkspace && (
-            <button className="btn" onClick={() => onViewChanges(task.key)}>
+            <button className="btn" onClick={onViewChanges}>
               <Icon name="diff" /> Ver cambios
-            </button>
-          )}
-          {hasWorkspace && (
-            <button className="btn" onClick={() => onOpenEditor(task.key)}>
-              <Icon name="code" /> Editor
             </button>
           )}
           {isActive(s) && (

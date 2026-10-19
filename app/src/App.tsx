@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { BoardView } from "./components/BoardView";
-import { ChangesView } from "./components/ChangesView";
 import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
 import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
@@ -9,11 +8,10 @@ import { ProjectsView } from "./components/ProjectsView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
-import { TaskView } from "./components/TaskView";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
 
-// CodeMirror is most of the bundle: load it the first time the editor opens.
-const EditorScreen = lazy(() => import("./components/EditorScreen").then((m) => ({ default: m.EditorScreen })));
+// The task screen carries CodeMirror, most of the bundle: load it when a task opens.
+const TaskScreen = lazy(() => import("./components/TaskScreen").then((m) => ({ default: m.TaskScreen })));
 
 export function App() {
   const [view, setView] = useState<View>("board");
@@ -31,7 +29,6 @@ export function App() {
   const [restoreLayout, setRestoreLayout] = useState<Layout>(4);
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
-  const [editorRequest, setEditorRequest] = useState<{ path: string; n: number } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -142,8 +139,8 @@ export function App() {
       case "new-claude":
         return openSession("claude");
       case "close-session":
-        // In the editor, ⌘W closes the file's tab, as in any editor.
-        if (view === "editor") return void window.dispatchEvent(new Event("delilah:close-tab"));
+        // In a task, ⌘W closes its active tab (a file, the changes), as in any editor.
+        if (view === "tasks") return void window.dispatchEvent(new Event("delilah:close-tab"));
         return closeFocused();
       case "next-pane":
         return movePane(1);
@@ -156,6 +153,9 @@ export function App() {
           setRestoreLayout(layout);
           setLayout(1);
         }
+        return;
+      case "toggle-tree":
+        if (view === "tasks") window.dispatchEvent(new Event("delilah:toggle-tree"));
         return;
       case "new-task":
         return setNewTask(true);
@@ -193,7 +193,7 @@ export function App() {
     <div className="window">
       <header className="titlebar" data-tauri-drag-region>
         <span data-tauri-drag-region>Delilah</span>
-        {task && (view === "tasks" || view === "changes" || view === "editor") && (
+        {task && view === "tasks" && (
           <span data-tauri-drag-region className="mono" style={{ color: "var(--tx)" }}>/ {task.key}</span>
         )}
       </header>
@@ -241,42 +241,21 @@ export function App() {
           )}
           {view === "tasks" &&
             (task ? (
-              <TaskView
-                task={task}
-                sessions={sessions.filter((s) => s.task === task.key)}
-                onOpenConsole={openConsole}
-                onChanged={refresh}
-                onViewChanges={(key) => {
-                  setSelected(key);
-                  setView("changes");
-                }}
-                onOpenEditor={(key) => {
-                  setSelected(key);
-                  setEditorRequest(null);
-                  setView("editor");
-                }}
-              />
+              <Suspense fallback={<div className="empty">Cargando…</div>}>
+                <TaskScreen
+                  key={task.key}
+                  task={task}
+                  sessions={sessions.filter((s) => s.task === task.key)}
+                  onOpenConsole={openConsole}
+                  onChanged={refresh}
+                />
+              </Suspense>
             ) : (
               <div className="empty">
                 <span>Elige una tarea del tablero.</span>
                 <button className="btn" onClick={() => setView("board")}>Ir al tablero</button>
               </div>
             ))}
-          {view === "changes" && task && (
-            <ChangesView
-              task={task}
-              onBack={() => setView("tasks")}
-              onEdit={(path) => {
-                setEditorRequest((r) => ({ path, n: (r?.n ?? 0) + 1 }));
-                setView("editor");
-              }}
-            />
-          )}
-          {view === "editor" && task && (
-            <Suspense fallback={<div className="empty">Cargando el editor…</div>}>
-              <EditorScreen key={task.key} task={task} request={editorRequest} onBack={() => setView("tasks")} />
-            </Suspense>
-          )}
           {view === "console" && (
             <ConsoleView
               layout={layout}

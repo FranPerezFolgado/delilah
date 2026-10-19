@@ -224,8 +224,18 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .dl.note { color: var(--tx3); font-style: italic; }
 
 /* Editor: workspace tree, tabs and CodeMirror */
-.editor { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; }
-.tree { overflow: auto; border-right: 1px solid var(--bd); background: var(--side); padding: 6px 4px 20px; }
+/* A task's screen: tabs in the middle, the project tree on the right (as in Orca) */
+.tscreen { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
+.tscreen.with-tree { grid-template-columns: 1fr minmax(220px, 280px); }
+.tmain { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.tmain > .view-body, .tmain > .changes { flex: 1; min-height: 0; }
+.tpanel { min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--bd); background: var(--side); }
+.tpanel-head { display: flex; align-items: center; gap: 2px; height: 32px; flex: none; padding: 0 6px 0 12px; border-bottom: 1px solid var(--bd); }
+.tpanel-head .sec { flex: 1; }
+.icon-btn { height: 24px; padding: 0 5px; }
+.btn.is-on { color: var(--acc); }
+.ctoolbar { display: flex; align-items: center; gap: 10px; height: 34px; flex: none; padding: 0 12px; border-bottom: 1px solid var(--bd); }
+.tree { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px 20px; }
 .trow { display: flex; align-items: center; gap: 4px; width: 100%; height: 24px; padding-right: 8px; border: 0; border-radius: 5px;
   background: transparent; color: var(--tx2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; white-space: nowrap; }
 .trow:hover { background: var(--hov); color: var(--tx); }
@@ -238,12 +248,12 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .chev.open { transform: rotate(90deg); }
 .tkind { font-size: 10.5px; font-weight: 700; flex: none; }
 .tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); flex: none; }
-.editor-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--term); }
 .etabs { display: flex; flex: none; overflow-x: auto; background: var(--side); border-bottom: 1px solid var(--bd); }
+.etab svg.i { width: 13px; height: 13px; }
 .etab { display: flex; align-items: center; gap: 6px; height: 32px; max-width: 220px; padding: 0 6px 0 12px; border-right: 1px solid var(--bd);
   font-size: 12.5px; color: var(--tx3); cursor: pointer; flex: none; }
 .etab:hover { color: var(--tx2); }
-.etab.on { background: var(--term); color: var(--tx); box-shadow: inset 0 2px 0 var(--acc); }
+.etab.on { background: var(--bg); color: var(--tx); box-shadow: inset 0 2px 0 var(--acc); }
 .etab-x { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 4px;
   background: transparent; color: var(--tx3); cursor: pointer; padding: 0; flex: none; }
 .etab-x:hover { background: var(--hov); color: var(--tx); }
@@ -257,5 +267,5 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .ebar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex: none; background: var(--panel); border-bottom: 1px solid var(--bd);
   font-size: 12.5px; }
 .ebar.warn { background: var(--accbg); }
-.ehost { flex: 1; min-height: 0; }
+.ehost { flex: 1; min-height: 0; background: var(--term); }
 .ehost .cm-editor { height: 100%; }
