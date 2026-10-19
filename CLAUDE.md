@@ -6,7 +6,8 @@ UI mock-ups: https://claude.ai/artifact/6kgvh73UPJWaboZVJiddre
 
 ## Current scope: MVP-0
 
-Core daemon + CLI, no GUI. Only the Claude Code adapter. The tasks are listed
+Core daemon + CLI, plus a first desktop app (Tauri, `app/`). Only the Claude Code
+adapter. The tasks are listed
 in the design doc's "MVP" section.
 
 ## Ground rules

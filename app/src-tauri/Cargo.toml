@@ -1,0 +1,12 @@
+[package]
+name = "delilah-app"
+description = "Delilah desktop app: a window around the web UI. All data goes through the daemon's API."
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

@@ -71,3 +71,19 @@ pub async fn add_project(
     app.store.create_project(&project).await?;
     Ok((StatusCode::CREATED, Json(project)))
 }
+
+/// The submodules a `parent` project offers, for the "new task" form.
+pub async fn submodules(
+    State(app): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<Vec<delilah_git::Submodule>>, ApiError> {
+    let project = app.store.project(&name).await?;
+    if project.kind != ProjectKind::Parent {
+        return Ok(Json(Vec::new()));
+    }
+    let subs = tokio::task::spawn_blocking(move || delilah_git::list_submodules(&project.path))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    Ok(Json(subs))
+}

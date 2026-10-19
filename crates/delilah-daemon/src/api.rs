@@ -2,19 +2,34 @@
 //! it: nothing else reads the database.
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use delilah_core::{Event, Task, TaskKey};
 use serde::{Deserialize, Serialize};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
 use crate::{actions, hooks, projects, run, terminal};
 
+/// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
+/// API from a browser: JSON requests need a preflight that other origins fail.
+const APP_ORIGINS: &[&str] = &[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "http://localhost:1420",
+];
+
 pub fn router(state: AppState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(
+            APP_ORIGINS.iter().map(|o| HeaderValue::from_static(o)),
+        ))
+        .allow_methods(Any)
+        .allow_headers(Any);
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
@@ -32,10 +47,15 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/projects",
             get(projects::list_projects).post(projects::add_project),
         )
+        .route(
+            "/api/v1/projects/{name}/submodules",
+            get(projects::submodules),
+        )
         .route("/api/v1/runs", post(run::start_run))
         .route("/hooks/claude", post(hooks::claude_hook))
         .route("/hooks/claude/statusline", post(hooks::claude_statusline))
         .with_state(state)
+        .layer(cors)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -296,5 +316,49 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _) = call(&app, "GET", "/api/v1/tasks/PROJ-404/events", None).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    async fn preflight(origin: &str) -> Option<String> {
+        let config = crate::config::Config {
+            home: std::env::temp_dir(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+        };
+        let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/api/v1/runs")
+            .header("origin", origin)
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-headers", "content-type")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        res.headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap().to_string())
+    }
+
+    #[tokio::test]
+    async fn only_the_desktop_app_may_call_from_a_browser() {
+        assert_eq!(
+            preflight("tauri://localhost").await.as_deref(),
+            Some("tauri://localhost")
+        );
+        assert_eq!(
+            preflight("http://localhost:1420").await.as_deref(),
+            Some("http://localhost:1420")
+        );
+        assert_eq!(preflight("https://evil.example").await, None);
     }
 }

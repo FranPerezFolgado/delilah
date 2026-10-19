@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window. No Tauri commands are exposed: data comes from the daemon's API.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The desktop shell builds on its own (it needs the web UI built first).
+exclude = ["app/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

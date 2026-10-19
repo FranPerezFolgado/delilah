@@ -50,6 +50,26 @@ sends macOS notifications when a task needs you, pauses, resumes or ends
 With the fake fixture, start the daemon with `DELILAH_ALLOW_FILE_PROTOCOL=1`
 (its submodules use `file://`).
 
+## Desktop app
+
+A Tauri 2 shell around a React UI (`app/`). The UI only talks to the daemon's HTTP
+and WebSocket API, so the shell could be swapped for Electron without touching it.
+
+```bash
+# 1. The daemon: against the fake repos (fixtures/, created on first run)…
+scripts/dev-daemon.sh
+#    …or against your real projects
+cargo run -p delilah-daemon
+
+# 2. The app (first time: npm install)
+cd app && npm run tauri dev
+
+# A Delilah.app bundle in app/src-tauri/target/release/bundle/
+cd app && npm run tauri build
+```
+
+`npm run dev` alone serves the same UI at http://localhost:1420 for a browser.
+
 ## Design
 
 The design sketch (decisions, architecture, MVP scope) lives in the
