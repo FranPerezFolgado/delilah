@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type Session, type SessionKind, type Task } from "../api";
+import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type InboxItem, type Session, type SessionKind, type Task } from "../api";
+import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
 import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
 import { keyOf } from "../shortcuts";
@@ -18,6 +19,8 @@ interface Props {
   task: Task;
   /** The task's open sessions: each one is a tab. */
   sessions: Session[];
+  /** Questions with options this task's sessions are waiting on. */
+  asks: InboxItem[];
   onChanged: () => void;
 }
 
@@ -29,7 +32,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ task, sessions, onChanged }: Props) {
+export function TaskScreen({ task, sessions, asks, onChanged }: Props) {
   const session = useMemo(() => sessionFor(task.key), [task.key]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -462,6 +465,14 @@ export function TaskScreen({ task, sessions, onChanged }: Props) {
               const on = shownSession === s.id;
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                  {asks
+                    .filter((a) => a.session?.id === s.id && a.ask)
+                    .map((a) => (
+                      <div key={a.ask!.id} className="ask-bar">
+                        <div className="sec" style={{ marginBottom: 6 }}>El agente te pregunta</div>
+                        <AskCard ask={a.ask!} onDone={onChanged} />
+                      </div>
+                    ))}
                   {!s.live && (
                     <div className="ebar">
                       <span style={{ flex: 1 }}>Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).</span>

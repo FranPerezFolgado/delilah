@@ -14,8 +14,8 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
 use crate::{
-    actions, changes, events, files, hooks, inbox, jira, preferences, projects, run, session_api,
-    specs, terminal,
+    actions, asks, changes, events, files, hooks, inbox, jira, preferences, projects, run,
+    session_api, specs, terminal,
 };
 
 /// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
@@ -91,6 +91,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/runs", post(run::start_run))
         .route("/hooks/claude", post(hooks::claude_hook))
         .route("/hooks/claude/statusline", post(hooks::claude_statusline))
+        .route("/hooks/claude/ask", post(asks::hook))
+        .route("/api/v1/asks/{id}/answer", post(asks::answer))
+        .route("/api/v1/asks/{id}/release", post(asks::release))
         .with_state(state)
         .layer(cors)
 }

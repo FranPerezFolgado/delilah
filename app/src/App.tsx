@@ -310,6 +310,7 @@ export function App() {
                   key={task.key}
                   task={task}
                   sessions={sessions.filter((s) => s.task === task.key)}
+                  asks={inbox.filter((i) => i.task === task.key && i.ask)}
                   onChanged={refresh}
                 />
               </Suspense>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ago, api, hhmm, type InboxItem, type InboxKind } from "../api";
 import { Icon, type IconName } from "./Icon";
+import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
 
 const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> = {
@@ -61,7 +62,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
   const kind = KINDS[item.kind];
   const s = item.session;
   const long = (item.text?.length ?? 0) > 500 || (item.text?.split("\n").length ?? 0) > 8;
-  const canReply = (item.kind === "question" || item.kind === "waiting") && s?.live;
+  const canReply = (item.kind === "question" || item.kind === "waiting") && s?.live && !item.ask;
 
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -100,12 +101,13 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
         )}
       </header>
 
-      {item.text && (
+      {item.ask && <AskCard ask={item.ask} onDone={onChanged} />}
+      {item.text && !item.ask && (
         <div className={`inbox-text ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={item.text} />
         </div>
       )}
-      {long && (
+      {long && !item.ask && (
         <button className="btn btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => setExpanded((e) => !e)}>
           {expanded ? "Ver menos" : "Ver todo"}
         </button>

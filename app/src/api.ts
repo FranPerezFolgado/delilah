@@ -178,6 +178,14 @@ export class ConflictError extends Error {}
 
 export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "paused" | "failed";
 
+/** One question of Claude's AskUserQuestion, as the agent wrote it. */
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  options: { label: string; description?: string }[];
+  multiSelect?: boolean;
+}
+
 /** Something that waits on you, from any task. */
 export interface InboxItem {
   kind: InboxKind;
@@ -186,6 +194,8 @@ export interface InboxItem {
   session: { id: string; label: string; primary: boolean; live: boolean } | null;
   text: string | null;
   since: string | null;
+  /** A question with options, answered from Delilah. */
+  ask?: { id: string; questions: AskQuestion[] };
 }
 
 /** The kinds that block an agent until you act: they count in the badge. */
@@ -248,6 +258,8 @@ export const api = {
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
+  answerAsk: (id: string, answers: Record<string, string>) => post<null>(`/api/v1/asks/${id}/answer`, { answers }),
+  releaseAsk: (id: string) => post<null>(`/api/v1/asks/${id}/release`),
   changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
   files: (key: string) => request<string[]>(`/api/v1/tasks/${key}/files`),
   tree: (key: string, path: string) => request<TreeEntry[]>(`/api/v1/tasks/${key}/tree?${new URLSearchParams({ path })}`),

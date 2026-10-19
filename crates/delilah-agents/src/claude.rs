@@ -6,6 +6,9 @@ use portable_pty::CommandBuilder;
 use serde_json::{Value, json};
 
 /// Hook events Delilah listens to.
+/// How long AskUserQuestion may wait for an answer from Delilah: a day.
+pub const ASK_TIMEOUT_SECS: u64 = 86_400;
+
 const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
@@ -91,7 +94,7 @@ pub fn settings(
     padding: Option<&Value>,
 ) -> Value {
     let post = post_command(daemon_url, "/hooks/claude", task, session);
-    let hooks: serde_json::Map<String, Value> = HOOK_EVENTS
+    let mut hooks: serde_json::Map<String, Value> = HOOK_EVENTS
         .iter()
         .map(|event| {
             let entry =
@@ -99,6 +102,19 @@ pub fn settings(
             (event.to_string(), entry)
         })
         .collect();
+    // AskUserQuestion waits here for an answer given in Delilah (see the daemon's
+    // asks.rs); if the daemon is away, curl prints nothing and the terminal asks.
+    let ask = format!(
+        "curl -sS -m 86400 -X POST -H 'content-type: application/json' --data-binary @- \
+         '{daemon_url}/hooks/claude/ask?task={task}&session={session}' 2>/dev/null || true"
+    );
+    hooks.insert(
+        "PreToolUse".into(),
+        json!([{
+            "matcher": "AskUserQuestion",
+            "hooks": [{ "type": "command", "command": ask, "timeout": ASK_TIMEOUT_SECS }]
+        }]),
+    );
     let mut status_line =
         json!({ "type": "command", "command": format!("sh '{}'", status_script.display()) });
     if let Some(padding) = padding {
@@ -221,23 +237,23 @@ pub fn shows_trust_dialog(screen: &[u8]) -> bool {
     text.contains("trust") && (text.contains("folder") || text.contains("project"))
 }
 
-const DOWN: &[u8] = b"\x1b[B";
-const ENTER: &[u8] = b"\r";
+pub const DOWN: &[u8] = b"\x1b[B";
+pub const ENTER: &[u8] = b"\r";
 
-/// The keys that accept the folder-trust dialog on `screen`, once its options are
-/// drawn: Enter when "Yes" is selected, else Down then Enter. Recent versions select
-/// "No, exit" first, so a bare Enter would close Claude.
-pub fn trust_dialog_keys(screen: &[u8]) -> Option<&'static [&'static [u8]]> {
+/// Which answer of the folder-trust dialog is selected on `screen`, once its options
+/// are drawn: `Some(true)` for "Yes". Recent versions select "No, exit" first, so a
+/// bare Enter would close Claude.
+pub fn trust_dialog_selection(screen: &[u8]) -> Option<bool> {
     if !shows_trust_dialog(screen) {
         return None;
     }
     let text = strip_ansi(&String::from_utf8_lossy(screen)).to_lowercase();
     // The marker as last drawn, and the option right after it.
-    let after = &text[text.rfind('❯')?..];
+    let after = &text[text.rfind('\u{276f}')?..];
     match (after.find("yes,"), after.find("no,")) {
-        (Some(yes), Some(no)) if yes < no => Some(&[ENTER]),
-        (Some(_), None) => Some(&[ENTER]),
-        (_, Some(_)) => Some(&[DOWN, ENTER]),
+        (Some(yes), Some(no)) => Some(yes < no),
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
         (None, None) => None,
     }
 }
@@ -297,6 +313,15 @@ mod tests {
             );
         }
         assert_eq!(s["statusLine"]["command"], "sh '/tmp/statusline-sess-1.sh'");
+        let ask = &s["hooks"]["PreToolUse"][0];
+        assert_eq!(ask["matcher"], "AskUserQuestion");
+        assert!(
+            ask["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("/hooks/claude/ask?task=PROJ-1&session=sess-1")
+        );
+        assert_eq!(ask["hooks"][0]["timeout"], ASK_TIMEOUT_SECS);
     }
 
     #[test]
@@ -428,20 +453,20 @@ mod tests {
     }
 
     #[test]
-    fn picks_yes_on_the_trust_dialog_wherever_it_is() {
+    fn sees_which_trust_answer_is_selected() {
         // 2.1.x: "No, exit" comes first and selected; spaces drawn as cursor moves.
         let no_first = "Quick safety check: Is this a project you created or one you trust?\x1b[1C\r\n\
             \x1b[38;5;153m\u{276f}\x1b[39mNo,\x1b[1Cexit\r\n  Yes,\x1b[1CI\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder";
-        assert_eq!(
-            trust_dialog_keys(no_first.as_bytes()),
-            Some(&[DOWN, ENTER][..])
-        );
+        assert_eq!(trust_dialog_selection(no_first.as_bytes()), Some(false));
+        // After Down, the last drawing has the marker on Yes.
+        let moved = format!("{no_first}\r\n  No, exit\r\n\u{276f} Yes, I trust this folder");
+        assert_eq!(trust_dialog_selection(moved.as_bytes()), Some(true));
         let yes_first =
             "Do you trust the files in this folder?\r\n \u{276f} Yes, proceed\r\n   No, exit";
-        assert_eq!(trust_dialog_keys(yes_first.as_bytes()), Some(&[ENTER][..]));
+        assert_eq!(trust_dialog_selection(yes_first.as_bytes()), Some(true));
         // The question is up but the options are not drawn yet: wait.
         assert_eq!(
-            trust_dialog_keys(b"Do you trust the files in this folder?"),
+            trust_dialog_selection(b"Do you trust the files in this folder?"),
             None
         );
     }

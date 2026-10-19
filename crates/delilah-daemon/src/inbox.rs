@@ -136,6 +136,15 @@ pub struct InboxItem {
     pub session: Option<ItemSession>,
     pub text: Option<String>,
     pub since: Option<DateTime<Utc>>,
+    /// A question with options (AskUserQuestion) that can be answered from here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ask: Option<AskView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AskView {
+    pub id: String,
+    pub questions: Value,
 }
 
 /// `GET /api/v1/inbox`: most urgent first (what blocks an agent), newest first within.
@@ -144,11 +153,45 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
     let task = |key: &str| tasks.iter().find(|t| t.key.as_str() == key);
     let mut items = Vec::new();
     let mut asked: HashSet<String> = HashSet::new();
+    let mut asking: HashSet<String> = HashSet::new();
+
+    for ask in app.asks.list() {
+        let Some(t) = task(&ask.task) else { continue };
+        let record = match &ask.session {
+            Some(id) => app.store.session(id).await.ok().flatten(),
+            None => None,
+        };
+        let first = ask.questions[0]["question"].as_str().map(str::to_string);
+        asked.insert(ask.task.clone());
+        if let Some(id) = &ask.session {
+            asking.insert(id.clone());
+        }
+        items.push(InboxItem {
+            kind: ItemKind::Question,
+            task: ask.task.clone(),
+            title: t.title.clone(),
+            session: record.map(|r| ItemSession {
+                live: app.sessions.get(&r.id).is_some(),
+                id: r.id,
+                label: r.label,
+                primary: r.primary,
+            }),
+            text: first,
+            since: Some(ask.since),
+            ask: Some(AskView {
+                id: ask.id,
+                questions: ask.questions,
+            }),
+        });
+    }
 
     for (s, attention) in app.store.attentions().await? {
         let Some(t) = task(&s.task).filter(|t| !t.status.is_terminal()) else {
             continue;
         };
+        if asking.contains(&s.id) {
+            continue;
+        }
         let live = app.sessions.get(&s.id).is_some();
         // A permission prompt dies with its process.
         if attention.kind == AttentionKind::Permission && !live {
@@ -171,6 +214,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             }),
             text: Some(attention.text),
             since: Some(attention.since),
+            ask: None,
         });
     }
 
@@ -201,6 +245,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 text,
                 // When the event that raised it happened.
                 since: last_event(&app, t, event).await,
+                ask: None,
             });
         }
     }

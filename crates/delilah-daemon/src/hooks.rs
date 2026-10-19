@@ -19,9 +19,9 @@ use crate::store::StoreError;
 
 #[derive(Deserialize)]
 pub struct HookQuery {
-    task: String,
+    pub(crate) task: String,
     /// Absent in settings written before sessions existed: the primary one.
-    session: Option<String>,
+    pub(crate) session: Option<String>,
 }
 
 pub async fn claude_hook(

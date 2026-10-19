@@ -229,31 +229,58 @@ fn shell_command(workspace: &std::path::Path) -> portable_pty::CommandBuilder {
     cmd
 }
 
-/// A new workspace path shows Claude's folder-trust dialog once: answer "Yes" (see
-/// `claude::trust_dialog_keys`). Stops as soon as the session starts, so it never
-/// types into the user's input.
+/// A new workspace path shows Claude's folder-trust dialog once: answer "Yes". The
+/// dialog may draw itself again (back on "No") right after appearing, so let it
+/// settle, move to "Yes", and press Enter only once "Yes" is seen selected. Stops as
+/// soon as the session starts, so it never types into the user's input.
 async fn accept_trust_dialog(pty: Arc<PtySession>, started: Arc<tokio::sync::Notify>) {
     let (mut screen, mut rx) = pty.attach();
-    let deadline = tokio::time::sleep(TRUST_WATCH);
-    tokio::pin!(deadline);
+    let deadline = tokio::time::Instant::now() + TRUST_WATCH;
     loop {
-        if let Some(keys) = claude::trust_dialog_keys(&screen) {
-            for key in keys {
-                let _ = pty.write(key);
-                // Apart, or the TUI may read them as one paste.
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            }
+        let settle = match claude::trust_dialog_selection(&screen) {
+            None => Duration::from_millis(200),
+            // A key pressed while it still redraws would be undone.
+            Some(_) => Duration::from_millis(600),
+        };
+        let before = claude::trust_dialog_selection(&screen);
+        if !read_for(&mut rx, &mut screen, &started, settle, deadline).await {
+            return;
+        }
+        let Some(yes) = claude::trust_dialog_selection(&screen) else {
+            continue;
+        };
+        if before != Some(yes) {
+            // Still changing: look again.
+            continue;
+        }
+        if yes {
+            let _ = pty.write(claude::ENTER);
             tracing::info!("accepted the folder-trust dialog");
             return;
         }
+        let _ = pty.write(claude::DOWN);
+    }
+}
+
+/// Collects terminal output into `screen` for `wait`. False once the session started,
+/// the terminal closed or `deadline` passed.
+async fn read_for(
+    rx: &mut tokio::sync::broadcast::Receiver<Arc<[u8]>>,
+    screen: &mut Vec<u8>,
+    started: &tokio::sync::Notify,
+    wait: Duration,
+    deadline: tokio::time::Instant,
+) -> bool {
+    let until = (tokio::time::Instant::now() + wait).min(deadline);
+    loop {
         tokio::select! {
             chunk = rx.recv() => match chunk {
                 Ok(chunk) => screen.extend_from_slice(&chunk),
                 Err(RecvError::Lagged(_)) => continue,
-                Err(RecvError::Closed) => return,
+                Err(RecvError::Closed) => return false,
             },
-            _ = started.notified() => return,
-            _ = &mut deadline => return,
+            _ = started.notified() => return false,
+            _ = tokio::time::sleep_until(until) => return tokio::time::Instant::now() < deadline,
         }
     }
 }

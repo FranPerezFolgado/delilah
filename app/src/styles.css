@@ -293,3 +293,16 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
   color: var(--tx); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; min-width: 0; }
 .qo-row .muted { font-size: 11.5px; }
 .qo-row.on { background: var(--sel); }
+
+/* A question with options (AskUserQuestion) */
+.ask { display: flex; flex-direction: column; gap: 12px; }
+.ask-q { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ask-q legend { display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 500; }
+.ask-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 140px; max-width: 280px; padding: 8px 12px;
+  border: 1px solid var(--bd2); border-radius: 8px; background: var(--elev); color: var(--tx); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.ask-opt:hover { border-color: var(--acc); }
+.ask-opt.on { border-color: var(--acc); background: var(--accbg); }
+.ask-opt .muted { font-size: 11.5px; }
+.ask-actions { display: flex; gap: 8px; }
+.ask-bar { flex: none; padding: 12px 14px; background: var(--panel); border-bottom: 1px solid var(--bd); max-height: 50%; overflow-y: auto; }

@@ -99,6 +99,15 @@ Each item opens the task on the right tab. The sidebar counts what blocks an
 agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
 
+**Questions with options.** When the agent asks with Claude Code's
+`AskUserQuestion` (as the `feature` workflow does), Delilah shows the question and
+its options in the Bandeja and on the session's tab: one click answers, as if
+chosen in the terminal, and the agent goes on. Several questions or multiple choice
+send with "Responder"; you can also type your own answer, or "Responder en la
+terminal" to answer there. It works through a `PreToolUse` hook in the session's
+settings that waits (up to a day) for the answer. If the daemon is away, the
+question simply shows in the terminal.
+
 **macOS.** The Dock icon counts what blocks an agent. While you are in another
 app, each new item of the Bandeja is a notification with the agent's own words
 (and a task resuming after the usage limit is one too). Coming back to Delilah

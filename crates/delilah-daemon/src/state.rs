@@ -35,6 +35,8 @@ pub struct AppState {
     pub specs: Arc<Mutex<HashMap<String, SpecSummary>>>,
     /// What changed, for clients listening on `/api/v1/events`.
     pub events: Events,
+    /// AskUserQuestion questions waiting for an answer from Delilah.
+    pub asks: Arc<crate::asks::Asks>,
 }
 
 impl AppState {
@@ -59,6 +61,7 @@ impl AppState {
             },
             specs: Arc::default(),
             events,
+            asks: Arc::default(),
         }
     }
 
