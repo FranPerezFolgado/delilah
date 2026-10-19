@@ -7,6 +7,7 @@ import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeO
 import { keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
 import { FileTree } from "./FileTree";
+import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
@@ -39,6 +40,7 @@ export function TaskScreen({ task, sessions, onChanged }: Props) {
   const [treeRefresh, setTreeRefresh] = useState(0);
   const [showTree, setShowTree] = useState(treeOpen);
   const [closingSession, setClosingSession] = useState<Session | null>(null);
+  const [finding, setFinding] = useState(false);
   // A session just started: its tab shows before the next refresh lists it.
   const [starting, setStarting] = useState<string | null>(null);
   // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
@@ -284,11 +286,14 @@ export function TaskScreen({ task, sessions, onChanged }: Props) {
       newRef.current(kind).catch((err) => setError((err as Error).message));
     };
     const onCycle = (e: Event) => cycleRef.current((e as CustomEvent<number>).detail);
+    const onFind = () => setFinding(true);
     window.addEventListener("delilah:new-session", onNew);
     window.addEventListener("delilah:cycle-tab", onCycle);
+    window.addEventListener("delilah:quick-open", onFind);
     return () => {
       window.removeEventListener("delilah:new-session", onNew);
       window.removeEventListener("delilah:cycle-tab", onCycle);
+      window.removeEventListener("delilah:quick-open", onFind);
     };
   }, []);
   useEffect(() => {
@@ -516,10 +521,14 @@ export function TaskScreen({ task, sessions, onChanged }: Props) {
           )}
         </div>
 
+        {finding && hasWorkspace && <QuickOpen taskKey={task.key} onOpen={openFile} onClose={() => setFinding(false)} />}
         {showTree && hasWorkspace && (
           <aside className="tpanel" aria-label="Archivos del workspace">
             <div className="tpanel-head">
               <span className="sec">Archivos</span>
+              <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title="Abrir un archivo por su nombre">
+                {keyOf("quick-open")}
+              </button>
               <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title="Actualizar" aria-label="Actualizar el árbol">
                 <Icon name="refresh" />
               </button>

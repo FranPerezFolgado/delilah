@@ -249,6 +249,7 @@ export const api = {
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
+  files: (key: string) => request<string[]>(`/api/v1/tasks/${key}/files`),
   tree: (key: string, path: string) => request<TreeEntry[]>(`/api/v1/tasks/${key}/tree?${new URLSearchParams({ path })}`),
   file: (key: string, path: string) => request<FileContent>(`/api/v1/tasks/${key}/file?${new URLSearchParams({ path })}`),
   saveFile: async (key: string, path: string, text: string, version: string) => {

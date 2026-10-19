@@ -9,6 +9,7 @@ export type ActionId =
   | "prev-pane"
   | "toggle-maximize"
   | "toggle-tree"
+  | "quick-open"
   | "new-task"
   | "view-inbox"
   | "view-tasks"
@@ -31,6 +32,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "prev-pane", label: "Panel anterior", group: "Consola", default: "Ctrl+Shift+Tab" },
   { id: "toggle-maximize", label: "Maximizar o restaurar el panel", group: "Consola", default: "Mod+Shift+Enter" },
   { id: "toggle-tree", label: "Mostrar u ocultar el árbol de archivos", group: "Tarea", default: "Mod+B" },
+  { id: "quick-open", label: "Abrir un archivo por su nombre", group: "Tarea", default: "Mod+P" },
   { id: "new-task", label: "Nueva tarea", group: "General", default: "Mod+N" },
   { id: "view-inbox", label: "Ir a la Bandeja", group: "General", default: "Mod+I" },
   { id: "view-tasks", label: "Ir a Tareas", group: "General", default: "Mod+1" },

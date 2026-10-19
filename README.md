@@ -111,7 +111,9 @@ daemon notifies as before.
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself
 (status, actions, spec, history), its sessions, Cambios when opened, and files.
-Each task remembers its tabs when you switch tasks or reload the app.
+Each task remembers its tabs when you switch tasks or reload the app. ⌘P finds a
+file by part of its name (the workspace's files as git sees them, submodules
+included) and opens it in a tab.
 
 - **Sessions** are tabs with their live terminal: the primary Claude, extra Claudes
   and shells. "+ Claude" and "+ Terminal" in the task, or ⌘⇧T and ⌘T, start one

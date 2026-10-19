@@ -159,6 +159,27 @@ fn untracked_diff(dir: &Path, path: &str) -> String {
     }
 }
 
+/// Every file of the repo in `dir` that git would show: tracked, plus new files not
+/// ignored. Submodules appear as their folder, not their files.
+pub fn repo_files(dir: &Path, opts: &GitOptions) -> Result<Vec<String>, GitError> {
+    let out = git(
+        dir,
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        opts,
+    )?;
+    Ok(out
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// `--name-status -z`: `M\0path\0`, or `R100\0old\0new\0` for a rename.
 fn name_status(out: &str) -> Vec<FileChange> {
     let mut fields = out.split('\0').filter(|f| !f.is_empty());

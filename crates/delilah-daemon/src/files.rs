@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiError;
 use crate::state::AppState;
 
+/// Enough for any repo worth opening here; past this the list is cut.
+const MAX_LISTED: usize = 100_000;
+
 /// Bigger files are shown as not editable: an editor in a panel is not the tool.
 pub const MAX_EDIT_BYTES: u64 = 1 << 20;
 
@@ -150,6 +153,50 @@ pub async fn tree(
         )));
     }
     Ok(Json(list_dir(&dir).map_err(io_error)?))
+}
+
+/// `GET /api/v1/tasks/{key}/files`: every file of the workspace, as git sees it (no
+/// ignored files), with each initialised submodule's files under its folder. For
+/// finding a file by name.
+pub async fn all(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    let key = TaskKey::new(key);
+    let ws = app
+        .store
+        .workspace(&key)
+        .await?
+        .map(|(_, ws)| ws)
+        .filter(|ws| ws.path.is_dir())
+        .ok_or_else(|| ApiError::not_found(format!("{key} has no workspace")))?;
+    let opts = delilah_git::GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    };
+    let files = tokio::task::spawn_blocking(move || {
+        let mut files = delilah_git::repo_files(&ws.path, &opts).unwrap_or_default();
+        // A parent lists its submodules as folders: put their files in their place.
+        let subs: Vec<String> = ws
+            .repos()
+            .into_iter()
+            .map(|(sub, _)| sub)
+            .filter(|s| s != ".")
+            .collect();
+        // Submodules left out of this workspace are empty folders: not files either.
+        files.retain(|f| !subs.contains(f) && !ws.path.join(f).is_dir());
+        for sub in subs {
+            let dir = ws.path.join(&sub);
+            if let Ok(inner) = delilah_git::repo_files(&dir, &opts) {
+                files.extend(inner.into_iter().map(|f| format!("{sub}/{f}")));
+            }
+        }
+        files.sort();
+        files.truncate(MAX_LISTED);
+        files
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(files))
 }
 
 /// `GET /api/v1/tasks/{key}/file?path=…`

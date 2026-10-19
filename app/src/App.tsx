@@ -214,6 +214,9 @@ export function App() {
       case "toggle-tree":
         if (view === "tasks") window.dispatchEvent(new Event("delilah:toggle-tree"));
         return;
+      case "quick-open":
+        if (view === "tasks") window.dispatchEvent(new Event("delilah:quick-open"));
+        return;
       case "new-task":
         return setNewTask(true);
       case "view-inbox":
