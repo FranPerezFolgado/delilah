@@ -200,17 +200,22 @@ worktree option is preselected; start without changing it; the task gets a workt
 - **FR-003**: The app MUST offer a settings screen per project, reached from Projects,
   showing every setting with its current value or default.
 - **FR-004**: The settings screen MUST validate before saving and show each problem next
-  to its field; nothing MUST be saved while a value is invalid.
-- **FR-005**: The CLI MUST show a project's settings and change each of them.
+  to its field; nothing MUST be saved while a value is invalid. Leaving the screen with
+  unsaved changes MUST ask whether to discard them.
+- **FR-005**: The CLI MUST show a project's settings (`delilah project show <name>`)
+  and change each of them (`delilah project set <name> <setting> <value>`, and `unset`
+  to go back to the default), with the same validation as the screen.
 - **FR-006**: The settings MUST include the default workspace mode (checkout or
   worktree); a choice made for one task MUST win over it.
 - **FR-007**: The settings MUST include a branch template with the placeholders
   `{ticket}` (required; the task key) and `{slug}` (optional; the title, lower-case,
-  letters, digits and hyphens, at most 40 characters); an explicit branch for one task
-  MUST win over it.
+  letters, digits and hyphens, at most 40 characters); any other placeholder is
+  invalid; an explicit branch for one task MUST win over it.
 - **FR-008**: The settings MUST include shared entries (files or folders relative to the
   project root, never outside it), each copied or linked into a new worktree; linking
-  MUST be the default for folders and copying for files.
+  MUST be the default for folders and copying for files. An entry that already exists
+  in the new worktree (because git tracks it) MUST be left as it is and noted in the
+  task's log.
 - **FR-009**: The settings MUST include an optional setup command that runs inside a
   newly created worktree (never in the checkout), after shared entries are in place and
   before the agent launches, with the same clean environment agents get, and a 10-minute
@@ -218,16 +223,23 @@ worktree option is preselected; start without changing it; the task gets a workt
 - **FR-010**: A setup failure (non-zero exit or timeout) MUST stop the start before the
   agent launches, keep the worktree, show the failure on the task with the end of the
   output, and offer "Reintentar setup" (runs it again) and "Lanzar sin setup" (launches
-  the agent as the worktree is).
+  the agent as the worktree is). "The end of the output" is its last 20 lines. The
+  failure and both actions MUST still be there after the daemon restarts.
 - **FR-011**: The setup command's full output MUST be kept with the task's logs.
 - **FR-012**: For parent projects, the settings MUST include submodules to always
   include and to never include; "always" is added to every selection and "never" is
-  removed from what is offered and suggested, and refused when requested.
+  removed from what is offered and suggested, and refused when requested. A submodule
+  MUST NOT be in both lists.
 - **FR-013**: The new-task form MUST preselect the project's default workspace mode and
   its "always" submodules, hide its "never" submodules, and show the branch name the
   task will get.
 - **FR-014**: The settings MUST leave room for PR options, to be added with the PR
   handling work.
+- **FR-016**: While the setup runs, the task MUST show that it is preparing the
+  workspace, with the setup's output visible live, and the user MUST be able to cancel
+  it (handled like a failure).
+- **FR-017**: The API and the CLI MUST report the effective settings of every project,
+  defaults included, so a project with no settings saved needs no special case.
 - **FR-015**: Texts MUST be translatable like the rest of Delilah (Spanish in the code,
   English in the translations).
 
