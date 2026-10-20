@@ -3,8 +3,9 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { terminalUrl } from "../api";
+import { terminalUrl, type SessionKind } from "../api";
 import { actionFor } from "../shortcuts";
+import { AGENT_NEW_LINE, isAgentNewLineKey } from "../keys";
 import { t as tr } from "../i18n";
 
 const THEME = {
@@ -13,6 +14,8 @@ const THEME = {
   cursor: "#f0a03c",
   selectionBackground: "rgba(240,160,60,0.3)",
 };
+// How long a pane's size must hold still before it claims it.
+const RESIZE_SETTLE_MS = 100;
 
 /**
  * A session's live terminal: the daemon's WebSocket stream drawn by xterm.js.
@@ -23,7 +26,15 @@ const THEME = {
  * size and every other viewer draws at the size the daemon announces. Only the
  * window in use drives: a pane focused in a window in the background does not.
  */
-export function TerminalPane({ sessionId, focused }: { sessionId: string; focused: boolean }) {
+export function TerminalPane({
+  sessionId,
+  kind,
+  focused,
+}: {
+  sessionId: string;
+  kind: SessionKind;
+  focused: boolean;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const focusedRef = useRef(focused);
   const claimRef = useRef<() => void>(() => {});
@@ -49,8 +60,6 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
       // No WebGL: xterm falls back to its DOM renderer.
     }
     termRef.current = t;
-    // App shortcuts (⌘T, ⌘W…) are for the app, not the shell.
-    t.attachCustomKeyEventHandler((e) => !(e.type === "keydown" && actionFor(e)));
 
     const ws = new WebSocket(terminalUrl(sessionId));
     ws.binaryType = "arraybuffer";
@@ -93,6 +102,18 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
     ws.onclose = () => t.write(`\r\n\x1b[2m[${tr("la sesión no está en marcha")}]\x1b[0m\r\n`);
 
     const encoder = new TextEncoder();
+    t.attachCustomKeyEventHandler((e) => {
+      // Shift+Enter is a new line for the agent, not a send.
+      if (isAgentNewLineKey(e, kind === "claude")) {
+        if (e.type === "keydown" && ws.readyState === WebSocket.OPEN) {
+          claim();
+          ws.send(encoder.encode(AGENT_NEW_LINE));
+        }
+        return false;
+      }
+      // App shortcuts (⌘T, ⌘W…) are for the app, not the shell.
+      return !(e.type === "keydown" && actionFor(e));
+    });
     const input = t.onData((data) => {
       if (ws.readyState !== WebSocket.OPEN) return;
       // Typing here makes this pane the driver.
@@ -100,20 +121,27 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
       ws.send(encoder.encode(data));
     });
 
+    // Once the size settles: dragging the tree's edge or the window's would otherwise
+    // send the PTY a resize, and the TUI a redraw, on every frame.
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const observer = new ResizeObserver(() => {
-      if (driving()) claim();
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        if (driving()) claim();
+      }, RESIZE_SETTLE_MS);
     });
     observer.observe(el);
 
     return () => {
       window.removeEventListener("focus", onWindowFocus);
+      clearTimeout(settle);
       observer.disconnect();
       input.dispose();
       ws.close();
       t.dispose();
       termRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, kind]);
 
   useEffect(() => {
     focusedRef.current = focused;

@@ -42,6 +42,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(addr = %config.addr, home = %config.home.display(), "delilahd listening");
     let app = AppState::new(store, config);
     app.load_language().await;
+    app.load_remote_control().await;
     scheduler::spawn(app.clone());
     specs::spawn(app.clone());
     axum::serve(listener, api::router(app))

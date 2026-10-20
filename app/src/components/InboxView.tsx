@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ago, api, hhmm, type InboxItem, type InboxKind } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
 import { locale, t } from "../i18n";
+import { isSendKey } from "../keys";
+
+// Where the webview cannot size a textarea to its text, it is done by hand.
+const SIZES_ITSELF = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
 
 const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> = {
   permission: { label: "Necesita un permiso", icon: "wait", cls: "c-wait" },
@@ -57,9 +61,16 @@ export function InboxView({ items, onOpenTask, onOpenChanges, onChanged }: Props
 
 function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem } & Omit<Props, "items">) {
   const [reply, setReply] = useState("");
+  const replyRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  useLayoutEffect(() => {
+    const el = replyRef.current;
+    if (!el || SIZES_ITSELF) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [reply]);
   const kind = KINDS[item.kind];
   const s = item.session;
   const long = (item.text?.length ?? 0) > 500 || (item.text?.split("\n").length ?? 0) > 8;
@@ -127,11 +138,19 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
             send();
           }}
         >
-          <input
+          <textarea
+            ref={replyRef}
             className="input"
+            rows={1}
             value={reply}
             onChange={(e) => setReply(e.target.value)}
-            placeholder={t("Responder… (Enter envía)")}
+            onKeyDown={(e) => {
+              if (isSendKey(e.nativeEvent)) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            placeholder={t("Responder… (Enter envía, ⇧Enter nueva línea)")}
             aria-label={t("Responder a {task}", { task: item.task })}
             disabled={busy}
           />

@@ -54,6 +54,9 @@ pub struct Launch<'a> {
     pub extra_dirs: &'a [&'a Path],
     /// Plan mode: Claude reads and explains, it does not edit.
     pub read_only: bool,
+    /// Remote Control: the session can also be followed and driven from claude.ai
+    /// and the Claude app, under this name.
+    pub remote_control: Option<&'a str>,
 }
 
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
@@ -97,6 +100,10 @@ pub fn command(launch: &Launch) -> CommandBuilder {
     for dir in launch.extra_dirs {
         cmd.arg("--add-dir");
         cmd.arg(dir);
+    }
+    // The name is always given: `--remote-control` alone would take the prompt as one.
+    if let Some(name) = launch.remote_control {
+        cmd.args(["--remote-control", name]);
     }
     cmd.arg("--settings");
     cmd.arg(launch.settings);
@@ -371,6 +378,7 @@ mod tests {
             resume: false,
             extra_dirs: &[],
             read_only: false,
+            remote_control: None,
         };
         let args = |l: &Launch| {
             command(l)
@@ -407,6 +415,60 @@ mod tests {
                 "continúa"
             ]
         );
+        let remote = Launch {
+            remote_control: Some("PROJ-1 · Principal"),
+            ..base
+        };
+        assert_eq!(
+            args(&remote),
+            [
+                "claude",
+                "--session-id",
+                "abc",
+                "--remote-control",
+                "PROJ-1 · Principal",
+                "--settings",
+                "/tmp/s.json",
+                "/feature PROJ-1"
+            ]
+        );
+        let remote_resumed = Launch {
+            resume: true,
+            prompt: Some("continúa"),
+            ..remote
+        };
+        assert_eq!(
+            args(&remote_resumed),
+            [
+                "claude",
+                "--resume",
+                "abc",
+                "--remote-control",
+                "PROJ-1 · Principal",
+                "--settings",
+                "/tmp/s.json",
+                "continúa"
+            ]
+        );
+        let remote_plan = Launch {
+            read_only: true,
+            ..remote
+        };
+        assert_eq!(
+            args(&remote_plan),
+            [
+                "claude",
+                "--session-id",
+                "abc",
+                "--remote-control",
+                "PROJ-1 · Principal",
+                "--settings",
+                "/tmp/s.json",
+                "--permission-mode",
+                "plan",
+                "/feature PROJ-1"
+            ]
+        );
     }
 
     #[test]
@@ -420,6 +482,7 @@ mod tests {
             resume: false,
             extra_dirs: &[ticket_dir],
             read_only: false,
+            remote_control: None,
         });
         let argv: Vec<String> = cmd
             .get_argv()
@@ -451,6 +514,7 @@ mod tests {
             resume: false,
             extra_dirs: &[],
             read_only: false,
+            remote_control: None,
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());
