@@ -6,7 +6,6 @@ import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
 import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
-import { ConsoleView, consoleOrder, type Layout } from "./components/ConsoleView";
 import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
 import { ProjectsView } from "./components/ProjectsView";
@@ -24,15 +23,12 @@ export function App() {
   const [specs, setSpecs] = useState<Record<string, SpecSummary>>({});
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [focusSession, setFocusSession] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [usage, setUsage] = useState<UsageReport | null>(null);
   const [online, setOnline] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [newTask, setNewTask] = useState(false);
   const [draft, setDraft] = useState<TaskDraft | undefined>(undefined);
-  const [layout, setLayout] = useState<Layout>(4);
-  const [restoreLayout, setRestoreLayout] = useState<Layout>(4);
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
   const [convertFrom, setConvertFrom] = useState<Session | null>(null);
@@ -115,57 +111,8 @@ export function App() {
     setBindingsState(b);
   };
 
-  const openConsole = (key: string, sessionId?: string) => {
-    setSelected(key);
-    setFocusSession(sessionId ?? sessions.find((s) => s.task === key && s.primary)?.id ?? null);
-    setView("console");
-    refresh();
-  };
 
-  const shown = consoleOrder(tasks, sessions, selected, focusSession);
-  const focused = shown.find((s) => s.id === focusSession) ?? (view === "console" ? shown[0] : undefined);
 
-  // The task a shortcut acts on: the focused pane's in the console, else the selected one.
-  const currentTask = () => (view === "console" && focused ? focused.task : selected);
-
-  const openSession = async (kind: SessionKind) => {
-    const key = currentTask();
-    if (!key || !sessions.some((s) => s.task === key)) {
-      setToast("Esta tarea no tiene workspace donde abrir una sesión.");
-      return;
-    }
-    try {
-      const s = await api.openSession(key, { kind });
-      openConsole(key, s.id);
-    } catch (e) {
-      setToast((e as Error).message);
-    }
-  };
-
-  const closeFocused = async () => {
-    if (view !== "console" || !focused) return;
-    if (focused.primary) {
-      setToast("La sesión principal no se cierra: termina con la tarea (Marcar como hecha).");
-      return;
-    }
-    const next = shown.filter((s) => s.id !== focused.id);
-    try {
-      await api.closeSession(focused.id);
-      setFocusSession(next[0]?.id ?? null);
-      refresh();
-    } catch (e) {
-      setToast((e as Error).message);
-    }
-  };
-
-  const movePane = (step: number) => {
-    if (view !== "console" || shown.length === 0) return;
-    const visible = shown.slice(0, layout);
-    const at = Math.max(0, visible.findIndex((s) => s.id === focused?.id));
-    const next = visible[(at + step + visible.length) % visible.length];
-    setFocusSession(next.id);
-    setSelected(next.task);
-  };
 
   /** Shows a task's screen, on one of its session tabs if given. */
   const openTask = (key: string, sessionId?: string) => {
@@ -201,26 +148,19 @@ export function App() {
         const kind: SessionKind = action === "new-terminal" ? "shell" : "claude";
         // In a task the new session opens as one of its tabs.
         if (view === "tasks" && (selected?.startsWith("@") || sessions.some((s) => s.task === selected))) return void window.dispatchEvent(new CustomEvent("delilah:new-session", { detail: kind }));
-        return openSession(kind);
+        setToast("Abre una tarea con workspace, o un proyecto, para abrir una sesión.");
+        return;
       }
       case "close-session":
         // In a task, ⌘W closes its active tab (a file, the changes), as in any editor.
-        if (view === "tasks") return void window.dispatchEvent(new Event("delilah:close-tab"));
-        return closeFocused();
+        if (view === "tasks") window.dispatchEvent(new Event("delilah:close-tab"));
+        return;
       case "next-pane":
       case "prev-pane": {
         const step = action === "next-pane" ? 1 : -1;
-        if (view === "tasks") return void window.dispatchEvent(new CustomEvent("delilah:cycle-tab", { detail: step }));
-        return movePane(step);
-      }
-      case "toggle-maximize":
-        if (view !== "console") return;
-        if (layout === 1) setLayout(restoreLayout);
-        else {
-          setRestoreLayout(layout);
-          setLayout(1);
-        }
+        if (view === "tasks") window.dispatchEvent(new CustomEvent("delilah:cycle-tab", { detail: step }));
         return;
+      }
       case "toggle-tree":
         if (view === "tasks") window.dispatchEvent(new Event("delilah:toggle-tree"));
         return;
@@ -233,8 +173,6 @@ export function App() {
         return setView("inbox");
       case "view-tasks":
         return setView("board");
-      case "view-console":
-        return setView("console");
       case "view-jira":
         return setView("jira");
       case "view-projects":
@@ -352,26 +290,6 @@ export function App() {
                 <button className="btn" onClick={() => setView("board")}>Ir al tablero</button>
               </div>
             ))}
-          {view === "console" && (
-            <ConsoleView
-              layout={layout}
-              onLayout={setLayout}
-              tasks={tasks}
-              sessions={sessions}
-              task={selected}
-              focus={focused?.id ?? null}
-              onFocus={(id, key) => {
-                setFocusSession(id);
-                setSelected(key);
-              }}
-              onChanged={refresh}
-              onNewTask={() => setNewTask(true)}
-              onOpenTask={(key) => {
-                setSelected(key);
-                setView("tasks");
-              }}
-            />
-          )}
           {view === "jira" && (
             <JiraView
               onAnalyze={(issue) => {
@@ -411,7 +329,7 @@ export function App() {
             setDraft(undefined);
             setConvertFrom(null);
             refresh();
-            openConsole(t.key);
+            openTask(t.key);
           }}
         />
       )}

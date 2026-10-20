@@ -144,8 +144,7 @@ included) and opens it in a tab.
   and shells. "+ Claude" and "+ Terminal" in the task, or ⌘⇧T and ⌘T, start one
   as a new tab. ⌘W closes the active tab: a terminal closes at once, a working
   Claude asks first, and the primary one never closes (it ends with the task). A
-  stopped session offers "Reabrir". ⌃Tab and ⌃⇧Tab move between tabs. The Consola
-  view still shows every task's sessions side by side.
+  stopped session offers "Reabrir". ⌃Tab and ⌃⇧Tab move between tabs.
 - **Cambios** lists what the branch changed in each repo of the workspace (each
   submodule of a parent), with line counts and the diff of each file. It compares
   against where the branch started (its merge-base with `origin/HEAD`, or `main`), so

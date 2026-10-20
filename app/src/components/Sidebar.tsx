@@ -5,7 +5,7 @@ import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 
-export type View = "inbox" | "board" | "tasks" | "console" | "jira" | "projects" | "settings";
+export type View = "inbox" | "board" | "tasks" | "jira" | "projects" | "settings";
 
 
 interface Props {
@@ -72,7 +72,6 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
     ...projects.map(group),
     ...(tasks.some((t) => !t.project) ? [group(null)] : []),
   ];
-  const live = tasks.filter((t) => ["running", "waiting-for-user", "paused-by-limit"].includes(t.status.type)).length;
   return (
     <nav className="sidebar" aria-label="Navegación">
       <button className={`nav ${view === "inbox" ? "on" : ""}`} onClick={() => onView("inbox")}>
@@ -83,10 +82,6 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
       <button className={`nav ${view === "board" ? "on" : ""}`} onClick={() => onView("board")}>
         <Icon name="tasks" /> Tareas <span className="count mono">{tasks.length}</span>
         <span className="kbd">{keyOf("view-tasks")}</span>
-      </button>
-      <button className={`nav ${view === "console" ? "on" : ""}`} onClick={() => onView("console")}>
-        <Icon name="console" /> Consola <span className="count mono">{live}</span>
-        <span className="kbd">{keyOf("view-console")}</span>
       </button>
       <button className={`nav ${view === "jira" ? "on" : ""}`} onClick={() => onView("jira")}>
         <Icon name="ticket" /> Jira <span className="kbd" style={{ marginLeft: "auto" }}>{keyOf("view-jira")}</span>

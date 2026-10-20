@@ -7,13 +7,11 @@ export type ActionId =
   | "close-session"
   | "next-pane"
   | "prev-pane"
-  | "toggle-maximize"
   | "toggle-tree"
   | "quick-open"
   | "new-task"
   | "view-inbox"
   | "view-tasks"
-  | "view-console"
   | "view-jira"
   | "view-projects";
 
@@ -27,18 +25,16 @@ export interface ActionDef {
 export const ACTIONS: ActionDef[] = [
   { id: "new-terminal", label: "Nueva terminal en el workspace", group: "Sesiones", default: "Mod+T" },
   { id: "new-claude", label: "Nueva sesión de Claude", group: "Sesiones", default: "Mod+Shift+T" },
-  { id: "close-session", label: "Cerrar la sesión activa", group: "Sesiones", default: "Mod+W" },
-  { id: "next-pane", label: "Siguiente panel", group: "Consola", default: "Ctrl+Tab" },
-  { id: "prev-pane", label: "Panel anterior", group: "Consola", default: "Ctrl+Shift+Tab" },
-  { id: "toggle-maximize", label: "Maximizar o restaurar el panel", group: "Consola", default: "Mod+Shift+Enter" },
+  { id: "close-session", label: "Cerrar la pestaña activa", group: "Tarea", default: "Mod+W" },
+  { id: "next-pane", label: "Pestaña siguiente", group: "Tarea", default: "Ctrl+Tab" },
+  { id: "prev-pane", label: "Pestaña anterior", group: "Tarea", default: "Ctrl+Shift+Tab" },
   { id: "toggle-tree", label: "Mostrar u ocultar el árbol de archivos", group: "Tarea", default: "Mod+B" },
   { id: "quick-open", label: "Abrir un archivo por su nombre", group: "Tarea", default: "Mod+P" },
   { id: "new-task", label: "Nueva tarea", group: "General", default: "Mod+N" },
   { id: "view-inbox", label: "Ir a la Bandeja", group: "General", default: "Mod+I" },
   { id: "view-tasks", label: "Ir a Tareas", group: "General", default: "Mod+1" },
-  { id: "view-console", label: "Ir a Consola", group: "General", default: "Mod+2" },
-  { id: "view-jira", label: "Ir a Jira", group: "General", default: "Mod+3" },
-  { id: "view-projects", label: "Ir a Proyectos", group: "General", default: "Mod+4" },
+  { id: "view-jira", label: "Ir a Jira", group: "General", default: "Mod+2" },
+  { id: "view-projects", label: "Ir a Proyectos", group: "General", default: "Mod+3" },
 ];
 
 export type Bindings = Record<ActionId, string>;
