@@ -13,6 +13,15 @@ always include or exclude. PR options are out of scope for now." Refined with th
 the config is edited from a project settings screen and kept by Delilah, not in a
 `delilah.toml` inside the repo (decision 26).
 
+## Clarifications
+
+### Session 2026-10-20
+
+- Q: Does the setup command also run for tasks in the checkout? → A: No, only when a
+  worktree is created.
+- Q: What happens to the task when the setup fails? → A: It stops with the error and
+  keeps its worktree, with "Reintentar setup" and "Lanzar sin setup".
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Configure a project from its settings screen (Priority: P1)
@@ -99,10 +108,15 @@ prompt.
 3. **Given** a setup command, **When** the workspace is ready, **Then** the command runs
    in the workspace before the agent launches, and its output is kept with the task's
    logs.
-4. **Given** a setup command that fails, **When** a task starts, **Then** the agent is
-   not launched, the task shows that setup failed with the end of the output, and the
-   user can retry the start or open the workspace.
-5. **Given** a shared entry missing from the checkout, **When** a task starts, **Then**
+4. **Given** a setup command that fails, **When** a worktree task starts, **Then** the
+   agent is not launched, the worktree is kept, and the task shows that setup failed
+   with the end of the output and two actions: "Reintentar setup" and "Lanzar sin
+   setup".
+5. **Given** a task stopped by a failed setup, **When** the user fixes the worktree by
+   hand and chooses "Lanzar sin setup", **Then** the agent launches in that worktree.
+6. **Given** a setup command, **When** a task starts in the checkout, **Then** the
+   setup does not run.
+7. **Given** a shared entry missing from the checkout, **When** a task starts, **Then**
    the task starts anyway and the task's log notes the missing entry.
 
 ---
@@ -166,8 +180,10 @@ worktree option is preselected; start without changing it; the task gets a workt
   existing `feature/<key>` branch.
 - **Long titles**: the slug is cut to 40 characters at a word boundary.
 - **Free tasks** (`LIBRE-n`): `{ticket}` is the free task's key.
-- **Shared entries in checkout mode**: nothing is copied or linked; the checkout already
-  has them.
+- **Checkout mode**: nothing is copied or linked and the setup does not run; the
+  checkout already has what it needs.
+- **Failed setup, then archive or delete**: the kept worktree is released like any
+  other worktree (same unpushed-work check).
 - **Setup command that hangs**: stopped after 10 minutes and treated as failed.
 - **Workspace reused** (resumed session, restarted agent): the setup does not run again;
   it runs only when a workspace is created.
@@ -195,12 +211,14 @@ worktree option is preselected; start without changing it; the task gets a workt
 - **FR-008**: The settings MUST include shared entries (files or folders relative to the
   project root, never outside it), each copied or linked into a new worktree; linking
   MUST be the default for folders and copying for files.
-- **FR-009**: The settings MUST include an optional setup command that runs inside a new
-  workspace, after shared entries are in place and before the agent launches, with the
-  same clean environment agents get, and a 10-minute limit.
+- **FR-009**: The settings MUST include an optional setup command that runs inside a
+  newly created worktree (never in the checkout), after shared entries are in place and
+  before the agent launches, with the same clean environment agents get, and a 10-minute
+  limit.
 - **FR-010**: A setup failure (non-zero exit or timeout) MUST stop the start before the
-  agent launches, show the failure on the task with the end of the output, and let the
-  user retry.
+  agent launches, keep the worktree, show the failure on the task with the end of the
+  output, and offer "Reintentar setup" (runs it again) and "Lanzar sin setup" (launches
+  the agent as the worktree is).
 - **FR-011**: The setup command's full output MUST be kept with the task's logs.
 - **FR-012**: For parent projects, the settings MUST include submodules to always
   include and to never include; "always" is added to every selection and "never" is
@@ -219,7 +237,7 @@ worktree option is preselected; start without changing it; the task gets a workt
   entries, setup command, submodules always and never. Kept by Delilah with the project.
 - **Shared entry**: a path relative to the project root and how it reaches a worktree
   (copy or link).
-- **Setup run**: one execution of the setup command for one workspace: start, end, exit
+- **Setup run**: one execution of the setup command for one worktree: start, end, exit
   status, output.
 
 ## Success Criteria *(mandatory)*
@@ -244,8 +262,6 @@ worktree option is preselected; start without changing it; the task gets a workt
   (for example through a file in the repo) is not needed now (decision 26).
 - The setup command is trusted like the rest of the project's code: the user typed it,
   and the agent already runs commands in the project.
-- The setup command also runs in checkout mode (e.g. installing dependencies after the
-  branch switch); shared entries do not.
 - The slug length (40) and the setup limit (10 minutes) are fixed in this feature.
 - The project's name, path, kind and workflow keep being edited where they are today;
   the settings screen may show them but does not have to move them.

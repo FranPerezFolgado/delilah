@@ -35,6 +35,8 @@
   implementation details.
 - Revised after the user chose option B: settings kept by Delilah and edited from a
   project settings screen, not a `delilah.toml` in the repo (decision 26).
-- Defaults taken instead of clarifications: setup also runs in checkout mode; folders
+- Clarified 2026-10-20: setup only in new worktrees; a failed setup keeps the worktree
+  with "Reintentar setup" and "Lanzar sin setup".
+- Defaults taken instead of clarifications: folders
   are linked and files copied by default; slug cut at 40 characters; setup timeout of
   10 minutes. `/speckit-clarify` can revisit them.
