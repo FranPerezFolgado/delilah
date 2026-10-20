@@ -31,6 +31,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         None => tracing::warn!("could not read the login shell's PATH; agents get the daemon's"),
     }
     std::fs::create_dir_all(&config.home)?;
+    // Only the user: it holds every hook payload (tool inputs and outputs) and logs.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&config.home, std::fs::Permissions::from_mode(0o700))?;
+    }
     let store = Store::open(&config.database_path()).await?;
 
     let listener = tokio::net::TcpListener::bind(config.addr).await?;

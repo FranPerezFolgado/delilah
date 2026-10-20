@@ -68,6 +68,15 @@ pub async fn connect(
         .filter(|s| !s.is_empty())
         // A board's or a ticket's URL works too: keep the site's.
         .map(delilah_integrations::jira::site_root);
+    // The token goes with every request: never in clear text.
+    if req.mode != JiraMode::Sample
+        && let Some(site) = &site
+        && !site.starts_with("https://")
+    {
+        return Err(ApiError::bad_request(format!(
+            "the Jira site must be an https:// URL, got `{site}`"
+        )));
+    }
     let email = req
         .email
         .as_deref()
@@ -316,6 +325,20 @@ mod tests {
         );
         assert!(md.contains("- Componentes: svc-payments, svc-orders"));
         assert!(md.contains("## Descripción"));
+    }
+
+    #[tokio::test]
+    async fn the_token_never_goes_over_plain_http() {
+        let state = app().await;
+        let (status, body) = call(
+            &state,
+            "PUT",
+            "/api/v1/jira",
+            Some(json!({ "mode": "data-center", "site": "http://jira.acme.test", "token": "t" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("https"), "{body}");
     }
 
     #[tokio::test]

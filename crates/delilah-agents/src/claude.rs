@@ -157,21 +157,15 @@ fn post_command(daemon_url: &str, path: &str, task: &str, session: &str) -> Stri
     )
 }
 
-/// The status line the user configured for Claude, looked up the way Claude does:
-/// the project's local settings, the project's, then the user's. `--settings` would
-/// otherwise replace it, so Delilah runs it itself.
-pub fn user_status_line(workspace: &Path) -> Option<Value> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let candidates = [
-        Some(workspace.join(".claude/settings.local.json")),
-        Some(workspace.join(".claude/settings.json")),
-        home.map(|h| h.join(".claude/settings.json")),
-    ];
-    candidates.into_iter().flatten().find_map(|path| {
-        let settings: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-        let line = settings.get("statusLine")?;
-        (line["type"] == "command" && line["command"].is_string()).then(|| line.clone())
-    })
+/// The status line the user configured for Claude in `~/.claude/settings.json`.
+/// `--settings` would otherwise replace it, so Delilah runs it itself. Only the
+/// user's own: a repo's `.claude/settings*.json` is not trusted to run commands,
+/// and Delilah would run it without Claude's folder trust prompt.
+pub fn user_status_line() -> Option<Value> {
+    let path = PathBuf::from(std::env::var_os("HOME")?).join(".claude/settings.json");
+    let settings: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let line = settings.get("statusLine")?;
+    (line["type"] == "command" && line["command"].is_string()).then(|| line.clone())
 }
 
 /// The status line script: forwards Claude's status JSON (with the usage windows) to
@@ -201,11 +195,10 @@ pub fn write_settings(
     daemon_url: &str,
     task: &str,
     session: &str,
-    workspace: &Path,
 ) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
-    let user = user_status_line(workspace);
+    let user = user_status_line();
     let script = dir.join(format!("statusline-{session}.sh"));
     std::fs::write(
         &script,

@@ -215,7 +215,9 @@ pub async fn file(
     }
     let ws = workspace_of(&app, &key).await?.ok_or_else(missing)?;
     let dir = spec.summary.dir.as_deref().ok_or_else(missing)?;
-    std::fs::read_to_string(ws.path.join(dir).join(&name)).map_err(|_| missing())
+    // `specs/` may be a symlink in the repo: the file must still be inside the workspace.
+    let path = crate::files::resolve(&ws.path, &format!("{dir}/{name}"))?;
+    std::fs::read_to_string(path).map_err(|_| missing())
 }
 
 /// Keeps the board's summary and, when the phase moves, the task's history.

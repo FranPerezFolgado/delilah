@@ -1,8 +1,9 @@
 //! HTTP API of the daemon. Every client (CLI, desktop app, mobile web) goes through
 //! it: nothing else reads the database.
 
-use axum::extract::{Path, State};
-use axum::http::{HeaderValue, StatusCode};
+use axum::extract::{Path, Request, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -109,6 +110,50 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/asks/{id}/release", post(asks::release))
         .with_state(state)
         .layer(cors)
+        .layer(middleware::from_fn(guard))
+}
+
+/// The API has no authentication, so only the app and local tools may reach it:
+/// - a browser `Origin` other than the app's is refused. CORS alone is not enough:
+///   WebSockets skip it, and a form POST with no body runs before CORS hides the reply.
+///   The CLI, curl and the agents' hooks send no `Origin`.
+/// - the `Host` must be a loopback name, so a page that rebinds its own domain to
+///   127.0.0.1 is refused too (DNS rebinding).
+async fn guard(req: Request, next: Next) -> Response {
+    match refusal(req.headers()) {
+        Some(reason) => {
+            tracing::warn!(uri = %req.uri(), "refused: {reason}");
+            ApiError::new(StatusCode::FORBIDDEN, reason).into_response()
+        }
+        None => next.run(req).await,
+    }
+}
+
+fn refusal(headers: &HeaderMap) -> Option<&'static str> {
+    if let Some(origin) = headers.get(header::ORIGIN)
+        && !APP_ORIGINS.iter().any(|o| origin == o)
+    {
+        return Some("requests from other origins are not allowed");
+    }
+    if let Some(host) = headers.get(header::HOST)
+        && !host.to_str().is_ok_and(is_loopback_host)
+    {
+        return Some("the Host must be a loopback address");
+    }
+    None
+}
+
+/// `127.0.0.1:7420`, `localhost`, `[::1]:7420`… The port does not matter: a rebinding
+/// page can only control the name.
+fn is_loopback_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -171,7 +216,8 @@ async fn create_task(
     State(app): State<AppState>,
     Json(new): Json<NewTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let task = Task::new(TaskKey::new(new.key), new.title, new.workflow);
+    let key = TaskKey::parse(new.key).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let task = Task::new(key, new.title, new.workflow);
     app.store.create_task(&task).await?;
     app.emit(crate::events::Topic::Tasks);
     Ok((StatusCode::CREATED, Json(task)))
@@ -443,5 +489,73 @@ mod cors_tests {
             Some("http://localhost:1420")
         );
         assert_eq!(preflight("https://evil.example").await, None);
+    }
+
+    async fn status(method: &str, uri: &str, headers: &[(&str, &str)]) -> StatusCode {
+        let config = crate::config::Config {
+            home: std::env::temp_dir(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+        };
+        let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
+        let mut req = Request::builder().method(method).uri(uri);
+        for (name, value) in headers {
+            req = req.header(*name, *value);
+        }
+        app.oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn other_origins_cannot_post_or_open_websockets() {
+        // A form POST with no body needs no preflight: it must still be refused.
+        let evil = [
+            ("origin", "https://evil.example"),
+            ("host", "127.0.0.1:7420"),
+        ];
+        assert_eq!(
+            status("POST", "/api/v1/tasks/PROJ-1/done", &evil).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status("GET", "/api/v1/tasks/PROJ-1/terminal", &evil).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status("GET", "/api/v1/tasks", &[("origin", "null")]).await,
+            StatusCode::FORBIDDEN
+        );
+        // The app, and tools that send no Origin, get through.
+        let app = [("origin", "tauri://localhost"), ("host", "127.0.0.1:7420")];
+        assert_eq!(status("GET", "/api/v1/tasks", &app).await, StatusCode::OK);
+        assert_eq!(
+            status("GET", "/api/v1/tasks", &[("host", "localhost:7420")]).await,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn rebound_host_names_are_refused() {
+        for host in [
+            "evil.example:7420",
+            "evil.example",
+            "127.0.0.1.evil.example:7420",
+        ] {
+            assert_eq!(
+                status("GET", "/api/v1/tasks", &[("host", host)]).await,
+                StatusCode::FORBIDDEN,
+                "{host}"
+            );
+        }
+        for host in ["127.0.0.1:7420", "localhost", "[::1]:7420", "127.0.0.1"] {
+            assert_eq!(
+                status("GET", "/api/v1/tasks", &[("host", host)]).await,
+                StatusCode::OK,
+                "{host}"
+            );
+        }
     }
 }

@@ -29,6 +29,9 @@ pub async fn claude_hook(
     Query(q): Query<HookQuery>,
     Json(hook): Json<Value>,
 ) -> StatusCode {
+    if !is_owner_name(&q.task) {
+        return StatusCode::BAD_REQUEST;
+    }
     // Kept raw: the exact payloads (e.g. a real StopFailure) are what the next
     // iteration of the adapter is built from.
     if let Err(e) = append_raw(&app, &q.task, &hook).await {
@@ -147,6 +150,16 @@ pub async fn claude_statusline(
     StatusCode::NO_CONTENT
 }
 
+/// A task key or `@<project>`: one plain folder name under the task dirs, so a forged
+/// `?task=../..` cannot write elsewhere.
+fn is_owner_name(owner: &str) -> bool {
+    let mut parts = std::path::Path::new(owner).components();
+    matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    )
+}
+
 async fn append_raw(app: &AppState, task: &str, hook: &Value) -> std::io::Result<()> {
     let dir = app.config.task_dir(task);
     tokio::fs::create_dir_all(&dir).await?;
@@ -209,6 +222,25 @@ mod tests {
             .await
             .unwrap()
             .status()
+    }
+
+    #[tokio::test]
+    async fn a_forged_task_cannot_write_outside_the_task_dirs() {
+        let state = running_task().await;
+        let outside = state.config.home.join("outside");
+        for task in ["..%2Foutside", "%2Ftmp%2Fdelilah-x", ".."] {
+            let path = format!("/hooks/claude?task={task}");
+            let code = post(&state, &path, json!({"hook_event_name": "Stop"})).await;
+            assert_eq!(code, StatusCode::BAD_REQUEST, "{task}");
+        }
+        assert!(!outside.exists());
+        let code = post(
+            &state,
+            "/hooks/claude?task=%40svc",
+            json!({"hook_event_name": "Stop"}),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
     }
 
     async fn status(state: &AppState) -> TaskStatus {

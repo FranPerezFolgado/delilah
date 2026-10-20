@@ -6,4 +6,4 @@ mod task;
 
 pub use project::{Project, ProjectKind};
 pub use spec::{SpecGroup, SpecItem, SpecPhase, parse_tasks};
-pub use task::{Event, Task, TaskKey, TaskStatus, TransitionError};
+pub use task::{Event, InvalidKey, Task, TaskKey, TaskStatus, TransitionError};

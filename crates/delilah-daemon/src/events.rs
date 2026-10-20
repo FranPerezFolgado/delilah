@@ -136,7 +136,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
         let req = format!(
-            "POST /api/v1/tasks HTTP/1.1\r\nHost: x\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            "POST /api/v1/tasks HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
         );
         s.write_all(req.as_bytes()).await.unwrap();

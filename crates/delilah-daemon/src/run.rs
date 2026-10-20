@@ -79,18 +79,7 @@ pub async fn start_run(
     if req.free && req.title.trim().is_empty() {
         return Err(ApiError::bad_request("say what the free task is about"));
     }
-    if req.key.is_empty()
-        || req.key.len() > 64
-        || !req
-            .key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err(ApiError::bad_request(format!(
-            "`{}` is not a valid ticket key (letters, digits, - and _)",
-            req.key
-        )));
-    }
+    let key = TaskKey::parse(&req.key).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let project = app.store.project(&req.project).await?;
     match (project.kind, req.submodules.is_empty()) {
         (ProjectKind::Parent, true) => {
@@ -131,7 +120,6 @@ pub async fn start_run(
         )));
     }
 
-    let key = TaskKey::new(&req.key);
     let mut task = Task::new(key.clone(), &req.title, &workflow);
     task.project = Some(project.name.clone());
     app.store.create_task(&task).await?;
@@ -264,7 +252,6 @@ pub fn launch_session(
                 &app.config.url(),
                 &session.task,
                 &session.id,
-                workspace,
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             claude::command(&claude::Launch {

@@ -13,10 +13,30 @@ impl TaskKey {
         Self(key.into())
     }
 
+    /// A key from outside (the API): letters, digits, `-` and `_`, up to 64. It names
+    /// folders and goes into the agents' hook commands, so nothing else gets in.
+    pub fn parse(key: impl Into<String>) -> Result<Self, InvalidKey> {
+        let key = key.into();
+        let valid = !key.is_empty()
+            && key.len() <= 64
+            && key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if valid {
+            Ok(Self(key))
+        } else {
+            Err(InvalidKey(key))
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("`{0}` is not a valid ticket key (letters, digits, - and _)")]
+pub struct InvalidKey(pub String);
 
 impl fmt::Display for TaskKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -213,6 +233,15 @@ mod tests {
 
     fn at(hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 19, hour, min, 0).unwrap()
+    }
+
+    #[test]
+    fn keys_from_outside_are_plain_names() {
+        assert!(TaskKey::parse("PROJ-1234").is_ok());
+        assert!(TaskKey::parse("free_7").is_ok());
+        for bad in ["", "../etc", "/tmp/x", "A B", "x'y", "a/b", &"x".repeat(65)] {
+            assert!(TaskKey::parse(bad).is_err(), "{bad} was accepted");
+        }
     }
 
     fn running_task() -> Task {
