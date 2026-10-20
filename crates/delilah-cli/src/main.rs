@@ -77,8 +77,14 @@ enum Command {
     Resume { key: String },
     /// Marks a task as done and stops its agent.
     Done { key: String },
-    /// Removes the workspace of a finished task (refuses while work is unpushed).
-    Archive { key: String },
+    /// Removes the workspace of a finished task (a worktree is kept while work is
+    /// unpushed, unless --force).
+    Archive {
+        key: String,
+        /// Remove the worktree even if uncommitted or unpushed work is lost.
+        #[arg(long)]
+        force: bool,
+    },
     /// Shows the subscription's usage windows, as Claude last reported them.
     Usage,
     /// Registers and lists projects.
@@ -238,8 +244,10 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 task.key
             );
         }
-        Command::Archive { key } => {
-            let task: Task = api.post(&format!("/api/v1/tasks/{key}/archive"), &json!({}))?;
+        Command::Archive { key, force } => {
+            let query = if force { "?force=true" } else { "" };
+            let task: Task =
+                api.post(&format!("/api/v1/tasks/{key}/archive{query}"), &json!({}))?;
             println!("Archived the workspace of {}.", task.key);
         }
         Command::Usage => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, hhmm, isActive, reviewPrompt, type EventRecord, type Session, type SessionKind, type Task } from "../api";
+import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type Session, type SessionKind, type Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { on } from "../live";
 import { Icon } from "./Icon";
@@ -38,6 +38,8 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Why archiving the worktree was refused (work that would be lost). */
+  const [keeps, setKeeps] = useState<string | null>(null);
 
   // The history changes with the task: fetched again whenever tasks change.
   useEffect(() => {
@@ -66,6 +68,22 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
   };
 
   const openSession = (kind: SessionKind, prompt?: string, label?: string) => act(() => onNewSession(kind, prompt, label));
+  const archive = (force: boolean) =>
+    act(async () => {
+      try {
+        await api.archive(task.key, force);
+        setKeeps(null);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409 && !force) setKeeps(e.message);
+        else throw e;
+      }
+    });
+  // Asking for a review puts the task in review.
+  const review = () =>
+    act(async () => {
+      if (task.phase !== "review" && task.status.type !== "done") await api.setPhase(task.key, "review");
+      await onNewSession("claude", reviewPrompt(), t("Revisión"));
+    });
   const hasWorkspace = sessions.length > 0;
 
   const s = task.status;
@@ -99,11 +117,11 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
         {task.phase === "review" && isActive(s) && hasWorkspace && (
           <div className="notice">
             <Icon name="review" className="c-done" />
-            <span style={{ flex: 1 }}>{t("Todas las subtareas están hechas: toca revisar los cambios de la rama.")}</span>
+            <span style={{ flex: 1 }}>{t("La tarea está en revisión: toca revisar los cambios de la rama.")}</span>
             <button className="btn" onClick={onViewChanges}>
               <Icon name="diff" /> {t("Ver cambios")}
             </button>
-            <button className="btn btn-p" disabled={busy} onClick={() => openSession("claude", reviewPrompt(), t("Revisión"))}>
+            <button className="btn btn-p" disabled={busy} onClick={review}>
               {t("Revisar con Claude")}
             </button>
           </div>
@@ -132,12 +150,29 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
             </button>
           )}
           {(s.type === "done" || s.type === "failed") && (
-            <button className="btn" disabled={busy} onClick={() => act(() => api.archive(task.key))}>
+            <button className="btn" disabled={busy} onClick={() => archive(false)}>
               {t("Archivar workspace")}
             </button>
           )}
         </div>
         {error && <div className="error selectable">{error}</div>}
+        {keeps && (
+          <div className="notice">
+            <Icon name="failed" className="c-err" />
+            <span style={{ flex: 1 }} className="selectable">
+              {t("No se ha archivado: {why}. Commitea y sube lo que quieras conservar, o archívalo igualmente.", { why: keeps })}
+            </span>
+            <button className="btn" onClick={onViewChanges}>
+              <Icon name="diff" /> {t("Ver cambios")}
+            </button>
+            <button className="btn btn-danger" disabled={busy} onClick={() => archive(true)}>
+              {t("Archivar igualmente (se pierde lo no subido)")}
+            </button>
+            <button className="btn btn-ghost" onClick={() => setKeeps(null)} aria-label={t("Cerrar")}>
+              <Icon name="close" />
+            </button>
+          </div>
+        )}
 
         <SpecPanel task={task} />
 
@@ -146,7 +181,7 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <span className="sec">{t("Sesiones en el workspace")}</span>
               <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                <button className="btn" disabled={busy} onClick={() => openSession("claude", reviewPrompt(), t("Revisión"))}>
+                <button className="btn" disabled={busy} onClick={review}>
                   <Icon name="review" /> {t("Revisar cambios")}
                 </button>
                 <button className="btn" disabled={busy} onClick={() => openSession("claude")}>

@@ -41,6 +41,8 @@ pub struct AppState {
     /// The language Delilah speaks in (see `lang.rs`); Spanish until `main` reads
     /// the preference.
     pub lang: crate::lang::Current,
+    /// Tasks the inbox suggests moving to review (see `phases.rs`).
+    pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
@@ -70,6 +72,7 @@ impl AppState {
             events,
             asks: Arc::default(),
             lang: crate::lang::Current::default(),
+            review_hints: Arc::default(),
             remote_control: Arc::default(),
         }
     }

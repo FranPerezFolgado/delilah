@@ -39,7 +39,7 @@ delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
 delilah resume PROJ-1234   # resume a task paused by the usage limit right away
 delilah done PROJ-1234     # mark it done and stop its agent
-delilah archive PROJ-1234  # remove its workspace (refuses while work is unpushed)
+delilah archive PROJ-1234  # remove its workspace (a worktree with unpushed work needs --force)
 ```
 
 A task whose turn ends on a usage limit is paused until the window resets; the
@@ -91,6 +91,13 @@ and the `tasks.md` checklist with the item the agent is on. Phase changes go to
 the task's history. Delilah only reads these files; the repo stays the source of
 truth.
 
+Without SpecKit the phase comes from what the agent does: its first edit to code
+(outside `specs/` and `.specify/`) means Implementación, and `gh pr create` or
+`git push` means Revisión. When the agent stops with commits on its branch, the
+Bandeja asks "¿Pasar a revisión?". These signals and the spec files only move a
+task forward; you move it anywhere by clicking a phase in the task's phase bar,
+and asking for a review ("Revisar cambios") moves it to Revisión.
+
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
 it right there), a permission it needs (answered in its terminal), a failed turn,
@@ -130,7 +137,8 @@ works in your checkout, the folder the conversation belongs to.
 and starts `/feature <what you want to do>`). The agent works either **in your
 checkout** (default: a branch in your folder, or in the chosen submodules of a
 parent; one task at a time, with the checkout clean; archiving goes back to the
-branch you were on and keeps the task's branch) or **isolated in a worktree**
+branch you were on and keeps the task's branch; files left uncommitted stay in your
+folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the

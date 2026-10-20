@@ -128,6 +128,8 @@ pub enum ItemKind {
     /// The task waits on you, but no session said what for (e.g. after a restart).
     Waiting,
     Review,
+    /// The agent stopped with commits on its branch: maybe it is ready for review.
+    SuggestReview,
     Paused,
     Failed,
 }
@@ -269,6 +271,32 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 ask: None,
             });
         }
+    }
+
+    let hints = app.review_hints.lock().unwrap().clone();
+    for t in tasks
+        .iter()
+        .filter(|t| hints.contains(t.key.as_str()) && is_open(t))
+    {
+        if t.phase.as_deref().and_then(SpecPhase::parse) >= Some(SpecPhase::Review) {
+            continue;
+        }
+        items.push(InboxItem {
+            kind: ItemKind::SuggestReview,
+            task: t.key.to_string(),
+            title: t.title.clone(),
+            session: None,
+            text: Some(
+                app.lang()
+                    .pick(
+                        "El agente ha parado con commits en su rama.",
+                        "The agent stopped with commits on its branch.",
+                    )
+                    .to_string(),
+            ),
+            since: None,
+            ask: None,
+        });
     }
 
     items.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.since.cmp(&a.since)));

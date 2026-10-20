@@ -171,9 +171,10 @@ impl Task {
     /// Applies `event`, leaving the task untouched if the transition is not allowed.
     pub fn apply(&mut self, event: Event) -> Result<(), TransitionError> {
         if let Event::PhaseReached { phase } = event {
+            // Any task under way, paused ones too (the user may move it by hand).
             if !matches!(
                 self.status,
-                TaskStatus::Running | TaskStatus::WaitingForUser
+                TaskStatus::Running | TaskStatus::WaitingForUser | TaskStatus::PausedByLimit { .. }
             ) {
                 return Err(self.invalid("phase-reached"));
             }

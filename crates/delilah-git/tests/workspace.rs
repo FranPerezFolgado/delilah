@@ -181,7 +181,7 @@ fn archives_a_workspace_with_no_new_work() {
     let fx = Fixture::new();
     let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
 
-    archive_workspace(&fx.parent(), &ws, &opts()).unwrap();
+    archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap();
     assert!(!ws.path.exists());
     assert_eq!(git(&fx.parent(), &["worktree", "list"]).lines().count(), 1);
 }
@@ -193,17 +193,17 @@ fn refuses_to_archive_while_work_would_be_lost() {
     let sub = ws.path.join("svc-payments");
 
     std::fs::write(sub.join("wip.txt"), "draft\n").unwrap();
-    let err = archive_workspace(&fx.parent(), &ws, &opts()).unwrap_err();
+    let err = archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap_err();
     assert!(matches!(err, GitError::Dirty { .. }), "{err}");
 
     std::fs::remove_file(sub.join("wip.txt")).unwrap();
     commit_change(&ws, "svc-payments");
-    let err = archive_workspace(&fx.parent(), &ws, &opts()).unwrap_err();
+    let err = archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap_err();
     assert!(matches!(err, GitError::Unpushed { count: 1, .. }), "{err}");
     assert!(ws.path.exists());
 
     git(&sub, &["push", "-q", "origin", BRANCH]);
-    archive_workspace(&fx.parent(), &ws, &opts()).unwrap();
+    archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap();
     assert!(!ws.path.exists());
 }
 
@@ -245,7 +245,7 @@ fn repo_archive_ignores_unpushed_work_that_is_not_the_tasks() {
     git(&repo, &["commit", "-m", "Local change"]);
 
     let ws = create_workspace(&repo, &fx.repo_spec(), &opts()).unwrap();
-    archive_workspace(&repo, &ws, &opts()).unwrap();
+    archive_workspace(&repo, &ws, false, &opts()).unwrap();
     assert!(!ws.path.exists());
     // The branch stays in the repo: it is what the PR is opened from.
     assert!(git(&repo, &["branch", "--list", "feature/SIGNAL-12"]).contains("SIGNAL-12"));
@@ -258,11 +258,11 @@ fn repo_archive_refuses_while_the_tasks_commits_are_not_pushed() {
     let ws = create_workspace(&repo, &fx.repo_spec(), &opts()).unwrap();
     commit_change(&ws, ".");
 
-    let err = archive_workspace(&repo, &ws, &opts()).unwrap_err();
+    let err = archive_workspace(&repo, &ws, false, &opts()).unwrap_err();
     assert!(matches!(err, GitError::Unpushed { count: 1, .. }), "{err}");
 
     git(&ws.path, &["push", "-q", "origin", "feature/SIGNAL-12"]);
-    archive_workspace(&repo, &ws, &opts()).unwrap();
+    archive_workspace(&repo, &ws, false, &opts()).unwrap();
 }
 
 #[test]
@@ -323,17 +323,28 @@ fn a_task_can_work_in_the_checkout_and_leave_it_as_it_was() {
     assert_eq!(git(&pay, &["branch", "--show-current"]), "feature/PROJ-9");
     assert_eq!(previous[0].0, "svc-payments");
 
-    // Uncommitted work stops leaving; committed work stays on the task's branch.
+    // Committed work stays on the task's branch; files left uncommitted stay in the
+    // checkout and do not stop it from going back.
     std::fs::write(pay.join("retry.txt"), "jitter\n").unwrap();
-    assert!(matches!(
-        leave_checkout(&parent, &previous, &opts()),
-        Err(GitError::Dirty { .. })
-    ));
     git(&pay, &["add", "retry.txt"]);
     git(&pay, &["commit", "-qm", "retry"]);
-    leave_checkout(&parent, &previous, &opts()).unwrap();
+    std::fs::write(pay.join("notes.txt"), "left over\n").unwrap();
+    assert!(leave_checkout(&parent, &previous, &opts()).is_empty());
     assert_eq!(git(&pay, &["rev-parse", "HEAD"]), before);
     assert!(git(&pay, &["branch", "--list", "feature/PROJ-9"]).contains("feature/PROJ-9"));
+    assert!(pay.join("notes.txt").exists());
+    // Leaving again (already back) is a no-op.
+    assert!(leave_checkout(&parent, &previous, &opts()).is_empty());
+}
+
+#[test]
+fn a_forced_archive_drops_work_that_was_not_pushed() {
+    let fx = Fixture::new();
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    std::fs::write(ws.path.join("svc-payments/wip.txt"), "draft\n").unwrap();
+    commit_change(&ws, "svc-payments");
+    archive_workspace(&fx.parent(), &ws, true, &opts()).unwrap();
+    assert!(!ws.path.exists());
 }
 
 #[test]

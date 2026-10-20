@@ -15,6 +15,7 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   error: { label: "Error en el turno", icon: "failed", cls: "c-err" },
   waiting: { label: "Te espera", icon: "wait", cls: "c-wait" },
   review: { label: "Lista para revisar", icon: "review", cls: "c-done" },
+  "suggest-review": { label: "¿Pasar a revisión?", icon: "review", cls: "c-done" },
   paused: { label: "Pausada por límite", icon: "pause", cls: "c-pause" },
   failed: { label: "Fallida", icon: "failed", cls: "c-err" },
 };
@@ -187,6 +188,19 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
               <Icon name="diff" /> {t("Ver cambios")}
             </button>
             <button className="btn" onClick={() => onOpenTask(item.task)}>{t("Abrir la tarea")}</button>
+          </>
+        )}
+        {item.kind === "suggest-review" && (
+          <>
+            <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.setPhase(item.task, "review"))}>
+              <Icon name="review" /> {t("Pasar a revisión")}
+            </button>
+            <button className="btn" onClick={() => onOpenChanges(item.task)}>
+              <Icon name="diff" /> {t("Ver cambios")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissReviewHint(item.task))}>
+              {t("Todavía no")}
+            </button>
           </>
         )}
         {item.kind === "paused" && (

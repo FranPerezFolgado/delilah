@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use delilah_core::{Event, ProjectKind, SpecGroup, SpecPhase, TaskKey, TaskStatus, parse_tasks};
+use delilah_core::{ProjectKind, SpecGroup, SpecPhase, TaskKey, parse_tasks};
 use delilah_git::{GitOptions, Workspace, changed_paths};
 use serde::Serialize;
 
@@ -235,22 +235,8 @@ async fn record(app: &AppState, key: &TaskKey, summary: &SpecSummary) {
     if summary.dir.is_none() {
         return;
     }
-    let Ok(Some(task)) = app.store.get_task(key).await else {
-        return;
-    };
-    let phase = summary.phase.name();
-    let can_move = matches!(
-        task.status,
-        TaskStatus::Running | TaskStatus::WaitingForUser
-    );
-    if can_move && task.phase.as_deref() != Some(phase) {
-        let event = Event::PhaseReached {
-            phase: phase.into(),
-        };
-        if let Err(e) = app.transition(key, event).await {
-            tracing::warn!(%key, "could not record the phase: {e}");
-        }
-    }
+    // The files only push forward: they never undo a phase the user chose.
+    crate::phases::advance(app, key, summary.phase).await;
 }
 
 pub fn spawn(app: AppState) {
