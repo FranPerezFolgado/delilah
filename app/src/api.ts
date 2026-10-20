@@ -76,13 +76,29 @@ export interface JiraSettings {
   jql: string;
 }
 
+/** The daemon's JQL when the connection saves none. */
+export const DEFAULT_JQL = "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+
+/** Whose tickets: assigned to me, reported by me, or the connection's saved JQL. */
+export type JiraWho = "assigned" | "reported" | "query";
+export type JiraProgress = "open" | "done";
+
+export interface JiraEpic {
+  key: string;
+  summary: string | null;
+}
+
 export interface JiraIssue {
   key: string;
   summary: string;
   issue_type: string;
   priority: string | null;
   status: string;
+  /** Jira's bucket for the status: "new", "indeterminate" or "done". */
+  status_category: string;
   assignee: string | null;
+  reporter: string | null;
+  epic: JiraEpic | null;
   components: string[];
   description: string;
   url: string | null;
@@ -258,7 +274,8 @@ export const api = {
   jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
   connectJira: (c: JiraConnect) =>
     request<{ account: string; settings: JiraSettings }>("/api/v1/jira", { method: "PUT", body: JSON.stringify(c) }),
-  jiraIssues: () => request<JiraIssue[]>("/api/v1/jira/issues"),
+  jiraIssues: (who: JiraWho, progress: JiraProgress) =>
+    request<JiraIssue[]>(`/api/v1/jira/issues?who=${who}&progress=${progress}`),
   sessions: () => request<Session[]>("/api/v1/sessions"),
   preference: <T>(key: string) => request<T | null>(`/api/v1/preferences/${key}`),
   setPreference: (key: string, value: unknown) =>

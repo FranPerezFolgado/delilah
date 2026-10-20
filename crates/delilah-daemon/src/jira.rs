@@ -1,8 +1,8 @@
 //! `/api/v1/jira`: the connection to Jira and the tickets it offers.
 
 use axum::Json;
-use axum::extract::{Path, State};
-use delilah_integrations::jira::{JiraClient, JiraIssue, JiraMode};
+use axum::extract::{Path, Query, State};
+use delilah_integrations::jira::{Filter, JiraClient, JiraIssue, JiraMode};
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiError;
@@ -116,10 +116,14 @@ pub async fn connect(
     Ok(Json(Connected { account, settings }))
 }
 
-pub async fn issues(State(app): State<AppState>) -> Result<Json<Vec<IssueRow>>, ApiError> {
+/// `?who=assigned|reported|query&progress=open|done`; assigned and open by default.
+pub async fn issues(
+    State(app): State<AppState>,
+    Query(filter): Query<Filter>,
+) -> Result<Json<Vec<IssueRow>>, ApiError> {
     let (settings, client) = client(&app).await?;
     let issues = client
-        .search(&settings.jql)
+        .list(&filter, &settings.jql)
         .await
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
     let tasks = app.store.list_tasks().await?;
@@ -176,6 +180,14 @@ pub fn write_ticket(
         md.push_str(&format!("- {}: {p}\n", l("Prioridad", "Priority")));
     }
     md.push_str(&format!("- {}: {}\n", l("Estado", "Status"), issue.status));
+    if let Some(epic) = &issue.epic {
+        let title = epic
+            .summary
+            .as_deref()
+            .map(|s| format!(" {s}"))
+            .unwrap_or_default();
+        md.push_str(&format!("- {}: {}{title}\n", l("Épica", "Epic"), epic.key));
+    }
     if !issue.components.is_empty() {
         md.push_str(&format!(
             "- {}: {}\n",
@@ -300,6 +312,18 @@ mod tests {
 
         let (_, issue) = call(&state, "GET", "/api/v1/jira/issues/PROJ-1243", None).await;
         assert_eq!(issue["components"], json!(["svc-billing"]));
+        assert_eq!(issue["epic"]["summary"], "Facturación v2");
+
+        let (status, done) = call(
+            &state,
+            "GET",
+            "/api/v1/jira/issues?who=reported&progress=done",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{done}");
+        assert_eq!(done[0]["key"], "PROJ-1238");
+        assert_eq!(done[0]["status_category"], "done");
     }
 
     #[tokio::test]

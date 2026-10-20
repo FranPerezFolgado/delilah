@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type JiraConnect, type JiraIssue, type JiraMode, type JiraSettings } from "../api";
+import {
+  api, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings, type JiraWho,
+} from "../api";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
 import { t, tn } from "../i18n";
@@ -19,6 +21,56 @@ const TASK_LABELS: Record<string, string> = {
   failed: "Fallida",
 };
 
+type GroupBy = "status" | "epic";
+
+interface Group {
+  id: string;
+  label: string;
+  hint?: string;
+  category?: string;
+  issues: JiraIssue[];
+}
+
+const CATEGORY_ORDER = ["indeterminate", "new", "done"];
+const categoryRank = (c: string) => {
+  const i = CATEGORY_ORDER.indexOf(c);
+  return i < 0 ? 1.5 : i;
+};
+
+/** Sections of the list: one per status, in progress first; or one per epic. */
+function groupIssues(issues: JiraIssue[], by: GroupBy): Group[] {
+  const groups = new Map<string, Group>();
+  for (const i of issues) {
+    const id = by === "status" ? i.status : i.epic?.key ?? "";
+    let g = groups.get(id);
+    if (!g) {
+      g = by === "status"
+        ? { id, label: i.status || "—", category: i.status_category, issues: [] }
+        : i.epic
+          ? { id, label: i.epic.summary ?? i.epic.key, hint: i.epic.summary ? i.epic.key : undefined, issues: [] }
+          : { id, label: t("Sin épica"), issues: [] };
+      groups.set(id, g);
+    }
+    g.issues.push(i);
+  }
+  const list = [...groups.values()];
+  if (by === "status") {
+    list.sort((a, b) => categoryRank(a.category ?? "") - categoryRank(b.category ?? ""));
+  } else {
+    // Inside an epic, the work in progress first; the tickets with no epic go last.
+    for (const g of list) g.issues.sort((a, b) => categoryRank(a.status_category) - categoryRank(b.status_category));
+    list.sort((a, b) => Number(a.id === "") - Number(b.id === ""));
+  }
+  return list;
+}
+
+const initials = (name: string) =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
+
+function StatusDot({ category }: { category: string }) {
+  return <span className={`jdot jdot-${category || "new"}`} aria-hidden />;
+}
+
 /** Tickets from Jira, and "Analizar" to start a task on one. */
 export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [settings, setSettings] = useState<JiraSettings | null | undefined>(undefined);
@@ -26,6 +78,10 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [issues, setIssues] = useState<JiraIssue[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [who, setWho] = useState<JiraWho>("assigned");
+  const [progress, setProgress] = useState<JiraProgress>("open");
+  const [groupBy, setGroupBy] = useState<GroupBy>("status");
+  const [folded, setFolded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -33,15 +89,15 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const rows = await api.jiraIssues();
+      const rows = await api.jiraIssues(who, progress);
       setIssues(rows);
-      setSelected((s) => s ?? rows[0]?.key ?? null);
+      setSelected((s) => (s && rows.some((r) => r.key === s) ? s : rows[0]?.key ?? null));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [who, progress]);
 
   useEffect(() => {
     api.jira().then((r) => setSettings(r.settings)).catch((e) => setError(e.message));
@@ -50,11 +106,28 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     if (settings) load();
   }, [settings, load]);
 
+  const hasQuery = !!settings && settings.jql.trim() !== DEFAULT_JQL;
+  useEffect(() => {
+    if (settings && !hasQuery && who === "query") setWho("assigned");
+  }, [settings, hasQuery, who]);
+
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return q ? issues.filter((i) => `${i.key} ${i.summary} ${i.components.join(" ")}`.toLowerCase().includes(q)) : issues;
+    return q
+      ? issues.filter((i) =>
+          `${i.key} ${i.summary} ${i.components.join(" ")} ${i.epic?.key ?? ""} ${i.epic?.summary ?? ""}`.toLowerCase().includes(q))
+      : issues;
   }, [issues, filter]);
+  const groups = useMemo(() => groupIssues(shown, groupBy), [shown, groupBy]);
   const issue = issues.find((i) => i.key === selected);
+
+  const toggle = (id: string) =>
+    setFolded((f) => {
+      const next = new Set(f);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   if (settings === undefined) return <div className="empty">{t("Cargando…")}</div>;
   if (settings === null || editing) {
@@ -71,6 +144,20 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     );
   }
 
+  const WHO: { id: JiraWho; label: string }[] = [
+    { id: "assigned", label: t("Asignados") },
+    { id: "reported", label: t("Reportados") },
+    ...(hasQuery ? [{ id: "query" as const, label: t("Mi consulta") }] : []),
+  ];
+  const PROGRESS: { id: JiraProgress; label: string }[] = [
+    { id: "open", label: t("Abiertos") },
+    { id: "done", label: t("Hechos") },
+  ];
+  const GROUP_BY: { id: GroupBy; label: string }[] = [
+    { id: "status", label: t("Estado") },
+    { id: "epic", label: t("Épica") },
+  ];
+
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
@@ -85,31 +172,53 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
         </button>
         <button className="btn" onClick={() => setEditing(true)}>{t("Conexión")}</button>
       </div>
+      <div className="jbar">
+        <Segs label={t("De quién")} options={WHO} value={who} onChange={setWho} />
+        <Segs label={t("Estado")} options={PROGRESS} value={progress} onChange={setProgress} />
+        <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>{t("Agrupar por")}</span>
+        <Segs label={t("Agrupar por")} options={GROUP_BY} value={groupBy} onChange={setGroupBy} />
+      </div>
       {error && <div className="error selectable" style={{ padding: "8px 20px" }}>{error}</div>}
       <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <div style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
-          <table className="list">
-            <thead>
-              <tr><th>{t("Clave")}</th><th>{t("Título")}</th><th>{t("Tipo")}</th><th>{t("Prioridad")}</th><th>{t("Estado")}</th><th>Delilah</th></tr>
-            </thead>
-            <tbody>
-              {shown.map((i) => (
-                <tr key={i.key} onClick={() => setSelected(i.key)}
-                  style={{ cursor: "pointer", background: i.key === selected ? "var(--sel)" : undefined,
-                    boxShadow: i.key === selected ? "inset 2px 0 0 var(--acc)" : undefined }}>
-                  <td className="mono" style={{ color: "var(--tx2)" }}>{i.key}</td>
-                  <td className="trunc" style={{ maxWidth: 380 }}>{i.summary}</td>
-                  <td className="muted">{i.issue_type}</td>
-                  <td className="muted">{i.priority ?? "—"}</td>
-                  <td className="muted">{i.status}</td>
-                  <td>{i.task_status ? <span className="pill">{TASK_LABELS[i.task_status] ? t(TASK_LABELS[i.task_status]) : i.task_status}</span> : <span className="muted">—</span>}</td>
-                </tr>
-              ))}
-              {shown.length === 0 && !loading && (
-                <tr><td colSpan={6} className="muted">{filter ? t("No hay tickets con ese filtro.") : t("No hay tickets para esta consulta.")}</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "4px 0 16px" }}>
+          {groups.map((g) => {
+            const open = !folded.has(`${groupBy}:${g.id}`);
+            return (
+              <section key={g.id}>
+                <button className="jgroup" onClick={() => toggle(`${groupBy}:${g.id}`)} aria-expanded={open}>
+                  <span className={`chev ${open ? "open" : ""}`}>›</span>
+                  {g.category !== undefined && <StatusDot category={g.category} />}
+                  <span className="jgroup-name trunc">{g.label}</span>
+                  {g.hint && <span className="mono muted" style={{ fontSize: 11 }}>{g.hint}</span>}
+                  <span className="jgroup-count">{g.issues.length}</span>
+                </button>
+                {open && g.issues.map((i) => (
+                  <button key={i.key} className={`jrow ${i.key === selected ? "on" : ""}`} onClick={() => setSelected(i.key)}>
+                    <StatusDot category={i.status_category} />
+                    <span className="mono jkey">{i.key}</span>
+                    <span className="trunc jtitle">{i.summary}</span>
+                    {groupBy === "epic" && <span className="jtag">{i.status}</span>}
+                    {groupBy === "status" && i.epic && (
+                      <span className="jtag trunc" title={i.epic.key}>{i.epic.summary ?? i.epic.key}</span>
+                    )}
+                    {i.task_status && (
+                      <span className="pill">{TASK_LABELS[i.task_status] ? t(TASK_LABELS[i.task_status]) : i.task_status}</span>
+                    )}
+                    <span className="muted jmeta">{i.issue_type}</span>
+                    <span className="muted jmeta">{i.priority ?? "—"}</span>
+                    {i.assignee
+                      ? <span className="javatar" title={i.assignee}>{initials(i.assignee)}</span>
+                      : <span className="javatar none" title={t("Sin asignar")} />}
+                  </button>
+                ))}
+              </section>
+            );
+          })}
+          {shown.length === 0 && !loading && (
+            <div className="muted" style={{ padding: "12px 20px", fontSize: 12.5 }}>
+              {filter ? t("No hay tickets con ese filtro.") : t("No hay tickets para esta consulta.")}
+            </div>
+          )}
         </div>
         {issue && (
           <aside style={{ width: 460, flex: "none", borderLeft: "1px solid var(--bd)", background: "var(--panel)",
@@ -121,8 +230,12 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
             <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: "6px 10px", fontSize: 12.5 }}>
               <span className="muted">{t("Tipo")}</span><span>{issue.issue_type}</span>
               <span className="muted">{t("Prioridad")}</span><span>{issue.priority ?? "—"}</span>
-              <span className="muted">{t("Estado")}</span><span>{issue.status}</span>
+              <span className="muted">{t("Estado")}</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}><StatusDot category={issue.status_category} />{issue.status}</span>
+              <span className="muted">{t("Épica")}</span>
+              <span>{issue.epic ? <>{issue.epic.summary ?? ""} <span className="mono muted">{issue.epic.key}</span></> : "—"}</span>
               <span className="muted">{t("Asignado")}</span><span>{issue.assignee ?? t("Sin asignar")}</span>
+              <span className="muted">{t("Informador")}</span><span>{issue.reporter ?? "—"}</span>
               <span className="muted">{t("Componentes")}</span>
               <span className="mono">{issue.components.length ? issue.components.join(", ") : "—"}</span>
             </div>
@@ -143,6 +256,24 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
         )}
       </div>
     </>
+  );
+}
+
+function Segs<T extends string>({ label, options, value, onChange }: {
+  label: string;
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="segs" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button key={o.id} role="radio" aria-checked={value === o.id} className={`seg ${value === o.id ? "on" : ""}`}
+          onClick={() => onChange(o.id)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

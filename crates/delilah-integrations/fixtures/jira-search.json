@@ -6,7 +6,9 @@
         "summary": "Rechazar cobros duplicados en una ventana de 30 s",
         "issuetype": { "name": "Bug" },
         "priority": { "name": "Alta" },
-        "status": { "name": "Por hacer" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1200", "fields": { "summary": "Pagos sin sobresaltos", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
         "assignee": { "displayName": "Fran" },
         "components": [{ "name": "svc-payments" }, { "name": "svc-orders" }],
         "description": {
@@ -33,7 +35,9 @@
         "summary": "Paginación por cursor en GET /invoices",
         "issuetype": { "name": "Historia" },
         "priority": { "name": "Media" },
-        "status": { "name": "Por hacer" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "reporter": { "displayName": "Fran" },
+        "parent": { "key": "PROJ-1210", "fields": { "summary": "Facturación v2", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
         "assignee": { "displayName": "Fran" },
         "components": [{ "name": "svc-billing" }],
         "description": {
@@ -50,7 +54,8 @@
         "summary": "Actualizar common-lib a Java 21",
         "issuetype": { "name": "Tarea" },
         "priority": { "name": "Baja" },
-        "status": { "name": "En curso" },
+        "status": { "name": "En curso", "statusCategory": { "key": "indeterminate" } },
+        "reporter": { "displayName": "Fran" },
         "assignee": { "displayName": "Fran" },
         "components": [{ "name": "common-lib" }],
         "description": null
@@ -62,7 +67,9 @@
         "summary": "Métrica de latencia del gateway de pagos por proveedor",
         "issuetype": { "name": "Historia" },
         "priority": { "name": "Media" },
-        "status": { "name": "Por hacer" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "reporter": { "displayName": "Fran" },
+        "parent": { "key": "PROJ-1200", "fields": { "summary": "Pagos sin sobresaltos", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
         "assignee": null,
         "components": [{ "name": "svc-payments" }],
         "description": {
@@ -75,6 +82,62 @@
             ]}
           ]
         }
+      }
+    },
+    {
+      "key": "PROJ-1246",
+      "fields": {
+        "summary": "Idempotency-Key en POST /payments",
+        "issuetype": { "name": "Historia" },
+        "priority": { "name": "Alta" },
+        "status": { "name": "En revisión", "statusCategory": { "key": "indeterminate" } },
+        "assignee": { "displayName": "Fran" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1200", "fields": { "summary": "Pagos sin sobresaltos", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
+        "components": [{ "name": "svc-payments" }],
+        "description": "Aceptar la cabecera Idempotency-Key y devolver la misma respuesta si se repite."
+      }
+    },
+    {
+      "key": "PROJ-1247",
+      "fields": {
+        "summary": "El PDF de la factura sale sin NIF del cliente",
+        "issuetype": { "name": "Bug" },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "assignee": { "displayName": "Ana" },
+        "reporter": { "displayName": "Fran" },
+        "parent": { "key": "PROJ-1210", "fields": { "summary": "Facturación v2", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
+        "components": [{ "name": "svc-billing" }],
+        "description": "Desde la última versión el PDF omite el NIF cuando el cliente es empresa."
+      }
+    },
+    {
+      "key": "PROJ-1238",
+      "fields": {
+        "summary": "Reintentos con backoff en el webhook de Stripe",
+        "issuetype": { "name": "Tarea" },
+        "priority": { "name": "Media" },
+        "status": { "name": "Hecho", "statusCategory": { "key": "done" } },
+        "assignee": { "displayName": "Fran" },
+        "reporter": { "displayName": "Fran" },
+        "parent": { "key": "PROJ-1200", "fields": { "summary": "Pagos sin sobresaltos", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
+        "components": [{ "name": "svc-payments" }],
+        "description": "Reintentar hasta 5 veces con backoff exponencial."
+      }
+    },
+    {
+      "key": "PROJ-1231",
+      "fields": {
+        "summary": "Quitar el endpoint /v1/invoices/legacy",
+        "issuetype": { "name": "Tarea" },
+        "priority": { "name": "Baja" },
+        "status": { "name": "Hecho", "statusCategory": { "key": "done" } },
+        "assignee": { "displayName": "Fran" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1210", "fields": { "summary": "Facturación v2", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
+        "components": [{ "name": "svc-billing" }],
+        "description": "Nadie lo llama desde marzo."
       }
     }
   ]
