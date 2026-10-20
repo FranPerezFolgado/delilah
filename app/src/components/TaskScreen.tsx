@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
+import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task } from "../api";
 import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
 import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
@@ -14,6 +14,8 @@ import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
+import { PhaseBadge } from "./PhaseBadge";
+import { headerPhaseOf } from "../phases";
 import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
 import { ProjectView } from "./ProjectView";
@@ -25,6 +27,8 @@ interface Props {
   owner: string;
   /** The task, when the owner is one. */
   task?: Task;
+  /** The task's spec, for the phase shown in the header. */
+  spec?: SpecSummary;
   /** The project, when the owner is one. */
   project?: Project;
   /** Opens the new task dialog (from a project). */
@@ -48,7 +52,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert }: Props) {
+export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -433,6 +437,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
   const toggleTree = () => window.dispatchEvent(new Event("delilah:toggle-tree"));
   const status = task ? statusIcon(task.status) : null;
+  const phase = task ? headerPhaseOf(task, spec) : null;
 
   return (
     <>
@@ -441,8 +446,11 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
           <>
             <span className="mono muted">{owner}</span>
             <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
-            <span className={`pill ${status.cls}`} style={{ marginLeft: "auto" }}>
-              <Icon name={status.icon} /> {statusLabel(task.status)}
+            <span className="head-pills">
+              {phase && <PhaseBadge phase={phase} />}
+              <span className={`pill ${status.cls}`}>
+                <Icon name={status.icon} /> {statusLabel(task.status)}
+              </span>
             </span>
           </>
         ) : (

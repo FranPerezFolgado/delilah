@@ -24,6 +24,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - The daemon is bundled and run by launchd.
 - Native window, configurable shortcuts and a folder picker.
 - A board by phase, and spec tracking per task.
+- The task header shows the phase (and done/total while implementing) before the status; hidden for backlog and finished tasks.
 - A task screen in Orca's style: tabs (task, sessions, Cambios, files), the project tree, ⌘P, and tabs remembered per task.
 - Cambios (diffs), a CodeMirror editor that reloads on disk changes, and a Markdown preview.
 - The Bandeja, with replies, AskUserQuestion answers (with a configurable panel position) and review suggestions.
