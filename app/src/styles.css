@@ -268,8 +268,9 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
   font-size: 12.5px; }
 .ebar.warn { background: var(--accbg); }
 .ehost { flex: 1; min-height: 0; background: var(--term); }
-.tterm { flex: 1; min-height: 0; flex-direction: column; background: var(--term); }
-.tterm .pane-term { flex: 1; min-height: 0; }
+.tterm { flex: 1; min-height: 0; flex-direction: column; background: var(--term); container-type: inline-size; }
+.tterm .pane-term { flex: 1; min-width: 0; min-height: 0; }
+.tterm-body { flex: 1; min-height: 0; display: flex; }
 .ehost .cm-editor { height: 100%; }
 
 /* Inbox */
@@ -305,7 +306,20 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .ask-opt.on { border-color: var(--acc); background: var(--accbg); }
 .ask-opt .muted { font-size: 11.5px; }
 .ask-actions { display: flex; gap: 8px; }
-.ask-bar { flex: none; padding: 12px 14px; background: var(--panel); border-bottom: 1px solid var(--bd); max-height: 50%; overflow-y: auto; }
+/* The questions next to a session's terminal: above, beside or below it (Ajustes). */
+.ask-bar { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; background: var(--panel); overflow-y: auto; }
+.ask-top { flex-direction: column-reverse; }
+.ask-bottom { flex-direction: column; }
+.ask-right { flex-direction: row; }
+.ask-top .ask-bar { border-bottom: 1px solid var(--bd); max-height: 50%; }
+.ask-bottom .ask-bar { border-top: 1px solid var(--bd); max-height: 50%; }
+.ask-right .ask-bar { width: 320px; border-left: 1px solid var(--bd); }
+.ask-right .ask-opt { max-width: 100%; }
+/* Too narrow for the terminal and the panel side by side: below, until there is room. */
+@container (max-width: 760px) {
+  .ask-right { flex-direction: column; }
+  .ask-right .ask-bar { width: auto; border-left: 0; border-top: 1px solid var(--bd); max-height: 50%; }
+}
 
 /* Sidebar grouped by project (as in Orca) */
 .pgroup { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }

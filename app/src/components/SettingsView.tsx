@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, ASK_POSITIONS, type AskPosition } from "../api";
 import { t, type LangSetting } from "../i18n";
 import { ACTIONS, type ActionId, type Bindings, comboFromEvent, DEFAULTS, formatCombo, setRecording } from "../shortcuts";
 
@@ -8,10 +8,13 @@ interface Props {
   onChange: (b: Bindings) => void;
   language: LangSetting;
   onLanguage: (l: LangSetting) => void;
+  askPosition: AskPosition;
+  onAskPosition: (p: AskPosition) => void;
 }
 
-/** Settings: the language, and the keyboard shortcuts (press "Cambiar", then the new keys). */
-export function SettingsView({ bindings, onChange, language, onLanguage }: Props) {
+/** Settings: the language, where the agent's questions sit, and the keyboard shortcuts
+ *  (press "Cambiar", then the new keys). */
+export function SettingsView({ bindings, onChange, language, onLanguage, askPosition, onAskPosition }: Props) {
   const [recordingFor, setRecordingFor] = useState<ActionId | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +69,19 @@ export function SettingsView({ bindings, onChange, language, onLanguage }: Props
           </div>
           <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
             {t("También cambia lo que Delilah le escribe a Claude y las notificaciones. El menú del Mac cambia al volver a abrir la app.")}
+          </p>
+        </div>
+        <div>
+          <div className="sec" style={{ marginBottom: 8 }}>{t("Panel de preguntas")}</div>
+          <div className="segs" role="radiogroup" aria-label={t("Panel de preguntas")} style={{ display: "inline-flex" }}>
+            {ASK_POSITIONS.map((p) => (
+              <button key={p} role="radio" aria-checked={askPosition === p} className={`seg ${askPosition === p ? "on" : ""}`} onClick={() => onAskPosition(p)}>
+                {p === "top" ? t("Arriba") : p === "right" ? t("A la derecha") : t("Abajo")}
+              </button>
+            ))}
+          </div>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {t("Dónde aparecen las preguntas con opciones del agente dentro de una sesión.")}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

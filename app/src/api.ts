@@ -240,6 +240,15 @@ export interface InboxItem {
   ask?: { id: string; questions: AskQuestion[] };
 }
 
+/** Where a session's questions with options sit, next to its terminal. */
+export type AskPosition = "top" | "right" | "bottom";
+export const ASK_POSITIONS: AskPosition[] = ["top", "right", "bottom"];
+
+/** A saved position, or the default (right) when there is none or it is unknown. */
+export function parseAskPosition(v: unknown): AskPosition {
+  return ASK_POSITIONS.includes(v as AskPosition) ? (v as AskPosition) : "right";
+}
+
 /** The kinds that block an agent until you act: they count in the badge. */
 export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting"];
 
