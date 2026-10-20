@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Per-project `delilah.toml`
+# Specification Quality Checklist: Per-project configuration
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-20
@@ -31,8 +31,10 @@
 
 ## Notes
 
-- The file name, its keys and placeholders (`{ticket}`, `{slug}`) are the feature's
-  user-facing surface, not implementation details.
+- The placeholders (`{ticket}`, `{slug}`) are the feature's user-facing surface, not
+  implementation details.
+- Revised after the user chose option B: settings kept by Delilah and edited from a
+  project settings screen, not a `delilah.toml` in the repo (decision 26).
 - Defaults taken instead of clarifications: setup also runs in checkout mode; folders
   are linked and files copied by default; slug cut at 40 characters; setup timeout of
   10 minutes. `/speckit-clarify` can revisit them.

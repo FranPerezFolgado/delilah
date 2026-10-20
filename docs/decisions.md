@@ -120,6 +120,16 @@ losing work.**
 chosen place (checkout or worktree) and started later. A failed start goes back
 to the backlog (`StartAborted`).
 
+**26. Project settings live in Delilah, not in the repo.** The per-project config
+(workspace mode, branch template, shared entries, setup command, submodule rules)
+is kept by the daemon and edited from a settings screen and the CLI. A
+`delilah.toml` in the repo was ruled out for now:
+- editing it from the app would leave the checkout dirty, which blocks checkout tasks;
+- the work repos should not carry a Delilah file.
+
+Sharing settings through the repo can come later, as a base the stored settings
+override. See `specs/004-project-config`.
+
 ## UI
 
 **20. Hand-rolled i18n.** `t("texto en español")`, with English in `i18n/en.ts`
