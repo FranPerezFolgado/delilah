@@ -446,9 +446,11 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
           <>
             <span className="mono muted">{owner}</span>
             <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
-            {phase && <PhaseBadge phase={phase} style={{ marginLeft: "auto" }} />}
-            <span className={`pill ${status.cls}`} style={phase ? undefined : { marginLeft: "auto" }}>
-              <Icon name={status.icon} /> {statusLabel(task.status)}
+            <span className="head-pills">
+              {phase && <PhaseBadge phase={phase} />}
+              <span className={`pill ${status.cls}`}>
+                <Icon name={status.icon} /> {statusLabel(task.status)}
+              </span>
             </span>
           </>
         ) : (

@@ -23,7 +23,7 @@ describe("PhaseBadge", () => {
   it("labels it for assistive tech and as a tooltip", () => {
     const { container } = render(<PhaseBadge phase={{ column: "plan", step: 2 }} />);
     const pill = container.querySelector(".phase-pill")!;
-    expect(pill.getAttribute("aria-label")).toBe("Fase: Plan");
+    expect(pill.getAttribute("aria-label")).toBe("Fase 2: Plan");
     expect(pill.getAttribute("title")).toBe("Fase: Plan");
   });
 

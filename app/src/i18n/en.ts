@@ -196,6 +196,7 @@ export const EN: Record<string, string> = {
   "Archivar igualmente (se pierde lo no subido)": "Archive anyway (unpushed work is lost)",
   "Mover a {phase}": "Move to {phase}",
   "Fase: {phase}": "Phase: {phase}",
+  "Fase {step}: {phase}": "Phase {step}: {phase}",
   "Pausada por límite": "Paused by the limit",
   "lo que te espera, de todas las tareas": "what is waiting for you, across tasks",
   "Nada pendiente. Los agentes siguen a lo suyo.": "Nothing pending. The agents carry on.",
