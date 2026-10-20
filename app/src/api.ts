@@ -218,7 +218,7 @@ export interface FileContent {
 /** The file changed on disk (usually the agent) since the editor loaded it. */
 export class ConflictError extends Error {}
 
-export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "paused" | "failed";
+export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "suggest-review" | "paused" | "failed";
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
 export interface AskQuestion {
@@ -259,7 +259,11 @@ export interface FolderInspection {
   submodules: number;
 }
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
@@ -273,7 +277,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
-  if (!res.ok) throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }));
+  if (!res.ok) throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status);
   return data as T;
 }
 
@@ -295,7 +299,10 @@ export const api = {
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
-  archive: (key: string) => post<Task>(`/api/v1/tasks/${key}/archive`),
+  archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
+  /** Moves the task to a phase; only the user can move it back. */
+  setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),
   usage: () => request<UsageReport | null>("/api/v1/usage"),
   jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
   connectJira: (c: JiraConnect) =>

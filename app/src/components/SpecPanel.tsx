@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type SpecProgress, type Task } from "../api";
+import { api, type SpecPhase, type SpecProgress, type Task } from "../api";
 import { on } from "../live";
 import { COLUMNS, columnOf, type Column } from "../phases";
 import { Icon } from "./Icon";
@@ -47,7 +47,7 @@ export function SpecPanel({ task }: { task: Task }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Stepper at={at} />
+      <Stepper at={at} onPick={task.status.type === "done" ? undefined : (phase) => api.setPhase(task.key, phase).catch(() => {})} />
 
       {!spec.dir ? (
         <div className="muted" style={{ fontSize: 12 }}>
@@ -125,15 +125,21 @@ export function SpecPanel({ task }: { task: Task }) {
   );
 }
 
-function Stepper({ at }: { at: number }) {
+/** The phases; clicking one moves the task there (not "Hecha": that is marking it done). */
+function Stepper({ at, onPick }: { at: number; onPick?: (phase: SpecPhase) => void }) {
   return (
     <ol className="stepper">
-      {COLUMNS.map((c: { id: Column; label: string }, i) => (
-        <li key={c.id} className={i < at ? "past" : i === at ? "now" : ""}>
-          <span className="dot-step">{i < at ? <Icon name="done" /> : i + 1}</span>
-          {t(c.label)}
-        </li>
-      ))}
+      {COLUMNS.map((c: { id: Column; label: string }, i) => {
+        const pick = onPick && c.id !== "done" && i !== at ? () => onPick(c.id as SpecPhase) : undefined;
+        return (
+          <li key={c.id} className={(i < at ? "past" : i === at ? "now" : "") + (pick ? " pickable" : "")}>
+            <button type="button" disabled={!pick} onClick={pick} title={pick ? t("Mover a {phase}", { phase: t(c.label) }) : undefined}>
+              <span className="dot-step">{i < at ? <Icon name="done" /> : i + 1}</span>
+              {t(c.label)}
+            </button>
+          </li>
+        );
+      })}
     </ol>
   );
 }

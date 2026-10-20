@@ -171,9 +171,16 @@ fn init_submodules(ws: &Path, spec: &WorkspaceSpec, opts: &GitOptions) -> Result
 /// Removes the workspace. Refuses while the task's branch has uncommitted changes or
 /// commits on no remote: in a `parent` workspace, removing the worktree also deletes
 /// the submodules' git data. A `repo` workspace keeps its branch in the repo.
-pub fn archive_workspace(root: &Path, ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
+/// `force` skips those checks: the user accepted losing that work.
+pub fn archive_workspace(
+    root: &Path,
+    ws: &Workspace,
+    force: bool,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
     let only_this_branch = format!("--exclude={}", ws.branch);
-    for (location, dir) in ws.branch_dirs() {
+    let checked = if force { Vec::new() } else { ws.branch_dirs() };
+    for (location, dir) in checked {
         if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
             return Err(GitError::Dirty { location });
         }
@@ -357,13 +364,17 @@ pub fn use_checkout(
 }
 
 /// Ends a task that worked in the project's checkout: goes back to the branches it
-/// was on. The task's branch stays (nothing is deleted), so unpushed commits are kept;
-/// only uncommitted changes stop it.
+/// was on. The task's branch stays (nothing is deleted), so unpushed commits are kept,
+/// and uncommitted files stay in the checkout (git carries them over).
+///
+/// Never refuses: the checkout is the user's own, and a task done with it must let go
+/// of it. Returns, for each folder that could not go back, why (e.g. a change git
+/// would overwrite); those stay on the task's branch for the user to sort out.
 pub fn leave_checkout(
     root: &Path,
     previous: &[(String, String)],
     opts: &GitOptions,
-) -> Result<(), GitError> {
+) -> Vec<String> {
     let dir = |loc: &str| {
         if loc == "." {
             root.to_path_buf()
@@ -371,15 +382,16 @@ pub fn leave_checkout(
             root.join(loc)
         }
     };
-    for (location, _) in previous {
-        if !git(&dir(location), &["status", "--porcelain"], opts)?.is_empty() {
-            return Err(GitError::Dirty {
-                location: location.clone(),
-            });
+    let mut stuck = Vec::new();
+    for (location, back) in previous {
+        let dir = dir(location);
+        let current = git(&dir, &["branch", "--show-current"], opts).unwrap_or_default();
+        if current == *back {
+            continue;
+        }
+        if let Err(e) = git(&dir, &["checkout", "-q", back], opts) {
+            stuck.push(format!("{location}: {e}"));
         }
     }
-    for (location, back) in previous {
-        git(&dir(location), &["checkout", "-q", back], opts)?;
-    }
-    Ok(())
+    stuck
 }

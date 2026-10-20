@@ -45,10 +45,19 @@ pub async fn done(
     Ok(Json(task))
 }
 
-/// Removes the workspace of a finished task, refusing while its work is not pushed.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct ArchiveQuery {
+    /// Remove a worktree even with work that is not pushed (the user confirmed).
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Removes the workspace of a finished task. A worktree is kept while its work is not
+/// pushed, unless `force`; the project's checkout is always let go of.
 pub async fn archive(
     State(app): State<AppState>,
     Path(key): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ArchiveQuery>,
 ) -> Result<Json<Task>, ApiError> {
     let key = TaskKey::new(key);
     let task = app
@@ -76,8 +85,16 @@ pub async fn archive(
     // A task in the project's checkout goes back to where it was; a worktree goes away.
     let previous = app.store.checkout_previous(&key).await?;
     tokio::task::spawn_blocking(move || match previous {
-        Some(previous) => delilah_git::leave_checkout(&root, &previous, &opts),
-        None => delilah_git::archive_workspace(&root, &ws, &opts),
+        Some(previous) => {
+            for stuck in delilah_git::leave_checkout(&root, &previous, &opts) {
+                tracing::warn!(
+                    "archiving {}: left on the task's branch: {stuck}",
+                    ws.branch
+                );
+            }
+            Ok(())
+        }
+        None => delilah_git::archive_workspace(&root, &ws, q.force, &opts),
     })
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?

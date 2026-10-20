@@ -74,6 +74,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/logs", get(crate::logs::tail))
         .route("/api/v1/specs", get(specs::list))
         .route("/api/v1/inbox", get(inbox::list))
+        .route("/api/v1/tasks/{key}/phase", post(crate::phases::set))
+        .route(
+            "/api/v1/tasks/{key}/review-hint/dismiss",
+            post(crate::phases::dismiss),
+        )
         .route("/api/v1/sessions/{id}/reply", post(inbox::reply))
         .route("/api/v1/tasks/{key}/changes", get(changes::list))
         .route("/api/v1/tasks/{key}/changes/diff", get(changes::diff))

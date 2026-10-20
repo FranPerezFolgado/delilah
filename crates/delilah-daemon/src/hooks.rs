@@ -113,6 +113,11 @@ pub async fn claude_hook(
         (Signal::NeedsUser | Signal::TurnEnded | Signal::TurnFailed, _) => Some(Event::AgentAsked),
         _ => None,
     };
+    // What the agent did may move the task's phase (a task's sessions only).
+    if crate::store_sessions::project_of(&q.task).is_none() {
+        crate::phases::on_hook(&app, &q.task, signal, &hook, primary, limit_reset.is_some()).await;
+    }
+
     // A project's session has no task to move: only the session and the inbox change.
     let event = event.filter(|_| crate::store_sessions::project_of(&q.task).is_none());
     if let Some(event) = event {
