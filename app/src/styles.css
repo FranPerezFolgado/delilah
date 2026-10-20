@@ -281,8 +281,9 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .inbox-task { min-width: 0; height: 22px; padding: 0 6px; gap: 6px; color: var(--tx); }
 .inbox-text { border-left: 2px solid var(--bd2); padding-left: 12px; }
 .inbox-text.clamped { max-height: 11.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
-.inbox-reply { display: flex; gap: 8px; }
+.inbox-reply { display: flex; align-items: flex-end; gap: 8px; }
 .inbox-reply .input { flex: 1; }
+.inbox-reply textarea.input { height: auto; min-height: 32px; max-height: 200px; field-sizing: content; resize: none; }
 .inbox-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .inbox-actions:empty { display: none; }
 

@@ -317,9 +317,7 @@ pub async fn reply(
         .sessions
         .get(&id)
         .ok_or_else(|| ApiError::conflict("the session is not running; reopen it to answer"))?;
-    // Newlines would send it early: the TUI takes Enter as "send".
-    let text = text.replace(['\r', '\n'], " ");
-    type_prompt(&live, &text).await?;
+    type_prompt(&live, text).await?;
     app.store.set_attention(&id, None).await?;
     app.emit(crate::events::Topic::Inbox);
     Ok(axum::http::StatusCode::NO_CONTENT)
@@ -411,6 +409,68 @@ mod tests {
             ),
             Change::Clear
         );
+    }
+
+    #[tokio::test]
+    async fn a_reply_of_several_lines_is_one_paste_and_one_enter() {
+        use std::time::Duration;
+
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use delilah_agents::pty::PtySession;
+        use portable_pty::CommandBuilder;
+        use tower::ServiceExt;
+
+        use crate::config::Config;
+        use crate::store::Store;
+        use crate::store_sessions::SessionKind;
+
+        let home = std::env::temp_dir().join(format!("delilah-reply-{}", uuid::Uuid::new_v4()));
+        let config = Config {
+            home,
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
+        let expected = b"\x1b[200~uno\ndos\x1b[201~\r";
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.args([
+            "--noprofile",
+            "--norc",
+            "-c",
+            &format!(
+                "stty raw -echo; printf ready; v=$(dd bs=1 count={} 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf \"got:%s;\" \"$v\"; sleep 5",
+                expected.len()
+            ),
+        ]);
+        let pty = PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let (_, mut output) = pty.attach();
+        app.sessions
+            .insert("s-1", "PROJ-1", SessionKind::Claude, true, pty);
+
+        let mut seen = String::new();
+        let mut read_until = async |needle: &str| {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !seen.contains(needle) {
+                    seen.push_str(&String::from_utf8_lossy(&output.recv().await.unwrap()));
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("never saw {needle:?} in {seen:?}"));
+        };
+        read_until("ready").await;
+
+        let req = Request::post("/api/v1/sessions/s-1/reply")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "text": "uno\r\ndos\n" }).to_string()))
+            .unwrap();
+        let res = crate::api::router(app.clone()).oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
+        read_until(&format!("got:{hex};")).await;
     }
 
     #[test]
