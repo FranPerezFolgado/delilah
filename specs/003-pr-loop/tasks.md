@@ -31,9 +31,9 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 ## Phase 1: Setup
 
 - [X] T001 Run `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml` and `cd app && npx tsc --noEmit && npx vitest run`; note any pre-existing failure before starting (no files changed)
-- [ ] T002 [P] Add migration `crates/delilah-daemon/migrations/0011_pull_requests.sql` with the tables `pull_requests`, `pr_unlinked` and `pr_notices` exactly as in data-model.md (FKs to `tasks(key)` ON DELETE CASCADE, `UNIQUE (task_key, repo)` and `UNIQUE (task_key, repo, kind, cause)`)
-- [ ] T003 [P] Add `Topic::Prs` (serialized `"prs"`, doc comment "`/prs`: a task's PRs or their summaries changed") in `crates/delilah-daemon/src/events.rs`, with a serialization test next to the existing ones
-- [ ] T004 [P] Write `scripts/fake-gh.sh` (executable, bash): answers `gh` from JSON files in `$FAKE_GH_DIR` — `repo view` → `repo.json`, `api user` → `user.json` (missing file → exit 1 with "You are not logged into any GitHub hosts. To log in, run: gh auth login"), `pr list` → `pr-list.json`, `api graphql … -F number=N` → `pr-N.json`, `pr create` → appends to `pr-list.json` and prints the new URL; anything else → exit 1 with the args on stderr (quickstart.md)
+- [X] T002 [P] Add migration `crates/delilah-daemon/migrations/0011_pull_requests.sql` with the tables `pull_requests`, `pr_unlinked` and `pr_notices` exactly as in data-model.md (FKs to `tasks(key)` ON DELETE CASCADE, `UNIQUE (task_key, repo)` and `UNIQUE (task_key, repo, kind, cause)`)
+- [X] T003 [P] Add `Topic::Prs` (serialized `"prs"`, doc comment "`/prs`: a task's PRs or their summaries changed") in `crates/delilah-daemon/src/events.rs`, with a serialization test next to the existing ones
+- [X] T004 [P] Write `scripts/fake-gh.sh` (executable, bash): answers `gh` from JSON files in `$FAKE_GH_DIR` — `repo view` → `repo.json`, `api user` → `user.json` (missing file → exit 1 with "You are not logged into any GitHub hosts. To log in, run: gh auth login"), `pr list` → `pr-list.json`, `api graphql … -F number=N` → `pr-N.json`, `pr create` → appends to `pr-list.json` and prints the new URL; anything else → exit 1 with the args on stderr (quickstart.md)
 
 ---
 
