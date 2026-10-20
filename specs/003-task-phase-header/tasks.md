@@ -64,15 +64,15 @@ None: no new dependencies; the existing vitest + Testing Library setup is used a
 
 **Independent Test**: a task in "implement" whose spec has 4 of 12 done shows "· 4/12". Another phase, or `total: 0`, shows no count.
 
-- [ ] T009 [P] [US2] Extend the tests in `app/src/phases.test.ts`:
+- [X] T009 [P] [US2] Extend the tests in `app/src/phases.test.ts`:
   - implement with spec `done: 4, total: 12` → `done: 4, total: 12`;
   - implement with `total: 0` → no `done`/`total`;
   - plan with `total: 12` → no `done`/`total`.
-- [ ] T010 [P] [US2] Extend `app/src/components/PhaseBadge.test.tsx`:
+- [X] T010 [P] [US2] Extend `app/src/components/PhaseBadge.test.tsx`:
   - `{ column: "implement", step: 3, done: 4, total: 12 }` renders "· 4/12", and the `aria-label` includes "4/12";
   - without `total`, no "·" is rendered.
-- [ ] T011 [US2] In `headerPhaseOf` (`app/src/phases.ts`), set `done`/`total` from the spec when `column === "implement"` and `spec.total > 0`. T009 then passes.
-- [ ] T012 [US2] In `PhaseBadge` (`app/src/components/PhaseBadge.tsx`), append `<span className="muted"> · {done}/{total}</span>` when `total` is set, and add ` · {done}/{total}` to the `title`/`aria-label`. T010 then passes.
+- [X] T011 [US2] In `headerPhaseOf` (`app/src/phases.ts`), set `done`/`total` from the spec when `column === "implement"` and `spec.total > 0`. T009 then passes.
+- [X] T012 [US2] In `PhaseBadge` (`app/src/components/PhaseBadge.tsx`), append `<span className="muted"> · {done}/{total}</span>` when `total` is set, and add ` · {done}/{total}` to the `title`/`aria-label`. T010 then passes.
 
 **Checkpoint**: all of `npx vitest run` passes.
 

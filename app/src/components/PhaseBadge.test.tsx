@@ -27,6 +27,19 @@ describe("PhaseBadge", () => {
     expect(pill.getAttribute("title")).toBe("Fase: Plan");
   });
 
+  it("shows the done/total count when there is one", () => {
+    const { container } = render(<PhaseBadge phase={{ column: "implement", step: 3, done: 4, total: 12 }} />);
+    const pill = container.querySelector(".phase-pill")!;
+    expect(pill.textContent).toContain("· 4/12");
+    expect(pill.getAttribute("aria-label")).toContain("4/12");
+    expect(pill.getAttribute("title")).toContain("4/12");
+  });
+
+  it("shows no count without a total", () => {
+    const { container } = render(<PhaseBadge phase={{ column: "implement", step: 3 }} />);
+    expect(container.querySelector(".phase-pill")!.textContent).not.toContain("·");
+  });
+
   it("is not clickable", () => {
     const { container } = render(<PhaseBadge phase={{ column: "implement", step: 3 }} />);
     expect(container.querySelector("button, a, [role=button]")).toBeNull();

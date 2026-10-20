@@ -37,7 +37,9 @@ export interface HeaderPhase {
 export function headerPhaseOf(task: Task, spec?: SpecSummary): HeaderPhase | null {
   if (!spec || task.status.type === "queued" || task.status.type === "done") return null;
   const column = columnOf(task, spec) as SpecPhase;
-  return { column, step: COLUMNS.findIndex((c) => c.id === column) + 1 };
+  const step = COLUMNS.findIndex((c) => c.id === column) + 1;
+  if (column === "implement" && spec.total > 0) return { column, step, done: spec.done, total: spec.total };
+  return { column, step };
 }
 
 /** Where a task sits: done tasks in "Hecha"; the others by the phase recorded (the

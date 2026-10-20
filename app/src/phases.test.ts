@@ -48,6 +48,35 @@ describe("headerPhaseOf", () => {
     expect(headerPhaseOf(task({ type: "running" }), spec("review", null))).toEqual({ column: "specify", step: 1 });
   });
 
+  it("keeps the recorded phase when the spec folder is missing", () => {
+    expect(headerPhaseOf(task({ type: "running" }, "plan"), spec("review", null))).toEqual({ column: "plan", step: 2 });
+  });
+
+  it("agrees with the board's column", () => {
+    const cases: [Task, ReturnType<typeof spec>][] = [
+      [task({ type: "running" }, "plan"), spec("implement")],
+      [task({ type: "running" }), spec("review")],
+      [task({ type: "running" }), spec("review", null)],
+      [task({ type: "running" }, "plan"), spec("review", null)],
+    ];
+    for (const [t, s] of cases) expect(headerPhaseOf(t, s)?.column).toBe(boardColumnOf(t, s));
+  });
+
+  it("counts done items out of total only in implement with a task list", () => {
+    const running = task({ type: "running" }, "implement");
+    expect(headerPhaseOf(running, { ...spec("implement"), done: 4, total: 12 })).toEqual({
+      column: "implement",
+      step: 3,
+      done: 4,
+      total: 12,
+    });
+    expect(headerPhaseOf(running, { ...spec("implement"), done: 0, total: 0 })).toEqual({ column: "implement", step: 3 });
+    expect(headerPhaseOf(task({ type: "running" }, "plan"), { ...spec("plan"), total: 12 })).toEqual({
+      column: "plan",
+      step: 2,
+    });
+  });
+
   it("shows the phase for failed and paused tasks", () => {
     expect(headerPhaseOf(task({ type: "failed" } as TaskStatus, "plan"), spec("plan"))?.column).toBe("plan");
     expect(headerPhaseOf(task({ type: "paused-by-limit" } as TaskStatus, "plan"), spec("plan"))?.column).toBe("plan");
