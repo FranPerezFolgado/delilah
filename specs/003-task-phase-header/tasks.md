@@ -37,22 +37,22 @@ None: no new dependencies; the existing vitest + Testing Library setup is used a
 
 **Independent Test**: in a preview, open a running task whose phase is "plan". The header reads "2 Plan" before the status pill with the terminal in front. Moving the phase with the spec panel's stepper changes it without a reload.
 
-- [ ] T004 [P] [US1] Write failing tests in `app/src/components/PhaseBadge.test.tsx` (pattern: `Sidebar.test.tsx`):
+- [X] T004 [P] [US1] Write failing tests in `app/src/components/PhaseBadge.test.tsx` (pattern: `Sidebar.test.tsx`):
   - `<PhaseBadge phase={{ column: "plan", step: 2 }} />` renders the step "2" and the label "Plan" in an element with classes `pill phase-pill`.
   - Its `aria-label` and `title` are "Fase: Plan", which is the Spanish source, as the other tests use.
   - It renders no button / is not clickable.
-- [ ] T005 [US1] Create `app/src/components/PhaseBadge.tsx`. It exports `PhaseBadge({ phase }: { phase: HeaderPhase })` and renders `<span className="pill phase-pill" title={label} aria-label={label}><span className="dot-step">{phase.step}</span>{phaseLabel(phase.column)}</span>`, where `label = t("Fase: {phase}", { phase: phaseLabel(phase.column) })`. T004 then passes.
-- [ ] T006 [P] [US1] Add the styles in `app/src/styles.css`, after the `.pill` rule (~line 69):
+- [X] T005 [US1] Create `app/src/components/PhaseBadge.tsx`. It exports `PhaseBadge({ phase }: { phase: HeaderPhase })` and renders `<span className="pill phase-pill" title={label} aria-label={label}><span className="dot-step">{phase.step}</span>{phaseLabel(phase.column)}</span>`, where `label = t("Fase: {phase}", { phase: phaseLabel(phase.column) })`. T004 then passes.
+- [X] T006 [P] [US1] Add the styles in `app/src/styles.css`, after the `.pill` rule (~line 69):
   - `.phase-pill { border-color: var(--acc); background: var(--accbg); color: var(--tx); }`
   - a compact `.phase-pill .dot-step` that fits the 20 px pill (look at the `.dot-step` rule (~line 207) for the existing look and size it down);
   - `.view-head .pill { flex-shrink: 0; }` so the title (`.trunc`) shrinks first.
-- [ ] T007 [US1] In `app/src/components/TaskScreen.tsx`:
+- [X] T007 [US1] In `app/src/components/TaskScreen.tsx`:
   - add `spec?: SpecSummary` to `Props` and to the destructured props;
   - in the header's `task && status` branch (~line 439), compute `const phase = headerPhaseOf(task, spec)`;
   - render `{phase && <PhaseBadge phase={phase} />}` before the status pill;
   - give `style={{ marginLeft: "auto" }}` to the badge when it is shown, and to the status pill only when it is not. Wrap the badge in nothing extra; pass the style through a `style` prop on `PhaseBadge`, or a `className` such as `push-right`, whichever is simpler.
   - The project header branch stays unchanged.
-- [ ] T008 [US1] In `app/src/App.tsx` (~line 322), pass `spec={specs[owner]}` to `<TaskScreen>`.
+- [X] T008 [US1] In `app/src/App.tsx` (~line 322), pass `spec={specs[owner]}` to `<TaskScreen>`.
 
 **Checkpoint**: `npx tsc --noEmit` and `npx vitest related --run src/components/PhaseBadge.tsx src/phases.ts` pass. US1 is usable on its own.
 
