@@ -19,8 +19,8 @@
 
 **Purpose**: the folder for the view and its art credits. There are no new dependencies.
 
-- [ ] T001 Create `app/src/playground/CREDITS.md`. It says that every sprite in `sprites.ts` is original pixel art drawn for Delilah, under the repository's licence, and has a table (sprite, author, licence, source) with one row per sprite group, filled as the sprites are added (FR-013).
-- [ ] T002 [P] Add the playground strings to `app/src/i18n/en.ts`, following the file's Spanish-key → English pattern:
+- [X] T001 Create `app/src/playground/CREDITS.md`. It says that every sprite in `sprites.ts` is original pixel art drawn for Delilah, under the repository's licence, and has a table (sprite, author, licence, source) with one row per sprite group, filled as the sprites are added (FR-013).
+- [X] T002 [P] Add the playground strings to `app/src/i18n/en.ts`, following the file's Spanish-key → English pattern:
   - "Playground" (nav and title);
   - "{n} esperando" → "{n} waiting";
   - "Abrir en ventana" → "Open in window";
