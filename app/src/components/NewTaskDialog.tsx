@@ -13,15 +13,24 @@ export interface TaskDraft {
 interface Props {
   projects: Project[];
   draft?: TaskDraft;
+  /** The project to start in, e.g. the one on screen. */
+  project?: string;
   onClose: () => void;
   onStarted: (task: Task) => void;
 }
 
-export function NewTaskDialog({ projects, draft, onClose, onStarted }: Props) {
+export function NewTaskDialog({ projects, draft, project: initialProject, onClose, onStarted }: Props) {
+  // A Jira ticket, or a free task Delilah names itself (LIBRE-n).
+  const [origin, setOrigin] = useState<"jira" | "libre">("jira");
+  // In the project's checkout (a branch there), or isolated in a worktree.
+  const [where, setWhere] = useState<"checkout" | "worktree">("checkout");
   const [key, setKey] = useState(draft?.key ?? "");
   const [title, setTitle] = useState(draft?.title ?? "");
   // A ticket with components most likely belongs to the parent project.
-  const preferred = (draft?.components.length ? projects.find((p) => p.kind === "parent") : undefined) ?? projects[0];
+  const preferred =
+    projects.find((p) => p.name === initialProject) ??
+    (draft?.components.length ? projects.find((p) => p.kind === "parent") : undefined) ??
+    projects[0];
   const [projectName, setProjectName] = useState(preferred?.name ?? "");
   const [submodules, setSubmodules] = useState<Submodule[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -59,7 +68,7 @@ export function NewTaskDialog({ projects, draft, onClose, onStarted }: Props) {
     setError(null);
     try {
       const res = await api.suggestSubmodules(project.name, {
-        key: key.trim(),
+        key: key.trim() || "LIBRE",
         title: title.trim(),
         components: draft?.components ?? [],
         description: draft?.description,
@@ -82,10 +91,12 @@ export function NewTaskDialog({ projects, draft, onClose, onStarted }: Props) {
     setError(null);
     try {
       const task = await api.run({
-        key: key.trim(),
+        key: origin === "libre" ? "" : key.trim(),
         title: title.trim(),
         project: project.name,
         submodules: picked,
+        free: origin === "libre",
+        in_checkout: where === "checkout",
         // A custom prompt runs outside the /feature workflow.
         ...(prompt.trim() ? { workflow: "prompt", prompt: prompt.trim() } : {}),
       });
@@ -104,16 +115,36 @@ export function NewTaskDialog({ projects, draft, onClose, onStarted }: Props) {
           <p className="muted">Primero añade un proyecto en la vista Proyectos.</p>
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
+            {!draft && (
+              <div className="segs" role="radiogroup" aria-label="Origen" style={{ alignSelf: "flex-start" }}>
+                <button type="button" role="radio" aria-checked={origin === "jira"} className={`seg ${origin === "jira" ? "on" : ""}`} onClick={() => setOrigin("jira")}>
+                  Ticket de Jira
+                </button>
+                <button type="button" role="radio" aria-checked={origin === "libre"} className={`seg ${origin === "libre" ? "on" : ""}`} onClick={() => setOrigin("libre")}>
+                  Tarea libre
+                </button>
+              </div>
+            )}
+            {origin === "jira" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
+                <label className="field">
+                  <span>Ticket</span>
+                  <input className="input mono" placeholder="PROJ-1234" value={key} onChange={(e) => setKey(e.target.value)} required autoFocus />
+                </label>
+                <label className="field">
+                  <span>Título</span>
+                  <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+                </label>
+              </div>
+            ) : (
               <label className="field">
-                <span>Ticket</span>
-                <input className="input mono" placeholder="PROJ-1234" value={key} onChange={(e) => setKey(e.target.value)} required autoFocus />
+                <span>Qué quieres hacer</span>
+                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Probar caché de tarifas en svc-billing" required autoFocus />
+                <span className="muted" style={{ fontSize: 11.5, fontWeight: 400 }}>
+                  Delilah le pone una clave LIBRE-n. Arranca con <span className="mono">/feature</span> y esta descripción.
+                </span>
               </label>
-              <label className="field">
-                <span>Título</span>
-                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
-              </label>
-            </div>
+            )}
             <label className="field">
               <span>Proyecto</span>
               <select className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)}>
@@ -124,12 +155,35 @@ export function NewTaskDialog({ projects, draft, onClose, onStarted }: Props) {
                 ))}
               </select>
             </label>
+            <div className="field">
+              <span>Dónde trabaja el agente</span>
+              <div className="where">
+                <label className={`where-opt ${where === "checkout" ? "on" : ""}`}>
+                  <input type="radio" name="where" checked={where === "checkout"} onChange={() => setWhere("checkout")} />
+                  <span>
+                    <b>En tu checkout</b>
+                    <span className="muted">
+                      Crea la rama en <span className="mono">{project?.path ?? "tu carpeta"}</span>
+                      {project?.kind === "parent" ? " (en los submódulos elegidos)" : ""} y trabaja ahí. Instantáneo; ves los cambios en tu IDE.
+                      Una tarea a la vez, con el checkout limpio.
+                    </span>
+                  </span>
+                </label>
+                <label className={`where-opt ${where === "worktree" ? "on" : ""}`}>
+                  <input type="radio" name="where" checked={where === "worktree"} onChange={() => setWhere("worktree")} />
+                  <span>
+                    <b>Aislada (worktree)</b>
+                    <span className="muted">Copia aparte. Varias tareas en paralelo sin tocar tu carpeta; la primera vez clona los submódulos.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
             {project?.kind === "parent" && (
               <div className="field">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   Submódulos que toca la tarea
                   <button type="button" className="btn" style={{ marginLeft: "auto", height: 24 }} onClick={suggest}
-                    disabled={suggesting || !key.trim() || !title.trim()}>
+                    disabled={suggesting || (origin === "jira" && !key.trim()) || !title.trim()}>
                     {suggesting ? "Claude está mirando el código…" : "Sugerir con Claude"}
                   </button>
                 </span>
@@ -153,7 +207,10 @@ export function NewTaskDialog({ projects, draft, onClose, onStarted }: Props) {
               </div>
             )}
             <label className="field">
-              <span>Primer mensaje (opcional; si lo dejas vacío usa <span className="mono">/feature {key || "TICKET"}</span>)</span>
+              <span>
+                Primer mensaje (opcional; si lo dejas vacío usa{" "}
+                <span className="mono">/feature {origin === "libre" ? "<lo que quieres hacer>" : key || "TICKET"}</span>)
+              </span>
               <textarea className="input" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
             </label>
           </>

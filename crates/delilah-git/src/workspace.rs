@@ -269,3 +269,117 @@ pub fn changed_paths(
     }
     Ok(paths)
 }
+
+/// The folders a task working in the project's own checkout puts its branch in:
+/// the repo itself, or each chosen submodule (which must be initialised there).
+fn checkout_dirs(root: &Path, spec: &WorkspaceSpec) -> Result<Vec<(String, PathBuf)>, GitError> {
+    match spec.kind {
+        ProjectKind::Repo if !spec.submodules.is_empty() => Err(GitError::SubmodulesInRepo),
+        ProjectKind::Repo => Ok(vec![(".".into(), root.to_path_buf())]),
+        ProjectKind::Parent => spec
+            .submodules
+            .iter()
+            .map(|sub| {
+                let dir = root.join(sub);
+                if dir.join(".git").exists() {
+                    Ok((sub.clone(), dir))
+                } else {
+                    Err(GitError::NotInitialised(sub.clone()))
+                }
+            })
+            .collect(),
+    }
+}
+
+/// Puts the task's branch in the project's own checkout instead of a worktree:
+/// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
+/// while there are uncommitted changes. Returns the workspace and, per folder, the
+/// branch (or commit) it was on, to go back there when the task is archived.
+pub fn use_checkout(
+    root: &Path,
+    spec: &WorkspaceSpec,
+    opts: &GitOptions,
+) -> Result<(Workspace, Vec<(String, String)>), GitError> {
+    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
+        return Err(GitError::InvalidBranch(spec.branch.clone()));
+    }
+    let dirs = checkout_dirs(root, spec)?;
+    for (location, dir) in &dirs {
+        if !git(dir, &["status", "--porcelain"], opts)?.is_empty() {
+            return Err(GitError::Dirty {
+                location: location.clone(),
+            });
+        }
+    }
+    let mut previous: Vec<(String, String)> = Vec::new();
+    for (location, dir) in &dirs {
+        let was = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"], opts)
+            .ok()
+            .filter(|b| !b.is_empty())
+            .map_or_else(|| git(dir, &["rev-parse", "HEAD"], opts), Ok)?;
+        let exists = git(
+            dir,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", spec.branch),
+            ],
+            opts,
+        )
+        .is_ok();
+        let switched = if exists {
+            git(dir, &["checkout", "-q", &spec.branch], opts)
+        } else {
+            git(dir, &["checkout", "-q", "-b", &spec.branch], opts)
+        };
+        if let Err(e) = switched {
+            // Leave nothing half-switched behind.
+            for (loc, back) in &previous {
+                let d = if loc == "." {
+                    root.to_path_buf()
+                } else {
+                    root.join(loc)
+                };
+                let _ = git(&d, &["checkout", "-q", back], opts);
+            }
+            return Err(e);
+        }
+        previous.push((location.clone(), was));
+    }
+    let ws = Workspace {
+        path: root.to_path_buf(),
+        branch: spec.branch.clone(),
+        kind: spec.kind,
+        submodules: spec.submodules.clone(),
+    };
+    Ok((ws, previous))
+}
+
+/// Ends a task that worked in the project's checkout: goes back to the branches it
+/// was on. The task's branch stays (nothing is deleted), so unpushed commits are kept;
+/// only uncommitted changes stop it.
+pub fn leave_checkout(
+    root: &Path,
+    previous: &[(String, String)],
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    let dir = |loc: &str| {
+        if loc == "." {
+            root.to_path_buf()
+        } else {
+            root.join(loc)
+        }
+    };
+    for (location, _) in previous {
+        if !git(&dir(location), &["status", "--porcelain"], opts)?.is_empty() {
+            return Err(GitError::Dirty {
+                location: location.clone(),
+            });
+        }
+    }
+    for (location, back) in previous {
+        git(&dir(location), &["checkout", "-q", back], opts)?;
+    }
+    Ok(())
+}

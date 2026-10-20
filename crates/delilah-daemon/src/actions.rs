@@ -70,10 +70,15 @@ pub async fn archive(
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
-    tokio::task::spawn_blocking(move || delilah_git::archive_workspace(&root, &ws, &opts))
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::conflict(e.to_string()))?;
+    // A task in the project's checkout goes back to where it was; a worktree goes away.
+    let previous = app.store.checkout_previous(&key).await?;
+    tokio::task::spawn_blocking(move || match previous {
+        Some(previous) => delilah_git::leave_checkout(&root, &previous, &opts),
+        None => delilah_git::archive_workspace(&root, &ws, &opts),
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    .map_err(|e| ApiError::conflict(e.to_string()))?;
     app.store.delete_workspace(&key).await?;
     app.emit(Topic::Tasks);
     app.emit(Topic::Specs);

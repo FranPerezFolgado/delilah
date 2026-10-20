@@ -319,3 +319,16 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .srow svg.i { width: 13px; height: 13px; }
 .pdone { font-size: 11.5px; padding: 2px 8px 4px 29px; }
 .pgroup .srow { padding-left: 18px; }
+
+/* New task: where the agent works */
+.where { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.where-opt { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid var(--bd2); border-radius: 8px; cursor: pointer;
+  font-size: 12.5px; font-weight: 400; color: var(--tx); }
+.where-opt > span { display: flex; flex-direction: column; gap: 3px; }
+.where-opt .muted { font-size: 11.5px; line-height: 1.4; }
+.where-opt.on { border-color: var(--acc); background: var(--accbg); }
+.where-opt input { margin: 2px 0 0; accent-color: var(--acc); }
+/* A tall dialog scrolls; its parts never get squeezed. */
+.dialog > * { flex-shrink: 0; }
+.where-opt > span { min-width: 0; }
+.where-opt .mono { word-break: break-all; }

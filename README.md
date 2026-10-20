@@ -117,6 +117,20 @@ report no clicks on desktop, and in development builds they are even sent as
 Terminal. While the app is open the daemon stays quiet; when it is closed, the
 daemon notifies as before.
 
+**Projects.** The sidebar groups everything by project, as in Orca: the project,
+its sessions, then its tasks by urgency. A project's screen works like a task's,
+but on your own checkout: "Preguntar a Claude" (or "+" on the project) starts
+Claude in **solo lectura** (`--permission-mode plan`). It reads, searches and
+explains, but does not edit, and nothing is created. "Permitir cambios en esta
+sesión" restarts it in normal mode on the same conversation.
+
+**New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
+and starts `/feature <what you want to do>`). The agent works either **in your
+checkout** (default: a branch in your folder, or in the chosen submodules of a
+parent; one task at a time, with the checkout clean; archiving goes back to the
+branch you were on and keeps the task's branch) or **isolated in a worktree**
+(several tasks in parallel without touching your folder).
+
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself
 (status, actions, spec, history), its sessions, Cambios when opened, and files.

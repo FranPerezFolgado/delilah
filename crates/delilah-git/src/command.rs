@@ -30,6 +30,10 @@ pub enum GitError {
     Unpushed { location: String, count: u32 },
     #[error("a `repo` project has no submodules; drop --submodules")]
     SubmodulesInRepo,
+    #[error(
+        "`{0}` is not initialised in your checkout: run `git submodule update --init {0}` or use a worktree"
+    )]
+    NotInitialised(String),
 }
 
 pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String, GitError> {

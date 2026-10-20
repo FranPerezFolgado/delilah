@@ -58,6 +58,10 @@ export interface RunRequest {
   submodules: string[];
   workflow?: string;
   prompt?: string;
+  /** No Jira ticket: Delilah names it LIBRE-n. */
+  free?: boolean;
+  /** Work in the project's own checkout instead of a worktree. */
+  in_checkout?: boolean;
 }
 
 export type JiraMode = "sample" | "cloud" | "data-center";

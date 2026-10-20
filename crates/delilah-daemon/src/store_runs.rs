@@ -57,6 +57,47 @@ impl Store {
         )))
     }
 
+    /// Marks a workspace as the project's own checkout, with where it was before.
+    pub async fn set_checkout_previous(
+        &self,
+        key: &TaskKey,
+        previous: &[(String, String)],
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE workspaces SET previous = ? WHERE task_key = ?")
+            .bind(serde_json::to_string(previous)?)
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// For a task working in the project's checkout: where each folder was before.
+    pub async fn checkout_previous(
+        &self,
+        key: &TaskKey,
+    ) -> Result<Option<Vec<(String, String)>>, StoreError> {
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT previous FROM workspaces WHERE task_key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+        Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
+    }
+
+    /// The task working in this checkout right now, if any: one at a time.
+    pub async fn checkout_user(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<Option<String>, StoreError> {
+        Ok(sqlx::query_scalar(
+            "SELECT task_key FROM workspaces WHERE previous IS NOT NULL AND path = ?",
+        )
+        .bind(path.to_string_lossy())
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     pub async fn delete_workspace(&self, key: &TaskKey) -> Result<(), StoreError> {
         sqlx::query("DELETE FROM workspaces WHERE task_key = ?")
             .bind(key.as_str())

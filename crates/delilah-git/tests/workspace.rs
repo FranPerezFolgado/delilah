@@ -4,7 +4,7 @@ use std::process::Command;
 use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
-    create_workspace, file_diff, list_submodules, repo_root,
+    create_workspace, file_diff, leave_checkout, list_submodules, repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -301,4 +301,54 @@ fn lists_what_the_branch_changed_committed_or_not() {
     assert!(diff.contains("+Payments, now with retries"), "{diff}");
     let new = file_diff(&dir, &found.files[2], &opts()).unwrap();
     assert!(new.contains("@@ -0,0 +1,2 @@\n+one\n+two"), "{new}");
+}
+
+#[test]
+fn a_task_can_work_in_the_checkout_and_leave_it_as_it_was() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    // The fixture's parent has its submodules initialised, like a dev's checkout.
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let spec = WorkspaceSpec {
+        path: parent.clone(),
+        branch: "feature/PROJ-9".into(),
+        kind: ProjectKind::Parent,
+        submodules: vec!["svc-payments".into()],
+    };
+    let pay = parent.join("svc-payments");
+    let before = git(&pay, &["rev-parse", "HEAD"]);
+
+    let (ws, previous) = use_checkout(&parent, &spec, &opts()).unwrap();
+    assert_eq!(ws.path, parent);
+    assert_eq!(git(&pay, &["branch", "--show-current"]), "feature/PROJ-9");
+    assert_eq!(previous[0].0, "svc-payments");
+
+    // Uncommitted work stops leaving; committed work stays on the task's branch.
+    std::fs::write(pay.join("retry.txt"), "jitter\n").unwrap();
+    assert!(matches!(
+        leave_checkout(&parent, &previous, &opts()),
+        Err(GitError::Dirty { .. })
+    ));
+    git(&pay, &["add", "retry.txt"]);
+    git(&pay, &["commit", "-qm", "retry"]);
+    leave_checkout(&parent, &previous, &opts()).unwrap();
+    assert_eq!(git(&pay, &["rev-parse", "HEAD"]), before);
+    assert!(git(&pay, &["branch", "--list", "feature/PROJ-9"]).contains("feature/PROJ-9"));
+}
+
+#[test]
+fn the_checkout_is_not_used_with_uncommitted_changes() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    std::fs::write(repo.join("wip.txt"), "mine\n").unwrap();
+    let spec = WorkspaceSpec {
+        path: repo.clone(),
+        branch: "feature/X-1".into(),
+        kind: ProjectKind::Repo,
+        submodules: vec![],
+    };
+    assert!(matches!(
+        use_checkout(&repo, &spec, &opts()),
+        Err(GitError::Dirty { .. })
+    ));
 }

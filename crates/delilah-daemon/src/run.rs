@@ -33,14 +33,27 @@ pub struct RunRequest {
     pub submodules: Vec<String>,
     /// Defaults to `feature/<key>`.
     pub branch: Option<String>,
-    /// Defaults to `/feature <key>` for the `feature` workflow.
+    /// Defaults to `/feature <key>` for the `feature` workflow (`/feature <title>`
+    /// for a free task).
     pub prompt: Option<String>,
+    /// A task without a Jira ticket: `key` may be empty, Delilah names it `LIBRE-<n>`.
+    #[serde(default)]
+    pub free: bool,
+    /// Work in the project's own checkout (a branch there) instead of a worktree.
+    #[serde(default)]
+    pub in_checkout: bool,
 }
 
 pub async fn start_run(
     State(app): State<AppState>,
-    Json(req): Json<RunRequest>,
+    Json(mut req): Json<RunRequest>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
+    if req.free && req.key.trim().is_empty() {
+        req.key = next_free_key(&app).await?;
+    }
+    if req.free && req.title.trim().is_empty() {
+        return Err(ApiError::bad_request("say what the free task is about"));
+    }
     if req.key.is_empty()
         || req.key.len() > 64
         || !req
@@ -75,6 +88,7 @@ pub async fn start_run(
         .unwrap_or_else(|| project.workflow.clone());
     let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
+        (None, "feature") if req.free => format!("/feature {}", req.title.trim()),
         (None, "feature") => format!("/feature {}", req.key),
         (None, other) => {
             return Err(ApiError::bad_request(format!(
@@ -82,6 +96,15 @@ pub async fn start_run(
             )));
         }
     };
+
+    if req.in_checkout
+        && let Some(other) = app.store.checkout_user(&project.path).await?
+    {
+        return Err(ApiError::conflict(format!(
+            "{other} is already working in {}'s checkout: archive it first, or use a worktree",
+            project.name
+        )));
+    }
 
     let key = TaskKey::new(&req.key);
     let mut task = Task::new(key.clone(), &req.title, &workflow);
@@ -102,12 +125,18 @@ pub async fn start_run(
         allow_file_protocol: app.config.allow_file_protocol,
     };
     let root = project.path.clone();
-    let created =
-        tokio::task::spawn_blocking(move || delilah_git::create_workspace(&root, &spec, &opts))
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-    let ws = match created {
-        Ok(ws) => ws,
+    let in_checkout = req.in_checkout;
+    let created = tokio::task::spawn_blocking(move || {
+        if in_checkout {
+            delilah_git::use_checkout(&root, &spec, &opts).map(|(ws, prev)| (ws, Some(prev)))
+        } else {
+            delilah_git::create_workspace(&root, &spec, &opts).map(|ws| (ws, None))
+        }
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let (ws, previous) = match created {
+        Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
             app.transition(
@@ -121,11 +150,18 @@ pub async fn start_run(
         }
     };
     app.store.save_workspace(&key, &project.path, &ws).await?;
+    if let Some(previous) = &previous {
+        app.store.set_checkout_previous(&key, previous).await?;
+    }
     app.transition(&key, Event::WorkspaceReady).await?;
 
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
-    let prompt = match (&req.prompt, crate::jira::fetch_issue(&app, &req.key).await) {
+    let issue = match req.free {
+        true => None,
+        false => crate::jira::fetch_issue(&app, &req.key).await,
+    };
+    let prompt = match (&req.prompt, issue) {
         (None, Some(issue)) => {
             let path = app.config.task_dir(&req.key).join("ticket.md");
             match crate::jira::write_ticket(&path, &issue) {
@@ -287,4 +323,17 @@ async fn read_for(
             _ = tokio::time::sleep_until(until) => return tokio::time::Instant::now() < deadline,
         }
     }
+}
+
+/// The next free task's key: `LIBRE-1`, `LIBRE-2`…
+async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
+    let n = app
+        .store
+        .list_tasks()
+        .await?
+        .iter()
+        .filter_map(|t| t.key.as_str().strip_prefix("LIBRE-")?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    Ok(format!("LIBRE-{}", n + 1))
 }

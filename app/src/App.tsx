@@ -383,6 +383,7 @@ export function App() {
       {newTask && (
         <NewTaskDialog
           projects={projects}
+          project={project?.name ?? task?.project ?? undefined}
           draft={draft}
           onClose={() => {
             setNewTask(false);
