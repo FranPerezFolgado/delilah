@@ -311,6 +311,7 @@ mod tests {
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
+            ui_origin: None,
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::post("/api/v1/projects/inspect")

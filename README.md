@@ -70,6 +70,14 @@ cd app && npm run dist
 
 `npm run dev` alone serves the same UI at http://localhost:1420 for a browser.
 
+**Previews.** To try a branch while the installed Delilah keeps working (e.g. when
+Delilah's own agents build Delilah), `scripts/preview.sh` runs that checkout's
+daemon on 750N and its UI on http://localhost:150N, with state in
+`fixtures/preview-home-N`; several worktrees get different slots. The daemon lets
+that UI in with `DELILAH_UI_ORIGIN`, and the UI finds it through
+`VITE_DELILAH_URL`. `--fresh` starts empty, `--no-ui` runs only the daemon,
+`--notify` turns notifications on. Ctrl-C stops both.
+
 The bundle carries `delilahd` inside (`Delilah.app/Contents/MacOS/delilahd`). When
 the installed app opens, it installs a LaunchAgent
 (`~/Library/LaunchAgents/dev.delilah.daemon.plist`) and launchd keeps the daemon

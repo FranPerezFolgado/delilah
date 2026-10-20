@@ -28,10 +28,14 @@ const APP_ORIGINS: &[&str] = &[
 ];
 
 pub fn router(state: AppState) -> Router {
+    let preview = state.config.ui_origin.clone();
+    let origins = APP_ORIGINS
+        .iter()
+        .copied()
+        .chain(preview.as_deref())
+        .filter_map(|o| HeaderValue::from_str(o).ok());
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::list(
-            APP_ORIGINS.iter().map(|o| HeaderValue::from_static(o)),
-        ))
+        .allow_origin(AllowOrigin::list(origins))
         .allow_methods(Any)
         .allow_headers(Any);
     Router::new()
@@ -116,7 +120,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/asks/{id}/release", post(asks::release))
         .with_state(state)
         .layer(cors)
-        .layer(middleware::from_fn(guard))
+        .layer(middleware::from_fn(move |req, next| {
+            guard(preview.clone(), req, next)
+        }))
 }
 
 /// The API has no authentication, so only the app and local tools may reach it:
@@ -125,8 +131,10 @@ pub fn router(state: AppState) -> Router {
 ///   The CLI, curl and the agents' hooks send no `Origin`.
 /// - the `Host` must be a loopback name, so a page that rebinds its own domain to
 ///   127.0.0.1 is refused too (DNS rebinding).
-async fn guard(req: Request, next: Next) -> Response {
-    match refusal(req.headers()) {
+///
+/// `preview` is the one more origin a preview daemon lets in (`DELILAH_UI_ORIGIN`).
+async fn guard(preview: Option<String>, req: Request, next: Next) -> Response {
+    match refusal(req.headers(), preview.as_deref()) {
         Some(reason) => {
             tracing::warn!(uri = %req.uri(), "refused: {reason}");
             ApiError::new(StatusCode::FORBIDDEN, reason).into_response()
@@ -135,9 +143,13 @@ async fn guard(req: Request, next: Next) -> Response {
     }
 }
 
-fn refusal(headers: &HeaderMap) -> Option<&'static str> {
+fn refusal(headers: &HeaderMap, preview: Option<&str>) -> Option<&'static str> {
     if let Some(origin) = headers.get(header::ORIGIN)
-        && !APP_ORIGINS.iter().any(|o| origin == o)
+        && !APP_ORIGINS
+            .iter()
+            .copied()
+            .chain(preview)
+            .any(|o| origin == o)
     {
         return Some("requests from other origins are not allowed");
     }
@@ -383,6 +395,7 @@ mod tests {
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
+            ui_origin: None,
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -471,11 +484,16 @@ mod cors_tests {
     use super::*;
 
     async fn preflight(origin: &str) -> Option<String> {
+        preflight_with(origin, None).await
+    }
+
+    async fn preflight_with(origin: &str, ui_origin: Option<&str>) -> Option<String> {
         let config = crate::config::Config {
             home: std::env::temp_dir(),
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
+            ui_origin: ui_origin.map(str::to_string),
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -503,6 +521,17 @@ mod cors_tests {
             Some("http://localhost:1420")
         );
         assert_eq!(preflight("https://evil.example").await, None);
+        assert_eq!(preflight("http://localhost:1520").await, None);
+    }
+
+    #[tokio::test]
+    async fn a_preview_daemon_also_lets_its_own_ui_in() {
+        let ui = "http://localhost:1520";
+        assert_eq!(preflight_with(ui, Some(ui)).await.as_deref(), Some(ui));
+        assert_eq!(
+            preflight_with("http://localhost:1521", Some(ui)).await,
+            None
+        );
     }
 
     async fn status(method: &str, uri: &str, headers: &[(&str, &str)]) -> StatusCode {
@@ -511,6 +540,7 @@ mod cors_tests {
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
+            ui_origin: None,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

@@ -13,6 +13,9 @@ pub struct Config {
     pub allow_file_protocol: bool,
     /// Desktop notifications; `DELILAH_NOTIFY=0` turns them off.
     pub notify: bool,
+    /// One more browser origin allowed to call the API (`DELILAH_UI_ORIGIN`): the UI
+    /// of a preview (`scripts/preview.sh`), served on its own port.
+    pub ui_origin: Option<String>,
 }
 
 impl Config {
@@ -38,11 +41,15 @@ impl Config {
         let allow_file_protocol =
             std::env::var("DELILAH_ALLOW_FILE_PROTOCOL").is_ok_and(|v| v == "1");
         let notify = std::env::var("DELILAH_NOTIFY").map_or(true, |v| v != "0");
+        let ui_origin = std::env::var("DELILAH_UI_ORIGIN")
+            .ok()
+            .filter(|o| !o.is_empty());
         Ok(Self {
             home,
             addr,
             allow_file_protocol,
             notify,
+            ui_origin,
         })
     }
 

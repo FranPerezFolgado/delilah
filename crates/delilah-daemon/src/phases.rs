@@ -178,6 +178,7 @@ mod tests {
             addr: "127.0.0.1:7420".parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
+            ui_origin: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

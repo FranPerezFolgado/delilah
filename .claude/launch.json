@@ -4,14 +4,31 @@
     {
       "name": "daemon",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["scripts/dev-daemon.sh"],
+      "runtimeArgs": [
+        "scripts/dev-daemon.sh"
+      ],
       "port": 7420
     },
     {
       "name": "ui",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "app", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "app",
+        "run",
+        "dev"
+      ],
       "port": 1420
+    },
+    {
+      "name": "preview",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "scripts/preview.sh",
+        "--slot",
+        "8"
+      ],
+      "port": 1508
     }
   ]
 }

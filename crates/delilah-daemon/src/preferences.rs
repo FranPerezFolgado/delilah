@@ -95,6 +95,7 @@ mod tests {
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
+            ui_origin: None,
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }
