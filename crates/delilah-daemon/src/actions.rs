@@ -62,11 +62,10 @@ pub async fn archive(
             task.status.name()
         )));
     }
-    let (root, ws) = app
-        .store
-        .workspace(&key)
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("{key} has no workspace")))?;
+    // Already released (e.g. its checkout was taken by a newer task): nothing to do.
+    let Some((root, ws)) = app.store.workspace(&key).await? else {
+        return Ok(Json(task));
+    };
     for live in app.sessions.of_task(key.as_str()) {
         let _ = live.pty.kill();
         live.pty.wait().await;

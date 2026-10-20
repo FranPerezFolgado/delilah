@@ -85,17 +85,24 @@ impl Store {
         Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
     }
 
-    /// The task working in this checkout right now, if any: one at a time.
+    /// The task registered in this checkout, if any, and whether it has finished
+    /// (done or failed). Only one unfinished task works in a checkout at a time.
     pub async fn checkout_user(
         &self,
         path: &std::path::Path,
-    ) -> Result<Option<String>, StoreError> {
-        Ok(sqlx::query_scalar(
-            "SELECT task_key FROM workspaces WHERE previous IS NOT NULL AND path = ?",
+    ) -> Result<Option<(String, bool)>, StoreError> {
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT w.task_key, t.status FROM workspaces w JOIN tasks t ON t.key = w.task_key
+             WHERE w.previous IS NOT NULL AND w.path = ?",
         )
         .bind(path.to_string_lossy())
         .fetch_optional(&self.pool)
-        .await?)
+        .await?;
+        Ok(row.map(|(key, status)| {
+            let finished = serde_json::from_str::<delilah_core::TaskStatus>(&status)
+                .is_ok_and(|s| s.is_terminal());
+            (key, finished)
+        }))
     }
 
     pub async fn delete_workspace(&self, key: &TaskKey) -> Result<(), StoreError> {
@@ -135,6 +142,53 @@ mod tests {
         assert_eq!(
             store.workspace(&key).await.unwrap(),
             Some(("/tmp/parent".into(), ws))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_finished_task_no_longer_holds_the_checkout() {
+        use chrono::Utc;
+        use delilah_core::Event;
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("SEC-1");
+        store
+            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .await
+            .unwrap();
+        let ws = Workspace {
+            path: "/w/delilah".into(),
+            branch: "feature/SEC-1".into(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        store
+            .save_workspace(&key, "/w/delilah".as_ref(), &ws)
+            .await
+            .unwrap();
+        store
+            .set_checkout_previous(&key, &[(".".into(), "main".into())])
+            .await
+            .unwrap();
+        for event in [Event::Start, Event::WorkspaceReady] {
+            store.apply_event(&key, event, Utc::now()).await.unwrap();
+        }
+        let path = std::path::Path::new("/w/delilah");
+        assert_eq!(
+            store.checkout_user(path).await.unwrap(),
+            Some(("SEC-1".into(), false))
+        );
+
+        store
+            .apply_event(&key, Event::MarkDone, Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.checkout_user(path).await.unwrap(),
+            Some(("SEC-1".into(), true))
+        );
+        assert_eq!(
+            store.checkout_user("/elsewhere".as_ref()).await.unwrap(),
+            None
         );
     }
 }

@@ -111,13 +111,22 @@ pub async fn start_run(
         }
     };
 
-    if req.in_checkout
-        && let Some(other) = app.store.checkout_user(&project.path).await?
-    {
-        return Err(ApiError::conflict(format!(
-            "{other} is already working in {}'s checkout: archive it first, or use a worktree",
-            project.name
-        )));
+    if req.in_checkout {
+        match app.store.checkout_user(&project.path).await? {
+            Some((other, false)) => {
+                return Err(ApiError::conflict(format!(
+                    "{other} is still working in {}'s checkout: mark it done first, or use a worktree",
+                    project.name
+                )));
+            }
+            // A finished task no longer needs the checkout: release it as it is (its
+            // branch stays; the folder stays on whatever branch it is on now).
+            Some((other, true)) => {
+                app.store.delete_workspace(&TaskKey::new(&other)).await?;
+                tracing::info!(task = %other, project = %project.name, "released the checkout of a finished task");
+            }
+            None => {}
+        }
     }
 
     let mut task = Task::new(key.clone(), &req.title, &workflow);

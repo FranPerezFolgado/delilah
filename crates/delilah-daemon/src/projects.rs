@@ -88,7 +88,7 @@ pub async fn update_project(
         project.path = path;
     }
     if project.path != old.path
-        && let Some(task) = app.store.checkout_user(&old.path).await?
+        && let Some((task, false)) = app.store.checkout_user(&old.path).await?
     {
         return Err(ApiError::conflict(format!(
             "{task} is working in this checkout: archive it before moving the project"
