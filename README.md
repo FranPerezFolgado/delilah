@@ -253,5 +253,9 @@ ended) can be reopened: Claude picks its conversation back up with `--resume`.
 
 ## Design
 
-The design sketch (decisions, architecture, MVP scope) lives in the
-[Delilah design doc](https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204).
+- [docs/architecture.md](docs/architecture.md): how it is built.
+- [docs/decisions.md](docs/decisions.md): what was decided and why.
+- [docs/development.md](docs/development.md): running, testing and releasing.
+- [docs/status.md](docs/status.md): what is done and pending.
+- [docs/vision.md](docs/vision.md): what is planned, from the original
+  [design sketch](https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204).

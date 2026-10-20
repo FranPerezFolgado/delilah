@@ -4,11 +4,28 @@ Native macOS orchestrator for coding agents, written in Rust. Design doc:
 https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204
 UI mock-ups: https://claude.ai/artifact/6kgvh73UPJWaboZVJiddre
 
-## Current scope: MVP-0
+## Current scope
 
-Core daemon + CLI, plus a first desktop app (Tauri, `app/`). Only the Claude Code
-adapter. The tasks are listed
-in the design doc's "MVP" section.
+Daemon + CLI and the desktop app (Tauri, `app/`), used daily; only the Claude Code
+adapter. MVP-0 and MVP-1 of the design doc are done; what is built and what comes
+next is in [docs/status.md](docs/status.md).
+
+## Start here
+
+Read these before changing anything; keep them true when you change behaviour:
+
+- [docs/status.md](docs/status.md): what is built, what is pending, known problems.
+- [docs/architecture.md](docs/architecture.md): crates, daemon modules, data, task
+  states and phases, hooks, workspaces, the UI.
+- [docs/decisions.md](docs/decisions.md): what was decided and why (including what
+  was ruled out).
+- [docs/development.md](docs/development.md): running, testing, conventions,
+  releasing, gotchas.
+- [docs/vision.md](docs/vision.md): the original plan, for what is not built yet.
+- [README.md](README.md): every feature as the user sees it.
+
+When a feature lands, update `docs/status.md` (and the README for user-facing
+behaviour); when a decision is taken, add it to `docs/decisions.md`.
 
 ## Ground rules
 
@@ -20,6 +37,21 @@ in the design doc's "MVP" section.
 - Git and gh here run as the personal account (FranPerezFolgado). The machine
   also has work credentials: confirm the account before any remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.
+
+## Stack & checks
+
+| Area | Where | Check |
+|---|---|---|
+| Rust workspace | `crates/*` | `cargo test -p <crate>`; everything: `cargo test --workspace` |
+| Desktop shell | `app/src-tauri` (outside the workspace) | `cargo test --manifest-path app/src-tauri/Cargo.toml` |
+| Web UI | `app/` (React + TS, Vite) | `cd app && npx tsc --noEmit && npx vitest related --run <files>`; everything: `npx vitest run` |
+
+- Migrations: `crates/delilah-daemon/migrations/NNNN_*.sql` (SQLite, sqlx; never edit a shipped one).
+- Contracts: the daemon's HTTP API in `crates/delilah-daemon/src/api.rs` ↔ its client types in `app/src/api.ts`.
+
+## QMD Collection
+
+Active collections: `delilah` (docs/), `delilah-specs` (specs/)
 
 ## Trying changes: always in a preview
 
