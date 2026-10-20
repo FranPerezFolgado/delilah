@@ -25,6 +25,21 @@ const PHASES: SpecPhase[] = ["specify", "plan", "implement", "review"];
 
 export const phaseLabel = (c: Column) => t(COLUMNS.find((col) => col.id === c)?.label ?? c);
 
+/** The phase the task screen header shows: the board's column and its 1-based step. */
+export interface HeaderPhase {
+  column: SpecPhase;
+  step: number;
+  done?: number;
+  total?: number;
+}
+
+/** Null for backlog and finished tasks and when there is no spec information. */
+export function headerPhaseOf(task: Task, spec?: SpecSummary): HeaderPhase | null {
+  if (!spec || task.status.type === "queued" || task.status.type === "done") return null;
+  const column = columnOf(task, spec) as SpecPhase;
+  return { column, step: COLUMNS.findIndex((c) => c.id === column) + 1 };
+}
+
 /** Where a task sits: done tasks in "Hecha"; the others by the phase recorded (the
  *  spec, the agent's actions or the user move it), else the spec's, else the start. */
 export function columnOf(task: Task, spec?: SpecSummary): Column {

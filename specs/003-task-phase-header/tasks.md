@@ -19,13 +19,13 @@ None: no new dependencies; the existing vitest + Testing Library setup is used a
 
 **Purpose**: the pure rule for what the header shows, and its text.
 
-- [ ] T001 Write failing tests for `headerPhaseOf(task, spec)` in `app/src/phases.test.ts`, reusing the file's `task()` factory:
+- [X] T001 Write failing tests for `headerPhaseOf(task, spec)` in `app/src/phases.test.ts`, reusing the file's `task()` factory:
   - `queued` → null; `done` → null; no spec (undefined) → null.
   - running task with `phase: "plan"` and a spec → `{ column: "plan", step: 2 }`.
   - `phase: null` with spec `phase: "implement"` → `implement`, step 3; spec with `dir: null` and no recorded phase → `specify`, step 1.
   - `failed` and `paused-by-limit` tasks with a spec → phase shown.
-- [ ] T002 Implement `export interface HeaderPhase { column: SpecPhase; step: number; done?: number; total?: number }` and `export function headerPhaseOf(task: Task, spec?: SpecSummary): HeaderPhase | null` in `app/src/phases.ts`. It returns null for `queued`, for `done` and when there is no spec. Otherwise `column = columnOf(task, spec)` (never `done` here), and `step` = its index in `COLUMNS` + 1. Leave `done`/`total` unset (US2). T001 then passes.
-- [ ] T003 [P] Add `"Fase: {phase}": "Phase: {phase}"` to `app/src/i18n/en.ts`, next to the existing phase strings (e.g. after `"Mover a {phase}"`).
+- [X] T002 Implement `export interface HeaderPhase { column: SpecPhase; step: number; done?: number; total?: number }` and `export function headerPhaseOf(task: Task, spec?: SpecSummary): HeaderPhase | null` in `app/src/phases.ts`. It returns null for `queued`, for `done` and when there is no spec. Otherwise `column = columnOf(task, spec)` (never `done` here), and `step` = its index in `COLUMNS` + 1. Leave `done`/`total` unset (US2). T001 then passes.
+- [X] T003 [P] Add `"Fase: {phase}": "Phase: {phase}"` to `app/src/i18n/en.ts`, next to the existing phase strings (e.g. after `"Mover a {phase}"`).
 
 **Checkpoint**: `npx vitest related --run src/phases.ts` passes.
 
