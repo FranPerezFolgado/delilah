@@ -68,7 +68,8 @@ out, the counter reads 1, and clicking its character opens that task on its term
 
 While an agent works, its character shows *what kind* of work it is doing: typing when
 it edits files, reading when it reads or searches, at a terminal when it runs commands,
-on the phone when it hands work to a helper agent, and thinking between actions. A small
+on the phone while it waits for a helper agent it handed work to, and thinking between
+actions. A small
 caption under the desk names the action (for example "Editing api.rs", "Running cargo
 test").
 
@@ -93,14 +94,50 @@ character goes reading → typing → terminal, and the caption follows.
 
 ---
 
-### User Story 4 - A view worth a screenshot (Priority: P3)
+### User Story 4 - See each agent's helpers around its desk (Priority: P3)
+
+When an agent hands work to helper agents (subagents: a researcher, an implementer, a
+reviewer…), a small character appears around its desk for each helper, in a semicircle.
+Each helper shows its role with its own look and a short label (for example a magnifying
+glass for a researcher, a hard hat for an implementer, glasses for a reviewer), and is
+animated by what it is doing right now, like the main character but smaller. A helper
+fades out when it finishes. Up to 4 helpers fit around a desk; beyond that a "+N" badge
+lists the rest on hover. The main character keeps showing its own work while helpers
+run in the background, and shows "supervising" only while it is blocked waiting for them.
+
+**Why this priority**: with orchestrated work an agent often has a small team running in
+parallel; seeing that team is the most striking part of the view and tells how a task is
+progressing. Stories 1–3 already work without it.
+
+**Independent Test**: have an agent launch two helpers of different roles in parallel;
+two small characters with different looks appear around its desk, animate by their own
+actions, and fade out when each ends.
+
+**Acceptance Scenarios**:
+
+1. **Given** a working agent, **When** it launches a helper, **Then** a small character
+   with that helper's role look and label appears next to its desk within 2 seconds.
+2. **Given** a helper reading files while the main agent edits, **When** the user looks at
+   the desk, **Then** the helper shows reading and the main character shows typing.
+3. **Given** a helper, **When** it finishes, **Then** its character fades out and the
+   other helpers keep their places.
+4. **Given** an agent with 6 helpers running, **When** the user looks at its desk,
+   **Then** 4 helpers are shown and a "+2" badge lists the other two on hover.
+5. **Given** an agent blocked waiting for its helpers, **When** the user looks at its desk,
+   **Then** the main character shows "supervising".
+6. **Given** a helper of a role with no specific look, **When** it appears, **Then** it uses
+   a generic helper look with its role name as the label.
+
+---
+
+### User Story 5 - A view worth a screenshot (Priority: P4)
 
 The Playground looks like a small, coherent pixel-art office: one style throughout, desks
 laid out on a grid that grows with the number of agents, and a calm animation that
 does not distract. It follows the app's light and dark themes and looks good in a
 screenshot or a short screen recording.
 
-**Why this priority**: the "brag" half of the request. It polishes stories 1–3 but adds no
+**Why this priority**: the "brag" half of the request. It polishes stories 1–4 but adds no
 information.
 
 **Independent Test**: with four running agents, take a screenshot in light and in dark
@@ -130,6 +167,10 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - An agent's action is never reported as finished (the agent crashes mid-action): the
   action clears when the agent stops, fails or goes to waiting.
 - A task's title is very long: the label truncates it and shows the full title on hover.
+- A helper never reports that it finished (the agent crashes mid-way): its character goes
+  away when the agent stops, fails, waits for the user or is paused.
+- A helper launches its own helpers: they are shown as helpers of the same desk, not
+  nested.
 - The Playground is hidden (another view open, window minimised): animations stop; they
   resume with the current state when it is shown again.
 - An agent's action carries a long or sensitive argument (a long command, a path outside
@@ -170,6 +211,15 @@ theme; both read clearly, with no clipped labels or overlapping desks.
   in the app (public domain / CC0 or equivalent), and their source MUST be recorded.
 - **FR-014**: When the connection to the daemon is lost, the Playground MUST show that its
   picture may be out of date and refresh when the connection returns.
+- **FR-015**: The system MUST know, for each live agent session, the helper agents it has
+  running: each one's role and its current action, with the same kinds as FR-008.
+- **FR-016**: The Playground MUST show each running helper as a small character next to
+  its agent's desk, with a look and label for its role (a generic look for unknown
+  roles), animated by its current action, appearing and fading out as it starts and ends.
+- **FR-017**: A desk MUST show at most 4 helpers; any beyond that MUST be counted in a
+  "+N" badge that names them on hover.
+- **FR-018**: An agent's helpers MUST be cleared when the helper ends, and all of them
+  when the agent stops, fails, waits for the user or is paused.
 
 ### Key Entities
 
@@ -179,6 +229,8 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - **Current action**: what a working agent is doing right now: its kind (editing,
   reading/searching, running a command, delegating, other), a short name and a short
   target; it lives only while the action runs and is not kept in the task's history.
+- **Helper**: a helper agent (subagent) running for an agent at work: its role, its
+  current action, if any, and when it started; it lives only while it runs.
 
 ## Success Criteria *(mandatory)*
 
@@ -194,14 +246,17 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - **SC-005**: In a screenshot with 4 working agents, an observer who has never seen the
   app can say what each agent is doing (editing, reading, running something, waiting)
   for at least 3 of the 4.
+- **SC-006**: With an agent running 3 helpers, a user can say how many helpers it has and
+  what role each plays in under 5 seconds.
 
 ## Assumptions
 
 - Only the Claude Code agent is supported, as in the rest of the app; other agents get
   a desk once their adapter reports the same states and actions.
-- Helper agents launched by an agent (subagents) are not shown as their own characters in
-  this version; the parent's character shows "delegating" while they run. Showing them as
-  temporary characters is a later step.
+- Helper roles with their own look are those Delilah's workflow uses (researcher,
+  implementer, reviewers); any other role gets the generic helper look.
+- Agent "teammates" that run as their own sessions are not helpers: if they are live
+  agent sessions they get their own desk.
 - Extra gadgets (context fill, usage meters, kanban boards on the wall), an editable
   office layout, characters walking between places, and game engines are out of scope.
 - The current action is live state only: it is not stored, and the Playground shows
