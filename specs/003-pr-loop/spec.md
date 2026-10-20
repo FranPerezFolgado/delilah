@@ -27,6 +27,9 @@ him (CI broke, a reviewer commented) and cleans up when the PR is merged.
 ### Session 2026-10-20
 
 - Q: How much of changesets goes in the first version? → A: Tracking only: detect and show one PR per submodule and archive when all are merged; "Abrir PR" works per submodule, without cross-links between the PRs.
+- Q: Should CI failures or review requests go to the agent on their own? → A: No; Delilah always waits for the user to choose "Pedir al agente que lo arregle".
+- Q: On merge, archive straight away or ask first? → A: Straight away, with no confirmation; the no-lost-work guard (FR-018) still applies.
+- Q: Which review comments should trigger a notification? → A: Everyone's except the signed-in account's own, bots included.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -214,7 +217,14 @@ open, merging the second archives it.
   are sent and nothing else breaks. A failure is reported once, not on every check.
 - **Two accounts on the machine** (work and personal): Delilah uses whichever
   account the hosting CLI resolves for that repository and shows which one in the
-  PR tab; it never switches accounts on its own.
+  PR tab; it never switches accounts on its own. Pushing uses git's own
+  credentials, which may be a different account; if the push fails, its error is
+  shown as in Story 3.
+- **Same access problem**: the same cause (CLI missing, signed out, no access,
+  unsupported remote) for the same project is reported once; it stays visible in
+  the PR tab until it is fixed.
+- **The merge happens while the agent is mid-turn or the task is paused**: the
+  sessions are stopped and the task archived anyway (FR-017).
 - **Network down or rate-limited**: the last known state stays visible, marked as
   "last checked at …"; checking resumes later without duplicate notifications.
 - **The daemon was stopped while a PR changed**: on start it checks again and sends
@@ -222,6 +232,8 @@ open, merging the second archives it.
 - **The task is deleted or archived by hand**: Delilah stops watching its PR.
 - **A task with a PR is reopened or resumed after a merge**: not possible; once
   archived, the PR stays linked for reference only.
+- **Comments by the user's own account** (including ones the agent posts through
+  the same account) are counted in the tab but never notify.
 - **A PR with no CI configured**: checks show "no checks"; this is not a failure.
 - **Projects without a remote, or with a remote that isn't a supported host**: no PR
   tab actions; the tab explains that PRs are not available for that project.
@@ -241,6 +253,15 @@ open, merging the second archives it.
 - **FR-003**: Users MUST be able to link a PR to a task by pasting its URL, and to
   unlink it.
 - **FR-004**: A task's linked PRs MUST persist across daemon restarts.
+- **FR-024**: The repository and host of a PR MUST come from the remote of the
+  repository the branch lives in: the project's repo, or each submodule's own repo
+  for parent projects.
+- **FR-025**: A PR the user unlinked MUST NOT be linked again automatically; a
+  different PR from the same branch can be.
+- **FR-026**: Among several PRs from one branch, Delilah MUST pick an open one
+  first, then a merged one, then a closed one, the most recent in each group.
+- **FR-027**: Linking a PR MUST move the task to Revisión if its phase is below it.
+  A merge marks the task done (FR-017); a close changes neither phase nor status.
 
 **Showing**
 - **FR-005**: The task screen MUST have a PR tab showing, per PR: number, title,
@@ -251,22 +272,50 @@ open, merging the second archives it.
   with a PR (state plus CI result).
 - **FR-007**: PR state shown in the app MUST update live, within a minute of the
   change on the host, while the task is not archived.
+- **FR-028**: Delilah MUST check every 30 seconds the PRs of non-archived tasks that
+  have one open, and look for a PR every 30 seconds for tasks in Revisión without
+  one; it MUST check at once when a task is opened in the app or the agent pushes
+  or opens a PR. Other tasks are not checked.
+- **FR-029**: After a failed check (network, host error, rate limit), Delilah MUST
+  wait twice as long before the next one, up to 10 minutes, or until the host's
+  rate-limit reset; the app MUST keep showing the last known state with the time
+  it was checked.
 
 **Notifying**
 - **FR-008**: Delilah MUST notify (macOS notification and Bandeja item counting on
   the Dock badge) when a CI check fails on the PR's latest commit, once per commit.
 - **FR-009**: Delilah MUST notify (notification and Bandeja item) when a reviewer
   requests changes or new review comments appear, once per new review or batch of
-  comments.
+  comments. Comments and reviews by anyone count, bots included, except those by
+  the account Delilah uses on the host (FR-021).
 - **FR-010**: Delilah MUST send a non-blocking notification when a PR is approved,
   merged or closed without merging.
-- **FR-011**: Failure and review items MUST offer to send the details to the
+- **FR-011**: Delilah MUST NOT send failures or reviews to the agent on its own. Failure and review items MUST offer to send the details to the
   task's agent as a prompt in the current language, resuming its session if
   needed; doing so resolves the item.
 - **FR-012**: A failure item MUST resolve on its own when a later commit's checks
   pass.
 - **FR-013**: Notifications MUST NOT repeat for a change already notified,
-  including after a daemon restart.
+  including after a daemon restart. The unit is the head commit for CI, the review
+  for reviews, and the newest comment seen for comments; a "batch" is every new
+  comment found in one check.
+- **FR-030**: After a restart or a gap in checking, Delilah MUST notify only the
+  difference between the last saved state and the current one, not every missed
+  event.
+- **FR-031**: A commit's CI counts as failed when any check ends failed, timed out
+  or needing action; cancelled, skipped and neutral checks are not failures. It is
+  notified when the head commit first becomes failed.
+- **FR-032**: Every PR item in the Bandeja (failure or review) MUST resolve when the
+  PR is merged or closed, when the task is archived or deleted, or when the user
+  forwards or dismisses it.
+- **FR-033**: macOS notifications MUST follow today's rule (sent only when the app
+  is not in front); the Bandeja item is always added.
+- **FR-034**: "Pedir al agente" MUST behave like any other reply from the Bandeja
+  (delivered after the agent's current turn); while the task is paused by the
+  usage limit it MUST be disabled, saying when it will be available.
+- **FR-035**: Comments forwarded to the agent MUST be quoted as the reviewers'
+  content, with author and location, framed as data to consider and not as
+  instructions from the user.
 
 **Opening**
 - **FR-014**: Users MUST be able to open a PR from the task screen when the task's
@@ -279,12 +328,27 @@ open, merging the second archives it.
   MUST report failures in plain words without linking anything.
 
 **Cleaning up**
-- **FR-017**: When all of a task's PRs are merged, Delilah MUST mark the task done,
+- **FR-017**: When all of a task's PRs are merged, Delilah MUST, without asking, mark the task done,
   stop its sessions, release its workspace and delete its local branch, then notify.
 - **FR-018**: That clean-up MUST NOT discard work: if the workspace has
-  uncommitted changes or commits not contained in the merged PR, Delilah MUST
-  mark the task done but leave the workspace, and add a Bandeja item offering a
-  forced archive.
+  uncommitted changes, or the local branch has commits that are not in the PR's
+  final head commit (its head equals it or is an ancestor of it, so squash and
+  rebase merges count as safe), Delilah MUST mark the task done but leave the
+  workspace and branch, and add a Bandeja item offering a forced archive. This
+  applies to checkout mode too, overriding today's rule that a checkout archive
+  never refuses.
+- **FR-036**: In checkout mode the archive MUST first return the checkout to its
+  previous branch and only then delete the task's branch.
+- **FR-037**: Delilah MUST NOT delete remote branches.
+- **FR-038**: In a changeset, only submodules get PRs; the merge archive deletes
+  the submodules' merged branches and leaves the parent repository's branch as is.
+  Uncommitted changes in the parent still block it (FR-018).
+- **FR-039**: When one of a changeset's PRs is closed without merging, the task is
+  not archived automatically even if the others are merged; Delilah notifies and
+  the user can archive it by hand.
+- **FR-040**: If the archive fails partway (e.g. the workspace is released but a
+  branch can't be deleted), the task MUST stay done and a Bandeja item MUST say
+  what was left; archiving by hand retries the rest.
 - **FR-019**: A PR closed without merging MUST only notify; the task stays as is.
 - **FR-020**: Delilah MUST stop watching a task's PRs when the task is archived or
   deleted.
@@ -323,7 +387,9 @@ open, merging the second archives it.
   within 2 minutes without Fran doing anything, unless there is unsaved work.
 - **SC-004**: Following a task from "agent finished" to "merged and archived"
   needs no visit to the browser except to review the code itself.
-- **SC-005**: No uncommitted or unpushed work is ever lost by an automatic archive.
+- **SC-005**: No work is ever lost by an automatic archive, in at least these
+  cases: uncommitted changes, local commits not pushed, and commits pushed after
+  the PR was merged.
 - **SC-006**: When PR access fails, Fran understands the cause from the PR tab
   alone, without reading logs.
 
