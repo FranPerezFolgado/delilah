@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { api, BLOCKING, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { api, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
@@ -107,6 +107,15 @@ export function App() {
     api
       .preference<Partial<Bindings>>("shortcuts")
       .then((saved) => applyBindings({ ...DEFAULTS, ...(saved ?? {}) }))
+      .catch(() => {});
+  }, []);
+
+  // Where a session's questions with options sit: right of the terminal unless chosen.
+  const [askPosition, setAskPosition] = useState<AskPosition>("right");
+  useEffect(() => {
+    api
+      .preference<unknown>("ask-position")
+      .then((v) => setAskPosition(parseAskPosition(v)))
       .catch(() => {});
   }, []);
 
@@ -292,6 +301,7 @@ export function App() {
                   project={project}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
+                  askPosition={askPosition}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
                   onConvert={(s) => {
@@ -321,6 +331,15 @@ export function App() {
           {view === "projects" && <ProjectsView projects={projects} onChanged={refresh} />}
           {view === "settings" && <SettingsView
               bindings={bindings}
+              askPosition={askPosition}
+              onAskPosition={(p) => {
+                const prev = askPosition;
+                setAskPosition(p);
+                api.setPreference("ask-position", p).catch((e) => {
+                  setAskPosition(prev);
+                  setToast((e as Error).message);
+                });
+              }}
               onChange={applyBindings}
               language={language}
               onLanguage={(l) => {

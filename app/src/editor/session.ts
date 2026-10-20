@@ -115,3 +115,31 @@ export function setTreeOpen(open: boolean) {
     // No storage: it just won't be remembered.
   }
 }
+
+// The file tree's width, dragged from its left edge: also a per-viewer convenience.
+const TREE_WIDTH_KEY = "delilah.tree-width";
+// `mainMin`: what the tabs column always keeps beside the tree.
+export const TREE_WIDTH = { min: 180, default: 260, max: 640, mainMin: 320 };
+/**
+ * `width` within the tree's limits and, given the screen's width, leaving the main
+ * column its room. On a screen too narrow for both, the tree's minimum wins.
+ */
+export function clampTreeWidth(width: number, screenWidth?: number): number {
+  const room = screenWidth === undefined ? TREE_WIDTH.max : screenWidth - TREE_WIDTH.mainMin;
+  return Math.round(Math.max(TREE_WIDTH.min, Math.min(width, TREE_WIDTH.max, room)));
+}
+export function treeWidth(): number {
+  try {
+    const n = Number(localStorage.getItem(TREE_WIDTH_KEY));
+    return n >= TREE_WIDTH.min && n <= TREE_WIDTH.max ? n : TREE_WIDTH.default;
+  } catch {
+    return TREE_WIDTH.default;
+  }
+}
+export function setTreeWidth(width: number) {
+  try {
+    localStorage.setItem(TREE_WIDTH_KEY, String(Math.round(width)));
+  } catch {
+    // No storage: it just won't be remembered.
+  }
+}

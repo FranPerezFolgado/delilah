@@ -124,13 +124,30 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
     )
 }
 
+/// The bytes that type `text` into the TUI. Several lines go as a bracketed paste,
+/// or each newline would send the message early.
+fn prompt_bytes(text: &str) -> Vec<u8> {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    if !text.contains('\n') {
+        return text.into_bytes();
+    }
+    // Control characters inside the paste (an ESC that starts a paste marker above
+    // all) could end it early: only newlines and tabs stay.
+    let text: String = text
+        .chars()
+        .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
+        .collect();
+    format!("\x1b[200~{text}\x1b[201~").into_bytes()
+}
+
 /// Writes a message into an agent's terminal as if the user typed it.
 pub async fn type_prompt(session: &Live, text: &str) -> Result<(), ApiError> {
     session
         .pty
-        .write(text.as_bytes())
+        .write(&prompt_bytes(text))
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    // Sent apart so the TUI takes it as Enter, not as part of a paste.
+    // Sent apart, after any paste is closed, so the TUI takes it as Enter rather
+    // than as one more character of the text.
     tokio::time::sleep(Duration::from_millis(300)).await;
     session
         .pty
@@ -156,5 +173,47 @@ pub async fn resume_if_due(app: &AppState, task: &Task) {
             }
         }
         Err(e) => tracing::warn!(task = %task.key, "could not resume: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_line_is_typed_as_is() {
+        assert_eq!(prompt_bytes("vale, sigue"), b"vale, sigue");
+    }
+
+    #[test]
+    fn several_lines_go_as_one_paste() {
+        assert_eq!(
+            prompt_bytes("uno\r\ndos\nthree"),
+            b"\x1b[200~uno\ndos\nthree\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn a_lone_carriage_return_is_a_new_line_too() {
+        assert_eq!(prompt_bytes("a\rb"), b"\x1b[200~a\nb\x1b[201~");
+    }
+
+    #[test]
+    fn a_trailing_new_line_stays_inside_the_paste() {
+        assert_eq!(prompt_bytes("a\n"), b"\x1b[200~a\n\x1b[201~");
+    }
+
+    #[test]
+    fn a_paste_marker_in_the_text_cannot_end_the_paste() {
+        assert_eq!(
+            prompt_bytes("a\x1b[201~\rb"),
+            b"\x1b[200~a[201~\nb\x1b[201~"
+        );
+        // Removing the marker must not leave another one behind.
+        assert_eq!(
+            prompt_bytes("a\x1b[20\x1b[201~1~\nb"),
+            b"\x1b[200~a[20[201~1~\nb\x1b[201~"
+        );
+        assert_eq!(prompt_bytes("a\tb\x07\nc"), b"\x1b[200~a\tb\nc\x1b[201~");
     }
 }

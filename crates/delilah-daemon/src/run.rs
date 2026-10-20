@@ -15,7 +15,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::ApiError;
 use crate::state::AppState;
-use crate::store_sessions::{SessionKind, SessionRecord};
+use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 
 /// How long a new session may show the folder-trust dialog before we stop watching.
 const TRUST_WATCH: Duration = Duration::from_secs(60);
@@ -263,6 +263,7 @@ pub fn launch_session(
                 &session.id,
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
+            let remote_name = app.remote_control().then(|| remote_name(session));
             claude::command(&claude::Launch {
                 workspace,
                 session_id: &session.id,
@@ -271,6 +272,7 @@ pub fn launch_session(
                 resume,
                 extra_dirs: &[task_dir.as_path()],
                 read_only: session.read_only && session.kind == SessionKind::Claude,
+                remote_control: remote_name.as_deref(),
             })
         }
         SessionKind::Shell => shell_command(workspace),
@@ -285,7 +287,8 @@ pub fn launch_session(
         session.primary,
         Arc::clone(&pty),
     );
-    tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, "session started");
+    let remote_control = session.kind == SessionKind::Claude && app.remote_control();
+    tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
 
     if session.kind == SessionKind::Claude {
         tokio::spawn(accept_trust_dialog(
@@ -301,6 +304,14 @@ pub fn launch_session(
         tracing::info!(session = %id, "session exited");
     });
     Ok(())
+}
+
+/// How a session is listed in claude.ai under Remote Control: the task (or project)
+/// and the session's label, as Delilah shows them. The label is fixed when the
+/// session is created, so the name stays the same if the language changes later.
+fn remote_name(session: &SessionRecord) -> String {
+    let owner = project_of(&session.task).unwrap_or(&session.task);
+    format!("{owner} · {}", session.label)
 }
 
 /// The user's login shell, so their PATH and aliases are there.
@@ -380,4 +391,30 @@ async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
         .max()
         .unwrap_or(0);
     Ok(format!("LIBRE-{}", n + 1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(task: &str, label: &str) -> SessionRecord {
+        SessionRecord {
+            id: "sess-1".into(),
+            task: task.into(),
+            kind: SessionKind::Claude,
+            label: label.into(),
+            primary: true,
+            closed: false,
+            read_only: false,
+        }
+    }
+
+    #[test]
+    fn remote_names_show_the_task_or_project_and_the_label() {
+        assert_eq!(
+            remote_name(&session("PROJ-1", "Principal")),
+            "PROJ-1 · Principal"
+        );
+        assert_eq!(remote_name(&session("@delilah", "Main")), "delilah · Main");
+    }
 }

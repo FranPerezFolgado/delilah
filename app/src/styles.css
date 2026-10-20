@@ -254,10 +254,17 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 /* Editor: workspace tree, tabs and CodeMirror */
 /* A task's screen: tabs in the middle, the project tree on the right (as in Orca) */
 .tscreen { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
-.tscreen.with-tree { grid-template-columns: 1fr minmax(220px, 280px); }
+/* The tree's width as dragged, but never squeezing the tabs below 320px (TREE_WIDTH.mainMin) in a narrower window */
+.tscreen.with-tree { grid-template-columns: minmax(0, 1fr) max(180px, min(var(--tree-w, 260px), calc(100% - 320px))); }
 .tmain { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tmain > .view-body, .tmain > .changes { flex: 1; min-height: 0; }
-.tpanel { min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--bd); background: var(--side); }
+.tpanel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--bd); background: var(--side); }
+/* The tree's left edge: a wide grab area over the border, highlighted while used */
+.tresize { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; z-index: 5; cursor: col-resize; outline: none; }
+.tresize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: transparent; transition: background 0.1s; }
+.tresize:hover::after, .tresize:focus-visible::after, body.resizing .tresize::after { background: var(--acc); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .tpanel-head { display: flex; align-items: center; gap: 2px; height: 32px; flex: none; padding: 0 6px 0 12px; border-bottom: 1px solid var(--bd); }
 .tpanel-head .sec { flex: 1; }
 .icon-btn { height: 24px; padding: 0 5px; }
@@ -296,8 +303,9 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
   font-size: 12.5px; }
 .ebar.warn { background: var(--accbg); }
 .ehost { flex: 1; min-height: 0; background: var(--term); }
-.tterm { flex: 1; min-height: 0; flex-direction: column; background: var(--term); }
-.tterm .pane-term { flex: 1; min-height: 0; }
+.tterm { flex: 1; min-height: 0; flex-direction: column; background: var(--term); container-type: inline-size; }
+.tterm .pane-term { flex: 1; min-width: 0; min-height: 0; }
+.tterm-body { flex: 1; min-height: 0; display: flex; }
 .ehost .cm-editor { height: 100%; }
 
 /* Inbox */
@@ -309,8 +317,9 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .inbox-task { min-width: 0; height: 22px; padding: 0 6px; gap: 6px; color: var(--tx); }
 .inbox-text { border-left: 2px solid var(--bd2); padding-left: 12px; }
 .inbox-text.clamped { max-height: 11.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
-.inbox-reply { display: flex; gap: 8px; }
+.inbox-reply { display: flex; align-items: flex-end; gap: 8px; }
 .inbox-reply .input { flex: 1; }
+.inbox-reply textarea.input { height: auto; min-height: 32px; max-height: 200px; field-sizing: content; resize: none; }
 .inbox-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .inbox-actions:empty { display: none; }
 
@@ -333,7 +342,20 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .ask-opt.on { border-color: var(--acc); background: var(--accbg); }
 .ask-opt .muted { font-size: 11.5px; }
 .ask-actions { display: flex; gap: 8px; }
-.ask-bar { flex: none; padding: 12px 14px; background: var(--panel); border-bottom: 1px solid var(--bd); max-height: 50%; overflow-y: auto; }
+/* The questions next to a session's terminal: above, beside or below it (Ajustes). */
+.ask-bar { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; background: var(--panel); overflow-y: auto; }
+.ask-top { flex-direction: column-reverse; }
+.ask-bottom { flex-direction: column; }
+.ask-right { flex-direction: row; }
+.ask-top .ask-bar { border-bottom: 1px solid var(--bd); max-height: 50%; }
+.ask-bottom .ask-bar { border-top: 1px solid var(--bd); max-height: 50%; }
+.ask-right .ask-bar { width: 320px; border-left: 1px solid var(--bd); }
+.ask-right .ask-opt { max-width: 100%; }
+/* Too narrow for the terminal and the panel side by side: below, until there is room. */
+@container (max-width: 760px) {
+  .ask-right { flex-direction: column; }
+  .ask-right .ask-bar { width: auto; border-left: 0; border-top: 1px solid var(--bd); max-height: 50%; }
+}
 
 /* Sidebar grouped by project (as in Orca) */
 .pgroup { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }

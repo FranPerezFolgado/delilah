@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
+import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
 import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
+import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
 import { isMarkdown } from "../markdown";
 import { comboFromEvent, keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
+import { TreeResizer } from "./TreeResizer";
 import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
@@ -34,6 +35,8 @@ interface Props {
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
   asks: InboxItem[];
+  /** Where those questions sit, next to the session's terminal. */
+  askPosition: AskPosition;
   onChanged: () => void;
 }
 
@@ -45,7 +48,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, project, sessions, asks, onChanged, onNewTask, onConvert }: Props) {
+export function TaskScreen({ owner, task, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -55,6 +58,8 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
   const [showTree, setShowTree] = useState(treeOpen);
+  const [treeW, setTreeW] = useState(treeWidth);
+  const treeId = useId();
   const [closingSession, setClosingSession] = useState<Session | null>(null);
   const [finding, setFinding] = useState(false);
   // A session just started: its tab shows before the next refresh lists it.
@@ -458,7 +463,10 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           </button>
         )}
       </div>
-      <div className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}>
+      <div
+        className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}
+        style={{ "--tree-w": `${treeW}px` } as CSSProperties}
+      >
         <div className="tmain">
           <div className="etabs" role="tablist">
             <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
@@ -533,6 +541,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
             .filter((s) => mounted.has(s.id))
             .map((s) => {
               const on = shownSession === s.id;
+              const sessionAsks = asks.filter((a) => a.session?.id === s.id && a.ask);
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
                   {s.read_only && s.kind === "claude" && s.live && (
@@ -569,14 +578,6 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                       </button>
                     </div>
                   )}
-                  {asks
-                    .filter((a) => a.session?.id === s.id && a.ask)
-                    .map((a) => (
-                      <div key={a.ask!.id} className="ask-bar">
-                        <div className="sec" style={{ marginBottom: 6 }}>{t("El agente te pregunta")}</div>
-                        <AskCard ask={a.ask!} onDone={onChanged} />
-                      </div>
-                    ))}
                   {!s.live && (
                     <div className="ebar">
                       <span style={{ flex: 1 }}>{t("Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).")}</span>
@@ -593,8 +594,20 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                       </button>
                     </div>
                   )}
-                  {/* A new connection once it comes back to life. */}
-                  <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} focused={on} />
+                  {/* Fixed order, placed by CSS: moving the questions never remounts the
+                      terminal or loses an answer being written. */}
+                  <div className={`tterm-body ask-${askPosition}`}>
+                    {/* A new connection once it comes back to life. */}
+                    <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} kind={s.kind} focused={on} />
+                    {sessionAsks.length > 0 && (
+                      <div className="ask-bar">
+                        <div className="sec">{t("El agente te pregunta")}</div>
+                        {sessionAsks.map((a) => (
+                          <AskCard key={a.ask!.id} ask={a.ask!} onDone={onChanged} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -663,7 +676,8 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
 
         {finding && hasWorkspace && <QuickOpen taskKey={owner} onOpen={openFile} onClose={() => setFinding(false)} />}
         {showTree && hasWorkspace && (
-          <aside className="tpanel" aria-label={t("Archivos del workspace")}>
+          <aside id={treeId} className="tpanel" aria-label={t("Archivos del workspace")}>
+            <TreeResizer width={treeW} controls={treeId} onChange={setTreeW} />
             <div className="tpanel-head">
               <span className="sec">{t("Archivos")}</span>
               <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>

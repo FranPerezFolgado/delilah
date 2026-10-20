@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::FromRef;
@@ -40,6 +41,9 @@ pub struct AppState {
     /// The language Delilah speaks in (see `lang.rs`); Spanish until `main` reads
     /// the preference.
     pub lang: crate::lang::Current,
+    /// Whether Claude sessions start with Remote Control (the `remote-control`
+    /// preference); off until `main` reads it.
+    remote_control: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -66,6 +70,7 @@ impl AppState {
             events,
             asks: Arc::default(),
             lang: crate::lang::Current::default(),
+            remote_control: Arc::default(),
         }
     }
 
@@ -82,6 +87,22 @@ impl AppState {
                 .await
                 .unwrap_or(crate::lang::Lang::Es);
         self.lang.set(lang);
+    }
+
+    pub fn remote_control(&self) -> bool {
+        self.remote_control.load(Ordering::Relaxed)
+    }
+
+    /// Reads the `remote-control` preference again (at start, and when it changes).
+    pub async fn load_remote_control(&self) {
+        let value: Option<Value> = self
+            .store
+            .setting("pref:remote-control")
+            .await
+            .ok()
+            .flatten();
+        let on = value.as_ref().and_then(Value::as_bool).unwrap_or(false);
+        self.remote_control.store(on, Ordering::Relaxed);
     }
 
     pub fn emit(&self, topic: Topic) {
