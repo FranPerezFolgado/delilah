@@ -10,10 +10,34 @@ interface Props {
   onLanguage: (l: LangSetting) => void;
 }
 
-/** Settings: the language, and the keyboard shortcuts (press "Cambiar", then the new keys). */
+/** Settings: the language, Remote Control, and the keyboard shortcuts (press "Cambiar", then the new keys). */
 export function SettingsView({ bindings, onChange, language, onLanguage }: Props) {
   const [recordingFor, setRecordingFor] = useState<ActionId | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [remote, setRemote] = useState(false);
+  // Off until the saved value is in, so a click can never race the first load.
+  const [remoteBusy, setRemoteBusy] = useState(true);
+
+  useEffect(() => {
+    api
+      .preference<boolean>("remote-control")
+      .then((v) => setRemote(v === true))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setRemoteBusy(false));
+  }, []);
+
+  const toggleRemote = async (on: boolean) => {
+    setError(null);
+    setRemoteBusy(true);
+    try {
+      await api.setPreference("remote-control", on);
+      setRemote(on);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRemoteBusy(false);
+    }
+  };
 
   const save = async (next: Bindings) => {
     setError(null);
@@ -66,6 +90,24 @@ export function SettingsView({ bindings, onChange, language, onLanguage }: Props
           </div>
           <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
             {t("También cambia lo que Delilah le escribe a Claude y las notificaciones. El menú del Mac cambia al volver a abrir la app.")}
+          </p>
+        </div>
+        <div>
+          <div className="sec" style={{ marginBottom: 8 }}>{t("Remote Control")}</div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={remote}
+              disabled={remoteBusy}
+              onChange={(e) => toggleRemote(e.target.checked)}
+            />
+            {t("Abrir las sesiones de Claude con Remote Control")}
+          </label>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {t("Podrás seguirlas y escribirles desde claude.ai o la app de Claude. Vale para las sesiones que se abran o reanuden a partir de ahora.")}
+          </p>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {t("Quien entre en tu cuenta de claude.ai podrá pedirles cambios en tu Mac. Necesita que Claude Code tenga la sesión iniciada con una cuenta de claude.ai, no con una clave de API.")}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

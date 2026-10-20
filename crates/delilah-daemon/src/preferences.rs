@@ -43,6 +43,9 @@ pub async fn put(
     if key == "language" {
         app.load_language().await;
     }
+    if key == "remote-control" {
+        app.load_remote_control().await;
+    }
     Ok(Json(value))
 }
 
@@ -86,15 +89,19 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn keeps_preferences_apart_from_other_settings() {
+    async fn app() -> AppState {
         let config = Config {
             home: std::env::temp_dir(),
             addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
         };
-        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        AppState::new(Store::in_memory().await.unwrap(), config)
+    }
+
+    #[tokio::test]
+    async fn keeps_preferences_apart_from_other_settings() {
+        let app = app().await;
         let (_, empty) = call(&app, "GET", "/api/v1/preferences/shortcuts", None).await;
         assert_eq!(empty, Value::Null);
 
@@ -115,5 +122,31 @@ mod tests {
         call(&app, "PUT", "/api/v1/preferences/jira", Some(json!("x"))).await;
         let (_, jira) = call(&app, "GET", "/api/v1/jira", None).await;
         assert_eq!(jira["settings"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_remote_control_preference_takes_effect_at_once() {
+        let app = app().await;
+        assert!(!app.remote_control());
+        let uri = "/api/v1/preferences/remote-control";
+        call(&app, "PUT", uri, Some(json!(true))).await;
+        assert!(app.remote_control());
+        call(&app, "PUT", uri, Some(json!(false))).await;
+        assert!(!app.remote_control());
+        // Only a real `true` turns it on.
+        call(&app, "PUT", uri, Some(json!("yes"))).await;
+        assert!(!app.remote_control());
+    }
+
+    #[tokio::test]
+    async fn the_remote_control_preference_is_read_at_start() {
+        let app = app().await;
+        app.store
+            .set_setting("pref:remote-control", &json!(true))
+            .await
+            .unwrap();
+        assert!(!app.remote_control());
+        app.load_remote_control().await;
+        assert!(app.remote_control());
     }
 }
