@@ -563,7 +563,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                     </div>
                   )}
                   {/* A new connection once it comes back to life. */}
-                  <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} focused={on} />
+                  <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} kind={s.kind} focused={on} />
                 </div>
               );
             })}

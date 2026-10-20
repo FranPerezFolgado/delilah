@@ -184,7 +184,7 @@ export const EN: Record<string, string> = {
   "Ver menos": "Show less",
   "Ver todo": "Show all",
   "Se reanuda sola a las {time}.": "It resumes by itself at {time}.",
-  "Responder… (Enter envía)": "Reply… (Enter sends)",
+  "Responder… (Enter envía, ⇧Enter nueva línea)": "Reply… (Enter sends, ⇧Enter new line)",
   "Responder a {task}": "Reply to {task}",
   "Enviar": "Send",
   "Responder en su terminal": "Answer in its terminal",
