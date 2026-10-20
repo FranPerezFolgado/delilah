@@ -171,6 +171,9 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - A task has more than one agent session (for example, a second Claude tab): each live
   agent session gets its own desk, all labelled with the same task; plain shell
   terminals get no desk.
+- An agent started before this feature existed (its hooks do not report actions or
+  helpers): its desk shows state as usual, with the thinking pose while working and no
+  helpers, until it is restarted.
 - An agent waits for the user or ends: no other desk moves; an ended agent's desk is
   freed and the next new agent in that project takes it.
 - More agents than fit on screen (more than 8): the office grows and scrolls; the waiting
@@ -203,13 +206,17 @@ theme; both read clearly, with no clipped labels or overlapping desks.
   shows other views, closing it does not affect the main window, and opening it again
   focuses the existing one instead of creating another.
 - **FR-020**: Clicking a character in the separate window MUST bring the main window to
-  the front with that task screen open on the agent's terminal.
+  the front (restoring or reopening it if it was minimised or closed) with that task
+  screen open on the agent's terminal.
 - **FR-002**: The Playground MUST show one desk with a character for each live agent
   session, and none for stored, ended or shell-only sessions.
 - **FR-021**: Desks MUST be grouped by project, each group a labelled area of the office
   with the project's name; projects with no live agent get no area. Within a group, a new
   agent takes the first free desk and keeps it until it ends; desks never move because of
   a state change.
+- **FR-022**: Each character MUST have an accessible name with its task key, state and
+  current action (for example "LIBRE-3, working, editing api.rs"), and helpers with their
+  role and action.
 - **FR-003**: Each desk MUST show the task key, the task title (truncated, full on hover)
   and the task's current phase, using the same phase names as the rest of the app.
 - **FR-004**: Each character MUST show its agent's state with a distinct look: starting,
@@ -224,18 +231,22 @@ theme; both read clearly, with no clipped labels or overlapping desks.
   now, if any, and its kind: editing, reading/searching, running a command, delegating
   to a helper agent, or other; and none when it is between actions.
 - **FR-009**: Each working character MUST show the kind of its current action with its
-  own animation and a short caption (the action plus a short, truncated target such as a
-  file name or the start of a command), and a thinking pose when there is no current
+  own animation and a short caption (the action plus a target of at most 40 characters,
+  such as a file name without its directory or the start of a command, cut with an
+  ellipsis), and a thinking pose when there is no current
   action.
 - **FR-010**: The current action MUST clear when the action ends, and when the agent
   stops, fails, waits for the user or is paused.
 - **FR-011**: The Playground MUST follow the app's light and dark themes and the system's
-  reduce-motion setting.
+  reduce-motion setting; with reduce motion on, characters and helpers use still poses,
+  helpers appear and go without fading, and the waiting highlight does not pulse.
 - **FR-012**: The Playground MUST stop animating while it is not visible.
 - **FR-013**: All graphics MUST be original or under a licence that allows shipping them
-  in the app (public domain / CC0 or equivalent), and their source MUST be recorded.
-- **FR-014**: When the connection to the daemon is lost, the Playground MUST show that its
-  picture may be out of date and refresh when the connection returns.
+  in the app (public domain / CC0 or equivalent), and each one's source and licence MUST
+  be recorded in a credits file next to the graphics in the repository.
+- **FR-014**: When the connection to the daemon is lost, the Playground MUST keep the last
+  picture, dimmed and with its animations stopped, under a banner saying it is
+  reconnecting, and refresh to the current state when the connection returns.
 - **FR-015**: The system MUST know, for each live agent session, the helper agents it has
   running: each one's role and its current action, with the same kinds as FR-008.
 - **FR-016**: The Playground MUST show each running helper as a small character next to
@@ -266,8 +277,8 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - **SC-002**: A user can go from the Playground to answering a waiting agent in 1 click.
 - **SC-003**: State and action changes show in the Playground within 2 seconds in 95% of
   cases.
-- **SC-004**: With 8 agents on screen, the app stays responsive (typing in a terminal
-  shows no noticeable lag) while the Playground is open.
+- **SC-004**: With 8 agents and 8 helpers on screen, typed characters still appear in a
+  terminal of the main window within 50 ms, as they do with the Playground closed.
 - **SC-005**: In a screenshot with 4 working agents, an observer who has never seen the
   app can say what each agent is doing (editing, reading, running something, waiting)
   for at least 3 of the 4.
