@@ -171,6 +171,8 @@ export const EN: Record<string, string> = {
   "Actualizar el árbol": "Refresh the tree",
   "Ocultar ({key})": "Hide ({key})",
   "Ocultar el árbol": "Hide the tree",
+  "Cambiar el ancho del árbol": "Resize the tree",
+  "Arrastra para cambiar el ancho; doble clic para restablecerlo": "Drag to resize; double-click to reset",
   "Cerrar {label}": "Close {label}",
   "Necesita un permiso": "Needs a permission",
   "Te pregunta": "Asks you",

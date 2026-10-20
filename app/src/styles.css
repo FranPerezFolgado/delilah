@@ -226,10 +226,17 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 /* Editor: workspace tree, tabs and CodeMirror */
 /* A task's screen: tabs in the middle, the project tree on the right (as in Orca) */
 .tscreen { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
-.tscreen.with-tree { grid-template-columns: 1fr minmax(220px, 280px); }
+/* The tree's width as dragged, but never squeezing the tabs below 320px (TREE_WIDTH.mainMin) in a narrower window */
+.tscreen.with-tree { grid-template-columns: minmax(0, 1fr) max(180px, min(var(--tree-w, 260px), calc(100% - 320px))); }
 .tmain { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tmain > .view-body, .tmain > .changes { flex: 1; min-height: 0; }
-.tpanel { min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--bd); background: var(--side); }
+.tpanel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--bd); background: var(--side); }
+/* The tree's left edge: a wide grab area over the border, highlighted while used */
+.tresize { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; z-index: 5; cursor: col-resize; outline: none; }
+.tresize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: transparent; transition: background 0.1s; }
+.tresize:hover::after, .tresize:focus-visible::after, body.resizing .tresize::after { background: var(--acc); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .tpanel-head { display: flex; align-items: center; gap: 2px; height: 32px; flex: none; padding: 0 6px 0 12px; border-bottom: 1px solid var(--bd); }
 .tpanel-head .sec { flex: 1; }
 .icon-btn { height: 24px; padding: 0 5px; }

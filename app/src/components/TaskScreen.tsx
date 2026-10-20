@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
 import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
+import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
 import { keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
+import { TreeResizer } from "./TreeResizer";
 import { FileTree } from "./FileTree";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
@@ -53,6 +54,8 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
   const [showTree, setShowTree] = useState(treeOpen);
+  const [treeW, setTreeW] = useState(treeWidth);
+  const treeId = useId();
   const [closingSession, setClosingSession] = useState<Session | null>(null);
   const [finding, setFinding] = useState(false);
   // A session just started: its tab shows before the next refresh lists it.
@@ -421,7 +424,10 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           </button>
         )}
       </div>
-      <div className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}>
+      <div
+        className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}
+        style={{ "--tree-w": `${treeW}px` } as CSSProperties}
+      >
         <div className="tmain">
           <div className="etabs" role="tablist">
             <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
@@ -601,7 +607,8 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
 
         {finding && hasWorkspace && <QuickOpen taskKey={owner} onOpen={openFile} onClose={() => setFinding(false)} />}
         {showTree && hasWorkspace && (
-          <aside className="tpanel" aria-label={t("Archivos del workspace")}>
+          <aside id={treeId} className="tpanel" aria-label={t("Archivos del workspace")}>
+            <TreeResizer width={treeW} controls={treeId} onChange={setTreeW} />
             <div className="tpanel-head">
               <span className="sec">{t("Archivos")}</span>
               <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>

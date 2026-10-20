@@ -13,6 +13,8 @@ const THEME = {
   cursor: "#f0a03c",
   selectionBackground: "rgba(240,160,60,0.3)",
 };
+// How long a pane's size must hold still before it claims it.
+const RESIZE_SETTLE_MS = 100;
 
 /**
  * A session's live terminal: the daemon's WebSocket stream drawn by xterm.js.
@@ -100,13 +102,20 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
       ws.send(encoder.encode(data));
     });
 
+    // Once the size settles: dragging the tree's edge or the window's would otherwise
+    // send the PTY a resize, and the TUI a redraw, on every frame.
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const observer = new ResizeObserver(() => {
-      if (driving()) claim();
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        if (driving()) claim();
+      }, RESIZE_SETTLE_MS);
     });
     observer.observe(el);
 
     return () => {
       window.removeEventListener("focus", onWindowFocus);
+      clearTimeout(settle);
       observer.disconnect();
       input.dispose();
       ws.close();
