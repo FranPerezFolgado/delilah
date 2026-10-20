@@ -324,6 +324,22 @@ export const api = {
     if (!res.ok) throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }));
     return data as FileContent;
   },
+  /** A workspace image for a Markdown preview, as a `data:` URL (the only kind the CSP
+   *  lets an `<img>` load from the app, besides `https:`). */
+  image: async (key: string, path: string): Promise<string> => {
+    const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/image?${new URLSearchParams({ path })}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }));
+    }
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  },
   diff: async (key: string, repo: string, path: string) => {
     const q = new URLSearchParams({ repo, path });
     const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/changes/diff?${q}`);

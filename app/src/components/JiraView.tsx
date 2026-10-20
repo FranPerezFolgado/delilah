@@ -321,7 +321,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
             </div>
             <div>
               <div className="sec" style={{ marginBottom: 6 }}>{t("Descripción")}</div>
-              {issue.description ? <Markdown text={issue.description} /> : <span className="muted">{t("Sin descripción.")}</span>}
+              {issue.description ? <Markdown text={issue.description} remoteImages="click" /> : <span className="muted">{t("Sin descripción.")}</span>}
             </div>
           </aside>
         )}

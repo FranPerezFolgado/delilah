@@ -6,9 +6,11 @@ import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
 import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
 import { t } from "../i18n";
-import { keyOf } from "../shortcuts";
+import { isMarkdown } from "../markdown";
+import { comboFromEvent, keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
 import { FileTree } from "./FileTree";
+import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { sessionStatus } from "./sessionLabels";
@@ -154,7 +156,9 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
       }
       // Opened meanwhile by another call (a double click, React's dev double effect).
       if (tab(path)) return show ? activate(path) : undefined;
-      const t: Tab = { path, version: f.version, size: f.size, saved: null, dirty: false, conflict: false };
+      // A Markdown file that was shown rendered last time comes back rendered.
+      const preview = isMarkdown(path) && session.pendingPreview.delete(path);
+      const t: Tab = { path, version: f.version, size: f.size, saved: null, dirty: false, conflict: false, preview };
       if (f.text !== null) {
         const state = createState(f.text, {
           onSave: () => saveRef.current(path),
@@ -259,6 +263,19 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
     }
   };
 
+  // A Markdown file shows its source or the rendered document. The editor state stays as
+  // it is, so going back keeps the cursor, the unsaved edits and the undo history.
+  const togglePreview = () => {
+    const t = tab(session.active);
+    if (!t || !t.saved || !isMarkdown(t.path)) return;
+    if (view.current) session.states.set(t.path, view.current.state);
+    t.preview = !t.preview;
+    persist(owner, session);
+    redraw();
+    // Once the editor is shown again.
+    if (!t.preview) requestAnimationFrame(() => view.current?.focus());
+  };
+
   // The files that were open last time, loaded in their tab order.
   useEffect(() => {
     const paths = session.pending.splice(0);
@@ -285,10 +302,27 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
     };
   }, [session]);
 
+  // ⌘S lives in the editor's keymap, and the editor is hidden while a preview shows:
+  // the preview saves too, so its "sin guardar · ⌘S" stays true.
+  const previewing = !!tab(session.active)?.preview;
+  useEffect(() => {
+    if (!previewing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (comboFromEvent(e) !== "Mod+S") return;
+      e.preventDefault();
+      saveRef.current(session.active);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewing, session]);
+
   // The app sends the shortcuts that act on tabs: ⌘W closes the active one, ⌘T and
-  // ⌘⇧T start a terminal or a Claude, ⌃Tab moves between tabs, ⌘B toggles the tree.
+  // ⌘⇧T start a terminal or a Claude, ⌃Tab moves between tabs, ⌘B toggles the tree,
+  // ⌘⇧V toggles a Markdown file's preview.
   const closeRef = useRef(close);
   closeRef.current = close;
+  const previewRef = useRef(togglePreview);
+  previewRef.current = togglePreview;
   const newRef = useRef(newSession);
   newRef.current = newSession;
   const cycleRef = useRef<(step: number) => void>(() => {});
@@ -320,11 +354,14 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
         setTreeOpen(!open);
         return !open;
       });
+    const onPreview = () => previewRef.current();
     window.addEventListener("delilah:close-tab", onClose);
     window.addEventListener("delilah:toggle-tree", onTree);
+    window.addEventListener("delilah:toggle-preview", onPreview);
     return () => {
       window.removeEventListener("delilah:close-tab", onClose);
       window.removeEventListener("delilah:toggle-tree", onTree);
+      window.removeEventListener("delilah:toggle-preview", onPreview);
     };
   }, [session]);
 
@@ -566,6 +603,17 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
             <div className="epath mono muted">
               <span className="selectable trunc">{active.path}</span>
               {active.dirty && <span className="c-wait">{t("sin guardar · ⌘S")}</span>}
+              {active.saved && isMarkdown(active.path) && (
+                <button
+                  className={`btn btn-ghost ${active.preview ? "is-on" : ""}`}
+                  style={{ marginLeft: "auto", height: 20 }}
+                  onClick={togglePreview}
+                  title={t("Alternar vista previa ({key})", { key: keyOf("toggle-preview") })}
+                  aria-pressed={active.preview}
+                >
+                  {active.preview ? t("Código") : t("Vista previa")}
+                </button>
+              )}
             </div>
           )}
           {closing && (
@@ -589,7 +637,21 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           )}
           {error && <div className="error selectable" style={{ padding: "8px 14px" }}>{error}</div>}
           {/* Always mounted: one CodeMirror view for every file tab. */}
-          <div className="ehost" ref={host} style={{ display: active?.saved ? "block" : "none" }} />
+          <div className="ehost" ref={host} style={{ display: active?.saved && !active.preview ? "block" : "none" }} />
+          {/* The live text, unsaved edits included; a reload from disk redraws it. */}
+          {active?.saved && active.preview && (
+            <div className="md-preview">
+              <Markdown
+                text={(stateOf(active.path)?.doc ?? active.saved).toString()}
+                doc={{
+                  path: active.path,
+                  version: active.version,
+                  openFile,
+                  loadImage: (path) => api.image(owner, path),
+                }}
+              />
+            </div>
+          )}
           {active && !active.saved && (
             <div className="empty">
               <span>

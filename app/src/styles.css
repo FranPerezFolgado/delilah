@@ -125,16 +125,44 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .bar { width: 56px; height: 4px; border-radius: 2px; background: var(--bd2); overflow: hidden; display: inline-block; }
 .bar > span { display: block; height: 100%; }
 
-/* Ticket descriptions */
+/* Markdown: tickets, specs, agent messages and workspace previews */
 .md { font-size: 12.5px; color: var(--tx2); line-height: 1.55; }
-.md-p { margin: 0 0 10px; white-space: pre-wrap; }
-.md-h { margin: 14px 0 6px; font-weight: 600; color: var(--tx); font-size: 13px; }
-.md-list { margin: 0 0 10px; padding-left: 18px; }
-.md-list li { margin: 2px 0; }
-.md code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--elev);
+.md > :first-child { margin-top: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md-table { margin: 0 0 10px; }
+.md :is(h1, h2, h3, h4, h5, h6) { margin: 14px 0 6px; font-weight: 600; color: var(--tx); line-height: 1.3; }
+.md h1 { font-size: 16px; }
+.md h2 { font-size: 14.5px; }
+.md h3 { font-size: 13.5px; }
+.md h4 { font-size: 13px; }
+.md :is(h5, h6) { font-size: 12.5px; }
+.md h6 { color: var(--tx2); }
+.md :is(ul, ol) { padding-left: 18px; }
+.md :is(ul, ol) :is(ul, ol) { margin: 2px 0 0; }
+.md li { margin: 2px 0; }
+.md li.task-list-item { list-style: none; }
+.md ul.contains-task-list { padding-left: 4px; }
+.md-task { margin: 0 6px 0 0; vertical-align: -1px; accent-color: var(--acc); }
+.md a { color: var(--acc); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md del { color: var(--tx3); }
+.md :not(pre) > code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--elev);
   border: 1px solid var(--bd); border-radius: 4px; padding: 0 4px; color: var(--tx); }
-.md-code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--term);
-  border: 1px solid var(--bd); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 0 0 10px; }
+.md pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--term);
+  border: 1px solid var(--bd); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+.md blockquote { border-left: 3px solid var(--bd2); padding-left: 10px; color: var(--tx3); }
+.md hr { border: 0; border-top: 1px solid var(--bd2); margin: 14px 0; }
+.md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; }
+.md :is(th, td) { border: 1px solid var(--bd2); padding: 4px 8px; }
+.md th { font-weight: 600; color: var(--tx); background: var(--elev); }
+.md tr:nth-child(even) td { background: var(--panel); }
+.md img { max-width: 100%; height: auto; border-radius: 4px; }
+.md-img-alt { color: var(--tx3); font-style: italic; }
+.md-img-alt .mono { font-style: normal; margin-left: 6px; }
+.md-img-ask { font-size: 11.5px; height: auto; padding: 2px 8px; border: 1px dashed var(--bd2); }
+/* A Markdown file shown rendered instead of the editor */
+.md-preview { flex: 1; min-height: 0; overflow: auto; padding: 16px 24px; background: var(--term); }
+.md-preview > .md { max-width: 860px; font-size: 13px; }
 
 /* Small popup menu (new session) */
 .menu { position: absolute; right: 0; top: 26px; z-index: 5; min-width: 190px; display: flex; flex-direction: column; padding: 4px;

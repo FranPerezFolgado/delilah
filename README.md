@@ -157,6 +157,14 @@ included) and opens it in a tab.
   editor asks which version to keep rather than overwrite either one. Files above
   1 MB and binaries are not editable. Paths are confined to the workspace, symlinks
   included.
+- **Markdown** files (`.md`, `.markdown`) switch between the source and a rendered
+  preview with the button over the editor or ⌘⇧V; the preview shows unsaved edits and
+  each tab keeps its mode. Specs, Bandeja messages and Jira descriptions render the
+  same way (GitHub-flavoured: tables, task lists, quotes, links, `https:` images),
+  keeping their single line breaks. HTML in the text shows as text. Web links open in
+  the browser. In a workspace file, relative links open the file in a tab and relative
+  images load from the workspace; in tickets and Bandeja messages a remote image waits
+  for a click, so viewing them tells no third party.
 
 **Live updates.** The app does not poll. The daemon announces what changed on
 `GET /api/v1/events` (a WebSocket sending topics like `{"type":"inbox"}`) and the

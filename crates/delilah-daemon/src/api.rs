@@ -80,6 +80,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/tree", get(files::tree))
         .route("/api/v1/tasks/{key}/files", get(files::all))
         .route("/api/v1/tasks/{key}/file", get(files::get).put(files::put))
+        .route("/api/v1/tasks/{key}/image", get(files::image))
         .route("/api/v1/tasks/{key}/spec", get(specs::of_task))
         .route("/api/v1/tasks/{key}/spec/files/{name}", get(specs::file))
         .route("/api/v1/jira", get(jira::status).put(jira::connect))
@@ -279,6 +280,14 @@ impl ApiError {
 
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
+    }
+
+    pub fn too_large(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::PAYLOAD_TOO_LARGE, message)
+    }
+
+    pub fn unsupported_type(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, message)
     }
 
     pub fn message(&self) -> &str {

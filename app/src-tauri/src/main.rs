@@ -19,6 +19,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         // Native notifications for what waits on you (see app/src/platform.ts).
         .plugin(tauri_plugin_notification::init())
+        // Links in Markdown previews open in the default browser, not in the window.
+        .plugin(tauri_plugin_opener::init())
         .menu(menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();

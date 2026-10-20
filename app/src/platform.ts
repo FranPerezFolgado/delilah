@@ -27,3 +27,14 @@ export async function notify(title: string, body: string): Promise<void> {
   if (!granted) granted = (await n.requestPermission()) === "granted";
   if (granted) n.sendNotification({ title, body });
 }
+
+/** Opens a web or mail link in the system's browser or mail app; outside the desktop
+ *  app, in a new tab. */
+export async function openExternal(url: string): Promise<void> {
+  if (!isDesktop) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  await openUrl(url);
+}

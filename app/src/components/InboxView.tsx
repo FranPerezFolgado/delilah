@@ -105,7 +105,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       {item.ask && <AskCard ask={item.ask} onDone={onChanged} />}
       {item.text && !item.ask && (
         <div className={`inbox-text ${long && !expanded ? "clamped" : ""}`}>
-          <Markdown text={item.text} />
+          <Markdown text={item.text} remoteImages="click" />
         </div>
       )}
       {long && !item.ask && (

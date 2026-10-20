@@ -20,6 +20,8 @@ export interface Tab {
   dirty: boolean;
   /** The file changed on disk while it had unsaved edits here. */
   conflict: boolean;
+  /** A Markdown file shown rendered instead of its source. */
+  preview: boolean;
 }
 
 export interface TaskSession {
@@ -33,6 +35,8 @@ export interface TaskSession {
   expanded: Set<string>;
   /** Files that were open last time, still to load (see `restore`). */
   pending: string[];
+  /** Of those, the ones that were shown rendered. */
+  pendingPreview: Set<string>;
 }
 
 // What a task had open, so its tabs come back after reloading the app. Per viewer:
@@ -42,6 +46,8 @@ interface Saved {
   files: string[];
   changesOpen: boolean;
   expanded: string[];
+  /** Files shown rendered. Absent in what older versions saved. */
+  previews?: string[];
 }
 const savedKey = (task: string) => `delilah.tabs.${task}`;
 
@@ -61,6 +67,7 @@ export function persist(task: string, s: TaskSession) {
     files: [...s.tabs.map((t) => t.path), ...s.pending],
     changesOpen: s.changesOpen,
     expanded: [...s.expanded],
+    previews: [...s.tabs.filter((t) => t.preview).map((t) => t.path), ...s.pending.filter((p) => s.pendingPreview.has(p))],
   };
   try {
     localStorage.setItem(savedKey(task), JSON.stringify(saved));
@@ -82,6 +89,7 @@ export function sessionFor(task: string): TaskSession {
       states: new Map(),
       expanded: new Set(saved?.expanded ?? []),
       pending: saved?.files ?? [],
+      pendingPreview: new Set(saved?.previews ?? []),
     };
     sessions.set(task, s);
   }

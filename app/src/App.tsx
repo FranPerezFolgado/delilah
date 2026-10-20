@@ -181,6 +181,9 @@ export function App() {
       case "quick-open":
         if (view === "tasks") window.dispatchEvent(new Event("delilah:quick-open"));
         return;
+      case "toggle-preview":
+        if (view === "tasks") window.dispatchEvent(new Event("delilah:toggle-preview"));
+        return;
       case "new-task":
         return setNewTask(true);
       case "view-inbox":
