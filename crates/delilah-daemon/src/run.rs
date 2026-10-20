@@ -8,13 +8,14 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
-use delilah_core::{Event, ProjectKind, Task, TaskKey};
+use delilah_core::{Event, ProjectKind, Task, TaskKey, TaskStatus};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::ApiError;
 use crate::state::AppState;
+use crate::store::BacklogChange;
 use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 
 /// How long a new session may show the folder-trust dialog before we stop watching.
@@ -23,9 +24,16 @@ const TRUST_WATCH: Duration = Duration::from_secs(60);
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
     pub key: String,
+    /// Left out for a backlog task: its own.
+    #[serde(default)]
     pub title: String,
-    /// Name of a registered project.
+    /// Name of a registered project. Left out for a backlog task: its own.
+    #[serde(default)]
     pub project: String,
+    /// What the agent gets with the task (`""` clears a backlog task's). Left out
+    /// for a backlog task: its own.
+    #[serde(default)]
+    pub notes: Option<String>,
     /// Defaults to the project's workflow.
     pub workflow: Option<String>,
     /// `parent` projects only: the submodules the task touches.
@@ -40,8 +48,9 @@ pub struct RunRequest {
     #[serde(default)]
     pub free: bool,
     /// Work in the project's own checkout (a branch there) instead of a worktree.
+    /// Left out: what a backlog task chose, else a worktree.
     #[serde(default)]
-    pub in_checkout: bool,
+    pub in_checkout: Option<bool>,
     /// A Claude session of the project to carry on as the task's primary one, with
     /// its conversation ("Convertir en tarea"). Implies a free task in the checkout.
     pub from_session: Option<String>,
@@ -68,7 +77,7 @@ pub async fn start_run(
                 )));
             }
             req.free = true;
-            req.in_checkout = true;
+            req.in_checkout = Some(true);
             Some(s)
         }
         None => None,
@@ -76,10 +85,41 @@ pub async fn start_run(
     if req.free && req.key.trim().is_empty() {
         req.key = next_free_key(&app).await?;
     }
-    if req.free && req.title.trim().is_empty() {
-        return Err(ApiError::bad_request("say what the free task is about"));
-    }
     let key = TaskKey::parse(&req.key).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    // A backlog task is started as it is; any other existing task already was.
+    let existing = match app.store.get_task(&key).await? {
+        Some(task) if task.status == TaskStatus::Queued => Some(task),
+        Some(task) => {
+            return Err(ApiError::conflict(format!(
+                "{key} is already {}: only a backlog task can be started",
+                task.status.name()
+            )));
+        }
+        None => None,
+    };
+    if let Some(task) = &existing {
+        if req.title.trim().is_empty() {
+            req.title = task.title.clone();
+        }
+        if req.project.trim().is_empty() {
+            req.project = task.project.clone().unwrap_or_default();
+        }
+    }
+    let in_checkout = req
+        .in_checkout
+        .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
+        .unwrap_or(false);
+    if req.title.trim().is_empty() {
+        return Err(ApiError::bad_request(match req.free {
+            true => "say what the free task is about",
+            false => "a new task needs a title",
+        }));
+    }
+    if req.project.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "say which project the task runs against",
+        ));
+    }
     let project = app.store.project(&req.project).await?;
     match (project.kind, req.submodules.is_empty()) {
         (ProjectKind::Parent, true) => {
@@ -99,6 +139,7 @@ pub async fn start_run(
     let workflow = req
         .workflow
         .clone()
+        .or_else(|| existing.as_ref().map(|t| t.workflow.clone()))
         .unwrap_or_else(|| project.workflow.clone());
     let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
@@ -111,7 +152,7 @@ pub async fn start_run(
         }
     };
 
-    if req.in_checkout {
+    if in_checkout {
         match app.store.checkout_user(&project.path).await? {
             Some((other, false)) => {
                 return Err(ApiError::conflict(format!(
@@ -129,9 +170,26 @@ pub async fn start_run(
         }
     }
 
-    let mut task = Task::new(key.clone(), &req.title, &workflow);
-    task.project = Some(project.name.clone());
-    app.store.create_task(&task).await?;
+    let notes = match &existing {
+        Some(_) => {
+            // It starts where and as it is asked to now.
+            let change = BacklogChange {
+                title: Some(req.title.trim().to_string()),
+                project: Some(project.name.clone()),
+                workflow: Some(workflow.clone()),
+                notes: req.notes.clone(),
+                in_checkout: Some(in_checkout),
+            };
+            app.store.update_backlog_task(&key, &change).await?.notes
+        }
+        None => {
+            let mut task = Task::new(key.clone(), req.title.trim(), &workflow);
+            task.project = Some(project.name.clone());
+            task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
+            app.store.create_task(&task).await?;
+            task.notes
+        }
+    };
     app.transition(&key, Event::Start).await?;
 
     let spec = WorkspaceSpec {
@@ -147,7 +205,6 @@ pub async fn start_run(
         allow_file_protocol: app.config.allow_file_protocol,
     };
     let root = project.path.clone();
-    let in_checkout = req.in_checkout;
     let created = tokio::task::spawn_blocking(move || {
         if in_checkout {
             delilah_git::use_checkout(&root, &spec, &opts).map(|(ws, prev)| (ws, Some(prev)))
@@ -161,13 +218,37 @@ pub async fn start_run(
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
-            app.transition(
-                &key,
-                Event::Fail {
-                    reason: reason.clone(),
-                },
-            )
-            .await?;
+            // A backlog task stays in the backlog as it was, to be tried again.
+            match existing {
+                Some(task) => {
+                    app.transition(
+                        &key,
+                        Event::StartAborted {
+                            reason: reason.clone(),
+                        },
+                    )
+                    .await?;
+                    let undo = BacklogChange {
+                        title: Some(task.title),
+                        project: task.project,
+                        workflow: Some(task.workflow),
+                        notes: Some(task.notes.unwrap_or_default()),
+                        in_checkout: task.in_checkout,
+                    };
+                    if let Err(e) = app.store.update_backlog_task(&key, &undo).await {
+                        tracing::warn!(task = %key, "cannot put it back as it was: {e}");
+                    }
+                }
+                None => {
+                    app.transition(
+                        &key,
+                        Event::Fail {
+                            reason: reason.clone(),
+                        },
+                    )
+                    .await?;
+                }
+            }
             return Err(ApiError::unprocessable(reason));
         }
     };
@@ -201,6 +282,7 @@ pub async fn start_run(
         }
         _ => prompt,
     };
+    let prompt = point_to_notes(&app, &key, prompt, notes.as_deref());
 
     if let Some(mut session) = adopted {
         // The project's Claude becomes the task's: it goes on with its conversation,
@@ -380,9 +462,39 @@ async fn read_for(
     }
 }
 
-/// The next free task's key: `LIBRE-1`, `LIBRE-2`…
-async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
-    let n = app
+/// The user's notes, like the ticket: a file in the task's folder (outside the repo)
+/// and a pointer to it in the first prompt, whatever the prompt is.
+fn point_to_notes(app: &AppState, key: &TaskKey, prompt: String, notes: Option<&str>) -> String {
+    let Some(notes) = notes.filter(|n| !n.trim().is_empty()) else {
+        return prompt;
+    };
+    let dir = app.config.task_dir(key.as_str());
+    let path = dir.join("notes.md");
+    match std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, notes)) {
+        Ok(()) => format!(
+            "{prompt} ({} {})",
+            app.lang().pick(
+                "tus notas sobre la tarea están en",
+                "your notes on the task are at"
+            ),
+            path.display()
+        ),
+        Err(e) => {
+            tracing::warn!(task = %key, "cannot write the notes: {e}");
+            prompt
+        }
+    }
+}
+
+/// The setting that holds the last free task's number handed out.
+const FREE_KEY_LAST: &str = "free_key_last";
+
+/// The next free task's key: `LIBRE-1`, `LIBRE-2`… A number is never handed out
+/// twice, not even after its task is deleted (its `feature/LIBRE-n` branch may live
+/// on) or to two tasks created at once.
+pub(crate) async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
+    // Tasks from before the setting existed count too.
+    let existing = app
         .store
         .list_tasks()
         .await?
@@ -390,7 +502,8 @@ async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
         .filter_map(|t| t.key.as_str().strip_prefix("LIBRE-")?.parse::<u32>().ok())
         .max()
         .unwrap_or(0);
-    Ok(format!("LIBRE-{}", n + 1))
+    let n = app.store.next_counter(FREE_KEY_LAST, existing).await?;
+    Ok(format!("LIBRE-{n}"))
 }
 
 #[cfg(test)]
@@ -407,6 +520,177 @@ mod tests {
             closed: false,
             read_only: false,
         }
+    }
+
+    async fn app() -> AppState {
+        let config = crate::config::Config {
+            home: std::env::temp_dir().join(format!("delilah-run-{}", uuid::Uuid::new_v4())),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        // A folder that isn't there: any workspace for it fails, and no agent starts.
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: app.config.home.join("missing"),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+        app
+    }
+
+    fn run(key: &str) -> RunRequest {
+        serde_json::from_value(serde_json::json!({ "key": key, "title": "", "project": "web" }))
+            .unwrap()
+    }
+
+    async fn backlog_task(app: &AppState, key: &str) -> TaskKey {
+        let mut task = Task::new(TaskKey::new(key), "Reintentos", "feature");
+        task.project = Some("web".into());
+        app.store.create_task(&task).await.unwrap();
+        task.key
+    }
+
+    #[tokio::test]
+    async fn a_backlog_task_that_cannot_start_stays_in_the_backlog() {
+        let app = app().await;
+        let key = backlog_task(&app, "PROJ-1").await;
+
+        let err = start_run(State(app.clone()), Json(run("PROJ-1")))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            err.message
+        );
+
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+        assert_eq!(task.title, "Reintentos", "the title comes from the task");
+        let events: Vec<_> = app.store.events(&key).await.unwrap();
+        assert_eq!(events.last().unwrap().event.name(), "start-aborted");
+
+        // A new task started directly still fails, as before.
+        let mut fresh = run("PROJ-2");
+        fresh.title = "Otra".into();
+        start_run(State(app.clone()), Json(fresh))
+            .await
+            .unwrap_err();
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status.name(), "failed");
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_leaves_the_backlog_task_as_it_was() {
+        let app = app().await;
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Reintentos", "feature");
+        task.project = Some("web".into());
+        task.notes = Some("con backoff".into());
+        task.in_checkout = Some(false);
+        app.store.create_task(&task).await.unwrap();
+
+        // No project, title or notes: the task's own; then edited ones, put back.
+        let req: RunRequest =
+            serde_json::from_value(serde_json::json!({ "key": "PROJ-1" })).unwrap();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        let mut edited = run("PROJ-1");
+        edited.title = "Otro título".into();
+        edited.notes = Some(String::new());
+        edited.workflow = Some("prompt".into());
+        edited.prompt = Some("hazlo".into());
+        start_run(State(app.clone()), Json(edited))
+            .await
+            .unwrap_err();
+
+        let after = app.store.get_task(&task.key).await.unwrap().unwrap();
+        assert_eq!(after, task, "unchanged, still in the backlog");
+    }
+
+    #[tokio::test]
+    async fn a_new_task_needs_a_project() {
+        let app = app().await;
+        let req: RunRequest =
+            serde_json::from_value(serde_json::json!({ "key": "PROJ-9", "title": "x" })).unwrap();
+        let err = start_run(State(app), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn a_new_task_keeps_the_notes_it_was_started_with() {
+        let app = app().await;
+        let mut req = run("PROJ-2");
+        req.title = "Otra".into();
+        req.notes = Some("mirar el TTL".into());
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.notes.as_deref(), Some("mirar el TTL"));
+    }
+
+    #[tokio::test]
+    async fn free_keys_created_at_once_are_all_different() {
+        let app = app().await;
+        let keys = futures_util::future::join_all((0..8).map(|_| next_free_key(&app))).await;
+        let mut keys: Vec<String> = keys.into_iter().map(|k| k.ok().unwrap()).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), 8, "{keys:?}");
+    }
+
+    #[tokio::test]
+    async fn only_backlog_tasks_can_be_started_again() {
+        let app = app().await;
+        let key = backlog_task(&app, "PROJ-1").await;
+        app.store
+            .apply_event(&key, Event::Start, chrono::Utc::now())
+            .await
+            .unwrap();
+        let err = start_run(State(app.clone()), Json(run("PROJ-1")))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT, "{}", err.message);
+
+        let err = start_run(State(app), Json(run("PROJ-404")))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.status,
+            StatusCode::BAD_REQUEST,
+            "a new task needs a title"
+        );
+    }
+
+    #[tokio::test]
+    async fn notes_reach_the_first_prompt_as_a_file() {
+        let app = app().await;
+        let key = TaskKey::new("PROJ-1");
+        let prompt = point_to_notes(&app, &key, "/feature PROJ-1".into(), Some("con backoff"));
+        let path = app.config.task_dir("PROJ-1").join("notes.md");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "con backoff");
+        assert!(prompt.starts_with("/feature PROJ-1 ("), "{prompt}");
+        assert!(
+            prompt.ends_with(&format!("{})", path.display())),
+            "{prompt}"
+        );
+
+        let bare = point_to_notes(&app, &key, "/feature PROJ-1".into(), Some("  "));
+        assert_eq!(bare, "/feature PROJ-1");
     }
 
     #[test]

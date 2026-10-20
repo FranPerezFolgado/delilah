@@ -28,4 +28,19 @@ impl Store {
             .await?;
         Ok(())
     }
+
+    /// Bumps the counter in setting `key` and returns it, atomically: at least
+    /// `floor + 1`, and never the same number twice.
+    pub async fn next_counter(&self, key: &str, floor: u32) -> Result<u32, StoreError> {
+        let value: String = sqlx::query_scalar(
+            "INSERT INTO settings (key, value) VALUES (?1, CAST(?2 + 1 AS TEXT))
+             ON CONFLICT (key) DO UPDATE SET value = CAST(MAX(CAST(value AS INTEGER), ?2) + 1 AS TEXT)
+             RETURNING value",
+        )
+        .bind(key)
+        .bind(floor)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(serde_json::from_str(&value)?)
+    }
 }

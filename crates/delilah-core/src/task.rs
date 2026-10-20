@@ -109,6 +109,10 @@ pub enum Event {
     Fail {
         reason: String,
     },
+    /// A backlog task could not get its workspace: it goes back to the backlog.
+    StartAborted {
+        reason: String,
+    },
 }
 
 impl Event {
@@ -125,6 +129,7 @@ impl Event {
             Self::AgentFinished => "agent-finished",
             Self::MarkDone => "mark-done",
             Self::Fail { .. } => "fail",
+            Self::StartAborted { .. } => "start-aborted",
         }
     }
 }
@@ -154,6 +159,13 @@ pub struct Task {
     pub workflow: String,
     pub phase: Option<String>,
     pub status: TaskStatus,
+    /// What the user keeps with the task (free text); handed to the agent on start.
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Where it will work once started, chosen while in the backlog: the project's
+    /// checkout (`true`) or a worktree (`false`); `None` if not chosen yet.
+    #[serde(default)]
+    pub in_checkout: Option<bool>,
 }
 
 impl Task {
@@ -165,6 +177,8 @@ impl Task {
             workflow: workflow.into(),
             phase: None,
             status: TaskStatus::Queued,
+            notes: None,
+            in_checkout: None,
         }
     }
 
@@ -222,6 +236,7 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         (S::Running, Event::AgentFinished) => Ok(S::Done),
         (S::Running | S::WaitingForUser | S::PausedByLimit { .. }, Event::MarkDone) => Ok(S::Done),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
+        (S::PreparingWorkspace, Event::StartAborted { .. }) => Ok(S::Queued),
         _ => Err(invalid),
     }
 }
@@ -250,6 +265,26 @@ mod tests {
         task.apply(Event::Start).unwrap();
         task.apply(Event::WorkspaceReady).unwrap();
         task
+    }
+
+    #[test]
+    fn an_aborted_start_goes_back_to_the_backlog() {
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Card retries", "feature");
+        task.apply(Event::Start).unwrap();
+        let aborted = Event::StartAborted {
+            reason: "workspace: branch exists".into(),
+        };
+        task.apply(aborted.clone()).unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+
+        // Only a start being prepared can be aborted.
+        assert!(task.apply(aborted.clone()).is_err());
+        assert!(running_task().apply(aborted).is_err());
+
+        // And it can be started again.
+        task.apply(Event::Start).unwrap();
+        task.apply(Event::WorkspaceReady).unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
     }
 
     #[test]

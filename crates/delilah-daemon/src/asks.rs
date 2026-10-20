@@ -63,6 +63,21 @@ impl Asks {
         asks
     }
 
+    /// Lets go of every question of `task` (it is being deleted): the terminal asks.
+    pub fn release_task(&self, task: &str) {
+        let ids: Vec<String> = {
+            let pending = self.pending.lock().unwrap();
+            pending
+                .iter()
+                .filter(|(_, (ask, _))| ask.task == task)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        for id in ids {
+            self.resolve(&id, Outcome::Released);
+        }
+    }
+
     fn get(&self, id: &str) -> Option<Ask> {
         self.pending.lock().unwrap().get(id).map(|(a, _)| a.clone())
     }
@@ -224,6 +239,31 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::store::Store;
+
+    #[test]
+    fn a_deleted_task_lets_go_of_its_questions_only() {
+        let asks = Asks::default();
+        let mut waiting = Vec::new();
+        for (id, task) in [("a", "PROJ-1"), ("b", "PROJ-1"), ("c", "PROJ-2")] {
+            let (tx, rx) = oneshot::channel();
+            let ask = Ask {
+                id: id.into(),
+                task: task.into(),
+                session: None,
+                questions: Value::Null,
+                since: Utc::now(),
+            };
+            asks.pending.lock().unwrap().insert(id.into(), (ask, tx));
+            waiting.push(rx);
+        }
+
+        asks.release_task("PROJ-1");
+        let left: Vec<String> = asks.list().into_iter().map(|a| a.id).collect();
+        assert_eq!(left, ["c"]);
+        for mut rx in waiting.drain(..2) {
+            assert!(matches!(rx.try_recv(), Ok(Outcome::Released)));
+        }
+    }
 
     async fn app() -> AppState {
         let config = Config {

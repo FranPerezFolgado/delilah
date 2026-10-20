@@ -20,6 +20,10 @@ export interface Task {
   workflow: string;
   phase: string | null;
   status: TaskStatus;
+  /** What the user keeps with the task; handed to the agent on start. */
+  notes?: string | null;
+  /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
+  in_checkout?: boolean | null;
 }
 
 export interface EventRecord {
@@ -52,6 +56,27 @@ export interface UsageReport {
   rate_limits: Record<string, UsageWindow>;
 }
 
+/** A task saved to a project's backlog, not started. */
+export interface NewBacklogTask {
+  key?: string;
+  title: string;
+  project: string;
+  notes?: string;
+  /** No Jira ticket: Delilah names it LIBRE-n. */
+  free?: boolean;
+  /** Where it will work once started: the project's checkout or a worktree. */
+  in_checkout?: boolean;
+}
+
+/** What can change in a backlog task before it starts. */
+export interface BacklogChange {
+  title?: string;
+  /** An empty string clears them. */
+  notes?: string;
+  project?: string;
+  in_checkout?: boolean;
+}
+
 export interface RunRequest {
   key: string;
   title: string;
@@ -63,6 +88,8 @@ export interface RunRequest {
   free?: boolean;
   /** Work in the project's own checkout instead of a worktree. */
   in_checkout?: boolean;
+  /** What the agent gets with the task; for a backlog task, "" clears its notes. */
+  notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
   from_session?: string;
 }
@@ -260,7 +287,12 @@ export interface FolderInspection {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(
+    message: string,
+    readonly status?: number,
+    /** A delete refused because work in the task's worktree would be lost. */
+    readonly unpushed = false,
+  ) {
     super(message);
   }
 }
@@ -277,7 +309,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
-  if (!res.ok) throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status);
+  if (!res.ok)
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true);
   return data as T;
 }
 
@@ -297,6 +330,12 @@ export const api = {
     request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
   deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
+  createTask: (task: NewBacklogTask) => post<Task>("/api/v1/tasks", task),
+  updateTask: (key: string, change: BacklogChange) =>
+    request<Task>(`/api/v1/tasks/${key}`, { method: "PATCH", body: JSON.stringify(change) }),
+  /** For good: stops its agent and releases its workspace (the branch stays). */
+  deleteTask: (key: string, force = false) =>
+    request<null>(`/api/v1/tasks/${key}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
@@ -385,7 +424,7 @@ export const isActive = (s: TaskStatus) =>
 export const statusLabel = (s: TaskStatus): string => {
   switch (s.type) {
     case "queued":
-      return t("En cola");
+      return t("Backlog");
     case "preparing-workspace":
       return t("Preparando");
     case "running":

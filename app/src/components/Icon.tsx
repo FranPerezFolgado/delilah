@@ -23,6 +23,8 @@ const PATHS = {
   sidebar: "M4 5h16v14H4zM15 5v14",
   lock: "M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z",
   inbox: "M4 13l2.5-7h11l2.5 7v6H4zM4 13h5l1 2h4l1-2h5",
+  trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+  backlog: C + "M12 7.5V12l3 2",
 } as const;
 
 export type IconName = keyof typeof PATHS;

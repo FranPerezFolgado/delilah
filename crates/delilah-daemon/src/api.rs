@@ -41,7 +41,12 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/tasks", get(list_tasks).post(create_task))
-        .route("/api/v1/tasks/{key}", get(get_task))
+        .route(
+            "/api/v1/tasks/{key}",
+            get(get_task)
+                .patch(update_task)
+                .delete(crate::actions::delete),
+        )
         .route(
             "/api/v1/tasks/{key}/events",
             get(list_events).post(post_event),
@@ -186,12 +191,26 @@ pub struct Health {
     pub exe_mtime: Option<u64>,
 }
 
+/// A task saved without starting it: the backlog.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NewTask {
+    /// May be empty for a `free` task: Delilah names it `LIBRE-<n>`.
+    #[serde(default)]
     pub key: String,
     pub title: String,
-    #[serde(default = "default_workflow")]
-    pub workflow: String,
+    /// The project it will run against. The app and the CLI always send one; bare
+    /// tasks (no project) are only for driving the state machine by hand.
+    pub project: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// A task without a Jira ticket.
+    #[serde(default)]
+    pub free: bool,
+    /// Where it will work once started: the project's checkout or a worktree.
+    #[serde(default)]
+    pub in_checkout: Option<bool>,
+    /// Defaults to the project's workflow (`feature` without a project).
+    pub workflow: Option<String>,
 }
 
 fn default_workflow() -> String {
@@ -234,11 +253,49 @@ async fn create_task(
     State(app): State<AppState>,
     Json(new): Json<NewTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let key = TaskKey::parse(new.key).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let task = Task::new(key, new.title, new.workflow);
+    if new.title.trim().is_empty() {
+        return Err(ApiError::bad_request("say what the task is about"));
+    }
+    let project = match &new.project {
+        Some(name) => Some(app.store.project(name).await?),
+        None => None,
+    };
+    let key = match new.free && new.key.trim().is_empty() {
+        true => crate::run::next_free_key(&app).await?,
+        false => new.key,
+    };
+    let key = TaskKey::parse(key).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let workflow = new
+        .workflow
+        .or_else(|| project.as_ref().map(|p| p.workflow.clone()))
+        .unwrap_or_else(default_workflow);
+    let mut task = Task::new(key, new.title.trim(), workflow);
+    task.project = project.map(|p| p.name);
+    task.notes = new.notes.filter(|n| !n.trim().is_empty());
+    task.in_checkout = new.in_checkout;
     app.store.create_task(&task).await?;
     app.emit(crate::events::Topic::Tasks);
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
+async fn update_task(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+    Json(mut change): Json<crate::store::BacklogChange>,
+) -> Result<Json<Task>, ApiError> {
+    if let Some(title) = &mut change.title {
+        *title = title.trim().to_string();
+        if title.is_empty() {
+            return Err(ApiError::bad_request("a task needs a title"));
+        }
+    }
+    let task = app
+        .store
+        .update_backlog_task(&TaskKey::new(key), &change)
+        .await?;
+    app.emit(crate::events::Topic::Tasks);
+    Ok(Json(task))
 }
 
 async fn get_task(
@@ -275,11 +332,15 @@ async fn post_event(
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorBody {
     pub error: String,
+    /// Refused because work in a worktree would be lost: the client may offer to force it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unpushed: bool,
 }
 
 pub struct ApiError {
-    status: StatusCode,
-    message: String,
+    pub(crate) status: StatusCode,
+    pub(crate) message: String,
+    pub(crate) unpushed: bool,
 }
 
 impl ApiError {
@@ -297,6 +358,14 @@ impl ApiError {
 
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
+    }
+
+    /// A 409 for work that would be lost; `?force=true` goes ahead anyway.
+    pub fn unpushed(message: impl Into<String>) -> Self {
+        Self {
+            unpushed: true,
+            ..Self::conflict(message)
+        }
     }
 
     pub fn too_large(message: impl Into<String>) -> Self {
@@ -319,6 +388,7 @@ impl ApiError {
         Self {
             status,
             message: message.into(),
+            unpushed: false,
         }
     }
 }
@@ -328,6 +398,7 @@ impl From<StoreError> for ApiError {
         let status = match &e {
             StoreError::NotFound(_) | StoreError::ProjectNotFound(_) => StatusCode::NOT_FOUND,
             StoreError::AlreadyExists(_)
+            | StoreError::NotInBacklog(_)
             | StoreError::ProjectExists(_)
             | StoreError::Transition(_) => StatusCode::CONFLICT,
             StoreError::Db(_)
@@ -348,6 +419,7 @@ impl IntoResponse for ApiError {
             self.status,
             Json(ErrorBody {
                 error: self.message,
+                unpushed: self.unpushed,
             }),
         )
             .into_response()
@@ -398,6 +470,164 @@ mod tests {
             ui_origin: None,
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
+    }
+
+    /// The API with a `web` repo project registered (its folder is never touched).
+    async fn app_with_project() -> (Router, AppState) {
+        let config = crate::config::Config {
+            home: std::env::temp_dir().join(format!("delilah-api-{}", uuid::Uuid::new_v4())),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let state = AppState::new(Store::in_memory().await.unwrap(), config);
+        state
+            .store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "custom".into(),
+            })
+            .await
+            .unwrap();
+        (router(state.clone()), state)
+    }
+
+    #[tokio::test]
+    async fn saves_backlog_tasks_without_starting_them() {
+        let (app, state) = app_with_project().await;
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(
+                json!({"free": true, "title": " Reintentos ", "project": "web", "notes": "con backoff", "in_checkout": false}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["key"], "LIBRE-1");
+        assert_eq!(task["title"], "Reintentos");
+        assert_eq!(task["status"], json!({"type": "queued"}));
+        assert_eq!(task["project"], "web");
+        assert_eq!(task["notes"], "con backoff");
+        assert_eq!(task["workflow"], "custom", "the project's workflow");
+        assert_eq!(task["in_checkout"], false, "it will work in a worktree");
+        let key = TaskKey::new("LIBRE-1");
+        assert!(state.store.workspace(&key).await.unwrap().is_none());
+        assert!(
+            state
+                .store
+                .primary_session("LIBRE-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-1", "title": "x", "project": "nope"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/LIBRE-1",
+            Some(json!({"notes": "sin backoff", "in_checkout": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{task}");
+        assert_eq!(task["notes"], "sin backoff");
+        assert_eq!(task["in_checkout"], true, "now in the checkout");
+        assert_eq!(task["title"], "Reintentos");
+
+        call(
+            &app,
+            "POST",
+            "/api/v1/tasks/LIBRE-1/events",
+            Some(json!({"type": "start"})),
+        )
+        .await;
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/LIBRE-1",
+            Some(json!({"title": "y"})),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "only backlog tasks can be edited"
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_backlog_tasks_it_cannot_name_or_place() {
+        let (app, _) = app_with_project().await;
+        for body in [
+            json!({"title": "x", "project": "web"}),
+            json!({"key": "PROJ-1", "title": "  ", "project": "web"}),
+        ] {
+            let (status, _) = call(&app, "POST", "/api/v1/tasks", Some(body.clone())).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        }
+        call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-1", "title": "x", "project": "web"})),
+        )
+        .await;
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"project": "nope"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"title": " "})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn free_task_numbers_are_never_handed_out_twice() {
+        let (app, state) = app_with_project().await;
+        for _ in 0..2 {
+            call(
+                &app,
+                "POST",
+                "/api/v1/tasks",
+                Some(json!({"free": true, "title": "idea", "project": "web"})),
+            )
+            .await;
+        }
+        state
+            .store
+            .delete_task(&TaskKey::new("LIBRE-2"))
+            .await
+            .unwrap();
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "otra", "project": "web"})),
+        )
+        .await;
+        assert_eq!(task["key"], "LIBRE-3");
     }
 
     #[tokio::test]

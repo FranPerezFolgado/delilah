@@ -178,9 +178,21 @@ pub fn archive_workspace(
     force: bool,
     opts: &GitOptions,
 ) -> Result<(), GitError> {
+    if !force {
+        check_workspace(ws, opts)?;
+    }
+    remove_workspace(root, ws, opts)
+}
+
+/// Fails, touching nothing, if removing the workspace would lose work: uncommitted
+/// changes, or commits of the task's branch on no remote.
+pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
+    // Removed by hand: nothing left in it to lose, and the branch stays in the repo.
+    if !ws.path.exists() {
+        return Ok(());
+    }
     let only_this_branch = format!("--exclude={}", ws.branch);
-    let checked = if force { Vec::new() } else { ws.branch_dirs() };
-    for (location, dir) in checked {
+    for (location, dir) in ws.branch_dirs() {
         if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
             return Err(GitError::Dirty { location });
         }
@@ -204,6 +216,12 @@ pub fn archive_workspace(
             return Err(GitError::Unpushed { location, count });
         }
     }
+    Ok(())
+}
+
+/// Removes the workspace's worktree, whatever is in it (see [`check_workspace`]).
+/// The branch stays.
+pub fn remove_workspace(root: &Path, ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
     // `--force` is required by git for worktrees with submodules; the checks above
     // are what keep it safe.
     git(

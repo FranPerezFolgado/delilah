@@ -13,7 +13,7 @@ interface Props {
 }
 
 const TASK_LABELS: Record<string, string> = {
-  queued: "En cola",
+  queued: "Backlog",
   "preparing-workspace": "Preparando",
   running: "En ejecución",
   "waiting-for-user": "Te espera",

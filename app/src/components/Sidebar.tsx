@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Project, Session, Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { keyOf } from "../shortcuts";
@@ -23,38 +23,81 @@ interface Props {
   /** Starts a read-only Claude in the project's checkout. */
   onAsk: (project: string) => void;
   onNewTask: () => void;
+  /** Asks to confirm deleting a task (right-click on its row). */
+  onDelete: (task: Task) => void;
   /** Items in the inbox that block an agent. */
   waiting: number;
 }
 
-/** Most urgent first; finished tasks stay on the board, not here. */
-const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "queued", "failed"];
+/** Most urgent first; finished tasks stay on the board, not here, and backlog ones
+ *  (`queued`) sit in their own folded section: they are not pending work. */
+const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "failed"];
 
 const COLLAPSED_KEY = "delilah.collapsed-projects";
-function loadCollapsed(): Set<string> {
+/** Backlogs start folded: these are the ones the viewer opened. */
+const OPEN_BACKLOGS_KEY = "delilah.open-backlogs";
+function loadSet(key: string): Set<string> {
   try {
-    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]"));
+    return new Set(JSON.parse(localStorage.getItem(key) ?? "[]"));
   } catch {
     return new Set();
   }
 }
 
-export function Sidebar({ view, onView, tasks, projects, sessions, selected, onSelect, onOpenSession, onAsk, onNewTask, waiting }: Props) {
-  // Folded projects, remembered per viewer: a project with many sessions and tasks
-  // would otherwise take the whole sidebar.
-  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+function useRememberedSet(key: string) {
+  const [set, setSet] = useState<Set<string>>(() => loadSet(key));
   const toggle = (id: string) =>
-    setCollapsed((c) => {
+    setSet((c) => {
       const next = new Set(c);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       try {
-        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+        localStorage.setItem(key, JSON.stringify([...next]));
       } catch {
         // Not remembered: still folds for now.
       }
       return next;
     });
+  return [set, toggle] as const;
+}
+
+export function Sidebar({ view, onView, tasks, projects, sessions, selected, onSelect, onOpenSession, onAsk, onNewTask, onDelete, waiting }: Props) {
+  // Folded projects, remembered per viewer: a project with many sessions and tasks
+  // would otherwise take the whole sidebar.
+  const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
+  const [openBacklogs, toggleBacklog] = useRememberedSet(OPEN_BACKLOGS_KEY);
+  // The right-click menu of a task row.
+  const [menu, setMenu] = useState<{ task: Task; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+  const taskRow = (task: Task) => {
+    const { icon, cls } = statusIcon(task.status);
+    return (
+      <button
+        key={task.key}
+        className={`srow ${selected === task.key ? "on" : ""}`}
+        onClick={() => onSelect(task.key)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ task, x: e.clientX, y: e.clientY });
+        }}
+        title={task.title}
+      >
+        <Icon name={icon} className={cls} />
+        <span className="key mono">{task.key}</span>
+        <span className="trunc">{task.title}</span>
+      </button>
+    );
+  };
   // As in Orca: everything grouped by project, its own sessions first, then its tasks.
   const group = (project: Project | null) => {
     const owner = project ? `@${project.name}` : null;
@@ -64,8 +107,10 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
       project,
       sessions: owner ? sessions.filter((s) => s.task === owner) : [],
       tasks: mine
-        .filter((t) => t.status.type !== "done")
+        .filter((t) => t.status.type !== "done" && t.status.type !== "queued")
         .sort((a, b) => ORDER.indexOf(a.status.type) - ORDER.indexOf(b.status.type)),
+      // Oldest first: the daemon lists tasks in the order they were created.
+      backlog: mine.filter((t) => t.status.type === "queued"),
       done: mine.filter((t) => t.status.type === "done").length,
     };
   };
@@ -147,22 +192,37 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
               </button>
             );
           })}
-          {!folded && g.tasks.map((t) => {
-            const { icon, cls } = statusIcon(t.status);
-            return (
-              <button key={t.key} className={`srow ${selected === t.key ? "on" : ""}`} onClick={() => onSelect(t.key)} title={t.title}>
-                <Icon name={icon} className={cls} />
-                <span className="key mono">{t.key}</span>
-                <span className="trunc">{t.title}</span>
+          {!folded && g.tasks.map(taskRow)}
+          {!folded && g.backlog.length > 0 && (
+            <>
+              <button className="bhead" onClick={() => toggleBacklog(id)} aria-expanded={openBacklogs.has(id)}>
+                <span className={`chev ${openBacklogs.has(id) ? "open" : ""}`}>›</span>
+                {t("Backlog ({n})", { n: g.backlog.length })}
               </button>
-            );
-          })}
+              {openBacklogs.has(id) && g.backlog.map(taskRow)}
+            </>
+          )}
           {!folded && g.done > 0 && <div className="pdone muted">{tn(g.done, "{n} hecha · en Tareas", "{n} hechas · en Tareas")}</div>}
         </div>
         );
       })}
       {projects.length === 0 && tasks.length === 0 && (
         <p className="muted" style={{ padding: "4px 8px", fontSize: 12 }}>{t("Añade un proyecto en Proyectos.")}</p>
+      )}
+      {menu && (
+        <div className="menu ctx" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
+          <button
+            className="c-err"
+            onClick={() => {
+              onDelete(menu.task);
+              setMenu(null);
+            }}
+          >
+            <span>
+              <Icon name="trash" /> {t("Eliminar {key}…", { key: menu.task.key })}
+            </span>
+          </button>
+        </div>
       )}
       <button className={`nav ${view === "settings" ? "on" : ""}`} style={{ marginTop: "auto" }} onClick={() => onView("settings")}>
         <Icon name="settings" /> {t("Ajustes")}

@@ -19,6 +19,7 @@ const EVENT_LABELS: Record<string, string> = {
   "agent-finished": "El agente terminó",
   "mark-done": "Marcada como hecha",
   fail: "Falló",
+  "start-aborted": "No se pudo empezar; vuelve al backlog",
 };
 
 interface Props {
@@ -32,6 +33,10 @@ interface Props {
   /** Opens the changes tab. */
   onViewChanges: () => void;
 }
+
+/** Asks the app to confirm deleting a task (see DeleteTaskDialog in App). */
+export const askToDelete = (task: Task) =>
+  window.dispatchEvent(new CustomEvent<Task>("delilah:delete-task", { detail: task }));
 
 /** The task tab of a task's screen: status, actions, spec, sessions and history. */
 export function TaskView({ task, sessions, onOpenSession, onNewSession, onChanged, onViewChanges }: Props) {
@@ -152,6 +157,11 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
           {(s.type === "done" || s.type === "failed") && (
             <button className="btn" disabled={busy} onClick={() => archive(false)}>
               {t("Archivar workspace")}
+            </button>
+          )}
+          {s.type !== "preparing-workspace" && (
+            <button className="btn btn-ghost c-err" style={{ marginLeft: "auto" }} disabled={busy} onClick={() => askToDelete(task)}>
+              <Icon name="trash" /> {t("Eliminar")}
             </button>
           )}
         </div>

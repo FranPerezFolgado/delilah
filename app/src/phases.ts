@@ -12,6 +12,15 @@ export const COLUMNS: { id: Column; label: string }[] = [
   { id: "done", label: "Hecha" },
 ];
 
+/** The board: the backlog (tasks saved, not started) first, then the phases. Kept
+ *  apart from COLUMNS, which are also the phases a task can be moved through. */
+export type BoardColumn = Column | "backlog";
+
+export const BOARD_COLUMNS: { id: BoardColumn; label: string }[] = [{ id: "backlog", label: "Backlog" }, ...COLUMNS];
+
+export const boardColumnOf = (task: Task, spec?: SpecSummary): BoardColumn =>
+  task.status.type === "queued" ? "backlog" : columnOf(task, spec);
+
 const PHASES: SpecPhase[] = ["specify", "plan", "implement", "review"];
 
 export const phaseLabel = (c: Column) => t(COLUMNS.find((col) => col.id === c)?.label ?? c);

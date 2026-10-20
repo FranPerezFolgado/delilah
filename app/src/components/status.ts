@@ -11,6 +11,8 @@ export const statusIcon = (s: TaskStatus): { icon: IconName; cls: string } => {
       return { icon: "done", cls: "c-done" };
     case "failed":
       return { icon: "failed", cls: "c-err" };
+    case "queued":
+      return { icon: "backlog", cls: "c-mut" };
     default:
       return { icon: "run", cls: "c-run" };
   }

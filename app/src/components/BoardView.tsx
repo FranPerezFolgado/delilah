@@ -1,5 +1,5 @@
 import { statusLabel, type SpecSummary, type Task } from "../api";
-import { COLUMNS, columnOf } from "../phases";
+import { BOARD_COLUMNS, boardColumnOf } from "../phases";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 import { t } from "../i18n";
@@ -33,8 +33,8 @@ export function BoardView({ tasks, specs, onOpen, onNewTask }: Props) {
         </div>
       ) : (
         <div className="board">
-          {COLUMNS.map((col) => {
-            const cards = tasks.filter((t) => columnOf(t, specs[t.key]) === col.id);
+          {BOARD_COLUMNS.map((col) => {
+            const cards = tasks.filter((t) => boardColumnOf(t, specs[t.key]) === col.id);
             return (
               <section className="col" key={col.id} aria-label={t(col.label)}>
                 <div className="col-head">

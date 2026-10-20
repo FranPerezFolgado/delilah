@@ -9,6 +9,8 @@ import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
 import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
+import { DeleteTaskDialog } from "./components/DeleteTaskDialog";
+import { BacklogTaskView } from "./components/BacklogTaskView";
 import { ProjectsView } from "./components/ProjectsView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -33,7 +35,17 @@ export function App() {
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
   const [convertFrom, setConvertFrom] = useState<Session | null>(null);
+  // A backlog task being started ("Empezar"), and one being deleted.
+  const [starting, setStarting] = useState<Task | null>(null);
+  const [deleting, setDeleting] = useState<Task | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+
+  // "Eliminar" from a task's own view.
+  useEffect(() => {
+    const ask = (e: Event) => setDeleting((e as CustomEvent<Task>).detail);
+    window.addEventListener("delilah:delete-task", ask);
+    return () => window.removeEventListener("delilah:delete-task", ask);
+  }, []);
 
   // Help › Ver logs, from the native menu.
   useEffect(() => {
@@ -259,6 +271,7 @@ export function App() {
               .catch((e) => setToast((e as Error).message))
           }
           onNewTask={() => setNewTask(true)}
+          onDelete={setDeleting}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
         <main>
@@ -291,7 +304,19 @@ export function App() {
               onNewTask={() => setNewTask(true)}
             />
           )}
-          {view === "tasks" &&
+          {view === "tasks" && task?.status.type === "queued" && (
+            <BacklogTaskView
+              key={task.key}
+              task={task}
+              projects={projects}
+              onStart={(t) => {
+                setStarting(t);
+                setNewTask(true);
+              }}
+              onChanged={refresh}
+            />
+          )}
+          {view === "tasks" && task?.status.type !== "queued" &&
             (owner ? (
               <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
                 <TaskScreen
@@ -361,18 +386,42 @@ export function App() {
           projects={projects}
           project={project?.name ?? task?.project ?? undefined}
           fromSession={convertFrom ? { id: convertFrom.id, label: convertFrom.label } : undefined}
+          existing={starting ?? undefined}
           draft={draft}
           onClose={() => {
             setNewTask(false);
             setDraft(undefined);
             setConvertFrom(null);
+            setStarting(null);
           }}
           onStarted={(t) => {
             setNewTask(false);
             setDraft(undefined);
             setConvertFrom(null);
+            setStarting(null);
             refresh();
             openTask(t.key);
+          }}
+          onSaved={(saved) => {
+            setNewTask(false);
+            setDraft(undefined);
+            refresh();
+            setToast(t("{key} guardada en el backlog de {project}", { key: saved.key, project: saved.project ?? "-" }));
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteTaskDialog
+          task={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={(key) => {
+            setDeleting(null);
+            // Off a screen that no longer exists: to its project's, or the board.
+            if (selected === key) {
+              setSelected(deleting.project ? `@${deleting.project}` : null);
+              if (!deleting.project) setView("board");
+            }
+            refresh();
           }}
         />
       )}

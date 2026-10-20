@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Project, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
 import { t } from "../i18n";
+import { WherePicker, whereOf, type Where } from "./WherePicker";
 
 /** A ticket to start from, e.g. picked in the Jira view. */
 export interface TaskDraft {
@@ -18,19 +19,27 @@ interface Props {
   project?: string;
   /** "Convertir en tarea": a project's Claude session that becomes the task's. */
   fromSession?: { id: string; label: string };
+  /** "Empezar": a backlog task to start; its key stays, the rest comes prefilled. */
+  existing?: Task;
   onClose: () => void;
   onStarted: (task: Task) => void;
+  /** "Guardar en backlog": saved, not started. */
+  onSaved: (task: Task) => void;
 }
 
-export function NewTaskDialog({ projects, draft, project: initialProject, fromSession, onClose, onStarted }: Props) {
+export function NewTaskDialog({ projects, draft, project: initialProject, fromSession, existing, onClose, onStarted, onSaved }: Props) {
   // A Jira ticket, or a free task Delilah names itself (LIBRE-n).
-  const [origin, setOrigin] = useState<"jira" | "libre">(fromSession ? "libre" : "jira");
+  const [origin, setOrigin] = useState<"jira" | "libre">(
+    fromSession || existing?.key.startsWith("LIBRE-") ? "libre" : "jira",
+  );
   // In the project's checkout (a branch there), or isolated in a worktree.
-  const [where, setWhere] = useState<"checkout" | "worktree">("checkout");
-  const [key, setKey] = useState(draft?.key ?? "");
-  const [title, setTitle] = useState(draft?.title ?? "");
+  const [where, setWhere] = useState<Where>(existing ? whereOf(existing.in_checkout) : "checkout");
+  const [key, setKey] = useState(existing?.key ?? draft?.key ?? "");
+  const [title, setTitle] = useState(existing?.title ?? draft?.title ?? "");
+  const [notes, setNotes] = useState(existing?.notes ?? "");
   // A ticket with components most likely belongs to the parent project.
   const preferred =
+    projects.find((p) => p.name === existing?.project) ??
     projects.find((p) => p.name === initialProject) ??
     (draft?.components.length ? projects.find((p) => p.kind === "parent") : undefined) ??
     projects[0];
@@ -94,12 +103,14 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     setError(null);
     try {
       const task = await api.run({
-        key: origin === "libre" ? "" : key.trim(),
+        key: existing ? existing.key : origin === "libre" ? "" : key.trim(),
         title: title.trim(),
         project: project.name,
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
+        // A backlog task's notes as they read now ("" clears them).
+        ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
         // A custom prompt runs outside the /feature workflow.
         ...(prompt.trim() ? { workflow: "prompt", prompt: prompt.trim() } : {}),
@@ -111,10 +122,31 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     }
   };
 
+  const saveToBacklog = async () => {
+    if (!project) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const task = await api.createTask({
+        key: origin === "libre" ? undefined : key.trim(),
+        title: title.trim(),
+        project: project.name,
+        notes: notes.trim() || undefined,
+        free: origin === "libre",
+        in_checkout: where === "checkout",
+      });
+      onSaved(task);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
+  const canSave = !!project && !!title.trim() && (origin === "libre" || !!key.trim());
+
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="dialog" role="dialog" aria-label={t("Nueva tarea")} onSubmit={submit}>
-        <h2>{fromSession ? t("Convertir en tarea") : t("Nueva tarea")}</h2>
+        <h2>{fromSession ? t("Convertir en tarea") : existing ? t("Empezar {key}", { key: existing.key }) : t("Nueva tarea")}</h2>
         {fromSession && (
           <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
             {t("«{label}» pasa a ser el Claude de una tarea libre: sigue con su conversación, ya puede editar y trabaja en una rama de tu checkout (donde está la conversación).", { label: fromSession.label })}
@@ -124,7 +156,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           <p className="muted">{t("Primero añade un proyecto en la vista Proyectos.")}</p>
         ) : (
           <>
-            {!draft && !fromSession && (
+            {!draft && !fromSession && !existing && (
               <div className="segs" role="radiogroup" aria-label={t("Origen")} style={{ alignSelf: "flex-start" }}>
                 <button type="button" role="radio" aria-checked={origin === "jira"} className={`seg ${origin === "jira" ? "on" : ""}`} onClick={() => setOrigin("jira")}>
                   {t("Ticket de Jira")}
@@ -138,7 +170,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
                 <label className="field">
                   <span>{t("Ticket")}</span>
-                  <input className="input mono" placeholder="PROJ-1234" value={key} onChange={(e) => setKey(e.target.value)} required autoFocus />
+                  <input className="input mono" placeholder="PROJ-1234" value={key} onChange={(e) => setKey(e.target.value)} required autoFocus={!existing} readOnly={!!existing} />
                 </label>
                 <label className="field">
                   <span>{t("Título")}</span>
@@ -165,30 +197,12 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               </select>
             </label>
             {!fromSession && (
-            <div className="field">
-              <span>{t("Dónde trabaja el agente")}</span>
-              <div className="where">
-                <label className={`where-opt ${where === "checkout" ? "on" : ""}`}>
-                  <input type="radio" name="where" checked={where === "checkout"} onChange={() => setWhere("checkout")} />
-                  <span>
-                    <b>{t("En tu checkout")}</b>
-                    <span className="muted">
-                      {t("Crea la rama en {path}", { path: project?.path ?? t("tu carpeta") })}
-                      {project?.kind === "parent" ? t(" (en los submódulos elegidos)") : ""}
-                      {t(" y trabaja ahí. Instantáneo; ves los cambios en tu IDE. Una tarea a la vez, con el checkout limpio.")}
-                    </span>
-                  </span>
-                </label>
-                <label className={`where-opt ${where === "worktree" ? "on" : ""}`}>
-                  <input type="radio" name="where" checked={where === "worktree"} onChange={() => setWhere("worktree")} />
-                  <span>
-                    <b>{t("Aislada (worktree)")}</b>
-                    <span className="muted">{t("Copia aparte. Varias tareas en paralelo sin tocar tu carpeta; la primera vez clona los submódulos.")}</span>
-                  </span>
-                </label>
-              </div>
-            </div>
+              <label className="field">
+                <span>{t("Notas (opcional; el agente las recibe al empezar)")}</span>
+                <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+              </label>
             )}
+            {!fromSession && <WherePicker value={where} onChange={setWhere} project={project} />}
             {project?.kind === "parent" && (
               <div className="field">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -231,8 +245,14 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         {error && <div className="error selectable">{error}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>{t("Cancelar")}</button>
+          {!fromSession && !existing && (
+            <button type="button" className="btn" disabled={busy || !canSave} onClick={saveToBacklog}
+              title={t("Se queda en el backlog del proyecto, sin workspace ni agente, hasta que la empieces")}>
+              {t("Guardar en backlog")}
+            </button>
+          )}
           <button className="btn btn-p" disabled={busy || !project || (project.kind === "parent" && picked.length === 0)}>
-            {busy ? t("Preparando workspace…") : fromSession ? t("Convertir") : t("Lanzar")}
+            {busy ? t("Preparando workspace…") : fromSession ? t("Convertir") : existing ? t("Empezar") : t("Lanzar")}
           </button>
         </div>
       </form>

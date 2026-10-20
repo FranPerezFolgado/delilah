@@ -4,7 +4,8 @@ use std::process::Command;
 use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
-    create_workspace, file_diff, leave_checkout, list_submodules, repo_root, use_checkout,
+    check_workspace, create_workspace, file_diff, leave_checkout, list_submodules,
+    remove_workspace, repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -205,6 +206,24 @@ fn refuses_to_archive_while_work_would_be_lost() {
     git(&sub, &["push", "-q", "origin", BRANCH]);
     archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap();
     assert!(!ws.path.exists());
+}
+
+#[test]
+fn checking_a_workspace_never_removes_it() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let ws = create_workspace(&repo, &fx.repo_spec(), &opts()).unwrap();
+    check_workspace(&ws, &opts()).unwrap();
+
+    commit_change(&ws, ".");
+    let err = check_workspace(&ws, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Unpushed { count: 1, .. }), "{err}");
+    assert!(ws.path.exists());
+
+    // Removing it anyway keeps the branch, with its commit.
+    remove_workspace(&repo, &ws, &opts()).unwrap();
+    assert!(!ws.path.exists());
+    assert!(git(&repo, &["branch", "--list", "feature/SIGNAL-12"]).contains("SIGNAL-12"));
 }
 
 #[test]

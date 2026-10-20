@@ -35,26 +35,42 @@ enum Command {
     Status,
     /// Lists the tasks.
     Ls,
-    /// Creates a task for a ticket.
+    /// Saves a task to a project's backlog, without starting it (see `delilah run`).
     New {
-        key: String,
-        #[arg(long)]
-        title: String,
-        #[arg(long, default_value = "feature")]
-        workflow: String,
-    },
-    /// Shows a task and its history.
-    Show { key: String },
-    /// Sends a raw event to a task, e.g. '{"type":"start"}'. For development.
-    Event { key: String, json: String },
-    /// Creates a task, builds its workspace and starts Claude on it.
-    Run {
-        key: String,
+        /// The Jira ticket; leave it out with --free.
+        key: Option<String>,
         #[arg(long)]
         title: String,
         /// Registered project (see `delilah project ls`).
         #[arg(long, env = "DELILAH_PROJECT")]
         project: String,
+        /// What to keep with the task; the agent gets it when the task starts.
+        #[arg(long)]
+        notes: Option<String>,
+        /// A task without a Jira ticket: Delilah names it LIBRE-<n>.
+        #[arg(long)]
+        free: bool,
+        /// Work in the project's checkout once started (by default, in a worktree).
+        #[arg(long)]
+        checkout: bool,
+        /// Defaults to the project's workflow.
+        #[arg(long)]
+        workflow: Option<String>,
+    },
+    /// Shows a task and its history.
+    Show { key: String },
+    /// Sends a raw event to a task, e.g. '{"type":"start"}'. For development.
+    Event { key: String, json: String },
+    /// Builds a task's workspace and starts Claude on it: a backlog task, or a new
+    /// one (then --title is required).
+    Run {
+        key: String,
+        #[arg(long)]
+        title: Option<String>,
+        /// Registered project (see `delilah project ls`); a backlog task's own if
+        /// left out.
+        #[arg(long, env = "DELILAH_PROJECT")]
+        project: Option<String>,
         /// Parent projects: the submodules the task touches, comma separated.
         #[arg(long, value_delimiter = ',')]
         submodules: Vec<String>,
@@ -82,6 +98,15 @@ enum Command {
     Archive {
         key: String,
         /// Remove the worktree even if uncommitted or unpushed work is lost.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Deletes a task for good: stops its agent, releases its workspace (the branch
+    /// stays) and forgets it. Refuses while a worktree has unpushed work, unless --force.
+    #[command(alias = "delete")]
+    Rm {
+        key: String,
+        /// Delete it even if uncommitted or unpushed work in its worktree is lost.
         #[arg(long)]
         force: bool,
     },
@@ -130,6 +155,18 @@ struct UsageReport {
 #[derive(Deserialize)]
 struct ErrorBody {
     error: String,
+    /// Refused because work in the task's worktree would be lost.
+    #[serde(default)]
+    unpushed: bool,
+}
+
+impl From<String> for ErrorBody {
+    fn from(error: String) -> Self {
+        Self {
+            error,
+            unpushed: false,
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -161,7 +198,9 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         Command::Ls => {
             let tasks: Vec<Task> = api.get("/api/v1/tasks")?;
             if tasks.is_empty() {
-                println!("No tasks yet. Create one with `delilah new <KEY> --title ...`");
+                println!(
+                    "No tasks yet. Save one with `delilah new <KEY> --title ... --project ...`"
+                );
             }
             for task in tasks {
                 println!(
@@ -177,13 +216,28 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         Command::New {
             key,
             title,
+            project,
+            notes,
+            free,
+            checkout,
             workflow,
         } => {
+            if key.is_none() && !free {
+                return Err("say the ticket's KEY, or --free for a task without one".into());
+            }
             let task: Task = api.post(
                 "/api/v1/tasks",
-                &json!({ "key": key, "title": title, "workflow": workflow }),
+                &json!({
+                    "key": key.unwrap_or_default(), "title": title, "project": project,
+                    "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
+                }),
             )?;
-            println!("Created {} ({})", task.key, task.workflow);
+            println!(
+                "Saved {} to {}'s backlog. Start it with `delilah run {}`.",
+                task.key,
+                task.project.as_deref().unwrap_or("-"),
+                task.key
+            );
         }
         Command::Show { key } => {
             let task: Task = api.get(&format!("/api/v1/tasks/{key}"))?;
@@ -217,7 +271,8 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             let task: Task = api.post(
                 "/api/v1/runs",
                 &json!({
-                    "key": key, "title": title, "project": project, "workflow": workflow,
+                    "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
+                    "workflow": workflow,
                     "submodules": submodules, "branch": branch, "prompt": prompt,
                 }),
             )?;
@@ -249,6 +304,16 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             let task: Task =
                 api.post(&format!("/api/v1/tasks/{key}/archive{query}"), &json!({}))?;
             println!("Archived the workspace of {}.", task.key);
+        }
+        Command::Rm { key, force } => {
+            let query = if force { "?force=true" } else { "" };
+            match api.delete(&format!("/api/v1/tasks/{key}{query}")) {
+                Ok(()) => println!("Deleted {key}."),
+                Err(e) if e.unpushed => {
+                    return Err(format!("{}; use --force to delete it anyway", e.error));
+                }
+                Err(e) => return Err(e.error),
+            }
         }
         Command::Usage => {
             let report: Option<UsageReport> = api.get("/api/v1/usage")?;
@@ -318,6 +383,7 @@ fn status_label(status: &TaskStatus) -> String {
             )
         }
         TaskStatus::Failed { reason } => format!("failed: {reason}"),
+        TaskStatus::Queued => "backlog".to_string(),
         other => other.name().to_string(),
     }
 }
@@ -345,20 +411,38 @@ impl Api {
         )
     }
 
+    /// A `DELETE` answered with no body; the error keeps the daemon's flags.
+    fn delete(&self, path: &str) -> Result<(), ErrorBody> {
+        let res = self
+            .client
+            .delete(format!("{}{path}", self.base))
+            .send()
+            .map_err(|e| ErrorBody::from(self.unreachable(e)))?;
+        if res.status().is_success() {
+            return Ok(());
+        }
+        let status = res.status();
+        Err(res
+            .json::<ErrorBody>()
+            .unwrap_or_else(|_| format!("daemon answered {status}").into()))
+    }
+
+    fn unreachable(&self, e: reqwest::Error) -> String {
+        if e.is_connect() {
+            format!(
+                "cannot reach delilahd at {}; is it running? (`cargo run -p delilah-daemon`)",
+                self.base
+            )
+        } else {
+            e.to_string()
+        }
+    }
+
     fn handle<T: for<'de> Deserialize<'de>>(
         &self,
         sent: reqwest::Result<Response>,
     ) -> Result<T, String> {
-        let res = sent.map_err(|e| {
-            if e.is_connect() {
-                format!(
-                    "cannot reach delilahd at {}; is it running? (`cargo run -p delilah-daemon`)",
-                    self.base
-                )
-            } else {
-                e.to_string()
-            }
-        })?;
+        let res = sent.map_err(|e| self.unreachable(e))?;
         if res.status().is_success() {
             return res.json().map_err(|e| format!("unexpected response: {e}"));
         }

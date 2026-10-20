@@ -34,12 +34,19 @@ delilah project add ~/dev/projects/signal --kind repo # a single repo, Orca-styl
 delilah run PROJ-1234 --project plataforma --submodules svc-payments,svc-orders --title "Card retries"
 delilah run SIGNAL-12 --project signal --title "Better feed"
 
+# Or save it to the project's backlog for later (no workspace, no agent), then start it
+delilah new SIGNAL-13 --project signal --title "Feed cache" --notes "Look at the TTL first"
+delilah new --free --project signal --title "Try a lighter JSON parser"   # named LIBRE-n
+delilah run SIGNAL-13     # starts the backlog task in its project; its notes reach the agent
+
 delilah ls                 # tasks and their state
 delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
 delilah resume PROJ-1234   # resume a task paused by the usage limit right away
 delilah done PROJ-1234     # mark it done and stop its agent
 delilah archive PROJ-1234  # remove its workspace (a worktree with unpushed work needs --force)
+delilah rm PROJ-1234       # delete the task for good: stops its agent, releases its workspace
+                           # (the branch stays); a worktree with unpushed work needs --force
 ```
 
 A task whose turn ends on a usage limit is paused until the window resets; the
