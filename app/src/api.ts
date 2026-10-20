@@ -82,10 +82,23 @@ export const DEFAULT_JQL = "assignee = currentUser() AND resolution = Unresolved
 /** Whose tickets: assigned to me, reported by me, or the connection's saved JQL. */
 export type JiraWho = "assigned" | "reported" | "query";
 export type JiraProgress = "open" | "done";
+export type JiraSprintFilter = "all" | "current";
 
 export interface JiraEpic {
   key: string;
   summary: string | null;
+}
+
+/** The story or task a sub-task hangs from. */
+export interface JiraParent {
+  key: string;
+  summary: string | null;
+}
+
+export interface JiraSprint {
+  name: string;
+  /** "active", "future" or "closed". */
+  state: string;
 }
 
 export interface JiraIssue {
@@ -99,6 +112,10 @@ export interface JiraIssue {
   assignee: string | null;
   reporter: string | null;
   epic: JiraEpic | null;
+  subtask: boolean;
+  /** The story or task above a sub-task. */
+  parent: JiraParent | null;
+  sprint: JiraSprint | null;
   components: string[];
   description: string;
   url: string | null;
@@ -274,8 +291,8 @@ export const api = {
   jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
   connectJira: (c: JiraConnect) =>
     request<{ account: string; settings: JiraSettings }>("/api/v1/jira", { method: "PUT", body: JSON.stringify(c) }),
-  jiraIssues: (who: JiraWho, progress: JiraProgress) =>
-    request<JiraIssue[]>(`/api/v1/jira/issues?who=${who}&progress=${progress}`),
+  jiraIssues: (who: JiraWho, progress: JiraProgress, sprint: JiraSprintFilter) =>
+    request<JiraIssue[]>(`/api/v1/jira/issues?who=${who}&progress=${progress}&sprint=${sprint}`),
   sessions: () => request<Session[]>("/api/v1/sessions"),
   preference: <T>(key: string) => request<T | null>(`/api/v1/preferences/${key}`),
   setPreference: (key: string, value: unknown) =>

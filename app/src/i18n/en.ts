@@ -305,4 +305,10 @@ export const EN: Record<string, string> = {
   "De quién": "Whose",
   "Agrupar por": "Group by",
   "Informador": "Reporter",
+  "Sprint": "Sprint",
+  "Todos": "All",
+  "Actual": "Current",
+  "Padre": "Parent",
+  "{n} subtarea": "{n} sub-task",
+  "{n} subtareas": "{n} sub-tasks",
 };

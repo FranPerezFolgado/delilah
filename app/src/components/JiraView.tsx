@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings, type JiraWho,
+  api, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
+  type JiraSprintFilter, type JiraWho,
 } from "../api";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
@@ -23,12 +24,18 @@ const TASK_LABELS: Record<string, string> = {
 
 type GroupBy = "status" | "epic";
 
+/** A top-level row and the sub-tasks that hang from it. */
+interface Node {
+  issue: JiraIssue;
+  children: JiraIssue[];
+}
+
 interface Group {
   id: string;
   label: string;
   hint?: string;
   category?: string;
-  issues: JiraIssue[];
+  nodes: Node[];
 }
 
 const CATEGORY_ORDER = ["indeterminate", "new", "done"];
@@ -37,28 +44,66 @@ const categoryRank = (c: string) => {
   return i < 0 ? 1.5 : i;
 };
 
-/** Sections of the list: one per status, in progress first; or one per epic. */
-function groupIssues(issues: JiraIssue[], by: GroupBy): Group[] {
-  const groups = new Map<string, Group>();
+/** Sub-tasks under their parent when it is listed; the rest, orphans included, at the top. */
+function nest(issues: JiraIssue[]): Node[] {
+  const listed = new Set(issues.map((i) => i.key));
+  const children = new Map<string, JiraIssue[]>();
+  const top: JiraIssue[] = [];
   for (const i of issues) {
+    const parent = i.parent?.key;
+    if (parent && parent !== i.key && listed.has(parent)) {
+      const kids = children.get(parent) ?? [];
+      kids.push(i);
+      children.set(parent, kids);
+    } else {
+      top.push(i);
+    }
+  }
+  return top.map((issue) => ({ issue, children: children.get(issue.key) ?? [] }));
+}
+
+const haystack = (i: JiraIssue) =>
+  `${i.key} ${i.summary} ${i.components.join(" ")} ${i.epic?.key ?? ""} ${i.epic?.summary ?? ""} ${i.parent?.key ?? ""} ${i.parent?.summary ?? ""}`
+    .toLowerCase();
+
+/** A parent stays if it or a sub-task matches; a matching parent keeps all its sub-tasks. */
+function filterTree(nodes: Node[], q: string): Node[] {
+  if (!q) return nodes;
+  return nodes.flatMap((n) => {
+    if (haystack(n.issue).includes(q)) return [n];
+    const children = n.children.filter((c) => haystack(c).includes(q));
+    return children.length ? [{ issue: n.issue, children }] : [];
+  });
+}
+
+/** Sections of the list: one per status, in progress first; or one per epic. A sub-task goes with its parent. */
+function groupIssues(nodes: Node[], by: GroupBy): Group[] {
+  const groups = new Map<string, Group>();
+  for (const n of nodes) {
+    const i = n.issue;
     const id = by === "status" ? i.status : i.epic?.key ?? "";
     let g = groups.get(id);
     if (!g) {
       g = by === "status"
-        ? { id, label: i.status || "—", category: i.status_category, issues: [] }
+        ? { id, label: i.status || "—", category: i.status_category, nodes: [] }
         : i.epic
-          ? { id, label: i.epic.summary ?? i.epic.key, hint: i.epic.summary ? i.epic.key : undefined, issues: [] }
-          : { id, label: t("Sin épica"), issues: [] };
+          ? { id, label: i.epic.summary ?? i.epic.key, hint: i.epic.summary ? i.epic.key : undefined, nodes: [] }
+          : { id, label: t("Sin épica"), nodes: [] };
       groups.set(id, g);
     }
-    g.issues.push(i);
+    g.nodes.push(n);
   }
   const list = [...groups.values()];
   if (by === "status") {
     list.sort((a, b) => categoryRank(a.category ?? "") - categoryRank(b.category ?? ""));
   } else {
     // Inside an epic, the work in progress first; the tickets with no epic go last.
-    for (const g of list) g.issues.sort((a, b) => categoryRank(a.status_category) - categoryRank(b.status_category));
+    const byCategory = (a: JiraIssue, b: JiraIssue) => categoryRank(a.status_category) - categoryRank(b.status_category);
+    for (const g of list) {
+      g.nodes = g.nodes
+        .map((n) => ({ issue: n.issue, children: [...n.children].sort(byCategory) }))
+        .sort((a, b) => byCategory(a.issue, b.issue));
+    }
     list.sort((a, b) => Number(a.id === "") - Number(b.id === ""));
   }
   return list;
@@ -80,6 +125,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [filter, setFilter] = useState("");
   const [who, setWho] = useState<JiraWho>("assigned");
   const [progress, setProgress] = useState<JiraProgress>("open");
+  const [sprint, setSprint] = useState<JiraSprintFilter>("all");
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +135,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const rows = await api.jiraIssues(who, progress);
+      const rows = await api.jiraIssues(who, progress, sprint);
       setIssues(rows);
       setSelected((s) => (s && rows.some((r) => r.key === s) ? s : rows[0]?.key ?? null));
     } catch (e) {
@@ -97,7 +143,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [who, progress]);
+  }, [who, progress, sprint]);
 
   useEffect(() => {
     api.jira().then((r) => setSettings(r.settings)).catch((e) => setError(e.message));
@@ -111,13 +157,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     if (settings && !hasQuery && who === "query") setWho("assigned");
   }, [settings, hasQuery, who]);
 
-  const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    return q
-      ? issues.filter((i) =>
-          `${i.key} ${i.summary} ${i.components.join(" ")} ${i.epic?.key ?? ""} ${i.epic?.summary ?? ""}`.toLowerCase().includes(q))
-      : issues;
-  }, [issues, filter]);
+  const shown = useMemo(() => filterTree(nest(issues), filter.trim().toLowerCase()), [issues, filter]);
   const groups = useMemo(() => groupIssues(shown, groupBy), [shown, groupBy]);
   const issue = issues.find((i) => i.key === selected);
 
@@ -153,10 +193,40 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     { id: "open", label: t("Abiertos") },
     { id: "done", label: t("Hechos") },
   ];
+  const SPRINT: { id: JiraSprintFilter; label: string }[] = [
+    { id: "all", label: t("Todos") },
+    { id: "current", label: t("Actual") },
+  ];
   const GROUP_BY: { id: GroupBy; label: string }[] = [
     { id: "status", label: t("Estado") },
     { id: "epic", label: t("Épica") },
   ];
+
+  const row = (i: JiraIssue, child: boolean, subs: number) => (
+    <button key={i.key} className={`jrow ${child ? "child" : ""} ${i.key === selected ? "on" : ""}`} onClick={() => setSelected(i.key)}>
+      <StatusDot category={i.status_category} />
+      <span className="mono jkey">{i.key}</span>
+      <span className="trunc jtitle">{i.summary}</span>
+      {subs > 0 && <span className="jsubs">{tn(subs, "{n} subtarea", "{n} subtareas")}</span>}
+      {!child && i.parent && (
+        <span className="jtag trunc mono" title={i.parent.summary ?? undefined}>↳ {i.parent.key}</span>
+      )}
+      {groupBy === "epic" && <span className="jtag">{i.status}</span>}
+      {groupBy === "status" && !child && i.epic && (
+        <span className="jtag trunc" title={i.epic.key}>{i.epic.summary ?? i.epic.key}</span>
+      )}
+      {sprint === "all" && !child && i.sprint && <span className="jtag trunc">{i.sprint.name}</span>}
+      {i.task_status && (
+        <span className="pill">{TASK_LABELS[i.task_status] ? t(TASK_LABELS[i.task_status]) : i.task_status}</span>
+      )}
+      <span className="muted jmeta">{i.issue_type}</span>
+      <span className="muted jmeta">{i.priority ?? "—"}</span>
+      {i.assignee
+        ? <span className="javatar" title={i.assignee}>{initials(i.assignee)}</span>
+        : <span className="javatar none" title={t("Sin asignar")} />}
+    </button>
+  );
+  const parentListed = !!issue?.parent && issues.some((i) => i.key === issue.parent!.key);
 
   return (
     <>
@@ -175,6 +245,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
       <div className="jbar">
         <Segs label={t("De quién")} options={WHO} value={who} onChange={setWho} />
         <Segs label={t("Estado")} options={PROGRESS} value={progress} onChange={setProgress} />
+        <Segs label={t("Sprint")} options={SPRINT} value={sprint} onChange={setSprint} />
         <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>{t("Agrupar por")}</span>
         <Segs label={t("Agrupar por")} options={GROUP_BY} value={groupBy} onChange={setGroupBy} />
       </div>
@@ -190,26 +261,13 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
                   {g.category !== undefined && <StatusDot category={g.category} />}
                   <span className="jgroup-name trunc">{g.label}</span>
                   {g.hint && <span className="mono muted" style={{ fontSize: 11 }}>{g.hint}</span>}
-                  <span className="jgroup-count">{g.issues.length}</span>
+                  <span className="jgroup-count">{g.nodes.length}</span>
                 </button>
-                {open && g.issues.map((i) => (
-                  <button key={i.key} className={`jrow ${i.key === selected ? "on" : ""}`} onClick={() => setSelected(i.key)}>
-                    <StatusDot category={i.status_category} />
-                    <span className="mono jkey">{i.key}</span>
-                    <span className="trunc jtitle">{i.summary}</span>
-                    {groupBy === "epic" && <span className="jtag">{i.status}</span>}
-                    {groupBy === "status" && i.epic && (
-                      <span className="jtag trunc" title={i.epic.key}>{i.epic.summary ?? i.epic.key}</span>
-                    )}
-                    {i.task_status && (
-                      <span className="pill">{TASK_LABELS[i.task_status] ? t(TASK_LABELS[i.task_status]) : i.task_status}</span>
-                    )}
-                    <span className="muted jmeta">{i.issue_type}</span>
-                    <span className="muted jmeta">{i.priority ?? "—"}</span>
-                    {i.assignee
-                      ? <span className="javatar" title={i.assignee}>{initials(i.assignee)}</span>
-                      : <span className="javatar none" title={t("Sin asignar")} />}
-                  </button>
+                {open && g.nodes.map((n) => (
+                  <Fragment key={n.issue.key}>
+                    {row(n.issue, false, n.children.length)}
+                    {n.children.map((c) => row(c, true, 0))}
+                  </Fragment>
                 ))}
               </section>
             );
@@ -232,8 +290,21 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
               <span className="muted">{t("Prioridad")}</span><span>{issue.priority ?? "—"}</span>
               <span className="muted">{t("Estado")}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}><StatusDot category={issue.status_category} />{issue.status}</span>
+              {issue.parent && (
+                <>
+                  <span className="muted">{t("Padre")}</span>
+                  {parentListed ? (
+                    <button className="jparent" onClick={() => setSelected(issue.parent!.key)}>
+                      {issue.parent.summary ?? ""} <span className="mono muted">{issue.parent.key}</span>
+                    </button>
+                  ) : (
+                    <span>{issue.parent.summary ?? ""} <span className="mono muted">{issue.parent.key}</span></span>
+                  )}
+                </>
+              )}
               <span className="muted">{t("Épica")}</span>
               <span>{issue.epic ? <>{issue.epic.summary ?? ""} <span className="mono muted">{issue.epic.key}</span></> : "—"}</span>
+              <span className="muted">{t("Sprint")}</span><span>{issue.sprint?.name ?? "—"}</span>
               <span className="muted">{t("Asignado")}</span><span>{issue.assignee ?? t("Sin asignar")}</span>
               <span className="muted">{t("Informador")}</span><span>{issue.reporter ?? "—"}</span>
               <span className="muted">{t("Componentes")}</span>

@@ -116,7 +116,8 @@ pub async fn connect(
     Ok(Json(Connected { account, settings }))
 }
 
-/// `?who=assigned|reported|query&progress=open|done`; assigned and open by default.
+/// `?who=assigned|reported|query&progress=open|done&sprint=all|current`; assigned,
+/// open and every sprint by default. Sub-tasks come after the tickets they hang from.
 pub async fn issues(
     State(app): State<AppState>,
     Query(filter): Query<Filter>,
@@ -324,6 +325,40 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{done}");
         assert_eq!(done[0]["key"], "PROJ-1238");
         assert_eq!(done[0]["status_category"], "done");
+
+        let subtask = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["key"] == "PROJ-1251")
+            .expect("a sub-task of PROJ-1242");
+        assert_eq!(subtask["subtask"], true);
+        assert_eq!(subtask["parent"]["key"], "PROJ-1242");
+        assert_eq!(subtask["epic"]["key"], "PROJ-1200");
+    }
+
+    #[tokio::test]
+    async fn filters_by_the_current_sprint() {
+        let state = app().await;
+        call(
+            &state,
+            "PUT",
+            "/api/v1/jira",
+            Some(json!({ "mode": "sample" })),
+        )
+        .await;
+
+        let (status, rows) = call(&state, "GET", "/api/v1/jira/issues?sprint=current", None).await;
+        assert_eq!(status, StatusCode::OK, "{rows}");
+        let rows = rows.as_array().unwrap();
+        assert!(!rows.is_empty());
+        assert!(
+            rows.iter().all(|r| r["sprint"]["state"] == "active"),
+            "{rows:?}"
+        );
+
+        let (status, _) = call(&state, "GET", "/api/v1/jira/issues?sprint=nope", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

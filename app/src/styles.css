@@ -358,6 +358,10 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
   text-align: left; cursor: pointer; }
 .jrow:hover { background: var(--hov); }
 .jrow.on { background: var(--sel); box-shadow: inset 2px 0 0 var(--acc); }
+.jrow.child { padding-left: 58px; }
+.jsubs { flex: none; font-size: 11px; color: var(--tx3); }
+.jparent { padding: 0; border: 0; background: none; color: var(--tx); font: inherit; text-align: left; cursor: pointer; }
+.jparent:hover { color: var(--acc); }
 .jkey { font-size: 11.5px; color: var(--tx3); width: 84px; flex: none; }
 .jtitle { flex: 1; }
 .jtag { flex: none; max-width: 180px; font-size: 11px; color: var(--tx2); border: 1px solid var(--bd2); border-radius: 10px;

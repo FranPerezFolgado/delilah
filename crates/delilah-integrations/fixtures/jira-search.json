@@ -3,6 +3,7 @@
     {
       "key": "PROJ-1242",
       "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
         "summary": "Rechazar cobros duplicados en una ventana de 30 s",
         "issuetype": { "name": "Bug" },
         "priority": { "name": "Alta" },
@@ -32,6 +33,7 @@
     {
       "key": "PROJ-1243",
       "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
         "summary": "Paginación por cursor en GET /invoices",
         "issuetype": { "name": "Historia" },
         "priority": { "name": "Media" },
@@ -51,6 +53,7 @@
     {
       "key": "PROJ-1244",
       "fields": {
+        "customfield_10020": [{ "id": 41, "name": "Sprint 41", "state": "closed" }, { "id": 43, "name": "Sprint 43", "state": "future" }],
         "summary": "Actualizar common-lib a Java 21",
         "issuetype": { "name": "Tarea" },
         "priority": { "name": "Baja" },
@@ -87,6 +90,7 @@
     {
       "key": "PROJ-1246",
       "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
         "summary": "Idempotency-Key en POST /payments",
         "issuetype": { "name": "Historia" },
         "priority": { "name": "Alta" },
@@ -101,6 +105,7 @@
     {
       "key": "PROJ-1247",
       "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
         "summary": "El PDF de la factura sale sin NIF del cliente",
         "issuetype": { "name": "Bug" },
         "priority": { "name": "Media" },
@@ -115,6 +120,7 @@
     {
       "key": "PROJ-1238",
       "fields": {
+        "customfield_10020": [{ "id": 41, "name": "Sprint 41", "state": "closed" }],
         "summary": "Reintentos con backoff en el webhook de Stripe",
         "issuetype": { "name": "Tarea" },
         "priority": { "name": "Media" },
@@ -138,6 +144,96 @@
         "parent": { "key": "PROJ-1210", "fields": { "summary": "Facturación v2", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
         "components": [{ "name": "svc-billing" }],
         "description": "Nadie lo llama desde marzo."
+      }
+    },
+    {
+      "key": "PROJ-1190",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Exportar facturas a CSV",
+        "issuetype": { "name": "Historia", "hierarchyLevel": 0 },
+        "priority": { "name": "Media" },
+        "status": { "name": "En curso", "statusCategory": { "key": "indeterminate" } },
+        "assignee": { "displayName": "Ana" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1210", "fields": { "summary": "Facturación v2", "issuetype": { "name": "Epic", "hierarchyLevel": 1 } } },
+        "components": [{ "name": "svc-billing" }],
+        "description": "Un botón «Exportar» en el listado de facturas."
+      }
+    },
+    {
+      "key": "PROJ-1250",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Guardar la huella del cobro en Redis",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "En curso", "statusCategory": { "key": "indeterminate" } },
+        "assignee": { "displayName": "Fran" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1242", "fields": { "summary": "Rechazar cobros duplicados en una ventana de 30 s", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Clave: tarjeta + importe + comercio, TTL de 30 s."
+      }
+    },
+    {
+      "key": "PROJ-1251",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Test de dos cobros idénticos seguidos",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "assignee": { "displayName": "Ana" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1242", "fields": { "summary": "Rechazar cobros duplicados en una ventana de 30 s", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Dos POST /payments iguales en menos de 30 s: el segundo da 409."
+      }
+    },
+    {
+      "key": "PROJ-1252",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Documentar la cabecera Idempotency-Key",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "Hecho", "statusCategory": { "key": "done" } },
+        "assignee": { "displayName": "Ana" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1246", "fields": { "summary": "Idempotency-Key en POST /payments", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Sección nueva en la guía de la API."
+      }
+    },
+    {
+      "key": "PROJ-1253",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Formato de fechas del CSV",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "assignee": { "displayName": "Fran" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1190", "fields": { "summary": "Exportar facturas a CSV", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "ISO 8601, sin hora."
+      }
+    },
+    {
+      "key": "PROJ-1254",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Reproducir el PDF sin NIF",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "assignee": { "displayName": "Ana" },
+        "reporter": { "displayName": "Fran" },
+        "parent": { "key": "PROJ-1247", "fields": { "summary": "El PDF de la factura sale sin NIF del cliente", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Con un cliente dado de alta antes de 2024."
       }
     }
   ]
