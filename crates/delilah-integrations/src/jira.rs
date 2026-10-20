@@ -89,7 +89,7 @@ impl JiraClient {
     fn remote(mode: JiraMode, site: &str, auth: Auth) -> Self {
         Self::Remote {
             mode,
-            site: site.trim_end_matches('/').to_string(),
+            site: site_root(site),
             auth,
             // reqwest honours HTTPS_PROXY / NO_PROXY, as corporate networks need.
             http: reqwest::Client::builder()
@@ -200,6 +200,12 @@ impl JiraClient {
                 message: error_message(&text),
             });
         }
+        if text.trim_start().starts_with('<') {
+            // A login or web page instead of the API: the URL is not the site's.
+            return Err(JiraError::Parse(
+                "Jira answered with a web page, not data: check the site URL (just https://your-company.atlassian.net)".into(),
+            ));
+        }
         serde_json::from_str(&text).map_err(|e| JiraError::Parse(e.to_string()))
     }
 
@@ -214,6 +220,44 @@ impl JiraClient {
 
 /// Maps one issue of a v2 or v3 response. Cloud descriptions are ADF documents,
 /// Data Center ones plain (wiki) text.
+/// The site's base URL from whatever was pasted: a board, a ticket or a filter page
+/// all work. Jira Cloud keeps only the host; Server/Data Center keeps its context path
+/// (e.g. `https://intranet.example.com/jira`).
+pub fn site_root(pasted: &str) -> String {
+    let mut url = pasted.trim().to_string();
+    if !url.contains("://") {
+        url = format!("https://{url}");
+    }
+    let url = url.split(['?', '#']).next().unwrap_or_default();
+    let (scheme, rest) = url.split_once("://").unwrap_or(("https", url));
+    let (host, path) = rest.split_once('/').map_or((rest, ""), |(h, p)| (h, p));
+    if host.ends_with(".atlassian.net") {
+        return format!("{scheme}://{host}");
+    }
+    // Where Jira's own pages start; anything before is the context path.
+    const PAGES: &[&str] = &[
+        "browse",
+        "secure",
+        "projects",
+        "plugins",
+        "issues",
+        "rest",
+        "software",
+        "servicedesk",
+        "dashboards",
+    ];
+    let context: Vec<&str> = path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .take_while(|s| !PAGES.contains(s))
+        .collect();
+    if context.is_empty() {
+        format!("{scheme}://{host}")
+    } else {
+        format!("{scheme}://{host}/{}", context.join("/"))
+    }
+}
+
 pub fn map_issue(issue: &Value, site: Option<&str>) -> Result<JiraIssue, JiraError> {
     let key = issue["key"]
         .as_str()
@@ -313,5 +357,22 @@ mod tests {
             error_message("<html>gateway</html>"),
             "<html>gateway</html>"
         );
+    }
+
+    #[test]
+    fn a_pasted_board_or_ticket_url_becomes_the_site() {
+        assert_eq!(
+            site_root("https://acme.atlassian.net/jira/software/c/projects/ADM/boards/700"),
+            "https://acme.atlassian.net"
+        );
+        assert_eq!(
+            site_root("acme.atlassian.net/browse/ADM-12?x=1"),
+            "https://acme.atlassian.net"
+        );
+        assert_eq!(
+            site_root("https://intranet.acme.com/jira/browse/ADM-12"),
+            "https://intranet.acme.com/jira"
+        );
+        assert_eq!(site_root("https://jira.acme.com/"), "https://jira.acme.com");
     }
 }

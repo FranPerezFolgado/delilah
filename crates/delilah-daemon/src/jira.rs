@@ -64,8 +64,10 @@ pub async fn connect(
     let site = req
         .site
         .as_deref()
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty());
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        // A board's or a ticket's URL works too: keep the site's.
+        .map(delilah_integrations::jira::site_root);
     let email = req
         .email
         .as_deref()
