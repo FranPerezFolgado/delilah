@@ -235,13 +235,13 @@ worktree option is preselected; start without changing it; the task gets a workt
   task will get.
 - **FR-014**: The settings MUST leave room for PR options, to be added with the PR
   handling work.
+- **FR-015**: Texts MUST be translatable like the rest of Delilah (Spanish in the code,
+  English in the translations).
 - **FR-016**: While the setup runs, the task MUST show that it is preparing the
   workspace, with the setup's output visible live, and the user MUST be able to cancel
   it (handled like a failure).
 - **FR-017**: The API and the CLI MUST report the effective settings of every project,
   defaults included, so a project with no settings saved needs no special case.
-- **FR-015**: Texts MUST be translatable like the rest of Delilah (Spanish in the code,
-  English in the translations).
 
 ### Key Entities
 
