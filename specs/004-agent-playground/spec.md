@@ -8,6 +8,15 @@
 
 **Input**: User description: "Ahora que orquestamos, hay forma de poder visualizar bien los agentes que estan trabajando? Como brag estaría guapo meter como un playground donde se vean, haz research de ejemplos que hay en internet y lo analizamos si merece la pena"
 
+## Clarifications
+
+### Session 2026-10-20
+
+- Q: Where does the Playground live? → A: A view in the main window, plus a button that
+  opens it in a window of its own (second monitor, recordings).
+- Q: In what order are desks placed? → A: Grouped by project, with a fixed place within
+  each group.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See every working agent at a glance (Priority: P1)
@@ -145,11 +154,13 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 
 **Acceptance Scenarios**:
 
-1. **Given** 1 to 8 running agents, **When** the user opens the Playground, **Then** every
+1. **Given** running agents in two projects, **When** the user opens the Playground,
+   **Then** the desks are in two areas, each labelled with its project's name.
+2. **Given** 1 to 8 running agents, **When** the user opens the Playground, **Then** every
    desk fits in the window without overlapping, and labels are not clipped.
-2. **Given** the app in dark theme, **When** the user opens the Playground, **Then** the
+3. **Given** the app in dark theme, **When** the user opens the Playground, **Then** the
    office uses dark colours and stays legible.
-3. **Given** the system setting to reduce motion is on, **When** the user opens the
+4. **Given** the system setting to reduce motion is on, **When** the user opens the
    Playground, **Then** characters show their state with still poses instead of looping
    animations.
 
@@ -160,6 +171,8 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - A task has more than one agent session (for example, a second Claude tab): each live
   agent session gets its own desk, all labelled with the same task; plain shell
   terminals get no desk.
+- An agent waits for the user or ends: no other desk moves; an ended agent's desk is
+  freed and the next new agent in that project takes it.
 - More agents than fit on screen (more than 8): the office grows and scrolls; the waiting
   counter still counts all of them.
 - The daemon connection drops: the Playground keeps the last known picture, marks it as
@@ -171,6 +184,8 @@ theme; both read clearly, with no clipped labels or overlapping desks.
   away when the agent stops, fails, waits for the user or is paused.
 - A helper launches its own helpers: they are shown as helpers of the same desk, not
   nested.
+- The separate Playground window is open on another monitor while the main window shows
+  the same view: both stay live and show the same picture.
 - The Playground is hidden (another view open, window minimised): animations stop; they
   resume with the current state when it is shown again.
 - An agent's action carries a long or sensitive argument (a long command, a path outside
@@ -183,8 +198,18 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 
 - **FR-001**: The app MUST offer a Playground view, reachable from the sidebar like the
   other top-level views.
+- **FR-019**: The Playground view MUST have a button that opens it in a window of its
+  own, showing the same live content; that window can stay open while the main window
+  shows other views, closing it does not affect the main window, and opening it again
+  focuses the existing one instead of creating another.
+- **FR-020**: Clicking a character in the separate window MUST bring the main window to
+  the front with that task screen open on the agent's terminal.
 - **FR-002**: The Playground MUST show one desk with a character for each live agent
   session, and none for stored, ended or shell-only sessions.
+- **FR-021**: Desks MUST be grouped by project, each group a labelled area of the office
+  with the project's name; projects with no live agent get no area. Within a group, a new
+  agent takes the first free desk and keeps it until it ends; desks never move because of
+  a state change.
 - **FR-003**: Each desk MUST show the task key, the task title (truncated, full on hover)
   and the task's current phase, using the same phase names as the rest of the app.
 - **FR-004**: Each character MUST show its agent's state with a distinct look: starting,
@@ -264,4 +289,5 @@ theme; both read clearly, with no clipped labels or overlapping desks.
 - The Playground needs no settings in this version; the pixel-art office is the only
   look.
 - It runs in the desktop app's web UI, so it can also be tried in a preview in a
-  browser; nothing native to macOS is needed.
+  browser; there the "own window" button opens it in a new browser tab. Only the native
+  separate window needs the desktop app.
