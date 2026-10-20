@@ -332,3 +332,15 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .dialog > * { flex-shrink: 0; }
 .where-opt > span { min-width: 0; }
 .where-opt .mono { word-break: break-all; }
+.chev-btn { width: 18px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent;
+  color: var(--tx3); cursor: pointer; padding: 0 0 0 4px; }
+.chev-btn:hover { color: var(--tx); }
+.phead-main { padding-left: 2px; }
+.pcount { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--tx3); }
+.pgroup .srow { padding-left: 24px; }
+
+/* Help › Ver logs */
+.dialog.logs { width: min(1100px, calc(100vw - 80px)); }
+.logs-text { margin: 0; height: min(560px, calc(100vh - 260px)); overflow: auto; padding: 10px 12px; border: 1px solid var(--bd); border-radius: 6px;
+  background: var(--term); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap;
+  word-break: break-word; }

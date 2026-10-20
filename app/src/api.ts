@@ -246,6 +246,9 @@ export const api = {
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
+  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string }) =>
+    request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
+  deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),

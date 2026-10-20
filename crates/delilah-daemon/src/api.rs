@@ -70,6 +70,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
         .route("/api/v1/usage", get(actions::usage))
         .route("/api/v1/events", get(events::stream))
+        .route("/api/v1/logs", get(crate::logs::tail))
         .route("/api/v1/specs", get(specs::list))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/sessions/{id}/reply", post(inbox::reply))
@@ -88,6 +89,10 @@ pub fn router(state: AppState) -> Router {
             get(projects::list_projects).post(projects::add_project),
         )
         .route("/api/v1/projects/inspect", post(projects::inspect))
+        .route(
+            "/api/v1/projects/{name}",
+            axum::routing::patch(projects::update_project).delete(projects::delete_project),
+        )
         .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),

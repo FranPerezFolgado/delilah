@@ -3,8 +3,17 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+    // To the terminal (or launchd's log file), and to memory for the app's viewer.
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(delilah_daemon::logs::buffer()),
+        )
         .init();
 
     // Read the binary's details now: after an update the file on disk is a new one.

@@ -10,6 +10,7 @@ mod files;
 mod hooks;
 pub mod inbox;
 mod jira;
+pub mod logs;
 pub mod notify;
 mod owners;
 mod preferences;

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Project, Session, Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { keyOf } from "../shortcuts";
@@ -28,7 +29,31 @@ interface Props {
 /** Most urgent first; finished tasks stay on the board, not here. */
 const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "queued", "failed"];
 
+const COLLAPSED_KEY = "delilah.collapsed-projects";
+function loadCollapsed(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
 export function Sidebar({ view, onView, tasks, projects, sessions, selected, onSelect, onOpenSession, onAsk, onNewTask, waiting }: Props) {
+  // Folded projects, remembered per viewer: a project with many sessions and tasks
+  // would otherwise take the whole sidebar.
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  const toggle = (id: string) =>
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // Not remembered: still folds for now.
+      }
+      return next;
+    });
   // As in Orca: everything grouped by project, its own sessions first, then its tasks.
   const group = (project: Project | null) => {
     const owner = project ? `@${project.name}` : null;
@@ -76,22 +101,47 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
           <Icon name="plus" /> Tarea <span className="kbd">{keyOf("new-task")}</span>
         </button>
       </div>
-      {groups.map((g) => (
-        <div key={g.owner ?? "none"} className="pgroup">
+      {groups.map((g) => {
+        const id = g.owner ?? "none";
+        const folded = collapsed.has(id);
+        const count = g.sessions.length + g.tasks.length;
+        // Folded, it still says when something in it waits on you.
+        const waitingHere =
+          g.tasks.some((t) => t.status.type === "waiting-for-user") || g.sessions.some((s) => s.state === "waiting");
+        const chevron = (
+          <button
+            className="chev-btn"
+            onClick={() => toggle(id)}
+            aria-expanded={!folded}
+            aria-label={folded ? "Desplegar" : "Plegar"}
+          >
+            <span className={`chev ${folded ? "" : "open"}`}>›</span>
+          </button>
+        );
+        return (
+        <div key={id} className="pgroup">
           {g.project ? (
             <div className={`phead ${selected === g.owner ? "on" : ""}`}>
+              {chevron}
               <button className="phead-main" onClick={() => onSelect(g.owner!)} title={g.project.path}>
                 <Icon name="folder" />
                 <span className="trunc">{g.project.name}</span>
+                {folded && count > 0 && <span className={`pcount mono ${waitingHere ? "c-wait" : ""}`}>{count}</span>}
               </button>
               <button className="btn btn-ghost icon-btn" onClick={() => onAsk(g.project!.name)} title="Preguntar a Claude sobre el proyecto" aria-label={`Preguntar a Claude sobre ${g.project.name}`}>
                 <Icon name="plus" />
               </button>
             </div>
           ) : (
-            <div className="group-head"><b>Sin proyecto</b></div>
+            <div className="phead">
+              {chevron}
+              <button className="phead-main" onClick={() => toggle(id)} style={{ fontWeight: 500, color: "var(--tx3)" }}>
+                Sin proyecto
+                {folded && count > 0 && <span className="pcount mono">{count}</span>}
+              </button>
+            </div>
           )}
-          {g.sessions.map((s) => {
+          {!folded && g.sessions.map((s) => {
             const st = sessionStatus(s, undefined);
             return (
               <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? "Claude en solo lectura" : s.label}>
@@ -101,7 +151,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
               </button>
             );
           })}
-          {g.tasks.map((t) => {
+          {!folded && g.tasks.map((t) => {
             const { icon, cls } = statusIcon(t.status);
             return (
               <button key={t.key} className={`srow ${selected === t.key ? "on" : ""}`} onClick={() => onSelect(t.key)} title={t.title}>
@@ -111,9 +161,10 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
               </button>
             );
           })}
-          {g.done > 0 && <div className="pdone muted">{g.done} {g.done === 1 ? "hecha" : "hechas"} · en Tareas</div>}
+          {!folded && g.done > 0 && <div className="pdone muted">{g.done} {g.done === 1 ? "hecha" : "hechas"} · en Tareas</div>}
         </div>
-      ))}
+        );
+      })}
       {projects.length === 0 && tasks.length === 0 && (
         <p className="muted" style={{ padding: "4px 8px", fontSize: 12 }}>Añade un proyecto en Proyectos.</p>
       )}

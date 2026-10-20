@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, BLOCKING, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
+import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
 import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
@@ -35,6 +36,14 @@ export function App() {
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
   const [convertFrom, setConvertFrom] = useState<Session | null>(null);
+  const [showLogs, setShowLogs] = useState(false);
+
+  // Help › Ver logs, from the native menu.
+  useEffect(() => {
+    const open = () => setShowLogs(true);
+    window.addEventListener("delilah:show-logs", open);
+    return () => window.removeEventListener("delilah:show-logs", open);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -380,6 +389,7 @@ export function App() {
         </main>
       </div>
       <StatusBar online={online} active={active} usage={usage} />
+      {showLogs && <LogsView onClose={() => setShowLogs(false)} />}
       {toast && (
         <div className="toast" role="status">
           {toast}

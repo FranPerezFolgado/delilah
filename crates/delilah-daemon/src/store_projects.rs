@@ -44,6 +44,87 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Changes a project, renaming it everywhere it is referenced if its name changes.
+    pub async fn update_project(
+        &self,
+        old_name: &str,
+        project: &Project,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        // Tasks and sessions point at the name: check the references at commit.
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *tx)
+            .await?;
+        let updated = sqlx::query(
+            "UPDATE projects SET name = ?, path = ?, kind = ?, workflow = ? WHERE name = ?",
+        )
+        .bind(&project.name)
+        .bind(project.path.to_string_lossy())
+        .bind(project.kind.name())
+        .bind(&project.workflow)
+        .bind(old_name)
+        .execute(&mut *tx)
+        .await;
+        match updated {
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                return Err(StoreError::ProjectExists(project.name.clone()));
+            }
+            other => {
+                if other?.rows_affected() == 0 {
+                    return Err(StoreError::ProjectNotFound(old_name.to_string()));
+                }
+            }
+        }
+        if project.name != old_name {
+            for table in [
+                "UPDATE tasks SET project = ? WHERE project = ?",
+                "UPDATE sessions SET project = ? WHERE project = ?",
+            ] {
+                sqlx::query(table)
+                    .bind(&project.name)
+                    .bind(old_name)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Why a project cannot be deleted now: a task of it still has a workspace.
+    pub async fn project_in_use(&self, name: &str) -> Result<Option<String>, StoreError> {
+        Ok(sqlx::query_scalar(
+            "SELECT t.key FROM tasks t JOIN workspaces w ON w.task_key = t.key WHERE t.project = ? LIMIT 1",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// Deletes a project and its own sessions; its (finished) tasks stay, without it.
+    pub async fn delete_project(&self, name: &str) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE tasks SET project = NULL WHERE project = ?")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM sessions WHERE project = ?")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        let deleted = sqlx::query("DELETE FROM projects WHERE name = ?")
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        if deleted.rows_affected() == 0 {
+            return Err(StoreError::ProjectNotFound(name.to_string()));
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
 fn project_from_row(row: &SqliteRow) -> Result<Project, StoreError> {
     let kind: String = row.try_get("kind")?;
     Ok(Project {
@@ -95,5 +176,37 @@ mod tests {
             store.project("nope").await,
             Err(StoreError::ProjectNotFound(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn renames_carry_tasks_along_and_deletes_keep_finished_tasks() {
+        use delilah_core::{Task, TaskKey};
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_project(&project("plataforma", "/w/p", ProjectKind::Repo))
+            .await
+            .unwrap();
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        task.project = Some("plataforma".into());
+        store.create_task(&task).await.unwrap();
+
+        let renamed = project("payments", "/w/p", ProjectKind::Repo);
+        store.update_project("plataforma", &renamed).await.unwrap();
+        let moved = store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved.project.as_deref(), Some("payments"));
+
+        assert_eq!(store.project_in_use("payments").await.unwrap(), None);
+        store.delete_project("payments").await.unwrap();
+        let kept = store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.project, None);
+        assert!(store.list_projects().await.unwrap().is_empty());
     }
 }

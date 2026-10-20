@@ -11,6 +11,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 const RESTART_DAEMON: &str = "daemon-restart";
 const STOP_DAEMON: &str = "daemon-stop";
+const SHOW_LOGS: &str = "show-logs";
 
 fn main() {
     tauri::Builder::default()
@@ -21,6 +22,15 @@ fn main() {
         .menu(menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
+            if id == SHOW_LOGS {
+                // The viewer lives in the UI: bring the window and tell it.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.eval("window.dispatchEvent(new Event('delilah:show-logs'))");
+                }
+                return;
+            }
             if id != RESTART_DAEMON && id != STOP_DAEMON {
                 return;
             }
@@ -124,5 +134,17 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::fullscreen(app, Some("Pantalla completa"))?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &window])
+    let help = Submenu::with_items(
+        app,
+        "Ayuda",
+        true,
+        &[&MenuItem::with_id(
+            app,
+            SHOW_LOGS,
+            "Ver logs",
+            true,
+            Some("CmdOrCtrl+Shift+L"),
+        )?],
+    )?;
+    Menu::with_items(app, &[&app_menu, &edit, &window, &help])
 }

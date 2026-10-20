@@ -34,27 +34,7 @@ pub async fn add_project(
     State(app): State<AppState>,
     Json(new): Json<NewProject>,
 ) -> Result<(StatusCode, Json<Project>), ApiError> {
-    let path = new.path.clone();
-    let kind = new.kind;
-    // A project is the root of a repo; a `parent` one must actually have submodules.
-    let root = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
-        let root = delilah_git::repo_root(&path)
-            .map_err(|_| format!("{} is not a git repo", path.display()))?;
-        if kind == ProjectKind::Parent
-            && delilah_git::list_submodules(&root)
-                .map_err(|e| e.to_string())?
-                .is_empty()
-        {
-            return Err(format!(
-                "{} has no submodules; add it with --kind repo",
-                root.display()
-            ));
-        }
-        Ok(root)
-    })
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .map_err(ApiError::unprocessable)?;
+    let root = checked_root(new.path.clone(), new.kind).await?;
 
     let name = match new.name {
         Some(name) => name,
@@ -72,6 +52,83 @@ pub async fn add_project(
     app.store.create_project(&project).await?;
     app.emit(crate::events::Topic::Projects);
     Ok((StatusCode::CREATED, Json(project)))
+}
+
+/// What can change in a project: everything but its history.
+#[derive(Debug, Deserialize)]
+pub struct ProjectChange {
+    pub name: Option<String>,
+    pub path: Option<PathBuf>,
+    pub kind: Option<ProjectKind>,
+    pub workflow: Option<String>,
+}
+
+/// `PATCH /api/v1/projects/{name}`
+pub async fn update_project(
+    State(app): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    Json(change): Json<ProjectChange>,
+) -> Result<Json<Project>, ApiError> {
+    let old = app.store.project(&name).await?;
+    let mut project = old.clone();
+    if let Some(new_name) = change
+        .name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+    {
+        project.name = new_name;
+    }
+    if let Some(workflow) = change.workflow.filter(|w| !w.trim().is_empty()) {
+        project.workflow = workflow;
+    }
+    if let Some(kind) = change.kind {
+        project.kind = kind;
+    }
+    if let Some(path) = change.path {
+        project.path = path;
+    }
+    if project.path != old.path
+        && let Some(task) = app.store.checkout_user(&old.path).await?
+    {
+        return Err(ApiError::conflict(format!(
+            "{task} is working in this checkout: archive it before moving the project"
+        )));
+    }
+    if project.path != old.path || project.kind != old.kind {
+        project.path = checked_root(project.path.clone(), project.kind).await?;
+    }
+    app.store.update_project(&name, &project).await?;
+    app.emit(crate::events::Topic::Projects);
+    app.emit(crate::events::Topic::Tasks);
+    app.emit(crate::events::Topic::Sessions);
+    Ok(Json(project))
+}
+
+/// `DELETE /api/v1/projects/{name}`: refused while a task of it has a workspace, so no
+/// work is lost; its own sessions stop and go, its finished tasks stay.
+pub async fn delete_project(
+    State(app): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<StatusCode, ApiError> {
+    app.store.project(&name).await?;
+    if let Some(task) = app.store.project_in_use(&name).await? {
+        return Err(ApiError::conflict(format!(
+            "{task} still has a workspace: mark it done and archive it first"
+        )));
+    }
+    let owner = crate::store_sessions::project_owner(&name);
+    for live in app.sessions.of_task(&owner) {
+        let _ = live.pty.kill();
+    }
+    app.store.delete_project(&name).await?;
+    for topic in [
+        crate::events::Topic::Projects,
+        crate::events::Topic::Tasks,
+        crate::events::Topic::Sessions,
+    ] {
+        app.emit(topic);
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The submodules a `parent` project offers, for the "new task" form.
@@ -210,6 +267,28 @@ pub async fn inspect(Json(req): Json<InspectRequest>) -> Result<Json<Inspection>
     .map_err(|e| ApiError::internal(e.to_string()))?
     .map_err(ApiError::unprocessable)?;
     Ok(Json(inspection))
+}
+
+/// The root of the repo at `path`; a `parent` one must actually have submodules.
+async fn checked_root(path: PathBuf, kind: ProjectKind) -> Result<PathBuf, ApiError> {
+    tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
+        let root = delilah_git::repo_root(&path)
+            .map_err(|_| format!("{} is not a git repo", path.display()))?;
+        if kind == ProjectKind::Parent
+            && delilah_git::list_submodules(&root)
+                .map_err(|e| e.to_string())?
+                .is_empty()
+        {
+            return Err(format!(
+                "{} has no submodules; add it with --kind repo",
+                root.display()
+            ));
+        }
+        Ok(root)
+    })
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?
+    .map_err(ApiError::unprocessable)
 }
 
 #[cfg(test)]
