@@ -62,6 +62,8 @@ export interface RunRequest {
   free?: boolean;
   /** Work in the project's own checkout instead of a worktree. */
   in_checkout?: boolean;
+  /** A project's Claude session to carry on as the task's primary one. */
+  from_session?: string;
 }
 
 export type JiraMode = "sample" | "cloud" | "data-center";

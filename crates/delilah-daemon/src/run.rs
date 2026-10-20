@@ -42,12 +42,37 @@ pub struct RunRequest {
     /// Work in the project's own checkout (a branch there) instead of a worktree.
     #[serde(default)]
     pub in_checkout: bool,
+    /// A Claude session of the project to carry on as the task's primary one, with
+    /// its conversation ("Convertir en tarea"). Implies a free task in the checkout.
+    pub from_session: Option<String>,
 }
 
 pub async fn start_run(
     State(app): State<AppState>,
     Json(mut req): Json<RunRequest>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
+    // The conversation lives with the folder it was held in: carrying it over means
+    // working in that same checkout.
+    let adopted = match &req.from_session {
+        Some(id) => {
+            let s = app
+                .store
+                .session(id)
+                .await?
+                .filter(|s| !s.closed && s.kind == SessionKind::Claude)
+                .ok_or_else(|| ApiError::not_found(format!("no open Claude session {id}")))?;
+            if crate::store_sessions::project_of(&s.task) != Some(req.project.as_str()) {
+                return Err(ApiError::bad_request(format!(
+                    "session {id} is not one of {}'s questions",
+                    req.project
+                )));
+            }
+            req.free = true;
+            req.in_checkout = true;
+            Some(s)
+        }
+        None => None,
+    };
     if req.free && req.key.trim().is_empty() {
         req.key = next_free_key(&app).await?;
     }
@@ -175,17 +200,33 @@ pub async fn start_run(
         _ => prompt,
     };
 
-    let session = SessionRecord {
-        id: uuid::Uuid::new_v4().to_string(),
-        task: req.key.clone(),
-        kind: SessionKind::Claude,
-        label: "Principal".into(),
-        primary: true,
-        closed: false,
-        read_only: false,
-    };
-    app.store.create_session(&session).await?;
-    launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
+    if let Some(mut session) = adopted {
+        // The project's Claude becomes the task's: it goes on with its conversation,
+        // now able to edit, on the task's branch.
+        if let Some(live) = app.sessions.get(&session.id) {
+            let _ = live.pty.kill();
+            live.pty.wait().await;
+        }
+        app.store.adopt_session(&session.id, &req.key).await?;
+        session.task = req.key.clone();
+        session.primary = true;
+        session.read_only = false;
+        session.label = "Principal".into();
+        launch_session(&app, &session, &ws.path, None, true)?;
+        app.emit(crate::events::Topic::Sessions);
+    } else {
+        let session = SessionRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            task: req.key.clone(),
+            kind: SessionKind::Claude,
+            label: "Principal".into(),
+            primary: true,
+            closed: false,
+            read_only: false,
+        };
+        app.store.create_session(&session).await?;
+        launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
+    }
 
     let task = app
         .store

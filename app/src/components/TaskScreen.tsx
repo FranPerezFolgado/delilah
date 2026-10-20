@@ -25,6 +25,8 @@ interface Props {
   project?: Project;
   /** Opens the new task dialog (from a project). */
   onNewTask?: () => void;
+  /** "Convertir en tarea" on one of the project's Claude sessions. */
+  onConvert?: (session: Session) => void;
   /** The task's open sessions: each one is a tab. */
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
@@ -40,7 +42,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, project, sessions, asks, onChanged, onNewTask }: Props) {
+export function TaskScreen({ owner, task, project, sessions, asks, onChanged, onNewTask, onConvert }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -511,6 +513,21 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                         }
                       >
                         Permitir cambios en esta sesión
+                      </button>
+                      {onConvert && (
+                        <button className="btn" onClick={() => onConvert(s)}>
+                          Convertir en tarea
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {!s.read_only && s.kind === "claude" && s.live && project && onConvert && (
+                    <div className="ebar">
+                      <span style={{ flex: 1 }} className="muted">
+                        Claude sobre tu checkout, sin tarea.
+                      </span>
+                      <button className="btn" onClick={() => onConvert(s)}>
+                        Convertir en tarea
                       </button>
                     </div>
                   )}

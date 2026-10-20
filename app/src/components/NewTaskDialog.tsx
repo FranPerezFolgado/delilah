@@ -15,13 +15,15 @@ interface Props {
   draft?: TaskDraft;
   /** The project to start in, e.g. the one on screen. */
   project?: string;
+  /** "Convertir en tarea": a project's Claude session that becomes the task's. */
+  fromSession?: { id: string; label: string };
   onClose: () => void;
   onStarted: (task: Task) => void;
 }
 
-export function NewTaskDialog({ projects, draft, project: initialProject, onClose, onStarted }: Props) {
+export function NewTaskDialog({ projects, draft, project: initialProject, fromSession, onClose, onStarted }: Props) {
   // A Jira ticket, or a free task Delilah names itself (LIBRE-n).
-  const [origin, setOrigin] = useState<"jira" | "libre">("jira");
+  const [origin, setOrigin] = useState<"jira" | "libre">(fromSession ? "libre" : "jira");
   // In the project's checkout (a branch there), or isolated in a worktree.
   const [where, setWhere] = useState<"checkout" | "worktree">("checkout");
   const [key, setKey] = useState(draft?.key ?? "");
@@ -97,6 +99,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
+        ...(fromSession ? { from_session: fromSession.id } : {}),
         // A custom prompt runs outside the /feature workflow.
         ...(prompt.trim() ? { workflow: "prompt", prompt: prompt.trim() } : {}),
       });
@@ -110,12 +113,18 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="dialog" role="dialog" aria-label="Nueva tarea" onSubmit={submit}>
-        <h2>Nueva tarea</h2>
+        <h2>{fromSession ? "Convertir en tarea" : "Nueva tarea"}</h2>
+        {fromSession && (
+          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+            «{fromSession.label}» pasa a ser el Claude de una tarea libre: sigue con su conversación, ya puede editar y trabaja en
+            una rama de tu checkout (donde está la conversación).
+          </p>
+        )}
         {projects.length === 0 ? (
           <p className="muted">Primero añade un proyecto en la vista Proyectos.</p>
         ) : (
           <>
-            {!draft && (
+            {!draft && !fromSession && (
               <div className="segs" role="radiogroup" aria-label="Origen" style={{ alignSelf: "flex-start" }}>
                 <button type="button" role="radio" aria-checked={origin === "jira"} className={`seg ${origin === "jira" ? "on" : ""}`} onClick={() => setOrigin("jira")}>
                   Ticket de Jira
@@ -147,7 +156,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
             )}
             <label className="field">
               <span>Proyecto</span>
-              <select className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)}>
+              <select className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)} disabled={!!fromSession}>
                 {projects.map((p) => (
                   <option key={p.name} value={p.name}>
                     {p.name} · {p.kind === "parent" ? "parent" : "repo"}
@@ -155,6 +164,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
                 ))}
               </select>
             </label>
+            {!fromSession && (
             <div className="field">
               <span>Dónde trabaja el agente</span>
               <div className="where">
@@ -178,6 +188,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
                 </label>
               </div>
             </div>
+            )}
             {project?.kind === "parent" && (
               <div className="field">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -206,6 +217,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
                 )}
               </div>
             )}
+            {!fromSession && (
             <label className="field">
               <span>
                 Primer mensaje (opcional; si lo dejas vacío usa{" "}
@@ -213,13 +225,14 @@ export function NewTaskDialog({ projects, draft, project: initialProject, onClos
               </span>
               <textarea className="input" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
             </label>
+            )}
           </>
         )}
         {error && <div className="error selectable">{error}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>Cancelar</button>
           <button className="btn btn-p" disabled={busy || !project || (project.kind === "parent" && picked.length === 0)}>
-            {busy ? "Preparando workspace…" : "Lanzar"}
+            {busy ? "Preparando workspace…" : fromSession ? "Convertir" : "Lanzar"}
           </button>
         </div>
       </form>

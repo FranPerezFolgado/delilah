@@ -122,7 +122,9 @@ its sessions, then its tasks by urgency. A project's screen works like a task's,
 but on your own checkout: "Preguntar a Claude" (or "+" on the project) starts
 Claude in **solo lectura** (`--permission-mode plan`). It reads, searches and
 explains, but does not edit, and nothing is created. "Permitir cambios en esta
-sesión" restarts it in normal mode on the same conversation.
+sesión" restarts it in normal mode on the same conversation. "Convertir en tarea" turns
+that Claude into a free task's primary session, keeping its conversation: the task
+works in your checkout, the folder the conversation belongs to.
 
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
 and starts `/feature <what you want to do>`). The agent works either **in your

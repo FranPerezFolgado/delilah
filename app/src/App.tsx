@@ -34,6 +34,7 @@ export function App() {
   const [restoreLayout, setRestoreLayout] = useState<Layout>(4);
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [toast, setToast] = useState<string | null>(null);
+  const [convertFrom, setConvertFrom] = useState<Session | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -330,6 +331,10 @@ export function App() {
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
+                  onConvert={(s) => {
+                    setConvertFrom(s);
+                    setNewTask(true);
+                  }}
                 />
               </Suspense>
             ) : (
@@ -384,14 +389,17 @@ export function App() {
         <NewTaskDialog
           projects={projects}
           project={project?.name ?? task?.project ?? undefined}
+          fromSession={convertFrom ? { id: convertFrom.id, label: convertFrom.label } : undefined}
           draft={draft}
           onClose={() => {
             setNewTask(false);
             setDraft(undefined);
+            setConvertFrom(null);
           }}
           onStarted={(t) => {
             setNewTask(false);
             setDraft(undefined);
+            setConvertFrom(null);
             refresh();
             openConsole(t.key);
           }}
