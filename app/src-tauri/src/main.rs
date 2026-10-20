@@ -37,7 +37,11 @@ fn main() {
             // Development builds never touch launchd: a LaunchAgent there would point
             // at a build folder and fight scripts/dev-daemon.sh for the port.
             let result = if cfg!(debug_assertions) {
-                Err("En desarrollo el daemon no lo gestiona la app: arráncalo con scripts/dev-daemon.sh.".into())
+                Err(if daemon::english() {
+                    "In development the app does not manage the daemon: start it with scripts/dev-daemon.sh.".into()
+                } else {
+                    "En desarrollo el daemon no lo gestiona la app: arráncalo con scripts/dev-daemon.sh.".into()
+                })
             } else if id == RESTART_DAEMON {
                 daemon::ensure_running().and_then(|()| daemon::restart())
             } else {
@@ -92,56 +96,59 @@ fn main() {
 /// active tab, so the shortcut has to reach the UI (see `app/src/shortcuts.ts`).
 /// Edit stays, or copy and paste would not work in the webview.
 fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    // In the language picked in Settings, read when the app opens.
+    let en = daemon::english();
+    let l = |es: &'static str, english: &'static str| if en { english } else { es };
     let app_menu = Submenu::with_items(
         app,
         "Delilah",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some("Acerca de Delilah"), None)?,
+            &PredefinedMenuItem::about(app, Some(l("Acerca de Delilah", "About Delilah")), None)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, RESTART_DAEMON, "Reiniciar el daemon", true, None::<&str>)?,
-            &MenuItem::with_id(app, STOP_DAEMON, "Detener el daemon", true, None::<&str>)?,
+            &MenuItem::with_id(app, RESTART_DAEMON, l("Reiniciar el daemon", "Restart the daemon"), true, None::<&str>)?,
+            &MenuItem::with_id(app, STOP_DAEMON, l("Detener el daemon", "Stop the daemon"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, Some("Ocultar Delilah"))?,
-            &PredefinedMenuItem::hide_others(app, Some("Ocultar otros"))?,
-            &PredefinedMenuItem::show_all(app, Some("Mostrar todo"))?,
+            &PredefinedMenuItem::hide(app, Some(l("Ocultar Delilah", "Hide Delilah")))?,
+            &PredefinedMenuItem::hide_others(app, Some(l("Ocultar otros", "Hide Others")))?,
+            &PredefinedMenuItem::show_all(app, Some(l("Mostrar todo", "Show All")))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, Some("Salir de Delilah"))?,
+            &PredefinedMenuItem::quit(app, Some(l("Salir de Delilah", "Quit Delilah")))?,
         ],
     )?;
     let edit = Submenu::with_items(
         app,
-        "Edición",
+        l("Edición", "Edit"),
         true,
         &[
-            &PredefinedMenuItem::undo(app, Some("Deshacer"))?,
-            &PredefinedMenuItem::redo(app, Some("Rehacer"))?,
+            &PredefinedMenuItem::undo(app, Some(l("Deshacer", "Undo")))?,
+            &PredefinedMenuItem::redo(app, Some(l("Rehacer", "Redo")))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, Some("Cortar"))?,
-            &PredefinedMenuItem::copy(app, Some("Copiar"))?,
-            &PredefinedMenuItem::paste(app, Some("Pegar"))?,
-            &PredefinedMenuItem::select_all(app, Some("Seleccionar todo"))?,
+            &PredefinedMenuItem::cut(app, Some(l("Cortar", "Cut")))?,
+            &PredefinedMenuItem::copy(app, Some(l("Copiar", "Copy")))?,
+            &PredefinedMenuItem::paste(app, Some(l("Pegar", "Paste")))?,
+            &PredefinedMenuItem::select_all(app, Some(l("Seleccionar todo", "Select All")))?,
         ],
     )?;
     let window = Submenu::with_items(
         app,
-        "Ventana",
+        l("Ventana", "Window"),
         true,
         &[
-            &PredefinedMenuItem::minimize(app, Some("Minimizar"))?,
-            &PredefinedMenuItem::maximize(app, Some("Zoom"))?,
+            &PredefinedMenuItem::minimize(app, Some(l("Minimizar", "Minimize")))?,
+            &PredefinedMenuItem::maximize(app, Some(l("Zoom", "Zoom")))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::fullscreen(app, Some("Pantalla completa"))?,
+            &PredefinedMenuItem::fullscreen(app, Some(l("Pantalla completa", "Enter Full Screen")))?,
         ],
     )?;
     let help = Submenu::with_items(
         app,
-        "Ayuda",
+        l("Ayuda", "Help"),
         true,
         &[&MenuItem::with_id(
             app,
             SHOW_LOGS,
-            "Ver logs",
+            l("Ver logs", "View logs"),
             true,
             Some("CmdOrCtrl+Shift+L"),
         )?],

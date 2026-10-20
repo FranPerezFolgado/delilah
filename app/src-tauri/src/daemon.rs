@@ -185,14 +185,13 @@ struct Health {
     exe_mtime: Option<u64>,
 }
 
-/// `GET /api/v1/health` with a bare socket: one tiny request is not worth an HTTP client.
-fn health() -> Option<Health> {
+/// A GET to the daemon with a bare socket: tiny requests are not worth an HTTP client.
+fn get<T: serde::de::DeserializeOwned>(path: &str) -> Option<T> {
     let addr: SocketAddr = ADDR.parse().ok()?;
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    stream
-        .write_all(b"GET /api/v1/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .ok()?;
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
     let mut response = String::new();
     stream.read_to_string(&mut response).ok()?;
     if !response.starts_with("HTTP/1.1 200") {
@@ -200,6 +199,24 @@ fn health() -> Option<Health> {
     }
     let body = response.split("\r\n\r\n").nth(1)?;
     serde_json::from_str(body).ok()
+}
+
+fn health() -> Option<Health> {
+    get("/api/v1/health")
+}
+
+/// Whether the app speaks English: the language picked in Settings (kept by the
+/// daemon), or else the Mac's.
+pub fn english() -> bool {
+    match get::<serde_json::Value>("/api/v1/preferences/language").as_ref().and_then(|v| v.as_str()) {
+        Some("en") => true,
+        Some("es") => false,
+        _ => {
+            let langs = output("defaults", &["read", "-g", "AppleLanguages"]).unwrap_or_default();
+            let first = langs.split('"').nth(1).unwrap_or("es").to_lowercase();
+            !first.starts_with("es")
+        }
+    }
 }
 
 fn wait_for_health(timeout: Duration) -> Result<(), String> {

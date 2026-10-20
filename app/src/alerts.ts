@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react";
 import { BLOCKING, type InboxItem, type InboxKind, type Task } from "./api";
 import { notify, setBadge } from "./platform";
+import { t } from "./i18n";
 
 const SAYS: Record<InboxKind, string> = {
   permission: "necesita un permiso",
@@ -43,7 +44,7 @@ export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], open: (item:
     if (seen.current) {
       for (const item of inbox) {
         if (seen.current.has(idOf(item)) || document.hasFocus()) continue;
-        notify(`${item.task} ${SAYS[item.kind]}`, gist(item.text, item.title)).catch(() => {});
+        notify(`${item.task} ${t(SAYS[item.kind])}`, gist(item.text, item.title)).catch(() => {});
         pending.current = { item, at: Date.now() };
       }
     }
@@ -56,9 +57,9 @@ export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], open: (item:
   useEffect(() => {
     const now = new Map(tasks.map((t) => [t.key, t.status.type]));
     if (statuses.current && !document.hasFocus()) {
-      for (const t of tasks) {
-        if (statuses.current.get(t.key) === "paused-by-limit" && t.status.type === "running") {
-          notify(`${t.key} reanudada`, t.title).catch(() => {});
+      for (const task of tasks) {
+        if (statuses.current.get(task.key) === "paused-by-limit" && task.status.type === "running") {
+          notify(`${task.key} ${t("reanudada")}`, task.title).catch(() => {});
         }
       }
     }

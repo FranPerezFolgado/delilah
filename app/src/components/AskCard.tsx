@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, type AskQuestion } from "../api";
+import { t } from "../i18n";
 
 interface Props {
   ask: { id: string; questions: AskQuestion[] };
@@ -48,7 +49,7 @@ export function AskCard({ ask, onDone }: Props) {
           <legend>
             {q.header && <span className="tag">{q.header}</span>}
             <span className="selectable">{q.question}</span>
-            {q.multiSelect && <span className="muted"> · varias</span>}
+            {q.multiSelect && <span className="muted"> · {t("varias")}</span>}
           </legend>
           <div className="ask-options">
             {q.options.map((o) => {
@@ -63,8 +64,8 @@ export function AskCard({ ask, onDone }: Props) {
           </div>
           <input
             className="input"
-            placeholder="O escribe tu propia respuesta…"
-            aria-label={`Tu respuesta a: ${q.question}`}
+            placeholder={t("O escribe tu propia respuesta…")}
+            aria-label={t("Tu respuesta a: {question}", { question: q.question })}
             value={own[q.question] ?? ""}
             onChange={(e) => setOwn((o) => ({ ...o, [q.question]: e.target.value }))}
             onKeyDown={(e) => {
@@ -80,11 +81,11 @@ export function AskCard({ ask, onDone }: Props) {
             disabled={busy || !complete}
             onClick={() => send(Object.fromEntries(ask.questions.map((q) => [q.question, answerOf(q)])))}
           >
-            Responder
+            {t("Responder")}
           </button>
         )}
         <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.releaseAsk(ask.id))}>
-          Responder en la terminal
+          {t("Responder en la terminal")}
         </button>
       </div>
       {error && <div className="error selectable">{error}</div>}

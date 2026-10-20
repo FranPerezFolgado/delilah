@@ -165,6 +165,17 @@ second. If the connection drops (the daemon restarts or updates), the app
 reconnects by itself and fetches everything again. A full refresh every 30 s
 stays as a safety net.
 
+**Language.** Spanish or English, picked in Ajustes (Automatic follows the Mac). It
+covers the interface, the Mac menu (from the next time the app opens), the
+notifications, and what Delilah writes to Claude (the message after a usage
+limit, the review prompt, the ticket handed over), so the agent answers in that
+language too. Texts are written in Spanish in the components, wrapped in `t()`;
+the English ones are in `app/src/i18n/en.ts`. In development the console warns of
+any text without a translation.
+
+**Help.** Ayuda › Ver logs (⌘⇧L) shows the daemon's last lines live, to see what is
+going on while testing.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use

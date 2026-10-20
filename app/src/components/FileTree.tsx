@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type ChangeKind, type TreeEntry } from "../api";
+import { t } from "../i18n";
 
 const MARK: Partial<Record<ChangeKind, string>> = {
   modified: "c-wait",
@@ -100,8 +101,8 @@ export function FileTree({ taskKey, changed, active, expanded, refresh, onOpen }
 
   return (
     <div className="tree">
-      {children.has("") ? rows("", 0) : <div className="muted" style={{ padding: 10 }}>Cargando…</div>}
-      {children.get("")?.length === 0 && <div className="muted" style={{ padding: 10 }}>El workspace está vacío.</div>}
+      {children.has("") ? rows("", 0) : <div className="muted" style={{ padding: 10 }}>{t("Cargando…")}</div>}
+      {children.get("")?.length === 0 && <div className="muted" style={{ padding: 10 }}>{t("El workspace está vacío.")}</div>}
     </div>
   );
 }

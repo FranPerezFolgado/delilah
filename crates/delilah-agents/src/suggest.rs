@@ -20,15 +20,16 @@ pub struct Ticket<'a> {
     pub description: &'a str,
 }
 
-pub fn prompt(ticket: &Ticket, submodules: &[String]) -> String {
+/// `language`: the language of the reasons, in English ("Spanish").
+pub fn prompt(ticket: &Ticket, submodules: &[String], language: &str) -> String {
     let list: String = submodules.iter().map(|s| format!("- {s}\n")).collect();
     let components = if ticket.components.is_empty() {
-        "(ninguno)".into()
+        "(none)".into()
     } else {
         ticket.components.join(", ")
     };
     let description = if ticket.description.trim().is_empty() {
-        "(sin descripción)"
+        "(no description)"
     } else {
         ticket.description
     };
@@ -41,7 +42,7 @@ pub fn prompt(ticket: &Ticket, submodules: &[String]) -> String {
          Jira components: {components}\n\
          Description:\n{description}\n\n\
          Answer with only a JSON object and no other text:\n\
-         {{\"submodules\": [{{\"path\": \"<one of the paths above>\", \"reason\": \"<one short sentence in Spanish>\"}}]}}\n\
+         {{\"submodules\": [{{\"path\": \"<one of the paths above>\", \"reason\": \"<one short sentence in {language}>\"}}]}}\n\
          List only the submodules that need changes, most important first.",
         key = ticket.key,
         title = ticket.title,
@@ -137,11 +138,13 @@ mod tests {
                 description: "Dos cargos.",
             },
             &known(),
+            "Spanish",
         );
         assert!(p.contains("- svc-orders\n"));
         assert!(p.contains("Ticket PROJ-1: Cobros duplicados"));
         assert!(p.contains("Jira components: svc-payments"));
         assert!(p.contains("{\"submodules\""));
+        assert!(p.contains("one short sentence in Spanish"));
     }
 
     #[test]

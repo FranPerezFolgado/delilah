@@ -124,12 +124,13 @@ impl Store {
     }
 
     /// Moves a project's session to a task, as its primary, able to edit.
-    pub async fn adopt_session(&self, id: &str, task: &str) -> Result<(), StoreError> {
+    pub async fn adopt_session(&self, id: &str, task: &str, label: &str) -> Result<(), StoreError> {
         sqlx::query(
             "UPDATE sessions SET task_key = ?, project = NULL, is_primary = 1, read_only = 0,
-             label = 'Principal' WHERE id = ?",
+             label = ? WHERE id = ?",
         )
         .bind(task)
+        .bind(label)
         .bind(id)
         .execute(&self.pool)
         .await?;

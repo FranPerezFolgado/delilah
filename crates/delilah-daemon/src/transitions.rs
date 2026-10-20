@@ -28,26 +28,41 @@ impl AppState {
             return;
         }
         let key = &task.key;
+        let l = self.lang();
         let (title, body) = match (&task.status, before) {
             (TaskStatus::WaitingForUser, _) => {
                 // Whoever is attached is already looking at it.
                 if self.sessions.watched(key.as_str()) {
                     return;
                 }
-                (format!("{key} te espera"), task.title.clone())
+                (
+                    format!("{key} {}", l.pick("te espera", "is waiting for you")),
+                    task.title.clone(),
+                )
             }
             (TaskStatus::PausedByLimit { resume_at }, _) => (
-                format!("{key} pausada por límite"),
                 format!(
-                    "Se reanuda sola a las {}",
+                    "{key} {}",
+                    l.pick("pausada por límite", "paused by the limit")
+                ),
+                format!(
+                    "{} {}",
+                    l.pick("Se reanuda sola a las", "It resumes by itself at"),
                     resume_at.with_timezone(&Local).format("%H:%M")
                 ),
             ),
-            (TaskStatus::Running, TaskStatus::PausedByLimit { .. }) => {
-                (format!("{key} reanudada"), task.title.clone())
-            }
-            (TaskStatus::Done, _) => (format!("{key} terminada"), task.title.clone()),
-            (TaskStatus::Failed { reason }, _) => (format!("{key} ha fallado"), reason.clone()),
+            (TaskStatus::Running, TaskStatus::PausedByLimit { .. }) => (
+                format!("{key} {}", l.pick("reanudada", "resumed")),
+                task.title.clone(),
+            ),
+            (TaskStatus::Done, _) => (
+                format!("{key} {}", l.pick("terminada", "done")),
+                task.title.clone(),
+            ),
+            (TaskStatus::Failed { reason }, _) => (
+                format!("{key} {}", l.pick("ha fallado", "failed")),
+                reason.clone(),
+            ),
             _ => return,
         };
         self.notifier.send(title, body);

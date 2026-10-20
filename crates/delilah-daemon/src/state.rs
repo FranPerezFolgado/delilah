@@ -37,6 +37,9 @@ pub struct AppState {
     pub events: Events,
     /// AskUserQuestion questions waiting for an answer from Delilah.
     pub asks: Arc<crate::asks::Asks>,
+    /// The language Delilah speaks in (see `lang.rs`); Spanish until `main` reads
+    /// the preference.
+    pub lang: crate::lang::Current,
 }
 
 impl AppState {
@@ -62,7 +65,23 @@ impl AppState {
             specs: Arc::default(),
             events,
             asks: Arc::default(),
+            lang: crate::lang::Current::default(),
         }
+    }
+
+    pub fn lang(&self) -> crate::lang::Lang {
+        self.lang.get()
+    }
+
+    /// Reads the `language` preference again (at start, and when it changes).
+    pub async fn load_language(&self) {
+        let value: Option<Value> = self.store.setting("pref:language").await.ok().flatten();
+        let setting = value.as_ref().and_then(Value::as_str).map(str::to_string);
+        let lang =
+            tokio::task::spawn_blocking(move || crate::lang::from_setting(setting.as_deref()))
+                .await
+                .unwrap_or(crate::lang::Lang::Es);
+        self.lang.set(lang);
     }
 
     pub fn emit(&self, topic: Topic) {

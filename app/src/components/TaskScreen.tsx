@@ -5,6 +5,7 @@ import { api, ConflictError, statusLabel, type ChangeKind, type FileContent, typ
 import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
 import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, type Tab } from "../editor/session";
+import { t } from "../i18n";
 import { keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
 import { FileTree } from "./FileTree";
@@ -226,7 +227,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
       const s = sessionById(sid);
       if (!s) return;
       if (s.primary) {
-        setError("La sesión principal no se cierra: termina con la tarea (Marcar como hecha).");
+        setError(t("La sesión principal no se cierra: termina con la tarea (Marcar como hecha)."));
         return;
       }
       // Closing a working Claude stops it: ask first. A terminal just closes.
@@ -413,7 +414,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           <button
             className={`btn btn-ghost ${showTree ? "is-on" : ""}`}
             onClick={toggleTree}
-            title={`Árbol de archivos (${keyOf("toggle-tree")})`}
+            title={t("Árbol de archivos ({key})", { key: keyOf("toggle-tree") })}
             aria-pressed={showTree}
           >
             <Icon name="sidebar" />
@@ -423,7 +424,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
       <div className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}>
         <div className="tmain">
           <div className="etabs" role="tablist">
-            <TabButton id={OVERVIEW} label={project ? "Proyecto" : "Tarea"} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
+            <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
             {sessions.map((s) => {
               const st = sessionStatus(s, task);
               return (
@@ -431,7 +432,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                   key={s.id}
                   id={sessionTab(s.id)}
                   label={s.label}
-                  title={`${s.label} · ${s.kind === "shell" ? "terminal" : "Claude"} · ${st.label}`}
+                  title={`${s.label} · ${s.kind === "shell" ? t("terminal") : "Claude"} · ${st.label}`}
                   icon={s.kind === "shell" ? "console" : st.icon}
                   iconClass={s.kind === "shell" ? "" : st.cls}
                   shown={shown}
@@ -441,10 +442,10 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
               );
             })}
             {starting && !sessionById(starting) && (
-              <TabButton id={sessionTab(starting)} label="Arrancando…" icon="run" shown={shown} onActivate={activate} />
+              <TabButton id={sessionTab(starting)} label={t("Arrancando…")} icon="run" shown={shown} onActivate={activate} />
             )}
             {session.changesOpen && (
-              <TabButton id={CHANGES} label="Cambios" icon="diff" shown={shown} onActivate={activate} onClose={close} />
+              <TabButton id={CHANGES} label={t("Cambios")} icon="diff" shown={shown} onActivate={activate} onClose={close} />
             )}
             {session.tabs.map((t) => (
               <TabButton
@@ -484,13 +485,13 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           {closingSession && (
             <div className="ebar warn">
               <span style={{ flex: 1 }}>
-                Cerrar <b>{closingSession.label}</b> detiene ese Claude. Su conversación no se podrá reabrir desde aquí.
+                {t("Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.", { label: closingSession.label })}
               </span>
-              <button className="btn btn-p" onClick={() => close(sessionTab(closingSession.id), true)}>Cerrar</button>
-              <button className="btn btn-ghost" onClick={() => setClosingSession(null)}>Cancelar</button>
+              <button className="btn btn-p" onClick={() => close(sessionTab(closingSession.id), true)}>{t("Cerrar")}</button>
+              <button className="btn btn-ghost" onClick={() => setClosingSession(null)}>{t("Cancelar")}</button>
             </div>
           )}
-          {shownSession && !sessionById(shownSession) && <div className="empty">Arrancando la sesión…</div>}
+          {shownSession && !sessionById(shownSession) && <div className="empty">{t("Arrancando la sesión…")}</div>}
           {sessions
             .filter((s) => mounted.has(s.id))
             .map((s) => {
@@ -501,7 +502,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                     <div className="ebar warn">
                       <Icon name="lock" />
                       <span style={{ flex: 1 }}>
-                        <b>Solo lectura.</b> Este Claude lee, busca y explica, pero no edita.
+                        <b>{t("Solo lectura.")}</b> {t("Este Claude lee, busca y explica, pero no edita.")}
                       </span>
                       <button
                         className="btn"
@@ -512,11 +513,11 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                             .catch((e) => setError((e as Error).message))
                         }
                       >
-                        Permitir cambios en esta sesión
+                        {t("Permitir cambios en esta sesión")}
                       </button>
                       {onConvert && (
                         <button className="btn" onClick={() => onConvert(s)}>
-                          Convertir en tarea
+                          {t("Convertir en tarea")}
                         </button>
                       )}
                     </div>
@@ -524,10 +525,10 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                   {!s.read_only && s.kind === "claude" && s.live && project && onConvert && (
                     <div className="ebar">
                       <span style={{ flex: 1 }} className="muted">
-                        Claude sobre tu checkout, sin tarea.
+                        {t("Claude sobre tu checkout, sin tarea.")}
                       </span>
                       <button className="btn" onClick={() => onConvert(s)}>
-                        Convertir en tarea
+                        {t("Convertir en tarea")}
                       </button>
                     </div>
                   )}
@@ -535,13 +536,13 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                     .filter((a) => a.session?.id === s.id && a.ask)
                     .map((a) => (
                       <div key={a.ask!.id} className="ask-bar">
-                        <div className="sec" style={{ marginBottom: 6 }}>El agente te pregunta</div>
+                        <div className="sec" style={{ marginBottom: 6 }}>{t("El agente te pregunta")}</div>
                         <AskCard ask={a.ask!} onDone={onChanged} />
                       </div>
                     ))}
                   {!s.live && (
                     <div className="ebar">
-                      <span style={{ flex: 1 }}>Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).</span>
+                      <span style={{ flex: 1 }}>{t("Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).")}</span>
                       <button
                         className="btn btn-p"
                         onClick={() =>
@@ -551,7 +552,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
                             .catch((e) => setError((e as Error).message))
                         }
                       >
-                        Reabrir
+                        {t("Reabrir")}
                       </button>
                     </div>
                   )}
@@ -564,26 +565,26 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           {active && (
             <div className="epath mono muted">
               <span className="selectable trunc">{active.path}</span>
-              {active.dirty && <span className="c-wait">sin guardar · ⌘S</span>}
+              {active.dirty && <span className="c-wait">{t("sin guardar · ⌘S")}</span>}
             </div>
           )}
           {closing && (
             <div className="ebar">
               <span style={{ flex: 1 }}>
-                <b>{name(closing)}</b> tiene cambios sin guardar.
+                {t("«{name}» tiene cambios sin guardar.", { name: name(closing) })}
               </span>
-              <button className="btn btn-p" onClick={async () => (await save(closing), close(closing, true))}>Guardar</button>
-              <button className="btn" onClick={() => close(closing, true)}>Descartar</button>
-              <button className="btn btn-ghost" onClick={() => setClosing(null)}>Cancelar</button>
+              <button className="btn btn-p" onClick={async () => (await save(closing), close(closing, true))}>{t("Guardar")}</button>
+              <button className="btn" onClick={() => close(closing, true)}>{t("Descartar")}</button>
+              <button className="btn btn-ghost" onClick={() => setClosing(null)}>{t("Cancelar")}</button>
             </div>
           )}
           {active?.conflict && (
             <div className="ebar warn">
               <span style={{ flex: 1 }}>
-                El archivo ha cambiado en disco (probablemente el agente) y aquí tienes cambios sin guardar.
+                {t("El archivo ha cambiado en disco (probablemente el agente) y aquí tienes cambios sin guardar.")}
               </span>
-              <button className="btn" onClick={takeDisk}>Cargar el del disco</button>
-              <button className="btn" onClick={keepMine}>Guardar el mío encima</button>
+              <button className="btn" onClick={takeDisk}>{t("Cargar el del disco")}</button>
+              <button className="btn" onClick={keepMine}>{t("Guardar el mío encima")}</button>
             </div>
           )}
           {error && <div className="error selectable" style={{ padding: "8px 14px" }}>{error}</div>}
@@ -592,7 +593,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
           {active && !active.saved && (
             <div className="empty">
               <span>
-                {active.size > 1 << 20 ? "Este archivo es demasiado grande para editarlo aquí." : "Este archivo es binario y no se puede editar aquí."}
+                {active.size > 1 << 20 ? t("Este archivo es demasiado grande para editarlo aquí.") : t("Este archivo es binario y no se puede editar aquí.")}
               </span>
             </div>
           )}
@@ -600,16 +601,16 @@ export function TaskScreen({ owner, task, project, sessions, asks, onChanged, on
 
         {finding && hasWorkspace && <QuickOpen taskKey={owner} onOpen={openFile} onClose={() => setFinding(false)} />}
         {showTree && hasWorkspace && (
-          <aside className="tpanel" aria-label="Archivos del workspace">
+          <aside className="tpanel" aria-label={t("Archivos del workspace")}>
             <div className="tpanel-head">
-              <span className="sec">Archivos</span>
-              <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title="Abrir un archivo por su nombre">
+              <span className="sec">{t("Archivos")}</span>
+              <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>
                 {keyOf("quick-open")}
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title="Actualizar" aria-label="Actualizar el árbol">
+              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Actualizar")} aria-label={t("Actualizar el árbol")}>
                 <Icon name="refresh" />
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={toggleTree} title={`Ocultar (${keyOf("toggle-tree")})`} aria-label="Ocultar el árbol">
+              <button className="btn btn-ghost icon-btn" onClick={toggleTree} title={t("Ocultar ({key})", { key: keyOf("toggle-tree") })} aria-label={t("Ocultar el árbol")}>
                 <Icon name="close" />
               </button>
             </div>
@@ -665,7 +666,7 @@ function TabButton({
       {onClose && (
         <button
           className={`etab-x ${dirty ? "dirty" : ""}`}
-          aria-label={`Cerrar ${label}`}
+          aria-label={t("Cerrar {label}", { label })}
           onClick={(e) => {
             e.stopPropagation();
             onClose(id);

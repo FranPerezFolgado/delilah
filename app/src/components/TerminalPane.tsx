@@ -5,6 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { terminalUrl } from "../api";
 import { actionFor } from "../shortcuts";
+import { t as tr } from "../i18n";
 
 const THEME = {
   background: "#0c0d0f",
@@ -89,7 +90,7 @@ export function TerminalPane({ sessionId, focused }: { sessionId: string; focuse
         // Not a control message.
       }
     };
-    ws.onclose = () => t.write("\r\n\x1b[2m[la sesión no está en marcha]\x1b[0m\r\n");
+    ws.onclose = () => t.write(`\r\n\x1b[2m[${tr("la sesión no está en marcha")}]\x1b[0m\r\n`);
 
     const encoder = new TextEncoder();
     const input = t.onData((data) => {

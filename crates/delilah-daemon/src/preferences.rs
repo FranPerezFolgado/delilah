@@ -40,6 +40,9 @@ pub async fn put(
         return Err(ApiError::bad_request("preference too large"));
     }
     app.store.set_setting(&setting_key(&key)?, &value).await?;
+    if key == "language" {
+        app.load_language().await;
+    }
     Ok(Json(value))
 }
 

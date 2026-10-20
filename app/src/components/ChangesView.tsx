@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type ChangeKind, type FileChange, type RepoChanges } from "../api";
 import { Icon } from "./Icon";
+import { t, tn } from "../i18n";
 
 const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> = {
   added: { letter: "A", label: "Añadido", cls: "c-done" },
@@ -79,18 +80,18 @@ export function ChangesView({ owner, onEdit }: Props) {
           </span>
         )}
         <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={load} disabled={loading}>
-          <Icon name="refresh" /> Actualizar
+          <Icon name="refresh" /> {t("Actualizar")}
         </button>
       </div>
       {error && <div className="error selectable" style={{ padding: "12px 20px" }}>{error}</div>}
       {!repos && !error && (
         <div className="empty">
-          <span>Cargando…</span>
+          <span>{t("Cargando…")}</span>
         </div>
       )}
       {repos && flat.length === 0 && (
         <div className="empty">
-          <span>La rama aún no ha cambiado nada.</span>
+          <span>{t("La rama aún no ha cambiado nada.")}</span>
         </div>
       )}
       {flat.length > 0 && (
@@ -119,8 +120,8 @@ export function ChangesView({ owner, onEdit }: Props) {
                 )}
                 {r.files.length > 0 && (
                   <div className="changes-meta muted">
-                    {r.commits} {r.commits === 1 ? "commit" : "commits"}
-                    {r.base ? <> desde <span className="mono">{r.base.slice(0, 8)}</span></> : " · sin base: solo lo no commiteado"}
+                    {tn(r.commits, "{n} commit", "{n} commits")}
+                    {r.base ? <> {t("desde")} <span className="mono">{r.base.slice(0, 8)}</span></> : t(" · sin base: solo lo no commiteado")}
                   </div>
                 )}
                 {r.files.map((f) => (
@@ -148,7 +149,7 @@ function FileRow({ file, on, onClick }: { file: FileChange; on: boolean; onClick
   const slash = file.path.lastIndexOf("/");
   return (
     <button className={`frow ${on ? "on" : ""}`} onClick={onClick} title={file.path}>
-      <span className={`kind mono ${kind.cls}`} title={kind.label}>
+      <span className={`kind mono ${kind.cls}`} title={t(kind.label)}>
         {kind.letter}
       </span>
       <span className="trunc" style={{ flex: 1 }}>
@@ -239,15 +240,15 @@ function Diff({
           {file.old_path && <span className="muted">{file.old_path} → </span>}
           {where}
         </span>
-        <span className="muted" style={{ marginLeft: "auto", flex: "none" }}>{KIND[file.kind].label}</span>
+        <span className="muted" style={{ marginLeft: "auto", flex: "none" }}>{t(KIND[file.kind].label)}</span>
         {file.kind !== "deleted" && (
           <button className="btn btn-ghost" style={{ flex: "none" }} onClick={() => onEdit(where)}>
-            <Icon name="code" /> Abrir
+            <Icon name="code" /> {t("Abrir")}
           </button>
         )}
       </div>
       {error && <div className="error" style={{ padding: 12 }}>{error}</div>}
-      {text !== null && lines.length === 0 && <div className="muted" style={{ padding: 12 }}>Sin cambios de contenido.</div>}
+      {text !== null && lines.length === 0 && <div className="muted" style={{ padding: 12 }}>{t("Sin cambios de contenido.")}</div>}
       <div className="diff selectable">
         {lines.map((l, i) =>
           l.type === "hunk" ? (

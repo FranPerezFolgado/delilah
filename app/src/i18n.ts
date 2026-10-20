@@ -1,0 +1,46 @@
+// The app's language. Texts are written in Spanish in the components, wrapped in
+// t("…"); the English ones live in i18n/en.ts, keyed by the Spanish text. A text with
+// no translation shows in Spanish rather than breaking.
+import { EN } from "./i18n/en";
+
+export type Lang = "es" | "en";
+/** What the user picked in Ajustes: "auto" follows the Mac's language. */
+export type LangSetting = "auto" | Lang;
+
+let current: Lang = detect("auto");
+
+export function detect(setting: LangSetting): Lang {
+  if (setting !== "auto") return setting;
+  const system = typeof navigator !== "undefined" ? navigator.language : "es";
+  return system.toLowerCase().startsWith("es") ? "es" : "en";
+}
+
+export function setLanguage(setting: LangSetting) {
+  current = detect(setting);
+  if (typeof document !== "undefined") document.documentElement.lang = current;
+}
+
+export const lang = () => current;
+
+/** For dates and times: "es-ES" or "en-GB" (24-hour clock in both). */
+export const locale = () => (current === "en" ? "en-GB" : "es-ES");
+
+const missing = new Set<string>();
+
+/** `es` in the current language; `{name}` holes are filled from `vars`. */
+export function t(es: string, vars?: Record<string, string | number>): string {
+  let text = es;
+  if (current === "en") {
+    const en = EN[es];
+    if (en !== undefined) text = en;
+    else if (import.meta.env.DEV && !missing.has(es)) {
+      missing.add(es);
+      console.warn(`[i18n] sin traducir: ${JSON.stringify(es)}`);
+    }
+  }
+  if (vars) text = text.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+  return text;
+}
+
+/** Singular or plural by `n`, e.g. tn(n, "{n} archivo", "{n} archivos"). */
+export const tn = (n: number, one: string, many: string) => t(n === 1 ? one : many, { n });

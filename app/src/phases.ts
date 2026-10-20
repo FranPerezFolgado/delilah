@@ -1,4 +1,5 @@
 import type { SpecPhase, SpecSummary, Task } from "./api";
+import { t } from "./i18n";
 
 /** The board's columns: SpecKit's phases, then finished tasks. */
 export type Column = SpecPhase | "done";
@@ -13,7 +14,7 @@ export const COLUMNS: { id: Column; label: string }[] = [
 
 const PHASES: SpecPhase[] = ["specify", "plan", "implement", "review"];
 
-export const phaseLabel = (c: Column) => COLUMNS.find((col) => col.id === c)?.label ?? c;
+export const phaseLabel = (c: Column) => t(COLUMNS.find((col) => col.id === c)?.label ?? c);
 
 /** Where a task sits: done tasks in "Hecha"; the others by their spec's phase, or the
  *  one last recorded, or the start if nothing is known yet. */

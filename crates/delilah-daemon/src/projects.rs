@@ -199,6 +199,7 @@ pub async fn suggest_submodules(
             description: &description,
         },
         &known,
+        app.lang().name(),
     );
 
     let mut cmd = tokio::process::Command::new("claude");

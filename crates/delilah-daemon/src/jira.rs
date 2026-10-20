@@ -150,53 +150,34 @@ pub async fn fetch_issue(app: &AppState, key: &str) -> Option<JiraIssue> {
 }
 
 /// The ticket as Markdown for the agent to read.
-pub fn write_ticket(path: &std::path::Path, issue: &JiraIssue) -> std::io::Result<()> {
+pub fn write_ticket(
+    path: &std::path::Path,
+    issue: &JiraIssue,
+    lang: crate::lang::Lang,
+) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut md = format!(
-        "# {}: {}
-
-",
-        issue.key, issue.summary
-    );
-    md.push_str(&format!(
-        "- Tipo: {}
-",
-        issue.issue_type
-    ));
+    let l = |es, en| lang.pick(es, en);
+    let mut md = format!("# {}: {}\n\n", issue.key, issue.summary);
+    md.push_str(&format!("- {}: {}\n", l("Tipo", "Type"), issue.issue_type));
     if let Some(p) = &issue.priority {
-        md.push_str(&format!(
-            "- Prioridad: {p}
-"
-        ));
+        md.push_str(&format!("- {}: {p}\n", l("Prioridad", "Priority")));
     }
-    md.push_str(&format!(
-        "- Estado: {}
-",
-        issue.status
-    ));
+    md.push_str(&format!("- {}: {}\n", l("Estado", "Status"), issue.status));
     if !issue.components.is_empty() {
         md.push_str(&format!(
-            "- Componentes: {}
-",
+            "- {}: {}\n",
+            l("Componentes", "Components"),
             issue.components.join(", ")
         ));
     }
     if let Some(url) = &issue.url {
-        md.push_str(&format!(
-            "- Enlace: {url}
-"
-        ));
+        md.push_str(&format!("- {}: {url}\n", l("Enlace", "Link")));
     }
-    md.push_str(
-        "
-## Descripción
-
-",
-    );
+    md.push_str(&format!("\n## {}\n\n", l("Descripción", "Description")));
     md.push_str(if issue.description.is_empty() {
-        "(sin descripción)"
+        l("(sin descripción)", "(no description)")
     } else {
         &issue.description
     });
@@ -325,7 +306,7 @@ mod tests {
 
         let path =
             std::env::temp_dir().join(format!("delilah-ticket-{}/ticket.md", uuid::Uuid::new_v4()));
-        super::write_ticket(&path, &issue).unwrap();
+        super::write_ticket(&path, &issue, crate::lang::Lang::Es).unwrap();
         let md = std::fs::read_to_string(&path).unwrap();
         assert!(
             md.starts_with("# PROJ-1242: Rechazar cobros duplicados"),

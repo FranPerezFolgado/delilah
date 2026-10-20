@@ -1,5 +1,6 @@
 // Client of delilahd's HTTP and WebSocket API. The UI gets all its data from here:
 // no Tauri commands, so the same UI can run in another shell or a browser.
+import { locale, t } from "./i18n";
 
 export const DAEMON_URL: string = import.meta.env.VITE_DELILAH_URL ?? "http://127.0.0.1:7420";
 
@@ -226,11 +227,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: init?.body ? { "content-type": "application/json" } : undefined,
     });
   } catch {
-    throw new ApiError("No se puede conectar con delilahd. ¿Está arrancado?");
+    throw new ApiError(t("No se puede conectar con delilahd. ¿Está arrancado?"));
   }
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
-  if (!res.ok) throw new ApiError(data?.error ?? `delilahd respondió ${res.status}`);
+  if (!res.ok) throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }));
   return data as T;
 }
 
@@ -285,20 +286,20 @@ export const api = {
       body: JSON.stringify({ text, version }),
     });
     const data = await res.json().catch(() => null);
-    if (res.status === 409) throw new ConflictError(data?.error ?? "El archivo ha cambiado en disco");
-    if (!res.ok) throw new ApiError(data?.error ?? `delilahd respondió ${res.status}`);
+    if (res.status === 409) throw new ConflictError(data?.error ?? t("El archivo ha cambiado en disco"));
+    if (!res.ok) throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }));
     return data as FileContent;
   },
   diff: async (key: string, repo: string, path: string) => {
     const q = new URLSearchParams({ repo, path });
     const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/changes/diff?${q}`);
-    if (!res.ok) throw new ApiError(`No se pudo leer el diff de ${path}`);
+    if (!res.ok) throw new ApiError(t("No se pudo leer el diff de {path}", { path }));
     return res.text();
   },
   spec: (key: string) => request<SpecProgress | null>(`/api/v1/tasks/${key}/spec`),
   specFile: async (key: string, name: string) => {
     const res = await fetch(`${DAEMON_URL}/api/v1/tasks/${key}/spec/files/${encodeURIComponent(name)}`);
-    if (!res.ok) throw new ApiError(`No se pudo leer ${name}`);
+    if (!res.ok) throw new ApiError(t("No se pudo leer {name}", { name }));
     return res.text();
   },
 };
@@ -306,9 +307,10 @@ export const api = {
 export const terminalUrl = (sessionId: string) => `${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/terminal`;
 
 /** What the "Revisar cambios" session is asked first. */
-export const REVIEW_PROMPT =
-  "Revisa los cambios de este workspace respecto a la rama de la que salió (git diff y git log). " +
-  "Dime qué está bien, qué cambiarías y si falta algún test. No modifiques nada todavía.";
+export const reviewPrompt = () =>
+  t(
+    "Revisa los cambios de este workspace respecto a la rama de la que salió (git diff y git log). Dime qué está bien, qué cambiarías y si falta algún test. No modifiques nada todavía.",
+  );
 
 // Statuses whose agent may still have a live terminal.
 export const isActive = (s: TaskStatus) =>
@@ -317,29 +319,29 @@ export const isActive = (s: TaskStatus) =>
 export const statusLabel = (s: TaskStatus): string => {
   switch (s.type) {
     case "queued":
-      return "En cola";
+      return t("En cola");
     case "preparing-workspace":
-      return "Preparando";
+      return t("Preparando");
     case "running":
-      return "En ejecución";
+      return t("En ejecución");
     case "waiting-for-user":
-      return "Te espera";
+      return t("Te espera");
     case "paused-by-limit":
-      return `Pausada hasta las ${hhmm(s.resume_at)}`;
+      return t("Pausada hasta las {time}", { time: hhmm(s.resume_at) });
     case "done":
-      return "Hecha";
+      return t("Hecha");
     case "failed":
-      return "Fallida";
+      return t("Fallida");
   }
 };
 
 /** "hace 5 min", "hace 2 h", "ayer"… */
 export function ago(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return "ahora";
-  if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
-  if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;
-  return s < 172800 ? "ayer" : `hace ${Math.floor(s / 86400)} días`;
+  if (s < 60) return t("ahora");
+  if (s < 3600) return t("hace {n} min", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("hace {n} h", { n: Math.floor(s / 3600) });
+  return s < 172800 ? t("ayer") : t("hace {n} días", { n: Math.floor(s / 86400) });
 }
 
-export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { t } from "../i18n";
 
 const SHOWN = 50;
 
@@ -58,7 +59,7 @@ export function QuickOpen({ taskKey, onOpen, onClose }: Props) {
       .then(setFiles)
       .catch(() => {
         setFiles([]);
-        setError("El daemon no ha dado la lista de archivos. Si es de antes de ⌘P, reinícialo.");
+        setError(t("El daemon no ha dado la lista de archivos. Si es de antes de ⌘P, reinícialo."));
       });
   }, [taskKey]);
 
@@ -86,13 +87,13 @@ export function QuickOpen({ taskKey, onOpen, onClose }: Props) {
 
   return (
     <div className="backdrop" onClick={onClose}>
-      <div className="dialog quickopen" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Abrir archivo">
+      <div className="dialog quickopen" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("Abrir archivo")}>
         <input
           className="input"
           autoFocus
           value={query}
-          placeholder={files ? `Buscar entre ${files.length} archivos…` : "Cargando archivos…"}
-          aria-label="Nombre del archivo"
+          placeholder={files ? t("Buscar entre {n} archivos…", { n: files.length }) : t("Cargando archivos…")}
+          aria-label={t("Nombre del archivo")}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
@@ -128,7 +129,7 @@ export function QuickOpen({ taskKey, onOpen, onClose }: Props) {
             );
           })}
           {error && <div className="error" style={{ padding: 10 }}>{error}</div>}
-          {files && !error && matches.length === 0 && <div className="muted" style={{ padding: 10 }}>Ningún archivo coincide.</div>}
+          {files && !error && matches.length === 0 && <div className="muted" style={{ padding: 10 }}>{t("Ningún archivo coincide.")}</div>}
         </div>
       </div>
     </div>

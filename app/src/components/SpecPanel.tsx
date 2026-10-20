@@ -4,6 +4,7 @@ import { on } from "../live";
 import { COLUMNS, columnOf, type Column } from "../phases";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
+import { t } from "../i18n";
 
 /** A task's SpecKit spec: the phase it is in, its documents and the tasks.md checklist. */
 export function SpecPanel({ task }: { task: Task }) {
@@ -50,7 +51,7 @@ export function SpecPanel({ task }: { task: Task }) {
 
       {!spec.dir ? (
         <div className="muted" style={{ fontSize: 12 }}>
-          Aún no hay carpeta de spec en <span className="mono">specs/</span>. Aparece aquí en cuanto el agente la cree.
+          {t("Aún no hay carpeta de spec en specs/. Aparece aquí en cuanto el agente la cree.")}
         </div>
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -68,7 +69,7 @@ export function SpecPanel({ task }: { task: Task }) {
       {spec.total > 0 && (
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <span className="sec">Subtareas</span>
+            <span className="sec">{t("Subtareas")}</span>
             <span className="bar" style={{ width: 120 }}>
               <span style={{ width: `${(spec.done / spec.total) * 100}%`, background: spec.done === spec.total ? "var(--done)" : "var(--run)" }} />
             </span>
@@ -82,7 +83,7 @@ export function SpecPanel({ task }: { task: Task }) {
               return (
                 <details key={gi} open={done < g.items.length}>
                   <summary>
-                    <span className="trunc" style={{ flex: 1 }}>{g.title || "Tareas"}</span>
+                    <span className="trunc" style={{ flex: 1 }}>{g.title || t("Tareas")}</span>
                     <span className="mono muted">
                       {done}/{g.items.length}
                     </span>
@@ -94,9 +95,9 @@ export function SpecPanel({ task }: { task: Task }) {
                         <span className={`box ${item.done ? "c-done" : "c-mut"}`}>{item.done ? <Icon name="done" /> : <span className="empty-box" />}</span>
                         {item.id && <span className="mono muted">{item.id}</span>}
                         <span className="selectable" style={{ flex: 1 }}>{item.text}</span>
-                        {item.parallel && <span className="tag" title="Se puede hacer en paralelo">P</span>}
+                        {item.parallel && <span className="tag" title={t("Se puede hacer en paralelo")}>P</span>}
                         {item.story && <span className="tag">{item.story}</span>}
-                        {current && <span className="tag tag-run">{running ? "en curso" : "siguiente"}</span>}
+                        {current && <span className="tag tag-run">{running ? t("en curso") : t("siguiente")}</span>}
                       </div>
                     );
                   })}
@@ -130,7 +131,7 @@ function Stepper({ at }: { at: number }) {
       {COLUMNS.map((c: { id: Column; label: string }, i) => (
         <li key={c.id} className={i < at ? "past" : i === at ? "now" : ""}>
           <span className="dot-step">{i < at ? <Icon name="done" /> : i + 1}</span>
-          {c.label}
+          {t(c.label)}
         </li>
       ))}
     </ol>

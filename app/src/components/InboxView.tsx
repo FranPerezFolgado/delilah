@@ -3,6 +3,7 @@ import { ago, api, hhmm, type InboxItem, type InboxKind } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
+import { locale, t } from "../i18n";
 
 const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> = {
   permission: { label: "Necesita un permiso", icon: "wait", cls: "c-wait" },
@@ -27,15 +28,15 @@ export function InboxView({ items, onOpenTask, onOpenChanges, onChanged }: Props
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
-        <h1 data-tauri-drag-region>Bandeja</h1>
+        <h1 data-tauri-drag-region>{t("Bandeja")}</h1>
         <span className="muted" style={{ fontSize: 12 }}>
-          lo que te espera, de todas las tareas
+          {t("lo que te espera, de todas las tareas")}
         </span>
       </div>
       {items.length === 0 ? (
         <div className="empty">
           <Icon name="done" className="c-done" />
-          <span>Nada pendiente. Los agentes siguen a lo suyo.</span>
+          <span>{t("Nada pendiente. Los agentes siguen a lo suyo.")}</span>
         </div>
       ) : (
         <div className="view-body inbox">
@@ -88,14 +89,14 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
     <article className="card inbox-item">
       <header className="inbox-head">
         <Icon name={kind.icon} className={kind.cls} />
-        <b className={kind.cls}>{kind.label}</b>
+        <b className={kind.cls}>{t(kind.label)}</b>
         <button className="btn btn-ghost inbox-task" onClick={() => onOpenTask(item.task, s?.id)}>
           <span className="mono muted">{item.task}</span>
           <span className="trunc">{item.title}</span>
         </button>
         {s && !s.primary && <span className="tag">{s.label}</span>}
         {item.since && item.kind !== "paused" && (
-          <span className="muted" style={{ marginLeft: "auto", fontSize: 11.5, flex: "none" }} title={new Date(item.since).toLocaleString("es-ES")}>
+          <span className="muted" style={{ marginLeft: "auto", fontSize: 11.5, flex: "none" }} title={new Date(item.since).toLocaleString(locale())}>
             {ago(item.since)}
           </span>
         )}
@@ -109,12 +110,12 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       )}
       {long && !item.ask && (
         <button className="btn btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => setExpanded((e) => !e)}>
-          {expanded ? "Ver menos" : "Ver todo"}
+          {expanded ? t("Ver menos") : t("Ver todo")}
         </button>
       )}
       {item.kind === "paused" && item.since && (
         <div className="muted" style={{ fontSize: 12.5 }}>
-          Se reanuda sola a las <b>{hhmm(item.since)}</b>.
+          {t("Se reanuda sola a las {time}.", { time: hhmm(item.since) })}
         </div>
       )}
 
@@ -130,52 +131,52 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
             className="input"
             value={reply}
             onChange={(e) => setReply(e.target.value)}
-            placeholder="Responder… (Enter envía)"
-            aria-label={`Responder a ${item.task}`}
+            placeholder={t("Responder… (Enter envía)")}
+            aria-label={t("Responder a {task}", { task: item.task })}
             disabled={busy}
           />
-          <button className="btn btn-p" disabled={busy || !reply.trim()}>Enviar</button>
+          <button className="btn btn-p" disabled={busy || !reply.trim()}>{t("Enviar")}</button>
         </form>
       )}
 
       <div className="inbox-actions">
         {s && s.live && (
           <button className={`btn ${item.kind === "permission" ? "btn-p" : ""}`} onClick={() => onOpenTask(item.task, s.id)}>
-            <Icon name="console" /> {item.kind === "permission" ? "Responder en su terminal" : "Abrir la sesión"}
+            <Icon name="console" /> {item.kind === "permission" ? t("Responder en su terminal") : t("Abrir la sesión")}
           </button>
         )}
         {s && !s.live && (
           <>
-            <span className="muted" style={{ fontSize: 12 }}>La sesión está parada.</span>
+            <span className="muted" style={{ fontSize: 12 }}>{t("La sesión está parada.")}</span>
             <button
               className="btn btn-p"
               disabled={busy}
               onClick={() => act(async () => (await api.reopenSession(s.id), onOpenTask(item.task, s.id)))}
             >
-              Reabrir y responder
+              {t("Reabrir y responder")}
             </button>
           </>
         )}
         {item.kind === "waiting" && !s && (
           <button className="btn" onClick={() => onOpenTask(item.task)}>
-            <Icon name="console" /> Abrir la tarea
+            <Icon name="console" /> {t("Abrir la tarea")}
           </button>
         )}
         {item.kind === "review" && (
           <>
             <button className="btn btn-p" onClick={() => onOpenChanges(item.task)}>
-              <Icon name="diff" /> Ver cambios
+              <Icon name="diff" /> {t("Ver cambios")}
             </button>
-            <button className="btn" onClick={() => onOpenTask(item.task)}>Abrir la tarea</button>
+            <button className="btn" onClick={() => onOpenTask(item.task)}>{t("Abrir la tarea")}</button>
           </>
         )}
         {item.kind === "paused" && (
           <button className="btn" disabled={busy} onClick={() => act(() => api.resume(item.task))}>
-            Reanudar ahora
+            {t("Reanudar ahora")}
           </button>
         )}
         {item.kind === "failed" && (
-          <button className="btn" onClick={() => onOpenTask(item.task)}>Abrir la tarea</button>
+          <button className="btn" onClick={() => onOpenTask(item.task)}>{t("Abrir la tarea")}</button>
         )}
       </div>
       {error && <div className="error selectable">{error}</div>}

@@ -54,6 +54,7 @@ pub fn attention_change(
     limited: bool,
     current: Option<&Attention>,
     now: DateTime<Utc>,
+    lang: crate::lang::Lang,
 ) -> Change {
     let text = |field: &str| hook[field].as_str().map(clip).filter(|t| !t.is_empty());
     let set = |kind, text: String| {
@@ -68,24 +69,36 @@ pub fn attention_change(
         _ if limited => Change::Clear,
         Signal::TurnEnded => set(
             AttentionKind::Question,
-            text("last_assistant_message").unwrap_or_else(|| "El agente terminó su turno.".into()),
+            text("last_assistant_message").unwrap_or_else(|| {
+                lang.pick(
+                    "El agente terminó su turno.",
+                    "The agent finished its turn.",
+                )
+                .into()
+            }),
         ),
         Signal::TurnFailed => set(
             AttentionKind::Error,
             text("error")
                 .or_else(|| text("message"))
-                .unwrap_or_else(|| "El turno falló.".into()),
+                .unwrap_or_else(|| lang.pick("El turno falló.", "The turn failed.").into()),
         ),
         Signal::NeedsUser => match hook["notification_type"].as_str() {
             Some("permission_prompt") => set(
                 AttentionKind::Permission,
-                text("message").unwrap_or_else(|| "Claude necesita un permiso.".into()),
+                text("message").unwrap_or_else(|| {
+                    lang.pick("Claude necesita un permiso.", "Claude needs a permission.")
+                        .into()
+                }),
             ),
             // "Waiting for your input" after a turn: what it said at the end is the news.
             _ if current.is_some() => Change::Keep,
             _ => set(
                 AttentionKind::Question,
-                text("message").unwrap_or_else(|| "El agente te espera.".into()),
+                text("message").unwrap_or_else(|| {
+                    lang.pick("El agente te espera.", "The agent is waiting for you.")
+                        .into()
+                }),
             ),
         },
         _ => Change::Keep,
@@ -236,7 +249,12 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             _ => None,
         };
         let review = in_review.map(|s| {
-            let progress = format!("{}/{} subtareas hechas", s.done, s.total);
+            let progress = format!(
+                "{}/{} {}",
+                s.done,
+                s.total,
+                app.lang().pick("subtareas hechas", "subtasks done")
+            );
             (ItemKind::Review, Some(progress), "phase-reached")
         });
         for (kind, text, event) in found.into_iter().chain(review) {
@@ -270,7 +288,7 @@ async fn last_event(app: &AppState, t: &Task, name: &str) -> Option<DateTime<Utc
 /// project itself. None when the task is gone or finished.
 fn owner_title(owner: &str, task: Option<&Task>) -> Option<String> {
     match crate::store_sessions::project_of(owner) {
-        Some(project) => Some(format!("Proyecto {project}")),
+        Some(project) => Some(project.to_string()),
         None => task.map(|t| t.title.clone()),
     }
 }
@@ -321,7 +339,14 @@ mod tests {
     fn a_finished_turn_asks_with_its_last_message() {
         let hook =
             json!({ "hook_event_name": "Stop", "last_assistant_message": "¿Uso cursor o offset?" });
-        let Change::Set(a) = attention_change(Signal::TurnEnded, &hook, false, None, now()) else {
+        let Change::Set(a) = attention_change(
+            Signal::TurnEnded,
+            &hook,
+            false,
+            None,
+            now(),
+            crate::lang::Lang::Es,
+        ) else {
             panic!("expected an attention");
         };
         assert_eq!(a.kind, AttentionKind::Question);
@@ -337,13 +362,25 @@ mod tests {
         };
         let idle = json!({ "notification_type": "idle_prompt", "message": "Claude is waiting for your input" });
         assert_eq!(
-            attention_change(Signal::NeedsUser, &idle, false, Some(&question), now()),
+            attention_change(
+                Signal::NeedsUser,
+                &idle,
+                false,
+                Some(&question),
+                now(),
+                crate::lang::Lang::Es
+            ),
             Change::Keep
         );
         let perm = json!({ "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash" });
-        let Change::Set(a) =
-            attention_change(Signal::NeedsUser, &perm, false, Some(&question), now())
-        else {
+        let Change::Set(a) = attention_change(
+            Signal::NeedsUser,
+            &perm,
+            false,
+            Some(&question),
+            now(),
+            crate::lang::Lang::Es,
+        ) else {
             panic!("expected an attention");
         };
         assert_eq!(a.kind, AttentionKind::Permission);
@@ -353,11 +390,25 @@ mod tests {
     fn answering_or_hitting_the_limit_clears_it() {
         let hook = json!({});
         assert_eq!(
-            attention_change(Signal::PromptSubmitted, &hook, false, None, now()),
+            attention_change(
+                Signal::PromptSubmitted,
+                &hook,
+                false,
+                None,
+                now(),
+                crate::lang::Lang::Es
+            ),
             Change::Clear
         );
         assert_eq!(
-            attention_change(Signal::TurnEnded, &hook, true, None, now()),
+            attention_change(
+                Signal::TurnEnded,
+                &hook,
+                true,
+                None,
+                now(),
+                crate::lang::Lang::Es
+            ),
             Change::Clear
         );
     }

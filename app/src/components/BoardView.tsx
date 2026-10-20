@@ -2,6 +2,7 @@ import { statusLabel, type SpecSummary, type Task } from "../api";
 import { COLUMNS, columnOf } from "../phases";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
+import { t } from "../i18n";
 
 interface Props {
   tasks: Task[];
@@ -15,19 +16,19 @@ export function BoardView({ tasks, specs, onOpen, onNewTask }: Props) {
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
-        <h1 data-tauri-drag-region>Tareas</h1>
+        <h1 data-tauri-drag-region>{t("Tareas")}</h1>
         <span className="muted" style={{ fontSize: 12 }}>
-          por fase de la spec
+          {t("por fase de la spec")}
         </span>
         <button className="btn" style={{ marginLeft: "auto" }} onClick={onNewTask}>
-          <Icon name="plus" /> Nueva tarea
+          <Icon name="plus" /> {t("Nueva tarea")}
         </button>
       </div>
       {tasks.length === 0 ? (
         <div className="empty">
-          <span>Todavía no hay tareas.</span>
+          <span>{t("Todavía no hay tareas.")}</span>
           <button className="btn btn-p" onClick={onNewTask}>
-            Nueva tarea
+            {t("Nueva tarea")}
           </button>
         </div>
       ) : (
@@ -35,9 +36,9 @@ export function BoardView({ tasks, specs, onOpen, onNewTask }: Props) {
           {COLUMNS.map((col) => {
             const cards = tasks.filter((t) => columnOf(t, specs[t.key]) === col.id);
             return (
-              <section className="col" key={col.id} aria-label={col.label}>
+              <section className="col" key={col.id} aria-label={t(col.label)}>
                 <div className="col-head">
-                  <b>{col.label}</b>
+                  <b>{t(col.label)}</b>
                   <span className="mono muted">{cards.length}</span>
                 </div>
                 <div className="col-body">

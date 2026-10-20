@@ -36,6 +36,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(config.addr).await?;
     tracing::info!(addr = %config.addr, home = %config.home.display(), "delilahd listening");
     let app = AppState::new(store, config);
+    app.load_language().await;
     scheduler::spawn(app.clone());
     specs::spawn(app.clone());
     axum::serve(listener, api::router(app))

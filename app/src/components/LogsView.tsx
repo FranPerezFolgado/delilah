@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DAEMON_URL } from "../api";
 import { Icon } from "./Icon";
+import { t } from "../i18n";
 
 /** Help › Ver logs: what the daemon has been doing, followed live while open. */
 export function LogsView({ onClose }: { onClose: () => void }) {
@@ -14,13 +15,13 @@ export function LogsView({ onClose }: { onClose: () => void }) {
     let alive = true;
     const load = () =>
       fetch(`${DAEMON_URL}/api/v1/logs?lines=2000`)
-        .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`delilahd respondió ${r.status}`))))
+        .then((r) => (r.ok ? r.text() : Promise.reject(new Error(t("delilahd respondió {status}", { status: r.status })))))
         .then((t) => {
           if (!alive) return;
           setText(t);
           setError(null);
         })
-        .catch(() => alive && setError("No se pueden leer los logs: ¿está arrancado delilahd?"));
+        .catch(() => alive && setError(t("No se pueden leer los logs: ¿está arrancado delilahd?")));
     load();
     const timer = setInterval(load, 2000);
     return () => {
@@ -47,23 +48,22 @@ export function LogsView({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog logs" role="dialog" aria-label="Logs de delilahd">
+      <div className="dialog logs" role="dialog" aria-label={t("Logs de delilahd")}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h2 style={{ flex: 1 }}>Logs de delilahd</h2>
-          <input className="input" style={{ width: 220 }} placeholder="Filtrar…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filtrar los logs" />
+          <h2 style={{ flex: 1 }}>{t("Logs de delilahd")}</h2>
+          <input className="input" style={{ width: 220 }} placeholder={t("Filtrar…")} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={t("Filtrar los logs")} />
           <label className="muted" style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12 }}>
-            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Seguir
+            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t("Seguir")}
           </label>
-          <button className="btn" onClick={() => navigator.clipboard.writeText(shown).catch(() => {})}>Copiar</button>
-          <button className="btn btn-ghost" onClick={onClose} aria-label="Cerrar">
+          <button className="btn" onClick={() => navigator.clipboard.writeText(shown).catch(() => {})}>{t("Copiar")}</button>
+          <button className="btn btn-ghost" onClick={onClose} aria-label={t("Cerrar")}>
             <Icon name="close" />
           </button>
         </div>
         {error && <div className="error">{error}</div>}
-        <pre ref={box} className="logs-text selectable">{shown || "Sin logs todavía."}</pre>
+        <pre ref={box} className="logs-text selectable">{shown || t("Sin logs todavía.")}</pre>
         <div className="muted" style={{ fontSize: 11.5 }}>
-          Las últimas 2000 líneas del daemon, actualizadas cada 2 s. Los registros de cada sesión están en la carpeta de su tarea
-          (<span className="mono">~/.delilah/tasks/&lt;CLAVE&gt;</span>).
+          {t("Las últimas 2000 líneas del daemon, actualizadas cada 2 s. Los registros de cada sesión están en la carpeta de su tarea (~/.delilah/tasks/<CLAVE>).")}
         </div>
       </div>
     </div>

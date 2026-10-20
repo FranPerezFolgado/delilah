@@ -4,6 +4,7 @@ import { sessionStatus } from "./sessionLabels";
 import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
 import { statusIcon } from "./status";
+import { t, tn } from "../i18n";
 
 export type View = "inbox" | "board" | "tasks" | "jira" | "projects" | "settings";
 
@@ -73,27 +74,27 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
     ...(tasks.some((t) => !t.project) ? [group(null)] : []),
   ];
   return (
-    <nav className="sidebar" aria-label="Navegación">
+    <nav className="sidebar" aria-label={t("Navegación")}>
       <button className={`nav ${view === "inbox" ? "on" : ""}`} onClick={() => onView("inbox")}>
-        <Icon name="inbox" /> Bandeja
+        <Icon name="inbox" /> {t("Bandeja")}
         {waiting > 0 ? <span className="count badge mono">{waiting}</span> : <span className="count mono" />}
         <span className="kbd">{keyOf("view-inbox")}</span>
       </button>
       <button className={`nav ${view === "board" ? "on" : ""}`} onClick={() => onView("board")}>
-        <Icon name="tasks" /> Tareas <span className="count mono">{tasks.length}</span>
+        <Icon name="tasks" /> {t("Tareas")} <span className="count mono">{tasks.length}</span>
         <span className="kbd">{keyOf("view-tasks")}</span>
       </button>
       <button className={`nav ${view === "jira" ? "on" : ""}`} onClick={() => onView("jira")}>
         <Icon name="ticket" /> Jira <span className="kbd" style={{ marginLeft: "auto" }}>{keyOf("view-jira")}</span>
       </button>
       <button className={`nav ${view === "projects" ? "on" : ""}`} onClick={() => onView("projects")}>
-        <Icon name="folder" /> Proyectos <span className="kbd" style={{ marginLeft: "auto" }}>{keyOf("view-projects")}</span>
+        <Icon name="folder" /> {t("Proyectos")} <span className="kbd" style={{ marginLeft: "auto" }}>{keyOf("view-projects")}</span>
       </button>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 8px 4px" }}>
-        <span className="sec">Proyectos</span>
+        <span className="sec">{t("Proyectos")}</span>
         <button className="btn btn-ghost" style={{ height: 22, padding: "0 6px" }} onClick={onNewTask}>
-          <Icon name="plus" /> Tarea <span className="kbd">{keyOf("new-task")}</span>
+          <Icon name="plus" /> {t("Tarea")} <span className="kbd">{keyOf("new-task")}</span>
         </button>
       </div>
       {groups.map((g) => {
@@ -108,7 +109,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
             className="chev-btn"
             onClick={() => toggle(id)}
             aria-expanded={!folded}
-            aria-label={folded ? "Desplegar" : "Plegar"}
+            aria-label={folded ? t("Desplegar") : t("Plegar")}
           >
             <span className={`chev ${folded ? "" : "open"}`}>›</span>
           </button>
@@ -123,7 +124,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
                 <span className="trunc">{g.project.name}</span>
                 {folded && count > 0 && <span className={`pcount mono ${waitingHere ? "c-wait" : ""}`}>{count}</span>}
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={() => onAsk(g.project!.name)} title="Preguntar a Claude sobre el proyecto" aria-label={`Preguntar a Claude sobre ${g.project.name}`}>
+              <button className="btn btn-ghost icon-btn" onClick={() => onAsk(g.project!.name)} title={t("Preguntar a Claude sobre el proyecto")} aria-label={t("Preguntar a Claude sobre {name}", { name: g.project.name })}>
                 <Icon name="plus" />
               </button>
             </div>
@@ -131,7 +132,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
             <div className="phead">
               {chevron}
               <button className="phead-main" onClick={() => toggle(id)} style={{ fontWeight: 500, color: "var(--tx3)" }}>
-                Sin proyecto
+                {t("Sin proyecto")}
                 {folded && count > 0 && <span className="pcount mono">{count}</span>}
               </button>
             </div>
@@ -139,7 +140,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
           {!folded && g.sessions.map((s) => {
             const st = sessionStatus(s, undefined);
             return (
-              <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? "Claude en solo lectura" : s.label}>
+              <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? t("Claude en solo lectura") : s.label}>
                 <Icon name={s.kind === "shell" ? "console" : st.icon} className={s.kind === "shell" ? "c-mut" : st.cls} />
                 <span className="trunc" style={{ flex: 1 }}>{s.label}</span>
                 {s.read_only && <Icon name="lock" className="c-mut" />}
@@ -156,15 +157,15 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
               </button>
             );
           })}
-          {!folded && g.done > 0 && <div className="pdone muted">{g.done} {g.done === 1 ? "hecha" : "hechas"} · en Tareas</div>}
+          {!folded && g.done > 0 && <div className="pdone muted">{tn(g.done, "{n} hecha · en Tareas", "{n} hechas · en Tareas")}</div>}
         </div>
         );
       })}
       {projects.length === 0 && tasks.length === 0 && (
-        <p className="muted" style={{ padding: "4px 8px", fontSize: 12 }}>Añade un proyecto en Proyectos.</p>
+        <p className="muted" style={{ padding: "4px 8px", fontSize: 12 }}>{t("Añade un proyecto en Proyectos.")}</p>
       )}
       <button className={`nav ${view === "settings" ? "on" : ""}`} style={{ marginTop: "auto" }} onClick={() => onView("settings")}>
-        <Icon name="settings" /> Ajustes
+        <Icon name="settings" /> {t("Ajustes")}
       </button>
     </nav>
   );

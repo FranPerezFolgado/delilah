@@ -189,8 +189,13 @@ pub async fn start_run(
     let prompt = match (&req.prompt, issue) {
         (None, Some(issue)) => {
             let path = app.config.task_dir(&req.key).join("ticket.md");
-            match crate::jira::write_ticket(&path, &issue) {
-                Ok(()) => format!("{prompt} (el ticket de Jira está en {})", path.display()),
+            match crate::jira::write_ticket(&path, &issue, app.lang()) {
+                Ok(()) => format!(
+                    "{prompt} ({} {})",
+                    app.lang()
+                        .pick("el ticket de Jira está en", "the Jira ticket is at"),
+                    path.display()
+                ),
                 Err(e) => {
                     tracing::warn!(task = %key, "cannot write the ticket: {e}");
                     prompt
@@ -207,11 +212,13 @@ pub async fn start_run(
             let _ = live.pty.kill();
             live.pty.wait().await;
         }
-        app.store.adopt_session(&session.id, &req.key).await?;
+        app.store
+            .adopt_session(&session.id, &req.key, app.lang().pick("Principal", "Main"))
+            .await?;
         session.task = req.key.clone();
         session.primary = true;
         session.read_only = false;
-        session.label = "Principal".into();
+        session.label = app.lang().pick("Principal", "Main").into();
         launch_session(&app, &session, &ws.path, None, true)?;
         app.emit(crate::events::Topic::Sessions);
     } else {
@@ -219,7 +226,7 @@ pub async fn start_run(
             id: uuid::Uuid::new_v4().to_string(),
             task: req.key.clone(),
             kind: SessionKind::Claude,
-            label: "Principal".into(),
+            label: app.lang().pick("Principal", "Main").into(),
             primary: true,
             closed: false,
             read_only: false,

@@ -4,6 +4,7 @@ import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
+import { setLanguage, t, type LangSetting } from "./i18n";
 import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
 import { JiraView } from "./components/JiraView";
@@ -89,6 +90,19 @@ export function App() {
     };
   }, [refresh]);
 
+  // The language: "auto" follows the Mac. Changing it re-renders everything.
+  const [language, setLanguageState] = useState<LangSetting>("auto");
+  const applyLanguage = (l: LangSetting) => {
+    setLanguage(l);
+    setLanguageState(l);
+  };
+  useEffect(() => {
+    api
+      .preference<LangSetting>("language")
+      .then((l) => l && applyLanguage(l))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     api
       .preference<Partial<Bindings>>("shortcuts")
@@ -148,7 +162,7 @@ export function App() {
         const kind: SessionKind = action === "new-terminal" ? "shell" : "claude";
         // In a task the new session opens as one of its tabs.
         if (view === "tasks" && (selected?.startsWith("@") || sessions.some((s) => s.task === selected))) return void window.dispatchEvent(new CustomEvent("delilah:new-session", { detail: kind }));
-        setToast("Abre una tarea con workspace, o un proyecto, para abrir una sesión.");
+        setToast(t("Abre una tarea con workspace, o un proyecto, para abrir una sesión."));
         return;
       }
       case "close-session":
@@ -240,15 +254,14 @@ export function App() {
             <div className="notice" style={{ margin: 12, borderColor: "var(--err)" }}>
               <span className="c-err">●</span>
               <span>
-                No hay conexión con <span className="mono">delilahd</span>.{" "}
+                {t("No hay conexión con delilahd.")}{" "}
                 {import.meta.env.DEV ? (
                   <>
-                    En desarrollo arráncalo con <span className="mono selectable">scripts/dev-daemon.sh</span>.
+                    {t("En desarrollo arráncalo con")} <span className="mono selectable">scripts/dev-daemon.sh</span>.
                   </>
                 ) : (
                   <>
-                    Delilah lo arranca al abrirse; si sigue así, prueba <b>Delilah → Reiniciar el daemon</b> y mira{" "}
-                    <span className="mono selectable">~/Library/Logs/Delilah/delilahd.log</span>.
+                    {t("Delilah lo arranca al abrirse; si sigue así, prueba Delilah → Reiniciar el daemon, o mira Ayuda → Ver logs.")}
                   </>
                 )}
               </span>
@@ -268,7 +281,7 @@ export function App() {
           )}
           {view === "tasks" &&
             (owner ? (
-              <Suspense fallback={<div className="empty">Cargando…</div>}>
+              <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
                 <TaskScreen
                   key={owner}
                   owner={owner}
@@ -286,8 +299,8 @@ export function App() {
               </Suspense>
             ) : (
               <div className="empty">
-                <span>Elige una tarea del tablero.</span>
-                <button className="btn" onClick={() => setView("board")}>Ir al tablero</button>
+                <span>{t("Elige una tarea del tablero.")}</span>
+                <button className="btn" onClick={() => setView("board")}>{t("Ir al tablero")}</button>
               </div>
             ))}
           {view === "jira" && (
@@ -303,7 +316,15 @@ export function App() {
             />
           )}
           {view === "projects" && <ProjectsView projects={projects} onChanged={refresh} />}
-          {view === "settings" && <SettingsView bindings={bindings} onChange={applyBindings} />}
+          {view === "settings" && <SettingsView
+              bindings={bindings}
+              onChange={applyBindings}
+              language={language}
+              onLanguage={(l) => {
+                applyLanguage(l);
+                api.setPreference("language", l).catch((e) => setToast((e as Error).message));
+              }}
+            />}
         </main>
       </div>
       <StatusBar online={online} active={active} usage={usage} />

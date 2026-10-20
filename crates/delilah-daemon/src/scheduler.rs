@@ -37,7 +37,7 @@ mod tests {
     use portable_pty::CommandBuilder;
 
     use super::*;
-    use crate::actions::CONTINUE_PROMPT;
+    use crate::actions::continue_prompt;
     use crate::config::Config;
     use crate::store::Store;
     use crate::store_sessions::SessionKind;
@@ -103,7 +103,7 @@ mod tests {
         })
         .await
         .unwrap_or_else(|_| panic!("the agent never got the prompt: {seen:?}"));
-        assert!(CONTINUE_PROMPT.starts_with("Se ha restablecido"));
+        assert!(continue_prompt(crate::lang::Lang::Es).starts_with("Se ha restablecido"));
         assert_eq!(
             app.notifier.recorded().last().unwrap().title,
             "PROJ-1 reanudada"

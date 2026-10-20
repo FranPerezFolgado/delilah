@@ -16,8 +16,12 @@ use crate::store::StoreError;
 use crate::store_sessions::SessionKind;
 
 /// What the agent is told when it picks up after a pause.
-pub const CONTINUE_PROMPT: &str =
-    "Se ha restablecido el límite de uso. Continúa la tarea donde la dejaste.";
+pub fn continue_prompt(lang: crate::lang::Lang) -> &'static str {
+    lang.pick(
+        "Se ha restablecido el límite de uso. Continúa la tarea donde la dejaste.",
+        "The usage limit has reset. Carry on with the task where you left it.",
+    )
+}
 
 pub async fn resume(
     State(app): State<AppState>,
@@ -96,7 +100,7 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
     let live = app.sessions.of_task(key.as_str());
     for session in live.iter().filter(|l| l.kind == SessionKind::Claude) {
         if (session.primary || session.state() == LiveState::Paused) && !session.pty.has_exited() {
-            type_prompt(session, CONTINUE_PROMPT).await?;
+            type_prompt(session, continue_prompt(app.lang())).await?;
         }
     }
     if live.iter().any(|l| l.primary && !l.pty.has_exited()) {
@@ -112,7 +116,13 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
         .workspace(key)
         .await?
         .ok_or_else(|| ApiError::not_found(format!("{key} has no workspace")))?;
-    launch_session(app, &primary, &ws.path, Some(CONTINUE_PROMPT), true)
+    launch_session(
+        app,
+        &primary,
+        &ws.path,
+        Some(continue_prompt(app.lang())),
+        true,
+    )
 }
 
 /// Writes a message into an agent's terminal as if the user typed it.

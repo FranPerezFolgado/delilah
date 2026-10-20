@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { t, type LangSetting } from "../i18n";
 import { ACTIONS, type ActionId, type Bindings, comboFromEvent, DEFAULTS, formatCombo, setRecording } from "../shortcuts";
 
-/** Settings. For now, the keyboard shortcuts: press "Cambiar", then the new keys. */
-export function SettingsView({ bindings, onChange }: { bindings: Bindings; onChange: (b: Bindings) => void }) {
+interface Props {
+  bindings: Bindings;
+  onChange: (b: Bindings) => void;
+  language: LangSetting;
+  onLanguage: (l: LangSetting) => void;
+}
+
+/** Settings: the language, and the keyboard shortcuts (press "Cambiar", then the new keys). */
+export function SettingsView({ bindings, onChange, language, onLanguage }: Props) {
   const [recordingFor, setRecordingFor] = useState<ActionId | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,19 +52,32 @@ export function SettingsView({ bindings, onChange }: { bindings: Bindings; onCha
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
-        <h1 data-tauri-drag-region>Ajustes</h1>
+        <h1 data-tauri-drag-region>{t("Ajustes")}</h1>
       </div>
       <div className="view-body">
+        <div>
+          <div className="sec" style={{ marginBottom: 8 }}>{t("Idioma")}</div>
+          <div className="segs" role="radiogroup" aria-label={t("Idioma")} style={{ display: "inline-flex" }}>
+            {(["auto", "es", "en"] as LangSetting[]).map((l) => (
+              <button key={l} role="radio" aria-checked={language === l} className={`seg ${language === l ? "on" : ""}`} onClick={() => onLanguage(l)}>
+                {l === "auto" ? t("Automático (el del Mac)") : l === "es" ? "Español" : "English"}
+              </button>
+            ))}
+          </div>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {t("También cambia lo que Delilah le escribe a Claude y las notificaciones. El menú del Mac cambia al volver a abrir la app.")}
+          </p>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="sec">Atajos de teclado</span>
+          <span className="sec">{t("Atajos de teclado")}</span>
           <button className="btn" style={{ marginLeft: "auto" }} onClick={() => save({ ...DEFAULTS })}>
-            Restablecer todos
+            {t("Restablecer todos")}
           </button>
         </div>
         {error && <div className="error selectable">{error}</div>}
         {groups.map((group) => (
           <div key={group}>
-            <div className="muted" style={{ fontSize: 12, margin: "4px 0 6px" }}>{group}</div>
+            <div className="muted" style={{ fontSize: 12, margin: "4px 0 6px" }}>{t(group)}</div>
             <div className="card history">
               {ACTIONS.filter((a) => a.group === group).map((a) => {
                 const other = clash(a.id);
@@ -64,18 +85,18 @@ export function SettingsView({ bindings, onChange }: { bindings: Bindings; onCha
                 return (
                   <div key={a.id} className="row" style={{ gridTemplateColumns: "1fr auto auto auto", alignItems: "center", gap: 10 }}>
                     <span>
-                      {a.label}
-                      {other && <span className="c-err" style={{ fontSize: 12 }}> · coincide con «{other.label}»</span>}
+                      {t(a.label)}
+                      {other && <span className="c-err" style={{ fontSize: 12 }}> · {t("coincide con «{other}»", { other: t(other.label) })}</span>}
                     </span>
                     <span className="kbd" style={{ fontSize: 12, padding: "2px 6px", minWidth: 44, textAlign: "center" }}>
                       {recording ? "…" : formatCombo(bindings[a.id])}
                     </span>
                     <button className={`btn ${recording ? "btn-p" : ""}`} onClick={() => setRecordingFor(recording ? null : a.id)}>
-                      {recording ? "Pulsa las teclas (Esc cancela)" : "Cambiar"}
+                      {recording ? t("Pulsa las teclas (Esc cancela)") : t("Cambiar")}
                     </button>
                     <button className="btn btn-ghost" disabled={bindings[a.id] === a.default}
                       onClick={() => save({ ...bindings, [a.id]: a.default })}>
-                      Por defecto
+                      {t("Por defecto")}
                     </button>
                   </div>
                 );
@@ -84,8 +105,7 @@ export function SettingsView({ bindings, onChange }: { bindings: Bindings; onCha
           </div>
         ))}
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Se guardan en Delilah, así que valen en todas las ventanas. Las combinaciones necesitan ⌘, ⌃ u ⌥ para no
-          quitarle teclas a la terminal.
+          {t("Se guardan en Delilah, así que valen en todas las ventanas. Las combinaciones necesitan ⌘, ⌃ u ⌥ para no quitarle teclas a la terminal.")}
         </p>
       </div>
     </>

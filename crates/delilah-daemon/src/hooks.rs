@@ -77,6 +77,7 @@ pub async fn claude_hook(
             limit_reset.is_some(),
             current.as_ref(),
             Utc::now(),
+            app.lang(),
         );
         let changes = match &change {
             Change::Keep => false,
