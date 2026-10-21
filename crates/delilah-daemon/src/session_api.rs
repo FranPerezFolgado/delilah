@@ -34,6 +34,9 @@ pub struct OpenSession {
     /// Claude in plan mode. Defaults to true in a project (its checkout is yours),
     /// false in a task.
     pub read_only: Option<bool>,
+    /// An idea conversation (Claude, in a project only): shown as a chat that ends
+    /// in a task. Its label is "Idea" and it is never read-only.
+    pub conversation: Option<bool>,
 }
 
 /// Every open session, of every task.
@@ -80,16 +83,27 @@ async fn open_for(
     key: String,
     req: OpenSession,
 ) -> Result<(StatusCode, Json<SessionView>), ApiError> {
+    let conversation = req.conversation.unwrap_or(false);
+    if conversation && req.kind != SessionKind::Claude {
+        return Err(ApiError::bad_request("a conversation is a Claude session"));
+    }
+    if conversation && project_of(&key).is_none() {
+        return Err(ApiError::bad_request(
+            "a conversation can only be opened in a project",
+        ));
+    }
     let ws = crate::owners::workspace(app, &key)
         .await
         .map_err(|_| ApiError::conflict(format!("{key} has no workspace (archived?)")))?;
-    let read_only =
-        req.kind == SessionKind::Claude && req.read_only.unwrap_or(project_of(&key).is_some());
+    let read_only = !conversation
+        && req.kind == SessionKind::Claude
+        && req.read_only.unwrap_or(project_of(&key).is_some());
 
     let existing = app.store.open_sessions(Some(&key)).await?;
     let label = req
         .label
         .filter(|l| !l.trim().is_empty())
+        .or_else(|| conversation.then(|| "Idea".to_string()))
         .unwrap_or_else(|| {
             let same = existing.iter().filter(|s| s.kind == req.kind).count() + 1;
             match req.kind {
@@ -111,7 +125,7 @@ async fn open_for(
         primary: false,
         closed: false,
         read_only,
-        conversation: false,
+        conversation,
     };
     app.store.create_session(&record).await?;
     app.emit(Topic::Sessions);
@@ -397,6 +411,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_task_cannot_open_a_conversation() {
+        let (app, _) = task_with_two_sessions().await;
+        let (code, body) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/sessions",
+            Some(json!({ "kind": "claude", "conversation": true })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    #[tokio::test]
     async fn a_task_without_workspace_cannot_open_sessions() {
         let (app, _) = task_with_two_sessions().await;
         app.store
@@ -494,6 +521,77 @@ mod project_tests {
 
         let id = session["id"].as_str().unwrap();
         if let Some(live) = app.sessions.get(id) {
+            let _ = live.pty.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    async fn project_app() -> (AppState, std::path::PathBuf) {
+        let home = std::env::temp_dir().join(format!("delilah-conv-{}", uuid::Uuid::new_v4()));
+        let repo = home.join("plataforma");
+        std::fs::create_dir_all(&repo).unwrap();
+        let config = Config {
+            home: home.clone(),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&Project {
+                name: "plataforma".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+        (app, home)
+    }
+
+    fn post(body: Value) -> Request<Body> {
+        Request::post("/api/v1/projects/plataforma/sessions")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_conversation_opens_in_a_project_as_an_idea() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        assert_eq!(s["conversation"], true);
+        assert_eq!(s["label"], "Idea");
+        assert_eq!(s["read_only"], false);
+        if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
+            let _ = live.pty.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn a_shell_conversation_is_refused() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(&app, post(json!({ "kind": "shell", "conversation": true }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{s}");
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn without_conversation_a_project_claude_is_as_before() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(&app, post(json!({ "kind": "claude" }))).await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        assert_eq!(s["conversation"], false);
+        assert_eq!(s["label"], "Claude 1");
+        assert_eq!(s["read_only"], true);
+        if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
             let _ = live.pty.kill();
         }
         std::fs::remove_dir_all(home).ok();

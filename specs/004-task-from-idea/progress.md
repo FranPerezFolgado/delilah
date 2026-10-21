@@ -10,9 +10,9 @@ Mode: format=markdown commits=yes
 | WP-03 | 2 | 2A | verified | 1 | e460b09 | allow list also allows `Bash(rtk <cmd>:*)` forms (user decision); record in docs/decisions.md |
 | WP-04 | 2 | 2A | verified | 1 | faac645 | wire type "created-from-conversation" (kebab); JSON round-trip test moved to WP-05 |
 | WP-07 | 2 | 2A | verified | 1 | 5a88680 | App.tsx: no-op conversations fetcher |
-| WP-05 | 2 | 2B | verified | 1 | | +JSON round-trip of CreatedFromConversation |
+| WP-05 | 2 | 2B | verified | 1 | 7dae09c | +JSON round-trip of CreatedFromConversation |
 | WP-06 | 2 | 2B | verified | 1 | 2b0eda4 | |
-| WP-08 | 2 | 2C | pending | 0 | | |
+| WP-08 | 2 | 2C | verified | 2 | | |
 | WP-09 | 3 | 3A | pending | 0 | | |
 | WP-11 | 3 | 3A | pending | 0 | | |
 | WP-10 | 3 | 3B | pending | 0 | | split at T022/T023 if too large |

@@ -107,12 +107,12 @@
   - add `pub fn plugin_dir(&self) -> PathBuf` to `crates/delilah-daemon/src/config.rs`.
 
   Test: `plugin_dir()` is `<home>/plugins/delilah`.
-- [ ] T013 Write failing tests in `crates/delilah-daemon/src/session_api.rs` (pattern: the existing tests around line 467):
+- [X] T013 Write failing tests in `crates/delilah-daemon/src/session_api.rs` (pattern: the existing tests around line 467):
   - `POST /api/v1/projects/{p}/sessions {"kind":"claude","conversation":true}` → 201, with `conversation: true`, `label: "Idea"` and `read_only: false`;
   - with `"kind":"shell"` → 400;
   - `POST /api/v1/tasks/{k}/sessions {"kind":"claude","conversation":true}` → 400 (only projects);
   - without `conversation`, it behaves as today.
-- [ ] T014 In `crates/delilah-daemon/src/session_api.rs`:
+- [X] T014 In `crates/delilah-daemon/src/session_api.rs`:
   - add `conversation: Option<bool>` to `OpenSession`, with the validation from T013, and store it;
   - set the label to "Idea" and `read_only` to false for a conversation.
 

@@ -21,6 +21,35 @@ use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 /// How long a new session may show the folder-trust dialog before we stop watching.
 const TRUST_WATCH: Duration = Duration::from_secs(60);
 
+/// Added to the system prompt of an idea conversation.
+const IDEA_PROMPT: &str = "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode.";
+
+/// How a Claude session is launched, by what it is: a conversation never asks
+/// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
+/// the plugin (which can create tasks) goes only to project sessions, never to a
+/// task's agents.
+fn launch_flags(
+    session: &SessionRecord,
+    config: &crate::config::Config,
+) -> (
+    claude::Permission,
+    Option<std::path::PathBuf>,
+    Option<&'static str>,
+) {
+    let permission = if session.conversation {
+        claude::Permission::DontAsk
+    } else if session.read_only {
+        claude::Permission::Plan
+    } else {
+        claude::Permission::Default
+    };
+    let plugin_dir = project_of(&session.task)
+        .is_some()
+        .then(|| config.plugin_dir());
+    let prompt = session.conversation.then_some(IDEA_PROMPT);
+    (permission, plugin_dir, prompt)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
     pub key: String,
@@ -339,11 +368,7 @@ pub fn launch_session(
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
     let cmd = match session.kind {
         SessionKind::Claude => {
-            let permission = if session.read_only {
-                claude::Permission::Plan
-            } else {
-                claude::Permission::Default
-            };
+            let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
             let settings = claude::write_settings(
                 &task_dir.join(format!("claude-{}.json", session.id)),
                 &app.config.url(),
@@ -361,8 +386,8 @@ pub fn launch_session(
                 resume,
                 extra_dirs: &[task_dir.as_path()],
                 permission,
-                plugin_dir: None,
-                append_system_prompt: None,
+                plugin_dir: plugin_dir.as_deref(),
+                append_system_prompt,
                 remote_control: remote_name.as_deref(),
             })
         }
@@ -530,6 +555,34 @@ mod tests {
             read_only: false,
             conversation: false,
         }
+    }
+
+    #[test]
+    fn the_launch_table() {
+        let config = crate::config::Config {
+            home: "/h".into(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let mut conv = session("@web", "Idea");
+        conv.conversation = true;
+        let (p, dir, prompt) = launch_flags(&conv, &config);
+        assert_eq!(p, claude::Permission::DontAsk);
+        assert_eq!(dir, Some(config.plugin_dir()));
+        assert_eq!(prompt, Some(IDEA_PROMPT));
+
+        let mut ro = session("@web", "Claude 1");
+        ro.read_only = true;
+        let (p, dir, prompt) = launch_flags(&ro, &config);
+        assert_eq!(p, claude::Permission::Plan);
+        assert!(dir.is_some());
+        assert_eq!(prompt, None);
+
+        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config);
+        assert_eq!(p, claude::Permission::Default);
+        assert_eq!((dir, prompt), (None, None));
     }
 
     async fn app() -> AppState {
