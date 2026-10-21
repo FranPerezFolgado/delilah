@@ -74,6 +74,10 @@ pub async fn archive(
     }
     release_workspace(&app, &key, q.force).await?;
     app.store.delete_workspace(&key).await?;
+    // Nothing left to act on: its PR notices go with the workspace.
+    if app.store.resolve_all_notices_of_task(&key).await? > 0 {
+        app.emit(Topic::Inbox);
+    }
     app.emit(Topic::Tasks);
     app.emit(Topic::Specs);
     Ok(Json(task))
@@ -231,15 +235,15 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
 /// or each newline would send the message early.
 fn prompt_bytes(text: &str) -> Vec<u8> {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
-    if !text.contains('\n') {
-        return text.into_bytes();
-    }
-    // Control characters inside the paste (an ESC that starts a paste marker above
-    // all) could end it early: only newlines and tabs stay.
+    // Control characters (an ESC that starts a paste marker above all, or any escape
+    // sequence) could end a paste early or drive the TUI: only newlines and tabs stay.
     let text: String = text
         .chars()
         .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
         .collect();
+    if !text.contains('\n') {
+        return text.into_bytes();
+    }
     format!("\x1b[200~{text}\x1b[201~").into_bytes()
 }
 
@@ -597,6 +601,53 @@ mod tests {
     #[test]
     fn one_line_is_typed_as_is() {
         assert_eq!(prompt_bytes("vale, sigue"), b"vale, sigue");
+    }
+
+    #[tokio::test]
+    async fn archiving_resolves_the_open_pr_notices_of_the_task() {
+        use crate::store_prs::NewNotice;
+        let (app, repo) = setup().await;
+        started(&app, &repo, "PROJ-1", false).await;
+        let key = TaskKey::new("PROJ-1");
+        for (repo, kind) in [(".", "ci-failed"), ("api", "comments")] {
+            app.store
+                .insert_notice(
+                    &key,
+                    &NewNotice {
+                        repo: repo.into(),
+                        kind: kind.into(),
+                        cause: "c".into(),
+                        text: "t".into(),
+                        detail: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let mut rx = app.events.subscribe();
+        let _ = done(State(app.clone()), Path("PROJ-1".into()))
+            .await
+            .ok()
+            .unwrap();
+        let _ = archive(
+            State(app.clone()),
+            Path("PROJ-1".into()),
+            axum::extract::Query(ArchiveQuery { force: true }),
+        )
+        .await
+        .ok()
+        .unwrap();
+        assert!(app.store.open_notices().await.unwrap().is_empty());
+        let mut topics = vec![];
+        while let Ok(t) = rx.try_recv() {
+            topics.push(t);
+        }
+        assert!(topics.contains(&Topic::Inbox));
+    }
+
+    #[test]
+    fn control_characters_in_one_line_are_dropped_too() {
+        assert_eq!(prompt_bytes("a\x1b[201~b\x07"), b"a[201~b");
     }
 
     #[test]

@@ -47,6 +47,30 @@ impl Backoff {
     }
 }
 
+/// `s` as one line of at most `max` characters: control characters (line breaks
+/// included) become spaces. For what comes from the PR and goes to a terminal or a
+/// notification.
+pub(crate) fn one_line(s: &str, max: usize) -> String {
+    let mut out: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(max + 1)
+        .collect();
+    if out.chars().count() > max {
+        out = out.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+    }
+    out
+}
+
+/// `s` cut to `max` characters, with `mark` after it if something was cut.
+pub(crate) fn capped(s: &str, max: usize, mark: &str) -> String {
+    match s.char_indices().nth(max) {
+        Some((at, _)) => format!("{}{mark}", &s[..at]),
+        None => s.to_string(),
+    }
+}
+
 /// Failure beats pending beats success; neutral checks are ignored; no checks at all
 /// (or only neutral ones) is `None`.
 pub fn ci_outcome(checks: &[Check]) -> Rollup {
@@ -86,12 +110,22 @@ impl NoticeDraft {
     }
 
     /// What makes it a different notice from the one before: sha, review id, or the
-    /// highest comment id.
+    /// highest id of each sequence of comments (issue comments, review comments and
+    /// reviews count apart: their ids are not comparable).
     pub fn cause(&self) -> String {
         match self {
             Self::CiFailed { sha, .. } => sha.clone(),
             Self::ChangesRequested(r) => r.id.to_string(),
-            Self::Comments(cs) => cs.iter().map(|c| c.id).max().unwrap_or(0).to_string(),
+            Self::Comments(cs) => {
+                let max = |f: &dyn Fn(&Comment) -> bool| {
+                    cs.iter().filter(|c| f(c)).map(|c| c.id).max().unwrap_or(0)
+                };
+                // A review's own body is a review-kind comment without a file.
+                let issue = max(&|c| c.kind == CommentKind::Issue);
+                let review = max(&|c| c.kind == CommentKind::Review && c.path.is_some());
+                let verdict = max(&|c| c.kind == CommentKind::Review && c.path.is_none());
+                format!("i{issue}-r{review}-v{verdict}")
+            }
         }
     }
 }
@@ -421,7 +455,7 @@ pub(crate) mod tests {
             panic!("{drafts:?}")
         };
         assert_eq!(cs.iter().map(|c| c.id).collect::<Vec<_>>(), [10, 11]);
-        assert_eq!(drafts[0].cause(), "11");
+        assert_eq!(drafts[0].cause(), "i11-r0-v0");
         assert_eq!((marks.issue_comment, marks.review_comment), (11, 12));
 
         let mut own = prev.clone();
@@ -429,6 +463,26 @@ pub(crate) mod tests {
         let (drafts, marks, _) = diff(Some(&prev), &Marks::default(), &own, "me");
         assert!(drafts.is_empty());
         assert_eq!(marks.issue_comment, 20);
+    }
+
+    #[test]
+    fn the_cause_of_comments_keeps_each_id_sequence_apart() {
+        let issue_9 = NoticeDraft::Comments(vec![comment(9, CommentKind::Issue, "a")]);
+        let mut on_file = comment(9, CommentKind::Review, "a");
+        on_file.path = Some("src/a.rs".into());
+        let review_9 = NoticeDraft::Comments(vec![on_file]);
+        let verdict_9 = NoticeDraft::Comments(vec![comment(9, CommentKind::Review, "a")]);
+        let causes = [issue_9.cause(), review_9.cause(), verdict_9.cause()];
+        assert_eq!(causes, ["i9-r0-v0", "i0-r9-v0", "i0-r0-v9"]);
+    }
+
+    #[test]
+    fn one_line_replaces_control_characters_and_cuts() {
+        assert_eq!(one_line("a\nb\r\x1b[31mc\t", 50), "a b  [31mc ");
+        assert_eq!(one_line("abcdef", 4), "abc…");
+        assert_eq!(one_line("abcd", 4), "abcd");
+        assert_eq!(capped("ñññ", 2, "!"), "ññ!");
+        assert_eq!(capped("ññ", 2, "!"), "ññ");
     }
 
     #[test]

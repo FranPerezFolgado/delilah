@@ -90,7 +90,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       await action();
       onChanged();
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409 && item.pr) setPaused(true);
+      if (e instanceof ApiError && e.status === 409 && e.resumeAt && item.pr) setPaused(true);
       setError((e as Error).message);
     } finally {
       setBusy(false);

@@ -329,6 +329,10 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         let Some(t) = task(&n.task_key) else {
             continue;
         };
+        // An archived task (finished, its workspace gone) has nothing to act on.
+        if t.status.is_terminal() && app.store.workspace(&t.key).await?.is_none() {
+            continue;
+        }
         // An unlinked PR resolves its notices; one still open without its PR is stale.
         let prs = app.store.prs_of(&t.key).await?;
         let Some(pr) = prs.iter().find(|p| p.repo == n.repo) else {
@@ -642,6 +646,21 @@ mod tests {
         let json = serde_json::to_value(failed).unwrap();
         assert_eq!(json["kind"], "pr-failed");
         assert_eq!(json["pr"]["notice"], pr.notice);
+    }
+
+    #[tokio::test]
+    async fn notices_of_an_archived_task_are_not_items() {
+        let app = app_with_pr_task().await;
+        notify(&app, "ci-failed", "c").await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        assert!(items.iter().all(|i| i.pr.is_none()), "{items:?}");
     }
 
     #[test]

@@ -431,6 +431,21 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Resolves every open notice of a task, whatever its repo or kind; how many.
+    pub(crate) async fn resolve_all_notices_of_task(
+        &self,
+        key: &TaskKey,
+    ) -> Result<u64, StoreError> {
+        let result = sqlx::query(
+            "UPDATE pr_notices SET resolved_at = ? WHERE task_key = ? AND resolved_at IS NULL",
+        )
+        .bind(Utc::now().to_rfc3339())
+        .bind(key.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     #[allow(dead_code)] // used by the archive in the next packages
     pub(crate) async fn resolve_notices_of(
         &self,

@@ -34,11 +34,21 @@ describe("InboxView PR items", () => {
   });
 
   it("shows the daemon's message and disables the button on 409", async () => {
-    vi.spyOn(api, "forwardNotice").mockRejectedValue(new ApiError("paused until 14:30", 409));
+    vi.spyOn(api, "forwardNotice").mockRejectedValue(
+      new ApiError("paused until 14:30", 409, false, undefined, "2026-10-21T14:30:00Z"),
+    );
     view();
     fireEvent.click(screen.getByText("Ask the agent to fix it"));
     await waitFor(() => expect(screen.getByText("paused until 14:30")).toBeTruthy());
     expect((screen.getByText("Ask the agent to fix it") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps the button enabled on a 409 that is not a pause", async () => {
+    vi.spyOn(api, "forwardNotice").mockRejectedValue(new ApiError("no agent session", 409));
+    view();
+    fireEvent.click(screen.getByText("Ask the agent to fix it"));
+    await waitFor(() => expect(screen.getByText("no agent session")).toBeTruthy());
+    expect((screen.getByText("Ask the agent to fix it") as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("dismisses the notice", async () => {

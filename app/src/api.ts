@@ -333,6 +333,8 @@ export class ApiError extends Error {
     readonly unpushed = false,
     /** Why a PR can't be opened (`no-commits`, `has-pr`, `no-workspace`). */
     readonly reason?: string,
+    /** When a paused task resumes (a 409 that is a pause, not any other conflict). */
+    readonly resumeAt?: string,
   ) {
     super(message);
   }
@@ -351,7 +353,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason);
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at);
   return data as T;
 }
 

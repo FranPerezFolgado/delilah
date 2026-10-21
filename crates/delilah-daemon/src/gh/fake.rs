@@ -38,6 +38,44 @@ pub(crate) fn ci_snapshot(state: &str, head: &str, conclusion: &str) -> String {
     )
 }
 
+/// A GraphQL answer for an open PR at `head` titled `title`, with the given JSON
+/// `checks` (check-run nodes) and issue `comments` (nodes).
+pub(crate) fn custom_snapshot(
+    head: &str,
+    title: &str,
+    checks: &[String],
+    comments: &[String],
+) -> String {
+    format!(
+        r#"{{"data":{{"repository":{{"pullRequest":{{"state":"OPEN","isDraft":false,"merged":false,
+      "headRefOid":"{head}","baseRefName":"main","title":{title},"url":"u","reviewDecision":null,
+      "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":{{"contexts":{{"nodes":[{checks}]}}}}}}}}]}},
+      "reviews":{{"nodes":[]}},"comments":{{"nodes":[{comments}]}},"reviewThreads":{{"nodes":[]}}}}}}}}}}"#,
+        title = serde_json::Value::from(title),
+        checks = checks.join(","),
+        comments = comments.join(","),
+    )
+}
+
+/// A check-run node named `name` that is `status` (`COMPLETED`, `IN_PROGRESS`) with
+/// `conclusion`.
+pub(crate) fn check_node(name: &str, status: &str, conclusion: Option<&str>, url: &str) -> String {
+    serde_json::json!({
+        "__typename": "CheckRun", "name": name, "status": status,
+        "conclusion": conclusion, "detailsUrl": url,
+    })
+    .to_string()
+}
+
+/// An issue-comment node.
+pub(crate) fn comment_node(id: i64, author: &str, body: &str) -> String {
+    serde_json::json!({
+        "databaseId": id, "author": {"login": author}, "body": body,
+        "createdAt": "2026-10-20T10:00:00Z",
+    })
+    .to_string()
+}
+
 type Reply = (Vec<String>, Result<String, GhError>);
 
 pub(crate) struct FakeGh {
