@@ -47,7 +47,7 @@ Checks: Rust = `cargo test -p <crate>`; app = `cd app && npx tsc --noEmit && npx
 ## WP-05 Daemon store: migration, conversation entries, task-from-conversation
 - Phase: 2 Foundational
 - Tasks: T007, T008, T009, T010
-- Files: crates/delilah-daemon/migrations/0011_idea_conversations.sql, crates/delilah-daemon/src/store_sessions.rs, crates/delilah-daemon/src/store.rs, crates/delilah-daemon/src/run.rs (SessionRecord literals), crates/delilah-daemon/src/hooks.rs (literals), crates/delilah-daemon/src/session_api.rs (literals)
+- Files: crates/delilah-daemon/migrations/0014_idea_conversations.sql, crates/delilah-daemon/src/store_sessions.rs, crates/delilah-daemon/src/store.rs, crates/delilah-daemon/src/run.rs (SessionRecord literals), crates/delilah-daemon/src/hooks.rs (literals), crates/delilah-daemon/src/session_api.rs (literals)
 - Depends on: WP-04
 - Parallel group: 2B
 - Acceptance: FR-015, FR-016 — conversation column, conversation_entries CRUD with queue rules, transactional create_task_from_conversation
@@ -190,7 +190,7 @@ Checks: Rust = `cargo test -p <crate>`; app = `cd app && npx tsc --noEmit && npx
 - Files: docs/status.md, docs/architecture.md, docs/decisions.md, README.md
 - Depends on: WP-01, WP-12
 - Parallel group: 7A
-- Acceptance: status, architecture, decisions #26/#27 and README describe the feature
+- Acceptance: status, architecture, decisions #35/#36 and README describe the feature
 - Checks: none
 - Reviewers: —
 

@@ -1,6 +1,7 @@
 //! The sessions opened in each task's workspace.
 
 use chrono::{DateTime, Utc};
+use delilah_core::{Event, Step, TaskKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::Row;
@@ -58,6 +59,8 @@ pub struct SessionRecord {
     pub read_only: bool,
     /// An idea conversation: a project's Claude session shown as a chat.
     pub conversation: bool,
+    /// The step of the saving-mode chain it runs; `None` for any other session.
+    pub step: Option<Step>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,22 +103,111 @@ pub struct Entry {
 
 impl Store {
     pub async fn create_session(&self, s: &SessionRecord) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO sessions (id, task_key, project, kind, label, is_primary, closed, created_at, read_only, conversation)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&s.id)
-        .bind(project_of(&s.task).is_none().then_some(&s.task))
-        .bind(project_of(&s.task))
-        .bind(s.kind.name())
-        .bind(&s.label)
-        .bind(s.primary)
-        .bind(s.closed)
-        .bind(Utc::now().to_rfc3339())
-        .bind(s.read_only)
-        .bind(s.conversation)
-        .execute(&self.pool)
+        insert_session(&self.pool, s).await
+    }
+
+    /// The session that runs `step` of a task's saving-mode chain, if there is one.
+    pub async fn session_of_step(
+        &self,
+        task: &str,
+        step: Step,
+    ) -> Result<Option<SessionRecord>, StoreError> {
+        let row = sqlx::query(&format!(
+            "{SELECT} WHERE task_key = ? AND step = ? AND closed = 0"
+        ))
+        .bind(task)
+        .bind(step.name())
+        .fetch_optional(&self.pool)
         .await?;
+        row.as_ref().map(session_from_row).transpose()
+    }
+
+    /// Makes `new` (a record with its `step`) the task's only primary session and
+    /// records `StepStarted`, in one transaction. If the step already has a session
+    /// (a retry), that one is returned and nothing changes. The previous session is
+    /// left listed; stopping it is up to the caller.
+    pub async fn hand_over(
+        &self,
+        task: &str,
+        _from_id: &str,
+        new: &SessionRecord,
+    ) -> Result<SessionRecord, StoreError> {
+        let step = new
+            .step
+            .ok_or_else(|| StoreError::Corrupt("a handoff session needs a step".into()))?;
+        // IMMEDIATE, as in `apply_event`: a retry waits for the first attempt's result.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let existing = sqlx::query(&format!(
+            "{SELECT} WHERE task_key = ? AND step = ? AND closed = 0"
+        ))
+        .bind(task)
+        .bind(step.name())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(row) = existing {
+            return session_from_row(&row);
+        }
+        sqlx::query("UPDATE sessions SET is_primary = 0 WHERE task_key = ? AND is_primary = 1")
+            .bind(task)
+            .execute(&mut *tx)
+            .await?;
+        let record = SessionRecord {
+            primary: true,
+            closed: false,
+            ..new.clone()
+        };
+        insert_session(&mut *tx, &record).await?;
+        sqlx::query("INSERT INTO task_events (task_key, at, event) VALUES (?, ?, ?)")
+            .bind(task)
+            .bind(Utc::now().to_rfc3339())
+            .bind(serde_json::to_string(&Event::StepStarted {
+                step,
+                session: record.id.clone(),
+            })?)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    /// Reverts `hand_over`: `from_id` is the primary again and the new session is
+    /// closed (kept, not deleted, so the history still points at it).
+    pub async fn undo_hand_over(
+        &self,
+        task: &str,
+        from_id: &str,
+        new_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("UPDATE sessions SET is_primary = 0 WHERE task_key = ? AND is_primary = 1")
+            .bind(task)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE sessions SET is_primary = 0, closed = 1 WHERE task_key = ? AND id = ?")
+            .bind(task)
+            .bind(new_id)
+            .execute(&mut *tx)
+            .await?;
+        let promoted =
+            sqlx::query("UPDATE sessions SET is_primary = 1 WHERE task_key = ? AND id = ?")
+                .bind(task)
+                .bind(from_id)
+                .execute(&mut *tx)
+                .await?;
+        if promoted.rows_affected() == 0 {
+            // Dropping `tx` rolls the demotions back.
+            return Err(StoreError::NotFound(TaskKey::new(task)));
+        }
+        // The history must not list a step that was undone.
+        sqlx::query(
+            "DELETE FROM task_events WHERE task_key = ? AND json_extract(event, '$.type') = 'step-started'
+             AND json_extract(event, '$.session') = ?",
+        )
+        .bind(task)
+        .bind(new_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -197,7 +289,31 @@ impl Store {
     }
 }
 
-const SELECT: &str = "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, conversation FROM sessions";
+async fn insert_session<'e>(
+    executor: impl sqlx::SqliteExecutor<'e>,
+    s: &SessionRecord,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO sessions (id, task_key, project, kind, label, is_primary, closed, created_at, read_only, step, conversation)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&s.id)
+    .bind(project_of(&s.task).is_none().then_some(&s.task))
+    .bind(project_of(&s.task))
+    .bind(s.kind.name())
+    .bind(&s.label)
+    .bind(s.primary)
+    .bind(s.closed)
+    .bind(Utc::now().to_rfc3339())
+    .bind(s.read_only)
+    .bind(s.step.map(Step::name))
+    .bind(s.conversation)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+const SELECT: &str = "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, step, conversation FROM sessions";
 
 impl Store {
     /// Records what a session waits on the user for, or clears it.
@@ -233,7 +349,7 @@ impl Store {
         &self,
     ) -> Result<Vec<(SessionRecord, crate::inbox::Attention)>, StoreError> {
         let rows = sqlx::query(
-            "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, conversation, attention FROM sessions
+            "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, step, conversation, attention FROM sessions
              WHERE closed = 0 AND attention IS NOT NULL ORDER BY created_at, id",
         )
         .fetch_all(&self.pool)
@@ -365,12 +481,19 @@ fn session_from_row(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
         closed: row.try_get("closed")?,
         read_only: row.try_get("read_only")?,
         conversation: row.try_get("conversation")?,
+        step: row
+            .try_get::<Option<String>, _>("step")?
+            .map(|s| {
+                Step::parse(&s)
+                    .ok_or_else(|| StoreError::Corrupt(format!("unknown session step `{s}`")))
+            })
+            .transpose()?,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use delilah_core::{Task, TaskKey};
+    use delilah_core::Task;
 
     use super::*;
 
@@ -384,6 +507,7 @@ mod tests {
             closed: false,
             read_only: false,
             conversation: false,
+            step: None,
         }
     }
 
@@ -460,6 +584,199 @@ mod tests {
             store.session("c").await.unwrap().unwrap().kind,
             SessionKind::Shell
         );
+    }
+
+    fn step_session(id: &str, step: Step) -> SessionRecord {
+        SessionRecord {
+            step: Some(step),
+            ..session(id, SessionKind::Claude, false)
+        }
+    }
+
+    async fn store_with_plan_session() -> Store {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .await
+            .unwrap();
+        let plan = SessionRecord {
+            primary: true,
+            ..step_session("plan", Step::Plan)
+        };
+        store.create_session(&plan).await.unwrap();
+        store
+    }
+
+    #[tokio::test]
+    async fn a_session_remembers_its_step() {
+        let store = store_with_plan_session().await;
+        let found = store.session_of_step("PROJ-1", Step::Plan).await.unwrap();
+        assert_eq!(found.unwrap().id, "plan");
+        assert_eq!(
+            store.session("plan").await.unwrap().unwrap().step,
+            Some(Step::Plan)
+        );
+        assert!(
+            store
+                .session_of_step("PROJ-1", Step::Review)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_handover_leaves_one_primary_and_is_safe_to_retry() {
+        let store = store_with_plan_session().await;
+        let new = step_session("impl", Step::Implement);
+
+        let made = store.hand_over("PROJ-1", "plan", &new).await.unwrap();
+        assert!(made.primary);
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl"
+        );
+        let primaries: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sessions WHERE task_key = 'PROJ-1' AND is_primary = 1",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(primaries, 1);
+        assert!(!store.session("plan").await.unwrap().unwrap().primary);
+
+        let history = store.events(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert_eq!(
+            history.last().unwrap().event,
+            Event::StepStarted {
+                step: Step::Implement,
+                session: "impl".into()
+            }
+        );
+
+        // Again for the same step: the existing session, nothing new.
+        let again = step_session("impl-2", Step::Implement);
+        let same = store.hand_over("PROJ-1", "plan", &again).await.unwrap();
+        assert_eq!(same.id, "impl");
+        assert!(store.session("impl-2").await.unwrap().is_none());
+        assert_eq!(
+            store.events(&TaskKey::new("PROJ-1")).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn undoing_a_handover_restores_the_old_primary() {
+        let store = store_with_plan_session().await;
+        store
+            .hand_over("PROJ-1", "plan", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+
+        store
+            .undo_hand_over("PROJ-1", "plan", "impl")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "plan"
+        );
+        let undone = store.session("impl").await.unwrap().unwrap();
+        assert!(undone.closed && !undone.primary);
+    }
+
+    async fn count(store: &Store, sql: &str) -> i64 {
+        sqlx::query_scalar(sql)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_handover_after_an_undo_starts_a_new_session() {
+        let store = store_with_plan_session().await;
+        store
+            .hand_over("PROJ-1", "plan", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        store
+            .undo_hand_over("PROJ-1", "plan", "impl")
+            .await
+            .unwrap();
+        let key = TaskKey::new("PROJ-1");
+        assert!(store.events(&key).await.unwrap().is_empty());
+        assert!(
+            store
+                .session_of_step("PROJ-1", Step::Implement)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let retry = store
+            .hand_over("PROJ-1", "plan", &step_session("impl-2", Step::Implement))
+            .await
+            .unwrap();
+        assert_eq!(retry.id, "impl-2");
+        assert!(retry.primary && !retry.closed);
+        assert!(!store.session("plan").await.unwrap().unwrap().primary);
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl-2"
+        );
+        assert_eq!(store.events(&key).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_handover_from_a_stale_session_still_leaves_one_primary() {
+        let store = store_with_plan_session().await;
+        store
+            .create_session(&session("other", SessionKind::Shell, false))
+            .await
+            .unwrap();
+        store
+            .hand_over("PROJ-1", "other", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        let sql = "SELECT COUNT(*) FROM sessions WHERE task_key = 'PROJ-1' AND is_primary = 1";
+        assert_eq!(count(&store, sql).await, 1);
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl"
+        );
+    }
+
+    #[tokio::test]
+    async fn undoing_towards_an_unknown_session_changes_nothing() {
+        let store = store_with_plan_session().await;
+        store
+            .hand_over("PROJ-1", "plan", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        let err = store.undo_hand_over("PROJ-1", "ghost", "impl").await;
+        assert!(matches!(err, Err(StoreError::NotFound(_))));
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl"
+        );
+        assert!(!store.session("impl").await.unwrap().unwrap().closed);
+        assert_eq!(
+            store.events(&TaskKey::new("PROJ-1")).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn two_open_sessions_of_one_step_are_refused() {
+        let store = store_with_plan_session().await;
+        store
+            .create_session(&step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        let dup = store
+            .create_session(&step_session("impl-2", Step::Implement))
+            .await;
+        assert!(dup.is_err());
     }
 
     fn conversation(id: &str) -> SessionRecord {

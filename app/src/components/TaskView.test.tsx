@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { EventRecord, Task } from "../api";
-import { setLanguage } from "../i18n";
+import { setLanguage, t } from "../i18n";
+import { stepLabel } from "../chain";
 import { TaskView } from "./TaskView";
 
 const events = vi.fn<() => Promise<EventRecord[]>>();
@@ -12,7 +13,7 @@ vi.mock("../api", async (orig) => {
 });
 vi.mock("./SpecPanel", () => ({ SpecPanel: () => null }));
 
-const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" } };
+const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, handoff: null };
 
 const show = () =>
   render(
@@ -23,6 +24,7 @@ beforeEach(() => setLanguage("es"));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  localStorage.clear();
 });
 
 describe("TaskView history", () => {
@@ -32,5 +34,20 @@ describe("TaskView history", () => {
     ] as EventRecord[]);
     const { container } = show();
     await waitFor(() => expect(container.querySelector(".history")!.textContent).toContain("Creada desde la conversación «Idea X»"));
+  });
+});
+
+describe("step-started history label", () => {
+  it("names the step, not a phase", () => {
+    const label = (step: "plan" | "implement" | "review") => t("Paso a {step} (sesión nueva)", { step: stepLabel(step) });
+    expect(label("plan")).toBe("Paso a Spec y plan (sesión nueva)");
+    expect(label("implement")).toBe("Paso a Implementación (sesión nueva)");
+    expect(label("review")).toBe("Paso a Revisión (sesión nueva)");
+  });
+
+  it("translates the step labels", () => {
+    setLanguage("en");
+    expect(stepLabel("plan")).toBe("Spec and plan");
+    expect(t("Paso a {step} (sesión nueva)", { step: stepLabel("review") })).toBe("Moved to Review (new session)");
   });
 });

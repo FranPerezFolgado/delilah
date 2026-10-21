@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
-use delilah_core::{Event, ProjectKind, Task, TaskKey, TaskStatus};
+use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -80,6 +80,10 @@ pub struct RunRequest {
     /// Left out: what a backlog task chose, else a worktree.
     #[serde(default)]
     pub in_checkout: Option<bool>,
+    /// Saving mode: each phase runs in a fresh session. Left out: what a backlog
+    /// task chose, else the `saving-mode` preference.
+    #[serde(default)]
+    pub saving_mode: Option<bool>,
     /// A Claude session of the project to carry on as the task's primary one, with
     /// its conversation ("Convertir en tarea"). Implies a free task in the checkout.
     pub from_session: Option<String>,
@@ -138,6 +142,11 @@ pub async fn start_run(
         .in_checkout
         .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
         .unwrap_or(false);
+    let saving_mode = match (req.saving_mode, &existing) {
+        (Some(on), _) => on,
+        (None, Some(task)) => task.saving_mode,
+        (None, None) => saving_mode_preference(&app).await,
+    };
     if req.title.trim().is_empty() {
         return Err(ApiError::bad_request(match req.free {
             true => "say what the free task is about",
@@ -209,11 +218,16 @@ pub async fn start_run(
                 notes: req.notes.clone(),
                 in_checkout: Some(in_checkout),
             };
-            app.store.update_backlog_task(&key, &change).await?.notes
+            let updated = app.store.update_backlog_task(&key, &change).await?;
+            if updated.saving_mode != saving_mode {
+                app.store.set_saving_mode(&key, saving_mode).await?;
+            }
+            updated.notes
         }
         None => {
             let mut task = Task::new(key.clone(), req.title.trim(), &workflow);
             task.project = Some(project.name.clone());
+            task.saving_mode = saving_mode;
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
             app.store.create_task(&task).await?;
             task.notes
@@ -266,6 +280,9 @@ pub async fn start_run(
                     };
                     if let Err(e) = app.store.update_backlog_task(&key, &undo).await {
                         tracing::warn!(task = %key, "cannot put it back as it was: {e}");
+                    }
+                    if let Err(e) = app.store.set_saving_mode(&key, task.saving_mode).await {
+                        tracing::warn!(task = %key, "cannot put saving mode back: {e}");
                     }
                 }
                 None => {
@@ -330,16 +347,7 @@ pub async fn start_run(
         launch_session(&app, &session, &ws.path, None, true)?;
         app.emit(crate::events::Topic::Sessions);
     } else {
-        let session = SessionRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            task: req.key.clone(),
-            kind: SessionKind::Claude,
-            label: app.lang().pick("Principal", "Main").into(),
-            primary: true,
-            closed: false,
-            read_only: false,
-            conversation: false,
-        };
+        let (session, prompt) = first_session(&app, &req.key, saving_mode, prompt);
         app.store.create_session(&session).await?;
         launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
     }
@@ -350,6 +358,47 @@ pub async fn start_run(
         .await?
         .expect("task was just created");
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// The `saving-mode` preference: off unless the user turned it on.
+async fn saving_mode_preference(app: &AppState) -> bool {
+    let value: Option<serde_json::Value> =
+        app.store.setting("pref:saving-mode").await.ok().flatten();
+    value
+        .as_ref()
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// A task's first (main) session and the prompt it starts with. In saving mode it is
+/// the plan step, told to stop once the tasks are written.
+fn first_session(
+    app: &AppState,
+    task: &str,
+    saving_mode: bool,
+    prompt: String,
+) -> (SessionRecord, String) {
+    let lang = app.lang();
+    let (label, step, prompt) = match saving_mode {
+        true => (
+            crate::handoff::step_label(lang, Step::Plan).to_string(),
+            Some(Step::Plan),
+            format!("{prompt} {}", crate::handoff::plan_note(lang)),
+        ),
+        false => (lang.pick("Principal", "Main").to_string(), None, prompt),
+    };
+    let session = SessionRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        task: task.to_string(),
+        kind: SessionKind::Claude,
+        label,
+        primary: true,
+        closed: false,
+        read_only: false,
+        conversation: false,
+        step,
+    };
+    (session, prompt)
 }
 
 /// Starts a session in a daemon-owned PTY: Claude (new, or resumed with `--resume`
@@ -556,6 +605,7 @@ mod tests {
             closed: false,
             read_only: false,
             conversation: false,
+            step: None,
         }
     }
 
@@ -632,6 +682,77 @@ mod tests {
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         task.key
+    }
+
+    #[tokio::test]
+    async fn saving_mode_gives_the_first_session_the_plan_step_and_a_note() {
+        let app = app().await;
+        let (s, prompt) = first_session(&app, "PROJ-1", true, "/feature PROJ-1".into());
+        assert_eq!(s.step, Some(Step::Plan));
+        assert_eq!(s.label, "Spec y plan");
+        assert!(s.primary);
+        assert!(prompt.starts_with("/feature PROJ-1 "), "{prompt}");
+        assert!(
+            prompt.ends_with("Delilah seguirá en una sesión nueva."),
+            "{prompt}"
+        );
+
+        app.lang.set(crate::lang::Lang::En);
+        let (s, prompt) = first_session(&app, "PROJ-1", true, "/feature PROJ-1".into());
+        assert_eq!(s.label, "Spec and plan");
+        assert!(prompt.contains("tasks.md"), "{prompt}");
+        assert!(!prompt.ends_with("nueva."), "{prompt}");
+
+        let (s, prompt) = first_session(&app, "PROJ-1", false, "/feature PROJ-1".into());
+        assert_eq!((s.label.as_str(), s.step), ("Main", None));
+        assert_eq!(prompt, "/feature PROJ-1");
+        app.lang.set(crate::lang::Lang::Es);
+        let (s, _) = first_session(&app, "PROJ-1", false, String::new());
+        assert_eq!(s.label, "Principal");
+    }
+
+    #[tokio::test]
+    async fn saving_mode_comes_from_the_request_else_the_preference() {
+        let app = app().await;
+        // The start fails (no folder), but the task keeps what it was started with.
+        let saving = |app: &AppState, key: &str| {
+            let key = TaskKey::new(key);
+            let store = app.store.clone();
+            async move { store.get_task(&key).await.unwrap().unwrap().saving_mode }
+        };
+        let mut req = run("PROJ-1");
+        req.title = "a".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!saving(&app, "PROJ-1").await, "off by default");
+
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = run("PROJ-2");
+        req.title = "b".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(saving(&app, "PROJ-2").await, "the preference");
+
+        let mut req = run("PROJ-3");
+        req.title = "c".into();
+        req.saving_mode = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!saving(&app, "PROJ-3").await, "the request wins");
+
+        // A backlog task keeps its own choice, and goes back to it if the start fails.
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        task.project = Some("web".into());
+        task.saving_mode = true;
+        app.store.create_task(&task).await.unwrap();
+        start_run(State(app.clone()), Json(run("PROJ-4")))
+            .await
+            .unwrap_err();
+        assert!(saving(&app, "PROJ-4").await);
+        let mut req = run("PROJ-4");
+        req.saving_mode = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(saving(&app, "PROJ-4").await, "put back as it was");
     }
 
     #[tokio::test]
@@ -868,6 +989,7 @@ mod tests {
                 project: Some("web".into()),
                 notes: Some("brief original".into()),
                 in_checkout: None,
+                saving_mode: None,
                 workflow: None,
                 free: true,
             },

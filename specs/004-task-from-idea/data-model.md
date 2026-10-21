@@ -1,6 +1,6 @@
 # Data model: Create a task from an idea, with Claude
 
-Migration `crates/delilah-daemon/migrations/0011_idea_conversations.sql`. The shipped
+Migration `crates/delilah-daemon/migrations/0014_idea_conversations.sql`. The shipped
 ones are not edited.
 
 ## `sessions` (changed)

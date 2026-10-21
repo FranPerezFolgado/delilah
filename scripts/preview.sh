@@ -12,6 +12,8 @@
 # State lives in fixtures/preview-home-<slot> (git-ignored), with the fake repos of
 # scripts/make-fixture-parent.sh to register as projects. Notifications are off
 # unless --notify. Agents launched from the preview are real Claude sessions.
+#
+#   DELILAH_GH_BIN=scripts/fake-gh.sh FAKE_GH_DIR=… scripts/preview.sh   # PRs from a fake gh (specs/003-pr-loop/quickstart.md)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -58,8 +60,10 @@ fi
 
 # The daemon gets the environment launchd would give it, as in scripts/dev-daemon.sh:
 # a Claude launched from another Claude session would not behave as in production.
+[[ -n "${DELILAH_GH_BIN:-}" && "$DELILAH_GH_BIN" != /* ]] && DELILAH_GH_BIN="$PWD/$DELILAH_GH_BIN"
+[[ -n "${FAKE_GH_DIR:-}" && "$FAKE_GH_DIR" != /* ]] && FAKE_GH_DIR="$PWD/$FAKE_GH_DIR"
 KEEP=()
-for var in HTTPS_PROXY HTTP_PROXY NO_PROXY ALL_PROXY https_proxy http_proxy no_proxy all_proxy SSL_CERT_FILE NODE_EXTRA_CA_CERTS; do
+for var in HTTPS_PROXY HTTP_PROXY NO_PROXY ALL_PROXY https_proxy http_proxy no_proxy all_proxy SSL_CERT_FILE NODE_EXTRA_CA_CERTS DELILAH_GH_BIN FAKE_GH_DIR; do
   [[ -n "${!var:-}" ]] && KEEP+=("$var=${!var}")
 done
 LOG="$HOME_DIR/delilahd.log"

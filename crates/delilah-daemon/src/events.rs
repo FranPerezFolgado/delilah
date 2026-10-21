@@ -29,6 +29,8 @@ pub enum Topic {
     Usage,
     /// `/projects`
     Projects,
+    /// `/prs`: a task's PRs or their summaries changed.
+    Prs,
     /// `/conversations`: an idea conversation opened, changed or ended.
     Conversations,
     /// The client missed messages: fetch everything.
@@ -133,6 +135,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(msg, WsMessage::Text(r#"{"type":"tasks"}"#.into()));
+    }
+
+    #[test]
+    fn prs_topic_serializes_as_prs() {
+        assert_eq!(
+            serde_json::to_string(&Topic::Prs).unwrap(),
+            r#"{"type":"prs"}"#
+        );
     }
 
     /// A bare HTTP POST to /api/v1/tasks, to keep test dependencies down.

@@ -1,10 +1,13 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { ago, api, hhmm, type InboxItem, type InboxKind } from "../api";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ago, api, ApiError, hhmm, type Handoff, type InboxItem, type InboxKind } from "../api";
+import { HandoffActions } from "./HandoffActions";
+
 import { Icon, type IconName } from "./Icon";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
 import { locale, t } from "../i18n";
 import { isSendKey } from "../keys";
+import { openExternal } from "../platform";
 
 // Where the webview cannot size a textarea to its text, it is done by hand.
 const SIZES_ITSELF = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
@@ -15,9 +18,13 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   error: { label: "Error en el turno", icon: "failed", cls: "c-err" },
   waiting: { label: "Te espera", icon: "wait", cls: "c-wait" },
   review: { label: "Lista para revisar", icon: "review", cls: "c-done" },
+  handoff: { label: "Siguiente paso", icon: "run", cls: "c-done" },
   "suggest-review": { label: "¿Pasar a revisión?", icon: "review", cls: "c-done" },
   paused: { label: "Pausada por límite", icon: "pause", cls: "c-pause" },
   failed: { label: "Fallida", icon: "failed", cls: "c-err" },
+  "pr-failed": { label: "CI falló en la PR", icon: "failed", cls: "c-err" },
+  "pr-review": { label: "Comentarios en la PR", icon: "review", cls: "c-wait" },
+  "pr-blocked": { label: "No se pudo archivar", icon: "failed", cls: "c-err" },
 };
 
 interface Props {
@@ -66,12 +73,27 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   useLayoutEffect(() => {
     const el = replyRef.current;
     if (!el || SIZES_ITSELF) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
   }, [reply]);
+  // The item carries no task: the stage of its handoff decides the buttons.
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  useEffect(() => {
+    if (item.kind !== "handoff") return;
+    let live = true;
+    api
+      .tasks()
+      .then((ts) => live && setHandoff(ts.find((x) => x.key === item.task)?.handoff ?? null))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [item.kind, item.task, item.text]);
   const kind = KINDS[item.kind];
   const s = item.session;
   const long = (item.text?.length ?? 0) > 500 || (item.text?.split("\n").length ?? 0) > 8;
@@ -84,6 +106,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       await action();
       onChanged();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409 && e.resumeAt && item.pr) setPaused(true);
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -206,6 +229,59 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
         {item.kind === "paused" && (
           <button className="btn" disabled={busy} onClick={() => act(() => api.resume(item.task))}>
             {t("Reanudar ahora")}
+          </button>
+        )}
+        {item.kind === "handoff" && (
+          <HandoffActions
+            task={item.task}
+            handoff={handoff}
+            onDone={onChanged}
+            hideError={!!handoff?.error && !!item.text?.includes(handoff.error)}
+          />
+        )}
+        {(item.kind === "pr-failed" || item.kind === "pr-review") && item.pr && (
+          <>
+            <button className="btn btn-p" disabled={busy || paused} onClick={() => act(() => api.forwardNotice(item.pr!.notice))}>
+              {t("Pedir al agente que lo arregle")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissNotice(item.pr!.notice))}>
+              {t("Descartar")}
+            </button>
+          </>
+        )}
+        {item.kind === "pr-blocked" && item.pr && !confirming && (
+          <>
+            <button className="btn btn-p" disabled={busy} onClick={() => setConfirming(true)}>
+              {t("Archivar igualmente")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissNotice(item.pr!.notice))}>
+              {t("Descartar")}
+            </button>
+          </>
+        )}
+        {item.kind === "pr-blocked" && item.pr && confirming && (
+          <>
+            <span className="muted" style={{ fontSize: 12.5 }}>{t("Se quitará el workspace y las ramas locales que queden. Lo no subido se perderá si lo hay. ¿Archivar igualmente?")}</span>
+            <button
+              className="btn btn-p"
+              disabled={busy}
+              onClick={() =>
+                act(async () => {
+                  await api.archive(item.task, true);
+                  await api.dismissNotice(item.pr!.notice);
+                })
+              }
+            >
+              {t("Sí, archivar")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirming(false)}>
+              {t("Cancelar")}
+            </button>
+          </>
+        )}
+        {item.pr && (
+          <button className="btn" onClick={() => openExternal(item.pr!.url).catch(() => {})}>
+            {t("Ver PR")}
           </button>
         )}
         {item.kind === "failed" && (

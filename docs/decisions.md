@@ -94,7 +94,7 @@ a "carry on" prompt. Because the subscription is shared, a limit hit by any
 session pauses the task. The real `StopFailure` payload for a limit has not been
 observed yet (see the spike).
 
-**26. The idea conversation runs with `dontAsk` and an explicit allow list.**
+**34. The idea conversation runs with `dontAsk` and an explicit allow list.**
 `--permission-mode dontAsk` plus `permissions.allow`/`deny` in the session's
 settings file lets Claude read code without a terminal prompt. Allowed: Read, Grep,
 Glob, AskUserQuestion, Skill, TodoWrite, `git status` and `ls`, each Bash rule also
@@ -105,7 +105,7 @@ MultiEdit, Write and NotebookEdit. `--setting-sources user` drops the repo's
 settings and hooks stay. `rg` and `git log/show/diff` were dropped: `rg --pre` runs
 programs and `--output` writes files.
 
-**27. Tasks from ideas: the daemon creates them on the confirmation card.**
+**35. Tasks from ideas: the daemon creates them on the confirmation card.**
 Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card
 (title and brief in the `Crear` option's preview); when the user answers `Crear`, the
 daemon creates the backlog task and then returns the answer, with the key, to Claude.
@@ -116,14 +116,14 @@ and a Delilah MCP tool (a new server to run and configure, for what the existing
 ask hook already does). The brief is written by Claude, so it can be edited before
 the task starts.
 
-**28. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
+**36. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
 of plan mode; a plugin passed to project-owned sessions.**
 - **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY.
-- **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#26](decisions.md) for the allow list.
+- **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#34](decisions.md) for the allow list.
 - **A session-only plugin.** The `task-from-idea` skill ships in `<home>/plugins/delilah`, passed with `--plugin-dir` to project-owned sessions only (task sessions never get it), so nothing is installed in the user's Claude.
 - **Spike findings** (`specs/004-task-from-idea/research.md`, claude 2.1.292):
   - Edit and Write in `deny` are removed from the session, and `npm install` is refused without a prompt;
-  - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #26;
+  - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #34;
   - AskUserQuestion reaches PreToolUse in `dontAsk`, with the preview intact, and the answer returns verbatim (accents and dashes included);
   - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
   - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
@@ -188,3 +188,66 @@ repos is ever referenced or copied. Development uses
 (FranPerezFolgado). The machine also has work credentials, so confirm the account
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
+
+## Pull requests
+
+**26. GitHub through the user's `gh`, with no token in the daemon (2026-10-20).**
+Delilah runs the `gh` the user already has, on the login shell's PATH, behind a
+`Gh` trait so tests and previews can swap it (`DELILAH_GH_BIN`). `gh` already
+holds the tokens, honours `gh repo set-default` and talks to Enterprise hosts
+like the agent's own `gh pr create`. Storing a GitHub token in the daemon
+(Keychain or settings) and calling the API with `reqwest` or octocrab was ruled
+out: it copies a credential and adds a client. When `gh` is missing, signed out
+or without access, the PR tab says so and the Bandeja notifies once.
+
+**27. PRs are polled every 30 s, not pushed by webhooks (2026-10-20).** The daemon
+is on loopback behind no public address, so GitHub cannot reach it; a tunnel or
+a GitHub App would be new infrastructure and a new credential. One GraphQL call
+per open PR every 30 s is far under the rate limit, with back-off after a
+failure and an immediate check when a task is opened or the agent pushes.
+
+**28. PR notices are rows, not derived state (2026-10-20).** The inbox items for
+CI, reviews and a blocked archive live in `pr_notices`, unique per cause and
+resolved rather than deleted. Unlike session attention they cannot be recomputed
+from the snapshot: one already sent to the agent or dismissed must stay gone
+after a restart.
+
+**29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
+A failed CI or a review only reaches the Bandeja; "Pedir al agente que lo
+arregle" sends it, as comments to consider, not as instructions from the user.
+Auto-forwarding was ruled out: it would spend the subscription and let a
+reviewer's text steer the agent unseen.
+
+**30. Notify for comments from anyone but the signed-in account (2026-10-20).**
+Other people and bots count; only the user's own comments are skipped. Filtering
+bots was ruled out, since a CI bot's review is often the thing to read.
+
+**31. A merged task archives without asking, unless that would lose work
+(2026-10-21).** When every linked PR is merged the task is marked done and
+archived at once. Asking first was ruled out: the merge is the confirmation. The
+guard stays: every repo with a PR must be clean and its local branch contained
+in the PR's head (so squash and rebase merges pass), else an `archive-blocked`
+item offers a forced archive. The task's local branches are deleted at the
+verified sha, never the parent's and never a remote one. A branch left behind
+raises `archive-partial`, and archiving by hand finishes it. This overrides decision 18's "a checkout never refuses" for the
+merge archive only.
+
+**32. Repos without a PR never lose work; the merge archive checks every repo
+(2026-10-21).** A merge in one repo must not archive away another that has no PR:
+the check covers every repo of the workspace. One without a PR blocks the archive
+if it is dirty or has unpushed commits, and keeps its branch. A failed fetch blocks
+too, and the workspace is released without force. Deleting a branch compares it to
+the verified sha first, so a commit made after the check survives.
+
+## Saving mode
+
+**33. Saving mode: a fresh session per phase.** It relaxes decision 15, which said
+Delilah never drives SpecKit's phases: Delilah still never drives what happens inside a
+phase, it only starts a new session between phases. With the option on, each phase (spec and
+plan, implementation, review) runs in its own Claude session, started from the spec
+files and git, which already hold everything the next phase needs.
+- **Why:** every turn re-reads the whole conversation. On LIBRE-3 (153 turns) the context grew from ~44k tokens to ~364k, ~33M re-read against 130k written. Estimated saving by cuts: ~37 % with one (planning → implementation), ~49 % with two (+ before the review), ~60 % cutting between implementation phases too. Each session pays its own base (~45-60k), so the returns diminish. Measure it per task from the sessions' transcripts (research R8, [quickstart](../specs/004-saving-mode/quickstart.md)); target: 30 % fewer tokens.
+- **Opt-in per task**, default from a preference: on a high usage limit it only adds handoffs.
+- **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
+- **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
+

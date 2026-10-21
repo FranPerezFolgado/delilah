@@ -76,7 +76,7 @@
 
 ### Daemon: schema and store
 
-- [X] T007 Create `crates/delilah-daemon/migrations/0011_idea_conversations.sql` as in data-model.md:
+- [X] T007 Create `crates/delilah-daemon/migrations/0014_idea_conversations.sql` as in data-model.md:
   - `ALTER TABLE sessions ADD COLUMN conversation INTEGER NOT NULL DEFAULT 0;`;
   - `conversation_entries` with its index.
 - [X] T008 Write failing tests in `crates/delilah-daemon/src/store_sessions.rs` (`Store::in_memory()`):
@@ -314,7 +314,7 @@
 - [X] T039 [P] Docs:
   - `docs/status.md`: built, plus the pending items (streaming and a chat view for other sessions, deleting conversations);
   - `docs/architecture.md`: the conversation session, `conversation_entries`, `conversation.rs`, the plugin dir, the launch table, the `conversations` topic, the `Ask.proposal` flow;
-  - `docs/decisions.md`: #26 "Tasks from ideas: the daemon creates them on the confirmation card" (R1, with the rejected CLI/curl/MCP), and #27 "Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead of plan mode; a session-only plugin" (R2–R5, with `stream-json` left for later). Include the spike's findings;
+  - `docs/decisions.md`: #35 "Tasks from ideas: the daemon creates them on the confirmation card" (R1, with the rejected CLI/curl/MCP), and #36 "Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead of plan mode; a session-only plugin" (R2–R5, with `stream-json` left for later). Include the spike's findings;
   - `README.md`: "Nueva tarea con Claude" in the New tasks and Projects paragraphs.
 - [X] T040 Run `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`, and fix any failure.
 - [ ] T041 Go through quickstart.md "By hand" 1–11 in a preview (`scripts/preview.sh`, never 7420), and note the results in `specs/004-task-from-idea/progress.md` if the orchestrator keeps one.

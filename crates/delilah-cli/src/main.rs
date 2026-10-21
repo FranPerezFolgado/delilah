@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use delilah_core::{Event, Project, Task, TaskStatus};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
@@ -27,6 +27,36 @@ struct Cli {
     url: String,
     #[command(subcommand)]
     command: Command,
+}
+
+/// The saving-mode choice for a task; neither flag leaves it to the user preference.
+#[derive(Args)]
+struct SavingModeFlags {
+    /// Run the task in saving mode (each phase -- spec and plan, implementation, review -- runs in a fresh Claude session).
+    #[arg(long, conflicts_with = "no_saving_mode")]
+    saving_mode: bool,
+    /// Run the task without saving mode, whatever the preference says.
+    #[arg(long)]
+    no_saving_mode: bool,
+}
+
+impl SavingModeFlags {
+    /// `None` when no flag was given: the daemon then reads the preference.
+    fn choice(&self) -> Option<bool> {
+        match (self.saving_mode, self.no_saving_mode) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// Adds `saving_mode` to a request body only when the user chose it.
+fn with_saving_mode(mut body: serde_json::Value, choice: Option<bool>) -> serde_json::Value {
+    if let Some(on) = choice {
+        body["saving_mode"] = json!(on);
+    }
+    body
 }
 
 #[derive(Subcommand)]
@@ -56,6 +86,8 @@ enum Command {
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
+        #[command(flatten)]
+        saving: SavingModeFlags,
     },
     /// Shows a task and its history.
     Show { key: String },
@@ -86,6 +118,8 @@ enum Command {
         /// Attach to the agent's terminal right away.
         #[arg(long)]
         attach: bool,
+        #[command(flatten)]
+        saving: SavingModeFlags,
     },
     /// Opens the live terminal of a task's agent (Ctrl-] detaches).
     Attach { key: String },
@@ -221,16 +255,20 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             free,
             checkout,
             workflow,
+            saving,
         } => {
             if key.is_none() && !free {
                 return Err("say the ticket's KEY, or --free for a task without one".into());
             }
             let task: Task = api.post(
                 "/api/v1/tasks",
-                &json!({
-                    "key": key.unwrap_or_default(), "title": title, "project": project,
-                    "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
-                }),
+                &with_saving_mode(
+                    json!({
+                        "key": key.unwrap_or_default(), "title": title, "project": project,
+                        "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
+                    }),
+                    saving.choice(),
+                ),
             )?;
             println!(
                 "Saved {} to {}'s backlog. Start it with `delilah run {}`.",
@@ -267,14 +305,18 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             branch,
             prompt,
             attach,
+            saving,
         } => {
             let task: Task = api.post(
                 "/api/v1/runs",
-                &json!({
-                    "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
-                    "workflow": workflow,
-                    "submodules": submodules, "branch": branch, "prompt": prompt,
-                }),
+                &with_saving_mode(
+                    json!({
+                        "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
+                        "workflow": workflow,
+                        "submodules": submodules, "branch": branch, "prompt": prompt,
+                    }),
+                    saving.choice(),
+                ),
             )?;
             println!(
                 "{} is {}: Claude is working on it.",
@@ -451,5 +493,40 @@ impl Api {
             Ok(body) => Err(body.error),
             Err(_) => Err(format!("daemon answered {status}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn choice(args: &[&str]) -> Result<Option<bool>, clap::Error> {
+        let mut argv = vec!["delilah"];
+        argv.extend_from_slice(args);
+        Cli::try_parse_from(argv).map(|cli| match cli.command {
+            Command::New { saving, .. } | Command::Run { saving, .. } => saving.choice(),
+            _ => panic!("not new or run"),
+        })
+    }
+
+    #[test]
+    fn saving_mode_flags_on_new_and_run() {
+        let new = ["new", "K-1", "--title", "t", "--project", "p"];
+        let run = ["run", "K-1"];
+        for base in [&new[..], &run[..]] {
+            let with = |flag: &'static str| [base, &[flag]].concat();
+            assert_eq!(choice(base).unwrap(), None);
+            assert_eq!(choice(&with("--saving-mode")).unwrap(), Some(true));
+            assert_eq!(choice(&with("--no-saving-mode")).unwrap(), Some(false));
+            assert!(choice(&[base, &["--saving-mode", "--no-saving-mode"]].concat()).is_err());
+        }
+    }
+
+    #[test]
+    fn saving_mode_is_sent_only_when_chosen() {
+        let body = || json!({"key": "K-1"});
+        assert!(with_saving_mode(body(), None).get("saving_mode").is_none());
+        assert_eq!(with_saving_mode(body(), Some(true))["saving_mode"], true);
+        assert_eq!(with_saving_mode(body(), Some(false))["saving_mode"], false);
     }
 }

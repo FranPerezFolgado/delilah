@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
 import { t } from "../i18n";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
@@ -48,6 +48,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [projectName, setProjectName] = useState(preferred?.name ?? "");
   const [submodules, setSubmodules] = useState<Submodule[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
+  // Each step in a fresh session: a backlog task keeps its choice, a new one starts from the preference.
+  const [savingMode, setSavingMode] = useState(existing?.saving_mode ?? false);
+  const savingTouched = useRef(!!existing);
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -55,6 +58,14 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
+
+  useEffect(() => {
+    if (savingTouched.current) return;
+    api
+      .preference<boolean>("saving-mode")
+      .then((on) => !savingTouched.current && setSavingMode(on === true))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     setPicked([]);
@@ -122,6 +133,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
+        saving_mode: savingMode,
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
@@ -147,6 +159,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
+        saving_mode: savingMode,
       });
       onSaved(task);
     } catch (err) {
@@ -226,6 +239,19 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               </label>
             )}
             {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={setWhere} project={project} />}
+            {origin !== "claude" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
+                <input
+                  type="checkbox"
+                  checked={savingMode}
+                  onChange={(e) => {
+                    savingTouched.current = true;
+                    setSavingMode(e.target.checked);
+                  }}
+                />
+                <span>{t("Modo ahorro")}</span>
+              </label>
+            )}
             {origin !== "claude" && project?.kind === "parent" && (
               <div className="field">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>

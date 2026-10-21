@@ -433,6 +433,7 @@ mod tests {
             closed: false,
             read_only: false,
             conversation,
+            step: None,
         }
     }
 

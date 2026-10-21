@@ -24,6 +24,7 @@ pub async fn tick(app: &AppState) {
     };
     for task in tasks {
         resume_if_due(app, &task).await;
+        crate::handoff::recover(app, &task).await;
     }
 }
 
@@ -117,5 +118,51 @@ mod tests {
         let (app, _pty) = paused_until(Utc::now() + chrono::Duration::hours(1)).await;
         tick(&app).await;
         assert_eq!(status(&app).await.name(), "paused-by-limit");
+    }
+
+    #[tokio::test]
+    async fn recovery_on_tick_clears_a_handoff_whose_step_session_exists() {
+        use delilah_core::{Handoff, HandoffStage, Step};
+        let (app, _pty) = paused_until(Utc::now() + chrono::Duration::hours(1)).await;
+        let key = TaskKey::new("PROJ-1");
+        app.store.set_saving_mode(&key, true).await.unwrap();
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "impl-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Implementación".into(),
+                primary: false,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(Step::Implement),
+            })
+            .await
+            .unwrap();
+        // That session is running, so it was launched: only the handoff is left.
+        app.sessions
+            .insert("impl-1", "PROJ-1", SessionKind::Claude, false, _pty.clone());
+        let h = |stage| Handoff {
+            to: Step::Implement,
+            stage,
+            error: None,
+        };
+        app.store
+            .set_handoff(&key, Some(&h(HandoffStage::Starting)))
+            .await
+            .unwrap();
+        tick(&app).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(task.handoff.is_none());
+
+        // A save with no outgoing session running goes back to the offer.
+        app.store
+            .set_handoff(&key, Some(&h(HandoffStage::Saving)))
+            .await
+            .unwrap();
+        tick(&app).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.handoff.unwrap().stage, HandoffStage::Offered);
     }
 }

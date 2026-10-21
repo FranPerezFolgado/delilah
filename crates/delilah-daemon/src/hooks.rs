@@ -297,6 +297,7 @@ mod tests {
                 closed: false,
                 read_only: false,
                 conversation: false,
+                step: None,
             })
             .await
             .unwrap();

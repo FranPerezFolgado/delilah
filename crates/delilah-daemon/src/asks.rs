@@ -489,6 +489,7 @@ pub(crate) mod tests {
                 closed: false,
                 read_only: false,
                 conversation: true,
+                step: None,
             })
             .await
             .unwrap();

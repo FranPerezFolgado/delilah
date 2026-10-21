@@ -5,8 +5,9 @@ import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, typ
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
+import { CHANGES, OVERVIEW, PRS, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
+import { on } from "../live";
 import { isMarkdown } from "../markdown";
 import { comboFromEvent, keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
@@ -16,9 +17,11 @@ import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { PhaseBadge } from "./PhaseBadge";
+import { SessionChain } from "./SessionChain";
 import { headerPhaseOf } from "../phases";
 import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
+import { PrView } from "./PrView";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
 import { TerminalPane } from "./TerminalPane";
@@ -84,6 +87,25 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
     });
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
+  // The PR tab: for a task with a workspace (its PR is coming) or with PRs already linked.
+  const [hasPrs, setHasPrs] = useState(false);
+  const prTab = !project && (hasWorkspace || hasPrs);
+  useEffect(() => {
+    if (project) return;
+    let alive = true;
+    const load = () =>
+      api
+        .taskPrs(owner)
+        .then((d) => alive && setHasPrs(d.prs.length > 0))
+        .catch(() => {});
+    api.refreshPrs(owner).catch(() => {});
+    load();
+    const off = on("prs", load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [owner, project]);
 
   const tab = (path: string) => session.tabs.find((t) => t.path === path);
 
@@ -93,6 +115,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   const exists =
     session.active === OVERVIEW ||
     (session.active === CHANGES && session.changesOpen) ||
+    (session.active === PRS && prTab) ||
     !!tab(session.active) ||
     (activeSession !== null && (sessions.some((s) => s.id === activeSession) || activeSession === starting));
   const shown = exists ? session.active : OVERVIEW;
@@ -230,6 +253,25 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
     if (s) activate(sessionTab(s.id));
   };
 
+  // After a handoff the new primary's terminal is the one to look at.
+  const primaryId = task?.saving_mode ? (sessions.find((s) => s.primary)?.id ?? null) : null;
+  const lastPrimary = useRef({ owner, primaryId });
+  useEffect(() => {
+    const before = lastPrimary.current;
+    lastPrimary.current = { owner, primaryId };
+    // Only a new primary of the same task: another task's is not a handoff.
+    if (before.owner === owner && before.primaryId && primaryId && before.primaryId !== primaryId) {
+      activate(sessionTab(primaryId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, primaryId]);
+
+  const setSaving = (on: boolean) =>
+    api
+      .setSavingMode(owner, on)
+      .then(onChanged)
+      .catch((e) => setError((e as Error).message));
+
   const openChanges = () => {
     session.changesOpen = true;
     activate(CHANGES);
@@ -241,6 +283,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
     ...sessions.map((s) => sessionTab(s.id)),
     ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
     ...(session.changesOpen ? [CHANGES] : []),
+    ...(prTab ? [PRS] : []),
     ...session.tabs.map((t) => t.path),
   ];
 
@@ -461,9 +504,22 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
+              {task.saving_mode && (
+                <span className="pill saving-pill">
+                  {t("Modo ahorro")}
+                  {task.status.type !== "done" && (
+                    <button className="saving-off" onClick={() => setSaving(false)}>{t("Desactivar")}</button>
+                  )}
+                </span>
+              )}
               <span className={`pill ${status.cls}`}>
                 <Icon name={status.icon} /> {statusLabel(task.status)}
               </span>
+              {!task.saving_mode && task.status.type !== "done" && (
+                <button className="btn btn-ghost saving-on" onClick={() => setSaving(true)}>
+                  {t("Activar modo ahorro")}
+                </button>
+              )}
             </span>
           </>
         ) : (
@@ -494,6 +550,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
         style={{ "--tree-w": `${treeW}px` } as CSSProperties}
       >
         <div className="tmain">
+          {task && <SessionChain task={task} sessions={sessions} onOpenSession={showSession} onChanged={onChanged} />}
           <div className="etabs" role="tablist">
             <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
             {sessions.map((s) => {
@@ -518,6 +575,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             {session.changesOpen && (
               <TabButton id={CHANGES} label={t("Cambios")} icon="diff" shown={shown} onActivate={activate} onClose={close} />
             )}
+            {prTab && <TabButton id={PRS} label="PR" icon="review" shown={shown} onActivate={activate} />}
             {session.tabs.map((t) => (
               <TabButton
                 key={t.path}
@@ -552,6 +610,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               onViewChanges={openChanges}
             />
           )}
+          {shown === PRS && <PrView owner={owner} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 
           {closingSession && (

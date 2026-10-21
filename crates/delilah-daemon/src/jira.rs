@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiError;
 use crate::state::AppState;
 
-const SETTINGS_KEY: &str = "jira";
+pub(crate) const SETTINGS_KEY: &str = "jira";
 pub const DEFAULT_JQL: &str =
     "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
 

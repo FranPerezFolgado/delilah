@@ -96,11 +96,7 @@ pub async fn for_hook(
 
 /// Runs the proposal side of an answer: on `Crear` creates the task and replaces the
 /// answer Claude gets with what happened. Anything else is left as it is.
-pub async fn on_answer(
-    app: &AppState,
-    ask: &Ask,
-    answers: &mut Map<String, Value>,
-) -> AnswerReply {
+pub async fn on_answer(app: &AppState, ask: &Ask, answers: &mut Map<String, Value>) -> AnswerReply {
     let mut reply = AnswerReply::default();
     let Some(proposal) = &ask.proposal else {
         return reply;
@@ -155,6 +151,7 @@ async fn create_from_proposal(
         notes: Some(notes),
         free: true,
         in_checkout: None,
+        saving_mode: None,
         workflow: None,
     };
     let task = crate::api::build_task(app, new).await?;
@@ -355,7 +352,8 @@ mod tests {
     async fn a_hook_cannot_claim_a_session_it_does_not_own() {
         let app = app().await;
         project_and_conversation(&app).await;
-        let qs = proposal_card(TITLE, NEW_TASK_HEADER, Some("b"))["tool_input"]["questions"].clone();
+        let qs =
+            proposal_card(TITLE, NEW_TASK_HEADER, Some("b"))["tool_input"]["questions"].clone();
         // The conversation belongs to @web.
         assert!(for_hook(&app, "@web", Some("conv"), &qs).await.is_some());
         assert!(for_hook(&app, "@other", Some("conv"), &qs).await.is_none());
@@ -427,6 +425,7 @@ mod tests {
                 closed: false,
                 read_only,
                 conversation: false,
+                step: None,
             })
             .await
             .unwrap();

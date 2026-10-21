@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, type Project, type Session } from "../api";
+import { api, type Project, type Session, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { NewTaskDialog } from "./NewTaskDialog";
 
@@ -11,15 +11,20 @@ const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "fea
 const session = { id: "s9", task: "@web", kind: "claude", conversation: true } as Session;
 
 function setup() {
+  vi.spyOn(api, "preference").mockResolvedValue(null);
   const props = { onClose: vi.fn(), onStarted: vi.fn(), onSaved: vi.fn(), onConversation: vi.fn() };
   const view = render(<NewTaskDialog projects={[web]} {...props} />);
   return { ...view, ...props };
 }
 
-beforeEach(() => setLanguage("es"));
+beforeEach(() => {
+  setLanguage("es");
+  vi.spyOn(api, "submodules").mockResolvedValue([]);
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  localStorage.clear();
 });
 
 describe("NewTaskDialog origins", () => {
@@ -63,5 +68,55 @@ describe("NewTaskDialog origins", () => {
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith(task));
     expect(run.mock.calls[0][0]).toMatchObject({ key: "", title: "Do it", free: true });
+  });
+});
+
+const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature" }];
+const started: Task = {
+  key: "LIBRE-1",
+  title: "t",
+  project: "web",
+  workflow: "feature",
+  phase: null,
+  status: { type: "queued" },
+  saving_mode: true,
+  handoff: null,
+};
+
+describe("NewTaskDialog saving mode", () => {
+  it("is preloaded from the saving-mode preference and sent with the run", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(true);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { getByLabelText, container } = render(
+      <NewTaskDialog projects={projects} draft={{ key: "PROJ-1", title: "Algo", components: [] }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    await waitFor(() => expect((getByLabelText("Modo ahorro") as HTMLInputElement).checked).toBe(true));
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].saving_mode).toBe(true);
+  });
+
+  it("defaults to off and can be switched on, also for the backlog", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { getByLabelText, getByText } = render(
+      <NewTaskDialog projects={projects} draft={{ key: "PROJ-1", title: "Algo", components: [] }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    const box = getByLabelText("Modo ahorro") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].saving_mode).toBe(true);
+  });
+
+  it("starts a backlog task with the mode it was saved with", async () => {
+    const pref = vi.spyOn(api, "preference").mockResolvedValue(false);
+    const { getByLabelText } = render(
+      <NewTaskDialog projects={projects} existing={{ ...started, saving_mode: true }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    await Promise.resolve();
+    expect((getByLabelText("Modo ahorro") as HTMLInputElement).checked).toBe(true);
+    expect(pref).not.toHaveBeenCalled();
   });
 });

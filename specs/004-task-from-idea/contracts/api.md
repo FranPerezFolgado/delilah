@@ -13,7 +13,7 @@
 
 - `conversation` is **new** and optional (default `false`, today's behaviour).
 - With `true`: `kind` must be `claude` (400 otherwise). `read_only` is ignored: an idea
-  conversation is always read-only, through `dontAsk` (research R3, decisions #26), so
+  conversation is always read-only, through `dontAsk` (research R3, decisions #34), so
   the session's `read_only` field is `false` (enforcement is `dontAsk`, not plan mode)
   and `allow-edits` returns 409 for a conversation. The label is always `"Idea"` (a
   request `label` is ignored). A `prompt`, if given, is recorded as the first user entry

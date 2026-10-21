@@ -28,6 +28,10 @@ pub enum GitError {
     Dirty { location: String },
     #[error("{location} has {count} commit(s) that are on no remote; push them before archiving")]
     Unpushed { location: String, count: u32 },
+    #[error(
+        "{location} has commits that are not in the merged PR; push or discard them before archiving"
+    )]
+    NotMerged { location: String },
     #[error("a `repo` project has no submodules; drop --submodules")]
     SubmodulesInRepo,
     #[error(
@@ -36,12 +40,24 @@ pub enum GitError {
     NotInitialised(String),
 }
 
-pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String, GitError> {
+fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
     let mut cmd = Command::new("git");
+    // The repos are written by agents: no hook or fsmonitor command of theirs runs here.
+    cmd.args([
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+    ]);
     if opts.allow_file_protocol {
         cmd.args(["-c", "protocol.file.allow=always"]);
     }
-    let output = cmd.arg("-C").arg(dir).args(args).output()?;
+    cmd.arg("-C").arg(dir).args(args);
+    cmd
+}
+
+pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String, GitError> {
+    let output = command(dir, args, opts).output()?;
     if !output.status.success() {
         return Err(GitError::Command {
             dir: dir.to_path_buf(),
@@ -50,4 +66,11 @@ pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Like [`git`], but returns the exit code instead of failing on a non-zero one
+/// (a signal-killed process reads as -1). Fails only if git could not run.
+pub(crate) fn git_code(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<i32, GitError> {
+    let status = command(dir, args, opts).output()?.status;
+    Ok(status.code().unwrap_or(-1))
 }

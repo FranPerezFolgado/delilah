@@ -26,7 +26,7 @@ keep their terminal.
 
 **Primary Dependencies**: axum, sqlx (SQLite), tokio, serde; React, Vite; vitest + Testing Library. Claude Code ≥ 2.1.292 (`--plugin-dir`, `--append-system-prompt`, `--permission-mode dontAsk`)
 
-**Storage**: SQLite. Migration `0011_idea_conversations.sql`: `sessions.conversation`, plus the new `conversation_entries` table. The plugin's files go in `$DELILAH_HOME/plugins/delilah/`, written at start-up.
+**Storage**: SQLite. Migration `0014_idea_conversations.sql`: `sessions.conversation`, plus the new `conversation_entries` table. The plugin's files go in `$DELILAH_HOME/plugins/delilah/`, written at start-up.
 
 **Testing**: `cargo test -p delilah-agents`, `cargo test -p delilah-daemon` (`Store::in_memory()`, hook posts as in `hooks.rs` tests, asks as in `asks.rs` tests); `cd app && npx tsc --noEmit && npx vitest run`
 
@@ -56,7 +56,7 @@ rules (`CLAUDE.md`) serve as gates instead:
 | Agent hooks/settings outside the repo, clean env | ✅ plugin and settings under `$DELILAH_HOME`, passed by flag; `env.rs` untouched; no `DELILAH_URL` given to agents |
 | Try changes only in a preview, never 7420 / pkill | ✅ quickstart uses `scripts/preview.sh` |
 | No remote operations without confirming the account | ✅ none |
-| Migrations never edit a shipped one | ✅ new `0011` |
+| Migrations never edit a shipped one | ✅ new `0014` |
 | Contracts (`api.rs` ↔ `api.ts`) | ⚠️ changed, additively: see [contracts/api.md](contracts/api.md); both sides in the same package |
 
 Post-design re-check: no change. The one new external dependency is behaviour of
@@ -85,7 +85,7 @@ specs/004-task-from-idea/
 crates/delilah-core/src/task.rs                 # Event::CreatedFromConversation
 crates/delilah-agents/src/claude.rs             # Launch: plugin_dir, append_system_prompt, Permission; settings permissions
 crates/delilah-agents/plugin/                   # NEW: plugin.json + skills/task-from-idea/SKILL.md (include_str!)
-crates/delilah-daemon/migrations/0011_idea_conversations.sql   # NEW
+crates/delilah-daemon/migrations/0014_idea_conversations.sql   # NEW
 crates/delilah-daemon/src/store_sessions.rs     # conversation flag; entries CRUD
 crates/delilah-daemon/src/store.rs              # create_task_from_conversation (task + event, one tx)
 crates/delilah-daemon/src/api.rs                # routes; create_task core extracted for reuse
@@ -196,8 +196,8 @@ Each change emits `conversations`. The queue flush types the queued texts joined
 - `docs/status.md`: built and pending.
 - `docs/architecture.md`: the conversation session, the entries table, the plugin and the
   launch table.
-- `docs/decisions.md`: #26 "Tasks from ideas: the daemon creates them on the
-  confirmation card", and #27 "Idea conversations: a view over the PTY fed by hooks, not
+- `docs/decisions.md`: #35 "Tasks from ideas: the daemon creates them on the
+  confirmation card", and #36 "Idea conversations: a view over the PTY fed by hooks, not
   stream-json (left for later)".
 - `README.md`: "Nueva tarea con Claude".
 

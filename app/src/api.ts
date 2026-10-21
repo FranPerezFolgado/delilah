@@ -13,6 +13,17 @@ export type TaskStatus =
   | { type: "done" }
   | { type: "failed"; reason: string };
 
+/** The steps of a saving-mode task, each in its own session. */
+export type Step = "plan" | "implement" | "review";
+export type HandoffStage = "offered" | "saving" | "starting" | "failed" | "skipped";
+
+/** A pending move to the next step's fresh session. */
+export interface Handoff {
+  to: Step;
+  stage: HandoffStage;
+  error?: string;
+}
+
 export interface Task {
   key: string;
   title: string;
@@ -24,6 +35,9 @@ export interface Task {
   notes?: string | null;
   /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
   in_checkout?: boolean | null;
+  /** Saving mode: each step runs in a fresh session. */
+  saving_mode: boolean;
+  handoff: Handoff | null;
 }
 
 export interface EventRecord {
@@ -66,6 +80,7 @@ export interface NewBacklogTask {
   free?: boolean;
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
+  saving_mode?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -75,6 +90,7 @@ export interface BacklogChange {
   notes?: string;
   project?: string;
   in_checkout?: boolean;
+  saving_mode?: boolean;
 }
 
 export interface RunRequest {
@@ -88,6 +104,8 @@ export interface RunRequest {
   free?: boolean;
   /** Work in the project's own checkout instead of a worktree. */
   in_checkout?: boolean;
+  /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
+  saving_mode?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
@@ -181,6 +199,8 @@ export interface Session {
   state: SessionState | null;
   /** An idea conversation (a project session that turns an idea into a task). */
   conversation: boolean;
+  /** The saving-mode step it works on, if any. */
+  step: Step | null;
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -247,7 +267,10 @@ export interface FileContent {
 /** The file changed on disk (usually the agent) since the editor loaded it. */
 export class ConflictError extends Error {}
 
-export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "suggest-review" | "paused" | "failed";
+export type InboxKind =
+  | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
+  | "pr-failed" | "pr-review" | "pr-blocked";
+
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
 export interface AskQuestion {
@@ -290,6 +313,8 @@ export interface InboxItem {
   since: string | null;
   /** A question with options, answered from Delilah. */
   ask?: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
+  /** The PR notice behind a pr-* item. */
+  pr?: { notice: number; url: string; repo: string };
 }
 
 /** Where a session's questions with options sit, next to its terminal. */
@@ -302,7 +327,7 @@ export function parseAskPosition(v: unknown): AskPosition {
 }
 
 /** The kinds that block an agent until you act: they count in the badge. */
-export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting"];
+export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-blocked"];
 
 export interface FolderInspection {
   path: string;
@@ -311,12 +336,53 @@ export interface FolderInspection {
   submodules: number;
 }
 
+export interface PrCheck { name: string; outcome: "pending" | "success" | "failure" | "neutral"; url: string | null }
+export interface PrSnapshot {
+  state: "open" | "merged" | "closed";
+  draft: boolean;
+  title: string;
+  head: string;
+  base: string;
+  checks: PrCheck[];
+  ci: "pending" | "success" | "failure" | "none";
+  review_decision: "approved" | "changes-requested" | "review-required" | null;
+  comments: number;
+}
+export interface PullRequest {
+  id: number;
+  repo: string;
+  host: string;
+  owner_name: string;
+  number: number;
+  url: string;
+  linked_by: "detected" | "opened" | "pasted";
+  checked_at: string | null;
+  error: string | null;
+  snapshot: PrSnapshot | null;
+}
+export interface TaskPrs { account: string | null; problem: { kind: string; message: string } | null; prs: PullRequest[] }
+/** What `Abrir PR` starts from: the branch's last commit as title and body. */
+export interface PrProposal { repo: string; title: string; body: string; base: string; needs_push: boolean; repos: string[] }
+/** One task's PRs for badges: the worst of each field when it has several. */
+export interface PrSummary {
+  task: string;
+  state: PrSnapshot["state"];
+  draft: boolean;
+  ci: PrSnapshot["ci"];
+  review_decision: PrSnapshot["review_decision"];
+  count: number;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
     /** A delete refused because work in the task's worktree would be lost. */
     readonly unpushed = false,
+    /** Why a PR can't be opened (`no-commits`, `has-pr`, `no-workspace`). */
+    readonly reason?: string,
+    /** When a paused task resumes (a 409 that is a pause, not any other conflict). */
+    readonly resumeAt?: string,
   ) {
     super(message);
   }
@@ -335,7 +401,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true);
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at);
   return data as T;
 }
 
@@ -366,6 +432,9 @@ export const api = {
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  /** Answers the offer to continue in a fresh session, or retries a failed one. */
+  handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
   dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),
   usage: () => request<UsageReport | null>("/api/v1/usage"),
   jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
@@ -384,6 +453,17 @@ export const api = {
   openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean; conversation?: boolean }) =>
     post<Session>(`/api/v1/projects/${project}/sessions`, s),
   allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
+  taskPrs: (key: string) => request<TaskPrs>(`/api/v1/tasks/${key}/prs`),
+  prSummaries: () => request<PrSummary[]>("/api/v1/prs"),
+  forwardNotice: (id: number) => post<null>(`/api/v1/pr-notices/${id}/forward`),
+  dismissNotice: (id: number) => post<null>(`/api/v1/pr-notices/${id}/dismiss`),
+  refreshPrs: (key: string) => post<null>(`/api/v1/tasks/${key}/prs/refresh`),
+  linkPr: (key: string, url: string) => post<PullRequest>(`/api/v1/tasks/${key}/prs/link`, { url }),
+  prProposal: (key: string, repo = ".") =>
+    request<PrProposal>(`/api/v1/tasks/${key}/prs/proposal?repo=${encodeURIComponent(repo)}`),
+  openPr: (key: string, req: { repo: string; title: string; body: string; draft: boolean }) =>
+    post<PullRequest>(`/api/v1/tasks/${key}/prs`, req),
+  unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),

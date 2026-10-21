@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
+const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: () => () => new Promise(() => {}) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -34,6 +35,8 @@ const task = (status: TaskStatus): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
+  saving_mode: false,
+  handoff: null,
   status,
 });
 const spec: SpecSummary = { phase: "plan", dir: "specs/001-x", done: 0, total: 3, current: null };
@@ -55,7 +58,10 @@ function head(t?: Task, s?: SpecSummary) {
   return container.querySelector(".view-head")!;
 }
 
-beforeEach(() => setLanguage("es"));
+beforeEach(() => {
+  setLanguage("es");
+  setSavingMode.mockClear();
+});
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -92,6 +98,7 @@ describe("TaskScreen conversation sessions", () => {
     closed: false,
     live: true,
     read_only: false,
+    step: null,
     state: "waiting",
     conversation: true,
   };
@@ -158,5 +165,89 @@ describe("TaskScreen conversation sessions", () => {
     expect(getByTestId("askcard").getAttribute("data-proposal")).toBe("Nueva");
     fireEvent.click(getByText("open-created"));
     expect(onOpenTask).toHaveBeenCalledWith("LIBRE-9");
+  });
+});
+
+describe("TaskScreen saving mode", () => {
+  const saving = (status: TaskStatus, on = true) => {
+    const { container } = render(
+      <TaskScreen
+        owner="PROJ-1"
+        task={{ ...task(status), saving_mode: on }}
+        sessions={[]}
+        asks={[]}
+        askPosition="right"
+        onChanged={() => {}}
+      />,
+    );
+    return container;
+  };
+
+  it("shows the marker and the chain with saving mode", () => {
+    const c = saving({ type: "running" });
+    expect(c.querySelector(".saving-pill")?.textContent).toContain("Modo ahorro");
+    expect(c.querySelector(".chain")).not.toBeNull();
+    expect(c.textContent).not.toContain("Activar modo ahorro");
+  });
+
+  it("shows neither without it, only the activate action while running", () => {
+    const c = saving({ type: "running" }, false);
+    expect(c.querySelector(".saving-pill")).toBeNull();
+    expect(c.querySelector(".chain")).toBeNull();
+    expect(c.textContent).toContain("Activar modo ahorro");
+  });
+
+  it("offers no activate action on a done task", () => {
+    expect(saving({ type: "done" }, false).textContent).not.toContain("Activar modo ahorro");
+  });
+
+  it("turns saving mode off and on while running", () => {
+    saving({ type: "running" });
+    fireEvent.click(screen.getByText("Desactivar"));
+    expect(setSavingMode).toHaveBeenCalledWith("PROJ-1", false);
+    cleanup();
+    saving({ type: "running" }, false);
+    fireEvent.click(screen.getByText("Activar modo ahorro"));
+    expect(setSavingMode).toHaveBeenLastCalledWith("PROJ-1", true);
+  });
+});
+
+describe("TaskScreen follows the primary session", () => {
+  const sess = (id: string, primary: boolean): Session => ({
+    id,
+    task: "PROJ-1",
+    kind: "claude",
+    label: id,
+    primary,
+    closed: false,
+    live: true,
+    read_only: false,
+    conversation: false,
+    state: "working",
+    step: "plan",
+  });
+  const screenOf = (owner: string, sessions: Session[]) => (
+    <TaskScreen
+      owner={owner}
+      task={{ ...task({ type: "running" }), key: owner, saving_mode: true }}
+      sessions={sessions}
+      asks={[]}
+      askPosition="right"
+      onChanged={() => {}}
+    />
+  );
+  const selected = () => screen.getAllByRole("tab").find((x) => x.getAttribute("aria-selected") === "true")?.textContent;
+
+  it("selects the new primary's tab after a handoff", () => {
+    const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
+    expect(selected()).toBe("Tarea");
+    rerender(screenOf("PROJ-1", [sess("a", false), sess("b", true)]));
+    expect(selected()).toBe("b");
+  });
+
+  it("does not steal the tab when the screen switches to another task", () => {
+    const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
+    rerender(screenOf("PROJ-2", [sess("c", true)]));
+    expect(selected()).toBe("Tarea");
   });
 });

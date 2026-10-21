@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { Project, Session, Task } from "../api";
+import type { Project, PrSummary, Session, Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
+import { PrBadge } from "./PrBadge";
 import { statusIcon } from "./status";
 import { t, tn } from "../i18n";
 
@@ -13,6 +14,8 @@ interface Props {
   view: View;
   onView: (v: View) => void;
   tasks: Task[];
+  /** Each task's PR summary, for its badge. */
+  prs?: PrSummary[];
   projects: Project[];
   sessions: Session[];
   /** A task's key or `@<project>`. */
@@ -63,7 +66,7 @@ function useRememberedSet(key: string) {
   return [set, toggle] as const;
 }
 
-export function Sidebar({ view, onView, tasks, projects, sessions, selected, onSelect, onOpenSession, onAsk, onIdea, onNewTask, onDelete, waiting }: Props) {
+export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, selected, onSelect, onOpenSession, onAsk, onIdea, onNewTask, onDelete, waiting }: Props) {
   // Folded projects, remembered per viewer: a project with many sessions and tasks
   // would otherwise take the whole sidebar.
   const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
@@ -81,6 +84,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
       window.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+  const prOf = new Map(prs.map((p) => [p.task, p]));
   const taskRow = (task: Task) => {
     const { icon, cls } = statusIcon(task.status);
     return (
@@ -97,6 +101,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
         <Icon name={icon} className={cls} />
         <span className="key mono">{task.key}</span>
         <span className="trunc">{task.title}</span>
+        {prOf.get(task.key) && <PrBadge pr={prOf.get(task.key)!} />}
       </button>
     );
   };

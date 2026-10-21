@@ -58,7 +58,7 @@ Checked against Claude Code 2.1.292 (`claude --help`) and the code on `feature/L
   - read-only Bash: `Bash(git status:*)`, `Bash(ls:*)`, plus their `rtk` forms.
 
   Final list and reasons (no `rg`, no `git log/show/diff`; `--setting-sources user`):
-  decisions.md #26. It also adds `permissions.deny` for `Edit`, `MultiEdit`, `Write` and
+  decisions.md #34. It also adds `permissions.deny` for `Edit`, `MultiEdit`, `Write` and
   `NotebookEdit`. Anything else
   is denied without a prompt. Project sessions keep `--permission-mode plan`, unchanged.
 - **Rationale**: in plan mode Claude can call ExitPlanMode, whose approval only shows in

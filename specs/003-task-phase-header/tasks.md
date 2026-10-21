@@ -80,8 +80,8 @@ None: no new dependencies; the existing vitest + Testing Library setup is used a
 
 ## Phase 5: Polish & cross-cutting
 
-- [ ] T013 [P] `README.md`: in the "Desktop app" section, where it describes the task screen,, add one line saying the header shows the task's phase (and the progress while implementing) next to its status.
-- [ ] T014 [P] `docs/status.md`: add the phase in the task header to what is built (keep the file's style).
+- [X] T013 [P] `README.md`: in the "Desktop app" section, where it describes the task screen,, add one line saying the header shows the task's phase (and the progress while implementing) next to its status.
+- [X] T014 [P] `docs/status.md`: add the phase in the task header to what is built (keep the file's style).
 - [ ] T015 Run `cd app && npx tsc --noEmit && npx vitest run`, then follow `specs/003-task-phase-header/quickstart.md` "By hand" in a preview (`scripts/preview.sh`, never 7420). Check the five scenarios: phase, live change, progress, hidden cases, 1024 px width.
 
 ---
