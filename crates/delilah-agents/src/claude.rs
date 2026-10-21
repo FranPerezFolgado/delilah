@@ -319,7 +319,7 @@ pub enum ActivityEvent {
 
 const TARGET_MAX: usize = 40;
 
-fn shorten(s: &str) -> String {
+pub fn shorten(s: &str) -> String {
     if s.chars().count() <= TARGET_MAX {
         return s.to_string();
     }
@@ -349,6 +349,8 @@ pub fn action_of(tool: &str, input: &Value, id: &str) -> Action {
             let host = text("url").and_then(|u| {
                 let rest = u.split_once("://").map_or(u, |(_, r)| r);
                 let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+                // Never keep credentials from a `user:pass@host` URL.
+                let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
                 (!host.is_empty()).then(|| host.to_string())
             });
             (ActionKind::Read, host)
@@ -388,6 +390,10 @@ pub fn classify_activity(hook: &Value) -> Option<ActivityEvent> {
         role: hook["agent_type"].as_str().unwrap_or("").to_string(),
     });
     let tool_use_id = hook["tool_use_id"].as_str().unwrap_or("").to_string();
+    // A waiting session must not show a stale AskUserQuestion action.
+    if hook["tool_name"].as_str() == Some("AskUserQuestion") {
+        return None;
+    }
     match hook["hook_event_name"].as_str()? {
         "PreToolUse" => Some(ActivityEvent::ToolStarted {
             agent,
@@ -888,6 +894,21 @@ mod tests {
         }
         let a = action_of("Bash", &json!({"command": "x".repeat(100)}), "");
         assert_eq!(a.target.unwrap().chars().count(), 40);
+    }
+
+    #[test]
+    fn ask_user_question_is_not_an_activity() {
+        for ev in ["PreToolUse", "PostToolUse", "PostToolUseFailure"] {
+            let h = json!({"hook_event_name": ev, "tool_name": "AskUserQuestion",
+                "tool_input": {}, "tool_use_id": "t1"});
+            assert!(classify_activity(&h).is_none(), "{ev}");
+        }
+    }
+
+    #[test]
+    fn webfetch_target_drops_userinfo_and_keeps_port() {
+        let a = action_of("WebFetch", &json!({"url": "https://u:p@example.com:8080/x"}), "t");
+        assert_eq!(a.target.as_deref(), Some("example.com:8080"));
     }
 
     #[test]

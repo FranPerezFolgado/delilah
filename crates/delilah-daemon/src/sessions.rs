@@ -54,7 +54,7 @@ impl Live {
         }
         // Waiting on the user or paused: nothing is running any more.
         if matches!(state, LiveState::Waiting | LiveState::Paused) {
-            let cleared = self.activity.lock().unwrap().clear();
+            let cleared = self.activity.lock().unwrap_or_else(|e| e.into_inner()).clear();
             if cleared {
                 self.events.emit(Topic::Activity);
             }
@@ -63,7 +63,7 @@ impl Live {
 
     /// Applies one activity event, announcing it when the view changed.
     pub fn update_activity(&self, event: ActivityEvent) {
-        let changed = self.activity.lock().unwrap().apply(event);
+        let changed = self.activity.lock().unwrap_or_else(|e| e.into_inner()).apply(event);
         if changed {
             self.events.emit(Topic::Activity);
         }
@@ -137,7 +137,7 @@ impl Sessions {
             .into_iter()
             .filter(|l| l.kind == SessionKind::Claude)
             .filter_map(|l| {
-                let a = l.activity.lock().unwrap().clone();
+                let a = l.activity.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 (!a.is_empty()).then_some((l.id, a))
             })
             .collect()

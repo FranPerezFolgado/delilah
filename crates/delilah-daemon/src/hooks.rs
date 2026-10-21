@@ -34,7 +34,12 @@ pub async fn claude_hook(
     }
     // Kept raw: the exact payloads (e.g. a real StopFailure) are what the next
     // iteration of the adapter is built from.
-    if let Err(e) = append_raw(&app, &q.task, &hook).await {
+    // PreToolUse is not logged: it fires for every tool with the full tool_input
+    // (e.g. Write contents), which PostToolUse already carries; logging both
+    // would double the file.
+    if hook["hook_event_name"].as_str() != Some("PreToolUse")
+        && let Err(e) = append_raw(&app, &q.task, &hook).await
+    {
         tracing::warn!(task = %q.task, "cannot log hook: {e}");
     }
 
@@ -347,6 +352,23 @@ mod tests {
     fn pre_edit() -> Value {
         json!({ "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_use_id": "t1",
                 "tool_input": { "file_path": "/repo/src/main.rs" } })
+    }
+
+    #[tokio::test]
+    async fn pre_tool_use_is_not_logged_but_post_tool_use_is() {
+        let state = running_task().await;
+        live_claude(&state);
+        let log = state.config.task_dir("PROJ-1").join("hooks.jsonl");
+        let lines = || std::fs::read_to_string(&log).map_or(0, |s| s.lines().count());
+        post(&state, LIVE, pre_edit()).await;
+        assert_eq!(lines(), 0);
+        post(
+            &state,
+            LIVE,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
+        )
+        .await;
+        assert_eq!(lines(), 1);
     }
 
     #[tokio::test]
