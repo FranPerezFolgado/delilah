@@ -42,6 +42,12 @@ pub async fn list_all(State(app): State<AppState>) -> Result<Json<Vec<SessionVie
     Ok(Json(records.into_iter().map(|r| view(&app, r)).collect()))
 }
 
+/// What each live Claude session's agents are doing, for those doing something.
+pub async fn activity(State(app): State<AppState>) -> Json<serde_json::Value> {
+    let sessions: std::collections::BTreeMap<_, _> = app.sessions.busy().into_iter().collect();
+    Json(serde_json::json!({ "sessions": sessions }))
+}
+
 pub async fn list_for_task(
     State(app): State<AppState>,
     Path(key): Path<String>,

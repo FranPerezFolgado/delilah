@@ -67,6 +67,12 @@ pub async fn claude_hook(
         });
     }
 
+    if let Some(live) = &live
+        && let Some(event) = claude::classify_activity(&hook)
+    {
+        live.update_activity(event);
+    }
+
     // What the session now waits on you for, for the inbox.
     if let Some(id) = q
         .session
@@ -307,6 +313,105 @@ mod tests {
         )
         .await;
         assert!(inbox(&state).await.is_empty());
+    }
+
+    /// A live Claude session `s-1` of PROJ-1 (a quiet process behind it).
+    fn live_claude(state: &AppState) {
+        let mut cmd = portable_pty::CommandBuilder::new("bash");
+        cmd.args(["--noprofile", "--norc", "-c", "sleep 5"]);
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        state.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+    }
+
+    async fn activity(state: &AppState) -> Value {
+        let req = Request::get("/api/v1/activity").body(Body::empty()).unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    const LIVE: &str = "/hooks/claude?task=PROJ-1&session=s-1";
+
+    fn pre_edit() -> Value {
+        json!({ "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_use_id": "t1",
+                "tool_input": { "file_path": "/repo/src/main.rs" } })
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_shows_in_the_activity_until_it_ends() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        let a = activity(&state).await;
+        assert_eq!(a["sessions"]["s-1"]["action"]["kind"], "edit");
+        assert_eq!(a["sessions"]["s-1"]["action"]["target"], "main.rs");
+
+        post(
+            &state,
+            LIVE,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
+        )
+        .await;
+        assert_eq!(activity(&state).await, json!({ "sessions": {} }));
+    }
+
+    #[tokio::test]
+    async fn waiting_clears_the_activity() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        assert!(activity(&state).await["sessions"]["s-1"].is_object());
+        post(&state, LIVE, json!({ "hook_event_name": "Notification" })).await;
+        assert_eq!(activity(&state).await, json!({ "sessions": {} }));
+        assert_eq!(
+            state.sessions.get("s-1").unwrap().state(),
+            LiveState::Waiting
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_of_an_unknown_session_is_ignored() {
+        let state = running_task().await;
+        let code = post(
+            &state,
+            "/hooks/claude?task=PROJ-1&session=nope",
+            pre_edit(),
+        )
+        .await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
+        assert_eq!(activity(&state).await, json!({ "sessions": {} }));
+    }
+
+    #[tokio::test]
+    async fn activity_is_announced_on_change_only() {
+        let state = running_task().await;
+        live_claude(&state);
+        let mut rx = state.events.subscribe();
+        let drain = |rx: &mut tokio::sync::broadcast::Receiver<Topic>| {
+            let mut topics = vec![];
+            while let Ok(t) = rx.try_recv() {
+                topics.push(t);
+            }
+            topics
+        };
+        post(&state, LIVE, pre_edit()).await;
+        assert!(drain(&mut rx).contains(&Topic::Activity));
+        // The end of a call that is not the current one changes nothing.
+        let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
+        post(&state, LIVE, other).await;
+        assert!(!drain(&mut rx).contains(&Topic::Activity));
     }
 
     #[tokio::test]

@@ -57,6 +57,7 @@ pub fn router(state: AppState) -> Router {
             get(session_api::list_for_task).post(session_api::open),
         )
         .route("/api/v1/sessions", get(session_api::list_all))
+        .route("/api/v1/activity", get(session_api::activity))
         .route(
             "/api/v1/preferences/{key}",
             get(preferences::get).put(preferences::put),

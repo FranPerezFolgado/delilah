@@ -4,10 +4,12 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use delilah_agents::claude::ActivityEvent;
 use delilah_agents::pty::PtySession;
 use serde::Serialize;
 use tokio::sync::Notify;
 
+use crate::activity::Activity;
 use crate::events::{Events, Topic};
 use crate::store_sessions::SessionKind;
 
@@ -35,6 +37,8 @@ pub struct Live {
     /// Clients attached to the terminal right now.
     pub viewers: Arc<AtomicUsize>,
     pub state: Arc<Mutex<LiveState>>,
+    /// What its agents are doing right now (Claude sessions only).
+    pub activity: Arc<Mutex<Activity>>,
     events: Events,
 }
 
@@ -47,6 +51,21 @@ impl Live {
         let changed = std::mem::replace(&mut *self.state.lock().unwrap(), state) != state;
         if changed {
             self.events.emit(Topic::Sessions);
+        }
+        // Waiting on the user or paused: nothing is running any more.
+        if matches!(state, LiveState::Waiting | LiveState::Paused) {
+            let cleared = self.activity.lock().unwrap().clear();
+            if cleared {
+                self.events.emit(Topic::Activity);
+            }
+        }
+    }
+
+    /// Applies one activity event, announcing it when the view changed.
+    pub fn update_activity(&self, event: ActivityEvent) {
+        let changed = self.activity.lock().unwrap().apply(event);
+        if changed {
+            self.events.emit(Topic::Activity);
         }
     }
 }
@@ -86,6 +105,7 @@ impl Sessions {
             } else {
                 LiveState::Starting
             })),
+            activity: Arc::default(),
             events: self.events.clone(),
         };
         self.live
@@ -107,6 +127,19 @@ impl Sessions {
             .values()
             .filter(|l| l.task == task)
             .cloned()
+            .collect()
+    }
+
+    /// Every live session with its activity, for those that have any.
+    pub fn busy(&self) -> Vec<(String, Activity)> {
+        let lives: Vec<Live> = self.live.lock().unwrap().values().cloned().collect();
+        lives
+            .into_iter()
+            .filter(|l| l.kind == SessionKind::Claude)
+            .filter_map(|l| {
+                let a = l.activity.lock().unwrap().clone();
+                (!a.is_empty()).then_some((l.id, a))
+            })
             .collect()
     }
 

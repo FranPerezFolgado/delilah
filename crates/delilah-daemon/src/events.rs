@@ -29,6 +29,8 @@ pub enum Topic {
     Usage,
     /// `/projects`
     Projects,
+    /// `/activity`: what a session's agents are doing changed.
+    Activity,
     /// The client missed messages: fetch everything.
     Resync,
 }

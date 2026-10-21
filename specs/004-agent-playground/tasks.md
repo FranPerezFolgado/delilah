@@ -213,13 +213,13 @@
     - helpers keep their start order;
     - `clear()` returns whether anything was there.
 - [X] T028 [US3] Implement `crates/delilah-daemon/src/activity.rs` (`Activity`, `Helper`, `apply` and `clear`, plus the serde view matching contracts/api.md) and register the module in `lib.rs`/`main.rs` (T027).
-- [ ] T029 [US3] Write failing router tests in `crates/delilah-daemon/src/hooks.rs` (`mod tests`; reuse the AppState and `post(state, path, body)` helpers) against a live Claude session. Insert it with the same helper the existing state tests use; read them first:
+- [X] T029 [US3] Write failing router tests in `crates/delilah-daemon/src/hooks.rs` (`mod tests`; reuse the AppState and `post(state, path, body)` helpers) against a live Claude session. Insert it with the same helper the existing state tests use; read them first:
   1. post a `PreToolUse` Edit, and `GET /api/v1/activity` shows the action with `kind: "edit"` and the file name;
   2. post the matching `PostToolUse`, and the session is gone from the response;
   3. post a `PreToolUse`, then a `Notification`, and the activity is cleared and the state is `waiting`;
   4. a `PreToolUse` for an unknown session is ignored (200, nothing in activity);
   5. a `Topic::Activity` event is emitted on a change and not on a no-op. Use the events subscription the existing tests use, if there is one; otherwise assert through a receiver from `AppState`.
-- [ ] T030 [US3] Implement the daemon side until T029 passes:
+- [X] T030 [US3] Implement the daemon side until T029 passes:
   - `Topic::Activity` in `crates/delilah-daemon/src/events.rs`, with its wire name `activity`;
   - `Live.activity: Arc<Mutex<Activity>>`, plus `update_activity(event)`, which emits on change, in `crates/delilah-daemon/src/sessions.rs`;
   - `set_state` clearing the activity, and emitting, on `Waiting` or `Paused`;
