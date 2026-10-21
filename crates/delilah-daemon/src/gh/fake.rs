@@ -7,6 +7,23 @@ use futures_util::future::BoxFuture;
 
 use super::{Gh, GhError, strings};
 
+/// `gh repo view` of `o/r` on github.com.
+pub(crate) const REPO_VIEW: &str =
+    r#"{"nameWithOwner":"o/r","url":"https://github.com/o/r","defaultBranchRef":{"name":"main"}}"#;
+/// `gh pr list` with one open PR, `PR_URL`.
+pub(crate) const PR_LIST: &str = r#"[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN","updatedAt":"2026-10-20T10:00:00Z"}]"#;
+pub(crate) const PR_URL: &str = "https://github.com/o/r/pull/7";
+
+/// A GraphQL answer for a PR with no checks, reviews or comments.
+pub(crate) fn bare_snapshot(state: &str, merged: bool) -> String {
+    format!(
+        r#"{{"data":{{"repository":{{"pullRequest":{{"state":"{state}","isDraft":false,"merged":{merged},
+      "headRefOid":"abc","baseRefName":"main","title":"t","url":"u","reviewDecision":null,
+      "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":null}}}}]}},
+      "reviews":{{"nodes":[]}},"comments":{{"nodes":[]}},"reviewThreads":{{"nodes":[]}}}}}}}}}}"#
+    )
+}
+
 type Reply = (Vec<String>, Result<String, GhError>);
 
 pub(crate) struct FakeGh {
@@ -20,6 +37,19 @@ impl FakeGh {
             replies: Mutex::default(),
             calls: Mutex::default(),
         }
+    }
+
+    /// A repo `o/r` with one open PR (`PR_URL`) that `gh api graphql` can read.
+    pub(crate) fn happy() -> Self {
+        Self::new()
+            .on(&["repo", "view"], Ok(REPO_VIEW))
+            .on(&["pr", "list"], Ok(PR_LIST))
+            .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false)))
+    }
+
+    /// Signed in as `login`.
+    pub(crate) fn with_user(self, login: &str) -> Self {
+        self.on(&["api", "user"], Ok(&format!("{login}\n")))
     }
 
     /// Answers calls whose arguments start with `prefix` (the first match wins).

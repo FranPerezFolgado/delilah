@@ -18,6 +18,8 @@ mod owners;
 pub mod phases;
 pub mod pr_api;
 pub mod pr_loop;
+#[cfg(test)]
+pub(crate) mod pr_testkit;
 pub mod pr_types;
 mod preferences;
 mod projects;

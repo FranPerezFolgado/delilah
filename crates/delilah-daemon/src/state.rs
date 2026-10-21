@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -52,6 +52,10 @@ pub struct AppState {
     pub gh: Arc<GhClient>,
     /// Per repo (`host/owner/name`): when to try `gh` again after it failed.
     pub(crate) pr_backoff: Arc<Mutex<Backoff>>,
+    /// Tasks whose PRs are being checked now: one check per task at a time.
+    pub(crate) pr_checking: Arc<Mutex<HashSet<String>>>,
+    /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
+    pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -82,6 +86,8 @@ impl AppState {
             remote_control: Arc::default(),
             gh: Arc::new(GhClient::new(Arc::new(CliGh))),
             pr_backoff: Arc::default(),
+            pr_checking: Arc::default(),
+            pr_nudges: Arc::default(),
         }
     }
 

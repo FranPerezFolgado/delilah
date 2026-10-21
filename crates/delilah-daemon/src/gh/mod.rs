@@ -8,7 +8,7 @@ pub(crate) mod fake;
 mod graphql;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -215,14 +215,25 @@ pub struct PrRef {
     pub number: i64,
 }
 
+impl PrRef {
+    /// The URL without any trailing path, query or fragment.
+    pub fn url(&self) -> String {
+        format!(
+            "https://{}/{}/pull/{}",
+            self.host, self.owner_name, self.number
+        )
+    }
+}
+
 /// `https://<host>/<owner>/<name>/pull/<n>` (a trailing path or query is ignored). The
-/// host is a plain name (with a port): no userinfo, no odd characters.
+/// host is a plain name (with a port): no userinfo, no odd characters; owner and name
+/// are what GitHub allows.
 pub fn parse_pr_url(url: &str) -> Option<PrRef> {
     let rest = url.trim().strip_prefix("https://")?;
     let mut parts = rest.split(['?', '#']).next()?.split('/');
     let host = parts.next().filter(|h| valid_host(h))?;
     let (owner, name) = (parts.next()?, parts.next()?);
-    if parts.next()? != "pull" || owner.is_empty() || name.is_empty() {
+    if parts.next()? != "pull" || !valid_segment(owner) || !valid_segment(name) {
         return None;
     }
     let number = parts.next()?;
@@ -238,6 +249,13 @@ pub fn parse_pr_url(url: &str) -> Option<PrRef> {
         owner_name: format!("{owner}/{name}"),
         number: i64::try_from(number).ok()?,
     })
+}
+
+/// `^[A-Za-z0-9._-]{1,100}$`
+fn valid_segment(s: &str) -> bool {
+    (1..=100).contains(&s.len())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// `^[A-Za-z0-9.-]+(:\d+)?$`
@@ -265,6 +283,8 @@ fn host_of(url: &str) -> Option<&str> {
 pub struct GhClient {
     inner: Arc<dyn Gh>,
     users: Mutex<HashMap<String, String>>,
+    /// The host of each repo folder, asked once (see [`GhClient::host_of_dir`]).
+    hosts: Mutex<HashMap<PathBuf, String>>,
 }
 
 impl GhClient {
@@ -272,6 +292,7 @@ impl GhClient {
         Self {
             inner,
             users: Mutex::default(),
+            hosts: Mutex::default(),
         }
     }
 
@@ -285,6 +306,24 @@ impl GhClient {
         ];
         let out = self.inner.run(Some(dir), strings(&args), None).await?;
         parse_repo_view(&out)
+    }
+
+    /// The host of the repo in `dir`, remembered per folder.
+    pub async fn host_of_dir(&self, dir: &Path) -> Result<String, GhError> {
+        if let Some(host) = self
+            .hosts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(dir)
+        {
+            return Ok(host.clone());
+        }
+        let host = self.repo_view(dir).await?.host;
+        self.hosts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(dir.to_path_buf(), host.clone());
+        Ok(host)
     }
 
     /// The login `gh` is signed in as on `host`, asked once per host.
@@ -533,6 +572,12 @@ mod tests {
                 number: 42
             })
         );
+        assert_eq!(
+            parse_pr_url("https://git.corp.example/org/svc/pull/42/files?x=1#top")
+                .unwrap()
+                .url(),
+            "https://git.corp.example/org/svc/pull/42"
+        );
         assert_eq!(parse_pr_url("https://github.com/me/repo/issues/4"), None);
         assert_eq!(parse_pr_url("https://github.com/me/repo/pull/x"), None);
         assert_eq!(parse_pr_url("not a url"), None);
@@ -560,6 +605,28 @@ mod tests {
         for n in ["0", "-3", "+4", "", "99999999999999999999"] {
             assert_eq!(parse_pr_url(&url("github.com", n)), None, "{n}");
         }
+    }
+
+    #[test]
+    fn pr_urls_with_odd_owners_or_names_are_refused() {
+        for (owner, name) in [
+            ("me%2f", "repo"),
+            ("me", "re po"),
+            ("me", "repo;ls"),
+            ("m\u{e9}", "repo"),
+            ("me", "re\\po"),
+            ("", "repo"),
+        ] {
+            let url = format!("https://github.com/{owner}/{name}/pull/1");
+            assert_eq!(parse_pr_url(&url), None, "{url}");
+        }
+        let long = "a".repeat(101);
+        assert_eq!(
+            parse_pr_url(&format!("https://github.com/{long}/r/pull/1")),
+            None
+        );
+        let ok = parse_pr_url("https://github.com/Me_1/re.po-x/pull/1").unwrap();
+        assert_eq!(ok.owner_name, "Me_1/re.po-x");
     }
 
     #[test]
@@ -614,6 +681,22 @@ mod tests {
         assert_eq!(client.user("github.com").await.unwrap(), "FranPerezFolgado");
         assert_eq!(gh.calls().len(), 1);
         client.user("git.corp.example").await.unwrap();
+        assert_eq!(gh.calls().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_host_of_a_folder_is_asked_once() {
+        let (gh, client) = client(FakeGh::happy());
+        assert_eq!(
+            client.host_of_dir(Path::new("/a")).await.unwrap(),
+            "github.com"
+        );
+        assert_eq!(
+            client.host_of_dir(Path::new("/a")).await.unwrap(),
+            "github.com"
+        );
+        assert_eq!(gh.calls().len(), 1);
+        client.host_of_dir(Path::new("/b")).await.unwrap();
         assert_eq!(gh.calls().len(), 2);
     }
 

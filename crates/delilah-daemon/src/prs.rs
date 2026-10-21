@@ -166,6 +166,7 @@ pub(crate) mod tests {
             marks: Marks::default(),
             checked_at: None,
             error: None,
+            error_kind: None,
             created_at: Utc::now(),
         }
     }

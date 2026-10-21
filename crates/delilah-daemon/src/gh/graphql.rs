@@ -305,11 +305,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_pr_without_checks_parses_and_a_missing_one_is_an_error() {
-        let bare = r#"{"data":{"repository":{"pullRequest":{"state":"MERGED","isDraft":false,"merged":true,
-          "headRefOid":"d","baseRefName":"main","title":"t","url":"u","reviewDecision":null,
-          "commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]},
-          "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}"#;
-        let s = parse_snapshot(bare).unwrap();
+        let bare = crate::gh::fake::bare_snapshot("MERGED", true);
+        let s = parse_snapshot(&bare).unwrap();
         assert_eq!(s.state, PrState::Merged);
         assert!(s.checks.is_empty());
         assert_eq!(s.review_decision, None);

@@ -1,27 +1,84 @@
 //! The PR loop: finds the PR of each task's branch, checks the open ones on a timer and
-//! after the agent pushes (see `prs.rs` for the pure logic, `gh` for GitHub).
+//! after the agent pushes (see `prs.rs` for the pure logic, `gh` for GitHub, `access.rs`
+//! for the problems the user can fix).
+
+pub(crate) mod access;
 
 use std::collections::HashSet;
+use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use delilah_core::{SpecPhase, TaskKey};
+use delilah_core::{ProjectKind, SpecPhase, TaskKey};
 use tokio::time::MissedTickBehavior;
 
+use self::access::{failed, succeeded};
 use crate::events::Topic;
-use crate::gh::{AccessProblem, GhError, classify};
+use crate::gh::{GhError, PrRef, classify, parse_pr_url};
 use crate::phases;
 use crate::pr_types::PrState;
 use crate::state::AppState;
+use crate::store::StoreError;
 use crate::store_prs::{NewPr, PrRow};
 
 const INTERVAL: Duration = Duration::from_secs(30);
 /// How long after a push or `gh pr create` the PR is looked for: GitHub needs a moment.
-const NUDGE_DELAY: Duration = if cfg!(test) {
-    Duration::from_millis(20)
-} else {
-    Duration::from_secs(15)
-};
+const NUDGE_DELAY: Duration = Duration::from_secs(15);
+
+/// Why a PR could not be linked by its URL.
+#[derive(Debug)]
+pub(crate) enum LinkError {
+    /// Not the URL of a pull request.
+    NotAPr,
+    /// `gh` could not read the PR.
+    Gh(GhError),
+    /// The PR belongs to none of the repos of the task.
+    NotFromTask,
+    Store(StoreError),
+}
+
+impl From<StoreError> for LinkError {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e)
+    }
+}
+
+/// Marks a task as being checked; dropping it lets the next check run.
+pub(crate) struct CheckGuard {
+    checking: Arc<Mutex<HashSet<String>>>,
+    key: String,
+}
+
+impl Drop for CheckGuard {
+    fn drop(&mut self) {
+        self.checking
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.key);
+    }
+}
+
+/// Takes the task's check; `None` when another one is running.
+pub(crate) fn claim(app: &AppState, key: &TaskKey) -> Option<CheckGuard> {
+    let fresh = app
+        .pr_checking
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(key.as_str().to_string());
+    fresh.then(|| CheckGuard {
+        checking: app.pr_checking.clone(),
+        key: key.as_str().to_string(),
+    })
+}
+
+/// Whether a check of the task is running now.
+pub(crate) fn is_checking(app: &AppState, key: &TaskKey) -> bool {
+    app.pr_checking
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(key.as_str())
+}
 
 /// Checks the PRs on a timer: the open ones, and the tasks in review that have none yet.
 pub fn spawn(app: AppState) {
@@ -69,17 +126,39 @@ async fn tick(app: &AppState) {
 
 /// The agent just pushed or opened a PR: look for it soon, ignoring any back-off.
 pub fn nudge(app: &AppState, key: &TaskKey) {
+    nudge_after(app, key, NUDGE_DELAY);
+}
+
+/// [`nudge`] after `delay`. Nudges of a task that are waiting make one check.
+pub(crate) fn nudge_after(app: &AppState, key: &TaskKey, delay: Duration) {
+    let fresh = app
+        .pr_nudges
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(key.as_str().to_string());
+    if !fresh {
+        return;
+    }
     let app = app.clone();
     let key = key.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(NUDGE_DELAY).await;
+        tokio::time::sleep(delay).await;
+        // Out of the set before the check: a push during it asks for another.
+        app.pr_nudges
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(key.as_str());
         check_task(&app, &key, true).await;
     });
 }
 
 /// One check of a task: finds the PR of its branch in each repo that has none, then
 /// reads every open PR. `force` also searches below review and ignores the back-off.
+/// Only one check of a task runs at a time: a second call returns at once.
 pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
+    let Some(_guard) = claim(app, key) else {
+        return;
+    };
     let Ok(Some(task)) = app.store.get_task(key).await else {
         return;
     };
@@ -125,7 +204,7 @@ async fn detect(
     key: &TaskKey,
     project: &str,
     repo: &str,
-    dir: &std::path::Path,
+    dir: &Path,
     branch: &str,
     force: bool,
 ) -> Result<bool, ()> {
@@ -155,11 +234,13 @@ async fn detect(
     let Some(pr) = crate::prs::pick(&listed) else {
         return Ok(false);
     };
-    if app.store.is_unlinked(key, &pr.url).await.unwrap_or(false) {
+    // The same form the pasted links are stored in.
+    let url = parse_pr_url(&pr.url).map_or_else(|| pr.url.clone(), |r| r.url());
+    if app.store.is_unlinked(key, &url).await.unwrap_or(false) {
         return Ok(false);
     }
     let existing = app.store.prs_of(key).await.unwrap_or_default();
-    if existing.iter().any(|r| r.repo == repo && r.url == pr.url) {
+    if existing.iter().any(|r| r.repo == repo && r.url == url) {
         return Ok(false);
     }
     let new = NewPr {
@@ -167,7 +248,7 @@ async fn detect(
         host: info.host,
         owner_name: info.owner_name,
         number: pr.number,
-        url: pr.url.clone(),
+        url,
         linked_by: "detected".into(),
     };
     match app.store.link_pr(key, &new).await {
@@ -182,7 +263,8 @@ async fn detect(
     }
 }
 
-/// Reads a linked PR and saves what it found. Whether anything shown changed.
+/// Reads a linked PR and saves what it found. Whether to tell the open clients: after
+/// every good check (they show when it was made) and when the problem changed.
 async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bool {
     let backoff_key = format!("{}/{}", row.host, row.owner_name);
     if !force && !due(app, &backoff_key) {
@@ -195,7 +277,6 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bo
     {
         Ok(snap) => {
             succeeded(app, project, &[&backoff_key]).await;
-            let changed = row.snapshot.as_ref() != Some(&snap) || row.error.is_some();
             // The notices come with the next package: the marks stay as they were.
             if let Err(e) = app
                 .store
@@ -205,15 +286,21 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bo
                 tracing::warn!(task = %row.task_key, "could not save the PR check: {e}");
                 return false;
             }
-            changed
+            true
         }
         Err(e) => {
             failed(app, project, &backoff_key, &e, force).await;
+            let kind = classify(&e).kind();
             let text = e.to_string();
-            if row.error.as_deref() == Some(text.as_str()) {
+            if row.error.as_deref() == Some(text.as_str())
+                && row.error_kind.as_deref() == Some(kind)
+            {
                 return false;
             }
-            app.store.set_pr_error(row.id, Some(&text)).await.is_ok()
+            app.store
+                .set_pr_error(row.id, Some((kind, &text)))
+                .await
+                .is_ok()
         }
     }
 }
@@ -221,177 +308,101 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bo
 fn due(app: &AppState, key: &str) -> bool {
     app.pr_backoff
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(PoisonError::into_inner)
         .due(key, Instant::now())
 }
 
-/// `gh` failed for `backoff_key`: back off, and tell the user once if it is something
-/// they can fix.
-async fn failed(app: &AppState, project: &str, backoff_key: &str, err: &GhError, force: bool) {
-    let problem = classify(err);
-    let now = Instant::now();
-    let reset = match &problem {
-        AccessProblem::RateLimited { reset: Some(at) } => {
-            Some(now + (*at - Utc::now()).to_std().unwrap_or_default())
-        }
-        _ => None,
-    };
-    if !force || reset.is_some() {
-        app.pr_backoff
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .fail(backoff_key, now, reset);
-    }
-    let Some((title, body)) = access_message(app, project, &problem) else {
-        return;
-    };
-    let kind = problem.kind().to_string();
-    let flag = format!("pr_access:{project}");
-    let current: Option<Option<String>> = app.store.setting(&flag).await.ok().flatten();
-    if current.flatten().as_deref() == Some(kind.as_str()) {
-        return;
-    }
-    if app.store.set_setting(&flag, &Some(kind)).await.is_err() {
-        return;
-    }
-    // With the app open the PR tab shows the problem; the notification is for when it is not.
-    if !app.events.listening() {
-        app.notifier.send(title, body);
-    }
-}
-
-/// What to tell the user about an access problem; `None` for the ones that pass alone.
-fn access_message(
+/// Links the PR at `url` to the task, in the repo of its workspace it belongs to, and
+/// moves the task to review. `linked_by` is `pasted` or `opened`.
+pub(crate) async fn link_by_url(
     app: &AppState,
-    project: &str,
-    problem: &AccessProblem,
-) -> Option<(String, String)> {
-    let lang = app.lang();
-    let body = match problem {
-        AccessProblem::Missing => lang.pick(
-            "Instala la CLI de GitHub (gh).",
-            "Install the GitHub CLI (gh).",
-        ),
-        AccessProblem::SignedOut => lang.pick(
-            "Inicia sesión con `gh auth login`.",
-            "Sign in with `gh auth login`.",
-        ),
-        AccessProblem::NoAccess => lang.pick(
-            "Tu cuenta de gh no tiene acceso al repositorio.",
-            "Your gh account has no access to the repository.",
-        ),
-        AccessProblem::UnsupportedRemote => lang.pick(
-            "El remoto de git no es de GitHub.",
-            "The git remote is not a GitHub one.",
-        ),
-        AccessProblem::Network | AccessProblem::RateLimited { .. } => return None,
+    key: &TaskKey,
+    url: &str,
+    linked_by: &str,
+) -> Result<PrRow, LinkError> {
+    let pr = parse_pr_url(url).ok_or(LinkError::NotAPr)?;
+    let url = pr.url();
+    let (_, snapshot) = app.gh.pr_view_url(&url).await.map_err(LinkError::Gh)?;
+    let repo = repo_of(app, key, &pr).await?;
+    let new = NewPr {
+        repo,
+        host: pr.host,
+        owner_name: pr.owner_name,
+        number: pr.number,
+        url,
+        linked_by: linked_by.to_string(),
     };
-    let title = format!(
-        "{} {project}",
-        lang.pick("PRs no disponibles en", "PRs unavailable in")
-    );
-    Some((title, body.to_string()))
+    let row = app.store.link_pr(key, &new).await?;
+    app.store
+        .save_check(row.id, &snapshot, &row.marks, Utc::now(), &[], &[])
+        .await?;
+    phases::advance(app, key, SpecPhase::Review).await;
+    app.emit(Topic::Prs);
+    Ok(app.store.pr(row.id).await?.unwrap_or(row))
 }
 
-/// `gh` answered: forget the back-off and any access problem of the project.
-async fn succeeded(app: &AppState, project: &str, backoff_keys: &[&str]) {
-    {
-        let mut backoff = app
-            .pr_backoff
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for key in backoff_keys {
-            backoff.ok(key);
+/// The repo of the task's workspace that `pr` belongs to. A task without a workspace
+/// can only link PRs of its project's own checkout, when that is a plain repo.
+async fn repo_of(app: &AppState, key: &TaskKey, pr: &PrRef) -> Result<String, LinkError> {
+    let is_pr_repo = |dir: &Path| {
+        let dir = dir.to_path_buf();
+        async move {
+            app.gh.repo_view(&dir).await.is_ok_and(|info| {
+                info.host.eq_ignore_ascii_case(&pr.host)
+                    && info.owner_name.eq_ignore_ascii_case(&pr.owner_name)
+            })
         }
+    };
+    if let Some((_, ws)) = app.store.workspace(key).await? {
+        for (name, dir) in ws.repos() {
+            if is_pr_repo(&dir).await {
+                return Ok(name);
+            }
+        }
+        return Err(LinkError::NotFromTask);
     }
-    let flag = format!("pr_access:{project}");
-    let current: Option<Option<String>> = app.store.setting(&flag).await.ok().flatten();
-    if current.flatten().is_some() {
-        let _ = app.store.set_setting(&flag, &None::<String>).await;
+    let project = app
+        .store
+        .get_task(key)
+        .await?
+        .and_then(|t| t.project)
+        .ok_or(LinkError::NotFromTask)?;
+    let project = app.store.project(&project).await?;
+    if project.kind == ProjectKind::Repo && is_pr_repo(&project.path).await {
+        return Ok(".".into());
     }
+    Err(LinkError::NotFromTask)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-    use std::sync::Arc;
-
-    use delilah_core::{Event, Project, ProjectKind, SpecPhase, Task};
-    use delilah_git::Workspace;
+    use delilah_core::{Project, Task};
 
     use super::*;
-    use crate::config::Config;
-    use crate::gh::GhError;
-    use crate::gh::fake::FakeGh;
-    use crate::store::Store;
+    use crate::gh::fake::{FakeGh, PR_URL, REPO_VIEW, bare_snapshot};
+    use crate::pr_testkit::task_with_workspace;
 
-    const REPO_VIEW: &str = r#"{"nameWithOwner":"o/r","url":"https://github.com/o/r","defaultBranchRef":{"name":"main"}}"#;
-    const PR_LIST: &str = r#"[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN","updatedAt":"2026-10-20T10:00:00Z"}]"#;
-    const GRAPHQL: &str = r#"{"data":{"repository":{"pullRequest":{"state":"OPEN","isDraft":false,"merged":false,
-      "headRefOid":"abc","baseRefName":"main","title":"t","url":"u","reviewDecision":null,
-      "commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]},
-      "reviews":{"nodes":[]},"comments":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}"#;
-    const PR_URL: &str = "https://github.com/o/r/pull/7";
-
-    fn failed(stderr: &str) -> GhError {
+    fn gh_failed(stderr: &str) -> GhError {
         GhError::Failed {
             code: None,
             stderr: stderr.into(),
         }
     }
 
-    fn happy() -> FakeGh {
-        FakeGh::new()
-            .on(&["repo", "view"], Ok(REPO_VIEW))
-            .on(&["pr", "list"], Ok(PR_LIST))
-            .on(&["api", "graphql"], Ok(GRAPHQL))
-    }
+    const SIGNED_OUT: &str = "To get started with GitHub CLI, please run: gh auth login";
 
-    /// A task in `phase` with a workspace on `feature/PROJ-1`, talking to `fake`.
-    async fn setup(fake: Arc<FakeGh>, phase: Option<SpecPhase>) -> (AppState, TaskKey) {
-        let config = Config {
-            home: std::env::temp_dir().join(format!("delilah-prloop-{}", uuid::Uuid::new_v4())),
-            addr: "127.0.0.1:7420".parse().unwrap(),
-            allow_file_protocol: false,
-            notify: false,
-            ui_origin: None,
-        };
-        let app = AppState::new(Store::in_memory().await.unwrap(), config).with_gh(fake);
-        let key = TaskKey::new("PROJ-1");
-        app.store
-            .create_project(&Project {
-                name: "proj".into(),
-                path: "/parent".into(),
-                kind: ProjectKind::Repo,
-                workflow: "feature".into(),
-            })
-            .await
-            .unwrap();
-        let mut task = Task::new(key.clone(), "t", "feature");
-        task.project = Some("proj".into());
-        app.store.create_task(&task).await.unwrap();
-        app.transition(&key, Event::Start).await.unwrap();
-        app.transition(&key, Event::WorkspaceReady).await.unwrap();
-        let ws = Workspace {
-            path: std::env::temp_dir().join("delilah-prloop-ws"),
-            branch: "feature/PROJ-1".into(),
-            kind: ProjectKind::Repo,
-            submodules: vec![],
-        };
-        app.store
-            .save_workspace(&key, Path::new("/parent"), &ws)
-            .await
-            .unwrap();
-        if let Some(phase) = phase {
-            crate::phases::advance(&app, &key, phase).await;
+    fn drain(rx: &mut tokio::sync::broadcast::Receiver<Topic>) -> Vec<Topic> {
+        let mut topics = vec![];
+        while let Ok(t) = rx.try_recv() {
+            topics.push(t);
         }
-        (app, key)
+        topics
     }
 
     #[tokio::test]
     async fn a_pr_from_the_branch_is_linked_snapshotted_and_announced() {
-        let fake = Arc::new(happy());
-        let (app, key) = setup(fake.clone(), Some(SpecPhase::Implement)).await;
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake, Some(SpecPhase::Implement)).await;
         let mut rx = app.events.subscribe();
         check_task(&app, &key, true).await;
 
@@ -403,17 +414,23 @@ mod tests {
         assert!(rows[0].error.is_none());
         let task = app.store.get_task(&key).await.unwrap().unwrap();
         assert_eq!(task.phase.as_deref(), Some("review"));
-        let mut topics = vec![];
-        while let Ok(t) = rx.try_recv() {
-            topics.push(t);
-        }
-        assert!(topics.contains(&Topic::Prs));
+        assert!(drain(&mut rx).contains(&Topic::Prs));
+    }
+
+    #[tokio::test]
+    async fn every_good_check_announces_even_when_nothing_changed() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake, Some(SpecPhase::Review)).await;
+        check_task(&app, &key, false).await;
+        let mut rx = app.events.subscribe();
+        check_task(&app, &key, true).await;
+        assert!(drain(&mut rx).contains(&Topic::Prs));
     }
 
     #[tokio::test]
     async fn an_unlinked_url_is_not_linked_again() {
-        let fake = Arc::new(happy());
-        let (app, key) = setup(fake, Some(SpecPhase::Review)).await;
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake, Some(SpecPhase::Review)).await;
         check_task(&app, &key, false).await;
         let row = app.store.prs_of(&key).await.unwrap().remove(0);
         app.store.unlink_pr(row.id).await.unwrap();
@@ -423,8 +440,8 @@ mod tests {
 
     #[tokio::test]
     async fn below_review_without_a_pr_nothing_is_searched_unless_forced() {
-        let fake = Arc::new(happy());
-        let (app, key) = setup(fake.clone(), Some(SpecPhase::Implement)).await;
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Implement)).await;
         check_task(&app, &key, false).await;
         assert!(fake.calls().is_empty());
         assert!(app.store.prs_of(&key).await.unwrap().is_empty());
@@ -435,19 +452,20 @@ mod tests {
 
     #[tokio::test]
     async fn a_network_error_keeps_the_snapshot_and_backs_off() {
-        let ok = Arc::new(happy());
-        let (app, key) = setup(ok, Some(SpecPhase::Review)).await;
+        let (app, key, _dir) =
+            task_with_workspace(Arc::new(FakeGh::happy()), Some(SpecPhase::Review)).await;
         check_task(&app, &key, false).await;
         let before = app.store.prs_of(&key).await.unwrap().remove(0);
         assert!(before.snapshot.is_some());
 
         let failing =
-            Arc::new(FakeGh::new().on(&["api", "graphql"], Err(failed("connection reset"))));
+            Arc::new(FakeGh::new().on(&["api", "graphql"], Err(gh_failed("connection reset"))));
         let app = app.with_gh(failing.clone());
         check_task(&app, &key, false).await;
         let after = app.store.prs_of(&key).await.unwrap().remove(0);
         assert_eq!(after.snapshot, before.snapshot);
         assert!(after.error.as_deref().unwrap().contains("connection reset"));
+        assert_eq!(after.error_kind.as_deref(), Some("network"));
         assert_eq!(failing.calls().len(), 1);
 
         check_task(&app, &key, false).await;
@@ -456,26 +474,193 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_access_problem_is_notified_once_and_cleared_on_success() {
-        let signed_out = Arc::new(FakeGh::new().on(
-            &["repo", "view"],
-            Err(failed(
-                "To get started with GitHub CLI, please run: gh auth login",
-            )),
-        ));
-        let (app, key) = setup(signed_out, Some(SpecPhase::Review)).await;
+    async fn the_kind_of_a_failed_snapshot_is_stored_and_cleared_on_success() {
+        let (app, key, _dir) =
+            task_with_workspace(Arc::new(FakeGh::happy()), Some(SpecPhase::Review)).await;
+        check_task(&app, &key, false).await;
+        let missing = Arc::new(FakeGh::new().on(&["api", "graphql"], Err(GhError::NotFound)));
+        let app = app.with_gh(missing);
+        check_task(&app, &key, true).await;
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        assert_eq!(row.error_kind.as_deref(), Some("missing"));
+
+        let app = app.with_gh(Arc::new(FakeGh::happy()));
+        check_task(&app, &key, true).await;
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        assert_eq!((row.error, row.error_kind), (None, None));
+    }
+
+    #[tokio::test]
+    async fn an_access_problem_is_kept_notified_once_and_cleared_on_success() {
+        let signed_out = Arc::new(FakeGh::new().on(&["repo", "view"], Err(gh_failed(SIGNED_OUT))));
+        let (app, key, _dir) = task_with_workspace(signed_out, Some(SpecPhase::Review)).await;
         check_task(&app, &key, true).await;
         check_task(&app, &key, true).await;
         let sent = app.notifier.recorded();
         assert_eq!(sent.len(), 1);
         assert!(sent[0].title.contains("proj"));
-        let flag: Option<Option<String>> = app.store.setting("pr_access:proj").await.unwrap();
-        assert_eq!(flag.flatten().as_deref(), Some("signed-out"));
+        let found = access::problem_of(&app, "proj").await.unwrap();
+        assert_eq!(found.kind, "signed-out");
+        assert!(found.message.contains("gh auth login"));
 
-        let app = app.with_gh(Arc::new(happy()));
+        // Another access problem replaces the stored one, and is told once more.
+        let no_access = Arc::new(FakeGh::new().on(
+            &["repo", "view"],
+            Err(gh_failed("gh: Not Found (HTTP 404)")),
+        ));
+        let app = app.with_gh(no_access);
         check_task(&app, &key, true).await;
-        let flag: Option<Option<String>> = app.store.setting("pr_access:proj").await.unwrap();
-        assert_eq!(flag.flatten(), None);
+        assert_eq!(
+            access::problem_of(&app, "proj").await.unwrap().kind,
+            "no-access"
+        );
+        assert_eq!(app.notifier.recorded().len(), 2);
+
+        let app = app.with_gh(Arc::new(FakeGh::happy()));
+        let mut rx = app.events.subscribe();
+        check_task(&app, &key, true).await;
+        assert_eq!(access::problem_of(&app, "proj").await, None);
+        assert!(drain(&mut rx).contains(&Topic::Prs));
         assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_listening_app_gets_no_notification() {
+        let signed_out = Arc::new(FakeGh::new().on(&["repo", "view"], Err(gh_failed(SIGNED_OUT))));
+        let (app, key, _dir) = task_with_workspace(signed_out, Some(SpecPhase::Review)).await;
+        let mut rx = app.events.subscribe();
+        check_task(&app, &key, true).await;
+        assert!(drain(&mut rx).contains(&Topic::Prs), "the open tab updates");
+        assert!(app.notifier.recorded().is_empty());
+        assert!(access::problem_of(&app, "proj").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn only_one_check_of_a_task_runs_at_a_time() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Review)).await;
+        let running = claim(&app, &key).unwrap();
+        assert!(is_checking(&app, &key));
+        assert!(claim(&app, &key).is_none());
+        check_task(&app, &key, true).await;
+        assert!(fake.calls().is_empty(), "a second check does nothing");
+        drop(running);
+        assert!(!is_checking(&app, &key));
+
+        check_task(&app, &key, true).await;
+        assert!(!fake.calls().is_empty());
+        assert!(!is_checking(&app, &key), "the check lets go when done");
+    }
+
+    #[tokio::test]
+    async fn nudges_in_the_window_make_one_delayed_check() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Implement)).await;
+        for _ in 0..3 {
+            nudge_after(&app, &key, Duration::from_millis(30));
+        }
+        assert!(fake.calls().is_empty(), "not before the delay");
+        for _ in 0..100 {
+            if !app.store.prs_of(&key).await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let searches = fake
+            .calls()
+            .iter()
+            .filter(|c| c[..2] == ["pr", "list"])
+            .count();
+        assert_eq!(searches, 1);
+        assert!(app.pr_nudges.lock().unwrap().is_empty());
+
+        // Once it has run, the next push is looked for again.
+        nudge_after(&app, &key, Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let searches = fake
+            .calls()
+            .iter()
+            .filter(|c| c[..2] == ["pr", "list"])
+            .count();
+        assert_eq!(searches, 2);
+    }
+
+    #[tokio::test]
+    async fn linking_by_url_stores_the_canonical_url_and_moves_to_review() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake, Some(SpecPhase::Implement)).await;
+        let mut rx = app.events.subscribe();
+        let row = link_by_url(&app, &key, &format!("{PR_URL}/files?x=1#top"), "opened")
+            .await
+            .unwrap();
+        assert_eq!(row.url, PR_URL);
+        assert_eq!(row.linked_by, "opened");
+        assert_eq!(row.repo, ".");
+        assert!(row.snapshot.is_some());
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.phase.as_deref(), Some("review"));
+        assert!(drain(&mut rx).contains(&Topic::Prs));
+
+        // Unlinking by the canonical URL stops detection from bringing it back.
+        app.store.unlink_pr(row.id).await.unwrap();
+        check_task(&app, &key, true).await;
+        assert!(app.store.prs_of(&key).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn linking_refuses_urls_that_are_not_prs_or_not_the_tasks() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Implement)).await;
+        let err = link_by_url(&app, &key, "https://example.com/x", "pasted").await;
+        assert!(matches!(err, Err(LinkError::NotAPr)));
+
+        // The repo of the workspace is o/r: another repo's PR is not the task's.
+        let err = link_by_url(&app, &key, "https://github.com/other/repo/pull/7", "pasted").await;
+        assert!(matches!(err, Err(LinkError::NotFromTask)));
+        let err = link_by_url(&app, &key, "https://ghe.corp/o/r/pull/7", "pasted").await;
+        assert!(matches!(err, Err(LinkError::NotFromTask)));
+        assert!(app.store.prs_of(&key).await.unwrap().is_empty());
+
+        let unreadable = Arc::new(FakeGh::new().on(&["api", "graphql"], Err(gh_failed("boom"))));
+        let app = app.with_gh(unreadable);
+        let err = link_by_url(&app, &key, PR_URL, "pasted").await;
+        assert!(matches!(err, Err(LinkError::Gh(_))));
+    }
+
+    #[tokio::test]
+    async fn without_a_workspace_only_a_repo_projects_own_repo_matches() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, _key, _dir) = task_with_workspace(fake, None).await;
+        app.store
+            .create_project(&Project {
+                name: "par".into(),
+                path: "/par".into(),
+                kind: ProjectKind::Parent,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+        for (name, project) in [("PROJ-2", "proj"), ("PROJ-3", "par")] {
+            let mut task = Task::new(TaskKey::new(name), "t", "feature");
+            task.project = Some(project.into());
+            app.store.create_task(&task).await.unwrap();
+        }
+        let row = link_by_url(&app, &TaskKey::new("PROJ-2"), PR_URL, "pasted")
+            .await
+            .unwrap();
+        assert_eq!(row.repo, ".");
+        let err = link_by_url(&app, &TaskKey::new("PROJ-3"), PR_URL, "pasted").await;
+        assert!(matches!(err, Err(LinkError::NotFromTask)));
+
+        // The checkout is another repo than the PR's.
+        let other = Arc::new(
+            FakeGh::new()
+                .on(&["repo", "view"], Ok(&REPO_VIEW.replace("o/r", "x/y")))
+                .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false))),
+        );
+        let app = app.with_gh(other);
+        let err = link_by_url(&app, &TaskKey::new("PROJ-2"), PR_URL, "pasted").await;
+        assert!(matches!(err, Err(LinkError::NotFromTask)));
     }
 }

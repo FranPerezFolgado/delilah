@@ -26,6 +26,8 @@ pub(crate) struct PrRow {
     pub marks: Marks,
     pub checked_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
+    /// The kind of problem behind `error` (see `AccessProblem::kind`).
+    pub error_kind: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -65,7 +67,7 @@ pub(crate) struct NewNotice {
 }
 
 const PR_COLUMNS: &str = "id, task_key, repo, host, owner_name, number, url, linked_by, snapshot, \
-     ci_failed_sha, review_seen, issue_comment_seen, review_comment_seen, checked_at, error, created_at";
+     ci_failed_sha, review_seen, issue_comment_seen, review_comment_seen, checked_at, error, error_kind, created_at";
 #[allow(dead_code)] // used by the notices in the next packages
 const NOTICE_COLUMNS: &str =
     "id, task_key, repo, kind, cause, text, detail, created_at, resolved_at";
@@ -100,6 +102,7 @@ fn pr_row(row: &SqliteRow) -> Result<PrRow, StoreError> {
         },
         checked_at: opt_time(row.try_get("checked_at")?)?,
         error: row.try_get("error")?,
+        error_kind: row.try_get("error_kind")?,
         created_at: time(&row.try_get::<String, _>("created_at")?)?,
     })
 }
@@ -205,6 +208,7 @@ impl Store {
                review_comment_seen = CASE WHEN url = excluded.url THEN review_comment_seen ELSE 0 END,
                checked_at = CASE WHEN url = excluded.url THEN checked_at END,
                error = CASE WHEN url = excluded.url THEN error END,
+               error_kind = CASE WHEN url = excluded.url THEN error_kind END,
                url = excluded.url",
         )
         .bind(key.as_str())
@@ -350,7 +354,8 @@ impl Store {
         let repo: String = row.try_get("repo")?;
         sqlx::query(
             "UPDATE pull_requests SET snapshot = ?, ci_failed_sha = ?, review_seen = ?,
-                    issue_comment_seen = ?, review_comment_seen = ?, checked_at = ?, error = NULL
+                    issue_comment_seen = ?, review_comment_seen = ?, checked_at = ?, error = NULL,
+                    error_kind = NULL
              WHERE id = ?",
         )
         .bind(serde_json::to_string(snapshot)?)
@@ -370,14 +375,15 @@ impl Store {
         Ok(())
     }
 
-    /// Records the last check's problem (`None` clears it).
+    /// Records the last check's problem as `(kind, message)` (`None` clears it).
     pub(crate) async fn set_pr_error(
         &self,
         id: i64,
-        error: Option<&str>,
+        error: Option<(&str, &str)>,
     ) -> Result<(), StoreError> {
-        sqlx::query("UPDATE pull_requests SET error = ? WHERE id = ?")
-            .bind(error)
+        sqlx::query("UPDATE pull_requests SET error_kind = ?, error = ? WHERE id = ?")
+            .bind(error.map(|(kind, _)| kind))
+            .bind(error.map(|(_, message)| message))
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -571,11 +577,16 @@ mod tests {
     async fn set_pr_error_records_and_clears() {
         let store = store_with(&["PROJ-1"]).await;
         let pr = link(&store, "PROJ-1", ".", 1).await;
-        store.set_pr_error(pr.id, Some("network")).await.unwrap();
+        store
+            .set_pr_error(pr.id, Some(("network", "connection reset")))
+            .await
+            .unwrap();
         let row = store.pr(pr.id).await.unwrap().unwrap();
-        assert_eq!(row.error.as_deref(), Some("network"));
+        assert_eq!(row.error.as_deref(), Some("connection reset"));
+        assert_eq!(row.error_kind.as_deref(), Some("network"));
         store.set_pr_error(pr.id, None).await.unwrap();
-        assert_eq!(store.pr(pr.id).await.unwrap().unwrap().error, None);
+        let row = store.pr(pr.id).await.unwrap().unwrap();
+        assert_eq!((row.error, row.error_kind), (None, None));
     }
 
     #[tokio::test]
@@ -666,7 +677,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .set_pr_error(pr.id, Some("network: down"))
+            .set_pr_error(pr.id, Some(("network", "network: down")))
             .await
             .unwrap();
 
@@ -687,6 +698,7 @@ mod tests {
         assert_eq!(row.snapshot, Some(snap));
         assert_eq!(row.marks, marks);
         assert_eq!(row.error, None);
+        assert_eq!(row.error_kind, None);
         assert_eq!(row.checked_at.unwrap().timestamp(), now.timestamp());
         // The old ci-failed is resolved, the new one and the comments are open.
         let open = store.open_notices().await.unwrap();

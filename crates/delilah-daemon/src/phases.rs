@@ -266,7 +266,7 @@ mod tests {
         for quiet in ["cargo test", "git status"] {
             on_hook(&app, "PROJ-1", Signal::Working, &hook(quiet), true, false).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(app.pr_nudges.lock().unwrap().is_empty());
         assert!(fake.calls().is_empty());
 
         on_hook(
@@ -278,7 +278,7 @@ mod tests {
             false,
         )
         .await;
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert!(!fake.calls().is_empty());
+        // The check itself waits for GitHub: what is asked of the loop is one pending nudge.
+        assert!(app.pr_nudges.lock().unwrap().contains("PROJ-1"));
     }
 }
