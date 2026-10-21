@@ -7,8 +7,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
-use clap::{Parser, Subcommand};
-use delilah_core::{Event, Project, Task, TaskStatus};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use delilah_core::{
+    Event, Project, ProjectSettings, ShareMode, SharedEntry, Task, TaskStatus, WorkspaceMode,
+};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::json;
@@ -132,6 +134,226 @@ enum ProjectCommand {
     },
     /// Lists the registered projects.
     Ls,
+    /// Shows a project's effective settings; defaults are marked.
+    Show { name: String },
+    /// Changes one setting of a project; the daemon validates it.
+    Set {
+        name: String,
+        #[command(subcommand)]
+        setting: SetCommand,
+    },
+    /// Takes a setting back to its default.
+    Unset { name: String, setting: SettingName },
+}
+
+#[derive(Subcommand)]
+enum SetCommand {
+    /// Where tasks work: `checkout` or `worktree`.
+    Workspace { mode: WorkspaceArg },
+    /// Branch template, e.g. 'feature/{ticket}-{slug}'.
+    Branch { template: String },
+    /// Command run in each new workspace.
+    Setup { command: String },
+    /// Paths of the checkout made available in each workspace.
+    #[command(subcommand)]
+    Shared(SharedCommand),
+    /// Submodules a parent project's tasks always or never include.
+    Submodules {
+        rule: SubmoduleRule,
+        #[command(subcommand)]
+        action: SubmoduleAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SharedCommand {
+    /// Shares a path (an existing one takes the new mode).
+    Add {
+        path: String,
+        #[command(flatten)]
+        mode: ShareFlags,
+    },
+    /// Stops sharing a path.
+    Rm { path: String },
+}
+
+#[derive(Args)]
+struct ShareFlags {
+    /// Copy the path into each workspace.
+    #[arg(long, conflicts_with = "link")]
+    copy: bool,
+    /// Symlink the path into each workspace.
+    #[arg(long)]
+    link: bool,
+}
+
+#[derive(Subcommand)]
+enum SubmoduleAction {
+    Add { path: String },
+    Rm { path: String },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum WorkspaceArg {
+    Checkout,
+    Worktree,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum SubmoduleRule {
+    Always,
+    Never,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum SettingName {
+    Workspace,
+    Branch,
+    Setup,
+    Shared,
+    Submodules,
+}
+
+/// One change to a project's settings.
+#[derive(Debug, PartialEq)]
+enum Change {
+    Workspace(WorkspaceArg),
+    Branch(String),
+    Setup(String),
+    SharedAdd(String, Option<ShareMode>),
+    SharedRm(String),
+    SubmodulesAdd(SubmoduleRule, String),
+    SubmodulesRm(SubmoduleRule, String),
+    Unset(SettingName),
+}
+
+impl From<SetCommand> for Change {
+    fn from(c: SetCommand) -> Self {
+        match c {
+            SetCommand::Workspace { mode } => Change::Workspace(mode),
+            SetCommand::Branch { template } => Change::Branch(template),
+            SetCommand::Setup { command } => Change::Setup(command),
+            SetCommand::Shared(SharedCommand::Add { path, mode }) => {
+                let mode = match (mode.copy, mode.link) {
+                    (true, _) => Some(ShareMode::Copy),
+                    (_, true) => Some(ShareMode::Link),
+                    _ => None,
+                };
+                Change::SharedAdd(path, mode)
+            }
+            SetCommand::Shared(SharedCommand::Rm { path }) => Change::SharedRm(path),
+            SetCommand::Submodules { rule, action } => match action {
+                SubmoduleAction::Add { path } => Change::SubmodulesAdd(rule, path),
+                SubmoduleAction::Rm { path } => Change::SubmodulesRm(rule, path),
+            },
+        }
+    }
+}
+
+/// Applies one change to the current settings. No validation here: the daemon
+/// does that. Removing something that is not there is an error.
+fn apply_change(mut s: ProjectSettings, change: Change) -> Result<ProjectSettings, String> {
+    let defaults = ProjectSettings::default();
+    match change {
+        Change::Workspace(m) => {
+            s.workspace = match m {
+                WorkspaceArg::Checkout => WorkspaceMode::Checkout,
+                WorkspaceArg::Worktree => WorkspaceMode::Worktree,
+            }
+        }
+        Change::Branch(t) => s.branch = t,
+        Change::Setup(c) => s.setup = Some(c),
+        Change::SharedAdd(path, mode) => match s.shared.iter_mut().find(|e| e.path == path) {
+            Some(entry) => entry.mode = mode,
+            None => s.shared.push(SharedEntry { path, mode }),
+        },
+        Change::SharedRm(path) => {
+            let before = s.shared.len();
+            s.shared.retain(|e| e.path != path);
+            if s.shared.len() == before {
+                return Err(format!("shared: {path} is not shared"));
+            }
+        }
+        Change::SubmodulesAdd(rule, path) => {
+            let list = rule_list(&mut s, rule);
+            if !list.contains(&path) {
+                list.push(path);
+            }
+        }
+        Change::SubmodulesRm(rule, path) => {
+            let list = rule_list(&mut s, rule);
+            let before = list.len();
+            list.retain(|p| *p != path);
+            if list.len() == before {
+                return Err(format!("submodules: {path} is not in the {rule:?} list"));
+            }
+        }
+        Change::Unset(name) => match name {
+            SettingName::Workspace => s.workspace = defaults.workspace,
+            SettingName::Branch => s.branch = defaults.branch,
+            SettingName::Setup => s.setup = defaults.setup,
+            SettingName::Shared => s.shared = defaults.shared,
+            SettingName::Submodules => s.submodules = defaults.submodules,
+        },
+    }
+    Ok(s)
+}
+
+fn rule_list(s: &mut ProjectSettings, rule: SubmoduleRule) -> &mut Vec<String> {
+    match rule {
+        SubmoduleRule::Always => &mut s.submodules.always,
+        SubmoduleRule::Never => &mut s.submodules.never,
+    }
+}
+
+/// The effective settings, with `(default)` on what equals the default.
+fn settings_lines(s: &ProjectSettings) -> Vec<String> {
+    let d = ProjectSettings::default();
+    let mark = |is_default: bool| if is_default { " (default)" } else { "" };
+    let list = |v: &[String]| {
+        if v.is_empty() {
+            "-".to_string()
+        } else {
+            v.join(", ")
+        }
+    };
+    let mut lines = vec![
+        format!(
+            "workspace:  {}{}",
+            match s.workspace {
+                WorkspaceMode::Checkout => "checkout",
+                WorkspaceMode::Worktree => "worktree",
+            },
+            mark(s.workspace == d.workspace)
+        ),
+        format!("branch:     {}{}", s.branch, mark(s.branch == d.branch)),
+        format!(
+            "setup:      {}{}",
+            s.setup.as_deref().unwrap_or("-"),
+            mark(s.setup == d.setup)
+        ),
+        format!(
+            "shared:     {}",
+            if s.shared.is_empty() {
+                "- (default)"
+            } else {
+                ""
+            }
+        ),
+    ];
+    for e in &s.shared {
+        let mode = match e.mode {
+            Some(ShareMode::Copy) => "copy",
+            Some(ShareMode::Link) => "link",
+            None => "auto",
+        };
+        lines.push(format!("  {} ({mode})", e.path));
+    }
+    let default_subs = s.submodules == d.submodules;
+    lines.push(format!("submodules:{}", mark(default_subs)));
+    lines.push(format!("  always: {}", list(&s.submodules.always)));
+    lines.push(format!("  never:  {}", list(&s.submodules.never)));
+    lines
 }
 
 #[derive(Deserialize)]
@@ -158,6 +380,15 @@ struct ErrorBody {
     /// Refused because work in the task's worktree would be lost.
     #[serde(default)]
     unpushed: bool,
+    /// A 422 on project settings: one entry per problem.
+    #[serde(default)]
+    fields: Vec<FieldMessage>,
+}
+
+#[derive(Deserialize)]
+struct FieldMessage {
+    field: String,
+    message: String,
 }
 
 impl From<String> for ErrorBody {
@@ -165,6 +396,7 @@ impl From<String> for ErrorBody {
         Self {
             error,
             unpushed: false,
+            fields: Vec::new(),
         }
     }
 }
@@ -353,6 +585,19 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 project.path.display()
             );
         }
+        Command::Project(ProjectCommand::Show { name }) => {
+            let project = find_project(api, &name)?;
+            println!("{}  ({})", project.name, project.kind.name());
+            for line in settings_lines(&project.settings) {
+                println!("  {line}");
+            }
+        }
+        Command::Project(ProjectCommand::Set { name, setting }) => {
+            change_project(api, &name, setting.into())?;
+        }
+        Command::Project(ProjectCommand::Unset { name, setting }) => {
+            change_project(api, &name, Change::Unset(setting))?;
+        }
         Command::Project(ProjectCommand::Ls) => {
             let projects: Vec<Project> = api.get("/api/v1/projects")?;
             if projects.is_empty() {
@@ -370,6 +615,38 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 );
             }
         }
+    }
+    Ok(())
+}
+
+fn find_project(api: &Api, name: &str) -> Result<Project, String> {
+    let projects: Vec<Project> = api.get("/api/v1/projects")?;
+    projects
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("no such project: {name}"))
+}
+
+/// Reads the project, changes one field and sends all settings back.
+fn change_project(api: &Api, name: &str, change: Change) -> Result<(), String> {
+    let project = find_project(api, name)?;
+    let settings = apply_change(project.settings, change)?;
+    let updated: Project = api
+        .put(&format!("/api/v1/projects/{name}/settings"), &settings)
+        .map_err(|e| {
+            if e.fields.is_empty() {
+                e.error
+            } else {
+                e.fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.field, f.message))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        })?;
+    println!("Updated {}:", updated.name);
+    for line in settings_lines(&updated.settings) {
+        println!("  {line}");
     }
     Ok(())
 }
@@ -409,6 +686,29 @@ impl Api {
                 .json(body)
                 .send(),
         )
+    }
+
+    /// A `PUT`; the error keeps the daemon's per-field messages.
+    fn put<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<T, ErrorBody> {
+        let res = self
+            .client
+            .put(format!("{}{path}", self.base))
+            .json(body)
+            .send()
+            .map_err(|e| ErrorBody::from(self.unreachable(e)))?;
+        let status = res.status();
+        if status.is_success() {
+            return res
+                .json()
+                .map_err(|e| format!("unexpected response: {e}").into());
+        }
+        Err(res
+            .json::<ErrorBody>()
+            .unwrap_or_else(|_| format!("daemon answered {status}").into()))
     }
 
     /// A `DELETE` answered with no body; the error keeps the daemon's flags.
@@ -451,5 +751,143 @@ impl Api {
             Ok(body) => Err(body.error),
             Err(_) => Err(format!("daemon answered {status}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> ProjectCommand {
+        let mut v = vec!["delilah", "project"];
+        v.extend(args);
+        match Cli::try_parse_from(v).expect("parses").command {
+            Command::Project(p) => p,
+            _ => panic!("not a project command"),
+        }
+    }
+
+    fn change(args: &[&str]) -> Change {
+        match parse(args) {
+            ProjectCommand::Set { setting, .. } => setting.into(),
+            ProjectCommand::Unset { setting, .. } => Change::Unset(setting),
+            _ => panic!("not set/unset"),
+        }
+    }
+
+    #[test]
+    fn parses_show() {
+        assert!(matches!(parse(&["show", "p"]), ProjectCommand::Show { name } if name == "p"));
+    }
+
+    #[test]
+    fn parses_scalar_settings() {
+        assert_eq!(
+            change(&["set", "p", "workspace", "worktree"]),
+            Change::Workspace(WorkspaceArg::Worktree)
+        );
+        assert_eq!(
+            change(&["set", "p", "branch", "feature/{ticket}-{slug}"]),
+            Change::Branch("feature/{ticket}-{slug}".into())
+        );
+        assert_eq!(
+            change(&["set", "p", "setup", "npm ci"]),
+            Change::Setup("npm ci".into())
+        );
+        assert!(Cli::try_parse_from(["delilah", "project", "set", "p", "workspace", "x"]).is_err());
+    }
+
+    #[test]
+    fn parses_shared() {
+        assert_eq!(
+            change(&["set", "p", "shared", "add", ".env"]),
+            Change::SharedAdd(".env".into(), None)
+        );
+        assert_eq!(
+            change(&["set", "p", "shared", "add", ".env", "--copy"]),
+            Change::SharedAdd(".env".into(), Some(ShareMode::Copy))
+        );
+        assert_eq!(
+            change(&["set", "p", "shared", "add", "node_modules", "--link"]),
+            Change::SharedAdd("node_modules".into(), Some(ShareMode::Link))
+        );
+        assert_eq!(
+            change(&["set", "p", "shared", "rm", ".env"]),
+            Change::SharedRm(".env".into())
+        );
+        assert!(
+            Cli::try_parse_from([
+                "delilah", "project", "set", "p", "shared", "add", "x", "--copy", "--link"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parses_submodules_and_unset() {
+        assert_eq!(
+            change(&["set", "p", "submodules", "always", "add", "api"]),
+            Change::SubmodulesAdd(SubmoduleRule::Always, "api".into())
+        );
+        assert_eq!(
+            change(&["set", "p", "submodules", "never", "rm", "web"]),
+            Change::SubmodulesRm(SubmoduleRule::Never, "web".into())
+        );
+        assert_eq!(
+            change(&["unset", "p", "branch"]),
+            Change::Unset(SettingName::Branch)
+        );
+        assert!(Cli::try_parse_from(["delilah", "project", "unset", "p", "nope"]).is_err());
+    }
+
+    #[test]
+    fn applies_changes() {
+        let d = ProjectSettings::default();
+        let s = apply_change(d.clone(), Change::Workspace(WorkspaceArg::Worktree)).unwrap();
+        assert_eq!(s.workspace, WorkspaceMode::Worktree);
+        let s = apply_change(s, Change::SharedAdd(".env".into(), Some(ShareMode::Copy))).unwrap();
+        let s = apply_change(s, Change::SharedAdd(".env".into(), Some(ShareMode::Link))).unwrap();
+        assert_eq!(s.shared.len(), 1);
+        assert_eq!(s.shared[0].mode, Some(ShareMode::Link));
+        assert!(apply_change(s.clone(), Change::SharedRm("nope".into())).is_err());
+        let s = apply_change(s, Change::SharedRm(".env".into())).unwrap();
+        assert!(s.shared.is_empty());
+        let s = apply_change(s, Change::SubmodulesAdd(SubmoduleRule::Never, "a".into())).unwrap();
+        let s = apply_change(s, Change::SubmodulesAdd(SubmoduleRule::Never, "a".into())).unwrap();
+        assert_eq!(s.submodules.never, vec!["a".to_string()]);
+        let s = apply_change(s, Change::SubmodulesRm(SubmoduleRule::Never, "a".into())).unwrap();
+        assert!(s.submodules.never.is_empty());
+        assert!(apply_change(s, Change::SubmodulesRm(SubmoduleRule::Always, "a".into())).is_err());
+    }
+
+    #[test]
+    fn unset_returns_to_default() {
+        let mut s = ProjectSettings::default();
+        s.workspace = WorkspaceMode::Worktree;
+        s.branch = "x/{ticket}".into();
+        s.setup = Some("make".into());
+        s.shared.push(SharedEntry {
+            path: "a".into(),
+            mode: None,
+        });
+        s.submodules.always.push("m".into());
+        for name in [
+            SettingName::Workspace,
+            SettingName::Branch,
+            SettingName::Setup,
+            SettingName::Shared,
+            SettingName::Submodules,
+        ] {
+            s = apply_change(s, Change::Unset(name)).unwrap();
+        }
+        assert_eq!(s, ProjectSettings::default());
+    }
+
+    #[test]
+    fn show_marks_defaults() {
+        let mut s = ProjectSettings::default();
+        assert!(settings_lines(&s)[0].ends_with("(default)"));
+        s.workspace = WorkspaceMode::Worktree;
+        assert!(!settings_lines(&s)[0].contains("(default)"));
     }
 }
