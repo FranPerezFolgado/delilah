@@ -48,10 +48,10 @@ None: no new dependencies.
 - [X] T016 [US1] Write failing tests in `crates/delilah-daemon/src/inbox.rs`: a task with `handoff.stage = offered` yields one `handoff` item (text from contracts/api.md, session = outgoing primary), ordered after `review` and before `suggest-review`; `failed` yields one with the error; none for `skipped` or without handoff. Then implement `ItemKind::Handoff`.
 - [X] T017 [US1] Write failing tests in `crates/delilah-daemon/src/scheduler.rs`: recovery on tick — `starting` with no live session for that step → starts it once; `starting` whose step session already exists → just clears the handoff; `saving` with the outgoing PTY gone → `offered` (implement). Then implement `handoff::recover` and call it from `tick`.
 - [X] T018 [P] [US1] CLI: `--saving-mode` / `--no-saving-mode` on `new` and `run` in `crates/delilah-cli/src/main.rs` (sends `saving_mode`), with a parse test.
-- [ ] T019 [US1] `app/src/api.ts`: `Step`, `HandoffStage`, `Handoff`, `Task.saving_mode`, `Task.handoff`, `Session.step`, inbox kind `"handoff"`, `RunRequest.saving_mode`, `api.handoff(key, action)`, `api.setSavingMode(key, on)` (contracts/api.md).
-- [ ] T020 [US1] Write failing tests then add the "Modo ahorro" checkbox to `app/src/components/NewTaskDialog.tsx` (preloaded from preference `saving-mode`, sent as `saving_mode`) and to `app/src/components/BacklogTaskView.tsx`; tests in a new `app/src/components/NewTaskDialog.test.tsx`.
-- [ ] T021 [US1] Write failing tests then render the `handoff` item in `app/src/components/InboxView.tsx`: `offered` → "Implementar en sesión nueva" (confirm) and "Seguir aquí" (decline); `failed` → error + "Reintentar"; buttons disabled while the request runs; tests in `app/src/components/InboxView.test.tsx`.
-- [ ] T022 [P] [US1] English strings for every new Spanish text in `app/src/i18n/en.ts`.
+- [X] T019 [US1] `app/src/api.ts`: `Step`, `HandoffStage`, `Handoff`, `Task.saving_mode`, `Task.handoff`, `Session.step`, inbox kind `"handoff"`, `RunRequest.saving_mode`, `api.handoff(key, action)`, `api.setSavingMode(key, on)` (contracts/api.md).
+- [X] T020 [US1] Write failing tests then add the "Modo ahorro" checkbox to `app/src/components/NewTaskDialog.tsx` (preloaded from preference `saving-mode`, sent as `saving_mode`) and to `app/src/components/BacklogTaskView.tsx`; tests in a new `app/src/components/NewTaskDialog.test.tsx`.
+- [X] T021 [US1] Write failing tests then render the `handoff` item in `app/src/components/InboxView.tsx`: `offered` → "Implementar en sesión nueva" (confirm) and "Seguir aquí" (decline); `failed` → error + "Reintentar"; buttons disabled while the request runs; tests in `app/src/components/InboxView.test.tsx`.
+- [X] T022 [P] [US1] English strings for every new Spanish text in `app/src/i18n/en.ts`.
 
 **Checkpoint**: US1 works end to end in a preview (quickstart steps 1–5 without the chain view).
 

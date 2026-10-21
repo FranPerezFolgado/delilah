@@ -13,6 +13,7 @@ const SAYS: Record<InboxKind, string> = {
   error: "error en el turno",
   waiting: "te espera",
   review: "lista para revisar",
+  handoff: "te propone el siguiente paso",
   "suggest-review": "¿pasar a revisión?",
   paused: "pausada por límite",
   failed: "ha fallado",

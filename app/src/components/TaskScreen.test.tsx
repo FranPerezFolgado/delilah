@@ -26,6 +26,8 @@ const task = (status: TaskStatus): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
+  saving_mode: false,
+  handoff: null,
   status,
 });
 const spec: SpecSummary = { phase: "plan", dir: "specs/001-x", done: 0, total: 3, current: null };

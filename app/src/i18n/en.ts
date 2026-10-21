@@ -357,4 +357,12 @@ export const EN: Record<string, string> = {
   "Se parará el agente.": "The agent will be stopped.",
   "Eliminar igualmente (se pierde lo no subido)": "Delete anyway (unpushed work is lost)",
   "Eliminando…": "Deleting…",
+  "Modo ahorro": "Saving mode",
+  "Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior": "Each step (plan, implementation, review) runs in a fresh session, with the previous one's notes",
+  "Implementar en sesión nueva": "Implement in a new session",
+  "Seguir aquí": "Keep going here",
+  "Reintentar": "Retry",
+  "Paso nuevo (sesión nueva)": "New step (new session)",
+  "Siguiente paso": "Next step",
+  "te propone el siguiente paso": "suggests the next step",
 };

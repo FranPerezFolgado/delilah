@@ -18,6 +18,7 @@ const EVENT_LABELS: Record<string, string> = {
   "manual-resume": "Reanudada a mano",
   "agent-finished": "El agente terminó",
   "mark-done": "Marcada como hecha",
+  "step-started": "Paso nuevo (sesión nueva)",
   fail: "Falló",
   "start-aborted": "No se pudo empezar; vuelve al backlog",
 };
@@ -243,6 +244,7 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
                   {e.event.type === "limit-reached" && typeof e.event.resume_at === "string" && (
                     <span className="muted"> · {t("hasta las {time}", { time: hhmm(e.event.resume_at) })}</span>
                   )}
+                  {e.event.type === "step-started" && <span className="muted"> · {phaseLabel(String(e.event.step) as Column)}</span>}
                   {e.event.type === "phase-reached" && <span className="muted"> · {phaseLabel(String(e.event.phase) as Column)}</span>}
                 </span>
               </div>

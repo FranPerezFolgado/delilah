@@ -9,8 +9,8 @@ Mode: format=markdown commits=yes
 | WP-01F | 2 | 2A | done | 1 | 6826120 | phase 2 review fixes F1–F6 |
 | WP-02 | 3 | 3A | verified | 1 | b83caae | |
 | WP-03 | 3 | 3B | verified | 1 | 82ee202 | +backlog saving_mode (create/PATCH) |
-| WP-04 | 3 | 3B | verified | 1 | | |
-| WP-05 | 3 | 3B | implementing | 0 | | +TaskView.tsx (step-started label) |
+| WP-04 | 3 | 3B | verified | 1 | ad4894d | |
+| WP-05 | 3 | 3B | verified | 1 | | +TaskView.tsx label, alerts.ts, 4 test fixtures |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 5 | 5A | pending | 0 | | |
 | WP-08 | 6 | 6A | pending | 0 | | |

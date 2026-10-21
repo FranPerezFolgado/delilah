@@ -11,6 +11,8 @@ const task = (key: string, status: TaskStatus): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
+  saving_mode: false,
+  handoff: null,
   status,
 });
 

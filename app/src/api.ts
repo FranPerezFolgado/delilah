@@ -13,6 +13,17 @@ export type TaskStatus =
   | { type: "done" }
   | { type: "failed"; reason: string };
 
+/** The steps of a saving-mode task, each in its own session. */
+export type Step = "plan" | "implement" | "review";
+export type HandoffStage = "offered" | "saving" | "starting" | "failed" | "skipped";
+
+/** A pending move to the next step's fresh session. */
+export interface Handoff {
+  to: Step;
+  stage: HandoffStage;
+  error?: string;
+}
+
 export interface Task {
   key: string;
   title: string;
@@ -24,6 +35,9 @@ export interface Task {
   notes?: string | null;
   /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
   in_checkout?: boolean | null;
+  /** Saving mode: each step runs in a fresh session. */
+  saving_mode: boolean;
+  handoff: Handoff | null;
 }
 
 export interface EventRecord {
@@ -66,6 +80,7 @@ export interface NewBacklogTask {
   free?: boolean;
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
+  saving_mode?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -75,6 +90,7 @@ export interface BacklogChange {
   notes?: string;
   project?: string;
   in_checkout?: boolean;
+  saving_mode?: boolean;
 }
 
 export interface RunRequest {
@@ -88,6 +104,8 @@ export interface RunRequest {
   free?: boolean;
   /** Work in the project's own checkout instead of a worktree. */
   in_checkout?: boolean;
+  /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
+  saving_mode?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
@@ -179,6 +197,8 @@ export interface Session {
   /** Claude in plan mode: reads and explains, does not edit. */
   read_only: boolean;
   state: SessionState | null;
+  /** The saving-mode step it works on, if any. */
+  step: Step | null;
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -245,7 +265,7 @@ export interface FileContent {
 /** The file changed on disk (usually the agent) since the editor loaded it. */
 export class ConflictError extends Error {}
 
-export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "suggest-review" | "paused" | "failed";
+export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed";
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
 export interface AskQuestion {
@@ -341,6 +361,9 @@ export const api = {
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  /** Answers the offer to continue in a fresh session, or retries a failed one. */
+  handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
   dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),
   usage: () => request<UsageReport | null>("/api/v1/usage"),
   jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
