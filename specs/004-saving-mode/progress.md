@@ -5,7 +5,8 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 2 | 2A | verified | 1 | 923d21e | +hooks.rs (step: None in test literal) |
+| WP-01 | 2 | 2A | done | 1 | 27b27b6 | +hooks.rs (step: None in test literal) |
+| WP-01F | 2 | 2A | done | 1 | 6826120 | phase 2 review fixes F1–F6 |
 | WP-02 | 3 | 3A | pending | 0 | | |
 | WP-03 | 3 | 3B | pending | 0 | | |
 | WP-04 | 3 | 3B | pending | 0 | | |
@@ -15,3 +16,9 @@ Mode: format=markdown commits=yes
 | WP-08 | 6 | 6A | pending | 0 | | |
 | WP-09 | 7 | 7A | pending | 0 | | |
 | WP-10 | 7 | 7B | pending | 0 | | |
+
+## Reviews
+
+- Phase 2: spec GAPS→fixed, migration NEEDS CARE→fixed, architecture approve-with-changes→fixed, contract NEEDS CARE (no break). Fixed in WP-01F.
+  - Open (LOW): bad `handoff` JSON fails the whole task list (store.rs task_from_row); no test of 0011 over pre-existing rows; no shared insert_event helper (hand_over writes task_events directly).
+  - For WP-05: api.ts Task gets `saving_mode`, `handoff`; Session gets `step`; EVENT_LABELS gets "step-started"; tolerate inbox kind "handoff". CLI must ship with the daemon (strict Event enum).
