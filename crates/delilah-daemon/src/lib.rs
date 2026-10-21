@@ -2,6 +2,7 @@
 
 mod actions;
 pub mod api;
+mod archive;
 pub mod asks;
 mod changes;
 pub mod config;

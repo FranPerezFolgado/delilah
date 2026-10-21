@@ -3,10 +3,10 @@ use std::process::Command;
 
 use delilah_core::ProjectKind;
 use delilah_git::{
-    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
-    check_merged, check_workspace, commit_subjects, create_workspace, delete_branch, fetch,
-    file_diff, leave_checkout, list_submodules, needs_push, push_branch, remove_workspace,
-    repo_root, use_checkout,
+    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, branch_tip,
+    changes, check_merged, check_repos, check_workspace, commit_subjects, create_workspace,
+    delete_branch, fetch, file_diff, leave_checkout, list_submodules, needs_push, push_branch,
+    remove_workspace, repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -598,15 +598,81 @@ fn delete_branch_removes_it_and_tolerates_missing_or_refuses_current() {
     let (_tmp, repo, _remote) = pr_repo();
     let o = GitOptions::default();
     run(&repo, &["branch", "feature/y"]);
-    delete_branch(&repo, "feature/y", &o).unwrap();
+    delete_branch(&repo, "feature/y", None, &o).unwrap();
     assert!(
         git(&repo, &["branch", "--list", "feature/y"]).is_empty(),
         "branch still there"
     );
-    delete_branch(&repo, "feature/y", &o).unwrap();
-    assert!(delete_branch(&repo, "main", &o).is_err());
+    delete_branch(&repo, "feature/y", None, &o).unwrap();
+    assert!(delete_branch(&repo, "main", None, &o).is_err());
     assert!(matches!(
-        delete_branch(&repo, "-x", &o),
+        delete_branch(&repo, "-x", None, &o),
         Err(GitError::InvalidBranch(_))
     ));
+}
+
+#[test]
+fn delete_branch_with_an_expected_tip_deletes_only_that_tip() {
+    let (_tmp, repo, _remote) = pr_repo();
+    let o = GitOptions::default();
+    run(&repo, &["branch", "feature/y"]);
+    let tip = branch_tip(&repo, "feature/y", &o).unwrap().unwrap();
+    assert_eq!(tip, git(&repo, &["rev-parse", "feature/y"]));
+    assert_eq!(branch_tip(&repo, "feature/none", &o).unwrap(), None);
+
+    // The branch moved on since the tip was read: it stays.
+    run(&repo, &["checkout", "-q", "feature/y"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "later"]);
+    run(&repo, &["checkout", "-q", "main"]);
+    assert!(delete_branch(&repo, "feature/y", Some(&tip), &o).is_err());
+    assert!(!git(&repo, &["branch", "--list", "feature/y"]).is_empty());
+
+    let tip = branch_tip(&repo, "feature/y", &o).unwrap().unwrap();
+    delete_branch(&repo, "feature/y", Some(&tip), &o).unwrap();
+    assert!(git(&repo, &["branch", "--list", "feature/y"]).is_empty());
+    // Gone is fine; something that is not a commit id never reaches git.
+    delete_branch(&repo, "feature/y", Some(&tip), &o).unwrap();
+    run(&repo, &["branch", "feature/z"]);
+    assert!(delete_branch(&repo, "feature/z", Some("--stdin"), &o).is_err());
+}
+
+#[test]
+fn check_repos_checks_only_the_labelled_repos() {
+    let f = Fixture::new();
+    let o = GitOptions {
+        allow_file_protocol: true,
+    };
+    let ws = create_workspace(&f.parent(), &f.spec(&["svc-payments", "svc-orders"]), &o).unwrap();
+    std::fs::write(ws.path.join("svc-orders/wip.txt"), "x").unwrap();
+    let only = |l: &str| vec![l.to_string()];
+
+    check_repos(&ws, &only("svc-payments"), &o).unwrap();
+    let err = check_repos(&ws, &only("svc-orders"), &o).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+
+    git(&ws.path.join("svc-orders"), &["add", "."]);
+    git(&ws.path.join("svc-orders"), &["commit", "-q", "-m", "wip"]);
+    let err = check_repos(&ws, &only("svc-orders"), &o).unwrap_err();
+    assert!(matches!(err, GitError::Unpushed { .. }), "{err}");
+}
+
+#[test]
+fn home_of_is_the_repo_under_the_root_and_nothing_outside_it() {
+    let f = Fixture::new();
+    let root = f.parent();
+    let canonical = root.canonicalize().unwrap();
+    assert_eq!(Workspace::home_of(&root, "."), Some(canonical.clone()));
+    assert_eq!(
+        Workspace::home_of(&root, "svc-orders"),
+        Some(canonical.join("svc-orders"))
+    );
+    // Not initialised, missing, or leading out of the root.
+    std::fs::create_dir_all(root.join("plain")).unwrap();
+    assert_eq!(Workspace::home_of(&root, "plain"), None);
+    assert_eq!(Workspace::home_of(&root, "nope"), None);
+    assert_eq!(Workspace::home_of(&root, ".."), None);
+    assert_eq!(
+        Workspace::home_of(&root, "../env/remotes/svc-orders.git"),
+        None
+    );
 }

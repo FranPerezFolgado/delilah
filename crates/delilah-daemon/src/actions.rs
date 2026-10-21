@@ -1,5 +1,6 @@
 //! Things the user asks of a task: resume it, mark it done, archive it, delete it.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use axum::Json;
@@ -9,6 +10,7 @@ use delilah_core::{Event, Task, TaskKey, TaskStatus};
 use delilah_git::GitOptions;
 
 use crate::api::ApiError;
+use crate::archive::{archive_workspace, finish_partial, release_workspace};
 use crate::events::Topic;
 use crate::run::launch_session;
 use crate::sessions::{Live, LiveState};
@@ -72,116 +74,16 @@ pub async fn archive(
             task.status.name()
         )));
     }
-    if finish_archive_partial(&app, &key).await? {
+    if finish_partial(&app, &key).await? {
         app.emit(Topic::Inbox);
     }
-    // A merge already released the workspace: nothing else to do.
-    if app.store.workspace(&key).await?.is_none() {
-        for live in app.sessions.of_task(key.as_str()) {
-            let _ = live.pty.kill();
-            live.pty.wait().await;
-        }
-        app.emit(Topic::Tasks);
-        return Ok(Json(task));
-    }
-    release_workspace(&app, &key, q.force).await?;
-    app.store.delete_workspace(&key).await?;
-    // Nothing left to act on: its PR notices go with the workspace.
-    if app.store.resolve_all_notices_of_task(&key).await? > 0 {
-        app.emit(Topic::Inbox);
-    }
+    // A merge may already have released the workspace: then this only stops what runs.
+    // (No branch is deleted here: none was verified merged.)
+    archive_workspace(&app, &key, q.force, &HashMap::new()).await?;
+    app.emit(Topic::Inbox);
     app.emit(Topic::Tasks);
     app.emit(Topic::Specs);
     Ok(Json(task))
-}
-
-/// The `detail` of an `archive-partial` notice: the local branches a merge left behind.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ArchivePartial {
-    pub branches: Vec<LeftoverBranch>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct LeftoverBranch {
-    /// Absolute directory of the repo holding the branch.
-    pub dir: std::path::PathBuf,
-    pub branch: String,
-}
-
-/// Deletes the branches an open `archive-partial` notice of the task lists and resolves
-/// it; a failure keeps the notice and is a 409. Whether a notice was resolved.
-async fn finish_archive_partial(app: &AppState, key: &TaskKey) -> Result<bool, ApiError> {
-    let notices: Vec<_> = app
-        .store
-        .open_notices()
-        .await?
-        .into_iter()
-        .filter(|n| n.task_key == key.as_str() && n.kind == "archive-partial")
-        .collect();
-    let allow_file_protocol = app.config.allow_file_protocol;
-    let mut resolved = false;
-    for notice in notices {
-        let detail: ArchivePartial = notice
-            .detail
-            .clone()
-            .and_then(|d| serde_json::from_value(d).ok())
-            .unwrap_or(ArchivePartial { branches: vec![] });
-        let opts = GitOptions {
-            allow_file_protocol,
-        };
-        tokio::task::spawn_blocking(move || {
-            detail
-                .branches
-                .iter()
-                .try_for_each(|b| delilah_git::delete_branch(&b.dir, &b.branch, &opts))
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::conflict(e.to_string()))?;
-        resolved |= app.store.resolve_notice(notice.id).await?;
-    }
-    Ok(resolved)
-}
-
-/// Stops the task's sessions and lets go of its workspace: a task in the project's
-/// checkout goes back to where it was, a worktree goes away (unless work would be
-/// lost and not `force`). The branch stays. Nothing to do if it has none (e.g. its
-/// checkout was taken by a newer task). Its record stays for the caller to forget:
-/// a deleted task takes it in the same statement as the task.
-pub(crate) async fn release_workspace(
-    app: &AppState,
-    key: &TaskKey,
-    force: bool,
-) -> Result<(), ApiError> {
-    // Its sessions stop even without a workspace: nothing else would track them.
-    for live in app.sessions.of_task(key.as_str()) {
-        let _ = live.pty.kill();
-        live.pty.wait().await;
-    }
-    let Some((root, ws)) = app.store.workspace(key).await? else {
-        return Ok(());
-    };
-    let opts = GitOptions {
-        allow_file_protocol: app.config.allow_file_protocol,
-    };
-    // A task in the project's checkout goes back to where it was; a worktree goes away.
-    let previous = app.store.checkout_previous(key).await?;
-    tokio::task::spawn_blocking(move || match previous {
-        Some(previous) => {
-            for stuck in delilah_git::leave_checkout(&root, &previous, &opts) {
-                tracing::warn!(
-                    "archiving {}: left on the task's branch: {stuck}",
-                    ws.branch
-                );
-            }
-            Ok(())
-        }
-        None => delilah_git::archive_workspace(&root, &ws, force, &opts),
-    })
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .map_err(|e| ApiError::conflict(e.to_string()))?;
-    Ok(())
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -350,6 +252,7 @@ pub async fn resume_if_due(app: &AppState, task: &Task) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive::{ArchivePartial, LeftoverBranch};
     use std::path::{Path as FsPath, PathBuf};
 
     fn git(dir: &FsPath, args: &[&str]) -> String {
@@ -714,9 +617,17 @@ mod tests {
         use crate::store_prs::NewNotice;
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo.to_path_buf(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
             .await
             .unwrap();
+        let mut task = Task::new(key.clone(), "x", "feature");
+        task.project = Some("web".into());
+        app.store.create_task(&task).await.unwrap();
         for event in [Event::Start, Event::WorkspaceReady, Event::MarkDone] {
             app.store
                 .apply_event(&key, event, chrono::Utc::now())
@@ -725,8 +636,9 @@ mod tests {
         }
         let detail = ArchivePartial {
             branches: vec![LeftoverBranch {
-                dir: repo.to_path_buf(),
+                repo: ".".into(),
                 branch: branch.into(),
+                sha: git(repo, &["rev-parse", &format!("refs/heads/{branch}")]),
             }],
         };
         app.store
@@ -777,6 +689,77 @@ mod tests {
         let err = archive_task(&app, &key).await.unwrap_err();
         assert_eq!(err.status, StatusCode::CONFLICT);
         assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).contains("PROJ-1"));
+        assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archive_keeps_the_notice_when_it_cannot_be_read() {
+        let (app, repo) = setup().await;
+        git(&repo, &["branch", "feature/PROJ-1"]);
+        let key = partially_archived(&app, &repo, "feature/PROJ-1").await;
+        // The old shape: an absolute folder instead of a repo label.
+        let notice = app.store.open_notices().await.unwrap().remove(0);
+        app.store.resolve_notice(notice.id).await.unwrap();
+        app.store
+            .insert_notice(
+                &key,
+                &crate::store_prs::NewNotice {
+                    repo: ".".into(),
+                    kind: "archive-partial".into(),
+                    cause: "other".into(),
+                    text: "t".into(),
+                    detail: Some(serde_json::json!({"branches": [
+                        {"dir": repo.to_str().unwrap(), "branch": "feature/PROJ-1"}
+                    ]})),
+                },
+            )
+            .await
+            .unwrap();
+
+        let err = archive_task(&app, &key).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).contains("PROJ-1"));
+        assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archive_never_deletes_a_branch_that_moved_or_a_label_outside_the_root() {
+        let (app, repo) = setup().await;
+        git(&repo, &["branch", "feature/PROJ-1"]);
+        let key = partially_archived(&app, &repo, "feature/PROJ-1").await;
+        // The branch gets a commit after the merge was verified.
+        git(&repo, &["checkout", "-q", "feature/PROJ-1"]);
+        git(&repo, &["commit", "--allow-empty", "-qm", "later"]);
+        git(&repo, &["checkout", "-q", "main"]);
+
+        let err = archive_task(&app, &key).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).contains("PROJ-1"));
+
+        let notice = app.store.open_notices().await.unwrap().remove(0);
+        app.store.resolve_notice(notice.id).await.unwrap();
+        app.store
+            .insert_notice(
+                &key,
+                &crate::store_prs::NewNotice {
+                    repo: ".".into(),
+                    kind: "archive-partial".into(),
+                    cause: "escape".into(),
+                    text: "t".into(),
+                    detail: serde_json::to_value(ArchivePartial {
+                        branches: vec![LeftoverBranch {
+                            repo: "..".into(),
+                            branch: "feature/PROJ-1".into(),
+                            sha: "0".repeat(40),
+                        }],
+                    })
+                    .ok(),
+                },
+            )
+            .await
+            .unwrap();
+        let err = archive_task(&app, &key).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
         assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
     }
 

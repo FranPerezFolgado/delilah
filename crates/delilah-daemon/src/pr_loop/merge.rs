@@ -1,15 +1,18 @@
 //! Archive on merge (research R7): when every PR of a task is merged, the task is marked
 //! done and its workspace released, unless that would lose work. Never deletes a remote
-//! branch.
+//! branch. How an archive is done is `crate::archive`'s; this is the policy: what must
+//! hold first, and what the user is told.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
-use delilah_core::{Event, TaskKey};
+use delilah_core::{Event, Task, TaskKey};
 use delilah_git::GitOptions;
 use serde_json::json;
 
-use crate::actions::{ArchivePartial, LeftoverBranch, release_workspace};
+use crate::archive::{
+    ArchivePartial, CAUSE_MERGE, KIND_BLOCKED, KIND_PARTIAL, Outcome, archive_workspace,
+    stop_sessions,
+};
 use crate::events::Topic;
 use crate::pr_types::PrState;
 use crate::state::AppState;
@@ -27,20 +30,18 @@ pub(super) fn all_merged(rows: &[PrRow]) -> bool {
         })
 }
 
-/// The repo folder that holds the task's branch once the workspace is gone: the
-/// project's own checkout (`root`), or its submodule `label` when that one is set up.
-fn home_of(root: &Path, label: &str) -> Option<PathBuf> {
-    if label == "." {
-        return Some(root.to_path_buf());
-    }
-    let dir = root.join(label);
-    // An uninitialised submodule folder would make git answer for the parent.
-    dir.join(".git").exists().then_some(dir)
+/// How a merged task's archive ended.
+enum Verdict {
+    Archived,
+    /// Released, but these local branches could not be deleted.
+    Partial(Outcome),
+    /// Refused, with nothing removed: why.
+    Blocked(String),
 }
 
 /// The task's PRs are all merged: mark it done and archive it, keeping any work that
 /// is not in the PRs (`archive-blocked`) and reporting a half-done archive
-/// (`archive-partial`). Does nothing for a task already archived.
+/// (`archive-partial`). Does nothing for a task already archived. Tells the user once.
 pub(super) async fn on_merged(app: &AppState, key: &TaskKey, rows: &[PrRow]) {
     if let Err(e) = archive_merged(app, key, rows).await {
         tracing::warn!(task = %key, "archive on merge: {e}");
@@ -55,119 +56,58 @@ async fn archive_merged(app: &AppState, key: &TaskKey, rows: &[PrRow]) -> Result
     if task.status.is_terminal() && workspace.is_none() {
         return Ok(());
     }
-    if !task.status.is_terminal() {
-        if let Err(e) = app.transition(key, Event::MarkDone).await {
-            tracing::warn!(task = %key, "cannot mark it done after the merge: {e}");
-            return Ok(());
-        }
-        for live in app.sessions.of_task(key.as_str()) {
-            let _ = live.pty.kill();
-        }
+    if !task.status.is_terminal()
+        && let Err(e) = app.transition_quiet(key, Event::MarkDone).await
+    {
+        tracing::warn!(task = %key, "cannot mark it done after the merge: {e}");
+        tell(app, key, &task, &Verdict::Blocked(e.to_string()));
+        return Ok(());
     }
-    let lang = app.lang();
-    if let Some((root, ws)) = workspace {
-        let opts = GitOptions {
-            allow_file_protocol: app.config.allow_file_protocol,
-        };
-        let heads: HashMap<String, String> = rows
-            .iter()
-            .filter_map(|r| Some((r.repo.clone(), r.snapshot.as_ref()?.head.clone())))
-            .collect();
-        let checked = {
-            let (ws, opts) = (ws.clone(), opts.clone());
-            tokio::task::spawn_blocking(move || {
-                for (label, dir) in ws.repos() {
-                    if heads.contains_key(&label)
-                        && let Err(e) = delilah_git::fetch(&dir, &opts)
-                    {
-                        tracing::warn!("fetching {label}: {e}");
-                    }
-                }
-                delilah_git::check_merged(&ws, &heads, &opts)
-            })
-            .await
-        };
-        let refused = match checked {
-            Ok(Ok(())) => None,
-            Ok(Err(e)) => Some(e.to_string()),
-            Err(e) => Some(e.to_string()),
-        };
-        if let Some(reason) = refused {
-            return blocked(app, key, &reason).await;
-        }
+    // Whatever the state, nothing may write to the repos while they are checked.
+    stop_sessions(app, key).await;
 
-        let previous_dirs: Vec<LeftoverBranch> = ws
-            .repos()
-            .into_iter()
-            .filter_map(|(label, _)| home_of(&root, &label))
-            .map(|dir| LeftoverBranch {
-                dir,
-                branch: ws.branch.clone(),
-            })
-            .collect();
-        if let Err(e) = release_workspace(app, key, true).await {
-            return blocked(app, key, &e.message).await;
+    let verdict = match workspace {
+        Some((_, ws)) => release(app, key, &ws, rows).await,
+        None => Verdict::Archived,
+    };
+    let fresh = match &verdict {
+        Verdict::Archived => true,
+        Verdict::Blocked(reason) => {
+            let text = format!(
+                "{}: {reason}",
+                app.lang().pick(
+                    "No se archivó la tarea mergeada",
+                    "The merged task was not archived"
+                )
+            );
+            notice(
+                app,
+                key,
+                KIND_BLOCKED,
+                text,
+                Some(json!({ "reason": reason })),
+            )
+            .await?
         }
-        let mut left: Vec<LeftoverBranch> = Vec::new();
-        let mut problems: Vec<String> = Vec::new();
-        if let Err(e) = app.store.delete_workspace(key).await {
-            problems.push(e.to_string());
-            left = previous_dirs.clone();
-        } else {
-            for leftover in previous_dirs {
-                let (dir, branch, opts) =
-                    (leftover.dir.clone(), leftover.branch.clone(), opts.clone());
-                let result = tokio::task::spawn_blocking(move || {
-                    delilah_git::delete_branch(&dir, &branch, &opts)
-                })
-                .await;
-                match result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        problems.push(e.to_string());
-                        left.push(leftover);
-                    }
-                    Err(e) => {
-                        problems.push(e.to_string());
-                        left.push(leftover);
-                    }
-                }
-            }
-            // Nothing left to act on: the notices of the PRs go with the workspace.
-            app.store.resolve_all_notices_of_task(key).await?;
-        }
-        if !left.is_empty() {
+        Verdict::Partial(outcome) => {
             let text = format!(
                 "{}: {}",
-                lang.pick(
+                app.lang().pick(
                     "Archivada a medias, quedan ramas locales",
                     "Archived only partly, local branches are left"
                 ),
-                problems.join("; ")
+                outcome.problems.join("; ")
             );
-            let detail = serde_json::to_value(ArchivePartial { branches: left }).ok();
-            app.store
-                .insert_notice(
-                    key,
-                    &NewNotice {
-                        repo: ".".into(),
-                        kind: "archive-partial".into(),
-                        cause: "merge".into(),
-                        text,
-                        detail,
-                    },
-                )
-                .await?;
+            let detail = serde_json::to_value(ArchivePartial {
+                branches: outcome.left.clone(),
+            })
+            .ok();
+            notice(app, key, KIND_PARTIAL, text, detail).await?
         }
-    }
-    if !app.events.listening() {
-        app.notifier.send(
-            format!(
-                "{key} {}",
-                lang.pick("mergeada y archivada", "merged and archived")
-            ),
-            task.title.clone(),
-        );
+    };
+    // A refusal that stands from an earlier check was already told.
+    if fresh {
+        tell(app, key, &task, &verdict);
     }
     for topic in [Topic::Tasks, Topic::Prs, Topic::Inbox, Topic::Specs] {
         app.emit(topic);
@@ -175,31 +115,125 @@ async fn archive_merged(app: &AppState, key: &TaskKey, rows: &[PrRow]) -> Result
     Ok(())
 }
 
-/// The archive was refused: the task stays done with its workspace, and the inbox says why.
-async fn blocked(app: &AppState, key: &TaskKey, reason: &str) -> Result<(), StoreError> {
-    let lang = app.lang();
-    let text = format!(
-        "{}: {reason}",
-        lang.pick(
-            "No se archivó la tarea mergeada",
-            "The merged task was not archived"
-        )
-    );
+/// Checks that nothing of the task's would be lost, then archives its workspace and
+/// deletes the branches of the repos whose PR is merged.
+async fn release(
+    app: &AppState,
+    key: &TaskKey,
+    ws: &delilah_git::Workspace,
+    rows: &[PrRow],
+) -> Verdict {
+    let opts = GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    };
+    let heads: HashMap<String, String> = rows
+        .iter()
+        .filter_map(|r| Some((r.repo.clone(), r.snapshot.as_ref()?.head.clone())))
+        .collect();
+    if let Some((repo, head)) = heads.iter().find(|(_, h)| !delilah_git::is_sha(h)) {
+        return Verdict::Blocked(format!("the PR of {repo} has no valid head ({head:?})"));
+    }
+    let checked = {
+        let ws = ws.clone();
+        let opts = opts.clone();
+        tokio::task::spawn_blocking(move || verify(&ws, &heads, &opts)).await
+    };
+    let verified = match checked {
+        Ok(Ok(tips)) => tips,
+        Ok(Err(reason)) => return Verdict::Blocked(reason),
+        Err(e) => return Verdict::Blocked(e.to_string()),
+    };
+    // Git's own check of what the worktree holds is a second line behind the one above.
+    match archive_workspace(app, key, false, &verified).await {
+        Ok(outcome) if outcome.left.is_empty() => Verdict::Archived,
+        Ok(outcome) => Verdict::Partial(outcome),
+        Err(e) => Verdict::Blocked(e.message),
+    }
+}
+
+/// Whether the workspace can go without losing work: every repo whose PR merged has
+/// nothing beyond the PR's head, and every other repo has nothing uncommitted or
+/// unpushed. Fails closed (a repo that cannot be fetched or read blocks it). The tip of
+/// the task's branch in each merged repo, to delete exactly that.
+fn verify(
+    ws: &delilah_git::Workspace,
+    heads: &HashMap<String, String>,
+    opts: &GitOptions,
+) -> Result<HashMap<String, String>, String> {
+    let repos = ws.repos();
+    for (label, dir) in &repos {
+        if heads.contains_key(label) {
+            delilah_git::fetch(dir, opts).map_err(|e| format!("fetching {label}: {e}"))?;
+        }
+    }
+    delilah_git::check_merged(ws, heads, opts).map_err(|e| e.to_string())?;
+    let others: Vec<String> = repos
+        .iter()
+        .filter(|(label, _)| !heads.contains_key(label))
+        .map(|(label, _)| label.clone())
+        .collect();
+    delilah_git::check_repos(ws, &others, opts).map_err(|e| e.to_string())?;
+
+    let mut tips = HashMap::new();
+    if ws.path.exists() {
+        for (label, dir) in repos {
+            if !heads.contains_key(&label) {
+                continue;
+            }
+            if let Some(tip) = delilah_git::branch_tip(&dir, &ws.branch, opts)
+                .map_err(|e| format!("{label}: {e}"))?
+            {
+                tips.insert(label, tip);
+            }
+        }
+    }
+    Ok(tips)
+}
+
+/// Raises the task's notice of `kind`; whether it is new.
+async fn notice(
+    app: &AppState,
+    key: &TaskKey,
+    kind: &str,
+    text: String,
+    detail: Option<serde_json::Value>,
+) -> Result<bool, StoreError> {
     app.store
         .insert_notice(
             key,
             &NewNotice {
                 repo: ".".into(),
-                kind: "archive-blocked".into(),
-                cause: "merge".into(),
+                kind: kind.into(),
+                cause: CAUSE_MERGE.into(),
                 text,
-                detail: Some(json!({ "reason": reason })),
+                detail,
             },
         )
-        .await?;
-    app.emit(Topic::Inbox);
-    app.emit(Topic::Tasks);
-    Ok(())
+        .await
+}
+
+/// The one notification of a merge (the per-PR one is held back for it, see
+/// `notices::record`). The open app notifies itself.
+fn tell(app: &AppState, key: &TaskKey, task: &Task, verdict: &Verdict) {
+    if app.events.listening() {
+        return;
+    }
+    let lang = app.lang();
+    let (title, body) = match verdict {
+        Verdict::Archived => (
+            lang.pick("mergeada y archivada", "merged and archived"),
+            task.title.clone(),
+        ),
+        Verdict::Blocked(reason) => (
+            lang.pick("mergeada, sin archivar", "merged, not archived"),
+            reason.clone(),
+        ),
+        Verdict::Partial(outcome) => (
+            lang.pick("mergeada, sin archivar", "merged, not archived"),
+            outcome.problems.join("; "),
+        ),
+    };
+    app.notifier.send(format!("{key} {title}"), body);
 }
 
 #[cfg(test)]
@@ -523,7 +557,9 @@ mod tests {
                 }
                 ("pr", "list") => {
                     let sub = sub.unwrap();
-                    let (n, state, _) = &prs[&sub];
+                    let Some((n, state, _)) = prs.get(&sub) else {
+                        return Box::pin(async { Ok("[]".to_string()) });
+                    };
                     Ok(format!(
                         r#"[{{"number":{n},"url":"https://github.com/o/{sub}/pull/{n}","state":"{state}","updatedAt":"2026-10-20T10:00:00Z"}}]"#
                     ))
@@ -551,12 +587,11 @@ mod tests {
         _dir: TempDir,
     }
 
-    async fn changeset() -> Changeset {
-        let (app, key, dir) =
-            task_with_workspace(Arc::new(FakeGh::new()), Some(SpecPhase::Review)).await;
+    /// The fixture parent project under `dir`; returns its root.
+    fn fixture_parent(dir: &Path) -> PathBuf {
         let script =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/make-fixture-parent.sh");
-        let env_dir = dir.path().join("env");
+        let env_dir = dir.join("env");
         let out = Command::new("bash")
             .arg(script)
             .arg(&env_dir)
@@ -567,7 +602,13 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let root = env_dir.join("parent");
+        env_dir.join("parent")
+    }
+
+    async fn changeset() -> Changeset {
+        let (app, key, dir) =
+            task_with_workspace(Arc::new(FakeGh::new()), Some(SpecPhase::Review)).await;
+        let root = fixture_parent(dir.path());
         let subs = ["svc-payments", "svc-orders"];
         let spec = WorkspaceSpec {
             path: dir.path().join("cs-ws"),
@@ -667,5 +708,200 @@ mod tests {
         let sent = cs.app.notifier.recorded();
         assert!(sent.iter().any(|n| n.title.contains("PROJ-1")));
         assert!(cs.app.store.open_notices().await.unwrap().is_empty());
+    }
+
+    // --- repos without a merged PR -------------------------------------------------
+
+    /// A parent task in the project's checkout touching svc-payments (with a PR, merged)
+    /// and svc-orders (no PR). The checkout never refuses to be let go of, so only the
+    /// archive's own checks stand between svc-orders and a loss.
+    async fn half_changeset() -> Changeset {
+        let (app, key, dir) =
+            task_with_workspace(Arc::new(FakeGh::new()), Some(SpecPhase::Review)).await;
+        let root = fixture_parent(dir.path());
+        let spec = WorkspaceSpec {
+            path: dir.path().join("unused"),
+            branch: BRANCH.into(),
+            kind: ProjectKind::Parent,
+            submodules: vec!["svc-payments".into(), "svc-orders".into()],
+        };
+        let (ws, previous) = delilah_git::use_checkout(&root, &spec, &opts()).unwrap();
+        let head = commit_and_push(&root.join("svc-payments"));
+        app.store.save_workspace(&key, &root, &ws).await.unwrap();
+        app.store
+            .set_checkout_previous(&key, &previous)
+            .await
+            .unwrap();
+        let prs = HashMap::from([("svc-payments".to_string(), (1, "MERGED".to_string(), head))]);
+        let gh = Arc::new(DirGh {
+            prs: Mutex::new(prs),
+        });
+        let mut app = app.with_gh(gh.clone());
+        let mut config = (*app.config).clone();
+        config.allow_file_protocol = true;
+        app.config = Arc::new(config);
+        Changeset {
+            app,
+            key,
+            gh,
+            root,
+            ws,
+            _dir: dir,
+        }
+    }
+
+    async fn assert_blocked_and_untouched(cs: &Changeset) {
+        let task = cs.app.store.get_task(&cs.key).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Done);
+        assert!(cs.app.store.workspace(&cs.key).await.unwrap().is_some());
+        for sub in ["svc-payments", "svc-orders"] {
+            let dir = cs.root.join(sub);
+            assert_eq!(git(&dir, &["branch", "--show-current"]), BRANCH);
+        }
+        let kinds: Vec<_> = cs
+            .app
+            .store
+            .open_notices()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.kind)
+            .collect();
+        assert_eq!(kinds, ["archive-blocked"]);
+        let sent = cs.app.notifier.recorded();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let not_archived = cs
+            .app
+            .lang()
+            .pick("mergeada, sin archivar", "merged, not archived");
+        assert_eq!(sent[0].title, format!("PROJ-1 {not_archived}"));
+    }
+
+    #[tokio::test]
+    async fn a_repo_without_a_pr_and_with_uncommitted_work_blocks_the_archive() {
+        let cs = half_changeset().await;
+        std::fs::write(cs.root.join("svc-orders/wip.txt"), "wip").unwrap();
+
+        check_task(&cs.app, &cs.key, true).await;
+        check_task(&cs.app, &cs.key, true).await;
+
+        assert_blocked_and_untouched(&cs).await;
+        assert!(cs.root.join("svc-orders/wip.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_repo_without_a_pr_and_with_an_unpushed_commit_blocks_the_archive() {
+        let cs = half_changeset().await;
+        let orders = cs.root.join("svc-orders");
+        std::fs::write(orders.join("mine.txt"), "mine").unwrap();
+        git(&orders, &["add", "."]);
+        git(&orders, &["commit", "-q", "-m", "mine"]);
+
+        check_task(&cs.app, &cs.key, true).await;
+
+        assert_blocked_and_untouched(&cs).await;
+    }
+
+    #[tokio::test]
+    async fn a_clean_repo_without_a_pr_does_not_stop_the_archive_and_keeps_its_branch() {
+        let cs = half_changeset().await;
+
+        check_task(&cs.app, &cs.key, true).await;
+
+        let task = cs.app.store.get_task(&cs.key).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Done);
+        assert!(cs.app.store.workspace(&cs.key).await.unwrap().is_none());
+        assert!(cs.app.store.open_notices().await.unwrap().is_empty());
+        // Merged: its branch goes. Not merged (no PR): it stays.
+        assert!(git(&cs.root.join("svc-payments"), &["branch", "--list", BRANCH]).is_empty());
+        assert!(!git(&cs.root.join("svc-orders"), &["branch", "--list", BRANCH]).is_empty());
+        let _ = &cs.ws;
+        let sent = cs.app.notifier.recorded();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let archived = cs
+            .app
+            .lang()
+            .pick("mergeada y archivada", "merged and archived");
+        assert_eq!(sent[0].title, format!("PROJ-1 {archived}"));
+    }
+
+    #[tokio::test]
+    async fn a_branch_that_moved_since_the_check_is_not_deleted() {
+        let env = Env::repo(true, "MERGED").await;
+        // The sessions are gone and the check passed: now something commits.
+        let tip = git(&env.root, &["rev-parse", BRANCH]);
+        git(&env.root, &["checkout", "-q", "main"]);
+        git(&env.root, &["checkout", "-q", BRANCH]);
+        std::fs::write(env.root.join("late.txt"), "late").unwrap();
+        git(&env.root, &["add", "."]);
+        git(&env.root, &["commit", "-q", "-m", "late"]);
+        git(&env.root, &["checkout", "-q", "main"]);
+
+        let outcome = crate::archive::archive_workspace(
+            &env.app,
+            &env.key,
+            false,
+            &HashMap::from([(".".to_string(), tip)]),
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+
+        assert_eq!(outcome.left.len(), 1);
+        assert!(env.branch_exists(&env.root));
+    }
+
+    #[tokio::test]
+    async fn one_notification_per_merge_and_per_pr_for_all_but_the_last() {
+        let env = Env::repo(false, "MERGED").await;
+        check_task(&env.app, &env.key, true).await;
+        let sent = env.app.notifier.recorded();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        // The merge-driven MarkDone is quiet: no "terminada" either.
+        let done = env.app.lang().pick("terminada", "done");
+        assert!(sent.iter().all(|n| !n.title.ends_with(done)));
+
+        let cs = changeset().await;
+        check_task(&cs.app, &cs.key, true).await;
+        cs.gh.set("svc-payments", "MERGED");
+        check_task(&cs.app, &cs.key, true).await;
+        let merged = cs.app.lang().pick("mergeada", "merged");
+        let sent = cs.app.notifier.recorded();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0].title, format!("PROJ-1 {merged}"));
+        cs.gh.set("svc-orders", "MERGED");
+        check_task(&cs.app, &cs.key, true).await;
+        let archived = cs
+            .app
+            .lang()
+            .pick("mergeada y archivada", "merged and archived");
+        let sent = cs.app.notifier.recorded();
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert_eq!(sent[1].title, format!("PROJ-1 {archived}"));
+    }
+
+    #[tokio::test]
+    async fn a_refusal_is_told_once_however_often_it_is_checked() {
+        let env = Env::repo(false, "MERGED").await;
+        std::fs::write(env.ws.path.join("wip.txt"), "wip").unwrap();
+        check_task(&env.app, &env.key, true).await;
+        check_task(&env.app, &env.key, true).await;
+        let sent = env.app.notifier.recorded();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_blocks_the_archive() {
+        let env = Env::repo(false, "MERGED").await;
+        git(
+            &env.root,
+            &["remote", "set-url", "origin", "/nonexistent/origin.git"],
+        );
+
+        check_task(&env.app, &env.key, true).await;
+
+        assert!(env.ws.path.exists());
+        assert!(env.branch_exists(&env.root));
+        assert_eq!(env.kinds().await, ["archive-blocked"]);
     }
 }

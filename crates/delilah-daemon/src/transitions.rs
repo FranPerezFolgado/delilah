@@ -9,11 +9,26 @@ use crate::store::StoreError;
 
 impl AppState {
     pub async fn transition(&self, key: &TaskKey, event: Event) -> Result<Task, StoreError> {
+        self.change(key, event, true).await
+    }
+
+    /// Like [`AppState::transition`], without the notification of the change: for a
+    /// caller that tells it in its own words (a merge that marks the task done).
+    pub(crate) async fn transition_quiet(
+        &self,
+        key: &TaskKey,
+        event: Event,
+    ) -> Result<Task, StoreError> {
+        self.change(key, event, false).await
+    }
+
+    async fn change(&self, key: &TaskKey, event: Event, notify: bool) -> Result<Task, StoreError> {
         let before = self.store.get_task(key).await?.map(|t| t.status);
         let task = self.store.apply_event(key, event, Utc::now()).await?;
         self.emit(Topic::Tasks);
         self.emit(Topic::Inbox);
-        if let Some(before) = before
+        if notify
+            && let Some(before) = before
             && before != task.status
         {
             self.notify_change(&task, &before);

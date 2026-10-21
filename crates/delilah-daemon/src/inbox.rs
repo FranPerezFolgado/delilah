@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::actions::type_prompt;
 use crate::api::ApiError;
+use crate::archive::{KIND_BLOCKED, KIND_PARTIAL};
 use crate::state::AppState;
 
 /// Long answers are cut: the inbox shows the gist, the session tab the rest.
@@ -323,19 +324,26 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         let kind = match n.kind.as_str() {
             "ci-failed" => ItemKind::PrFailed,
             "changes-requested" | "comments" => ItemKind::PrReview,
-            "archive-blocked" | "archive-partial" => ItemKind::PrBlocked,
+            KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
             _ => continue,
         };
         let Some(t) = task(&n.task_key) else {
             continue;
         };
+        // The archive notices are about the task as a whole, not one repo's PR. A
+        // partial archive is the one that outlives the workspace: it asks to finish.
+        let archive = matches!(n.kind.as_str(), KIND_BLOCKED | KIND_PARTIAL);
         // An archived task (finished, its workspace gone) has nothing to act on.
-        if t.status.is_terminal() && app.store.workspace(&t.key).await?.is_none() {
+        if n.kind != KIND_PARTIAL
+            && t.status.is_terminal()
+            && app.store.workspace(&t.key).await?.is_none()
+        {
             continue;
         }
         // An unlinked PR resolves its notices; one still open without its PR is stale.
         let prs = app.store.prs_of(&t.key).await?;
-        let Some(pr) = prs.iter().find(|p| p.repo == n.repo) else {
+        let same_repo = prs.iter().find(|p| p.repo == n.repo);
+        let Some(pr) = same_repo.or(if archive { prs.first() } else { None }) else {
             continue;
         };
         items.push(InboxItem {
@@ -661,6 +669,60 @@ mod tests {
             panic!("the inbox failed");
         };
         assert!(items.iter().all(|i| i.pr.is_none()), "{items:?}");
+    }
+
+    #[tokio::test]
+    async fn an_archive_partial_of_a_done_task_without_workspace_still_reaches_the_inbox() {
+        use crate::store_prs::NewNotice;
+        let app = app_with_pr_task().await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        // The PR is of a submodule; the notice is about the task (repo ".").
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        app.store
+            .link_pr(
+                &key,
+                &crate::store_prs::NewPr {
+                    repo: "svc-a".into(),
+                    host: row.host.clone(),
+                    owner_name: row.owner_name.clone(),
+                    number: 8,
+                    url: "https://github.com/me/svc-a/pull/8".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+        app.store.unlink_pr(row.id).await.unwrap();
+        for kind in ["archive-partial", "archive-blocked"] {
+            app.store
+                .insert_notice(
+                    &key,
+                    &NewNotice {
+                        repo: ".".into(),
+                        kind: kind.into(),
+                        cause: "merge".into(),
+                        text: format!("{kind} text"),
+                        detail: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        // The blocked one is for a task still holding its workspace: archived, it is gone.
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].kind, ItemKind::PrBlocked);
+        assert_eq!(items[0].text.as_deref(), Some("archive-partial text"));
+        let pr = items[0].pr.as_ref().unwrap();
+        assert_eq!(pr.url, "https://github.com/me/svc-a/pull/8");
+        assert_eq!(pr.repo, ".");
     }
 
     #[test]

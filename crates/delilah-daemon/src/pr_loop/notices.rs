@@ -85,6 +85,9 @@ pub(super) async fn record(
     let after_ids: HashSet<i64> = after.iter().map(|n| n.id).collect();
 
     let key = TaskKey::new(row.task_key.clone());
+    // The merge that archives (or refuses to archive) the task tells it in one
+    // notification of its own, so this PR's is held back.
+    let told_by_archive = snap.state == PrState::Merged && archives_when_merged(app, &key).await?;
     if !app.events.listening() {
         for (draft, notice) in drafts.iter().zip(&notices) {
             let raised = after.iter().any(|n| {
@@ -100,6 +103,9 @@ pub(super) async fn record(
             }
         }
         for info in infos {
+            if info == Info::Merged && told_by_archive {
+                continue;
+            }
             let (title, body) = info_message(lang, &key, info, snap);
             app.notifier.send(title, body);
         }
@@ -108,6 +114,18 @@ pub(super) async fn record(
         changed: true,
         notices_changed: before != after_ids,
     })
+}
+
+/// Whether the check that just saved a merged PR of `key` is the one that archives the
+/// task (or refuses to): every PR of it is merged and it is not archived already.
+async fn archives_when_merged(app: &AppState, key: &TaskKey) -> Result<bool, StoreError> {
+    if !super::merge::all_merged(&app.store.prs_of(key).await?) {
+        return Ok(false);
+    }
+    let Some(task) = app.store.get_task(key).await? else {
+        return Ok(false);
+    };
+    Ok(!(task.status.is_terminal() && app.store.workspace(key).await?.is_none()))
 }
 
 /// What the user sees of a name that came from the PR: one short line.
@@ -340,7 +358,10 @@ mod tests {
 
     #[tokio::test]
     async fn merging_or_closing_resolves_every_notice_and_tells_it() {
-        for (state, word) in [("MERGED", "mergeada"), ("CLOSED", "PR cerrada")] {
+        for (state, word) in [
+            ("MERGED", "mergeada, sin archivar"),
+            ("CLOSED", "PR cerrada"),
+        ] {
             let (app, key, _dir) = task_with_workspace(
                 gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")),
                 Some(SpecPhase::Review),

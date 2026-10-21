@@ -42,6 +42,13 @@ pub enum GitError {
 
 fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
     let mut cmd = Command::new("git");
+    // The repos are written by agents: no hook or fsmonitor command of theirs runs here.
+    cmd.args([
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+    ]);
     if opts.allow_file_protocol {
         cmd.args(["-c", "protocol.file.allow=always"]);
     }
