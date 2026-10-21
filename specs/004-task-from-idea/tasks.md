@@ -304,7 +304,7 @@
 
 **Independent Test**: confirm two proposals in one conversation, and two backlog tasks with different keys and briefs appear.
 
-- [ ] T037 [US4] Add a daemon test in `crates/delilah-daemon/src/asks.rs`, `two_proposals_in_one_conversation_create_two_tasks`: two proposal asks from the same conversation session, both answered `Crear`, give `LIBRE-n` and `LIBRE-n+1` with their own notes and two card entries each showing its key.
+- [X] T037 [US4] Add a daemon test in `crates/delilah-daemon/src/asks.rs`, `two_proposals_in_one_conversation_create_two_tasks`: two proposal asks from the same conversation session, both answered `Crear`, give `LIBRE-n` and `LIBRE-n+1` with their own notes and two card entries each showing its key.
 
 ---
 

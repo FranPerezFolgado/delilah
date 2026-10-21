@@ -25,9 +25,9 @@ Mode: format=markdown commits=yes
 | WP-04F | 4 | 4F | done | 1 | 3c7eebe | phase 4 fixes: hermetic run test |
 | WP-15 | 5 | 5A | done | 1 | 62a0531 | |
 | WP-16 | 5 | 5A | done | 1 | 12d54c8 | InboxView change untested | |
-| WP-17 | 6 | 6A | implementing | 0 | | |
-| WP-18 | 7 | 7A | pending | 0 | | |
-| WP-19 | 7 | 7A | pending | 0 | | |
+| WP-17 | 6 | 6A | done | 1 | | |
+| WP-18 | 7 | 7A | implementing | 0 | | |
+| WP-19 | 7 | 7A | implementing | 0 | | |
 | WP-20 | 7 | 7B | pending | 0 | | T041 manual walkthrough |
 
 ## Reviews

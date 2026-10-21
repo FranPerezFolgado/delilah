@@ -227,6 +227,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_proposals_in_one_conversation_create_two_tasks() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let mut keys = Vec::new();
+        for (title, brief) in [("Primera idea", "brief uno"), ("Segunda idea", "brief dos")] {
+            let card = proposal_card(title, NEW_TASK_HEADER, Some(brief));
+            let (reply, _) = pick(&app, CONV, card, title, CREATE).await;
+            keys.push(reply["task"].as_str().unwrap().to_string());
+        }
+        assert_eq!(keys.len(), 2);
+        assert_ne!(keys[0], keys[1]);
+        let n = |k: &str| k.strip_prefix("LIBRE-").unwrap().parse::<u32>().unwrap();
+        assert_eq!(n(&keys[1]), n(&keys[0]) + 1);
+
+        for (key, title, brief) in [
+            (&keys[0], "Primera idea", "brief uno"),
+            (&keys[1], "Segunda idea", "brief dos"),
+        ] {
+            let task = app
+                .store
+                .get_task(&TaskKey::new(key))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(task.title, title);
+            assert!(task.notes.unwrap().ends_with(&format!("\n\n{brief}")));
+        }
+
+        let cards: Vec<Value> = app
+            .store
+            .entries("conv")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == crate::store_sessions::EntryKind::Card)
+            .map(|e| serde_json::to_value(e).unwrap())
+            .collect();
+        assert_eq!(cards.len(), 2);
+        for (card, key) in cards.iter().zip(&keys) {
+            assert_eq!(card["outcome"], "answered");
+            assert_eq!(card["task"], key.as_str());
+        }
+    }
+
+    #[tokio::test]
     async fn a_task_sessions_card_with_the_same_shape_creates_nothing() {
         let app = app().await;
         let card = proposal_card(TITLE, "Nueva tarea", Some("brief"));
