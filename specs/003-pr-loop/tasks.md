@@ -143,12 +143,12 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 - [X] T037 [P] [US4] Write failing tests in `crates/delilah-git/tests/workspace.rs` for `fetch`, `check_merged(ws, heads)` and `delete_branch`: a branch squash-merged on the remote passes (local head is the PR head); a local commit after the PR head → `NotMerged`; an uncommitted file → `Dirty`; for a parent, a dirty parent refuses but a submodule pointer change alone does not; `delete_branch` of a missing branch is Ok, of the current branch errors
 - [ ] T038 [US4] Write failing tests in `crates/delilah-daemon/src/prs.rs` for `on_merged` through `check_task` (fixture repo with bare remote): running task + merged PR → done, sessions stopped, worktree removed, local branch deleted, "merged and archived" notification; checkout-mode task → back to the previous branch, then branch deleted; dirty workspace → done, nothing removed, one `archive-blocked` notice; branch deletion failing after release → `archive-partial` notice; closed unmerged → only a notification, task unchanged
-- [ ] T039 [P] [US4] Write a failing test in `crates/delilah-daemon/src/actions.rs` that `POST /tasks/{key}/archive` on a task with an open `archive-partial` notice deletes the leftover branch and resolves the notice
+- [X] T039 [P] [US4] Write a failing test in `crates/delilah-daemon/src/actions.rs` that `POST /tasks/{key}/archive` on a task with an open `archive-partial` notice deletes the leftover branch and resolves the notice
 
 ### Implementation
 
 - [X] T040 [US4] Implement `fetch`, `check_merged`, `delete_branch` and `GitError::NotMerged { location }` in `crates/delilah-git/src/workspace.rs` (+ `crates/delilah-git/src/command.rs` for the error); make T037 pass
-- [ ] T041 [US4] Make `release_workspace` `pub(crate)` in `crates/delilah-daemon/src/actions.rs` and let `archive` finish an `archive-partial` (delete the remaining branches, resolve the notice); make T039 pass
+- [X] T041 [US4] Make `release_workspace` `pub(crate)` in `crates/delilah-daemon/src/actions.rs` and let `archive` finish an `archive-partial` (delete the remaining branches, resolve the notice); make T039 pass
 - [ ] T042 [US4] Implement `on_merged(app, key)` in `crates/delilah-daemon/src/prs.rs` per research R7 (MarkDone if not terminal → `fetch` + `check_merged` in `spawn_blocking` → `archive-blocked` notice, or `release_workspace(force = true)` + `delete_workspace` + `delete_branch` per repo → `archive-partial` on failure → notification), called from `check_task` when every row is merged and none closed unmerged; make T038 pass
 - [X] T043 [US4] In `app/src/components/InboxView.tsx` render `pr-blocked` with its text, "Archivar igualmente" (`archive(key, true)`) and "Descartar"; in `app/src/alerts.ts` notify "mergeada y archivada" from summaries when unfocused; strings in `app/src/i18n/en.ts`; extend `app/src/components/InboxView.test.tsx`
 
