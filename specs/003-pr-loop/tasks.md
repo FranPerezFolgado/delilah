@@ -120,12 +120,12 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 ### Tests first
 
 - [X] T031 [P] [US3] Write failing tests in `crates/delilah-git/tests/workspace.rs` for new helpers `commit_subjects(dir, base, branch)`, `needs_push(dir, branch)` (no upstream or ahead) and `push_branch(dir, branch)` against a temp repo with a local bare remote
-- [ ] T032 [US3] Write failing tests in `crates/delilah-daemon/src/pr_api.rs`: proposal with Jira configured (cloud) and key `PROJ-1` → body starts with `<site>/browse/PROJ-1` and lists the commit subjects; free task `LIBRE-1` → no link; no commits beyond base → 409 `no-commits`; task with an open PR → 409 `has-pr`; `POST /tasks/{key}/prs` pushes to the bare remote, calls `gh pr create` with `--head`, `--base`, `--title`, `--body-file -` (and `--draft` when asked), links (`opened`) and moves to review; a push failure → 409 with git's stderr and no row
+- [X] T032 [US3] Write failing tests in `crates/delilah-daemon/src/pr_api.rs`: proposal with Jira configured (cloud) and key `PROJ-1` → body starts with `<site>/browse/PROJ-1` and lists the commit subjects; free task `LIBRE-1` → no link; no commits beyond base → 409 `no-commits`; task with an open PR → 409 `has-pr`; `POST /tasks/{key}/prs` pushes to the bare remote, calls `gh pr create` with `--head`, `--base`, `--title`, `--body-file -` (and `--draft` when asked), links (`opened`) and moves to review; a push failure → 409 with git's stderr and no row
 
 ### Implementation
 
 - [X] T033 [US3] Implement `commit_subjects`, `needs_push`, `push_branch` in `crates/delilah-git/src/workspace.rs` (export from `crates/delilah-git/src/lib.rs`); make T031 pass
-- [ ] T034 [US3] Implement `proposal` and `open` handlers in `crates/delilah-daemon/src/pr_api.rs` (Jira site and mode from the daemon's Jira settings in `crates/delilah-daemon/src/jira.rs`; git calls in `spawn_blocking`), register routes in `crates/delilah-daemon/src/api.rs`; make T032 pass
+- [X] T034 [US3] Implement `proposal` and `open` handlers in `crates/delilah-daemon/src/pr_api.rs` (Jira site and mode from the daemon's Jira settings in `crates/delilah-daemon/src/jira.rs`; git calls in `spawn_blocking`), register routes in `crates/delilah-daemon/src/api.rs`; make T032 pass
 - [X] T035 [P] [US3] Add `PrProposal`, `prProposal`, `openPr` to `app/src/api.ts`
 - [X] T036 [US3] Write `app/src/components/OpenPrDialog.tsx` (loads the proposal; editable title and body; "Borrador" checkbox; errors inline; the submodule select is added in US5) with `app/src/components/OpenPrDialog.test.tsx`, and add the "Abrir PR" button to the empty state of `app/src/components/PrView.tsx` (disabled with the 409 reason); strings in `app/src/i18n/en.ts`
 
@@ -165,12 +165,12 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 ### Tests first
 
 - [ ] T044 [US5] Write failing tests in `crates/delilah-daemon/src/prs.rs` with a parent fixture (two submodules, fake `gh` per repo folder): one PR detected per submodule (`repo` = submodule path); one merged → not archived; both merged → archived, submodule branches deleted, parent branch kept; one merged + one closed → not archived, notification; `summary` reports the worst state and `count = 2`
-- [ ] T045 [P] [US5] Write a failing test in `crates/delilah-daemon/src/pr_api.rs`: proposal and open with `repo = <submodule>` push and create from that submodule's folder; an unknown repo → 400
+- [X] T045 [P] [US5] Write a failing test in `crates/delilah-daemon/src/pr_api.rs`: proposal and open with `repo = <submodule>` push and create from that submodule's folder; an unknown repo → 400
 
 ### Implementation
 
 - [ ] T046 [US5] Make `check_task`, `on_merged` and the merged/closed rule in `crates/delilah-daemon/src/prs.rs` work per submodule (only submodules get PRs for parents; FR-038, FR-039); make T044 pass
-- [ ] T047 [US5] Validate and use `repo` in `proposal` / `open` of `crates/delilah-daemon/src/pr_api.rs`; make T045 pass
+- [X] T047 [US5] Validate and use `repo` in `proposal` / `open` of `crates/delilah-daemon/src/pr_api.rs`; make T045 pass
 - [X] T048 [US5] Add the submodule select to `app/src/components/OpenPrDialog.tsx` (parents only, submodules without an open PR) and group cards by submodule in `app/src/components/PrView.tsx`; extend their tests
 
 **Checkpoint**: all stories work independently.

@@ -57,7 +57,14 @@ pub fn router(state: AppState) -> Router {
             get(session_api::list_for_task).post(session_api::open),
         )
         .route("/api/v1/prs", get(crate::pr_api::summaries))
-        .route("/api/v1/tasks/{key}/prs", get(crate::pr_api::task_prs))
+        .route(
+            "/api/v1/tasks/{key}/prs",
+            get(crate::pr_api::task_prs).post(crate::pr_api::open),
+        )
+        .route(
+            "/api/v1/tasks/{key}/prs/proposal",
+            get(crate::pr_api::proposal),
+        )
         .route(
             "/api/v1/tasks/{key}/prs/refresh",
             post(crate::pr_api::refresh),
@@ -357,6 +364,9 @@ pub struct ErrorBody {
     /// A task paused by the limit: when it resumes by itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_at: Option<chrono::DateTime<Utc>>,
+    /// Why a 409 happened, for the client to tell apart (`no-commits`, `has-pr`...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 pub struct ApiError {
@@ -364,6 +374,7 @@ pub struct ApiError {
     pub(crate) message: String,
     pub(crate) unpushed: bool,
     pub(crate) resume_at: Option<chrono::DateTime<Utc>>,
+    pub(crate) reason: Option<String>,
 }
 
 impl ApiError {
@@ -381,6 +392,14 @@ impl ApiError {
 
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
+    }
+
+    /// A 409 the client tells apart by `reason`.
+    pub fn conflict_reason(message: impl Into<String>, reason: &str) -> Self {
+        Self {
+            reason: Some(reason.to_string()),
+            ..Self::conflict(message)
+        }
     }
 
     /// A 409 for work that would be lost; `?force=true` goes ahead anyway.
@@ -421,6 +440,7 @@ impl ApiError {
             message: message.into(),
             unpushed: false,
             resume_at: None,
+            reason: None,
         }
     }
 }
@@ -453,6 +473,7 @@ impl IntoResponse for ApiError {
                 error: self.message,
                 unpushed: self.unpushed,
                 resume_at: self.resume_at,
+                reason: self.reason,
             }),
         )
             .into_response()

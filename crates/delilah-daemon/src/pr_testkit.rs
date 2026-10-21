@@ -73,3 +73,41 @@ pub(crate) async fn task_with_workspace(
     }
     (app, key, dir)
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Makes `repo` a git repo on `main` with a bare `origin` at `origin`, then checks out
+/// `branch` with one commit per subject in `subjects` (named `<subject>.txt`).
+pub(crate) fn git_repo_with_origin(repo: &Path, origin: &Path, branch: &str, subjects: &[&str]) {
+    std::fs::create_dir_all(repo).unwrap();
+    std::fs::create_dir_all(origin).unwrap();
+    git(origin, &["init", "--bare", "-b", "main"]);
+    git(repo, &["init", "-b", "main"]);
+    git(repo, &["commit", "--allow-empty", "-m", "base"]);
+    git(repo, &["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(repo, &["checkout", "-b", branch]);
+    for subject in subjects {
+        std::fs::write(repo.join(format!("{subject}.txt")), subject).unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-m", subject]);
+    }
+}

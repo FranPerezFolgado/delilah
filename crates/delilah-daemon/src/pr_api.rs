@@ -2,14 +2,17 @@
 //! what to do with their notices: forward them to the agent or dismiss them.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use delilah_core::{TaskKey, TaskStatus};
+use delilah_git::GitOptions;
+use delilah_integrations::jira::JiraMode;
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiError;
 use crate::events::Topic;
+use crate::jira::{JiraSettings, SETTINGS_KEY};
 use crate::lang::Lang;
 use crate::pr_loop::{self, LinkError};
 use crate::pr_types::{Check, PrState, PrSummary, ReviewDecision, Rollup, Snapshot};
@@ -186,6 +189,224 @@ pub async fn link(
             LinkError::Store(e) => e.into(),
         })?;
     Ok(Json(view(&row)))
+}
+
+#[derive(Deserialize)]
+pub struct ProposalQuery {
+    repo: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Proposal {
+    repo: String,
+    title: String,
+    body: String,
+    base: String,
+    needs_push: bool,
+    /// The task's repos that have no open PR yet.
+    repos: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct OpenRequest {
+    #[serde(default)]
+    repo: Option<String>,
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    draft: bool,
+}
+
+fn is_open(row: &PrRow) -> bool {
+    row.snapshot
+        .as_ref()
+        .is_none_or(|s| s.state == PrState::Open)
+}
+
+/// Where a PR of `repo` (default `.`) would come from: the task's branch and the folder.
+async fn source_of(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+) -> Result<(String, String, std::path::PathBuf, Vec<String>), ApiError> {
+    let (_, ws) = app.store.workspace(key).await?.ok_or_else(|| {
+        ApiError::conflict_reason(
+            format!("{key} has no workspace to open a PR from"),
+            "no-workspace",
+        )
+    })?;
+    let repo = repo.unwrap_or(".");
+    let repos = ws.repos();
+    let dir = repos
+        .iter()
+        .find(|(label, _)| label == repo)
+        .map(|(_, dir)| dir.clone())
+        .ok_or_else(|| ApiError::bad_request(format!("{key} has no repo {repo}")))?;
+    let labels = repos.into_iter().map(|(label, _)| label).collect();
+    Ok((repo.to_string(), ws.branch, dir, labels))
+}
+
+fn git_options(app: &AppState) -> GitOptions {
+    GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    }
+}
+
+fn join_error(e: tokio::task::JoinError) -> ApiError {
+    ApiError::internal(format!("git task failed: {e}"))
+}
+
+/// The Jira link of the ticket, when Jira is connected for real and the task is one.
+async fn jira_link(app: &AppState, key: &TaskKey) -> Option<String> {
+    if key.as_str().starts_with("LIBRE-") {
+        return None;
+    }
+    let settings: JiraSettings = app.store.setting(SETTINGS_KEY).await.ok().flatten()?;
+    if settings.mode == JiraMode::Sample {
+        return None;
+    }
+    let site = settings.site?;
+    Some(format!(
+        "{}/browse/{key}",
+        site.trim().trim_end_matches('/')
+    ))
+}
+
+/// `GET /tasks/{key}/prs/proposal?repo=.`: the title and body the dialog starts from.
+pub async fn proposal(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+    Query(q): Query<ProposalQuery>,
+) -> Result<Json<Proposal>, ApiError> {
+    let key = known_task(&app, &key).await?;
+    let rows = app.store.prs_of(&key).await?;
+    let has_open = |label: &str| rows.iter().any(|r| r.repo == label && is_open(r));
+    let mut chosen = q.repo.clone();
+    if chosen.as_deref().is_none_or(|r| r == ".")
+        && let Some((_, ws)) = app.store.workspace(&key).await?
+    {
+        // A parent has no "." repo: the default is its first submodule without a PR.
+        let labels: Vec<String> = ws.repos().into_iter().map(|(l, _)| l).collect();
+        if !labels.iter().any(|l| l == ".") {
+            let free = labels.into_iter().find(|l| !has_open(l)).ok_or_else(|| {
+                ApiError::conflict_reason("every repo already has an open PR", "has-pr")
+            })?;
+            chosen = Some(free);
+        }
+    }
+    let (repo, branch, dir, labels) = source_of(&app, &key, chosen.as_deref()).await?;
+    if has_open(&repo) {
+        return Err(ApiError::conflict_reason(
+            format!("{repo} already has an open PR"),
+            "has-pr",
+        ));
+    }
+    let base = app
+        .gh
+        .repo_view(&dir)
+        .await
+        .map_err(|e| ApiError::conflict(e.to_string()))?
+        .default_branch;
+    let opts = git_options(&app);
+    let (d, b, bs) = (dir.clone(), branch.clone(), base.clone());
+    let (subjects, needs_push) = tokio::task::spawn_blocking(move || {
+        let subjects = delilah_git::commit_subjects(&d, &bs, &b, &opts)?;
+        let needs_push = delilah_git::needs_push(&d, &b, &opts)?;
+        Ok::<_, delilah_git::GitError>((subjects, needs_push))
+    })
+    .await
+    .map_err(join_error)?
+    .map_err(|e| ApiError::conflict(e.to_string()))?;
+    if subjects.is_empty() {
+        return Err(ApiError::conflict_reason(
+            format!("{branch} has no commits beyond {base}"),
+            "no-commits",
+        ));
+    }
+    let mut body = String::new();
+    if let Some(link) = jira_link(&app, &key).await {
+        body.push_str(&format!("Jira: {link}\n\n"));
+    }
+    for subject in &subjects {
+        body.push_str(&format!("- {subject}\n"));
+    }
+    let title = app
+        .store
+        .get_task(&key)
+        .await?
+        .map(|t| t.title)
+        .unwrap_or_default();
+    Ok(Json(Proposal {
+        repo,
+        title,
+        body: body.trim_end().to_string(),
+        base,
+        needs_push,
+        repos: labels.into_iter().filter(|l| !has_open(l)).collect(),
+    }))
+}
+
+/// `POST /tasks/{key}/prs`: pushes the branch if needed, creates the PR and links it.
+pub async fn open(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<OpenRequest>,
+) -> Result<(StatusCode, Json<PrView>), ApiError> {
+    let key = known_task(&app, &key).await?;
+    let title = req.title.trim();
+    if title.is_empty() {
+        return Err(ApiError::bad_request("the PR needs a title"));
+    }
+    let (repo, branch, dir, _) = source_of(&app, &key, req.repo.as_deref()).await?;
+    // Keeps a detection from linking the PR twice while it is being opened; the link
+    // is an upsert anyway, so a check already running is not waited for.
+    let _claim = pr_loop::claim(&app, &key);
+    if app
+        .store
+        .prs_of(&key)
+        .await?
+        .iter()
+        .any(|r| r.repo == repo && is_open(r))
+    {
+        return Err(ApiError::conflict_reason(
+            format!("{repo} already has an open PR"),
+            "has-pr",
+        ));
+    }
+    let opts = git_options(&app);
+    let (d, b) = (dir.clone(), branch.clone());
+    tokio::task::spawn_blocking(move || {
+        if delilah_git::needs_push(&d, &b, &opts)? {
+            delilah_git::push_branch(&d, &b, &opts)?;
+        }
+        Ok::<_, delilah_git::GitError>(())
+    })
+    .await
+    .map_err(join_error)?
+    .map_err(|e| ApiError::conflict(e.to_string()))?;
+    let base = app
+        .gh
+        .repo_view(&dir)
+        .await
+        .map_err(|e| ApiError::conflict(e.to_string()))?
+        .default_branch;
+    let url = app
+        .gh
+        .pr_create(&dir, &branch, &base, title, &req.body, req.draft)
+        .await
+        .map_err(|e| ApiError::conflict(e.to_string()))?;
+    let row = pr_loop::link_by_url(&app, &key, &url, "opened")
+        .await
+        .map_err(|e| match e {
+            LinkError::NotAPr => ApiError::conflict(format!("gh answered with no PR URL: {url}")),
+            LinkError::Gh(e) => ApiError::conflict(e.to_string()),
+            LinkError::NotFromTask => {
+                ApiError::conflict("the PR is not from any repo of this task")
+            }
+            LinkError::Store(e) => e.into(),
+        })?;
+    Ok((StatusCode::CREATED, Json(view(&row))))
 }
 
 pub async fn unlink(
@@ -430,6 +651,7 @@ mod tests {
     use crate::gh::GhError;
     use crate::gh::fake::{FakeGh, PR_URL};
     use crate::pr_testkit::{TempDir, task_with_workspace};
+    use std::path::Path;
 
     const SIGNED_OUT: &str = "To get started with GitHub CLI, please run: gh auth login";
 
@@ -952,5 +1174,266 @@ mod tests {
             let (s, _) = call(&router, "POST", &uri, None).await;
             assert_eq!(s, StatusCode::NO_CONTENT);
         }
+    }
+
+    fn opening_gh() -> Arc<FakeGh> {
+        Arc::new(
+            FakeGh::happy()
+                .with_user("me")
+                .on(&["pr", "create"], Ok(PR_URL)),
+        )
+    }
+
+    async fn git_setup(gh: Arc<FakeGh>, subjects: &[&str]) -> (Router, AppState, TempDir) {
+        let (router, app, dir) = setup(gh).await;
+        crate::pr_testkit::git_repo_with_origin(
+            &dir.path().join("ws"),
+            &dir.path().join("origin"),
+            "feature/PROJ-1",
+            subjects,
+        );
+        (router, app, dir)
+    }
+
+    fn jira(site: &str) -> JiraSettings {
+        JiraSettings {
+            mode: JiraMode::Cloud,
+            site: Some(site.into()),
+            email: None,
+            jql: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_proposal_lists_commits_and_links_the_jira_ticket() {
+        let (router, app, _dir) = git_setup(fake(), &["first", "second"]).await;
+        app.store
+            .set_setting(SETTINGS_KEY, &jira("https://acme.atlassian.net/"))
+            .await
+            .unwrap();
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v["title"], "t");
+        assert_eq!(v["base"], "main");
+        assert_eq!(v["needs_push"], true);
+        assert_eq!(v["repo"], ".");
+        assert_eq!(v["repos"], json!(["."]));
+        assert_eq!(
+            v["body"],
+            "Jira: https://acme.atlassian.net/browse/PROJ-1\n\n- first\n- second"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_free_task_or_no_jira_has_no_link() {
+        let (router, app, _dir) = git_setup(fake(), &["first"]).await;
+        let (_, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(v["body"], "- first");
+        // A LIBRE- key never links, even with Jira connected.
+        app.store
+            .set_setting(SETTINGS_KEY, &jira("https://acme.atlassian.net"))
+            .await
+            .unwrap();
+        let mut task = delilah_core::Task::new(TaskKey::new("LIBRE-1"), "free", "feature");
+        task.project = Some("proj".into());
+        app.store.create_task(&task).await.unwrap();
+        let ws = app
+            .store
+            .workspace(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        app.store
+            .save_workspace(&TaskKey::new("LIBRE-1"), &ws.0, &ws.1)
+            .await
+            .unwrap();
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/LIBRE-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v["body"], "- first");
+    }
+
+    #[tokio::test]
+    async fn the_proposal_is_409_without_commits_or_with_an_open_pr() {
+        let (router, app, _dir) = git_setup(fake(), &[]).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert_eq!(v["reason"], "no-commits");
+
+        pr_loop::check_task(&app, &TaskKey::new("PROJ-1"), true).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert_eq!(v["reason"], "has-pr");
+        let (s, _) = call(
+            &router,
+            "GET",
+            "/api/v1/tasks/PROJ-1/prs/proposal?repo=nope",
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn opening_pushes_creates_links_and_moves_to_review() {
+        let gh = opening_gh();
+        let (router, app, dir) = git_setup(gh.clone(), &["first"]).await;
+        let body = json!({ "repo": ".", "title": "My PR", "body": "the body", "draft": true });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        assert_eq!(v["linked_by"], "opened");
+        assert_eq!(v["url"], PR_URL);
+
+        let calls = gh.calls();
+        let create = calls
+            .iter()
+            .position(|c| c.starts_with(&["pr".into(), "create".into()]))
+            .unwrap();
+        let args = &calls[create];
+        for needle in [
+            "--head",
+            "feature/PROJ-1",
+            "--base",
+            "main",
+            "--title",
+            "My PR",
+            "--body-file",
+            "-",
+            "--draft",
+        ] {
+            assert!(args.iter().any(|a| a == needle), "{needle} in {args:?}");
+        }
+        assert_eq!(gh.stdins()[create].as_deref(), Some("the body"));
+        let pushed = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin"))
+            .output()
+            .unwrap();
+        assert!(pushed.status.success());
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.phase.as_deref(), Some("review"));
+
+        let body = json!({ "title": "again" });
+        let (s, _) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        let body = json!({ "title": "  " });
+        let (s, _) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_failed_push_is_409_with_gits_stderr_and_links_nothing() {
+        let gh = opening_gh();
+        let (router, app, dir) = git_setup(gh.clone(), &["first"]).await;
+        std::fs::remove_dir_all(dir.path().join("origin")).unwrap();
+        let body = json!({ "title": "T" });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert!(v["error"].as_str().unwrap().contains("git"));
+        assert!(
+            app.store
+                .prs_of(&TaskKey::new("PROJ-1"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(gh.calls().iter().all(|c| c[..2] != ["pr", "create"]));
+    }
+
+    #[tokio::test]
+    async fn a_gh_failure_on_create_is_409_and_links_nothing() {
+        let gh = Arc::new(FakeGh::happy().on(
+            &["pr", "create"],
+            Err(GhError::Failed {
+                code: Some(1),
+                stderr: "no way".into(),
+            }),
+        ));
+        let (router, app, _dir) = git_setup(gh, &["first"]).await;
+        let (s, v) = call(
+            &router,
+            "POST",
+            "/api/v1/tasks/PROJ-1/prs",
+            Some(json!({ "title": "T" })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert!(v["error"].as_str().unwrap().contains("no way"));
+        assert!(
+            app.store
+                .prs_of(&TaskKey::new("PROJ-1"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// A parent task with submodules `svc-a` and `svc-b`, each a repo with its origin.
+    async fn parent_setup(gh: Arc<FakeGh>) -> (Router, AppState, TempDir) {
+        let (router, app, dir) = setup(gh).await;
+        let ws_path = dir.path().join("ws");
+        for sub in ["svc-a", "svc-b"] {
+            crate::pr_testkit::git_repo_with_origin(
+                &ws_path.join(sub),
+                &dir.path().join(format!("origin-{sub}")),
+                "feature/PROJ-1",
+                &[sub],
+            );
+        }
+        let ws = delilah_git::Workspace {
+            path: ws_path,
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Parent,
+            submodules: vec!["svc-a".into(), "svc-b".into()],
+        };
+        app.store
+            .save_workspace(&TaskKey::new("PROJ-1"), Path::new("/parent"), &ws)
+            .await
+            .unwrap();
+        (router, app, dir)
+    }
+
+    #[tokio::test]
+    async fn a_parent_defaults_to_its_first_free_submodule_and_opens_per_submodule() {
+        let gh = opening_gh();
+        let (router, _app, dir) = parent_setup(gh).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["repo"], "svc-a");
+        assert_eq!(v["repos"], json!(["svc-a", "svc-b"]));
+
+        let (s, _) = call(
+            &router,
+            "GET",
+            "/api/v1/tasks/PROJ-1/prs/proposal?repo=nope",
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let body = json!({ "repo": ".", "title": "T" });
+        let (s, _) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        let body = json!({ "repo": "svc-b", "title": "T" });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        // (The fake gh answers every repo alike, so which row it links to is not checked.)
+        let origin = dir.path().join("origin-svc-b");
+        let pushed = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feature/PROJ-1"])
+            .current_dir(&origin)
+            .output()
+            .unwrap();
+        assert!(pushed.status.success());
+        let untouched = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin-svc-a"))
+            .output()
+            .unwrap();
+        assert!(!untouched.status.success());
     }
 }

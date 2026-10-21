@@ -81,6 +81,7 @@ type Reply = (Vec<String>, Result<String, GhError>);
 pub(crate) struct FakeGh {
     replies: Mutex<Vec<Reply>>,
     calls: Mutex<Vec<Vec<String>>>,
+    stdins: Mutex<Vec<Option<String>>>,
 }
 
 impl FakeGh {
@@ -88,6 +89,7 @@ impl FakeGh {
         Self {
             replies: Mutex::default(),
             calls: Mutex::default(),
+            stdins: Mutex::default(),
         }
     }
 
@@ -113,6 +115,11 @@ impl FakeGh {
         self
     }
 
+    /// The stdin of every call made, in order.
+    pub(crate) fn stdins(&self) -> Vec<Option<String>> {
+        self.stdins.lock().unwrap().clone()
+    }
+
     /// Every call made, in order.
     pub(crate) fn calls(&self) -> Vec<Vec<String>> {
         self.calls.lock().unwrap().clone()
@@ -124,7 +131,7 @@ impl Gh for FakeGh {
         &self,
         _dir: Option<&Path>,
         args: Vec<String>,
-        _stdin: Option<String>,
+        stdin: Option<String>,
     ) -> BoxFuture<'_, Result<String, GhError>> {
         let reply = self
             .replies
@@ -134,6 +141,7 @@ impl Gh for FakeGh {
             .find(|(prefix, _)| args.starts_with(prefix))
             .map(|(_, r)| r.clone());
         let unsupported = format!("fake gh: unsupported: {}", args.join(" "));
+        self.stdins.lock().unwrap().push(stdin);
         self.calls.lock().unwrap().push(args);
         Box::pin(async move { reply.unwrap_or_else(|| Err(GhError::failed(unsupported))) })
     }
