@@ -7,11 +7,11 @@ Baseline (T001): workspace and app tests green; `app/src-tauri` tests can't buil
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | 0a9d0f9 | |
-| WP-02 | 2 | 2A | pending | 0 | | |
+| WP-01 | 1 | 1A | done | 1 | 6ba6e64 | review: compliant; migration safe (LOW only) |
+| WP-02 | 2 | 2A | implementing | 0 | | |
 | WP-03 | 3 | 3A | pending | 0 | | |
 | WP-04 | 3 | 3B | pending | 0 | | |
-| WP-05 | 3 | 3A | pending | 0 | | |
+| WP-05 | 3 | 3A | verified | 1 | e2d3260 | |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 4 | 4A | pending | 0 | | |
 | WP-08 | 4 | 4A | pending | 0 | | |

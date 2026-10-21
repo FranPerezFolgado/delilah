@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use axum::extract::FromRef;
 use chrono::{DateTime, Utc};
@@ -9,6 +10,7 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::events::{Events, Topic};
+use crate::gh::{CliGh, Gh};
 use crate::notify::Notifier;
 use crate::secrets::Secrets;
 use crate::sessions::Sessions;
@@ -46,6 +48,10 @@ pub struct AppState {
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
+    /// The user's `gh`, behind a trait so tests answer with canned output.
+    pub gh: Arc<dyn Gh>,
+    /// Per repo (`host/owner/name`): failures in a row and when to try again.
+    pub pr_backoff: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
 }
 
 impl AppState {
@@ -74,7 +80,15 @@ impl AppState {
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             remote_control: Arc::default(),
+            gh: Arc::new(CliGh::default()),
+            pr_backoff: Arc::default(),
         }
+    }
+
+    /// The same state talking to another `gh` (tests inject a fake).
+    pub fn with_gh(mut self, gh: Arc<dyn Gh>) -> Self {
+        self.gh = gh;
+        self
     }
 
     pub fn lang(&self) -> crate::lang::Lang {
