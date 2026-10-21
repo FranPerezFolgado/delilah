@@ -138,6 +138,9 @@ mod tests {
             })
             .await
             .unwrap();
+        // That session is running, so it was launched: only the handoff is left.
+        app.sessions
+            .insert("impl-1", "PROJ-1", SessionKind::Claude, false, _pty.clone());
         let h = |stage| Handoff {
             to: Step::Implement,
             stage,

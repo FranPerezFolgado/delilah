@@ -309,8 +309,7 @@ async fn update_task(
     let key = TaskKey::new(key);
     let mut task = app.store.update_backlog_task(&key, &change).await?;
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
-        app.store.set_saving_mode(&key, on).await?;
-        task.saving_mode = on;
+        task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
     }
     app.emit(crate::events::Topic::Tasks);
     Ok(Json(task))
@@ -829,6 +828,26 @@ mod tests {
             .unwrap();
         let (_, task) = call(&app, "POST", "/api/v1/tasks", Some(new(json!({})))).await;
         assert_eq!(task["saving_mode"], true, "the preference is the default");
+    }
+
+    #[tokio::test]
+    async fn patching_saving_mode_off_clears_a_pending_handoff() {
+        let (app, state) = app_with_project().await;
+        let body = json!({"free": true, "title": "T", "project": "web", "saving_mode": true});
+        let (_, task) = call(&app, "POST", "/api/v1/tasks", Some(body)).await;
+        let key = TaskKey::new(task["key"].as_str().unwrap());
+        let offered = delilah_core::Handoff {
+            to: delilah_core::Step::Implement,
+            stage: delilah_core::HandoffStage::Offered,
+            error: None,
+        };
+        state.store.set_handoff(&key, Some(&offered)).await.unwrap();
+        let uri = format!("/api/v1/tasks/{key}");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"saving_mode": false}))).await;
+        assert_eq!(task["saving_mode"], false);
+        assert!(task["handoff"].is_null());
+        let stored = state.store.get_task(&key).await.unwrap().unwrap();
+        assert!(stored.handoff.is_none());
     }
 }
 

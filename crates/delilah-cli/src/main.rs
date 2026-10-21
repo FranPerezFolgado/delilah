@@ -32,7 +32,7 @@ struct Cli {
 /// The saving-mode choice for a task; neither flag leaves it to the user preference.
 #[derive(Args)]
 struct SavingModeFlags {
-    /// Run the task in saving mode (cheaper model, lighter handoffs).
+    /// Run the task in saving mode (each phase -- spec and plan, implementation, review -- runs in a fresh Claude session).
     #[arg(long, conflicts_with = "no_saving_mode")]
     saving_mode: bool,
     /// Run the task without saving mode, whatever the preference says.
