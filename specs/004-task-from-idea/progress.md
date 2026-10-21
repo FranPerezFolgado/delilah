@@ -5,8 +5,8 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | implementing | 0 | | spike, run by a subagent |
-| WP-02 | 1 | 1A | verified | 1 | | |
+| WP-01 | 1 | 1A | verified | 1 | | spike: (a)-(f) pass |
+| WP-02 | 1 | 1A | verified | 1 | c05ac7c | |
 | WP-03 | 2 | 2A | pending | 0 | | |
 | WP-04 | 2 | 2A | pending | 0 | | |
 | WP-07 | 2 | 2A | pending | 0 | | |

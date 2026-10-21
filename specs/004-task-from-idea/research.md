@@ -118,6 +118,68 @@ Checked against Claude Code 2.1.292 (`claude --help`) and the code on `feature/L
 - **Alternatives**: typing straight into the TUI while it works. Rejected for the
   reasons above.
 
+## Spike results (2026-10-21)
+
+WP-1 / T001, for R2, R3 and R5. `claude --version`: `2.1.292 (Claude Code)`. Run in preview 3
+(API 7503) against the fixture repo `fixtures/signal`, registered as project `signal`.
+The settings file `fixtures/preview-home-3/tasks/@signal/claude-spike.json` is a copy of a
+real `@signal` project session's settings (same hooks, session id `spike`, no statusLine).
+It adds R3's `permissions.allow`/`deny` lists verbatim. The AskUserQuestion PreToolUse
+command is prefixed with `tee -a …/spike-ask-input.jsonl |` because the ask endpoint does
+not write `hooks.jsonl`. A minimal plugin (`.claude-plugin/plugin.json` named `delilah`,
+plus `skills/task-from-idea/SKILL.md`) sits in a tmp dir. Every run used a clean env
+(`env -i HOME USER LANG PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`) and this
+base command, with `$S` the tmp dir and `$D` the task dir:
+
+```
+claude --settings $D/claude-spike.json --permission-mode dontAsk --plugin-dir $S/plugin \
+  --append-system-prompt "You are in a Delilah idea conversation; …"
+```
+
+(a)/(b)/(f-listing) added `-p --output-format json "<try Write, Edit, npm install,
+git log; list delilah skills>"`. (c)/(d)/(e)/(f-invocation) ran it interactively in a
+PTY driven by a Python `pty.fork()` script. That script answers through
+`POST /api/v1/asks/{id}/answer` and reads `hooks.jsonl`.
+
+- **(a) PASS. Edit/Write and `npm install` are refused with no prompt.** With `deny` on Edit
+  and Write, those tools are removed from the session altogether: Claude reports "no Write
+  tool in this session". It is not a per-call denial. `npm install` came back as
+  `Permission to use Bash has been denied because Claude Code is running in don't ask mode`
+  and is listed in `permission_denials`. The run ended normally and no file was created.
+- **(b) PASS, with a caveat. `git log` runs** under `--setting-sources project,local`:
+  `a2b8b17 Initial svc-orders`, and `ls` ran too. With the default sources (user settings
+  loaded), a **user-level PreToolUse hook that rewrites the command** broke the allow
+  match. On this machine RTK rewrote `git log` to `rtk git log`, and that call was denied
+  (`permission_denials: [{"command":"rtk git log --oneline -3"}]`). User hooks still run
+  next to `--settings`, and allow rules match the command *after* the rewrite.
+- **(c) PASS. AskUserQuestion reaches the PreToolUse hook in `dontAsk`.** The hook got
+  `hook_event_name: PreToolUse`, `tool_name: AskUserQuestion`, `permission_mode: dontAsk`,
+  and option 0 was `{"label":"Crear","description":"Crea la tarea","preview":"## Idea\nPrueba de spike"}`.
+  The daemon held it as an ask. `/api/v1/inbox` listed it, with `preview` intact.
+- **(d) PASS. The answer reaches Claude verbatim.** The answer
+  `"Crear — creada LIBRE-9 en el backlog"` produced the transcript `tool_result`
+  `The user answered: "¿Creo esta tarea?"="Crear — creada LIBRE-9 en el backlog". …`
+  and `Stop`'s `last_assistant_message` was `<<<Crear — creada LIBRE-9 en el backlog>>>`.
+  The em dash and accents survived. `PostToolUse` fired for AskUserQuestion.
+- **(e) PASS for stopping. `Stop` does NOT fire after ESC.** The test typed a long turn
+  ("count to 400 in Spanish words"), waited 6 s after `UserPromptSubmit`, then wrote
+  `\x1b`. The TUI showed `Interrupted · What should Claude do instead?`. No `Stop`,
+  `StopFailure` or other hook event followed within 10 s. The next prompt ("PONG") ran
+  normally and produced a single `Stop`. Event sequence: `UserPromptSubmit`,
+  (ESC: nothing), `UserPromptSubmit`, `Stop`. This confirms R5: after Detener the daemon
+  must set the state and deliver the queue itself.
+- **(f) PASS. The plugin's skill is listed and invocable.** `-p` listed
+  `delilah:task-from-idea`. Typing `/delilah:task-from-idea …` in the TUI ran it
+  and led to the AskUserQuestion above. In `dontAsk`, Claude's own `Skill` tool call
+  `{"skill":"delilah:task-from-idea"}` was allowed (`permission_denials: []`) and printed
+  the skill's marker.
+
+Consequences: neither (a), (c) nor (d) failed, so the R3 fallback is not needed.
+Watch for user-level hooks that rewrite Bash commands (R3's read-only Bash allow list
+won't match them). Either add the rewritten forms, or accept that read-only Bash may be
+denied on such machines. Do not pass `--setting-sources`, which would also drop the
+user's other settings.
+
 ## R6. Question cards with detail: `preview`
 
 - **Decision**:

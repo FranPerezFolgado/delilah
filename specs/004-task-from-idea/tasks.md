@@ -20,7 +20,7 @@
 
 **Purpose**: verify the Claude Code behaviour the design relies on (research R3, R5, R1) before building on it, and write the plugin's text.
 
-- [ ] T001 Spike, by hand in a preview, with no code committed. Follow quickstart.md "Spike":
+- [X] T001 Spike, by hand in a preview, with no code committed. Follow quickstart.md "Spike":
   - Start `scripts/preview.sh`.
   - Write a throw-away settings file under `fixtures/preview-home-N/tasks/@<project>/` that copies an existing project session's settings (same hooks) and adds R3's `permissions.allow` / `permissions.deny`.
   - Run `claude --settings <it> --permission-mode dontAsk --plugin-dir <tmp plugin dir with a minimal skill> --append-system-prompt "…"` in a fixture repo.
