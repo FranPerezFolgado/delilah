@@ -1,0 +1,646 @@
+//! Saving mode: each phase of a task runs in a fresh Claude session. This module
+//! decides when a step is done (`boundary`) and carries out the handoff to the next
+//! one: offer it, wait for the user, start the new session, or undo it if it cannot
+//! start. The state lives in `tasks.handoff`, written before each side effect, so a
+//! restart can finish or re-offer a handoff (see `specs/004-saving-mode`).
+
+use std::path::Path;
+use std::time::Duration;
+
+use delilah_core::{Handoff, HandoffStage, Step, Task, TaskKey};
+use delilah_git::{GitOptions, Workspace};
+
+use crate::api::ApiError;
+use crate::events::Topic;
+use crate::lang::Lang;
+use crate::specs::SpecSummary;
+use crate::state::AppState;
+use crate::store_sessions::{SessionKind, SessionRecord};
+
+/// How long the stopped session gets to exit before the new one is launched.
+const KILL_WAIT: Duration = Duration::from_secs(3);
+
+/// Serialises the check-and-set of a task's handoff, so two confirmations (or a
+/// confirmation and a turn end) can never both start the same step.
+static GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// What the end of a step asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Boundary {
+    /// Ask the user before moving to the step.
+    Offer(Step),
+    /// Move to the step on its own.
+    Start(Step),
+}
+
+/// Whether the step the primary session runs has reached a boundary: the spec is
+/// ready to implement (offer) or fully checked (review starts on its own). When both
+/// hold, the furthest step wins.
+pub(crate) fn boundary(
+    task: &Task,
+    primary_step: Option<Step>,
+    spec: &SpecSummary,
+) -> Option<Boundary> {
+    if !task.saving_mode || spec.dir.is_none() || spec.total == 0 {
+        return None;
+    }
+    let skipped = match &task.handoff {
+        None => false,
+        Some(h) if h.stage == HandoffStage::Skipped => true,
+        // A pending offer for the implementation is overtaken by the review.
+        Some(h) if h.stage == HandoffStage::Offered && h.to == Step::Implement => false,
+        Some(_) => return None,
+    };
+    let all_done = spec.done == spec.total;
+    match primary_step? {
+        Step::Plan if all_done => Some(Boundary::Start(Step::Review)),
+        Step::Plan if spec.done == 0 && !skipped && task.handoff.is_none() => {
+            Some(Boundary::Offer(Step::Implement))
+        }
+        Step::Implement if all_done => Some(Boundary::Start(Step::Review)),
+        _ => None,
+    }
+}
+
+/// The label of a step's session.
+pub(crate) fn step_label(lang: Lang, step: Step) -> &'static str {
+    match step {
+        Step::Plan => lang.pick("Spec y plan", "Spec and plan"),
+        Step::Implement => lang.pick("Implementación", "Implementation"),
+        Step::Review => lang.pick("Revisión", "Review"),
+    }
+}
+
+/// What the first session is told on top of its prompt: stop once `tasks.md` is
+/// written, the next session takes over.
+pub(crate) fn plan_note(lang: Lang) -> &'static str {
+    lang.pick(
+        "Modo ahorro: cuando `tasks.md` esté escrito, para y no implementes; Delilah seguirá en una sesión nueva.",
+        "Saving mode: once `tasks.md` is written, stop and do not implement; Delilah will carry on in a new session.",
+    )
+}
+
+/// What a step's session is told to do. `dir` is the spec folder in the workspace.
+fn step_prompt(lang: Lang, step: Step, dir: &str) -> Option<String> {
+    match step {
+        Step::Plan => None,
+        Step::Implement => Some(format!("/orchestrate {dir}")),
+        Step::Review => Some(
+            lang.pick(
+                "/review de la rama de esta tarea. Después aplica los hallazgos confirmados, actualiza la documentación que hayan dejado obsoleta y haz commit. No hagas push ni abras una PR.",
+                "/review the branch of this task. Then apply the confirmed findings, update the docs they made stale and commit. Do not push or open a PR.",
+            )
+            .to_string(),
+        ),
+    }
+}
+
+/// Reads the task's spec now (blocking work off the async threads).
+async fn read_spec(app: &AppState, key: &TaskKey) -> Option<SpecSummary> {
+    let (_, ws) = app.store.workspace(key).await.ok()??;
+    if !ws.path.is_dir() {
+        return None;
+    }
+    let opts = GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    };
+    let name = key.to_string();
+    let spec = tokio::task::spawn_blocking(move || crate::specs::read_spec(&ws, &name, &opts))
+        .await
+        .ok()?;
+    Some(spec.summary)
+}
+
+/// The task's main session, if it is a Claude one.
+async fn primary_session(app: &AppState, key: &TaskKey) -> Option<SessionRecord> {
+    let sessions = app.store.open_sessions(Some(key.as_str())).await.ok()?;
+    sessions
+        .into_iter()
+        .find(|s| s.primary && s.kind == SessionKind::Claude)
+}
+
+async fn task_of(app: &AppState, key: &TaskKey) -> Result<Task, ApiError> {
+    app.store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))
+}
+
+async fn set(app: &AppState, key: &TaskKey, to: Step, stage: HandoffStage, error: Option<String>) {
+    let handoff = Handoff { to, stage, error };
+    if let Err(e) = app.store.set_handoff(key, Some(&handoff)).await {
+        tracing::warn!(task = %key, "cannot record the handoff: {e}");
+    }
+    app.emit(Topic::Inbox);
+    app.emit(Topic::Tasks);
+}
+
+/// Where a confirmed handoff goes next: the one place that decides between saving
+/// the outgoing session's notes and starting the new session right away.
+async fn after_confirm(_app: &AppState, _key: &TaskKey) -> HandoffStage {
+    HandoffStage::Starting
+}
+
+/// The primary session finished a turn (not on the usage limit): see whether its step
+/// is over. Offers the next step or starts it, as `boundary` says.
+pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
+    let Ok(task) = task_of(app, key).await else {
+        return;
+    };
+    if !task.saving_mode {
+        return;
+    }
+    let Some(primary) = primary_session(app, key).await else {
+        return;
+    };
+    let Some(spec) = read_spec(app, key).await else {
+        return;
+    };
+    let Some(found) = boundary(&task, primary.step, &spec) else {
+        return;
+    };
+    let guard = GUARD.lock().await;
+    // Another turn end or a click may have got here first.
+    let Ok(fresh) = task_of(app, key).await else {
+        return;
+    };
+    if boundary(&fresh, primary.step, &spec) != Some(found) {
+        return;
+    }
+    match found {
+        Boundary::Offer(to) => set(app, key, to, HandoffStage::Offered, None).await,
+        Boundary::Start(to) => {
+            let stage = after_confirm(app, key).await;
+            set(app, key, to, stage, None).await;
+            drop(guard);
+            if stage == HandoffStage::Starting {
+                start(app, key, to).await;
+            }
+        }
+    }
+}
+
+/// The user accepts the offered step (which also approves the tasks).
+pub(crate) async fn confirm(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
+    confirm_with(app, key, &crate::run::launch_session).await
+}
+
+async fn confirm_with<L>(app: &AppState, key: &TaskKey, launch: &L) -> Result<(), ApiError>
+where
+    L: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>,
+{
+    let guard = GUARD.lock().await;
+    let task = task_of(app, key).await?;
+    let to = match &task.handoff {
+        Some(h) if h.stage == HandoffStage::Offered => h.to,
+        _ => {
+            return Err(ApiError::conflict(format!(
+                "{key} has no handoff to confirm"
+            )));
+        }
+    };
+    let stage = after_confirm(app, key).await;
+    set(app, key, to, stage, None).await;
+    drop(guard);
+    if stage == HandoffStage::Starting {
+        start_with(app, key, to, launch).await;
+    }
+    Ok(())
+}
+
+/// The user keeps working in the same session: no handoff, and no saving mode.
+pub(crate) async fn decline(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
+    let _guard = GUARD.lock().await;
+    let task = task_of(app, key).await?;
+    if !matches!(&task.handoff, Some(h) if h.stage == HandoffStage::Offered) {
+        return Err(ApiError::conflict(format!(
+            "{key} has no handoff to decline"
+        )));
+    }
+    app.store.set_handoff(key, None).await?;
+    app.store.set_saving_mode(key, false).await?;
+    app.emit(Topic::Inbox);
+    app.emit(Topic::Tasks);
+    Ok(())
+}
+
+/// Tries again a handoff whose new session could not start.
+pub(crate) async fn retry(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
+    retry_with(app, key, &crate::run::launch_session).await
+}
+
+async fn retry_with<L>(app: &AppState, key: &TaskKey, launch: &L) -> Result<(), ApiError>
+where
+    L: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>,
+{
+    let guard = GUARD.lock().await;
+    let task = task_of(app, key).await?;
+    let to = match &task.handoff {
+        Some(h) if h.stage == HandoffStage::Failed => h.to,
+        _ => return Err(ApiError::conflict(format!("{key} has no failed handoff"))),
+    };
+    set(app, key, to, HandoffStage::Starting, None).await;
+    drop(guard);
+    start_with(app, key, to, launch).await;
+    Ok(())
+}
+
+/// Starts `step`'s session: it becomes the main one, the previous is stopped (and
+/// stays listed), and the handoff is cleared. If the new session cannot start the
+/// previous one is main again and the handoff is `failed`, to retry.
+pub(crate) async fn start(app: &AppState, key: &TaskKey, step: Step) {
+    start_with(app, key, step, &crate::run::launch_session).await;
+}
+
+async fn start_with<L>(app: &AppState, key: &TaskKey, step: Step, launch: &L)
+where
+    L: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>,
+{
+    match try_start(app, key, step, launch).await {
+        Ok(()) => {
+            if let Err(e) = app.store.set_handoff(key, None).await {
+                tracing::warn!(task = %key, "cannot clear the handoff: {e}");
+            }
+            tracing::info!(task = %key, step = step.name(), "handoff done");
+        }
+        Err(message) => {
+            tracing::warn!(task = %key, step = step.name(), "handoff failed: {message}");
+            set(app, key, step, HandoffStage::Failed, Some(message)).await;
+        }
+    }
+    app.emit(Topic::Sessions);
+    app.emit(Topic::Inbox);
+    app.emit(Topic::Tasks);
+}
+
+async fn try_start<L>(app: &AppState, key: &TaskKey, step: Step, launch: &L) -> Result<(), String>
+where
+    L: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>,
+{
+    let ws: Workspace = match app.store.workspace(key).await {
+        Ok(Some((_, ws))) if ws.path.is_dir() => ws,
+        Ok(_) => return Err("the task has no workspace".into()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let dir = read_spec(app, key).await.and_then(|s| s.dir);
+    let lang = app.lang();
+    let prompt = match (step_prompt(lang, step, dir.as_deref().unwrap_or("")), &dir) {
+        (Some(prompt), Some(_)) => prompt,
+        (Some(prompt), None) if step == Step::Review => prompt,
+        _ => {
+            return Err(lang
+                .pick(
+                    "no encuentro la carpeta de la spec",
+                    "cannot find the spec folder",
+                )
+                .into());
+        }
+    };
+    let old = primary_session(app, key).await;
+    let new = SessionRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        task: key.to_string(),
+        kind: SessionKind::Claude,
+        label: step_label(lang, step).into(),
+        primary: true,
+        closed: false,
+        read_only: false,
+        step: Some(step),
+    };
+    let from = old.as_ref().map(|s| s.id.as_str()).unwrap_or("");
+    let new = app
+        .store
+        .hand_over(key.as_str(), from, &new)
+        .await
+        .map_err(|e| e.to_string())?;
+    // A retry that finds its session already running has nothing more to do.
+    if app.sessions.get(&new.id).is_some() {
+        return Ok(());
+    }
+    if let Some(live) = old.as_ref().and_then(|s| app.sessions.get(&s.id)) {
+        let _ = live.pty.kill();
+        let _ = tokio::time::timeout(KILL_WAIT, live.pty.wait()).await;
+    }
+    if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false) {
+        if let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await {
+            tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
+        }
+        return Err(e.message().to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+    use crate::config::Config;
+    use crate::store::Store;
+    use delilah_core::ProjectKind;
+
+    fn task(saving: bool, handoff: Option<(Step, HandoffStage)>) -> Task {
+        let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        t.saving_mode = saving;
+        t.handoff = handoff.map(|(to, stage)| Handoff {
+            to,
+            stage,
+            error: None,
+        });
+        t
+    }
+
+    fn spec(done: usize, total: usize) -> SpecSummary {
+        SpecSummary {
+            phase: delilah_core::SpecPhase::Specify,
+            dir: Some("specs/proj-1-x".into()),
+            done,
+            total,
+            current: None,
+        }
+    }
+
+    #[test]
+    fn plan_with_unstarted_tasks_offers_the_implementation() {
+        let t = task(true, None);
+        assert_eq!(
+            boundary(&t, Some(Step::Plan), &spec(0, 5)),
+            Some(Boundary::Offer(Step::Implement))
+        );
+        assert_eq!(boundary(&t, Some(Step::Plan), &spec(0, 0)), None);
+        assert_eq!(boundary(&t, Some(Step::Plan), &spec(2, 5)), None);
+    }
+
+    #[test]
+    fn nothing_without_saving_mode_a_spec_dir_or_a_free_slot() {
+        let plan = Some(Step::Plan);
+        assert_eq!(boundary(&task(false, None), plan, &spec(0, 5)), None);
+        let mut no_dir = spec(0, 5);
+        no_dir.dir = None;
+        assert_eq!(boundary(&task(true, None), plan, &no_dir), None);
+        for stage in [
+            HandoffStage::Saving,
+            HandoffStage::Starting,
+            HandoffStage::Failed,
+            HandoffStage::Offered,
+        ] {
+            let t = task(true, Some((Step::Implement, stage)));
+            assert_eq!(boundary(&t, plan, &spec(0, 5)), None, "{stage:?}");
+        }
+        // The user was seen implementing in the plan session: no offer.
+        let skipped = task(true, Some((Step::Implement, HandoffStage::Skipped)));
+        assert_eq!(boundary(&skipped, plan, &spec(0, 5)), None);
+        // A session of no step, or the review one, has no boundary.
+        assert_eq!(boundary(&task(true, None), None, &spec(0, 5)), None);
+        assert_eq!(
+            boundary(&task(true, None), Some(Step::Review), &spec(5, 5)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_fully_checked_spec_starts_the_review_from_the_furthest_step() {
+        let t = task(true, None);
+        for step in [Step::Plan, Step::Implement] {
+            assert_eq!(
+                boundary(&t, Some(step), &spec(5, 5)),
+                Some(Boundary::Start(Step::Review))
+            );
+        }
+        assert_eq!(boundary(&t, Some(Step::Implement), &spec(3, 5)), None);
+        // An offer still pending, and then everything checked.
+        let offered = task(true, Some((Step::Implement, HandoffStage::Offered)));
+        assert_eq!(
+            boundary(&offered, Some(Step::Plan), &spec(5, 5)),
+            Some(Boundary::Start(Step::Review))
+        );
+        // Skipping the implementation does not skip the review.
+        let skipped = task(true, Some((Step::Implement, HandoffStage::Skipped)));
+        assert_eq!(
+            boundary(&skipped, Some(Step::Plan), &spec(5, 5)),
+            Some(Boundary::Start(Step::Review))
+        );
+    }
+
+    /// A task in saving mode with its plan session and a workspace whose spec is
+    /// written (nothing checked yet).
+    async fn setup() -> (AppState, TaskKey) {
+        let config = Config {
+            home: std::env::temp_dir().join(format!("delilah-handoff-{}", uuid::Uuid::new_v4())),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        let key = TaskKey::new("PROJ-1");
+        let mut t = Task::new(key.clone(), "t", "feature");
+        t.saving_mode = true;
+        app.store.create_task(&t).await.unwrap();
+        let path = app.config.home.join("ws");
+        std::fs::create_dir_all(path.join("specs/proj-1-x")).unwrap();
+        std::fs::write(
+            path.join("specs/proj-1-x/tasks.md"),
+            "- [ ] T001 One\n- [ ] T002 Two\n",
+        )
+        .unwrap();
+        let ws = Workspace {
+            path: path.clone(),
+            branch: "feature/PROJ-1".into(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store.save_workspace(&key, &path, &ws).await.unwrap();
+        app.store
+            .create_session(&SessionRecord {
+                id: "plan-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Spec y plan".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                step: Some(Step::Plan),
+            })
+            .await
+            .unwrap();
+        (app, key)
+    }
+
+    type Launched = Mutex<Vec<(SessionRecord, Option<String>)>>;
+
+    fn ok_launcher(
+        launched: &Launched,
+    ) -> impl Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError> + '_
+    {
+        move |_, s, _, prompt, _| {
+            launched
+                .lock()
+                .unwrap()
+                .push((s.clone(), prompt.map(str::to_string)));
+            Ok(())
+        }
+    }
+
+    async fn handoff_of(app: &AppState, key: &TaskKey) -> Option<Handoff> {
+        app.store.get_task(key).await.unwrap().unwrap().handoff
+    }
+
+    #[tokio::test]
+    async fn the_end_of_the_plan_turn_offers_the_implementation() {
+        let (app, key) = setup().await;
+        let mut rx = app.events.subscribe();
+        on_turn_ended(&app, &key).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Offered));
+        let mut topics = vec![];
+        while let Ok(t) = rx.try_recv() {
+            topics.push(t);
+        }
+        assert!(topics.contains(&Topic::Inbox), "{topics:?}");
+        // Once offered, a later turn end changes nothing.
+        on_turn_ended(&app, &key).await;
+        assert_eq!(handoff_of(&app, &key).await.unwrap(), h);
+    }
+
+    #[tokio::test]
+    async fn confirm_starts_the_implementation_in_a_new_primary_session() {
+        let (app, key) = setup().await;
+        // The outgoing session is really running, so killing it can be seen.
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        on_turn_ended(&app, &key).await;
+
+        let launched = Launched::default();
+        confirm_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+
+        let launched = launched.lock().unwrap();
+        assert_eq!(launched.len(), 1);
+        let (session, prompt) = &launched[0];
+        assert_eq!(session.step, Some(Step::Implement));
+        assert_eq!(session.label, "Implementación");
+        assert_eq!(prompt.as_deref(), Some("/orchestrate specs/proj-1-x"));
+        tokio::time::timeout(Duration::from_secs(5), pty.wait())
+            .await
+            .expect("the old session was killed");
+
+        assert!(handoff_of(&app, &key).await.is_none());
+        let open = app.store.open_sessions(Some("PROJ-1")).await.unwrap();
+        assert_eq!(open.len(), 2, "the old one stays listed");
+        let primaries: Vec<_> = open.iter().filter(|s| s.primary).collect();
+        assert_eq!(primaries.len(), 1);
+        assert_eq!(primaries[0].id, session.id);
+    }
+
+    #[tokio::test]
+    async fn the_prompts_follow_the_language() {
+        assert_eq!(
+            step_prompt(Lang::Es, Step::Implement, "specs/x").unwrap(),
+            "/orchestrate specs/x"
+        );
+        let es = step_prompt(Lang::Es, Step::Review, "").unwrap();
+        let en = step_prompt(Lang::En, Step::Review, "").unwrap();
+        assert!(es.starts_with("/review") && en.starts_with("/review"));
+        assert!(es.contains("No hagas push") && en.contains("Do not push"));
+        assert!(plan_note(Lang::Es).contains("Delilah seguirá en una sesión nueva."));
+        assert!(plan_note(Lang::En).contains("tasks.md"));
+    }
+
+    #[tokio::test]
+    async fn confirming_twice_starts_one_session() {
+        let (app, key) = setup().await;
+        on_turn_ended(&app, &key).await;
+        let launched = Launched::default();
+        let launcher = ok_launcher(&launched);
+        confirm_with(&app, &key, &launcher).await.ok().unwrap();
+        let err = confirm_with(&app, &key, &launcher).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        // Nor does a task with no offer confirm, decline or retry.
+        assert!(decline(&app, &key).await.is_err());
+        assert!(retry(&app, &key).await.is_err());
+        let missing = TaskKey::new("NOPE-1");
+        assert_eq!(
+            confirm(&app, &missing).await.unwrap_err().status,
+            axum::http::StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn declining_keeps_the_session_and_ends_saving_mode() {
+        let (app, key) = setup().await;
+        on_turn_ended(&app, &key).await;
+        decline(&app, &key).await.ok().unwrap();
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(task.handoff.is_none() && !task.saving_mode);
+        let open = app.store.open_sessions(Some("PROJ-1")).await.unwrap();
+        assert_eq!(open.len(), 1);
+        assert!(open[0].primary);
+    }
+
+    #[tokio::test]
+    async fn a_launch_failure_restores_the_old_session_and_can_be_retried() {
+        let (app, key) = setup().await;
+        on_turn_ended(&app, &key).await;
+        let failing = |_: &AppState,
+                       _: &SessionRecord,
+                       _: &Path,
+                       _: Option<&str>,
+                       _: bool|
+         -> Result<(), ApiError> { Err(ApiError::internal("no claude")) };
+        confirm_with(&app, &key, &failing).await.ok().unwrap();
+
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Failed));
+        assert_eq!(h.error.as_deref(), Some("no claude"));
+        let open = app.store.open_sessions(Some("PROJ-1")).await.unwrap();
+        assert_eq!(open.len(), 1, "the new one is closed");
+        assert!(open[0].primary && open[0].id == "plan-1");
+        let events = app.store.events(&key).await.unwrap();
+        assert!(!events.iter().any(|e| e.event.name() == "step-started"));
+
+        let launched = Launched::default();
+        retry_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert!(handoff_of(&app, &key).await.is_none());
+        let open = app.store.open_sessions(Some("PROJ-1")).await.unwrap();
+        assert_eq!(open.iter().filter(|s| s.primary).count(), 1);
+        assert!(
+            open.iter()
+                .any(|s| s.step == Some(Step::Implement) && s.primary)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fully_checked_spec_starts_the_review_by_itself() {
+        let (app, key) = setup().await;
+        let ws = app.config.home.join("ws");
+        std::fs::write(
+            ws.join("specs/proj-1-x/tasks.md"),
+            "- [x] T001 One\n- [x] T002 Two\n",
+        )
+        .unwrap();
+        // The real launcher cannot be used here: check the decision and the stage.
+        let launched = Launched::default();
+        let found = {
+            let task = app.store.get_task(&key).await.unwrap().unwrap();
+            let spec = read_spec(&app, &key).await.unwrap();
+            boundary(&task, Some(Step::Plan), &spec)
+        };
+        assert_eq!(found, Some(Boundary::Start(Step::Review)));
+        set(&app, &key, Step::Review, HandoffStage::Starting, None).await;
+        start_with(&app, &key, Step::Review, &ok_launcher(&launched)).await;
+        let launched = launched.lock().unwrap();
+        assert_eq!(launched[0].0.step, Some(Step::Review));
+        assert!(launched[0].1.as_deref().unwrap().starts_with("/review"));
+    }
+}
