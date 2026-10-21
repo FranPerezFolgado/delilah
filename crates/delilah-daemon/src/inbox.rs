@@ -125,11 +125,17 @@ pub enum ItemKind {
     Question,
     /// A session's turn failed.
     Error,
+    /// The CI of a task's PR failed.
+    PrFailed,
+    /// A reviewer asked for changes or commented on a task's PR.
+    PrReview,
     /// The task waits on you, but no session said what for (e.g. after a restart).
     Waiting,
     Review,
     /// The agent stopped with commits on its branch: maybe it is ready for review.
     SuggestReview,
+    /// Archiving the task left a PR behind (blocked or partial).
+    PrBlocked,
     Paused,
     Failed,
 }
@@ -154,6 +160,16 @@ pub struct InboxItem {
     /// A question with options (AskUserQuestion) that can be answered from here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ask: Option<AskView>,
+    /// The PR notice this item stands for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<InboxPr>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InboxPr {
+    pub notice: i64,
+    pub url: String,
+    pub repo: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,6 +215,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 id: ask.id,
                 questions: ask.questions,
             }),
+            pr: None,
         });
     }
 
@@ -233,6 +250,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             text: Some(attention.text),
             since: Some(attention.since),
             ask: None,
+            pr: None,
         });
     }
 
@@ -269,6 +287,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 // When the event that raised it happened.
                 since: last_event(&app, t, event).await,
                 ask: None,
+                pr: None,
             });
         }
     }
@@ -296,6 +315,38 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             ),
             since: None,
             ask: None,
+            pr: None,
+        });
+    }
+
+    for n in app.store.open_notices().await? {
+        let kind = match n.kind.as_str() {
+            "ci-failed" => ItemKind::PrFailed,
+            "changes-requested" | "comments" => ItemKind::PrReview,
+            "archive-blocked" | "archive-partial" => ItemKind::PrBlocked,
+            _ => continue,
+        };
+        let Some(t) = task(&n.task_key) else {
+            continue;
+        };
+        // An unlinked PR resolves its notices; one still open without its PR is stale.
+        let prs = app.store.prs_of(&t.key).await?;
+        let Some(pr) = prs.iter().find(|p| p.repo == n.repo) else {
+            continue;
+        };
+        items.push(InboxItem {
+            kind,
+            task: n.task_key,
+            title: t.title.clone(),
+            session: None,
+            text: Some(n.text),
+            since: Some(n.created_at),
+            ask: None,
+            pr: Some(InboxPr {
+                notice: n.id,
+                url: pr.url.clone(),
+                repo: n.repo,
+            }),
         });
     }
 
@@ -500,6 +551,97 @@ mod tests {
 
         let hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
         read_until(&format!("got:{hex};")).await;
+    }
+
+    async fn app_with_pr_task() -> AppState {
+        use crate::config::Config;
+        use crate::store::Store;
+        use crate::store_prs::NewPr;
+
+        let config = Config {
+            home: std::env::temp_dir().join(format!("delilah-inbox-{}", uuid::Uuid::new_v4())),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let mut task = Task::new(key.clone(), "Fix it", "feature");
+        task.status = TaskStatus::Running;
+        app.store.create_task(&task).await.unwrap();
+        app.store
+            .link_pr(
+                &key,
+                &NewPr {
+                    repo: ".".into(),
+                    host: "github.com".into(),
+                    owner_name: "me/repo".into(),
+                    number: 7,
+                    url: "https://github.com/me/repo/pull/7".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+        app
+    }
+
+    async fn notify(app: &AppState, kind: &str, cause: &str) {
+        use crate::store_prs::NewNotice;
+        app.store
+            .insert_notice(
+                &delilah_core::TaskKey::new("PROJ-1"),
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: kind.into(),
+                    cause: cause.into(),
+                    text: format!("{kind} text"),
+                    detail: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn open_pr_notices_are_items_after_their_neighbours_and_resolved_ones_are_not() {
+        let app = app_with_pr_task().await;
+        notify(&app, "archive-blocked", "a").await;
+        notify(&app, "comments", "b").await;
+        notify(&app, "ci-failed", "c").await;
+        notify(&app, "changes-requested", "d").await;
+        let gone = app.store.open_notices().await.unwrap();
+        let resolved = gone.iter().find(|n| n.kind == "changes-requested").unwrap();
+        app.store.resolve_notice(resolved.id).await.unwrap();
+        app.review_hints.lock().unwrap().insert("PROJ-1".into());
+
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        let kinds: Vec<_> = items.iter().map(|i| i.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                ItemKind::PrFailed,
+                ItemKind::PrReview,
+                ItemKind::SuggestReview,
+                ItemKind::PrBlocked
+            ]
+        );
+        let failed = &items[0];
+        assert_eq!(failed.task, "PROJ-1");
+        assert_eq!(failed.title, "Fix it");
+        assert_eq!(failed.text.as_deref(), Some("ci-failed text"));
+        assert!(failed.session.is_none());
+        let pr = failed.pr.as_ref().unwrap();
+        assert_eq!(
+            (pr.url.as_str(), pr.repo.as_str()),
+            ("https://github.com/me/repo/pull/7", ".")
+        );
+        let json = serde_json::to_value(failed).unwrap();
+        assert_eq!(json["kind"], "pr-failed");
+        assert_eq!(json["pr"]["notice"], pr.notice);
     }
 
     #[test]
