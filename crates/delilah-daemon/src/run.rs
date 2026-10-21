@@ -258,15 +258,66 @@ pub async fn start_run(
     }
     app.transition(&key, Event::WorkspaceReady).await?;
 
+    launch_agent(
+        &app,
+        &key,
+        &ws,
+        AgentLaunch {
+            free: req.free,
+            prompt,
+            custom_prompt: req.prompt.is_some(),
+            notes,
+            adopted,
+        },
+    )
+    .await?;
+
+    let task = app
+        .store
+        .get_task(&key)
+        .await?
+        .expect("task was just created");
+    Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// What `launch_agent` needs besides the task and its workspace.
+pub struct AgentLaunch {
+    /// A task without a Jira ticket: nothing to fetch.
+    pub free: bool,
+    /// The prompt as resolved (the request's own, or the workflow's default).
+    pub prompt: String,
+    /// The request gave its own prompt: no ticket pointer is added to it.
+    pub custom_prompt: bool,
+    pub notes: Option<String>,
+    /// A session of the project to carry on as the primary one.
+    pub adopted: Option<SessionRecord>,
+}
+
+/// Everything after the workspace is ready: the ticket and notes the agent is
+/// pointed at, then its primary session (an adopted one or a new one). Owns what it
+/// needs, so it can run from a background task as well as from the request.
+pub async fn launch_agent(
+    app: &AppState,
+    key: &TaskKey,
+    ws: &delilah_git::Workspace,
+    launch: AgentLaunch,
+) -> Result<(), ApiError> {
+    let AgentLaunch {
+        free,
+        prompt,
+        custom_prompt,
+        notes,
+        adopted,
+    } = launch;
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
-    let issue = match req.free {
+    let issue = match free {
         true => None,
-        false => crate::jira::fetch_issue(&app, &req.key).await,
+        false => crate::jira::fetch_issue(app, &key.to_string()).await,
     };
-    let prompt = match (&req.prompt, issue) {
-        (None, Some(issue)) => {
-            let path = app.config.task_dir(&req.key).join("ticket.md");
+    let prompt = match (&custom_prompt, issue) {
+        (false, Some(issue)) => {
+            let path = app.config.task_dir(key.as_str()).join("ticket.md");
             match crate::jira::write_ticket(&path, &issue, app.lang()) {
                 Ok(()) => format!(
                     "{prompt} ({} {})",
@@ -282,7 +333,7 @@ pub async fn start_run(
         }
         _ => prompt,
     };
-    let prompt = point_to_notes(&app, &key, prompt, notes.as_deref());
+    let prompt = point_to_notes(app, key, prompt, notes.as_deref());
 
     if let Some(mut session) = adopted {
         // The project's Claude becomes the task's: it goes on with its conversation,
@@ -292,18 +343,18 @@ pub async fn start_run(
             live.pty.wait().await;
         }
         app.store
-            .adopt_session(&session.id, &req.key, app.lang().pick("Principal", "Main"))
+            .adopt_session(&session.id, &key.to_string(), app.lang().pick("Principal", "Main"))
             .await?;
-        session.task = req.key.clone();
+        session.task = key.to_string();
         session.primary = true;
         session.read_only = false;
         session.label = app.lang().pick("Principal", "Main").into();
-        launch_session(&app, &session, &ws.path, None, true)?;
+        launch_session(app, &session, &ws.path, None, true)?;
         app.emit(crate::events::Topic::Sessions);
     } else {
         let session = SessionRecord {
             id: uuid::Uuid::new_v4().to_string(),
-            task: req.key.clone(),
+            task: key.to_string(),
             kind: SessionKind::Claude,
             label: app.lang().pick("Principal", "Main").into(),
             primary: true,
@@ -311,15 +362,9 @@ pub async fn start_run(
             read_only: false,
         };
         app.store.create_session(&session).await?;
-        launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
+        launch_session(app, &session, &ws.path, Some(&prompt), false)?;
     }
-
-    let task = app
-        .store
-        .get_task(&key)
-        .await?
-        .expect("task was just created");
-    Ok((StatusCode::CREATED, Json(task)))
+    Ok(())
 }
 
 /// Starts a session in a daemon-owned PTY: Claude (new, or resumed with `--resume`
