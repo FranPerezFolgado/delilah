@@ -16,10 +16,11 @@ const task = (key: string, status: TaskStatus): Task => ({
 
 function setup(tasks: Task[]) {
   const onDelete = vi.fn();
+  const onView = vi.fn();
   const view = render(
     <Sidebar
       view="tasks"
-      onView={() => {}}
+      onView={onView}
       tasks={tasks}
       projects={[web]}
       sessions={[]}
@@ -33,7 +34,7 @@ function setup(tasks: Task[]) {
     />,
   );
   const keys = () => [...view.container.querySelectorAll(".srow .key")].map((k) => k.textContent);
-  return { ...view, keys, onDelete };
+  return { ...view, keys, onDelete, onView };
 }
 
 afterEach(() => {
@@ -70,5 +71,13 @@ describe("Sidebar backlog", () => {
     fireEvent.contextMenu(container.querySelector(".srow")!);
     fireEvent.click(container.querySelector(".menu.ctx button")!);
     expect(onDelete).toHaveBeenCalledWith(tasks[0]);
+  });
+});
+
+describe("Sidebar playground", () => {
+  it("opens the playground from its nav button", () => {
+    const { getByText, onView } = setup([]);
+    fireEvent.click(getByText("Playground"));
+    expect(onView).toHaveBeenCalledWith("playground");
   });
 });

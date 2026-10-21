@@ -6,7 +6,7 @@ import { Icon } from "./Icon";
 import { statusIcon } from "./status";
 import { t, tn } from "../i18n";
 
-export type View = "inbox" | "board" | "tasks" | "jira" | "projects" | "settings";
+export type View = "inbox" | "board" | "tasks" | "jira" | "projects" | "playground" | "settings";
 
 
 interface Props {
@@ -134,6 +134,10 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
       </button>
       <button className={`nav ${view === "projects" ? "on" : ""}`} onClick={() => onView("projects")}>
         <Icon name="folder" /> {t("Proyectos")} <span className="kbd" style={{ marginLeft: "auto" }}>{keyOf("view-projects")}</span>
+      </button>
+
+      <button className={`nav ${view === "playground" ? "on" : ""}`} onClick={() => onView("playground")}>
+        <Icon name="console" /> {t("Playground")}
       </button>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 8px 4px" }}>

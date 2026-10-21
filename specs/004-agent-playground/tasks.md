@@ -39,7 +39,7 @@
 
 **Purpose**: the Playground view exists in the sidebar and loads the data it needs, before any visuals.
 
-- [ ] T003 Write failing tests in `app/src/playground/layout.test.ts` for:
+- [X] T003 Write failing tests in `app/src/playground/layout.test.ts` for:
   - `assignSlots(prev: Map<string, number>, ids: string[]): Map<string, number>`:
     - empty prev gives 0..n-1 in input order;
     - kept ids keep their slot when others are added or removed;
@@ -51,10 +51,10 @@
     - a task session gets the key, the title and the phase via `columnOf(task, specs[task.key])` from `app/src/phases.ts`;
     - an `@name` session is grouped under project `name` and labelled with the project, with no phase;
     - a session whose task has `project: null` goes in a trailing "—" area.
-- [ ] T004 Implement `assignSlots` and `groupByProject` (with the `DeskModel` and `ProjectArea` types) in `app/src/playground/layout.ts`, until T003 passes.
-- [ ] T005 Implement `app/src/playground/usePlayground.ts`. It loads `api.sessions()`, `api.tasks()`, `api.projects()` and the specs map (the same call `App.tsx` uses for the board) in parallel, and refetches each one on its `on(topic)` from `app/src/live.ts`. It tracks `online` through the connection status, using `connect()` only if no connection exists in this window; otherwise it follows the existing status mechanism, and you should read `live.ts` to pick the right one. It returns `{ areas, online }`, built with `groupByProject`.
-- [ ] T006 Add `"playground"` to the `View` union and a nav button ("Playground", the same pattern as Board and Inbox) in `app/src/components/Sidebar.tsx`. Add a test case in `app/src/components/Sidebar.test.tsx`: clicking the button calls `onView("playground")`.
-- [ ] T007 Add `case "playground"`, rendering a lazy `PlaygroundView`, to the view switch in `app/src/App.tsx`, passing `onOpen={(task, session) => openTask(task, session)}`. Create a placeholder `app/src/playground/PlaygroundView.tsx` that renders the areas and desks as plain text, so the wiring can be tried.
+- [X] T004 Implement `assignSlots` and `groupByProject` (with the `DeskModel` and `ProjectArea` types) in `app/src/playground/layout.ts`, until T003 passes.
+- [X] T005 Implement `app/src/playground/usePlayground.ts`. It loads `api.sessions()`, `api.tasks()`, `api.projects()` and the specs map (the same call `App.tsx` uses for the board) in parallel, and refetches each one on its `on(topic)` from `app/src/live.ts`. It tracks `online` through the connection status, using `connect()` only if no connection exists in this window; otherwise it follows the existing status mechanism, and you should read `live.ts` to pick the right one. It returns `{ areas, online }`, built with `groupByProject`.
+- [X] T006 Add `"playground"` to the `View` union and a nav button ("Playground", the same pattern as Board and Inbox) in `app/src/components/Sidebar.tsx`. Add a test case in `app/src/components/Sidebar.test.tsx`: clicking the button calls `onView("playground")`.
+- [X] T007 Add `case "playground"`, rendering a lazy `PlaygroundView`, to the view switch in `app/src/App.tsx`, passing `onOpen={(task, session) => openTask(task, session)}`. Create a placeholder `app/src/playground/PlaygroundView.tsx` that renders the areas and desks as plain text, so the wiring can be tried.
 
 **Checkpoint**: `npx vitest related --run src/playground/layout.ts src/components/Sidebar.tsx` passes; in a preview, Playground lists the live sessions grouped by project.
 

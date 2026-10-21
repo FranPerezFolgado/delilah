@@ -20,6 +20,8 @@ import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "
 // The task screen carries CodeMirror, most of the bundle: load it when a task opens.
 const TaskScreen = lazy(() => import("./components/TaskScreen").then((m) => ({ default: m.TaskScreen })));
 
+const PlaygroundView = lazy(() => import("./playground/PlaygroundView").then((m) => ({ default: m.PlaygroundView })));
+
 export function App() {
   const [view, setView] = useState<View>("board");
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -293,6 +295,11 @@ export function App() {
             </div>
           )}
           {view === "inbox" && <InboxView items={inbox} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
+          {view === "playground" && (
+            <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
+              <PlaygroundView onOpen={(task, session) => openTask(task, session)} online={online} />
+            </Suspense>
+          )}
           {view === "board" && (
             <BoardView
               tasks={tasks}
