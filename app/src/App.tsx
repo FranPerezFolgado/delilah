@@ -179,7 +179,7 @@ export function App() {
     const primary = sessions.find((s) => s.task === item.task && s.primary);
     openTask(item.task, item.session?.id ?? (item.kind === "waiting" ? primary?.id : undefined));
   };
-  useDesktopAlerts(inbox, tasks, openItem);
+  useDesktopAlerts(inbox, tasks, prs, openItem);
 
   const run = (action: ActionId) => {
     switch (action) {

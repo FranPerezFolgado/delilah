@@ -245,7 +245,7 @@ export interface FileContent {
 /** The file changed on disk (usually the agent) since the editor loaded it. */
 export class ConflictError extends Error {}
 
-export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "suggest-review" | "paused" | "failed";
+export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "suggest-review" | "paused" | "failed" | "pr-failed" | "pr-review" | "pr-blocked";
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
 export interface AskQuestion {
@@ -265,6 +265,8 @@ export interface InboxItem {
   since: string | null;
   /** A question with options, answered from Delilah. */
   ask?: { id: string; questions: AskQuestion[] };
+  /** The PR notice behind a pr-* item. */
+  pr?: { notice: number; url: string; repo: string };
 }
 
 /** Where a session's questions with options sit, next to its terminal. */
@@ -277,7 +279,7 @@ export function parseAskPosition(v: unknown): AskPosition {
 }
 
 /** The kinds that block an agent until you act: they count in the badge. */
-export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting"];
+export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-blocked"];
 
 export interface FolderInspection {
   path: string;
@@ -396,6 +398,8 @@ export const api = {
   allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
   taskPrs: (key: string) => request<TaskPrs>(`/api/v1/tasks/${key}/prs`),
   prSummaries: () => request<PrSummary[]>("/api/v1/prs"),
+  forwardNotice: (id: number) => post<null>(`/api/v1/pr-notices/${id}/forward`),
+  dismissNotice: (id: number) => post<null>(`/api/v1/pr-notices/${id}/dismiss`),
   refreshPrs: (key: string) => post<null>(`/api/v1/tasks/${key}/prs/refresh`),
   linkPr: (key: string, url: string) => post<PullRequest>(`/api/v1/tasks/${key}/prs/link`, { url }),
   unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
