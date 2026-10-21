@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type AskQuestion } from "../api";
 import { t } from "../i18n";
 import { Markdown } from "./Markdown";
+import { ProposalCard } from "./ProposalCard";
 
 interface Props {
   ask: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
@@ -14,11 +15,15 @@ interface Props {
 /** A question the agent asked with options (AskUserQuestion): pick and the agent goes
  *  on, as if chosen in its terminal. A single question answers on the first click. */
 export function AskCard({ ask, onDone, onOpenTask }: Props) {
+  if (ask.proposal) return <ProposalCard ask={{ ...ask, proposal: ask.proposal }} onDone={onDone} onOpenTask={onOpenTask} />;
+  return <QuestionCard ask={ask} onDone={onDone} />;
+}
+
+function QuestionCard({ ask, onDone }: Pick<Props, "ask" | "onDone">) {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [own, setOwn] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<string | null>(null);
   const instant = ask.questions.length === 1 && !ask.questions[0].multiSelect;
 
   const act = async (action: () => Promise<unknown>) => {
@@ -39,7 +44,6 @@ export function AskCard({ ask, onDone, onOpenTask }: Props) {
     act(async () => {
       const res = await api.answerAsk(ask.id, answers);
       if (res?.error) throw new Error(res.error);
-      if (res?.task) setCreated(res.task);
     });
 
   const choose = (q: AskQuestion, label: string) => {
@@ -50,45 +54,6 @@ export function AskCard({ ask, onDone, onOpenTask }: Props) {
       return { ...p, [q.question]: next };
     });
   };
-
-  if (ask.proposal) {
-    const q = ask.questions[0]?.question ?? "";
-    return (
-      <div className="ask ask-proposal">
-        <h3 className="selectable">{ask.proposal.title}</h3>
-        <div className="ask-preview">
-          <Markdown text={ask.proposal.brief} remoteImages="click" />
-        </div>
-        {created ? (
-          <div className="ask-created">
-            {t("Creada")}{" "}
-            <a
-              href="#"
-              onClick={(e) => {
-                e.preventDefault();
-                onOpenTask?.(created);
-              }}
-            >
-              {created}
-            </a>
-          </div>
-        ) : (
-          <div className="ask-actions">
-            <button className="btn btn-p" disabled={busy} onClick={() => send({ [q]: "Crear" })}>
-              {t("Crear")}
-            </button>
-            <button className="btn" disabled={busy} onClick={() => send({ [q]: "Cambiar algo" })}>
-              {t("Cambiar algo")}
-            </button>
-            <button className="btn btn-ghost" disabled={busy} onClick={() => send({ [q]: "Descartar" })}>
-              {t("Descartar")}
-            </button>
-          </div>
-        )}
-        {error && <div className="error selectable">{error}</div>}
-      </div>
-    );
-  }
 
   return (
     <div className="ask">

@@ -267,11 +267,11 @@ export type ConversationEntry =
       kind: "card";
       ask: string;
       questions: AskQuestion[];
-      proposal?: { title: string; brief: string };
-      outcome?: string;
-      answer?: Record<string, string> | null;
-      task?: string;
-      error?: string | null;
+      proposal: { title: string; brief: string } | null;
+      outcome: "pending" | "answered" | "terminal" | "withdrawn";
+      answer: Record<string, string> | null;
+      task: string | null;
+      error: string | null;
     };
 
 export interface Conversation {

@@ -16,8 +16,10 @@ Mode: format=markdown commits=yes
 | WP-02F | 2 | 2F | done | 1 | 050dadb | phase 2 review fixes |
 | WP-09 | 3 | 3A | verified | 1 | b1f19f6 | |
 | WP-11 | 3 | 3A | verified | 1 | 852b678 | new strings for WP-18: Creada, Crear, Cambiar algo, Abrir terminal, Escribe un mensaje…, Mensaje, Quitar mensaje, en cola, Cuéntale tu idea…, Claude espera en la terminal |
-| WP-10 | 3 | 3B | verified | 1 | | gap: card stays pending if hook connection drops |
+| WP-10 | 3 | 3B | verified | 1 | 9e98f38 | gap: card stays pending if hook connection drops |
 | WP-12 | 3 | 3C | verified | 1 | 502d1e6 | strings for WP-18: Ver terminal, Ver conversación, Nueva tarea con Claude (en {name}), Con Claude, Tu idea, Opcional: cuéntale…, Abrir conversación |
+| WP-03Fd | 3 | 3F | implementing | 0 | | phase 3 fixes, daemon |
+| WP-03Fu | 3 | 3F | verified | 1 | | phase 3 fixes, UI; strings for WP-18: Respondida en la terminal, Retirada |
 | WP-13 | 4 | 4A | pending | 0 | | |
 | WP-14 | 4 | 4A | pending | 0 | | |
 | WP-15 | 5 | 5A | pending | 0 | | |
@@ -31,3 +33,4 @@ Mode: format=markdown commits=yes
 
 - Phase 1: spec-compliance COMPLIANT. MEDIUM (RTK rewrites break read-only Bash allow list) → decided: also allow `rtk` forms, done in WP-03.
 - Phase 2: spec COMPLIANT (minor gaps) · migration SAFE · contract 1 HIGH (Entry not flattened) · security 2 HIGH (rg --pre exec, git --output write), 1 MEDIUM (repo settings merged). Fixed in WP-02F: allow list cut to git status/ls (+rtk), MultiEdit denied, --setting-sources user for dontAsk, Entry flattened, allow-edits refuses conversations, prompt recorded as first user entry, label forced "Idea", docs aligned. LOW kept: plugin dir stays on all project sessions (FR-014 allows them to create tasks).
+- Phase 3: spec GAPS (HIGH pending cards not interactive, MEDIUM duplicate ask-bar) · contract BREAKING (same CRITICAL; card types; dead card after failed Crear) · security no HIGH (MEDIUM control chars to PTY; LOW stop on any session, owner not checked vs record, no size caps, send race) · architecture 2 HIGH (asks↔conversation cycle; proposal logic in ask handler) · UI verifier: no browser tools, nothing checked. Fixed in WP-03Fd/WP-03Fu. Deferred: usage-limit notice in the conversation view (no task covers it), TaskScreen SessionTab split, build_task move to a service module; "Otra" not offered on proposal cards (scenario 5 lists only the three actions).

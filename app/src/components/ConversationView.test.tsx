@@ -30,6 +30,11 @@ const card = (id: number, over: object = {}): ConversationEntry => ({
   kind: "card",
   ask: "ask-1",
   questions: [{ question: "¿Cuál?", options: [{ label: "A" }, { label: "B" }] }],
+  proposal: null,
+  outcome: "pending",
+  answer: null,
+  task: null,
+  error: null,
   ...over,
 });
 
@@ -109,10 +114,22 @@ describe("ConversationView", () => {
 
   it("shows an answered card's task as a link", async () => {
     const onOpenTask = vi.fn();
-    const { findByText } = setup(conv([card(5, { outcome: "created", answer: { "¿Cuál?": "Crear" }, task: "LIBRE-7" })]), session(), { onOpenTask });
+    const { findByText } = setup(conv([card(5, { outcome: "answered", answer: { "¿Cuál?": "Crear" }, task: "LIBRE-7" })]), session(), { onOpenTask });
     const link = await findByText("LIBRE-7");
     expect(link.tagName).toBe("A");
     fireEvent.click(link);
     expect(onOpenTask).toHaveBeenCalledWith("LIBRE-7");
+  });
+
+  it("labels cards answered in the terminal and withdrawn", async () => {
+    const { findByText } = setup(conv([card(6, { outcome: "terminal" }), card(7, { outcome: "withdrawn" })]));
+    expect(await findByText("Respondida en la terminal")).toBeTruthy();
+    expect(await findByText("Retirada")).toBeTruthy();
+  });
+
+  it("does not render an answered card as interactive", async () => {
+    const { container, findByText } = setup(conv([card(8, { outcome: "answered", answer: { "¿Cuál?": "A" } })]));
+    await findByText("¿Cuál?: A");
+    expect(container.querySelector(".ask")).toBeNull();
   });
 });

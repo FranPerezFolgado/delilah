@@ -636,11 +636,11 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                     ) : (
                       <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} kind={s.kind} focused={on} />
                     )}
-                    {sessionAsks.length > 0 && (
+                    {!asConversation && sessionAsks.length > 0 && (
                       <div className="ask-bar">
                         <div className="sec">{t("El agente te pregunta")}</div>
                         {sessionAsks.map((a) => (
-                          <AskCard key={a.ask!.id} ask={a.ask!} onDone={onChanged} />
+                          <AskCard key={a.ask!.id} ask={a.ask!} onDone={onChanged} onOpenTask={onOpenTask} />
                         ))}
                       </div>
                     )}

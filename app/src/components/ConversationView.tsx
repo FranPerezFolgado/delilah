@@ -86,7 +86,7 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
               </div>
             );
           }
-          const pending = !e.outcome && !e.task && !e.error;
+          const pending = e.outcome === "pending";
           return (
             <div key={e.id} className="conv-card">
               {pending ? (
@@ -117,6 +117,8 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
                       </a>
                     </div>
                   )}
+                  {e.outcome === "terminal" && <div className="muted">{t("Respondida en la terminal")}</div>}
+                  {e.outcome === "withdrawn" && <div className="muted">{t("Retirada")}</div>}
                   {e.error && <div className="error">{e.error}</div>}
                 </div>
               )}

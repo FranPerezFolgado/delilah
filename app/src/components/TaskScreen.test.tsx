@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import type { Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
@@ -20,7 +20,7 @@ vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
 vi.mock("./TaskView", () => ({ TaskView: () => null }));
 vi.mock("./ProjectView", () => ({ ProjectView: () => null }));
 vi.mock("./QuickOpen", () => ({ QuickOpen: () => null }));
-vi.mock("./AskCard", () => ({ AskCard: () => null }));
+vi.mock("./AskCard", () => ({ AskCard: () => <div data-testid="askcard" /> }));
 
 const task = (status: TaskStatus): Task => ({
   key: "PROJ-1",
@@ -117,5 +117,27 @@ describe("TaskScreen conversation sessions", () => {
     const { queryByTestId } = open({ ...conv, conversation: false });
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
+  });
+
+  const pendingAsk = {
+    kind: "question",
+    task: "@web",
+    title: "",
+    session: { id: "s1", label: "Idea", primary: false, live: true },
+    text: null,
+    since: null,
+    ask: { id: "a1", questions: [] },
+  } as unknown as InboxItem;
+  const openWithAsk = (s: Session) => {
+    sessionFor("@web").active = sessionTab(s.id);
+    return render(
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[pendingAsk]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
+    );
+  };
+
+  it("has no ask-bar in conversation mode, but keeps it for a terminal session", () => {
+    expect(openWithAsk(conv).container.querySelector(".ask-bar")).toBeNull();
+    cleanup();
+    expect(openWithAsk({ ...conv, conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
   });
 });
