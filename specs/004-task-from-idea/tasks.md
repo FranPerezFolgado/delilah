@@ -208,16 +208,16 @@
 
 ### UI
 
-- [ ] T025 [P] [US1] Write failing tests in `app/src/components/AskCard.test.tsx` (new; pattern: `DeleteTaskDialog.test.tsx`):
+- [X] T025 [P] [US1] Write failing tests in `app/src/components/AskCard.test.tsx` (new; pattern: `DeleteTaskDialog.test.tsx`):
   - an option with `preview` shows its Markdown, and the first option's preview is shown before any pick;
   - an ask with `proposal` renders the title as a heading, the brief open, and the buttons "Crear", "Cambiar algo" and "Descartar";
   - clicking "Crear" calls `api.answerAsk` with `{ [question]: "Crear" }` and then shows "Creada LIBRE-7" as a link (mock `answerAsk` → `{task:"LIBRE-7"}`);
   - an `error` response shows it.
-- [ ] T026 [US1] Implement T025 in `app/src/components/AskCard.tsx`:
+- [X] T026 [US1] Implement T025 in `app/src/components/AskCard.tsx`:
   - render previews with the existing `Markdown` component, in a block with `max-height: 60vh; overflow: auto` (class in `app/src/styles.css`);
   - use the confirmation layout when `ask.proposal` is set;
   - add an `onOpenTask?: (key: string) => void` prop for the link.
-- [ ] T027 [P] [US1] Write failing tests in `app/src/components/ConversationView.test.tsx` (mock `api`):
+- [X] T027 [P] [US1] Write failing tests in `app/src/components/ConversationView.test.tsx` (mock `api`):
   - with no entries it shows the hint "Cuéntale tu idea…";
   - user, Claude (Markdown) and card entries render in order, and a pending card renders an `AskCard`;
   - a `queued` entry shows "en cola" and a remove button that calls `api.removeMessage`;
@@ -227,7 +227,7 @@
   - `needs_terminal` shows "Claude espera en la terminal" with a button that calls `onOpenTerminal`;
   - a session that is not live shows "Reabrir";
   - an answered card with `task` shows the key as a link.
-- [ ] T028 [US1] Create `app/src/components/ConversationView.tsx`:
+- [X] T028 [US1] Create `app/src/components/ConversationView.tsx`:
   - props `{ session: Session; onOpenTerminal: () => void; onOpenTask: (key) => void; onReopen: () => void }`;
   - it fetches `api.conversation(session.id)` and refetches on the `conversations` and `inbox` topics, using the same subscription hook other views use for topics;
   - it renders as in T027 and scrolls to the bottom on new entries.

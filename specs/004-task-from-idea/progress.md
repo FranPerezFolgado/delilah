@@ -14,8 +14,8 @@ Mode: format=markdown commits=yes
 | WP-06 | 2 | 2B | done | 1 | 2b0eda4 | |
 | WP-08 | 2 | 2C | done | 2 | 4f7a642 | |
 | WP-02F | 2 | 2F | done | 1 | 050dadb | phase 2 review fixes |
-| WP-09 | 3 | 3A | verified | 1 | | |
-| WP-11 | 3 | 3A | implementing | 0 | | |
+| WP-09 | 3 | 3A | verified | 1 | b1f19f6 | |
+| WP-11 | 3 | 3A | verified | 1 | | new strings for WP-18: Creada, Crear, Cambiar algo, Abrir terminal, Escribe un mensaje…, Mensaje, Quitar mensaje, en cola, Cuéntale tu idea…, Claude espera en la terminal |
 | WP-10 | 3 | 3B | pending | 0 | | split at T022/T023 if too large |
 | WP-12 | 3 | 3C | pending | 0 | | |
 | WP-13 | 4 | 4A | pending | 0 | | |
