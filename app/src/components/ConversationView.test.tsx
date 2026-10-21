@@ -132,4 +132,73 @@ describe("ConversationView", () => {
     await findByText("¿Cuál?: A");
     expect(container.querySelector(".ask")).toBeNull();
   });
+
+  it("ignores a stale response after switching session", async () => {
+    let slow!: (c: Conversation) => void;
+    const spy = vi.spyOn(api, "conversation").mockImplementation((sid: string) =>
+      sid === "s1" ? new Promise<Conversation>((r) => (slow = r)) : Promise.resolve(conv([claude(1, "de dos")])),
+    );
+    const props = { onOpenTerminal: () => {}, onOpenTask: () => {}, onReopen: () => {} };
+    const { rerender, findByText, queryByText } = render(<ConversationView session={session()} {...props} />);
+    rerender(<ConversationView session={session({ id: "s2" })} {...props} />);
+    await findByText("de dos");
+    slow(conv([claude(2, "de uno")]));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(queryByText("de uno")).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the error after a successful reload", async () => {
+    const spy = vi.spyOn(api, "conversation").mockRejectedValueOnce(new Error("caído")).mockResolvedValue(conv([claude(1, "ok")]));
+    const { findByText, queryByText } = render(
+      <ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("caído");
+    // A successful send reloads the conversation.
+    vi.spyOn(api, "sendMessage").mockResolvedValue(user(2, "x"));
+    fireEvent.change(document.querySelector("textarea")!, { target: { value: "hola" } });
+    fireEvent.click(document.querySelector(".btn-p") as HTMLButtonElement);
+    await waitFor(() => expect(queryByText("caído")).toBeNull());
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps text typed while a send fails", async () => {
+    let fail!: (e: Error) => void;
+    vi.spyOn(api, "sendMessage").mockImplementation(() => new Promise((_, rej) => (fail = rej)));
+    const { findByText, getByLabelText, getByText } = setup(conv());
+    await findByText("Cuéntale tu idea…");
+    const field = getByLabelText("Mensaje") as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "primero" } });
+    fireEvent.click(getByText("Enviar"));
+    await waitFor(() => expect(field.value).toBe(""));
+    fireEvent.change(field, { target: { value: "segundo" } });
+    fail(new Error("falló"));
+    await findByText("falló");
+    expect(field.value).toBe("segundo");
+  });
+
+  it("restores the message when a send fails and the box is still empty", async () => {
+    vi.spyOn(api, "sendMessage").mockRejectedValue(new Error("falló"));
+    const { findByText, getByLabelText, getByText } = setup(conv());
+    await findByText("Cuéntale tu idea…");
+    const field = getByLabelText("Mensaje") as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "primero" } });
+    fireEvent.click(getByText("Enviar"));
+    await findByText("falló");
+    expect(field.value).toBe("primero");
+  });
+
+  it("reopens a closed conversation with its full history in order", async () => {
+    const onReopen = vi.fn();
+    const { container, findByText } = setup(
+      conv([user(1, "idea"), claude(2, "respuesta"), card(3, { outcome: "answered", answer: { "¿Cuál?": "A" } }), claude(4, "fin")]),
+      session({ live: false, closed: true }),
+      { onReopen },
+    );
+    await findByText("fin");
+    const kids = [...container.querySelector(".conv-log")!.children].map((k) => k.textContent);
+    expect(kids).toEqual(["idea", "respuesta", "¿Cuál?: A", "fin"]);
+    fireEvent.click(await findByText("Reabrir"));
+    expect(onReopen).toHaveBeenCalled();
+  });
 });

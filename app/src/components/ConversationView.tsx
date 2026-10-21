@@ -21,8 +21,29 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
   const log = useRef<HTMLDivElement>(null);
   const id = session.id;
 
+  // Only the latest request may write: a slow earlier one, or one from the previous
+  // session, is ignored.
+  const seq = useRef(0);
+  const stick = useRef(true);
+
   const load = useCallback(() => {
-    api.conversation(id).then(setConv, (e) => setError((e as Error).message));
+    const mine = ++seq.current;
+    api.conversation(id).then(
+      (c) => {
+        if (mine !== seq.current) return;
+        setConv(c);
+        setError(null);
+      },
+      (e) => {
+        if (mine === seq.current) setError((e as Error).message);
+      },
+    );
+  }, [id]);
+
+  useEffect(() => {
+    setConv(null);
+    setError(null);
+    stick.current = true;
   }, [id]);
 
   useEffect(() => {
@@ -34,8 +55,8 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
   const count = conv?.entries.length ?? 0;
   useEffect(() => {
     const el = log.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [count]);
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [count, id]);
 
   const send = async () => {
     const msg = text.trim();
@@ -46,7 +67,8 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
       await api.sendMessage(id, msg);
       load();
     } catch (e) {
-      setText(msg);
+      // Restore the message unless the user already typed something else meanwhile.
+      setText((cur) => (cur.trim() ? cur : msg));
       setError((e as Error).message);
     }
   };
@@ -56,7 +78,14 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
 
   return (
     <div className="conv">
-      <div className="conv-log" ref={log}>
+      <div
+        className="conv-log"
+        ref={log}
+        onScroll={(ev) => {
+          const el = ev.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+      >
         {conv && conv.entries.length === 0 && <div className="muted">{t("Cuéntale tu idea…")}</div>}
         {conv?.entries.map((e) => {
           if (e.kind === "user") {

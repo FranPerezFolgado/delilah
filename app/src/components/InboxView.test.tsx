@@ -177,3 +177,20 @@ describe("InboxView handoff item", () => {
     expect(await findByText("ya empezó")).toBeTruthy();
   });
 });
+
+describe("InboxView proposal item", () => {
+  it("links the created task and opens it", async () => {
+    vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-9" });
+    const onOpenTask = vi.fn();
+    const proposal: InboxItem = {
+      ...item,
+      kind: "question",
+      ask: { id: "a9", questions: [{ question: "¿Creo la tarea?", options: [] }], proposal: { title: "Idea", brief: "brief" } },
+    };
+    render(<InboxView items={[proposal]} onOpenTask={onOpenTask} onOpenChanges={() => {}} onChanged={() => {}} />);
+    fireEvent.click(screen.getByText("Create"));
+    const link = await screen.findByText("LIBRE-9");
+    fireEvent.click(link);
+    expect(onOpenTask).toHaveBeenCalledWith("LIBRE-9");
+  });
+});

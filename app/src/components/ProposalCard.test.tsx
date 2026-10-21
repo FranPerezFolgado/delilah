@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { api } from "../api";
 import { setLanguage } from "../i18n";
 import { ProposalCard } from "./ProposalCard";
@@ -50,5 +50,16 @@ describe("ProposalCard", () => {
     expect(queryByText("Crear")).toBeNull();
     expect(queryByText("Descartar")).toBeNull();
     expect(onDone).toHaveBeenCalled();
+  });
+
+  it.each(["Cambiar algo", "Descartar"])("%s answers with it, creates nothing and shows no error", async (label) => {
+    const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
+    const onDone = vi.fn();
+    const { getByText, container } = render(<ProposalCard ask={proposal} onDone={onDone} />);
+    fireEvent.click(getByText(label));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": label });
+    expect(container.querySelector(".ask-created")).toBeNull();
+    expect(container.querySelector(".error")).toBeNull();
   });
 });
