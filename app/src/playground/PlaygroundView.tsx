@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { openPlaygroundWindow } from "../platform";
 import "./playground.css";
 import { Desk } from "./Desk";
 import { deskState, type DeskModel } from "./layout";
@@ -8,6 +9,8 @@ interface Props {
   onOpen: (task: string, session: string) => void;
   /** The app's connection state, when it already holds the change feed. */
   online?: boolean;
+  /** Already in its own window: no "open in window" button. */
+  standalone?: boolean;
 }
 
 /** One cell per slot, 0..max: a freed slot stays an empty cell so no desk moves. */
@@ -18,7 +21,7 @@ function cells(desks: DeskModel[]): (DeskModel | undefined)[] {
 }
 
 /** The office: an area per project with a desk for each live agent. */
-export function PlaygroundView({ onOpen, online }: Props) {
+export function PlaygroundView({ onOpen, online, standalone }: Props) {
   const { areas } = usePlayground(online);
   const waiting = areas.reduce((n, a) => n + a.desks.filter((d) => deskState(d.session) === "waiting").length, 0);
   return (
@@ -26,6 +29,11 @@ export function PlaygroundView({ onOpen, online }: Props) {
       <header className="pg-head">
         <h2>{t("Playground")}</h2>
         <span className={`pg-count${waiting > 0 ? " pg-count--on" : ""}`}>{t("{n} esperando", { n: waiting })}</span>
+        {!standalone && (
+          <button type="button" className="pg-window" style={{ marginLeft: "auto" }} onClick={() => void openPlaygroundWindow()}>
+            {t("Abrir en ventana")}
+          </button>
+        )}
       </header>
       {areas.length === 0 ? (
         <p className="pg-empty">{t("Ningún agente trabajando")}</p>

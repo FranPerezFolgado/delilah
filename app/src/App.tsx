@@ -4,6 +4,7 @@ import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
+import { onOpenTask } from "./platform";
 import { setLanguage, t, type LangSetting } from "./i18n";
 import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
 import { BoardView } from "./components/BoardView";
@@ -237,7 +238,15 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  const task = tasks.find((t) => t.key === selected);
+  // A click in the playground window opens that task's terminal here.
+  const openTaskRef = useRef(openTask);
+  openTaskRef.current = openTask;
+  useEffect(() => {
+    const off = onOpenTask(({ task, session }) => openTaskRef.current(task, session));
+    return () => void off.then((f) => f());
+  }, []);
+
+  const task =tasks.find((t) => t.key === selected);
   // `@<name>` selects a project's own screen (sessions on its checkout).
   const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
   const owner = task?.key ?? (project ? `@${project.name}` : null);

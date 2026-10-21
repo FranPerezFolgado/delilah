@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { Session } from "../api";
 import type { DeskModel, ProjectArea } from "./layout";
 import { t } from "../i18n";
+import { openPlaygroundWindow } from "../platform";
 import { PlaygroundView } from "./PlaygroundView";
 import { usePlayground } from "./usePlayground";
 
@@ -34,7 +35,20 @@ function show(areas: ProjectArea[]) {
   vi.mocked(usePlayground).mockReturnValue({ areas, online: true });
 }
 
+vi.mock("../platform", () => ({ openPlaygroundWindow: vi.fn() }));
+
 afterEach(cleanup);
+
+describe("PlaygroundView window button", () => {
+  it("opens the playground window; hidden when standalone", () => {
+    show([]);
+    const { getByText, queryByText, rerender } = render(<PlaygroundView onOpen={() => {}} />);
+    fireEvent.click(getByText(t("Abrir en ventana")));
+    expect(openPlaygroundWindow).toHaveBeenCalledTimes(1);
+    rerender(<PlaygroundView onOpen={() => {}} standalone />);
+    expect(queryByText(t("Abrir en ventana"))).toBeNull();
+  });
+});
 
 describe("PlaygroundView", () => {
   it("renders an area per project with its desks", () => {
@@ -115,7 +129,7 @@ describe("PlaygroundView", () => {
   it("opens the session of a focused character on Enter (native button)", () => {
     show([{ project: "web", desks: [desk("@web", 0, "waiting", { owner: "@web", key: "web" })] }]);
     const onOpen = vi.fn();
-    const { getByRole } = render(<PlaygroundView onOpen={onOpen} />);
+    const { getByRole } = render(<PlaygroundView onOpen={onOpen} standalone />);
     const btn = getByRole("button") as HTMLButtonElement;
     btn.focus();
     expect(document.activeElement).toBe(btn);
@@ -127,7 +141,7 @@ describe("PlaygroundView", () => {
 
   it("gives each character its accessible name", () => {
     show([{ project: "web", desks: [desk("W-1", 0, "waiting")] }]);
-    const { getByRole } = render(<PlaygroundView onOpen={() => {}} />);
+    const { getByRole } = render(<PlaygroundView onOpen={() => {}} standalone />);
     expect(getByRole("button").getAttribute("aria-label")).toBe(`W-1, ${t("Esperándote")}`);
   });
 });

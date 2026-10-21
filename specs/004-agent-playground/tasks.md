@@ -139,13 +139,13 @@
 - A click in that tab makes the main tab open the task.
 - The native window is checked in the desktop app; see the quickstart.
 
-- [ ] T020 [P] [US2] Write failing tests in `app/src/platform.test.ts` (jsdom, browser mode, so `isDesktop` is false):
+- [X] T020 [P] [US2] Write failing tests in `app/src/platform.test.ts` (jsdom, browser mode, so `isDesktop` is false):
   - `openPlaygroundWindow()` calls `window.open` with a URL ending in `#playground` and the target `"delilah-playground"`;
   - `requestOpenTask({task, session})` posts `{type: "open-task", task, session}` on a `BroadcastChannel("delilah")`;
   - `onOpenTask(cb)` calls `cb` for that message and returns an unsubscribe.
 
   Stub `BroadcastChannel` with a tiny in-memory fake.
-- [ ] T021 [US2] Implement `openPlaygroundWindow`, `requestOpenTask` and `onOpenTask` in `app/src/platform.ts`:
+- [X] T021 [US2] Implement `openPlaygroundWindow`, `requestOpenTask` and `onOpenTask` in `app/src/platform.ts`:
   - **Browser**: as in T020.
   - **Desktop**, through `@tauri-apps/api`:
     - `WebviewWindow.getByLabel("playground")` then `setFocus()`, or else `new WebviewWindow("playground", { url: "index.html#playground", title: "Delilah — Playground", width: 1100, height: 700 })`;
@@ -153,13 +153,13 @@
     - `listen("delilah:open-task")` for `onOpenTask`.
 
   Use dynamic imports, as the file already does for the other Tauri APIs. T020 passes.
-- [ ] T022 [US2] Update `app/src-tauri/capabilities/default.json`:
+- [X] T022 [US2] Update `app/src-tauri/capabilities/default.json`:
   - `"windows": ["main", "playground"]`;
   - add `core:webview:allow-create-webview-window`, `core:window:allow-set-focus`, `core:window:allow-show` and `core:window:allow-unminimize` (and `core:event:default` if it is not already part of `core:default`).
 
   Update the description string. Run `cargo test --manifest-path app/src-tauri/Cargo.toml`, which also builds and so validates the capability.
-- [ ] T023 [US2] Create `app/src/playground/PlaygroundWindow.tsx`: the office full-window, with a slim top bar (title and counter, no "open in window" button), and clicks going to `requestOpenTask`. In `app/src/main.tsx`, render it instead of `<App/>` when `location.hash === "#playground"` (keep the existing providers and styles).
-- [ ] T024 [US2] Add the "Abrir en ventana" button to the `PlaygroundView.tsx` header, calling `openPlaygroundWindow()`. In `app/src/App.tsx`, register `onOpenTask(({task, session}) => openTask(task, session))` once in an effect. Add a test case in `PlaygroundView.test.tsx`: the button calls the mocked `openPlaygroundWindow`.
+- [X] T023 [US2] Create `app/src/playground/PlaygroundWindow.tsx`: the office full-window, with a slim top bar (title and counter, no "open in window" button), and clicks going to `requestOpenTask`. In `app/src/main.tsx`, render it instead of `<App/>` when `location.hash === "#playground"` (keep the existing providers and styles).
+- [X] T024 [US2] Add the "Abrir en ventana" button to the `PlaygroundView.tsx` header, calling `openPlaygroundWindow()`. In `app/src/App.tsx`, register `onOpenTask(({task, session}) => openTask(task, session))` once in an effect. Add a test case in `PlaygroundView.test.tsx`: the button calls the mocked `openPlaygroundWindow`.
 
 **Checkpoint**: in a preview, the separate tab works both ways.
 
