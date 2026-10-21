@@ -34,6 +34,7 @@
 .pg-anim { animation: pg-frames 0.8s steps(var(--pg-fn)) infinite; }
 @keyframes pg-frames { to { transform: translateX(calc(-1 * var(--pg-fw) * var(--pg-fn))); } }
 .pg-label { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 11px; min-width: 0; }
+.pg-caption { max-width: 100%; text-align: center; font-size: 10px; color: var(--tx3); white-space: nowrap; }
 .pg-title { max-width: 100%; color: var(--tx2); }
 .pg-phase { color: var(--tx3); }
 .pg-desk--empty { min-height: 1px; }

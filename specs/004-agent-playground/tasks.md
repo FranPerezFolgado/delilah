@@ -246,7 +246,7 @@
   - `busy` (other).
 
   2 frames each, in the same style as T012.
-- [ ] T035 [US3] Show the caption under the character in `app/src/playground/Desk.tsx`; it is cleared when there is no action. Add cases to `PlaygroundView.test.tsx`: a desk with an `edit` action has `data-pose="typing"` and the caption "Edit · api.rs", and a foreground delegate shows `phone` and "Supervisando".
+- [X] T035 [US3] Show the caption under the character in `app/src/playground/Desk.tsx`; it is cleared when there is no action. Add cases to `PlaygroundView.test.tsx`: a desk with an `edit` action has `data-pose="typing"` and the caption "Edit · api.rs", and a foreground delegate shows `phone` and "Supervisando".
 
 **Checkpoint**: `cargo test -p delilah-agents -p delilah-daemon` passes. In a preview, a newly started agent's character follows its tools.
 

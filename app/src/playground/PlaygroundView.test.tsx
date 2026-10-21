@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import type { Session } from "../api";
+import type { Action, Activity, Session } from "../api";
 import type { DeskModel, ProjectArea } from "./layout";
 import { t } from "../i18n";
 import { openPlaygroundWindow } from "../platform";
@@ -143,5 +143,36 @@ describe("PlaygroundView", () => {
     show([{ project: "web", desks: [desk("W-1", 0, "waiting")] }]);
     const { getByRole } = render(<PlaygroundView onOpen={() => {}} standalone />);
     expect(getByRole("button").getAttribute("aria-label")).toBe(`W-1, ${t("Esperándote")}`);
+  });
+
+  const act = (kind: Action["kind"], tool: string, target: string | null, background = false): Activity => ({
+    action: { id: "a1", kind, tool, target, background, since: "2026-01-01T00:00:00Z" },
+    helpers: [],
+  });
+
+  it("shows the action under an editing character, with the typing pose", () => {
+    show([{ project: "web", desks: [desk("W-1", 0, "working", { activity: act("edit", "Edit", "api.rs") })] }]);
+    const { container, getByRole } = render(<PlaygroundView onOpen={() => {}} standalone />);
+    expect(container.querySelector("button[data-pose]")?.getAttribute("data-pose")).toBe("typing");
+    expect(container.querySelector(".pg-caption")?.textContent).toBe("Edit · api.rs");
+    expect(getByRole("button").getAttribute("aria-label")).toBe(`W-1, ${t("Editando")}, Edit · api.rs`);
+  });
+
+  it("a foreground delegate shows the phone and Supervisando", () => {
+    show([{ project: "web", desks: [desk("W-1", 0, "working", { activity: act("delegate", "Task", "review") })] }]);
+    const { container } = render(<PlaygroundView onOpen={() => {}} />);
+    expect(container.querySelector("button[data-pose]")?.getAttribute("data-pose")).toBe("phone");
+    expect(container.querySelector(".pg-caption")?.textContent).toBe(t("Supervisando"));
+  });
+
+  it("clears the caption without an action and on waiting desks", () => {
+    show([
+      {
+        project: "web",
+        desks: [desk("W-1", 0, "working"), desk("W-2", 1, "waiting", { activity: act("edit", "Edit", "api.rs") })],
+      },
+    ]);
+    const { container } = render(<PlaygroundView onOpen={() => {}} />);
+    expect(container.querySelector(".pg-caption")).toBeNull();
   });
 });
