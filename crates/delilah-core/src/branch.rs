@@ -25,6 +25,8 @@ fn words(text: &str) -> Vec<String> {
             'ñ' => "n",
             'ç' => "c",
             'ß' => "ss",
+            // Combining marks of decomposed accents belong to the letter before them.
+            '\u{300}'..='\u{36f}' => continue,
             c if c.is_ascii_alphanumeric() => {
                 cur.push(c);
                 continue;
@@ -86,13 +88,32 @@ pub fn title_slug(title: &str) -> String {
     join_max(&chosen, MAX_SHORT)
 }
 
+/// A Jira key made safe for a branch name: case kept, only ASCII letters/digits and single
+/// `-`, trimmed. `None` when nothing is left.
+fn clean_key(key: &str) -> Option<String> {
+    let mut out = String::new();
+    for c in key.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_end_matches('-').to_string();
+    (!out.is_empty()).then_some(out)
+}
+
 /// Full branch name. `key` is used only for Jira tasks (`!free`). `short` is passed through
-/// `slug`, so callers can hand over raw text.
-pub fn compose(key: Option<&str>, short: &str, free: bool) -> String {
+/// `slug`, so callers can hand over raw text. `None` when there is neither a usable key nor
+/// a usable short part (a bare `feature/` is not a branch).
+pub fn compose(key: Option<&str>, short: &str, free: bool) -> Option<String> {
     let short = slug(short, MAX_SHORT);
-    match key {
-        Some(k) if !free => format!("{PREFIX}{k}-{short}"),
-        _ => format!("{PREFIX}{short}"),
+    let key = key.filter(|_| !free).and_then(clean_key);
+    match (key, short.is_empty()) {
+        (Some(k), true) => Some(format!("{PREFIX}{k}")),
+        (Some(k), false) => Some(format!("{PREFIX}{k}-{short}")),
+        (None, true) => None,
+        (None, false) => Some(format!("{PREFIX}{short}")),
     }
 }
 
@@ -108,12 +129,14 @@ pub fn custom(input: &str) -> Option<String> {
 }
 
 /// Branch name when there is no short part: `feature/<KEY>` (Jira) or `feature/<key lowercased>`.
-pub fn fallback(key: &str, free: bool) -> String {
-    if free {
+/// `None` when the key has nothing usable.
+pub fn fallback(key: &str, free: bool) -> Option<String> {
+    let key = clean_key(key)?;
+    Some(if free {
         format!("{PREFIX}{}", key.to_lowercase())
     } else {
         format!("{PREFIX}{key}")
-    }
+    })
 }
 
 #[cfg(test)]
@@ -162,17 +185,46 @@ mod tests {
     #[test]
     fn compose_jira_and_free() {
         assert_eq!(
-            compose(Some("PROJ-12"), "retry-failed-payments", false),
-            "feature/PROJ-12-retry-failed-payments"
+            compose(Some("PROJ-12"), "retry-failed-payments", false).as_deref(),
+            Some("feature/PROJ-12-retry-failed-payments")
         );
         assert_eq!(
-            compose(Some("PROJ-12"), "retry-failed-payments", true),
-            "feature/retry-failed-payments"
+            compose(Some("PROJ-12"), "retry-failed-payments", true).as_deref(),
+            Some("feature/retry-failed-payments")
         );
         assert_eq!(
-            compose(None, "Retry Payments!", true),
-            "feature/retry-payments"
+            compose(None, "Retry Payments!", true).as_deref(),
+            Some("feature/retry-payments")
         );
+    }
+
+    #[test]
+    fn compose_sanitises_the_key() {
+        assert_eq!(
+            compose(Some("PROJ 12"), "x", false).as_deref(),
+            Some("feature/PROJ-12-x")
+        );
+        assert_eq!(
+            compose(Some("..~"), "x", false).as_deref(),
+            Some("feature/x")
+        );
+        assert_eq!(compose(Some("..~"), "", false), None);
+        assert_eq!(fallback("..~", false), None);
+    }
+
+    #[test]
+    fn compose_without_a_short_part() {
+        assert_eq!(
+            compose(Some("PROJ-12"), "", false).as_deref(),
+            Some("feature/PROJ-12")
+        );
+        assert_eq!(compose(Some("PROJ-12"), "!!", true), None);
+        assert_eq!(compose(None, "", true), None);
+    }
+
+    #[test]
+    fn slug_skips_combining_marks() {
+        assert_eq!(slug("re\u{301}plica", 50), "replica");
     }
 
     #[test]
@@ -188,7 +240,10 @@ mod tests {
 
     #[test]
     fn fallback_by_kind() {
-        assert_eq!(fallback("PROJ-1", false), "feature/PROJ-1");
-        assert_eq!(fallback("LIBRE-6", true), "feature/libre-6");
+        assert_eq!(fallback("PROJ-1", false).as_deref(), Some("feature/PROJ-1"));
+        assert_eq!(
+            fallback("LIBRE-6", true).as_deref(),
+            Some("feature/libre-6")
+        );
     }
 }

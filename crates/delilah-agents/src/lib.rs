@@ -4,5 +4,6 @@ pub mod branch_name;
 pub mod claude;
 pub mod env;
 pub mod limits;
+pub mod oneshot;
 pub mod pty;
 pub mod suggest;

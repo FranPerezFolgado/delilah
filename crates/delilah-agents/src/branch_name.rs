@@ -1,10 +1,6 @@
 //! A quick, tool-less Claude pass that names a task's git branch from its title
 //! (and notes), so the branch says what the work is instead of just a ticket key.
 
-use serde_json::Value;
-
-pub use crate::suggest::env;
-
 /// A small model is plenty to summarise a task in a few words.
 pub const MODEL: &str = "haiku";
 
@@ -49,6 +45,10 @@ pub fn args(prompt: &str) -> Vec<String> {
         "",
         "--setting-sources",
         "user",
+        // User-level hooks would still run on every naming call.
+        "--settings",
+        "{\"disableAllHooks\":true}",
+        "--disable-slash-commands",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -58,24 +58,7 @@ pub fn args(prompt: &str) -> Vec<String> {
 /// Reads Claude's `--output-format json` answer and returns the trimmed `name`; the caller
 /// normalises it into a branch name.
 pub fn parse(output: &str) -> Result<String, String> {
-    let envelope: Value =
-        serde_json::from_str(output).map_err(|e| format!("unexpected output from claude: {e}"))?;
-    if envelope["is_error"] == true {
-        return Err(format!(
-            "claude failed: {}",
-            envelope["result"].as_str().unwrap_or("unknown error")
-        ));
-    }
-    let text = envelope["result"].as_str().ok_or("claude gave no result")?;
-    let (start, end) = (text.find('{'), text.rfind('}'));
-    let (Some(start), Some(end)) = (start, end) else {
-        return Err(format!(
-            "claude did not answer with JSON: {}",
-            text.chars().take(200).collect::<String>()
-        ));
-    };
-    let answer: Value = serde_json::from_str(&text[start..=end])
-        .map_err(|e| format!("claude's JSON is not valid: {e}"))?;
+    let answer = crate::oneshot::answer_json(output)?;
     let name = answer["name"].as_str().map(str::trim).unwrap_or("");
     if name.is_empty() {
         return Err("claude gave no branch name".into());
@@ -114,12 +97,17 @@ mod tests {
             "--no-session-persistence",
             "--strict-mcp-config",
             "--setting-sources",
+            "--disable-slash-commands",
         ] {
             assert!(a.contains(&flag.to_string()), "{flag}");
         }
         assert!(a.windows(2).any(|w| w == ["--model", "haiku"]));
         assert!(a.windows(2).any(|w| w == ["--output-format", "json"]));
         assert!(a.windows(2).any(|w| w == ["--setting-sources", "user"]));
+        assert!(
+            a.windows(2)
+                .any(|w| w == ["--settings", "{\"disableAllHooks\":true}"])
+        );
         let tools = a.iter().position(|x| x == "--tools").unwrap();
         assert_eq!(a[tools + 1], "");
         assert!(a[tools + 2].starts_with("--"));

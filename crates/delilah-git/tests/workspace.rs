@@ -694,6 +694,20 @@ fn branch_taken_sees_local_and_remote_branches() {
 }
 
 #[test]
+fn branch_taken_handles_remote_names_with_a_slash() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    run(
+        &repo,
+        &["remote", "add", "team/origin", remote.to_str().unwrap()],
+    );
+    run(&repo, &["push", "team/origin", "main:feature/z"]);
+    run(&repo, &["fetch", "team/origin"]);
+    assert!(branch_taken(&repo, "feature/z", &opts).unwrap());
+    assert!(!branch_taken(&repo, "origin/feature/z", &opts).unwrap());
+}
+
+#[test]
 fn free_branch_suffixes_until_free_in_every_dir() {
     let (_t1, a, _r1) = pr_repo();
     let (_t2, b, _r2) = pr_repo();

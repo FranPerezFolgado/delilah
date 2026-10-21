@@ -518,12 +518,17 @@ pub fn branch_taken(dir: &Path, name: &str, opts: &GitOptions) -> Result<bool, G
         ],
         opts,
     )?;
+    // Remote names may contain `/`, so strip each known remote instead of splitting.
+    let remotes = git(dir, &["remote"], opts)?;
     let local = format!("refs/heads/{name}");
     Ok(out.lines().any(|r| {
         r == local
-            || r.strip_prefix("refs/remotes/")
-                .and_then(|rest| rest.split_once('/'))
-                .is_some_and(|(_, branch)| branch == name)
+            || remotes.lines().any(|remote| {
+                r.strip_prefix("refs/remotes/")
+                    .and_then(|rest| rest.strip_prefix(remote))
+                    .and_then(|rest| rest.strip_prefix('/'))
+                    == Some(name)
+            })
     }))
 }
 
