@@ -292,10 +292,7 @@ mod tests {
     fn prompt_bytes_drop_control_characters_in_single_and_multi_line_text() {
         assert_eq!(prompt_bytes("a\x1bb\x03\x04c"), b"abc");
         assert_eq!(prompt_bytes("x\x1b[200~y"), b"x[200~y");
-        assert_eq!(
-            prompt_bytes("a\x1b\nb"),
-            b"\x1b[200~a\nb\x1b[201~".to_vec()
-        );
+        assert_eq!(prompt_bytes("a\x1b\nb"), b"\x1b[200~a\nb\x1b[201~".to_vec());
     }
     use std::path::{Path as FsPath, PathBuf};
 
@@ -351,6 +348,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         (
             AppState::new(crate::store::Store::in_memory().await.unwrap(), config),

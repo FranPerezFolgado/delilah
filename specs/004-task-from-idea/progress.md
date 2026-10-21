@@ -22,9 +22,9 @@ Mode: format=markdown commits=yes
 | WP-03Fu | 3 | 3F | done | 1 | d9447f0 | phase 3 fixes, UI; strings for WP-18: Respondida en la terminal, Retirada |
 | WP-13 | 4 | 4A | verified | 1 | 551037a | |
 | WP-14 | 4 | 4A | verified | 1 | 46f9f9f | |
-| WP-04F | 4 | 4F | implementing | 0 | | phase 4 fixes: hermetic run test |
+| WP-04F | 4 | 4F | done | 1 | | phase 4 fixes: hermetic run test |
 | WP-15 | 5 | 5A | pending | 0 | | |
-| WP-16 | 5 | 5A | verified | 1 | | InboxView change untested | |
+| WP-16 | 5 | 5A | verified | 1 | 12d54c8 | InboxView change untested | |
 | WP-17 | 6 | 6A | pending | 0 | | |
 | WP-18 | 7 | 7A | pending | 0 | | |
 | WP-19 | 7 | 7A | pending | 0 | | |

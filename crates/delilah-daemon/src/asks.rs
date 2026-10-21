@@ -19,8 +19,8 @@ use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
 
 use crate::api::ApiError;
-use crate::events::Topic;
 use crate::conversation::{Card, CardOutcome};
+use crate::events::Topic;
 use crate::hooks::HookQuery;
 use crate::proposals::{self, Proposal};
 use crate::sessions::LiveState;
@@ -333,6 +333,7 @@ pub(crate) mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -668,5 +669,4 @@ pub(crate) mod tests {
         assert!(matches!(waiting[0].try_recv(), Ok(Outcome::Released)));
         assert_eq!(asks.list().len(), 1);
     }
-
 }

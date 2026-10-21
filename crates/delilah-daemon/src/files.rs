@@ -414,6 +414,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

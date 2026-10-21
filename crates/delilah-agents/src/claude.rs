@@ -90,6 +90,8 @@ pub struct Launch<'a> {
     /// Remote Control: the session can also be followed and driven from claude.ai
     /// and the Claude app, under this name.
     pub remote_control: Option<&'a str>,
+    /// Program to run instead of `claude` (tests use a stand-in); `None` in production.
+    pub program: Option<&'a Path>,
 }
 
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
@@ -115,7 +117,10 @@ pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
 }
 
 pub fn command(launch: &Launch) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new("claude");
+    let mut cmd = match launch.program {
+        Some(program) => CommandBuilder::new(program),
+        None => CommandBuilder::new("claude"),
+    };
     cmd.env_clear();
     for (key, value) in crate::env::agent_env() {
         cmd.env(key, value);
@@ -457,6 +462,7 @@ mod tests {
             plugin_dir: None,
             append_system_prompt: None,
             remote_control: None,
+            program: None,
         };
         let args = |l: &Launch| {
             command(l)
@@ -495,6 +501,7 @@ mod tests {
         );
         let remote = Launch {
             remote_control: Some("PROJ-1 · Principal"),
+            program: None,
             ..base
         };
         assert_eq!(
@@ -569,6 +576,7 @@ mod tests {
             plugin_dir: None,
             append_system_prompt: None,
             remote_control: None,
+            program: None,
         }
     }
 
@@ -666,6 +674,27 @@ mod tests {
     }
 
     #[test]
+    fn the_program_override_replaces_claude_as_argv0() {
+        let fake = Path::new("/tmp/fake-claude");
+        let launch = |program| Launch {
+            workspace: Path::new("/tmp/ws"),
+            session_id: "abc",
+            settings: Path::new("/tmp/s.json"),
+            prompt: None,
+            resume: false,
+            extra_dirs: &[],
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
+            remote_control: None,
+            program,
+        };
+        let first = |l: &Launch| command(l).get_argv()[0].to_string_lossy().into_owned();
+        assert_eq!(first(&launch(None)), "claude");
+        assert_eq!(first(&launch(Some(fake))), "/tmp/fake-claude");
+    }
+
+    #[test]
     fn extra_dirs_go_before_settings_so_the_prompt_stays_a_prompt() {
         let ticket_dir = Path::new("/tmp/tasks/PROJ-1");
         let cmd = command(&Launch {
@@ -679,6 +708,7 @@ mod tests {
             plugin_dir: None,
             append_system_prompt: None,
             remote_control: None,
+            program: None,
         });
         let argv: Vec<String> = cmd
             .get_argv()
@@ -713,6 +743,7 @@ mod tests {
             plugin_dir: None,
             append_system_prompt: None,
             remote_control: None,
+            program: None,
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());

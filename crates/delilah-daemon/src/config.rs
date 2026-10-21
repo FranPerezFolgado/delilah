@@ -16,6 +16,8 @@ pub struct Config {
     /// One more browser origin allowed to call the API (`DELILAH_UI_ORIGIN`): the UI
     /// of a preview (`scripts/preview.sh`), served on its own port.
     pub ui_origin: Option<String>,
+    /// Program to run instead of `claude`; only tests set it.
+    pub agent_program: Option<PathBuf>,
 }
 
 impl Config {
@@ -50,6 +52,7 @@ impl Config {
             allow_file_protocol,
             notify,
             ui_origin,
+            agent_program: None,
         })
     }
 

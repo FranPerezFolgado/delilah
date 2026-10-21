@@ -389,6 +389,7 @@ pub fn launch_session(
                 plugin_dir: plugin_dir.as_deref(),
                 append_system_prompt,
                 remote_control: remote_name.as_deref(),
+                program: app.config.agent_program.as_deref(),
             })
         }
         SessionKind::Shell => shell_command(workspace),
@@ -566,6 +567,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let mut conv = session("@web", "Idea");
         conv.conversation = true;
@@ -593,6 +595,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.
@@ -799,8 +802,24 @@ mod tests {
         };
 
         // A real repo to work in, and a conversation of the project.
-        let home = std::env::temp_dir().join(format!("delilah-run-{}", uuid::Uuid::new_v4()));
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
         let repo = home.join("web");
+        // Stands in for `claude`: records the arguments it got, then goes away.
+        let fake = home.join("fake-claude.sh");
+        let seen = home.join("args.txt");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 1\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         std::fs::create_dir_all(&repo).unwrap();
         git(&repo, &["init", "-q", "-b", "main"]);
         std::fs::write(repo.join("README.md"), "web\n").unwrap();
@@ -812,6 +831,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: Some(fake),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.store
@@ -870,15 +890,26 @@ mod tests {
             ),
         )
         .await;
-        for live in app.sessions.of_task(&key) {
-            let _ = live.pty.kill();
-        }
         assert_eq!(status, StatusCode::CREATED, "{started}");
 
         let path = app.config.task_dir(&key).join("notes.md");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "brief editado");
-        let prompt = point_to_notes(&app, &task.key, "/feature".into(), Some("brief editado"));
-        assert!(prompt.ends_with(&format!("{})", path.display())), "{prompt}");
+        // What the program received, not what we would have built.
+        let mut args = String::new();
+        for _ in 0..100 {
+            args = std::fs::read_to_string(&seen).unwrap_or_default();
+            if !args.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        for live in app.sessions.of_task(&key) {
+            let _ = live.pty.kill();
+        }
+        assert!(
+            args.contains(&format!("{})", path.display())),
+            "the prompt does not point to notes.md: {args}"
+        );
     }
 
     #[test]
