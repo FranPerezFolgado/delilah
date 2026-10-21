@@ -70,7 +70,7 @@
 
 ### Core: the history event
 
-- [ ] T006 [P] In `crates/delilah-core/src/task.rs`:
+- [X] T006 [P] In `crates/delilah-core/src/task.rs`:
   - Add a failing test: `Event::CreatedFromConversation { session, label }` applies to a `Queued` task, leaving status and phase unchanged, and is rejected on a `Running` task.
   - Then add the variant, serialized as `{"type":"created_from_conversation","session":…,"label":…}` (match the enum's existing serde tagging), and accept it in `Task::apply` only for `Queued`.
 

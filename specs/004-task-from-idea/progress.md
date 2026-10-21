@@ -7,9 +7,9 @@ Mode: format=markdown commits=yes
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 924520d | spike: (a)-(f) pass |
 | WP-02 | 1 | 1A | done | 1 | c05ac7c | |
-| WP-03 | 2 | 2A | pending | 0 | | allow list also allows `Bash(rtk <cmd>:*)` forms (user decision); record in docs/decisions.md |
-| WP-04 | 2 | 2A | pending | 0 | | |
-| WP-07 | 2 | 2A | pending | 0 | | |
+| WP-03 | 2 | 2A | implementing | 0 | | allow list also allows `Bash(rtk <cmd>:*)` forms (user decision); record in docs/decisions.md |
+| WP-04 | 2 | 2A | verified | 1 | | wire type "created-from-conversation" (kebab); JSON round-trip test moved to WP-05 |
+| WP-07 | 2 | 2A | implementing | 0 | | |
 | WP-05 | 2 | 2B | pending | 0 | | |
 | WP-06 | 2 | 2B | pending | 0 | | |
 | WP-08 | 2 | 2C | pending | 0 | | |

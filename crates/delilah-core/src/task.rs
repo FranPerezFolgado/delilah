@@ -113,6 +113,11 @@ pub enum Event {
     StartAborted {
         reason: String,
     },
+    /// The task was created from a conversation with an agent; nothing else changes.
+    CreatedFromConversation {
+        session: String,
+        label: String,
+    },
 }
 
 impl Event {
@@ -130,6 +135,7 @@ impl Event {
             Self::MarkDone => "mark-done",
             Self::Fail { .. } => "fail",
             Self::StartAborted { .. } => "start-aborted",
+            Self::CreatedFromConversation { .. } => "created-from-conversation",
         }
     }
 }
@@ -237,6 +243,7 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         (S::Running | S::WaitingForUser | S::PausedByLimit { .. }, Event::MarkDone) => Ok(S::Done),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
         (S::PreparingWorkspace, Event::StartAborted { .. }) => Ok(S::Queued),
+        (S::Queued, Event::CreatedFromConversation { .. }) => Ok(S::Queued),
         _ => Err(invalid),
     }
 }
@@ -265,6 +272,23 @@ mod tests {
         task.apply(Event::Start).unwrap();
         task.apply(Event::WorkspaceReady).unwrap();
         task
+    }
+
+    #[test]
+    fn created_from_conversation_is_recorded_on_a_queued_task_only() {
+        let event = Event::CreatedFromConversation {
+            session: "s1".into(),
+            label: "Idea chat".into(),
+        };
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Card retries", "feature");
+        let before = task.clone();
+        task.apply(event.clone()).unwrap();
+        assert_eq!(task, before);
+        assert_eq!(event.name(), "created-from-conversation");
+
+        let mut running = running_task();
+        assert!(running.apply(event.clone()).is_err());
+        assert_eq!(running.status, TaskStatus::Running);
     }
 
     #[test]
