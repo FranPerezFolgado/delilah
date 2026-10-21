@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Action, Activity, Project, Session, SpecSummary, Task } from "../api";
+import type { Action, Activity, Helper, Project, Session, SpecSummary, Task } from "../api";
 import { t } from "../i18n";
 import type { DeskModel } from "./layout";
-import { accessibleName, assignSlots, caption, deskState, groupByProject, slotMaps } from "./layout";
+import { accessibleName, assignSlots, caption, deskState, groupByProject, roleLook, slotMaps, visibleHelpers } from "./layout";
 
 describe("assignSlots", () => {
   it("numbers from 0 in input order when nothing was assigned", () => {
@@ -156,5 +156,46 @@ describe("accessibleName", () => {
   });
   it("uses the project name for an @project desk", () => {
     expect(accessibleName(model("working", "web"))).toBe(`web, ${t("Pensando")}`);
+  });
+});
+
+const helper = (id: string, role: string, since = "2026-01-01T00:00:0" + id.slice(-1) + "Z", kind: Action["kind"] | null = null): Helper => ({
+  id,
+  role,
+  since,
+  action: kind && { id: "a" + id, kind, tool: "T", target: null, background: false, since },
+});
+
+describe("roleLook", () => {
+  it("maps known roles to a look", () => {
+    for (const r of ["code-researcher", "Explore", "doc-searcher"]) expect(roleLook(r).look).toBe("researcher");
+    expect(roleLook("implementer").look).toBe("implementer");
+    for (const r of ["code-quality-reviewer", "spec-compliance-reviewer"]) expect(roleLook(r).look).toBe("reviewer");
+  });
+  it("gives other roles the generic look labelled with the role", () => {
+    expect(roleLook("foo")).toEqual({ look: "generic", label: "foo" });
+    expect(roleLook("")).toEqual({ look: "generic", label: t("Ayudante") });
+  });
+});
+
+describe("visibleHelpers", () => {
+  it("shows the first 4 by since and returns the rest", () => {
+    const hs = ["h6", "h2", "h1", "h5", "h3", "h4"].map((id) => helper(id, id));
+    const { shown, rest } = visibleHelpers(hs);
+    expect(shown.map((h) => h.id)).toEqual(["h1", "h2", "h3", "h4"]);
+    expect(rest.map((h) => h.id)).toEqual(["h5", "h6"]);
+  });
+});
+
+describe("accessibleName with helpers", () => {
+  it("appends the helpers and what they do", () => {
+    const desk = { session: { state: "working" } as Session, owner: "K", key: "K", title: "", phase: null, project: null, slot: 0 } as DeskModel;
+    const activity: Activity = {
+      action: null,
+      helpers: [helper("h1", "code-researcher", undefined, "read"), helper("h2", "implementer", undefined, "edit")],
+    };
+    expect(accessibleName(desk, activity)).toBe(
+      `K, ${t("Pensando")}, ${t("{n} ayudantes", { n: 2 })}: code-researcher ${t("Leyendo").toLowerCase()}, implementer ${t("Editando").toLowerCase()}`,
+    );
   });
 });

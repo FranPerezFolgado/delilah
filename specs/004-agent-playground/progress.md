@@ -11,20 +11,20 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP-02 | 2 | 2A | done | 1 | a7fbadc | 11 tests; tests written with impl (not seen failing); @name of unregistered project gets own area |
 | WP-03 | 3 | 3A | done | 2 | 3ff4b70 | 18 tests; fix: empty cells for free slots (no desk shifts); art not yet seen rendered |
 | WP-04 | 4 | 4A | done | 1 | 84c2379 | class pg-desk--waiting; counter always shown (muted at 0) | |
-| WP-05 | 5 | 5A | verified | 1 | 8eab1c9 | native window not tried (needs desktop app); src-tauri test needed a 0-byte sidecar stub (gitignored) |
+| WP-05 | 5 | 5A | done | 1 | 8eab1c9 | native window not tried (needs desktop app); src-tauri test needed a 0-byte sidecar stub (gitignored) |
 | WP-06 | 6 | 6A | done | 2 | da8f944 | 28 tests; tests failed first; ActivityEvent serde tag=type |
-| WP-07 | 6 | 6A | verified | 1 | ff47dce | |
+| WP-07 | 6 | 6A | done | 1 | ff47dce | |
 | WP-08 | 6 | 6B | done | 1 | a32eb33 | 8 tests failed first; mod is private in lib.rs |
 | WP-09 | 6 | 6C | done | 1 | b306827 | 106 daemon tests; red first; hook returns 204 |
-| WP-10 | 6 | 6D | verified | 1 | 69f6767 | App fetchers no-op activity; new state words need en.ts entries (WP-11) |
-| WP-11 | 6 | 6E | verified | 1 | 329656f | data-pose is now the pose name; en.ts gets Editing/Reading/Running |
-| WP-12 | 7 | 7A | pending | 0 | | |
+| WP-10 | 6 | 6D | done | 1 | 69f6767 | App fetchers no-op activity; new state words need en.ts entries (WP-11) |
+| WP-11 | 6 | 6E | done | 1 | 329656f | data-pose is now the pose name; en.ts gets Editing/Reading/Running |
+| WP-12 | 7 | 7A | verified | 1 | (next) | 8 tests red first; new palette key y; spots in module-level map |
 | WP-13 | 8 | 8A | pending | 0 | | |
 | WP-14 | 9 | 9A | pending | 0 | | |
 | WP-15 | 9 | 9B | pending | 0 | | |
 | WP-03F | 3 | fix | done | 1 | af94ab7 | arch HIGH --pg-w collision + MEDIUM theme/paths/poses.ts/scale |
 | WP-09F | 6 | fix | done | 1 | 15d97b9 | AskUserQuestion, no PreToolUse raw log, helper cap, ghost helpers, WebFetch userinfo |
-| WP-05F | 5 | fix | verified | 1 | (next) | hide-on-close only for main; payload validation; in-flight guard |
+| WP-05F | 5 | fix | done | 1 | 8c08ade | hide-on-close only for main; payload validation; in-flight guard |
 
 ## Reviews
 

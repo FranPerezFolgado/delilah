@@ -258,7 +258,7 @@
 
 **Independent Test**: have an agent launch two helpers of different roles in parallel. Two small characters with different looks appear around its desk, animate by their own actions, and fade out as they end.
 
-- [ ] T036 [P] [US4] Write failing tests in `app/src/playground/layout.test.ts`:
+- [X] T036 [P] [US4] Write failing tests in `app/src/playground/layout.test.ts`:
   - **`roleLook(role)`**:
     - `code-researcher`, `Explore` and `doc-searcher` → `researcher`;
     - `implementer` → `implementer`;
@@ -266,13 +266,13 @@
     - `foo` → `{ look: "generic", label: "foo" }`.
   - **`visibleHelpers(helpers)`**: 6 helpers → the first 4 by `since`, plus `rest` with the other 2.
   - **`accessibleName`** appends the helpers ("2 ayudantes: code-researcher leyendo, implementer editando").
-- [ ] T037 [US4] Implement `roleLook`, `visibleHelpers` and the `accessibleName` extension in `app/src/playground/layout.ts` (T036).
-- [ ] T038 [US4] Draw the role props in `app/src/playground/sprites.ts` (magnifying glass, hard hat, glasses, generic badge), each a small overlay map on the 16×16 grid, and add them to `CREDITS.md`.
-- [ ] T039 [US4] Add failing cases to `app/src/playground/PlaygroundView.test.tsx`:
+- [X] T037 [US4] Implement `roleLook`, `visibleHelpers` and the `accessibleName` extension in `app/src/playground/layout.ts` (T036).
+- [X] T038 [US4] Draw the role props in `app/src/playground/sprites.ts` (magnifying glass, hard hat, glasses, generic badge), each a small overlay map on the 16×16 grid, and add them to `CREDITS.md`.
+- [X] T039 [US4] Add failing cases to `app/src/playground/PlaygroundView.test.tsx`:
   - a desk with 2 helpers renders 2 `.helper` elements, each with `data-look` and `data-pose` from its own action, at semicircle spots 0 and 1;
   - with 6 helpers, 4 render and a "+2" badge has `title` listing the other two roles;
   - when a helper is removed, the remaining ones keep their `data-spot`.
-- [ ] T040 [US4] Render the helpers in `app/src/playground/Desk.tsx`:
+- [X] T040 [US4] Render the helpers in `app/src/playground/Desk.tsx`:
   - each one is a non-interactive `<span class="helper" role="img" aria-label=…>` at 60 % scale, with the pose and the role prop;
   - spots are kept stable with a small `assignSlots` per desk;
   - an exit keeps a removed helper for 300 ms with `.helper--leaving`.

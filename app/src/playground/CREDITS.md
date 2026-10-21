@@ -10,3 +10,4 @@ source.
 | Character poses (arriving, thinking, waiting, paused) | Delilah | MIT | app/src/playground/sprites.ts (original) |
 | Action poses (typing, reading, terminal, phone, busy) | Delilah | MIT | app/src/playground/sprites.ts (original) |
 | Desk | Delilah | MIT | app/src/playground/sprites.ts (original) |
+| Role props (magnifying glass, hard hat, glasses, badge) | Delilah | MIT | app/src/playground/sprites.ts (original) |

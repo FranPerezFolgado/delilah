@@ -1,6 +1,7 @@
-import type { Action, Activity, Project, Session, SpecSummary, Task } from "../api";
-import type { DeskState } from "./poses";
-import { t } from "../i18n";
+import type { Action, Activity, Helper, Project, Session, SpecSummary, Task } from "../api";
+import type { DeskState, Pose } from "./poses";
+import type { Look } from "./sprites";
+import { t, tn } from "../i18n";
 import { columnOf, type Column } from "../phases";
 
 export interface DeskModel {
@@ -53,11 +54,54 @@ const STATE_WORD: Record<DeskState, string> = {
   other: "Trabajando",
 };
 
-/** The character's accessible name: the task (or project), what it is doing and the action. */
+const LOOK_OF: Record<string, Look> = {
+  "code-researcher": "researcher",
+  Explore: "researcher",
+  "doc-searcher": "researcher",
+  implementer: "implementer",
+  "code-quality-reviewer": "reviewer",
+  "spec-compliance-reviewer": "reviewer",
+};
+
+/** How a helper looks and is called, from its role; an empty role is just "Ayudante". */
+export function roleLook(role: string): { look: Look; label: string } {
+  return { look: LOOK_OF[role] ?? "generic", label: role || t("Ayudante") };
+}
+
+const HELPER_POSE: Record<Action["kind"], Pose> = { edit: "typing", read: "reading", run: "terminal", delegate: "phone", other: "busy" };
+
+/** A helper's pose, from its action (thinking without one). */
+export const helperPose = (h: Helper): Pose => (h.action ? HELPER_POSE[h.action.kind] : "thinking");
+
+const HELPER_WORD: Record<Action["kind"], string> = {
+  edit: "Editando",
+  read: "Leyendo",
+  run: "Ejecutando",
+  delegate: "Supervisando",
+  other: "Trabajando",
+};
+
+export const MAX_HELPERS = 4;
+
+/** The helpers drawn around a desk (the oldest by `since`) and the rest, shown as "+n". */
+export function visibleHelpers(helpers: Helper[]): { shown: Helper[]; rest: Helper[] } {
+  const sorted = [...helpers].sort((a, b) => a.since.localeCompare(b.since));
+  return { shown: sorted.slice(0, MAX_HELPERS), rest: sorted.slice(MAX_HELPERS) };
+}
+
+/** "code-researcher leyendo": a helper's role and what it is doing. */
+export const helperName = (h: Helper): string =>
+  `${roleLook(h.role).label} ${t(h.action ? HELPER_WORD[h.action.kind] : "Pensando").toLowerCase()}`;
+
+/** The character's accessible name: the task (or project), what it is doing, the action and the helpers. */
 export function accessibleName(desk: DeskModel, activity?: Activity): string {
   const state = deskState(desk.session, activity);
   const cap = state === "waiting" ? null : caption(activity?.action);
-  return `${desk.key}, ${t(STATE_WORD[state])}${cap ? `, ${cap}` : ""}`;
+  const helpers = activity?.helpers ?? [];
+  const extra = helpers.length
+    ? `, ${tn(helpers.length, "{n} ayudante", "{n} ayudantes")}: ${[...helpers].sort((a, b) => a.since.localeCompare(b.since)).map(helperName).join(", ")}`
+    : "";
+  return `${desk.key}, ${t(STATE_WORD[state])}${cap ? `, ${cap}` : ""}${extra}`;
 }
 
 /** Slot maps per project (session id -> slot) of `areas`, to pass back to `groupByProject`. */

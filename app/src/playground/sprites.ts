@@ -374,4 +374,95 @@ export const DESK: string[][] = [
 ];
 
 /** Every letter a sprite may use; each is a `--pg-<key>` colour in playground.css. */
-export const PALETTE_KEYS = ["k", "s", "h", "c", "d", "b", "m", "l", "w", "z"];
+export const PALETTE_KEYS = ["k", "s", "h", "c", "d", "b", "m", "l", "w", "z", "y"];
+
+/** What a helper's props say about its role. */
+export type Look = "researcher" | "implementer" | "reviewer" | "generic";
+
+/** Role props, 16x16 overlays drawn over a helper's pose (y is the hard hat and badge yellow). */
+export const ROLE_PROPS: Record<Look, string[]> = {
+  // magnifying glass held at the side
+  researcher: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "............kkk.",
+    "...........kwwwk",
+    "...........kwwwk",
+    "............kkk.",
+    "...........k....",
+    "..........k.....",
+    "................",
+  ],
+  // hard hat
+  implementer: [
+    "................",
+    ".....yyyyyy.....",
+    "....yyyyyyyy....",
+    "....kkkkkkkk....",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+  ],
+  // glasses
+  reviewer: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".....kkk.kkk....",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+  ],
+  // badge on the chest
+  generic: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".....kkkk.......",
+    ".....kyyk.......",
+    ".....kkkk.......",
+    "................",
+    "................",
+    "................",
+  ],
+};
+
+/** The overlays as single-frame sprites, stable references for the Sprite cache. */
+export const ROLE_PROP_FRAMES: Record<Look, string[][]> = {
+  researcher: [ROLE_PROPS.researcher],
+  implementer: [ROLE_PROPS.implementer],
+  reviewer: [ROLE_PROPS.reviewer],
+  generic: [ROLE_PROPS.generic],
+};

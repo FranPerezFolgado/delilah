@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import type { Action, Activity, Session } from "../api";
+import type { Action, Activity, Helper, Session } from "../api";
 import type { DeskModel, ProjectArea } from "./layout";
 import { t } from "../i18n";
 import { openPlaygroundWindow } from "../platform";
@@ -174,5 +174,47 @@ describe("PlaygroundView", () => {
     ]);
     const { container } = render(<PlaygroundView onOpen={() => {}} />);
     expect(container.querySelector(".pg-caption")).toBeNull();
+  });
+});
+
+describe("helpers around a desk", () => {
+  const h = (id: string, role: string, n: number, kind: Action["kind"] | null = null): Helper => ({
+    id,
+    role,
+    since: `2026-01-01T00:00:0${n}Z`,
+    action: kind && { id: "a" + id, kind, tool: "T", target: null, background: false, since: "" },
+  });
+  const withHelpers = (helpers: Helper[]) =>
+    show([{ project: "web", desks: [desk("W-1", 0, "working", { activity: { action: null, helpers } })] }]);
+  const live = (c: HTMLElement) => [...c.querySelectorAll(".pg-helper:not(.pg-helper--leaving)")];
+
+  it("renders each helper with look, pose and spot", () => {
+    withHelpers([h("a", "code-researcher", 1, "read"), h("b", "implementer", 2)]);
+    const { container } = render(<PlaygroundView onOpen={() => {}} />);
+    const hs = live(container);
+    expect(hs).toHaveLength(2);
+    expect(hs.map((e) => e.getAttribute("data-look"))).toEqual(["researcher", "implementer"]);
+    expect(hs.map((e) => e.getAttribute("data-pose"))).toEqual(["reading", "thinking"]);
+    expect(hs.map((e) => e.getAttribute("data-spot"))).toEqual(["0", "1"]);
+    expect(hs[0].getAttribute("role")).toBe("img");
+  });
+
+  it("shows 4 and a +2 badge titled with the other roles", () => {
+    withHelpers(["r1", "r2", "r3", "r4", "r5", "r6"].map((r, i) => h(r, r, i)));
+    const { container } = render(<PlaygroundView onOpen={() => {}} />);
+    expect(live(container)).toHaveLength(4);
+    const more = container.querySelector(".pg-helper-more")!;
+    expect(more.textContent).toBe("+2");
+    expect(more.getAttribute("title")).toBe("r5, r6");
+  });
+
+  it("keeps the spots of the remaining helpers when one is removed", () => {
+    withHelpers([h("a", "x", 1), h("b", "y", 2), h("c", "z", 3)]);
+    const view = render(<PlaygroundView onOpen={() => {}} />);
+    withHelpers([h("a", "x", 1), h("c", "z", 3)]);
+    view.rerender(<PlaygroundView onOpen={() => {}} />);
+    const spots = live(view.container).map((e) => e.getAttribute("data-spot"));
+    expect(spots).toEqual(["0", "2"]);
+    expect(view.container.querySelectorAll(".pg-helper--leaving")).toHaveLength(1);
   });
 });
