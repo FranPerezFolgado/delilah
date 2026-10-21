@@ -19,7 +19,7 @@ use self::notices::{Checked, record};
 use crate::events::Topic;
 use crate::gh::{GhError, PrRef, classify, parse_pr_url};
 use crate::phases;
-use crate::pr_types::PrState;
+use crate::pr_types::{PrState, Snapshot};
 use crate::state::AppState;
 use crate::store::StoreError;
 use crate::store_prs::{NewPr, PrRow};
@@ -332,19 +332,31 @@ pub(crate) async fn link_by_url(
     linked_by: &str,
 ) -> Result<PrRow, LinkError> {
     let pr = parse_pr_url(url).ok_or(LinkError::NotAPr)?;
-    let url = pr.url();
-    let (_, snapshot) = app.gh.pr_view_url(&url).await.map_err(LinkError::Gh)?;
+    let (_, snapshot) = app.gh.pr_view_url(&pr.url()).await.map_err(LinkError::Gh)?;
     let repo = repo_of(app, key, &pr).await?;
+    link_known(app, key, repo, pr, &snapshot, linked_by).await
+}
+
+/// Links `pr`, already read as `snapshot` and known to belong to `repo` of the task's
+/// workspace, and moves the task to review.
+pub(crate) async fn link_known(
+    app: &AppState,
+    key: &TaskKey,
+    repo: String,
+    pr: PrRef,
+    snapshot: &Snapshot,
+    linked_by: &str,
+) -> Result<PrRow, LinkError> {
     let new = NewPr {
         repo,
+        url: pr.url(),
         host: pr.host,
         owner_name: pr.owner_name,
         number: pr.number,
-        url,
         linked_by: linked_by.to_string(),
     };
     let row = app.store.link_pr(key, &new).await?;
-    let checked = record(app, &row, &snapshot).await?;
+    let checked = record(app, &row, snapshot).await?;
     phases::advance(app, key, SpecPhase::Review).await;
     app.emit(Topic::Prs);
     if checked.notices_changed {
