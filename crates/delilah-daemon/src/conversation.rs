@@ -6,18 +6,21 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use delilah_agents::claude::Signal;
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
 
 use crate::api::ApiError;
-use crate::asks::Ask;
 use crate::events::Topic;
+use crate::proposals::Proposal;
 use crate::sessions::{Live, LiveState};
 use crate::state::AppState;
 use crate::store_sessions::EntryKind;
 
+/// Longest message taken from the view, in characters.
+const MAX_MESSAGE_CHARS: usize = 16_000;
+
 /// The conversation's session record, or the 404 / 409 of the contract.
-async fn conversation_of(app: &AppState, id: &str) -> Result<(), ApiError> {
+async fn ensure_conversation(app: &AppState, id: &str) -> Result<(), ApiError> {
     let record = app
         .store
         .session(id)
@@ -34,7 +37,7 @@ pub async fn get(
     State(app): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    conversation_of(&app, &id).await?;
+    ensure_conversation(&app, &id).await?;
     let entries = app.store.entries(&id).await?;
     let live = app.sessions.get(&id);
     Ok(Json(json!({
@@ -56,10 +59,17 @@ pub async fn send(
     Path(id): Path<String>,
     Json(message): Json<Message>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    conversation_of(&app, &id).await?;
-    let text = message.text.trim();
+    ensure_conversation(&app, &id).await?;
+    // What reaches the terminal is what is recorded: no control characters in it.
+    let text = crate::actions::sanitize_prompt(message.text.trim());
+    let text = text.trim();
     if text.is_empty() {
         return Err(ApiError::bad_request("the message is empty"));
+    }
+    if text.chars().count() > MAX_MESSAGE_CHARS {
+        return Err(ApiError::bad_request(format!(
+            "the message is longer than {MAX_MESSAGE_CHARS} characters"
+        )));
     }
     let live = app
         .sessions
@@ -80,6 +90,10 @@ pub async fn send(
         crate::actions::type_prompt(&live, text).await?;
         let _ = app.store.set_attention(&id, None).await;
         app.emit(Topic::Inbox);
+    } else if live.state() != LiveState::Working {
+        // The turn ended between reading the state and recording the entry: its Stop
+        // hook has already flushed the queue without this message, so flush again.
+        flush_queue(&app, &live).await;
     }
     app.emit(Topic::Conversations);
     Ok((StatusCode::CREATED, Json(json!(entry))))
@@ -90,7 +104,7 @@ pub async fn remove(
     State(app): State<AppState>,
     Path((id, entry)): Path<(String, i64)>,
 ) -> Result<StatusCode, ApiError> {
-    conversation_of(&app, &id).await?;
+    ensure_conversation(&app, &id).await?;
     if !app.store.delete_queued_entry(&id, entry).await? {
         return Err(ApiError::conflict("only a queued message can be removed"));
     }
@@ -105,6 +119,7 @@ pub async fn stop(
     State(app): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    ensure_conversation(&app, &id).await?;
     let live = app
         .sessions
         .get(&id)
@@ -113,14 +128,12 @@ pub async fn stop(
         .write(b"\x1b")
         .map_err(|e| ApiError::internal(e.to_string()))?;
     live.set_state(LiveState::Waiting);
-    live.set_activity(None);
-    live.set_needs_terminal(false);
+    live.reset_turn_state();
     for ask in app.asks.release_session(&id) {
-        card_update(&app, &id, &ask, json!({ "outcome": "withdrawn" })).await;
+        card_outcome(&app, &id, &ask, CardOutcome::Withdrawn).await;
     }
     let _ = app.store.set_attention(&id, None).await;
     flush_queue(&app, &live).await;
-    app.emit(Topic::Conversations);
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -177,38 +190,42 @@ pub async fn on_hook(
     signal: Signal,
     hook: &Value,
 ) {
+    // The live state emits by itself when it changes; entries recorded emit here.
     match signal {
         Signal::PromptSubmitted => {
             if let Some(text) = hook["prompt"]
                 .as_str()
                 .map(str::trim)
                 .filter(|t| !t.is_empty())
-                && let Err(e) = prompt_submitted(app, session, text).await
             {
-                tracing::warn!(session, "cannot record the prompt: {e}");
+                if let Err(e) = prompt_submitted(app, session, text).await {
+                    tracing::warn!(session, "cannot record the prompt: {e}");
+                }
+                app.emit(Topic::Conversations);
             }
             if let Some(live) = live {
-                live.set_activity(None);
-                live.set_needs_terminal(false);
+                live.reset_turn_state();
             }
         }
         Signal::Working => {
             if let Some(live) = live {
-                live.set_activity(activity_of(hook));
-                live.set_needs_terminal(false);
+                let activity = activity_of(hook);
+                live.update_convo(|c| {
+                    c.activity = activity;
+                    c.needs_terminal = false;
+                });
             }
         }
         Signal::NeedsUser => {
             if hook["notification_type"].as_str() == Some("permission_prompt")
                 && let Some(live) = live
             {
-                live.set_needs_terminal(true);
+                live.update_convo(|c| c.needs_terminal = true);
             }
         }
         Signal::TurnEnded | Signal::TurnFailed | Signal::SessionEnded => {
             if let Some(live) = live {
-                live.set_activity(None);
-                live.set_needs_terminal(false);
+                live.reset_turn_state();
             }
             if signal == Signal::TurnEnded {
                 if let Some(text) = hook["last_assistant_message"]
@@ -220,15 +237,15 @@ pub async fn on_hook(
                     if let Err(e) = app.store.add_entry(session, EntryKind::Claude, &body).await {
                         tracing::warn!(session, "cannot record Claude's message: {e}");
                     }
+                    app.emit(Topic::Conversations);
                 }
                 if let Some(live) = live {
                     flush_queue(app, live).await;
                 }
             }
         }
-        Signal::SessionStarted | Signal::Other => return,
+        Signal::SessionStarted | Signal::Other => {}
     }
-    app.emit(Topic::Conversations);
 }
 
 /// A prompt reached Claude: if it is what the view sent (alone or the queue joined),
@@ -270,49 +287,112 @@ async fn prompt_submitted(
     Ok(())
 }
 
+/// How a card stands: waiting for your pick, picked, answered in the terminal, or
+/// withdrawn because the turn was stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardOutcome {
+    Pending,
+    Answered,
+    Terminal,
+    Withdrawn,
+}
+
+/// The body of a card entry (see data-model.md).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Card {
+    pub ask: String,
+    pub questions: Value,
+    pub proposal: Option<Proposal>,
+    pub outcome: CardOutcome,
+    pub answer: Option<Map<String, Value>>,
+    pub task: Option<String>,
+    pub error: Option<String>,
+}
+
+impl Card {
+    pub fn pending(ask: &str, questions: &Value, proposal: Option<Proposal>) -> Self {
+        Self {
+            ask: ask.to_string(),
+            questions: questions.clone(),
+            proposal,
+            outcome: CardOutcome::Pending,
+            answer: None,
+            task: None,
+            error: None,
+        }
+    }
+}
+
+/// Whether the session is an idea conversation: its live state knows; a session that
+/// is not running is read from its record.
+pub async fn is_conversation(app: &AppState, session: &str) -> bool {
+    match app.sessions.get(session) {
+        Some(live) => live.is_conversation(),
+        None => matches!(app.store.session(session).await, Ok(Some(r)) if r.conversation),
+    }
+}
+
 /// A card of a conversation's session enters the history as pending.
-pub async fn card_added(app: &AppState, session: &str, ask: &Ask) {
+pub async fn card_added(app: &AppState, session: &str, card: &Card) {
     if !is_conversation(app, session).await {
         return;
     }
-    let body = json!({
-        "ask": ask.id,
-        "questions": ask.questions,
-        "proposal": ask.proposal,
-        "outcome": "pending",
-        "answer": null,
-        "task": null,
-        "error": null,
-    });
+    let body = match serde_json::to_value(card) {
+        Ok(body) => body,
+        Err(e) => {
+            tracing::warn!(session, "cannot record the card: {e}");
+            return;
+        }
+    };
     if let Err(e) = app.store.add_entry(session, EntryKind::Card, &body).await {
         tracing::warn!(session, "cannot record the card: {e}");
     }
     app.emit(Topic::Conversations);
 }
 
-/// Merges `patch` into the card of `ask`, if it is in a conversation's history.
-pub async fn card_update(app: &AppState, session: &str, ask: &str, patch: Value) {
-    let Ok(entries) = app.store.entries(session).await else {
-        return;
-    };
-    let Some(card) = entries
-        .into_iter()
-        .find(|e| e.kind == EntryKind::Card && e.body["ask"] == ask)
-    else {
-        return;
-    };
-    let mut body = card.body;
-    if let (Some(body), Some(patch)) = (body.as_object_mut(), patch.as_object()) {
-        body.extend(patch.clone());
-    }
-    if let Err(e) = app.store.update_entry(card.id, &body).await {
-        tracing::warn!(session, "cannot update the card: {e}");
-    }
-    app.emit(Topic::Conversations);
+/// The card of `ask` ended without an answer from Delilah.
+pub async fn card_outcome(app: &AppState, session: &str, ask: &str, outcome: CardOutcome) {
+    card_update(app, session, ask, |card| card.outcome = outcome).await;
 }
 
-async fn is_conversation(app: &AppState, session: &str) -> bool {
-    matches!(app.store.session(session).await, Ok(Some(r)) if r.conversation)
+/// The card of `ask` was answered; `task` / `error` tell how creating a task went.
+pub async fn card_answered(
+    app: &AppState,
+    session: &str,
+    ask: &str,
+    answer: Map<String, Value>,
+    task: Option<String>,
+    error: Option<String>,
+) {
+    card_update(app, session, ask, |card| {
+        card.outcome = CardOutcome::Answered;
+        card.answer = Some(answer);
+        card.task = task;
+        card.error = error;
+    })
+    .await;
+}
+
+/// Changes the card of `ask`, if it is in a conversation's history.
+async fn card_update(app: &AppState, session: &str, ask: &str, change: impl FnOnce(&mut Card)) {
+    let Ok(Some(entry)) = app.store.card_entry(session, ask).await else {
+        return;
+    };
+    let Ok(mut card) = serde_json::from_value::<Card>(entry.body) else {
+        tracing::warn!(session, "a card in the history is malformed");
+        return;
+    };
+    change(&mut card);
+    match serde_json::to_value(&card) {
+        Ok(body) => {
+            if let Err(e) = app.store.update_entry(entry.id, &body).await {
+                tracing::warn!(session, "cannot update the card: {e}");
+            }
+        }
+        Err(e) => tracing::warn!(session, "cannot update the card: {e}"),
+    }
+    app.emit(Topic::Conversations);
 }
 
 #[cfg(test)]
@@ -392,6 +472,7 @@ mod tests {
             let live = app
                 .sessions
                 .insert("conv", "@web", SessionKind::Claude, false, pty);
+            live.set_conversation(true);
             // The file exists once `stty` has run.
             for _ in 0..100 {
                 if typed.exists() {
@@ -465,7 +546,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_conversation_of_an_unknown_or_plain_session_is_refused() {
+    async fn the_ensure_conversation_an_unknown_or_plain_session_is_refused() {
         let f = Fixture::new().await;
         f.app
             .store
@@ -619,7 +700,57 @@ mod tests {
         assert_eq!(f.typed(1).await, "\x1b");
         assert_eq!(f.live.state(), LiveState::Waiting);
         let (status, _) = f.post("/api/v1/sessions/other/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn stop_refuses_a_session_that_is_not_a_conversation() {
+        let f = Fixture::new().await;
+        f.app
+            .store
+            .create_session(&record("plain", false))
+            .await
+            .unwrap();
+        let (status, _) = f.post("/api/v1/sessions/plain/stop", json!({})).await;
         assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn messages_lose_control_characters_and_are_capped() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Waiting);
+        assert_eq!(f.send("\x1b\x03\x04").await.0, StatusCode::BAD_REQUEST);
+        let long = "x".repeat(16_001);
+        assert_eq!(f.send(&long).await.0, StatusCode::BAD_REQUEST);
+        let (status, entry) = f.send("a\x1b[200~b").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(entry["text"], "a[200~b");
+        assert_eq!(f.typed(8).await, "a[200~b\r");
+    }
+
+    #[tokio::test]
+    async fn another_sessions_queued_message_cannot_be_removed() {
+        let f = Fixture::new().await;
+        f.app
+            .store
+            .create_session(&record("other", true))
+            .await
+            .unwrap();
+        let theirs = f
+            .app
+            .store
+            .add_entry(
+                "other",
+                EntryKind::User,
+                &json!({ "text": "x", "state": "queued", "from": "view" }),
+            )
+            .await
+            .unwrap();
+        let req = Request::delete(format!("/api/v1/sessions/conv/messages/{}", theirs.id))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(f.call(req).await.0, StatusCode::CONFLICT);
+        assert_eq!(f.app.store.entries("other").await.unwrap().len(), 1);
     }
 
     #[tokio::test]

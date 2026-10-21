@@ -58,6 +58,8 @@ done or pending is in [status.md](status.md).
 | `terminal.rs` | WebSocket terminal: scrollback first, then live bytes; text frames for `resize`. |
 | `hooks.rs` | `/hooks/claude` and `/hooks/claude/statusline`. Each hook is classified into a `Signal`, which sets the session's live state, the inbox attention, the task transition and the phase. |
 | `asks.rs` | AskUserQuestion: the PreToolUse hook posts here and waits up to a day. The answer goes back as `updatedInput.answers`. |
+| `proposals.rs` | A card headed `Nueva tarea` in a project's conversation is a task proposal: answering `Crear` creates the backlog task (brief as notes, `CreatedFromConversation` event) before Claude is told. Owns the protocol strings. Called by `asks::answer` through `on_answer`. |
+| `conversation.rs` | An idea conversation's history (`conversation_entries`): your messages (sent now, or queued while Claude works and flushed when its turn ends), Claude's closing messages, and cards (`Card`, outcome pending / answered / terminal / withdrawn). Endpoints `GET /sessions/{id}/conversation`, `POST /sessions/{id}/messages`, `DELETE /sessions/{id}/messages/{entry}`, `POST /sessions/{id}/stop`. The live activity and "needs the terminal" flag sit on `Live` (`ConvoState`) and emit `conversations` once per change. |
 | `inbox.rs` | `GET /api/v1/inbox` (everything that waits on the user) and replies typed into a session. |
 | `phases.rs` | The phase: set by the user, moved forward by spec files and agent signals, and review hints. |
 | `specs.rs` | A watcher (every 5 s) that reads each task's `specs/<feature>/` and records phase changes. |

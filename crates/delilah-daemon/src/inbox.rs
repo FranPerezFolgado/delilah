@@ -161,7 +161,7 @@ pub struct AskView {
     pub id: String,
     pub questions: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub proposal: Option<crate::asks::Proposal>,
+    pub proposal: Option<crate::proposals::Proposal>,
 }
 
 /// `GET /api/v1/inbox`: most urgent first (what blocks an agent), newest first within.

@@ -1,0 +1,371 @@
+//! A task Claude proposes in an idea conversation: a card of a project's session with
+//! one question headed `Nueva tarea` whose `Crear` option carries the brief. Answering
+//! `Crear` creates the backlog task before Claude hears about it. The protocol strings
+//! are the contract with the idea prompt; they live here and nowhere else.
+
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+use crate::api::{ApiError, NewTask};
+use crate::asks::Ask;
+use crate::events::Topic;
+use crate::state::AppState;
+
+/// Header of the question that proposes a task.
+pub const NEW_TASK_HEADER: &str = "Nueva tarea";
+/// The options of a proposal; only `Crear` carries a brief (as its preview).
+pub const CREATE: &str = "Crear";
+pub const CHANGE: &str = "Cambiar algo";
+pub const DISCARD: &str = "Descartar";
+/// Starts the notes of a task created from a proposal.
+pub const NOTES_MARK: &str = "> Brief escrito por Claude en la conversación";
+
+/// What Claude is told after `Crear` worked.
+pub fn created_text(key: &str) -> String {
+    format!("{CREATE} — creada {key} en el backlog")
+}
+
+/// What Claude is told after `Crear` failed.
+pub fn failed_text(error: &str) -> String {
+    format!("{CREATE} — no se pudo crear: {error}")
+}
+
+/// Longest title and brief taken from a card; beyond it the card stays a plain one.
+const MAX_TITLE_CHARS: usize = 200;
+const MAX_BRIEF_BYTES: usize = 64 * 1024;
+
+/// The title and brief of a task Claude proposes in an idea conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Proposal {
+    pub title: String,
+    pub brief: String,
+}
+
+/// The reply of an answer: the task created, or why not.
+#[derive(Debug, Default, Serialize)]
+pub struct AnswerReply {
+    pub task: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A proposal is a card of a project's session (owner `@project`) with exactly one
+/// question headed `Nueva tarea`, whose text is the title (one short line) and whose
+/// `Crear` option carries the brief as its preview.
+pub fn proposal_of(owner: &str, questions: &Value) -> Option<Proposal> {
+    crate::store_sessions::project_of(owner)?;
+    let [question] = questions.as_array()?.as_slice() else {
+        return None;
+    };
+    if question["header"].as_str() != Some(NEW_TASK_HEADER) {
+        return None;
+    }
+    let title = question["question"].as_str()?;
+    let brief = question["options"]
+        .as_array()?
+        .iter()
+        .find(|o| o["label"].as_str() == Some(CREATE))?["preview"]
+        .as_str()?;
+    if title.contains(['\n', '\r'])
+        || title.chars().count() > MAX_TITLE_CHARS
+        || brief.len() > MAX_BRIEF_BYTES
+    {
+        return None;
+    }
+    Some(Proposal {
+        title: title.to_string(),
+        brief: brief.to_string(),
+    })
+}
+
+/// The proposal of a card posted by a hook, only when the session it names exists and
+/// is owned by the same project: a hook cannot claim a conversation that is not its own.
+pub async fn for_hook(
+    app: &AppState,
+    owner: &str,
+    session: Option<&str>,
+    questions: &Value,
+) -> Option<Proposal> {
+    let record = app.store.session(session?).await.ok()??;
+    if record.task != owner {
+        return None;
+    }
+    proposal_of(owner, questions)
+}
+
+/// Runs the proposal side of an answer: on `Crear` creates the task and replaces the
+/// answer Claude gets with what happened. Anything else is left as it is.
+pub async fn on_answer(
+    app: &AppState,
+    ask: &Ask,
+    answers: &mut Map<String, Value>,
+) -> AnswerReply {
+    let mut reply = AnswerReply::default();
+    let Some(proposal) = &ask.proposal else {
+        return reply;
+    };
+    let question = proposal.title.as_str();
+    if answers.get(question).and_then(Value::as_str).map(str::trim) != Some(CREATE) {
+        return reply;
+    }
+    let text = match create_from_proposal(app, ask, proposal).await {
+        Ok(key) => {
+            app.emit(Topic::Tasks);
+            let text = created_text(&key);
+            reply.task = Some(key);
+            text
+        }
+        Err(e) => {
+            let text = failed_text(&e.message);
+            reply.error = Some(e.message);
+            text
+        }
+    };
+    answers.insert(question.to_string(), Value::String(text));
+    reply
+}
+
+/// Creates the proposal's free task in the conversation's project, with the brief as
+/// its notes, and records where it came from.
+async fn create_from_proposal(
+    app: &AppState,
+    ask: &Ask,
+    proposal: &Proposal,
+) -> Result<String, ApiError> {
+    let project = crate::store_sessions::project_of(&ask.task)
+        .ok_or_else(|| ApiError::bad_request("only a project's conversation can create tasks"))?;
+    // The origin event is part of the feature: without the conversation, no task.
+    let record = match &ask.session {
+        Some(id) => app.store.session(id).await?,
+        None => None,
+    }
+    .ok_or_else(|| ApiError::not_found("la conversación ya no existe"))?;
+    let now = Utc::now();
+    let notes = format!(
+        "{NOTES_MARK} «{}», {}.\n\n{}",
+        record.label,
+        now.format("%Y-%m-%d"),
+        proposal.brief
+    );
+    let new = NewTask {
+        key: String::new(),
+        title: proposal.title.clone(),
+        project: Some(project.to_string()),
+        notes: Some(notes),
+        free: true,
+        in_checkout: None,
+        workflow: None,
+    };
+    let task = crate::api::build_task(app, new).await?;
+    app.store
+        .create_task_from_conversation(&task, &record.id, &record.label, now)
+        .await?;
+    Ok(task.key.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use delilah_core::{Event, TaskKey};
+    use serde_json::json;
+
+    use super::*;
+    use crate::asks::tests::{
+        CONV, TITLE, app, call, pick, post, project_and_conversation, proposal_card, waiting_ask,
+    };
+
+    #[tokio::test]
+    async fn a_crear_answer_on_a_project_proposal_creates_a_backlog_task_with_the_brief() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card(TITLE, "Nueva tarea", Some("## Idea\nreintentar"));
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, post(CONV, card)).await }
+        });
+        let item = waiting_ask(&app).await;
+        assert_eq!(item["ask"]["proposal"]["title"], TITLE);
+        assert_eq!(item["ask"]["proposal"]["brief"], "## Idea\nreintentar");
+        assert_eq!(
+            item["ask"]["questions"][0]["options"][0]["preview"],
+            "## Idea\nreintentar"
+        );
+        let id = item["ask"]["id"].as_str().unwrap();
+        let (status, reply) = call(
+            &app,
+            post(
+                &format!("/api/v1/asks/{id}/answer"),
+                json!({ "answers": { TITLE: "Crear" } }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let key = reply["task"].as_str().unwrap().to_string();
+        assert!(key.starts_with("LIBRE-"));
+
+        let (_, out) = hook.await.unwrap();
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
+            format!("Crear — creada {key} en el backlog")
+        );
+        let task = app
+            .store
+            .get_task(&TaskKey::new(&key))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.title, TITLE);
+        assert_eq!(task.project.as_deref(), Some("web"));
+        assert_eq!(task.status, delilah_core::TaskStatus::Queued);
+        let notes = task.notes.unwrap();
+        assert!(notes.starts_with("> Brief escrito por Claude en la conversación «Idea»,"));
+        assert!(notes.ends_with("\n\n## Idea\nreintentar"));
+        let events = app.store.events(&task.key).await.unwrap();
+        assert!(events.iter().any(|e| matches!(&e.event,
+            Event::CreatedFromConversation { session, label } if session == "conv" && label == "Idea")));
+    }
+
+    #[tokio::test]
+    async fn a_task_sessions_card_with_the_same_shape_creates_nothing() {
+        let app = app().await;
+        let card = proposal_card(TITLE, "Nueva tarea", Some("brief"));
+        let (reply, out) = pick(&app, "/hooks/claude/ask?task=PROJ-1", card, TITLE, "Crear").await;
+        assert_eq!(reply, json!({ "task": null }));
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
+            "Crear"
+        );
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_cambiar_answer_creates_nothing() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card(TITLE, "Nueva tarea", Some("brief"));
+        let (reply, out) = pick(&app, CONV, card, TITLE, "Cambiar algo").await;
+        assert_eq!(reply, json!({ "task": null }));
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
+            "Cambiar algo"
+        );
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_second_answer_cannot_create_a_second_task() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card(TITLE, "Nueva tarea", Some("brief"));
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, post(CONV, card)).await }
+        });
+        let id = waiting_ask(&app).await["ask"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let uri = format!("/api/v1/asks/{id}/answer");
+        let body = json!({ "answers": { TITLE: "Crear" } });
+        let (first, _) = call(&app, post(&uri, body.clone())).await;
+        let (second, _) = call(&app, post(&uri, body)).await;
+        assert_eq!(first, StatusCode::OK);
+        assert_eq!(second, StatusCode::NOT_FOUND);
+        hook.await.unwrap();
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_empty_title_answers_with_the_reason_and_creates_nothing() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card(" ", "Nueva tarea", Some("brief"));
+        let (reply, out) = pick(&app, CONV, card, " ", "Crear").await;
+        assert_eq!(reply["task"], Value::Null);
+        let error = reply["error"].as_str().unwrap();
+        assert!(!error.is_empty());
+        let answer = out["hookSpecificOutput"]["updatedInput"]["answers"][" "]
+            .as_str()
+            .unwrap();
+        assert!(answer.starts_with("Crear — no se pudo crear: "));
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_card_without_preview_or_with_two_questions_is_not_a_proposal() {
+        let qs = |v: Value| v["tool_input"]["questions"].clone();
+        let good = qs(proposal_card(TITLE, "Nueva tarea", Some("b")));
+        assert!(proposal_of("@web", &good).is_some());
+        assert!(proposal_of("PROJ-1", &good).is_none());
+        let no_preview = qs(proposal_card(TITLE, "Nueva tarea", None));
+        assert!(proposal_of("@web", &no_preview).is_none());
+        let other_header = qs(proposal_card(TITLE, "Otra", Some("b")));
+        assert!(proposal_of("@web", &other_header).is_none());
+        let first = good[0].clone();
+        assert!(proposal_of("@web", &json!([first.clone(), first])).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_hook_cannot_claim_a_session_it_does_not_own() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let qs = proposal_card(TITLE, NEW_TASK_HEADER, Some("b"))["tool_input"]["questions"].clone();
+        // The conversation belongs to @web.
+        assert!(for_hook(&app, "@web", Some("conv"), &qs).await.is_some());
+        assert!(for_hook(&app, "@other", Some("conv"), &qs).await.is_none());
+        assert!(for_hook(&app, "@web", Some("nope"), &qs).await.is_none());
+        assert!(for_hook(&app, "@web", None, &qs).await.is_none());
+
+        let card = proposal_card(TITLE, NEW_TASK_HEADER, Some("brief"));
+        let (reply, out) = pick(
+            &app,
+            "/hooks/claude/ask?task=@web&session=PROJ-1",
+            card,
+            TITLE,
+            CREATE,
+        )
+        .await;
+        assert_eq!(reply, json!({ "task": null }));
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
+            CREATE
+        );
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_oversized_or_multiline_title_or_brief_is_not_a_proposal() {
+        let qs = |title: &str, brief: &str| {
+            proposal_card(title, NEW_TASK_HEADER, Some(brief))["tool_input"]["questions"].clone()
+        };
+        assert!(proposal_of("@web", &qs(TITLE, "b")).is_some());
+        assert!(proposal_of("@web", &qs("uno\ndos", "b")).is_none());
+        assert!(proposal_of("@web", &qs(&"t".repeat(201), "b")).is_none());
+        assert!(proposal_of("@web", &qs(&"t".repeat(200), "b")).is_some());
+        assert!(proposal_of("@web", &qs(TITLE, &"b".repeat(64 * 1024 + 1))).is_none());
+    }
+
+    #[tokio::test]
+    async fn creating_without_the_conversation_is_refused() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let ask = Ask {
+            id: "a".into(),
+            task: "@web".into(),
+            session: Some("gone".into()),
+            questions: Value::Null,
+            proposal: Some(Proposal {
+                title: TITLE.into(),
+                brief: "b".into(),
+            }),
+            since: Utc::now(),
+        };
+        let mut answers = Map::new();
+        answers.insert(TITLE.into(), json!(CREATE));
+        let reply = on_answer(&app, &ask, &mut answers).await;
+        assert_eq!(reply.task, None);
+        assert_eq!(reply.error.as_deref(), Some("la conversación ya no existe"));
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+}

@@ -295,6 +295,19 @@ impl Store {
             .collect())
     }
 
+    /// The card of an ask in a conversation's history, if it is there.
+    pub async fn card_entry(&self, session: &str, ask: &str) -> Result<Option<Entry>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, at, kind, body FROM conversation_entries
+             WHERE session_id = ? AND kind = 'card' AND json_extract(body, '$.ask') = ?",
+        )
+        .bind(session)
+        .bind(ask)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(entry_from_row).transpose()
+    }
+
     pub async fn update_entry(&self, id: i64, body: &Value) -> Result<(), StoreError> {
         sqlx::query("UPDATE conversation_entries SET body = ? WHERE id = ?")
             .bind(serde_json::to_string(body)?)

@@ -16,6 +16,7 @@ pub mod logs;
 pub mod notify;
 mod owners;
 pub mod phases;
+pub mod proposals;
 mod preferences;
 mod projects;
 mod run;
