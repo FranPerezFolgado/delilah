@@ -200,7 +200,7 @@
 
 ### Daemon
 
-- [ ] T027 [P] [US3] Write failing unit tests in `crates/delilah-daemon/src/activity.rs` for `Activity::apply(event) -> bool`:
+- [X] T027 [P] [US3] Write failing unit tests in `crates/delilah-daemon/src/activity.rs` for `Activity::apply(event) -> bool`:
   - **Main agent**:
     - `ToolStarted` sets the action (true);
     - `ToolEnded` with the same id clears it (true), and with another id leaves it (false);
@@ -212,7 +212,7 @@
     - `HelperEnded` removes it, and for an unknown id returns false;
     - helpers keep their start order;
     - `clear()` returns whether anything was there.
-- [ ] T028 [US3] Implement `crates/delilah-daemon/src/activity.rs` (`Activity`, `Helper`, `apply` and `clear`, plus the serde view matching contracts/api.md) and register the module in `lib.rs`/`main.rs` (T027).
+- [X] T028 [US3] Implement `crates/delilah-daemon/src/activity.rs` (`Activity`, `Helper`, `apply` and `clear`, plus the serde view matching contracts/api.md) and register the module in `lib.rs`/`main.rs` (T027).
 - [ ] T029 [US3] Write failing router tests in `crates/delilah-daemon/src/hooks.rs` (`mod tests`; reuse the AppState and `post(state, path, body)` helpers) against a live Claude session. Insert it with the same helper the existing state tests use; read them first:
   1. post a `PreToolUse` Edit, and `GET /api/v1/activity` shows the action with `kind: "edit"` and the file name;
   2. post the matching `PostToolUse`, and the session is gone from the response;

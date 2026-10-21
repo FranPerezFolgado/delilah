@@ -1,6 +1,7 @@
 //! The always-running process: scheduler, hook server and API.
 
 mod actions;
+mod activity;
 pub mod api;
 pub mod asks;
 mod changes;
