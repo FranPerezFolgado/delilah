@@ -289,11 +289,11 @@
 
 **Independent Test**: with four running agents, screenshots in light and dark both read clearly, with no clipped labels or overlap. With reduce motion on, the characters hold still.
 
-- [ ] T041 [P] [US5] Add failing cases to `app/src/playground/PlaygroundView.test.tsx`:
+- [X] T041 [P] [US5] Add failing cases to `app/src/playground/PlaygroundView.test.tsx`:
   - with `online: false` the office has class `office--stale` and shows "Reconectando…";
   - when `document.hidden` is true (stub `visibilityState` and fire `visibilitychange`), the office has class `paused`, and the class goes away when the document is visible again.
-- [ ] T042 [US5] Implement the stale banner and the visibility pause in `app/src/playground/PlaygroundView.tsx`, and use the same component in `PlaygroundWindow.tsx`. T041 passes.
-- [ ] T043 [US5] Finish `app/src/playground/playground.css`:
+- [X] T042 [US5] Implement the stale banner and the visibility pause in `app/src/playground/PlaygroundView.tsx`, and use the same component in `PlaygroundWindow.tsx`. T041 passes.
+- [X] T043 [US5] Finish `app/src/playground/playground.css`:
   - `.office--stale` (dimmed, `animation-play-state: paused` on all descendants) and `.paused`;
   - `@media (prefers-reduced-motion: reduce)`: `animation: none` (first frame), no transitions, no pulse, and helpers that appear and go without fading;
   - dark-theme palette values;

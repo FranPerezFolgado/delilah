@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { Action, Activity, Helper, Session } from "../api";
 import type { DeskModel, ProjectArea } from "./layout";
 import { t } from "../i18n";
@@ -216,5 +216,37 @@ describe("helpers around a desk", () => {
     const spots = live(view.container).map((e) => e.getAttribute("data-spot"));
     expect(spots).toEqual(["0", "2"]);
     expect(view.container.querySelectorAll(".pg-helper--leaving")).toHaveLength(1);
+  });
+});
+
+describe("stale and hidden office", () => {
+  const setVisibility = (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => state === "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  afterEach(() => setVisibility("visible"));
+
+  it("dims the last picture under a reconnecting banner while offline", () => {
+    vi.mocked(usePlayground).mockReturnValue({ areas: [{ project: "web", desks: [desk("W-1", 0, "working")] }], online: false });
+    const { container, getByText, rerender } = render(<PlaygroundView onOpen={() => {}} />);
+    expect(container.querySelector(".pg-office")!.classList.contains("pg-office--stale")).toBe(true);
+    expect(getByText(t("Reconectando…"))).toBeTruthy();
+    expect(container.textContent).toContain("title of W-1");
+    show([{ project: "web", desks: [desk("W-1", 0, "working")] }]);
+    rerender(<PlaygroundView onOpen={() => {}} />);
+    expect(container.querySelector(".pg-office--stale")).toBeNull();
+    expect(container.textContent).not.toContain(t("Reconectando…"));
+  });
+
+  it("pauses the animations while the document is hidden", () => {
+    show([{ project: "web", desks: [desk("W-1", 0, "working")] }]);
+    const { container } = render(<PlaygroundView onOpen={() => {}} />);
+    const office = () => container.querySelector(".pg-office")!;
+    expect(office().classList.contains("pg-office--paused")).toBe(false);
+    act(() => setVisibility("hidden"));
+    expect(office().classList.contains("pg-office--paused")).toBe(true);
+    act(() => setVisibility("visible"));
+    expect(office().classList.contains("pg-office--paused")).toBe(false);
   });
 });

@@ -18,8 +18,8 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP-09 | 6 | 6C | done | 1 | b306827 | 106 daemon tests; red first; hook returns 204 |
 | WP-10 | 6 | 6D | done | 1 | 69f6767 | App fetchers no-op activity; new state words need en.ts entries (WP-11) |
 | WP-11 | 6 | 6E | done | 1 | 329656f | data-pose is now the pose name; en.ts gets Editing/Reading/Running |
-| WP-12 | 7 | 7A | verified | 1 | (next) | 8 tests red first; new palette key y; spots in module-level map |
-| WP-13 | 8 | 8A | pending | 0 | | |
+| WP-12 | 7 | 7A | verified | 1 | dce6ced | 8 tests red first; new palette key y; spots in module-level map |
+| WP-13 | 8 | 8A | verified | 1 | (next) | T044 (art pass with screenshots) left to the user: no browser in this session |
 | WP-14 | 9 | 9A | pending | 0 | | |
 | WP-15 | 9 | 9B | pending | 0 | | |
 | WP-03F | 3 | fix | done | 1 | af94ab7 | arch HIGH --pg-w collision + MEDIUM theme/paths/poses.ts/scale |
