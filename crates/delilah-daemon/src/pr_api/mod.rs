@@ -15,6 +15,7 @@ pub use self::forward::{dismiss, forward};
 pub use self::open::{open, proposal};
 use crate::api::ApiError;
 use crate::events::Topic;
+use crate::gh::{AccessProblem, classify};
 use crate::pr_loop::{self, LinkError};
 use crate::pr_types::PrSummary;
 use crate::prs;
@@ -45,17 +46,45 @@ async fn known_task(app: &AppState, key: &str) -> Result<TaskKey, ApiError> {
 }
 
 /// The login `gh` has on the host of the task's PRs: the first one's, or the first repo
-/// of its workspace when it has none yet. `None` if anything fails.
-async fn account_of(app: &AppState, key: &TaskKey, rows: &[PrRow]) -> Option<String> {
+/// of its workspace when it has none yet. `None` if anything fails; when the lookup of
+/// the login fails for lack of access, that is the problem to show.
+async fn account_of(
+    app: &AppState,
+    key: &TaskKey,
+    rows: &[PrRow],
+) -> (Option<String>, Option<Problem>) {
     let host = match rows.first() {
         Some(row) => row.host.clone(),
         None => {
-            let (_, ws) = app.store.workspace(key).await.ok().flatten()?;
-            let (_, dir) = ws.repos().into_iter().next()?;
-            app.gh.host_of_dir(&dir).await.ok()?
+            let Some((_, ws)) = app.store.workspace(key).await.ok().flatten() else {
+                return (None, None);
+            };
+            let Some((_, dir)) = ws.repos().into_iter().next() else {
+                return (None, None);
+            };
+            match app.gh.host_of_dir(&dir).await {
+                Ok(host) => host,
+                Err(_) => return (None, None),
+            }
         }
     };
-    app.gh.user(&host).await.ok()
+    match app.gh.user(&host).await {
+        Ok(login) => (Some(login), None),
+        Err(e) => {
+            let found = classify(&e);
+            if !matches!(
+                found,
+                AccessProblem::SignedOut | AccessProblem::Missing | AccessProblem::NoAccess
+            ) {
+                return (None, None);
+            }
+            let problem = Problem {
+                kind: found.kind().to_string(),
+                message: e.to_string(),
+            };
+            (None, Some(problem))
+        }
+    }
 }
 
 /// What stops the PRs of the task: the problem of a check, else the one found while
@@ -81,8 +110,11 @@ pub async fn task_prs(
 ) -> Result<Json<TaskPrs>, ApiError> {
     let key = known_task(&app, &key).await?;
     let rows = app.store.prs_of(&key).await?;
-    let account = account_of(&app, &key, &rows).await;
-    let problem = problem_of(&app, &key, &rows).await;
+    let (account, lookup_problem) = account_of(&app, &key, &rows).await;
+    let problem = match problem_of(&app, &key, &rows).await {
+        Some(p) => Some(p),
+        None => lookup_problem,
+    };
     Ok(Json(TaskPrs {
         account,
         problem,
@@ -257,6 +289,29 @@ mod tests {
         let (_, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs", None).await;
         assert_eq!(v["problem"]["kind"], "signed-out");
         assert_eq!(v["problem"]["message"], "odd words");
+    }
+
+    #[tokio::test]
+    async fn a_signed_out_account_lookup_is_the_problem_when_nothing_else_is() {
+        let gh = Arc::new(
+            FakeGh::happy().on(
+                &["api", "user"],
+                Err(GhError::Failed {
+                    code: Some(4),
+                    stderr: SIGNED_OUT.into(),
+                }),
+            ),
+        );
+        let (router, _app, _dir) = setup(gh).await;
+        let (_, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs", None).await;
+        assert_eq!(v["account"], Value::Null);
+        assert_eq!(v["problem"]["kind"], "signed-out");
+        assert!(
+            v["problem"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("gh auth login")
+        );
     }
 
     #[tokio::test]

@@ -59,9 +59,8 @@ pub(super) async fn record(
         .iter()
         .any(|d| matches!(d, NoticeDraft::CiFailed { .. }))
         // One failure item per PR: the new head's replaces the older head's.
-        || (ci_outcome(&snap.checks) == Rollup::Success
-            // Green on a later commit, even one first seen while pending.
-            && row.marks.ci_failed_sha.as_deref() != Some(snap.head.as_str()))
+        // Green on any head, even a re-run of the failed one.
+        || ci_outcome(&snap.checks) == Rollup::Success
     {
         resolve.push("ci-failed");
     }
@@ -414,6 +413,34 @@ mod tests {
         let app = app.with_gh(gh_with(&ci_snapshot("OPEN", "def", "SUCCESS")));
         check_task(&app, &key, true).await;
         assert!(open_ci(&app).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_rerun_of_the_same_head_that_ends_green_resolves_and_the_same_red_is_not_told_twice() {
+        let (app, key, _dir) = task_with_workspace(
+            gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")),
+            Some(SpecPhase::Review),
+        )
+        .await;
+        check_task(&app, &key, true).await;
+        let app = app.with_gh(gh_with(&pending("abc")));
+        check_task(&app, &key, true).await;
+        assert_eq!(open_ci(&app).await, ["abc"]);
+        let app = app.with_gh(gh_with(&ci_snapshot("OPEN", "abc", "SUCCESS")));
+        check_task(&app, &key, true).await;
+        assert!(open_ci(&app).await.is_empty());
+
+        let app = app.with_gh(gh_with(&ci_snapshot("OPEN", "def", "FAILURE")));
+        check_task(&app, &key, true).await;
+        let app = app.with_gh(gh_with(&ci_snapshot("OPEN", "def", "SUCCESS")));
+        check_task(&app, &key, true).await;
+        assert!(open_ci(&app).await.is_empty());
+        let before = app.notifier.recorded().len();
+        // Resolved notices stay, so the same head failing again is not raised twice.
+        let app = app.with_gh(gh_with(&ci_snapshot("OPEN", "def", "FAILURE")));
+        check_task(&app, &key, true).await;
+        assert!(open_ci(&app).await.is_empty());
+        assert_eq!(app.notifier.recorded().len(), before);
     }
 
     #[tokio::test]
