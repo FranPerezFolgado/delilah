@@ -180,8 +180,8 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
 - [X] T049 [P] Update `docs/status.md` (built: PR loop; pending: cross-linked changeset PRs, QMD learning on merge), `docs/architecture.md` (modules `gh`, `prs`, `pr_api`, `store_prs`; tables; the `prs` topic; merge archive rules), `docs/decisions.md` (gh instead of a token; polling not webhooks; notices as rows; archive on merge without asking, with the no-lost-work check; comments from anyone but the user) and `README.md` (PR tab, badge, Bandeja items, "Abrir PR", archive on merge)
-- [ ] T050 Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --manifest-path app/src-tauri/Cargo.toml` and `cd app && npx tsc --noEmit && npx vitest run`; fix anything red
-- [ ] T051 Run quickstart.md in a preview with `DELILAH_GH_BIN=scripts/fake-gh.sh` (steps 1–8) and record the result per step in `specs/003-pr-loop/quickstart.md` under "Results"
+- [X] T050 Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --manifest-path app/src-tauri/Cargo.toml` and `cd app && npx tsc --noEmit && npx vitest run`; fix anything red
+- [X] T051 Run quickstart.md in a preview with `DELILAH_GH_BIN=scripts/fake-gh.sh` (steps 1–8) and record the result per step in `specs/003-pr-loop/quickstart.md` under "Results"
 
 ---
 

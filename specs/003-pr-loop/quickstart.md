@@ -40,3 +40,20 @@ github.com and watch the task archive itself.
 cargo test -p delilah-git -p delilah-daemon
 cd app && npx tsc --noEmit && npx vitest run
 ```
+
+## Results (2026-10-21, preview slot 2, fake gh)
+
+Checked through the daemon API and its log (the verifier had no browser tools, so the UI rendering is not covered here):
+
+| Step | Result |
+|---|---|
+| 1–2 PR linked, snapshot and summary | ✅ API shows #7, open, base main, checks, `checked_at`; `/prs` summary for the badge |
+| 3 failing head → one `pr-failed` item | ✅ exactly one, "CI failed: build" |
+| 3 unchanged → nothing new | ✅ still one after ~50 s |
+| 3 later green → item resolves | ✅ on a new head; same-head re-run fixed afterwards (WP-21) |
+| 4 comment by another login / by me | ✅ one `pr-review` ("from alice"); own comment ignored |
+| 5 "Pedir al agente" without a session | ✅ 409 with the message, item kept (button stays enabled per InboxView tests) |
+| dismiss | ✅ 204, item gone |
+| unlink + proposal without workspace | ✅ 204; 409 `no-workspace` |
+| 8 signed out | ⚠️ the fake's GraphQL needs no auth; fixed so a failed account lookup shows the problem (WP-21) |
+| 6–7 archive on merge, "Abrir PR" success | not checked here (need a workspace / real agent); covered by daemon tests |
