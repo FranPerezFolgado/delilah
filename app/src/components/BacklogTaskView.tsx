@@ -19,6 +19,7 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
   const [notes, setNotes] = useState(task.notes ?? "");
   const [project, setProject] = useState(task.project ?? "");
   const [where, setWhere] = useState<Where>(whereOf(task.in_checkout));
+  const [savingMode, setSavingMode] = useState(task.saving_mode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,19 +29,21 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
     setNotes(task.notes ?? "");
     setProject(task.project ?? "");
     setWhere(whereOf(task.in_checkout));
-  }, [task.title, task.notes, task.project, task.in_checkout]);
+    setSavingMode(task.saving_mode);
+  }, [task.title, task.notes, task.project, task.in_checkout, task.saving_mode]);
 
   const dirty =
     title.trim() !== task.title ||
     notes !== (task.notes ?? "") ||
     project !== (task.project ?? "") ||
-    where !== whereOf(task.in_checkout);
+    where !== whereOf(task.in_checkout) ||
+    savingMode !== task.saving_mode;
   const inCheckout = where === "checkout";
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: inCheckout });
+      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: inCheckout, saving_mode: savingMode });
       onChanged();
     } catch (e) {
       setError((e as Error).message);
@@ -76,13 +79,17 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
           </select>
         </label>
         <WherePicker value={where} onChange={setWhere} project={projects.find((p) => p.name === project)} />
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
+          <input type="checkbox" checked={savingMode} onChange={(e) => setSavingMode(e.target.checked)} />
+          <span>{t("Modo ahorro")}</span>
+        </label>
         <label className="field">
           <span>{t("Notas (el agente las recibe al empezar)")}</span>
           <textarea className="input" rows={8} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
         {error && <div className="error selectable">{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-p" disabled={busy || !title.trim()} onClick={() => onStart({ ...task, title: title.trim(), notes, project: project || null, in_checkout: inCheckout })}>
+          <button className="btn btn-p" disabled={busy || !title.trim()} onClick={() => onStart({ ...task, title: title.trim(), notes, project: project || null, in_checkout: inCheckout, saving_mode: savingMode })}>
             <Icon name="run" /> {t("Empezar")}
           </button>
           {dirty && (

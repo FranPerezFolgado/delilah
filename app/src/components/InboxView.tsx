@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { ago, api, ApiError, hhmm, type InboxItem, type InboxKind } from "../api";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ago, api, ApiError, hhmm, type Handoff, type InboxItem, type InboxKind } from "../api";
+import { HandoffActions } from "./HandoffActions";
+
 import { Icon, type IconName } from "./Icon";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
@@ -16,6 +18,7 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   error: { label: "Error en el turno", icon: "failed", cls: "c-err" },
   waiting: { label: "Te espera", icon: "wait", cls: "c-wait" },
   review: { label: "Lista para revisar", icon: "review", cls: "c-done" },
+  handoff: { label: "Siguiente paso", icon: "run", cls: "c-done" },
   "suggest-review": { label: "¿Pasar a revisión?", icon: "review", cls: "c-done" },
   paused: { label: "Pausada por límite", icon: "pause", cls: "c-pause" },
   failed: { label: "Fallida", icon: "failed", cls: "c-err" },
@@ -78,6 +81,19 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
   }, [reply]);
+  // The item carries no task: the stage of its handoff decides the buttons.
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
+  useEffect(() => {
+    if (item.kind !== "handoff") return;
+    let live = true;
+    api
+      .tasks()
+      .then((ts) => live && setHandoff(ts.find((x) => x.key === item.task)?.handoff ?? null))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [item.kind, item.task, item.text]);
   const kind = KINDS[item.kind];
   const s = item.session;
   const long = (item.text?.length ?? 0) > 500 || (item.text?.split("\n").length ?? 0) > 8;
@@ -214,6 +230,14 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
           <button className="btn" disabled={busy} onClick={() => act(() => api.resume(item.task))}>
             {t("Reanudar ahora")}
           </button>
+        )}
+        {item.kind === "handoff" && (
+          <HandoffActions
+            task={item.task}
+            handoff={handoff}
+            onDone={onChanged}
+            hideError={!!handoff?.error && !!item.text?.includes(handoff.error)}
+          />
         )}
         {(item.kind === "pr-failed" || item.kind === "pr-review") && item.pr && (
           <>

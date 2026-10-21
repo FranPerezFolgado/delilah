@@ -10,6 +10,8 @@ const task = (status: TaskStatus, phase: string | null = null): Task => ({
   workflow: "feature",
   phase,
   status,
+  saving_mode: false,
+  handoff: null,
 });
 
 describe("boardColumnOf", () => {

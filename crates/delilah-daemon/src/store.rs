@@ -2,7 +2,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use delilah_core::{Event, Task, TaskKey, TaskStatus, TransitionError};
+use delilah_core::{Event, Handoff, Task, TaskKey, TaskStatus, TransitionError};
 use serde::Serialize;
 use sqlx::Row;
 use sqlx::sqlite::{
@@ -74,8 +74,8 @@ impl Store {
     pub async fn create_task(&self, task: &Task) -> Result<(), StoreError> {
         let now = Utc::now().to_rfc3339();
         let result = sqlx::query(
-            "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(task.key.as_str())
         .bind(&task.title)
@@ -85,6 +85,8 @@ impl Store {
         .bind(serde_json::to_string(&task.status)?)
         .bind(&task.notes)
         .bind(task.in_checkout)
+        .bind(task.saving_mode)
+        .bind(task.handoff.as_ref().map(serde_json::to_string).transpose()?)
         .bind(&now)
         .bind(&now)
         .execute(&self.pool)
@@ -99,7 +101,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks WHERE key = ?",
+            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff FROM tasks WHERE key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&self.pool)
@@ -109,7 +111,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks ORDER BY created_at, key",
+            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff FROM tasks ORDER BY created_at, key",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -158,6 +160,39 @@ impl Store {
         Ok(self.get_task(key).await?.expect("task was just updated"))
     }
 
+    /// Turns saving mode on or off for a task, whatever state it is in.
+    pub async fn set_saving_mode(&self, key: &TaskKey, on: bool) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET saving_mode = ?, updated_at = ? WHERE key = ?")
+            .bind(on)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
+    /// Records the handoff under way, or clears it.
+    pub async fn set_handoff(
+        &self,
+        key: &TaskKey,
+        handoff: Option<&Handoff>,
+    ) -> Result<(), StoreError> {
+        let json = handoff.map(serde_json::to_string).transpose()?;
+        let updated = sqlx::query("UPDATE tasks SET handoff = ?, updated_at = ? WHERE key = ?")
+            .bind(json)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
     /// Removes a task for good. Its events, workspace record and sessions go with it
     /// (`ON DELETE CASCADE`), in the same statement: it is either all there or all gone.
     pub async fn delete_task(&self, key: &TaskKey) -> Result<(), StoreError> {
@@ -201,7 +236,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks WHERE key = ?",
+            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff FROM tasks WHERE key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&mut *tx)
@@ -274,6 +309,11 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         status: serde_json::from_str::<TaskStatus>(&status)?,
         notes: row.try_get("notes")?,
         in_checkout: row.try_get("in_checkout")?,
+        saving_mode: row.try_get("saving_mode")?,
+        handoff: row
+            .try_get::<Option<String>, _>("handoff")?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?,
     })
 }
 
@@ -305,6 +345,75 @@ mod tests {
             .map(|t| t.key)
             .collect();
         assert_eq!(keys, [TaskKey::new("PROJ-1"), TaskKey::new("PROJ-2")]);
+    }
+
+    #[tokio::test]
+    async fn saving_mode_and_handoff_persist() {
+        use delilah_core::{HandoffStage, Step};
+
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut saving = task("PROJ-1");
+        saving.saving_mode = true;
+        store.create_task(&saving).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap(), Some(saving));
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        let plain = store
+            .get_task(&TaskKey::new("PROJ-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!plain.saving_mode && plain.handoff.is_none());
+
+        store.set_saving_mode(&key, false).await.unwrap();
+        assert!(!store.get_task(&key).await.unwrap().unwrap().saving_mode);
+        store.set_saving_mode(&key, true).await.unwrap();
+        assert!(store.get_task(&key).await.unwrap().unwrap().saving_mode);
+
+        let handoff = Handoff {
+            to: Step::Implement,
+            stage: HandoffStage::Offered,
+            error: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&handoff).unwrap(),
+            r#"{"to":"implement","stage":"offered"}"#
+        );
+        store.set_handoff(&key, Some(&handoff)).await.unwrap();
+        assert_eq!(
+            store.get_task(&key).await.unwrap().unwrap().handoff,
+            Some(handoff)
+        );
+        store.set_handoff(&key, None).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().handoff, None);
+
+        let missing = TaskKey::new("PROJ-404");
+        assert!(matches!(
+            store.set_saving_mode(&missing, true).await,
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn step_started_is_listed_in_the_history_and_keeps_the_status() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        store
+            .apply_event(&key, Event::Start, Utc::now())
+            .await
+            .unwrap();
+        let event = Event::StepStarted {
+            step: delilah_core::Step::Implement,
+            session: "s-2".into(),
+        };
+        let task = store
+            .apply_event(&key, event.clone(), Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        let last = store.events(&key).await.unwrap().pop().unwrap();
+        assert_eq!(last.event, event);
     }
 
     #[tokio::test]
@@ -397,6 +506,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                step: None,
             })
             .await
             .unwrap();

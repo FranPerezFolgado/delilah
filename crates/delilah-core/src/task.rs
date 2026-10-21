@@ -113,6 +113,11 @@ pub enum Event {
     StartAborted {
         reason: String,
     },
+    /// A saving-mode handoff started the session of a step; the status does not change.
+    StepStarted {
+        step: Step,
+        session: String,
+    },
 }
 
 impl Event {
@@ -130,6 +135,7 @@ impl Event {
             Self::MarkDone => "mark-done",
             Self::Fail { .. } => "fail",
             Self::StartAborted { .. } => "start-aborted",
+            Self::StepStarted { .. } => "step-started",
         }
     }
 }
@@ -146,6 +152,63 @@ pub enum TransitionError {
         resume_at: DateTime<Utc>,
         now: DateTime<Utc>,
     },
+}
+
+/// A step of the saving-mode chain; each one runs in its own Claude session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Step {
+    Plan,
+    Implement,
+    Review,
+}
+
+impl Step {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Plan => "plan",
+            Self::Implement => "implement",
+            Self::Review => "review",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "plan" => Some(Self::Plan),
+            "implement" => Some(Self::Implement),
+            "review" => Some(Self::Review),
+            _ => None,
+        }
+    }
+
+    /// The step after this one; `None` after the last.
+    pub fn next(self) -> Option<Self> {
+        match self {
+            Self::Plan => Some(Self::Implement),
+            Self::Implement => Some(Self::Review),
+            Self::Review => None,
+        }
+    }
+}
+
+/// How far a handoff to the next step has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HandoffStage {
+    Offered,
+    Saving,
+    Starting,
+    Failed,
+    Skipped,
+}
+
+/// The handoff under way: the step it goes to and where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Handoff {
+    pub to: Step,
+    pub stage: HandoffStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +229,12 @@ pub struct Task {
     /// checkout (`true`) or a worktree (`false`); `None` if not chosen yet.
     #[serde(default)]
     pub in_checkout: Option<bool>,
+    /// Saving mode: each phase runs in a fresh Claude session.
+    #[serde(default)]
+    pub saving_mode: bool,
+    /// The handoff to the next step under way, if any.
+    #[serde(default)]
+    pub handoff: Option<Handoff>,
 }
 
 impl Task {
@@ -179,6 +248,8 @@ impl Task {
             status: TaskStatus::Queued,
             notes: None,
             in_checkout: None,
+            saving_mode: false,
+            handoff: None,
         }
     }
 
@@ -193,6 +264,9 @@ impl Task {
                 return Err(self.invalid("phase-reached"));
             }
             self.phase = Some(phase);
+            return Ok(());
+        }
+        if let Event::StepStarted { .. } = event {
             return Ok(());
         }
         self.status = next_status(&self.status, event)?;
@@ -438,5 +512,79 @@ mod tests {
 
         assert!(task.apply(Event::AgentFinished).is_err());
         assert_eq!(task, before);
+    }
+
+    #[test]
+    fn steps_chain_plan_implement_review() {
+        assert_eq!(Step::Plan.next(), Some(Step::Implement));
+        assert_eq!(Step::Implement.next(), Some(Step::Review));
+        assert_eq!(Step::Review.next(), None);
+        assert_eq!(Step::parse("implement"), Some(Step::Implement));
+        assert_eq!(Step::parse("nope"), None);
+    }
+
+    #[test]
+    fn steps_and_stages_serialise_lowercase() {
+        assert_eq!(serde_json::to_string(&Step::Review).unwrap(), "\"review\"");
+        assert_eq!(
+            serde_json::to_string(&HandoffStage::Saving).unwrap(),
+            "\"saving\""
+        );
+    }
+
+    #[test]
+    fn a_handoff_round_trips_without_an_empty_error() {
+        let handoff = Handoff {
+            to: Step::Implement,
+            stage: HandoffStage::Offered,
+            error: None,
+        };
+        let json = serde_json::to_string(&handoff).unwrap();
+        assert_eq!(json, r#"{"to":"implement","stage":"offered"}"#);
+        assert_eq!(serde_json::from_str::<Handoff>(&json).unwrap(), handoff);
+    }
+
+    #[test]
+    fn old_tasks_load_without_saving_mode_or_handoff() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,
+            "status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(!task.saving_mode);
+        assert_eq!(task.handoff, None);
+    }
+
+    #[test]
+    fn a_started_step_serialises_with_its_name() {
+        let event = Event::StepStarted {
+            step: Step::Implement,
+            session: "s-2".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"type":"step-started","step":"implement","session":"s-2"}"#
+        );
+    }
+
+    #[test]
+    fn starting_a_step_keeps_every_status() {
+        let event = Event::StepStarted {
+            step: Step::Implement,
+            session: "s-2".into(),
+        };
+        let mut paused = running_task();
+        paused
+            .apply(Event::LimitReached {
+                resume_at: at(15, 0),
+            })
+            .unwrap();
+        for mut task in [
+            running_task(),
+            paused,
+            Task::new(TaskKey::new("PROJ-5"), "t", "feature"),
+        ] {
+            let before = task.clone();
+            task.apply(event.clone()).unwrap();
+            assert_eq!(task, before);
+        }
     }
 }

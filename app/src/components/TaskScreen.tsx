@@ -16,6 +16,7 @@ import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { PhaseBadge } from "./PhaseBadge";
+import { SessionChain } from "./SessionChain";
 import { headerPhaseOf } from "../phases";
 import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
@@ -238,6 +239,25 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
     const s = id ? sessionById(id) : sessions.find((x) => x.primary);
     if (s) activate(sessionTab(s.id));
   };
+
+  // After a handoff the new primary's terminal is the one to look at.
+  const primaryId = task?.saving_mode ? (sessions.find((s) => s.primary)?.id ?? null) : null;
+  const lastPrimary = useRef({ owner, primaryId });
+  useEffect(() => {
+    const before = lastPrimary.current;
+    lastPrimary.current = { owner, primaryId };
+    // Only a new primary of the same task: another task's is not a handoff.
+    if (before.owner === owner && before.primaryId && primaryId && before.primaryId !== primaryId) {
+      activate(sessionTab(primaryId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, primaryId]);
+
+  const setSaving = (on: boolean) =>
+    api
+      .setSavingMode(owner, on)
+      .then(onChanged)
+      .catch((e) => setError((e as Error).message));
 
   const openChanges = () => {
     session.changesOpen = true;
@@ -471,9 +491,22 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
+              {task.saving_mode && (
+                <span className="pill saving-pill">
+                  {t("Modo ahorro")}
+                  {task.status.type !== "done" && (
+                    <button className="saving-off" onClick={() => setSaving(false)}>{t("Desactivar")}</button>
+                  )}
+                </span>
+              )}
               <span className={`pill ${status.cls}`}>
                 <Icon name={status.icon} /> {statusLabel(task.status)}
               </span>
+              {!task.saving_mode && task.status.type !== "done" && (
+                <button className="btn btn-ghost saving-on" onClick={() => setSaving(true)}>
+                  {t("Activar modo ahorro")}
+                </button>
+              )}
             </span>
           </>
         ) : (
@@ -499,6 +532,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
         style={{ "--tree-w": `${treeW}px` } as CSSProperties}
       >
         <div className="tmain">
+          {task && <SessionChain task={task} sessions={sessions} onOpenSession={showSession} onChanged={onChanged} />}
           <div className="etabs" role="tablist">
             <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
             {sessions.map((s) => {

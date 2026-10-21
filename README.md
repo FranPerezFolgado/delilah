@@ -115,6 +115,23 @@ Bandeja asks "¿Pasar a revisión?". These signals and the spec files only move 
 task forward; you move it anywhere by clicking a phase in the task's phase bar,
 and asking for a review ("Revisar cambios") moves it to Revisión.
 
+**Saving mode.** Every turn of a Claude session re-reads the whole conversation, so
+long tasks get expensive. With "Modo ahorro" on (a checkbox when creating a task or
+saving it to the backlog, a toggle on a running task, `--saving-mode` /
+`--no-saving-mode` in `delilah run` and `new`), each phase runs in a fresh session.
+The first one ("Spec y plan") stops once `tasks.md` is written; the Bandeja and the
+task screen then offer "Implementar en sesión nueva" (which also approves the
+tasks) or "Seguir aquí" to carry on in the same session without saving mode. The
+implementation session ("Implementación") starts from the spec files; when every
+item is checked, a "Revisión" session starts on its own, reviews the branch and
+commits (it never pushes). The task screen shows the chain of sessions, with the
+earlier ones finished and reopenable; the newest is the main one. Before each
+change the outgoing session saves its notes with `/save-session`. If a handoff
+fails, the Bandeja shows it with "Reintentar"; after a restart Delilah finishes or
+re-offers it. In Settings: "Modo ahorro por defecto" (new tasks) and "Guardar notas
+antes de cambiar de sesión" (on by default). Needs the spec files: without a
+`specs/` folder there are no handoffs.
+
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
 it right there), a permission it needs (answered in its terminal), a failed turn,

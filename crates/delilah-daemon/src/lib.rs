@@ -9,6 +9,7 @@ pub mod config;
 pub mod events;
 mod files;
 pub mod gh;
+mod handoff;
 mod hooks;
 pub mod inbox;
 mod jira;

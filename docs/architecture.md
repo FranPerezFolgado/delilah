@@ -164,7 +164,7 @@ and only changes while the task is under way (see `phases.rs`):
 |---|---|
 | `PromptSubmitted` (UserPromptSubmit), `Working` (PostToolUse) | session working; primary → `UserAnswered`; drops the review hint; phase signals |
 | `NeedsUser` (Notification) | inbox attention (permission or idle); primary → `AgentAsked` |
-| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint |
+| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint; in saving mode, a phase boundary offers or starts the next session, and a `saving` handoff goes on to `starting` |
 | `TurnFailed` (StopFailure) | inbox error, or a usage limit |
 | a turn ending while a usage window is at 100 % | `LimitReached` (any session: the subscription is shared) |
 
@@ -172,6 +172,25 @@ and only changes while the task is under way (see `phases.rs`):
 1. The latest `rate_limits` of each session comes from the status line.
 2. A turn that ends with `five_hour` or `seven_day` at 100 % pauses the task until the latest `resets_at` among the full windows.
 3. The scheduler resumes it and sends the "carry on" prompt in the current language.
+
+### Saving mode (`handoff.rs`)
+
+A task with `saving_mode` runs each phase in a fresh Claude session, so the context
+re-read on every turn stays small. The chain of sessions is `Session.step`
+(`plan`, `implement`, `review`; at most one open session per task and step, a
+partial unique index). The primary switch is one transaction: the new session
+becomes `primary`, the old one stays in the task as a finished, reopenable tab
+(an extra when reopened: it never takes the main role back). The history records
+`step-started`.
+
+- **Boundaries** (`boundary`, checked when the primary's turn ends and when the phase is moved by hand):
+  - plan, `tasks.md` written and nothing checked: **offer** the implementation (the user confirms from the Bandeja or the task screen, or declines with "Seguir aquí", which clears the handoff and turns saving mode off for the whole task);
+  - every item checked: the review session **starts on its own**; when both hold, the furthest step wins.
+  - No spec folder, or no `tasks.md`: never a boundary.
+- **Stages** (`tasks.handoff`, `{to, stage, error}`, written before each side effect): `offered` → `saving` (types `/save-session` into the outgoing primary, if the `save-notes` preference is on and it is live) → `starting` (stops the old session, waits up to 3 s, launches the new one) → cleared. `failed` (with the error; Bandeja item and a "Reintentar" button) is another; `skipped` is set when the plan session edits code anyway (`on_code_edit`): the implementation is then never offered, the task carries on in that session, and the review handoff still applies. A failed save turn (`TurnFailed`) fails the handoff.
+- **Recovery** (`recover`, on each scheduler tick and at start): `saving` and `starting` are finished, `offered` is re-offered, and a step session that was recorded but never launched is relaunched. A `HandoffCoordinator` in `AppState` holds a mutex over the check-and-set and a set of tasks being started, so two confirmations or a tick never start the same step twice. A usage limit mid-handoff pauses the task as usual and the tick resumes it.
+- **API:** `POST /api/v1/tasks/{key}/handoff` (`confirm`, `decline`, `retry`), and `saving_mode` on task create, backlog create and `PATCH` (also while running). The preferences `saving-mode` (default for new tasks) and `save-notes` are in Settings.
+- **UI:** `chain.ts` and `SessionChain.tsx` draw the chain; `HandoffActions.tsx` is shared by the task screen and the Bandeja item (kind `handoff`: offered, saving, starting, failed). The automatic review is announced like a finished turn: quiet when the app is listening.
 
 ## Workspaces
 

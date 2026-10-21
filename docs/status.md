@@ -50,8 +50,21 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - Previews (`scripts/preview.sh`) to try a branch next to the installed app.
 - Phases moved by the user, by spec files and by agent signals; archiving that never blocks in the checkout, and a forced archive for worktrees.
 
+**Saving mode** (a fresh Claude session per phase, opt-in per task):
+- Option on new tasks, backlog items and running tasks (also `--saving-mode` / `--no-saving-mode` in the CLI), with its default and "save notes first" in Settings.
+- The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
+- Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
+
 ## Pending and known problems
 
+- **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).
+- **Saving mode, known problems:**
+  - the old live session keeps `primary = true` in memory until it exits (~3 s);
+  - `PATCH` of `saving_mode` is not atomic with the other backlog fields;
+  - an unparsable `handoff` JSON fails the whole task list;
+  - the English history says "Moved to Implement" (it reuses the phase-name keys);
+  - a CLI older than the daemon fails on `step-started` events: ship them together;
+  - rolling the daemon back after using saving mode needs the `step-started` rows tolerated.
 - **The real usage-limit payload** has never been observed. When it first happens on the work Mac, check `hooks.jsonl` against `delilah-agents::limits` (see the [spike](spikes/2026-10-19-claude-pty.md)).
 - **SpecKit dirties the checkout.** Each `/speckit-plan` writes its block into CLAUDE.md, and a dirty checkout blocks new checkout tasks. Proposed: ignore that block in the clean-checkout check.
 - **The archive refusal message** (`workspace: . has uncommitted changes…`) names neither the task nor the files. It should list them.
