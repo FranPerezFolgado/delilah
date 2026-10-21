@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import "./playground.css";
 import { Desk } from "./Desk";
-import type { DeskModel } from "./layout";
+import { deskState, type DeskModel } from "./layout";
 import { usePlayground } from "./usePlayground";
 
 interface Props {
@@ -20,10 +20,12 @@ function cells(desks: DeskModel[]): (DeskModel | undefined)[] {
 /** The office: an area per project with a desk for each live agent. */
 export function PlaygroundView({ onOpen, online }: Props) {
   const { areas } = usePlayground(online);
+  const waiting = areas.reduce((n, a) => n + a.desks.filter((d) => deskState(d.session) === "waiting").length, 0);
   return (
     <div className="pg-office">
       <header className="pg-head">
         <h2>{t("Playground")}</h2>
+        <span className={`pg-count${waiting > 0 ? " pg-count--on" : ""}`}>{t("{n} esperando", { n: waiting })}</span>
       </header>
       {areas.length === 0 ? (
         <p className="pg-empty">{t("Ningún agente trabajando")}</p>

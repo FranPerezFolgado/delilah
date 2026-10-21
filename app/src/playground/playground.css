@@ -10,7 +10,10 @@
 @media (prefers-color-scheme: light) {
   .pg-office { --pg-w: #b9bec9; }
 }
-.pg-head h2 { margin: 0 0 12px; font-size: 15px; }
+.pg-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; }
+.pg-head h2 { margin: 0; font-size: 15px; }
+.pg-count { font-size: 12px; color: var(--tx3); }
+.pg-count--on { color: var(--acc); font-weight: 600; }
 .pg-empty { color: var(--tx3); }
 .pg-areas { display: flex; flex-direction: column; gap: 16px; }
 .pg-area { background: var(--panel); border: 1px solid var(--bd); border-radius: 8px; padding: 10px 12px; }
@@ -34,3 +37,6 @@
 .pg-title { max-width: 100%; color: var(--tx2); }
 .pg-phase { color: var(--tx3); }
 .pg-desk--empty { min-height: 1px; }
+.pg-desk--waiting .pg-scene { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 8px; animation: pg-glow 1.4s ease-in-out infinite; }
+@keyframes pg-glow { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 10px 2px var(--acc); } }
+@media (prefers-reduced-motion: reduce) { .pg-desk--waiting .pg-scene { animation: none; } }

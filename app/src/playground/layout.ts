@@ -1,5 +1,6 @@
 import type { Project, Session, SpecSummary, Task } from "../api";
 import type { DeskState } from "./poses";
+import { t } from "../i18n";
 import { columnOf, type Column } from "../phases";
 
 export interface DeskModel {
@@ -25,6 +26,18 @@ export function deskState(session: Session, _activity?: unknown): DeskState {
     default:
       return "thinking";
   }
+}
+
+const STATE_WORD: Record<DeskState, string> = {
+  starting: "Arrancando",
+  thinking: "Pensando",
+  waiting: "Esperándote",
+  paused: "En pausa",
+};
+
+/** The character's accessible name: the task (or project) and what it is doing. */
+export function accessibleName(desk: DeskModel, activity?: unknown): string {
+  return `${desk.key}, ${t(STATE_WORD[deskState(desk.session, activity)])}`;
 }
 
 /** Slot maps per project (session id -> slot) of `areas`, to pass back to `groupByProject`. */

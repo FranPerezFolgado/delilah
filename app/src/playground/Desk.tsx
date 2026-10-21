@@ -1,6 +1,6 @@
 import { phaseLabel } from "../phases";
 import { memo } from "react";
-import { deskState, type DeskModel } from "./layout";
+import { accessibleName, deskState, type DeskModel } from "./layout";
 import { POSE_OF } from "./poses";
 import { Sprite } from "./Sprite";
 import { DESK, POSES } from "./sprites";
@@ -9,7 +9,7 @@ import { DESK, POSES } from "./sprites";
 export const Desk = memo(function Desk({ desk, onOpen }: { desk: DeskModel; onOpen: (task: string, session: string) => void }) {
   const state = deskState(desk.session);
   return (
-    <div className="pg-desk" data-owner={desk.owner} data-slot={desk.slot}>
+    <div className={`pg-desk${state === "waiting" ? " pg-desk--waiting" : ""}`} data-owner={desk.owner} data-slot={desk.slot}>
       <div className="pg-scene">
         <Sprite className="pg-desk-art" frames={DESK} />
         <button
@@ -17,7 +17,7 @@ export const Desk = memo(function Desk({ desk, onOpen }: { desk: DeskModel; onOp
           className="pg-char"
           data-pose={state}
           data-slot={desk.slot}
-          aria-label={desk.key}
+          aria-label={accessibleName(desk)}
           onClick={() => onOpen(desk.owner, desk.session.id)}
         >
           <Sprite frames={POSES[POSE_OF[state]]} />

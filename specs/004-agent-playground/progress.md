@@ -10,10 +10,10 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP-01 | 1 | 1A | done | 1 | 9c190e7 | tsc ok; "Arrancando" already existed |
 | WP-02 | 2 | 2A | done | 1 | a7fbadc | 11 tests; tests written with impl (not seen failing); @name of unregistered project gets own area |
 | WP-03 | 3 | 3A | done | 2 | 3ff4b70 | 18 tests; fix: empty cells for free slots (no desk shifts); art not yet seen rendered |
-| WP-04 | 4 | 4A | implementing | 1 | | |
+| WP-04 | 4 | 4A | verified | 1 | (next) | class pg-desk--waiting; counter always shown (muted at 0) | |
 | WP-05 | 5 | 5A | pending | 0 | | |
 | WP-06 | 6 | 6A | done | 2 | da8f944 | 28 tests; tests failed first; ActivityEvent serde tag=type |
-| WP-07 | 6 | 6A | verified | 1 | (next) | |
+| WP-07 | 6 | 6A | verified | 1 | ff47dce | |
 | WP-08 | 6 | 6B | done | 1 | a32eb33 | 8 tests failed first; mod is private in lib.rs |
 | WP-09 | 6 | 6C | done | 1 | b306827 | 106 daemon tests; red first; hook returns 204 |
 | WP-10 | 6 | 6D | pending | 0 | | |

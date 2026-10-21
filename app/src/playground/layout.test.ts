@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Session, SpecSummary, Task } from "../api";
-import { assignSlots, deskState, groupByProject, slotMaps } from "./layout";
+import { t } from "../i18n";
+import type { DeskModel } from "./layout";
+import { accessibleName, assignSlots, deskState, groupByProject, slotMaps } from "./layout";
 
 describe("assignSlots", () => {
   it("numbers from 0 in input order when nothing was assigned", () => {
@@ -100,5 +102,19 @@ describe("slots across regroupings", () => {
     expect(first[0].desks.map((d) => d.slot)).toEqual([0, 1]);
     const second = groupByProject([session("b", "B"), session("c", "C")], tasks, projects, {}, slotMaps(first));
     expect(Object.fromEntries(second[0].desks.map((d) => [d.session.id, d.slot]))).toEqual({ b: 1, c: 0 });
+  });
+});
+
+describe("accessibleName", () => {
+  const model = (state: Session["state"], key = "LIBRE-3") =>
+    ({ session: { state } as Session, owner: key, key, title: "", phase: null, project: null, slot: 0 }) as DeskModel;
+  it("names the task and the state", () => {
+    expect(accessibleName(model("waiting"))).toBe(`LIBRE-3, ${t("Esperándote")}`);
+    expect(accessibleName(model("working"))).toBe(`LIBRE-3, ${t("Pensando")}`);
+    expect(accessibleName(model("paused"))).toBe(`LIBRE-3, ${t("En pausa")}`);
+    expect(accessibleName(model("starting"))).toBe(`LIBRE-3, ${t("Arrancando")}`);
+  });
+  it("uses the project name for an @project desk", () => {
+    expect(accessibleName(model("working", "web"))).toBe(`web, ${t("Pensando")}`);
   });
 });

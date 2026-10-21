@@ -86,4 +86,48 @@ describe("PlaygroundView", () => {
     expect(grid.children[2].getAttribute("data-owner")).toBe("C");
     expect(grid.children[1].getAttribute("aria-hidden")).toBe("true");
   });
+
+  it("highlights a waiting desk and counts the waiting ones in every area", () => {
+    show([
+      { project: "web", desks: [desk("W-1", 0, "working"), desk("W-2", 1, "waiting")] },
+      { project: "api", desks: [desk("A-1", 0, "working")] },
+    ]);
+    const { container, getByText } = render(<PlaygroundView onOpen={() => {}} />);
+    const waiting = container.querySelectorAll(".pg-desk--waiting");
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].getAttribute("data-owner")).toBe("W-2");
+    expect(getByText(t("{n} esperando", { n: 1 }))).toBeTruthy();
+  });
+
+  it("counts waiting desks across areas and drops to 0 when none", () => {
+    show([
+      { project: "web", desks: [desk("W-1", 0, "waiting")] },
+      { project: "api", desks: [desk("A-1", 0, "waiting")] },
+    ]);
+    const view = render(<PlaygroundView onOpen={() => {}} />);
+    expect(view.getByText(t("{n} esperando", { n: 2 }))).toBeTruthy();
+    show([{ project: "web", desks: [desk("W-1", 0, "working")] }]);
+    view.rerender(<PlaygroundView onOpen={() => {}} />);
+    expect(view.getByText(t("{n} esperando", { n: 0 }))).toBeTruthy();
+    expect(view.container.querySelector(".pg-desk--waiting")).toBeNull();
+  });
+
+  it("opens the session of a focused character on Enter (native button)", () => {
+    show([{ project: "web", desks: [desk("@web", 0, "waiting", { owner: "@web", key: "web" })] }]);
+    const onOpen = vi.fn();
+    const { getByRole } = render(<PlaygroundView onOpen={onOpen} />);
+    const btn = getByRole("button") as HTMLButtonElement;
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.type).toBe("button");
+    fireEvent.click(btn); // a focused button turns Enter into a click
+    expect(onOpen).toHaveBeenCalledWith("@web", "@web");
+  });
+
+  it("gives each character its accessible name", () => {
+    show([{ project: "web", desks: [desk("W-1", 0, "waiting")] }]);
+    const { getByRole } = render(<PlaygroundView onOpen={() => {}} />);
+    expect(getByRole("button").getAttribute("aria-label")).toBe(`W-1, ${t("Esperándote")}`);
+  });
 });

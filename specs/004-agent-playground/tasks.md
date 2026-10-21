@@ -112,19 +112,19 @@
 
 **Independent Test**: make one of two agents ask for permission. Its desk stands out, the counter reads 1, and clicking its character opens that task on its terminal.
 
-- [ ] T016 [P] [US2] Write failing tests in `app/src/playground/layout.test.ts` for `accessibleName(desk)`:
+- [X] T016 [P] [US2] Write failing tests in `app/src/playground/layout.test.ts` for `accessibleName(desk)`:
   - `"LIBRE-3, Esperándote"` for a waiting desk;
   - `"LIBRE-3, Pensando"` for working with no action;
   - an `@proj` desk uses the project name.
 
   (The action and helper parts come in US3/US4.)
-- [ ] T017 [US2] Implement `accessibleName` in `app/src/playground/layout.ts`, using `t()` for the state words (T016).
-- [ ] T018 [US2] Add failing cases to `app/src/playground/PlaygroundView.test.tsx`:
+- [X] T017 [US2] Implement `accessibleName` in `app/src/playground/layout.ts`, using `t()` for the state words (T016).
+- [X] T018 [US2] Add failing cases to `app/src/playground/PlaygroundView.test.tsx`:
   - a waiting desk has class `desk--waiting`, and the header counter reads "1 esperando";
   - the count includes desks in every area;
   - clicking a character, or focusing it and pressing Enter, calls `onOpen(task, session)` with the session's owner and id;
   - each character's `aria-label` is `accessibleName`.
-- [ ] T019 [US2] Implement the waiting highlight, the counter and the click/keyboard handlers in `app/src/playground/Desk.tsx` and `PlaygroundView.tsx`. In `playground.css`, `.desk--waiting` gets an accent outline, a pulsing glow and the bubble pose, so the cue is not colour alone. T018 passes.
+- [X] T019 [US2] Implement the waiting highlight, the counter and the click/keyboard handlers in `app/src/playground/Desk.tsx` and `PlaygroundView.tsx`. In `playground.css`, `.desk--waiting` gets an accent outline, a pulsing glow and the bubble pose, so the cue is not colour alone. T018 passes.
 
 **Checkpoint**: in a preview, a permission prompt highlights the desk, and the click lands on the agent's terminal.
 
