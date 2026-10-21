@@ -316,7 +316,7 @@
   - `docs/architecture.md`: the conversation session, `conversation_entries`, `conversation.rs`, the plugin dir, the launch table, the `conversations` topic, the `Ask.proposal` flow;
   - `docs/decisions.md`: #26 "Tasks from ideas: the daemon creates them on the confirmation card" (R1, with the rejected CLI/curl/MCP), and #27 "Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead of plan mode; a session-only plugin" (R2–R5, with `stream-json` left for later). Include the spike's findings;
   - `README.md`: "Nueva tarea con Claude" in the New tasks and Projects paragraphs.
-- [ ] T040 Run `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`, and fix any failure.
+- [X] T040 Run `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`, and fix any failure.
 - [ ] T041 Go through quickstart.md "By hand" 1–11 in a preview (`scripts/preview.sh`, never 7420), and note the results in `specs/004-task-from-idea/progress.md` if the orchestrator keeps one.
 
 ---

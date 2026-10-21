@@ -27,8 +27,8 @@ Mode: format=markdown commits=yes
 | WP-16 | 5 | 5A | done | 1 | 12d54c8 | InboxView change untested | |
 | WP-17 | 6 | 6A | done | 1 | 6e74126 | |
 | WP-18 | 7 | 7A | done | 1 | 4423015 | |
-| WP-19 | 7 | 7A | done | 1 | | |
-| WP-20 | 7 | 7B | pending | 0 | | T041 manual walkthrough |
+| WP-19 | 7 | 7A | done | 1 | 6d43ef5 | |
+| WP-20 | 7 | 7B | done | 1 | | T040 green; T041 (quickstart by hand) left to the user — no browser tools available to agents |
 
 ## Reviews
 
@@ -37,3 +37,4 @@ Mode: format=markdown commits=yes
 - Phase 3: spec GAPS (HIGH pending cards not interactive, MEDIUM duplicate ask-bar) · contract BREAKING (same CRITICAL; card types; dead card after failed Crear) · security no HIGH (MEDIUM control chars to PTY; LOW stop on any session, owner not checked vs record, no size caps, send race) · architecture 2 HIGH (asks↔conversation cycle; proposal logic in ask handler) · UI verifier: no browser tools, nothing checked. Fixed in WP-03Fd/WP-03Fu. Deferred: usage-limit notice in the conversation view (no task covers it), TaskScreen SessionTab split, build_task move to a service module; "Otra" not offered on proposal cards (scenario 5 lists only the three actions).
 - Phase 4: spec GAPS — HIGH run test launches the real claude (fails without it), MEDIUM tautological prompt assertion, LOW temp dir left behind → WP-04F. Deferred LOW: the history label isn't visible in BacklogTaskView (no history list there; the notes mark shows the origin).
 - Phase 5: spec+security PASS. Optional LOWs left: unauthenticated hook endpoint lets a local process forge a card for a known project session id (user still clicks Crear; same as the loopback API); Config.agent_program is a pub field (only tests set it).
+- Final checks (T040): `cargo test --workspace` green (agents 29, core 15, daemon 144, …); Tauri shell green after `scripts/build-sidecar.sh debug` (the build script needs the sidecar binary; not a feature regression); `tsc` clean, vitest 15 files / 101 tests. T041 (quickstart "By hand" 1–11 in a preview) not done: neither this session nor its subagents had browser tools.
