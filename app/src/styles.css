@@ -437,3 +437,8 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .menu .c-err { color: var(--err); }
 .backlog-task { max-width: 720px; }
 .backlog-task textarea { resize: vertical; font: inherit; }
+
+/* Project settings screen */
+.dialog.settings { width: 640px; }
+.settings .shared-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
+.settings .picks { display: flex; flex-wrap: wrap; gap: 4px 14px; }

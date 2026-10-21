@@ -326,6 +326,8 @@ export class ApiError extends Error {
     readonly status?: number,
     /** A delete refused because work in the task's worktree would be lost. */
     readonly unpushed = false,
+    /** A 422 from the settings endpoint: one message per invalid field. */
+    readonly fields: SettingsError["fields"] = [],
   ) {
     super(message);
   }
@@ -344,7 +346,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true);
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, Array.isArray(data?.fields) ? data.fields : []);
   return data as T;
 }
 
@@ -362,6 +364,9 @@ export const api = {
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
   updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string }) =>
     request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
+  /** Saves the whole settings; a 422 throws an ApiError with `fields`. */
+  updateProjectSettings: (name: string, settings: ProjectSettings) =>
+    request<Project>(`/api/v1/projects/${name}/settings`, { method: "PUT", body: JSON.stringify(settings) }),
   deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   createTask: (task: NewBacklogTask) => post<Task>("/api/v1/tasks", task),
