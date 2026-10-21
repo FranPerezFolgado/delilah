@@ -26,8 +26,12 @@ settings.
 
 - `200` → the updated `Project`; emits the `projects` topic.
 - `404` → no such project.
-- `422` → `{ "error": "<summary>", "fields": [{ "field": "shared[0].path", "message": "…" }] }`;
-  nothing saved.
+- `422` → `{ "error": "<summary>", "fields": [{ "field": "shared[0].path", "code": "shared.path_absolute", "message": "…" }] }`;
+  nothing saved. `code` is stable and machine-readable; the daemon localises `message`
+  from `code`. Codes: `branch.empty`, `branch.missing_ticket`,
+  `branch.unknown_placeholder`, `shared.path_empty`, `shared.path_absolute`,
+  `shared.path_parent`, `shared.path_duplicate`, `submodules.not_parent`,
+  `submodules.conflict`.
 
 ## `POST /api/v1/runs` (unchanged shape, new defaults)
 

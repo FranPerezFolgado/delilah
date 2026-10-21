@@ -53,7 +53,7 @@ export interface ProjectSettings {
 /** Body of a 422 from the settings endpoint: one message per invalid field. */
 export interface SettingsError {
   error: string;
-  fields: { field: string; message: string }[];
+  fields: { field: string; code: string; message: string }[];
 }
 
 /** The effective settings of a project with nothing configured. */

@@ -10,6 +10,9 @@ use std::thread;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::{broadcast, watch};
 
+/// Reported as the exit code when waiting for the child failed.
+const WAIT_FAILED_CODE: u32 = u32::MAX;
+
 /// Bytes of output kept in memory for clients that attach later.
 const SCROLLBACK_BYTES: usize = 512 * 1024;
 /// Chunks a slow client may fall behind before it starts missing output.
@@ -114,9 +117,12 @@ impl PtySession {
                 }
             }
         }
-        if let Ok(status) = self.child.lock().unwrap().wait() {
-            *self.exit_code.lock().unwrap() = Some(status.exit_code());
-        }
+        // Once `exited` fires the outcome is always definite: a failed wait() counts as a failure.
+        let code = match self.child.lock().unwrap().wait() {
+            Ok(status) => status.exit_code(),
+            Err(_) => WAIT_FAILED_CODE,
+        };
+        *self.exit_code.lock().unwrap() = Some(code);
         let _ = exited.send(true);
     }
 
@@ -171,7 +177,9 @@ impl PtySession {
         *self.exited.borrow()
     }
 
-    /// The child's exit code; `None` until it has exited.
+    /// The child's exit code; `None` only while it is running. A child killed by a signal
+    /// is reported as 1 (portable-pty's mapping), and if waiting for it failed the code is
+    /// `u32::MAX`, so an exited session never looks successful by accident.
     pub fn exit_code(&self) -> Option<u32> {
         *self.exit_code.lock().unwrap()
     }
@@ -273,9 +281,11 @@ mod tests {
     #[tokio::test]
     async fn can_be_killed() {
         let session = PtySession::spawn(bash("sleep 30"), 80, 24, None).unwrap();
+        assert_eq!(session.exit_code(), None);
         session.kill().unwrap();
         tokio::time::timeout(Duration::from_secs(5), session.wait())
             .await
             .unwrap();
+        assert!(matches!(session.exit_code(), Some(c) if c != 0));
     }
 }
