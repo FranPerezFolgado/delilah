@@ -68,6 +68,10 @@ Unlinks: deletes the row, resolves its notices, adds the URL to `pr_unlinked`. 2
 { "repo": ".", "title": "…", "body": "Jira: https://…/browse/PROJ-1\n\n- commit subject\n- …", "base": "main", "needs_push": true }
 ```
 
+`repos` *(added during implementation)*: the task's repos (`.` or submodule paths) that
+have no open PR, so the dialog can offer a submodule picker for parent projects:
+`"repos": ["svc-a", "svc-b"]`.
+
 409 `{ "error": "…", "reason": "no-commits" | "has-pr" | "no-workspace" }`.
 
 ### `POST /api/v1/tasks/{key}/prs`
@@ -121,7 +125,7 @@ export interface PullRequest { id: number; repo: string; host: string; owner_nam
   linked_by: "detected" | "opened" | "pasted"; checked_at: string | null; error: string | null; snapshot: PrSnapshot | null }
 export interface TaskPrs { account: string | null; problem: { kind: string; message: string } | null; prs: PullRequest[] }
 export interface PrSummary { task: string; state: PrSnapshot["state"]; draft: boolean; ci: PrSnapshot["ci"]; review_decision: PrSnapshot["review_decision"]; count: number }
-export interface PrProposal { repo: string; title: string; body: string; base: string; needs_push: boolean }
+export interface PrProposal { repo: string; title: string; body: string; base: string; needs_push: boolean; repos: string[] }
 // api.taskPrs(key), api.prSummaries(), api.refreshPrs(key), api.linkPr(key, url), api.unlinkPr(key, id),
 // api.prProposal(key, repo), api.openPr(key, body), api.forwardNotice(id), api.dismissNotice(id)
 ```
