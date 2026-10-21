@@ -1,5 +1,6 @@
 //! Agent adapters (Claude Code first): launch, resume and status detection.
 
+pub mod branch_name;
 pub mod claude;
 pub mod env;
 pub mod limits;
