@@ -23,9 +23,9 @@ Mode: format=markdown commits=yes
 | WP-13 | 4 | 4A | done | 1 | 551037a | |
 | WP-14 | 4 | 4A | done | 1 | 46f9f9f | |
 | WP-04F | 4 | 4F | done | 1 | 3c7eebe | phase 4 fixes: hermetic run test |
-| WP-15 | 5 | 5A | verified | 1 | | |
-| WP-16 | 5 | 5A | verified | 1 | 12d54c8 | InboxView change untested | |
-| WP-17 | 6 | 6A | pending | 0 | | |
+| WP-15 | 5 | 5A | done | 1 | 62a0531 | |
+| WP-16 | 5 | 5A | done | 1 | 12d54c8 | InboxView change untested | |
+| WP-17 | 6 | 6A | implementing | 0 | | |
 | WP-18 | 7 | 7A | pending | 0 | | |
 | WP-19 | 7 | 7A | pending | 0 | | |
 | WP-20 | 7 | 7B | pending | 0 | | T041 manual walkthrough |
@@ -36,3 +36,4 @@ Mode: format=markdown commits=yes
 - Phase 2: spec COMPLIANT (minor gaps) · migration SAFE · contract 1 HIGH (Entry not flattened) · security 2 HIGH (rg --pre exec, git --output write), 1 MEDIUM (repo settings merged). Fixed in WP-02F: allow list cut to git status/ls (+rtk), MultiEdit denied, --setting-sources user for dontAsk, Entry flattened, allow-edits refuses conversations, prompt recorded as first user entry, label forced "Idea", docs aligned. LOW kept: plugin dir stays on all project sessions (FR-014 allows them to create tasks).
 - Phase 3: spec GAPS (HIGH pending cards not interactive, MEDIUM duplicate ask-bar) · contract BREAKING (same CRITICAL; card types; dead card after failed Crear) · security no HIGH (MEDIUM control chars to PTY; LOW stop on any session, owner not checked vs record, no size caps, send race) · architecture 2 HIGH (asks↔conversation cycle; proposal logic in ask handler) · UI verifier: no browser tools, nothing checked. Fixed in WP-03Fd/WP-03Fu. Deferred: usage-limit notice in the conversation view (no task covers it), TaskScreen SessionTab split, build_task move to a service module; "Otra" not offered on proposal cards (scenario 5 lists only the three actions).
 - Phase 4: spec GAPS — HIGH run test launches the real claude (fails without it), MEDIUM tautological prompt assertion, LOW temp dir left behind → WP-04F. Deferred LOW: the history label isn't visible in BacklogTaskView (no history list there; the notes mark shows the origin).
+- Phase 5: spec+security PASS. Optional LOWs left: unauthenticated hook endpoint lets a local process forge a card for a known project session id (user still clicks Crear; same as the loopback API); Config.agent_program is a pub field (only tests set it).
