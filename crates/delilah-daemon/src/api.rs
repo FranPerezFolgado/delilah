@@ -56,6 +56,17 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/sessions",
             get(session_api::list_for_task).post(session_api::open),
         )
+        .route("/api/v1/prs", get(crate::pr_api::summaries))
+        .route("/api/v1/tasks/{key}/prs", get(crate::pr_api::task_prs))
+        .route(
+            "/api/v1/tasks/{key}/prs/refresh",
+            post(crate::pr_api::refresh),
+        )
+        .route("/api/v1/tasks/{key}/prs/link", post(crate::pr_api::link))
+        .route(
+            "/api/v1/tasks/{key}/prs/{id}",
+            axum::routing::delete(crate::pr_api::unlink),
+        )
         .route("/api/v1/sessions", get(session_api::list_all))
         .route(
             "/api/v1/preferences/{key}",

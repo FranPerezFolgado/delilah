@@ -243,7 +243,6 @@ impl Store {
         rows.iter().map(pr_row).collect()
     }
 
-    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn pr(&self, id: i64) -> Result<Option<PrRow>, StoreError> {
         let row = sqlx::query(&format!(
             "SELECT {PR_COLUMNS} FROM pull_requests WHERE id = ?"
@@ -256,7 +255,6 @@ impl Store {
 
     /// Deletes the link, resolves its notices and remembers the URL so detection never
     /// brings it back. Returns the row, or `None` if there was none.
-    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn unlink_pr(&self, id: i64) -> Result<Option<PrRow>, StoreError> {
         let Some(row) = self.pr(id).await? else {
             return Ok(None);

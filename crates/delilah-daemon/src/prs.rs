@@ -75,7 +75,6 @@ pub fn pick(prs: &[ListedPr]) -> Option<&ListedPr> {
 
 /// The badge of a task's PRs; `None` if it has none. A PR not checked yet counts as
 /// open.
-#[allow(dead_code)] // used by the API in the next package
 pub(crate) fn summary(task: &str, rows: &[PrRow]) -> Option<PrSummary> {
     if rows.is_empty() {
         return None;
