@@ -253,6 +253,15 @@ async fn create_task(
     State(app): State<AppState>,
     Json(new): Json<NewTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let task = build_task(&app, new).await?;
+    app.store.create_task(&task).await?;
+    app.emit(crate::events::Topic::Tasks);
+    Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// Everything `POST /tasks` does short of storing: validates, resolves the project and
+/// key, and builds the backlog task.
+pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, ApiError> {
     if new.title.trim().is_empty() {
         return Err(ApiError::bad_request("say what the task is about"));
     }
@@ -273,9 +282,7 @@ async fn create_task(
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
-    app.store.create_task(&task).await?;
-    app.emit(crate::events::Topic::Tasks);
-    Ok((StatusCode::CREATED, Json(task)))
+    Ok(task)
 }
 
 /// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.

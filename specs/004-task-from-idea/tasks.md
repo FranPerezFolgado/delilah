@@ -147,7 +147,7 @@
 
 ### Proposal → task (daemon)
 
-- [ ] T016 [US1] Write failing tests in `crates/delilah-daemon/src/asks.rs` (pattern: the test at ~line 340 that posts to the hook and answers):
+- [X] T016 [US1] Write failing tests in `crates/delilah-daemon/src/asks.rs` (pattern: the test at ~line 340 that posts to the hook and answers):
   - `a_crear_answer_on_a_project_proposal_creates_a_backlog_task_with_the_brief`:
     - post the hook for owner `@web` with one question (`header: "Nueva tarea"`, `question: "Reintentos con backoff"`, options `Crear` (preview `"## Idea\n…"`), `Cambiar algo`, `Descartar`);
     - answer `Crear`;
@@ -157,8 +157,8 @@
   - `a_second_answer_cannot_create_a_second_task` (second answer → 404, one task).
   - `an_empty_title_answers_with_the_reason_and_creates_nothing` (answer contains `no se pudo crear`, response `{task:null,error}`).
   - `a_card_without_preview_or_with_two_questions_is_not_a_proposal`.
-- [ ] T017 [US1] Extract the body of `create_task` in `crates/delilah-daemon/src/api.rs` (lines 256–276) into `pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, ApiError>`, without storing it, so `create_task` calls it and then `store.create_task`. Existing api tests must still pass.
-- [ ] T018 [US1] In `crates/delilah-daemon/src/asks.rs`:
+- [X] T017 [US1] Extract the body of `create_task` in `crates/delilah-daemon/src/api.rs` (lines 256–276) into `pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, ApiError>`, without storing it, so `create_task` calls it and then `store.create_task`. Existing api tests must still pass.
+- [X] T018 [US1] In `crates/delilah-daemon/src/asks.rs`:
   - add `proposal: Option<Proposal>` (`#[derive(Serialize)] pub struct Proposal { title: String, brief: String }`) to `Ask`, filled in `hook` by `fn proposal_of(owner: &str, questions: &Value) -> Option<Proposal>` with the data-model rules;
   - change `Outcome::Answered` handling so that `answer()`, when the ask has a proposal and its question's answer is `"Crear"`, does the following:
     - builds a `NewTask { free: true, key: "", title, project: Some(project), notes: Some(mark + brief), in_checkout: None, workflow: None }` with `build_task`;
@@ -168,7 +168,7 @@
     - returns `{task}` / `{task:null,error}`.
 
   Other answers return `{task:null}`. T016 then passes.
-- [ ] T019 [US1] Expose `proposal` and `options[].preview` through the inbox's ask (`crates/delilah-daemon/src/inbox.rs`, wherever `Ask` is mapped into the item), with a test that an inbox item for a proposal ask carries `proposal`.
+- [X] T019 [US1] Expose `proposal` and `options[].preview` through the inbox's ask (`crates/delilah-daemon/src/inbox.rs`, wherever `Ask` is mapped into the item), with a test that an inbox item for a proposal ask carries `proposal`.
 
 ### History, queue and stop (daemon)
 

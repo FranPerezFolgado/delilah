@@ -160,6 +160,8 @@ pub struct InboxItem {
 pub struct AskView {
     pub id: String,
     pub questions: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<crate::asks::Proposal>,
 }
 
 /// `GET /api/v1/inbox`: most urgent first (what blocks an agent), newest first within.
@@ -198,6 +200,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             ask: Some(AskView {
                 id: ask.id,
                 questions: ask.questions,
+                proposal: ask.proposal,
             }),
         });
     }
