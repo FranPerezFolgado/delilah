@@ -362,7 +362,8 @@ export const EN: Record<string, string> = {
   "Implementar en sesión nueva": "Implement in a new session",
   "Seguir aquí": "Keep going here",
   "Reintentar": "Retry",
-  "Paso nuevo (sesión nueva)": "New step (new session)",
+  "Paso a {step} (sesión nueva)": "Moved to {step} (new session)",
+  "Spec y plan": "Spec and plan",
   "Siguiente paso": "Next step",
   "te propone el siguiente paso": "suggests the next step",
 };

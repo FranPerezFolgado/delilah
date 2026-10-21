@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type Session, type SessionKind, type Task } from "../api";
+import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type Step, type Session, type SessionKind, type Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { on } from "../live";
 import { Icon } from "./Icon";
@@ -18,10 +18,17 @@ const EVENT_LABELS: Record<string, string> = {
   "manual-resume": "Reanudada a mano",
   "agent-finished": "El agente terminó",
   "mark-done": "Marcada como hecha",
-  "step-started": "Paso nuevo (sesión nueva)",
   fail: "Falló",
   "start-aborted": "No se pudo empezar; vuelve al backlog",
 };
+
+const STEP_LABELS: Record<Step, string> = {
+  plan: "Spec y plan",
+  implement: "Implementación",
+  review: "Revisión",
+};
+
+export const stepLabel = (step: Step) => t(STEP_LABELS[step] ?? String(step));
 
 interface Props {
   task: Task;
@@ -240,11 +247,12 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
               <div className="row" key={i}>
                 <span className="mono muted">{new Date(e.at).toLocaleTimeString(locale())}</span>
                 <span>
-                  {EVENT_LABELS[e.event.type] ? t(EVENT_LABELS[e.event.type]) : e.event.type}
+                  {e.event.type === "step-started"
+                    ? t("Paso a {step} (sesión nueva)", { step: stepLabel(String(e.event.step) as Step) })
+                    : EVENT_LABELS[e.event.type] ? t(EVENT_LABELS[e.event.type]) : e.event.type}
                   {e.event.type === "limit-reached" && typeof e.event.resume_at === "string" && (
                     <span className="muted"> · {t("hasta las {time}", { time: hhmm(e.event.resume_at) })}</span>
                   )}
-                  {e.event.type === "step-started" && <span className="muted"> · {phaseLabel(String(e.event.step) as Column)}</span>}
                   {e.event.type === "phase-reached" && <span className="muted"> · {phaseLabel(String(e.event.phase) as Column)}</span>}
                 </span>
               </div>
