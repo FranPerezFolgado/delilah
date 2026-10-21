@@ -42,6 +42,34 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
     }
   };
 
+  const [saving, setSaving] = useState(false);
+  const [saveNotes, setSaveNotes] = useState(true);
+  const [savingBusy, setSavingBusy] = useState(true);
+
+  useEffect(() => {
+    Promise.all([api.preference<boolean>("saving-mode"), api.preference<boolean>("save-notes")])
+      .then(([mode, notes]) => {
+        setSaving(mode === true);
+        // On unless the user turned it off.
+        setSaveNotes(notes !== false);
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setSavingBusy(false));
+  }, []);
+
+  const togglePref = async (name: "saving-mode" | "save-notes", on: boolean) => {
+    setError(null);
+    setSavingBusy(true);
+    try {
+      await api.setPreference(name, on);
+      (name === "saving-mode" ? setSaving : setSaveNotes)(on);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingBusy(false);
+    }
+  };
+
   const save = async (next: Bindings) => {
     setError(null);
     try {
@@ -124,6 +152,33 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
           </p>
           <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
             {t("Quien entre en tu cuenta de claude.ai podrá pedirles cambios en tu Mac. Necesita que Claude Code tenga la sesión iniciada con una cuenta de claude.ai, no con una clave de API.")}
+          </p>
+        </div>
+        <div>
+          <div className="sec" style={{ marginBottom: 8 }}>{t("Modo ahorro")}</div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={saving}
+              disabled={savingBusy}
+              onChange={(e) => togglePref("saving-mode", e.target.checked)}
+            />
+            {t("Modo ahorro por defecto")}
+          </label>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {t("Las tareas nuevas usan una sesión de Claude por fase, para gastar menos contexto.")}
+          </p>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={saveNotes}
+              disabled={savingBusy}
+              onChange={(e) => togglePref("save-notes", e.target.checked)}
+            />
+            {t("Guardar notas antes de cambiar de sesión")}
+          </label>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {t("Antes de pasar a la sesión siguiente, la actual guarda sus notas con /save-session.")}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

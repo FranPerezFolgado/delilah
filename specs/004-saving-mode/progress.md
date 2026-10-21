@@ -15,7 +15,7 @@ Mode: format=markdown commits=yes
 | WP-05F | 3 | 3B | done | 1 | f2f90b6 | phase 3 review fixes (history label) |
 | WP-06 | 4 | 4A | done | 1 | 7d176ae | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
 | WP-06F | 4 | 4A | done | 1 | 6855266 | phase 4 review fixes |
-| WP-07 | 5 | 5A | pending | 0 | | |
+| WP-07 | 5 | 5A | verified | 1 | | |
 | WP-08 | 6 | 6A | pending | 0 | | |
 | WP-09 | 7 | 7A | pending | 0 | | |
 | WP-10 | 7 | 7B | pending | 0 | | |

@@ -173,6 +173,10 @@ pub async fn on_hook(
                 maybe_hint(&app, &key).await;
             });
         }
+        Signal::TurnFailed if primary && !limited => {
+            let app = app.clone();
+            tokio::spawn(async move { crate::handoff::on_turn_failed(&app, &key).await });
+        }
         _ => {}
     }
 }

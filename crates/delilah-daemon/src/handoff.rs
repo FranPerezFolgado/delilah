@@ -175,20 +175,51 @@ async fn set(app: &AppState, key: &TaskKey, to: Step, stage: HandoffStage, error
     app.emit(Topic::Tasks);
 }
 
+/// The `save-notes` preference: on unless the user turned it off.
+async fn save_notes_preference(app: &AppState) -> bool {
+    let value: Option<serde_json::Value> =
+        app.store.setting("pref:save-notes").await.ok().flatten();
+    value
+        .as_ref()
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
 /// Where a confirmed handoff goes next: the one place that decides between saving
-/// the outgoing session's notes and starting the new session right away.
-async fn after_confirm(_app: &AppState, _key: &TaskKey) -> HandoffStage {
-    HandoffStage::Starting
+/// the outgoing session's notes and starting the new session right away. Saving
+/// types `/save-session` into the outgoing primary; with the preference off, or no
+/// live session to ask, the new session starts at once.
+async fn after_confirm(app: &AppState, key: &TaskKey) -> HandoffStage {
+    if !save_notes_preference(app).await {
+        return HandoffStage::Starting;
+    }
+    let Some(live) = app.sessions.primary(key.as_str()) else {
+        return HandoffStage::Starting;
+    };
+    match crate::actions::type_prompt(&live, "/save-session").await {
+        Ok(()) => HandoffStage::Saving,
+        Err(e) => {
+            tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
+            HandoffStage::Starting
+        }
+    }
 }
 
 /// The primary session finished a turn (not on the usage limit): see whether its step
 /// is over. Offers the next step or starts it, as `boundary` says.
 pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
+    on_turn_ended_with(app, key, &crate::run::launch_session).await;
+}
+
+async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
     let Ok(task) = task_of(app, key).await else {
         return;
     };
     if !task.saving_mode {
         return;
+    }
+    if matches!(&task.handoff, Some(h) if h.stage == HandoffStage::Saving) {
+        return finish_save(app, key, launch).await;
     }
     let Some(primary) = primary_session(app, key).await else {
         return;
@@ -217,9 +248,50 @@ pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
             set(app, key, to, stage, None).await;
             drop(guard);
             if stage == HandoffStage::Starting {
-                start(app, key, to).await;
+                start_with(app, key, to, launch).await;
             }
         }
+    }
+}
+
+/// The outgoing session's save turn ended: the new session can start.
+async fn finish_save<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
+    let guard = app.handoffs.guard.lock().await;
+    let Ok(fresh) = task_of(app, key).await else {
+        return;
+    };
+    let to = match &fresh.handoff {
+        Some(h) if h.stage == HandoffStage::Saving => h.to,
+        _ => return,
+    };
+    if !app.handoffs.mark_starting(key) {
+        return;
+    }
+    set(app, key, to, HandoffStage::Starting, None).await;
+    drop(guard);
+    start_with(app, key, to, launch).await;
+}
+
+/// The primary session's turn failed (not on the usage limit): a handoff waiting for
+/// its notes cannot go on by itself, so it stops as failed, to retry.
+pub(crate) async fn on_turn_failed(app: &AppState, key: &TaskKey) {
+    let _guard = app.handoffs.guard.lock().await;
+    let Ok(task) = task_of(app, key).await else {
+        return;
+    };
+    if let Some(h) = task
+        .handoff
+        .as_ref()
+        .filter(|h| task.saving_mode && h.stage == HandoffStage::Saving)
+    {
+        let message = app
+            .lang()
+            .pick(
+                "la sesión no pudo guardar las notas",
+                "the session could not save its notes",
+            )
+            .to_string();
+        set(app, key, h.to, HandoffStage::Failed, Some(message)).await;
     }
 }
 
@@ -473,10 +545,6 @@ pub(crate) async fn act(
 /// previous one is main again and the handoff is `failed`, to retry.
 ///
 /// The caller has marked the task as starting (under the guard) and dropped the guard.
-pub(crate) async fn start(app: &AppState, key: &TaskKey, step: Step) {
-    start_with(app, key, step, &crate::run::launch_session).await;
-}
-
 async fn start_with<L: Launcher>(app: &AppState, key: &TaskKey, step: Step, launch: &L) {
     let result = try_start(app, key, step, launch).await;
     // The final write is made under the guard, and only if the handoff is still the
@@ -771,6 +839,115 @@ mod tests {
         assert_eq!(handoff_of(&app, &key).await.unwrap(), h);
     }
 
+    async fn no_save_notes(app: &AppState) {
+        app.store
+            .set_setting("pref:save-notes", &serde_json::json!(false))
+            .await
+            .unwrap();
+    }
+
+    /// A live outgoing primary (a process that does nothing) and an offered handoff.
+    async fn offered_with_live_primary(app: &AppState, key: &TaskKey) {
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty);
+        on_turn_ended(app, key).await;
+    }
+
+    #[tokio::test]
+    async fn confirm_saves_the_notes_first_and_the_save_turn_end_starts_the_session() {
+        let (app, key) = setup().await;
+        offered_with_live_primary(&app, &key).await;
+        let launched = Launched::default();
+        confirm_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Saving));
+        assert!(launched.lock().unwrap().is_empty());
+        assert_eq!(
+            app.sessions.get("plan-1").unwrap().state(),
+            crate::sessions::LiveState::Working
+        );
+
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let launched = launched.lock().unwrap();
+        assert_eq!(launched.len(), 1);
+        assert_eq!(launched[0].0.step, Some(Step::Implement));
+        assert!(handoff_of(&app, &key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_failed_save_turn_fails_the_handoff_and_a_retry_starts_it() {
+        let (app, key) = setup().await;
+        offered_with_live_primary(&app, &key).await;
+        let launched = Launched::default();
+        confirm_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+        on_turn_failed(&app, &key).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Failed));
+        assert!(h.error.is_some());
+        assert!(launched.lock().unwrap().is_empty());
+
+        retry_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(launched.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_turn_failure_outside_saving_changes_nothing() {
+        let (app, key) = setup().await;
+        on_turn_ended(&app, &key).await;
+        let before = handoff_of(&app, &key).await;
+        on_turn_failed(&app, &key).await;
+        assert_eq!(handoff_of(&app, &key).await, before);
+    }
+
+    #[tokio::test]
+    async fn without_save_notes_the_session_starts_straight_away() {
+        let (app, key) = setup().await;
+        no_save_notes(&app).await;
+        offered_with_live_primary(&app, &key).await;
+        let launched = Launched::default();
+        confirm_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert!(handoff_of(&app, &key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn the_automatic_review_handoff_saves_the_notes_too() {
+        let (app, key) = setup().await;
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty);
+        let ws = app.config.home.join("ws");
+        std::fs::write(
+            ws.join("specs/proj-1-x/tasks.md"),
+            "- [x] T001 One\n- [x] T002 Two\n",
+        )
+        .unwrap();
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Review, HandoffStage::Saving));
+        assert!(launched.lock().unwrap().is_empty());
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn confirm_starts_the_implementation_in_a_new_primary_session() {
         let (app, key) = setup().await;
@@ -780,6 +957,7 @@ mod tests {
         let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
         app.sessions
             .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        no_save_notes(&app).await;
         on_turn_ended(&app, &key).await;
 
         let launched = Launched::default();

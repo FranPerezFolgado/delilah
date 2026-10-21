@@ -79,9 +79,9 @@ None: no new dependencies.
 
 **Independent Test**: engine tests with a fake PTY reading what was typed.
 
-- [ ] T028 [US3] Write failing tests in `crates/delilah-daemon/src/handoff.rs`: with preference `save-notes` absent or true, `confirm` → `saving` and `/save-session` typed into the outgoing primary; its next not-limited `TurnEnded` → the new session starts; a limited turn end keeps `saving` (and the task pauses as today); a `TurnFailed` without limit → `failed`; with `save-notes = false` → straight to `starting`.
-- [ ] T029 [US3] Implement T028 in `crates/delilah-daemon/src/handoff.rs` (uses `actions::type_prompt`).
-- [ ] T030 [US3] Settings: "Modo ahorro por defecto" (`saving-mode`) and "Guardar notas antes de cambiar de sesión" (`save-notes`, default on) in `app/src/components/SettingsView.tsx`, with English strings in `app/src/i18n/en.ts`.
+- [X] T028 [US3] Write failing tests in `crates/delilah-daemon/src/handoff.rs`: with preference `save-notes` absent or true, `confirm` → `saving` and `/save-session` typed into the outgoing primary; its next not-limited `TurnEnded` → the new session starts; a limited turn end keeps `saving` (and the task pauses as today); a `TurnFailed` without limit → `failed`; with `save-notes = false` → straight to `starting`.
+- [X] T029 [US3] Implement T028 in `crates/delilah-daemon/src/handoff.rs` (uses `actions::type_prompt`).
+- [X] T030 [US3] Settings: "Modo ahorro por defecto" (`saving-mode`) and "Guardar notas antes de cambiar de sesión" (`save-notes`, default on) in `app/src/components/SettingsView.tsx`, with English strings in `app/src/i18n/en.ts`.
 
 ---
 
