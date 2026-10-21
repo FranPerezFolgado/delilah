@@ -138,17 +138,19 @@ binary swaps `gh` (previews use a fake one).
   the task's agent as comments to consider (never on its own), or "Descartar" it.
   They count on the Dock badge. A new failing commit raises a new item; the same one
   never twice.
-- **"Abrir PR"** (in the PR tab, once the branch has commits) shows a title and
+- **"Abrir PR"** (in the PR tab, once the branch has commits, and while some repo of the task has no open PR) shows a title and
   description to edit (the Jira link and the commit subjects), "Borrador", and for a
-  parent a "Submódulo" picker. It pushes the branch and opens the PR against the
+  parent a "Submódulo" picker, on the first free submodule with commits. It pushes the branch and opens the PR against the
   default branch; if anything fails, nothing is linked and the error is shown.
 - **Archive on merge.** When all of a task's PRs are merged, Delilah marks it done and
   archives it without asking: back to your previous branches in checkout mode, the
   worktree removed otherwise, and the local task branches deleted (never the parent's
-  and never on GitHub). If a repo has uncommitted changes or commits the PR does not
-  contain, nothing is removed and the Bandeja says why, with "Archivar igualmente". A PR
-  closed without merging only notifies. If an archive stops halfway, the Bandeja lists
-  what was left and archiving by hand finishes it.
+  and never on GitHub). Every repo counts, also one without a PR: if any has uncommitted changes or
+  commits the PR does not contain (or, without a PR, unpushed ones), or cannot be
+  fetched, nothing is removed and the Bandeja says why, with "Archivar igualmente". A PR
+  closed without merging only notifies. You get one notification per merge, "mergeada y archivada" or "mergeada, sin
+  archivar". If branches are left, the Bandeja lists them (also once the task is
+  archived) and archiving by hand finishes it.
 
 **Questions with options.** When the agent asks with Claude Code's
 `AskUserQuestion` (as the `feature` workflow does), Delilah shows the question and

@@ -38,7 +38,7 @@ done or pending is in [status.md](status.md).
 |---|---|
 | `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds. Pure, no I/O. |
 | `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`). |
-| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), what a branch changed (`changes.rs`). |
+| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
@@ -63,13 +63,14 @@ done or pending is in [status.md](status.md).
 | `specs.rs` | A watcher (every 5 s) that reads each task's `specs/<feature>/` and records phase changes. |
 | `scheduler.rs` | Runs every 30 s: resumes tasks paused by a usage limit once the window resets. |
 | `actions.rs` | Resume, done, archive, delete, and the usage report. |
+| `archive.rs` | How a task is archived, shared by `actions::archive` and `pr_loop::merge`: stop and await the sessions, release the workspace, delete the verified local branches, finish an `archive-partial`. The policy (what must hold first) stays with the caller. |
 | `transitions.rs` | The one way to change a task's status, so every change emits events and notifications. |
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
 | `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), submodules, and the submodule suggestion. |
 | `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` swaps the binary. |
 | `pr_types.rs`, `prs.rs` | PR data types (snapshot, checks, reviews, comments) and the pure logic: `ci_outcome`, `pick`, `summary`, `diff`, back-off. |
 | `pr_loop/` | The I/O of the PR loop: `mod.rs` (the 30 s loop `spawn`, `nudge`, `check_task`, detection), `access.rs` (access problems, notified once per project), `notices.rs` (turns a snapshot diff into notices and notifications), `merge.rs` (`on_merged`, see Workspaces). |
-| `pr_api.rs`, `store_prs.rs` | The PR routes (list, summaries, refresh, link, unlink, proposal, open, forward, dismiss) and the SQLite access for PRs and their notices. |
+| `pr_api/`, `store_prs.rs` | The PR routes and the SQLite access for PRs and their notices. `mod.rs` (list, summaries, refresh, link, unlink, dismiss), `dto.rs` (the JSON types), `open.rs` (proposal and open; `open` links the new PR straight to its repo with `pr_loop::link_known`; a parent's proposal defaults to its first free submodule that has commits), `forward.rs` (sending feedback to the agent). |
 | `jira.rs`, `secrets.rs` | The Jira connection. The token lives in the Keychain; tests keep it in memory. |
 | `events.rs` | `GET /api/v1/events`: a WebSocket that only announces topics. |
 | `preferences.rs`, `store_settings.rs`, `lang.rs` | Preferences (`pref:<key>`), settings, and the language the daemon writes in. |
@@ -183,15 +184,17 @@ and only changes while the task is under way (see `phases.rs`):
   - The checkout must be clean to start, and only one active task may hold it.
   - A finished holder is released when a new task takes it.
   - The branches to go back to are stored in `workspaces.previous`.
-- **Archive** (`actions::archive`):
+- **Archive** (`actions::archive`, built on `archive.rs`):
   - **Checkout mode:** goes back to the previous branches. It never refuses: uncommitted files stay, and a folder that cannot switch is logged and left on the task's branch.
   - **Worktree mode:** refuses while there are uncommitted changes or commits on no remote, unless `?force=true`. It then runs `git worktree remove --force`.
+  - Sessions are stopped and awaited first, so nothing writes while the workspace goes.
 - **Archive on merge** (`pr_loop::merge::on_merged`), when every linked PR of the task is merged and none was closed unmerged:
-  1. The task is marked done if it is not terminal, which stops its sessions.
-  2. Each repo is fetched and checked (`delilah_git::check_merged`): no uncommitted changes (the parent's too), and the local branch is contained in the PR's head. The head is the reference, not the base, so squash and rebase merges pass.
+  1. The task is marked done if it is not terminal, and its sessions are stopped and awaited.
+  2. Every repo of the workspace is checked, not only those with a PR. A repo with a merged PR is fetched (a failed fetch blocks) and `delilah_git::check_merged` requires no uncommitted changes (the parent's too) and its local branch contained in the PR's head; the head is the reference, not the base, so squash and rebase merges pass. A repo without a PR (`check_repos`) must have nothing uncommitted and no unpushed commits, and keeps its branch.
   3. A failed check leaves everything as it is and raises an `archive-blocked` notice with the reason.
-  4. Otherwise the workspace is released (a checkout goes back to the previous branches first) and the task's local branch is deleted (`branch -D`, needed after a squash) in each submodule that has it. The parent's branch stays.
-  5. A failure after that started raises `archive-partial`, listing what was left; `POST /archive` by hand finishes it.
+  4. Otherwise `archive::archive_workspace` releases the workspace with `force=false` (a checkout goes back to the previous branches first) and deletes the task's local branch only in repos with a merged PR, by compare-and-delete: `branch -D` (needed after a squash) at the sha verified in step 2, so a commit made meanwhile is never lost. The parent's branch stays.
+  5. A branch that cannot be deleted raises `archive-partial`, which stores the repo labels and shas; the folders are recomputed under the project root. `POST /archive` by hand finishes it, and the item shows in the Bandeja even for an archived task.
+  6. One notification per merge, "mergeada y archivada" or "mergeada, sin archivar"; the per-PR one is held back.
 
   It asks nothing and never deletes a remote branch. A PR closed without merging stops the automatic archive; the task stays and the user archives by hand.
 - **Delete** (`DELETE /api/v1/tasks/{key}`, `delilah rm`): stops the task's agents, releases the workspace (the branch stays) and frees the key. The same force rule applies.

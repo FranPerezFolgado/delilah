@@ -191,9 +191,16 @@ bots was ruled out, since a CI bot's review is often the thing to read.
 **31. A merged task archives without asking, unless that would lose work
 (2026-10-21).** When every linked PR is merged the task is marked done and
 archived at once. Asking first was ruled out: the merge is the confirmation. The
-guard stays: every repo must be clean and its local branch contained in the PR's
-head (so squash and rebase merges pass), else an `archive-blocked` item offers a
-forced archive. The task's local branches are deleted, never the parent's and
-never a remote one. A failure halfway raises `archive-partial`, and archiving by
-hand finishes it. This overrides decision 18's "a checkout never refuses" for the
+guard stays: every repo with a PR must be clean and its local branch contained
+in the PR's head (so squash and rebase merges pass), else an `archive-blocked`
+item offers a forced archive. The task's local branches are deleted at the
+verified sha, never the parent's and never a remote one. A branch left behind
+raises `archive-partial`, and archiving by hand finishes it. This overrides decision 18's "a checkout never refuses" for the
 merge archive only.
+
+**32. Repos without a PR never lose work; the merge archive checks every repo
+(2026-10-21).** A merge in one repo must not archive away another that has no PR:
+the check covers every repo of the workspace. One without a PR blocks the archive
+if it is dirty or has unpushed commits, and keeps its branch. A failed fetch blocks
+too, and the workspace is released without force. Deleting a branch compares it to
+the verified sha first, so a commit made after the check survives.
