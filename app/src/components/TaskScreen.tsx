@@ -4,8 +4,9 @@ import type { EditorState } from "@codemirror/state";
 import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
 import { AskCard } from "./AskCard";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
+import { CHANGES, OVERVIEW, PRS, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
+import { on } from "../live";
 import { isMarkdown } from "../markdown";
 import { comboFromEvent, keyOf } from "../shortcuts";
 import { ChangesView } from "./ChangesView";
@@ -16,6 +17,7 @@ import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
+import { PrView } from "./PrView";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
 import { TerminalPane } from "./TerminalPane";
@@ -68,6 +70,25 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
   const [mounted, setMounted] = useState<Set<string>>(() => new Set());
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
+  // The PR tab: for a task with a workspace (its PR is coming) or with PRs already linked.
+  const [hasPrs, setHasPrs] = useState(false);
+  const prTab = !project && (hasWorkspace || hasPrs);
+  useEffect(() => {
+    if (project) return;
+    let alive = true;
+    const load = () =>
+      api
+        .taskPrs(owner)
+        .then((d) => alive && setHasPrs(d.prs.length > 0))
+        .catch(() => {});
+    api.refreshPrs(owner).catch(() => {});
+    load();
+    const off = on("prs", load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [owner, project]);
 
   const tab = (path: string) => session.tabs.find((t) => t.path === path);
 
@@ -77,6 +98,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
   const exists =
     session.active === OVERVIEW ||
     (session.active === CHANGES && session.changesOpen) ||
+    (session.active === PRS && prTab) ||
     !!tab(session.active) ||
     (activeSession !== null && (sessions.some((s) => s.id === activeSession) || activeSession === starting));
   const shown = exists ? session.active : OVERVIEW;
@@ -224,6 +246,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
     ...sessions.map((s) => sessionTab(s.id)),
     ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
     ...(session.changesOpen ? [CHANGES] : []),
+    ...(prTab ? [PRS] : []),
     ...session.tabs.map((t) => t.path),
   ];
 
@@ -492,6 +515,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
             {session.changesOpen && (
               <TabButton id={CHANGES} label={t("Cambios")} icon="diff" shown={shown} onActivate={activate} onClose={close} />
             )}
+            {prTab && <TabButton id={PRS} label="PR" icon="review" shown={shown} onActivate={activate} />}
             {session.tabs.map((t) => (
               <TabButton
                 key={t.path}
@@ -525,6 +549,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
               onViewChanges={openChanges}
             />
           )}
+          {shown === PRS && <PrView owner={owner} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 
           {closingSession && (

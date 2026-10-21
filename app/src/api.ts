@@ -286,6 +286,41 @@ export interface FolderInspection {
   submodules: number;
 }
 
+export interface PrCheck { name: string; outcome: "pending" | "success" | "failure" | "neutral"; url: string | null }
+export interface PrSnapshot {
+  state: "open" | "merged" | "closed";
+  draft: boolean;
+  title: string;
+  head: string;
+  base: string;
+  checks: PrCheck[];
+  ci: "pending" | "success" | "failure" | "none";
+  review_decision: "approved" | "changes-requested" | "review-required" | null;
+  comments: number;
+}
+export interface PullRequest {
+  id: number;
+  repo: string;
+  host: string;
+  owner_name: string;
+  number: number;
+  url: string;
+  linked_by: "detected" | "opened" | "pasted";
+  checked_at: string | null;
+  error: string | null;
+  snapshot: PrSnapshot | null;
+}
+export interface TaskPrs { account: string | null; problem: { kind: string; message: string } | null; prs: PullRequest[] }
+/** One task's PRs for badges: the worst of each field when it has several. */
+export interface PrSummary {
+  task: string;
+  state: PrSnapshot["state"];
+  draft: boolean;
+  ci: PrSnapshot["ci"];
+  review_decision: PrSnapshot["review_decision"];
+  count: number;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -359,6 +394,11 @@ export const api = {
   openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean }) =>
     post<Session>(`/api/v1/projects/${project}/sessions`, s),
   allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
+  taskPrs: (key: string) => request<TaskPrs>(`/api/v1/tasks/${key}/prs`),
+  prSummaries: () => request<PrSummary[]>("/api/v1/prs"),
+  refreshPrs: (key: string) => post<null>(`/api/v1/tasks/${key}/prs/refresh`),
+  linkPr: (key: string, url: string) => post<PullRequest>(`/api/v1/tasks/${key}/prs/link`, { url }),
+  unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
