@@ -197,6 +197,8 @@ export interface Session {
   /** Claude in plan mode: reads and explains, does not edit. */
   read_only: boolean;
   state: SessionState | null;
+  /** An idea conversation (a project session that turns an idea into a task). */
+  conversation: boolean;
   /** The saving-mode step it works on, if any. */
   step: Step | null;
 }
@@ -274,8 +276,31 @@ export type InboxKind =
 export interface AskQuestion {
   question: string;
   header?: string;
-  options: { label: string; description?: string }[];
+  options: { label: string; description?: string; preview?: string }[];
   multiSelect?: boolean;
+}
+
+/** One entry of an idea conversation. */
+export type ConversationEntry =
+  | { id: number; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" }
+  | { id: number; at: string; kind: "claude"; text: string }
+  | {
+      id: number;
+      at: string;
+      kind: "card";
+      ask: string;
+      questions: AskQuestion[];
+      proposal: { title: string; brief: string } | null;
+      outcome: "pending" | "answered" | "terminal" | "withdrawn";
+      answer: Record<string, string> | null;
+      task: string | null;
+      error: string | null;
+    };
+
+export interface Conversation {
+  entries: ConversationEntry[];
+  activity: string | null;
+  needs_terminal: boolean;
 }
 
 /** Something that waits on you, from any task. */
@@ -287,7 +312,7 @@ export interface InboxItem {
   text: string | null;
   since: string | null;
   /** A question with options, answered from Delilah. */
-  ask?: { id: string; questions: AskQuestion[] };
+  ask?: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
   /** The PR notice behind a pr-* item. */
   pr?: { notice: number; url: string; repo: string };
 }
@@ -425,7 +450,7 @@ export const api = {
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
-  openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean }) =>
+  openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean; conversation?: boolean }) =>
     post<Session>(`/api/v1/projects/${project}/sessions`, s),
   allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
   taskPrs: (key: string) => request<TaskPrs>(`/api/v1/tasks/${key}/prs`),
@@ -442,7 +467,12 @@ export const api = {
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
-  answerAsk: (id: string, answers: Record<string, string>) => post<null>(`/api/v1/asks/${id}/answer`, { answers }),
+  answerAsk: (id: string, answers: Record<string, string>) => post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, { answers }),
+  conversation: (id: string) => request<Conversation>(`/api/v1/sessions/${id}/conversation`),
+  sendMessage: (id: string, text: string) => post<ConversationEntry>(`/api/v1/sessions/${id}/messages`, { text }),
+  removeMessage: (id: string, entry: number) =>
+    request<null>(`/api/v1/sessions/${id}/messages/${entry}`, { method: "DELETE" }),
+  stopSession: (id: string) => post<null>(`/api/v1/sessions/${id}/stop`),
   releaseAsk: (id: string) => post<null>(`/api/v1/asks/${id}/release`),
   changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
   files: (key: string) => request<string[]>(`/api/v1/tasks/${key}/files`),

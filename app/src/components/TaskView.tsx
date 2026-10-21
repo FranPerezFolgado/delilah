@@ -240,7 +240,9 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
               <div className="row" key={i}>
                 <span className="mono muted">{new Date(e.at).toLocaleTimeString(locale())}</span>
                 <span>
-                  {e.event.type === "step-started"
+                  {e.event.type === "created-from-conversation"
+                    ? t("Creada desde la conversación «{label}»", { label: String(e.event.label ?? "") })
+                    : e.event.type === "step-started"
                     ? t("Paso a {step} (sesión nueva)", { step: stepLabel(String(e.event.step) as Step) })
                     : EVENT_LABELS[e.event.type] ? t(EVENT_LABELS[e.event.type]) : e.event.type}
                   {e.event.type === "limit-reached" && typeof e.event.resume_at === "string" && (

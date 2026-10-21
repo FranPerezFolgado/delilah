@@ -197,16 +197,21 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
     )
 }
 
+/// `text` with line ends normalised and every control character dropped but newline
+/// and tab: an ESC, Ctrl-C or Ctrl-D, or a paste marker, never reaches the terminal as
+/// a key press.
+pub fn sanitize_prompt(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .chars()
+        .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
+        .collect()
+}
+
 /// The bytes that type `text` into the TUI. Several lines go as a bracketed paste,
 /// or each newline would send the message early.
 fn prompt_bytes(text: &str) -> Vec<u8> {
-    let text = text.replace("\r\n", "\n").replace('\r', "\n");
-    // Control characters (an ESC that starts a paste marker above all, or any escape
-    // sequence) could end a paste early or drive the TUI: only newlines and tabs stay.
-    let text: String = text
-        .chars()
-        .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
-        .collect();
+    let text = sanitize_prompt(text);
     if !text.contains('\n') {
         return text.into_bytes();
     }
@@ -253,6 +258,14 @@ pub async fn resume_if_due(app: &AppState, task: &Task) {
 mod tests {
     use super::*;
     use crate::archive::{ArchivePartial, LeftoverBranch};
+
+    #[test]
+    fn prompt_bytes_drop_control_characters_in_single_and_multi_line_text() {
+        assert_eq!(prompt_bytes("a\x1bb\x03\x04c"), b"abc");
+        assert_eq!(prompt_bytes("x\x1b[200~y"), b"x[200~y");
+        assert_eq!(prompt_bytes("a\x1b\nb"), b"\x1b[200~a\nb\x1b[201~".to_vec());
+    }
+
     use std::path::{Path as FsPath, PathBuf};
 
     fn git(dir: &FsPath, args: &[&str]) -> String {
@@ -307,6 +320,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         (
             AppState::new(crate::store::Store::in_memory().await.unwrap(), config),

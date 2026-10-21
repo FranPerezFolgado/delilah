@@ -196,7 +196,8 @@ Claude in **solo lectura** (`--permission-mode plan`). It reads, searches and
 explains, but does not edit, and nothing is created. "Permitir cambios en esta
 sesión" restarts it in normal mode on the same conversation. "Convertir en tarea" turns
 that Claude into a free task's primary session, keeping its conversation: the task
-works in your checkout, the folder the conversation belongs to.
+works in your checkout, the folder the conversation belongs to. A project session can
+also propose tasks (see "Nueva tarea con Claude" below).
 
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
 and starts `/feature <what you want to do>`). The agent works either **in your
@@ -205,6 +206,19 @@ parent; one task at a time, with the checkout clean; archiving goes back to the
 branch you were on and keeps the task's branch; files left uncommitted stay in your
 folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
+
+**Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
+and Libre (after choosing the project), and on the project's screen and its "+".
+Instead of a form you tell Claude your idea in a conversation view, without a
+terminal: its replies, its questions as cards (like the Bandeja's) and a text field.
+You can write while it works (the message waits for the end of its turn) or press
+"Detener". Claude reads the code (read-only, it cannot edit) and ends with a
+`Nueva tarea` card with a title and a brief (the idea, a summary, affected areas and
+open questions). "Crear" puts the task in the project's **backlog** with that brief as
+its notes, and its history says "Creada desde la conversación «name»"; you review or
+edit it and start it as any other. The conversation stays open and keeps its history,
+also after restarting Delilah. Project sessions ("Preguntar a Claude") can create
+tasks the same way; a task's own sessions cannot.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself

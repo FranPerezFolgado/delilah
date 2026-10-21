@@ -38,7 +38,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&config.home, std::fs::Permissions::from_mode(0o700))?;
     }
+    if let Err(e) =
+        delilah_agents::claude::write_plugin(&config.plugin_dir(), env!("CARGO_PKG_VERSION"))
+    {
+        tracing::warn!("could not write the Delilah plugin: {e}");
+    }
     let store = Store::open(&config.database_path()).await?;
+    // The pending asks lived in the previous process: their cards cannot be answered.
+    match store.withdraw_pending_cards().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, "withdrew the cards left pending by the last run"),
+        Err(e) => tracing::warn!("could not withdraw the stale cards: {e}"),
+    }
 
     let listener = tokio::net::TcpListener::bind(config.addr).await?;
     tracing::info!(addr = %config.addr, home = %config.home.display(), "delilahd listening");

@@ -2,7 +2,7 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-21
-(version 0.3.0).
+(version 0.3.0, plus "Nueva tarea con Claude").
 
 ## Built
 
@@ -35,6 +35,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
+- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md).
 
 **PR loop:**
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
@@ -57,6 +58,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 
 ## Pending and known problems
 
+- **Idea conversations, still missing:**
+  - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
+  - deleting conversations (the history is kept for good);
+  - the usage-limit notice does not show in the conversation view;
+  - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
+  - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
 - **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).
 - **Saving mode, known problems:**
   - the old live session keeps `primary = true` in memory until it exits (~3 s);

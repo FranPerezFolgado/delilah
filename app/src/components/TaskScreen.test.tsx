@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
@@ -13,13 +14,20 @@ vi.mock("../api", async (orig) => {
     api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : () => new Promise(() => {})) }),
   };
 });
-vi.mock("./TerminalPane", () => ({ TerminalPane: () => null }));
+vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
+vi.mock("./ConversationView", () => ({ ConversationView: () => <div data-testid="conversation" /> }));
 vi.mock("./FileTree", () => ({ FileTree: () => null }));
 vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
 vi.mock("./TaskView", () => ({ TaskView: () => null }));
 vi.mock("./ProjectView", () => ({ ProjectView: () => null }));
 vi.mock("./QuickOpen", () => ({ QuickOpen: () => null }));
-vi.mock("./AskCard", () => ({ AskCard: () => null }));
+vi.mock("./AskCard", () => ({
+  AskCard: (p: { ask: { proposal?: { title: string } | null }; onOpenTask?: (k: string) => void }) => (
+    <div data-testid="askcard" data-proposal={p.ask.proposal?.title ?? ""}>
+      <button onClick={() => p.onOpenTask?.("LIBRE-9")}>open-created</button>
+    </div>
+  ),
+}));
 
 const task = (status: TaskStatus): Task => ({
   key: "PROJ-1",
@@ -80,6 +88,86 @@ describe("TaskScreen header phase", () => {
   });
 });
 
+describe("TaskScreen conversation sessions", () => {
+  const conv: Session = {
+    id: "s1",
+    task: "@web",
+    kind: "claude",
+    label: "Idea",
+    primary: false,
+    closed: false,
+    live: true,
+    read_only: false,
+    step: null,
+    state: "waiting",
+    conversation: true,
+  };
+  const open = (s: Session) => {
+    sessionFor("@web").active = sessionTab(s.id);
+    return render(
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
+    );
+  };
+
+  it("shows the conversation view, not the terminal, with no convert bar", () => {
+    const { queryByTestId, container } = open(conv);
+    expect(queryByTestId("conversation")).not.toBeNull();
+    expect(queryByTestId("terminal")).toBeNull();
+    expect(container.querySelector(".tterm .ebar")).toBeNull();
+  });
+
+  it("toggles to the terminal and back", () => {
+    const { queryByTestId, getByText } = open(conv);
+    fireEvent.click(getByText("Ver terminal"));
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
+    fireEvent.click(getByText("Ver conversación"));
+    expect(queryByTestId("conversation")).not.toBeNull();
+    expect(queryByTestId("terminal")).toBeNull();
+  });
+
+  it("keeps the terminal for a plain session", () => {
+    const { queryByTestId } = open({ ...conv, conversation: false });
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
+  });
+
+  const pendingAsk = {
+    kind: "question",
+    task: "@web",
+    title: "",
+    session: { id: "s1", label: "Idea", primary: false, live: true },
+    text: null,
+    since: null,
+    ask: { id: "a1", questions: [] },
+  } as unknown as InboxItem;
+  const openWithAsk = (s: Session, ask: InboxItem = pendingAsk, onOpenTask?: (k: string) => void) => {
+    sessionFor("@web").active = sessionTab(s.id);
+    return render(
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[ask]} askPosition="right" onChanged={() => {}} onConvert={() => {}} onOpenTask={onOpenTask} />,
+    );
+  };
+
+  it("has no ask-bar in conversation mode, but keeps it for a terminal session", () => {
+    expect(openWithAsk(conv).container.querySelector(".ask-bar")).toBeNull();
+    cleanup();
+    expect(openWithAsk({ ...conv, conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
+  });
+
+  it("shows a proposal ask beside the terminal and opens the created task", () => {
+    const proposal = {
+      ...pendingAsk,
+      ask: { id: "a2", questions: [], proposal: { title: "Nueva", brief: "b" } },
+    } as unknown as InboxItem;
+    const onOpenTask = vi.fn();
+    const { getByTestId, getByText, queryByTestId } = openWithAsk({ ...conv, conversation: false }, proposal, onOpenTask);
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(getByTestId("askcard").getAttribute("data-proposal")).toBe("Nueva");
+    fireEvent.click(getByText("open-created"));
+    expect(onOpenTask).toHaveBeenCalledWith("LIBRE-9");
+  });
+});
+
 describe("TaskScreen saving mode", () => {
   const saving = (status: TaskStatus, on = true) => {
     const { container } = render(
@@ -134,6 +222,7 @@ describe("TaskScreen follows the primary session", () => {
     closed: false,
     live: true,
     read_only: false,
+    conversation: false,
     state: "working",
     step: "plan",
   });

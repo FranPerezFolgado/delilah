@@ -16,6 +16,8 @@ pub struct Config {
     /// One more browser origin allowed to call the API (`DELILAH_UI_ORIGIN`): the UI
     /// of a preview (`scripts/preview.sh`), served on its own port.
     pub ui_origin: Option<String>,
+    /// Program to run instead of `claude`; only tests set it.
+    pub agent_program: Option<PathBuf>,
 }
 
 impl Config {
@@ -50,6 +52,7 @@ impl Config {
             allow_file_protocol,
             notify,
             ui_origin,
+            agent_program: None,
         })
     }
 
@@ -66,7 +69,29 @@ impl Config {
         self.home.join("tasks").join(key)
     }
 
+    /// The Claude Code plugin Delilah writes at start-up (the idea-conversation skill).
+    pub fn plugin_dir(&self) -> PathBuf {
+        self.home.join("plugins/delilah")
+    }
+
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_dir_is_under_home() {
+        let config = Config {
+            home: PathBuf::from("/tmp/delilah-home"),
+            ..Config::from_env().unwrap()
+        };
+        assert_eq!(
+            config.plugin_dir(),
+            PathBuf::from("/tmp/delilah-home/plugins/delilah")
+        );
     }
 }

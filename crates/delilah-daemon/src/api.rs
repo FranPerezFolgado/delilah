@@ -120,6 +120,22 @@ pub fn router(state: AppState) -> Router {
             post(crate::phases::dismiss),
         )
         .route("/api/v1/sessions/{id}/reply", post(inbox::reply))
+        .route(
+            "/api/v1/sessions/{id}/conversation",
+            get(crate::conversation::get),
+        )
+        .route(
+            "/api/v1/sessions/{id}/messages",
+            post(crate::conversation::send),
+        )
+        .route(
+            "/api/v1/sessions/{id}/messages/{entry}",
+            axum::routing::delete(crate::conversation::remove),
+        )
+        .route(
+            "/api/v1/sessions/{id}/stop",
+            post(crate::conversation::stop),
+        )
         .route("/api/v1/tasks/{key}/changes", get(changes::list))
         .route("/api/v1/tasks/{key}/changes/diff", get(changes::diff))
         .route("/api/v1/tasks/{key}/tree", get(files::tree))
@@ -287,6 +303,15 @@ async fn create_task(
     State(app): State<AppState>,
     Json(new): Json<NewTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let task = build_task(&app, new).await?;
+    app.store.create_task(&task).await?;
+    app.emit(crate::events::Topic::Tasks);
+    Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// Everything `POST /tasks` does short of storing: validates, resolves the project and
+/// key, and builds the backlog task.
+pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, ApiError> {
     if new.title.trim().is_empty() {
         return Err(ApiError::bad_request("say what the task is about"));
     }
@@ -309,11 +334,9 @@ async fn create_task(
     task.in_checkout = new.in_checkout;
     task.saving_mode = match new.saving_mode {
         Some(on) => on,
-        None => crate::handoff::saving_mode_preference(&app).await,
+        None => crate::handoff::saving_mode_preference(app).await,
     };
-    app.store.create_task(&task).await?;
-    app.emit(crate::events::Topic::Tasks);
-    Ok((StatusCode::CREATED, Json(task)))
+    Ok(task)
 }
 
 /// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
@@ -548,6 +571,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -560,6 +584,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -924,6 +949,7 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: ui_origin.map(str::to_string),
+            agent_program: None,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -971,6 +997,7 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

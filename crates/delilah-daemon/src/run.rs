@@ -21,6 +21,35 @@ use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 /// How long a new session may show the folder-trust dialog before we stop watching.
 const TRUST_WATCH: Duration = Duration::from_secs(60);
 
+/// Added to the system prompt of an idea conversation.
+const IDEA_PROMPT: &str = "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode.";
+
+/// How a Claude session is launched, by what it is: a conversation never asks
+/// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
+/// the plugin (which can create tasks) goes only to project sessions, never to a
+/// task's agents.
+fn launch_flags(
+    session: &SessionRecord,
+    config: &crate::config::Config,
+) -> (
+    claude::Permission,
+    Option<std::path::PathBuf>,
+    Option<&'static str>,
+) {
+    let permission = if session.conversation {
+        claude::Permission::DontAsk
+    } else if session.read_only {
+        claude::Permission::Plan
+    } else {
+        claude::Permission::Default
+    };
+    let plugin_dir = project_of(&session.task)
+        .is_some()
+        .then(|| config.plugin_dir());
+    let prompt = session.conversation.then_some(IDEA_PROMPT);
+    (permission, plugin_dir, prompt)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
     pub key: String,
@@ -366,6 +395,7 @@ fn first_session(
         primary: true,
         closed: false,
         read_only: false,
+        conversation: false,
         step,
     };
     (session, prompt)
@@ -382,16 +412,22 @@ pub fn launch_session(
 ) -> Result<(), ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume = resume && claude::has_conversation(workspace, &session.id);
+    // No control character reaches the agent's command line.
+    let prompt = prompt.map(crate::actions::sanitize_prompt);
+    let prompt = prompt.as_deref();
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
     let cmd = match session.kind {
         SessionKind::Claude => {
+            let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
             let settings = claude::write_settings(
                 &task_dir.join(format!("claude-{}.json", session.id)),
                 &app.config.url(),
                 &session.task,
                 &session.id,
+                permission,
+                &[task_dir.as_path()],
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
@@ -402,8 +438,11 @@ pub fn launch_session(
                 prompt,
                 resume,
                 extra_dirs: &[task_dir.as_path()],
-                read_only: session.read_only && session.kind == SessionKind::Claude,
+                permission,
+                plugin_dir: plugin_dir.as_deref(),
+                append_system_prompt,
                 remote_control: remote_name.as_deref(),
+                program: app.config.agent_program.as_deref(),
             })
         }
         SessionKind::Shell => shell_command(workspace),
@@ -418,6 +457,7 @@ pub fn launch_session(
         session.primary,
         Arc::clone(&pty),
     );
+    live.set_conversation(session.conversation);
     let remote_control = session.kind == SessionKind::Claude && app.remote_control();
     tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
 
@@ -568,8 +608,49 @@ mod tests {
             primary: true,
             closed: false,
             read_only: false,
+            conversation: false,
             step: None,
         }
+    }
+
+    #[test]
+    fn the_launch_table() {
+        let config = crate::config::Config {
+            home: "/h".into(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+        };
+        let mut conv = session("@web", "Idea");
+        conv.conversation = true;
+        let (p, dir, prompt) = launch_flags(&conv, &config);
+        assert_eq!(p, claude::Permission::DontAsk);
+        assert_eq!(dir, Some(config.plugin_dir()));
+        assert_eq!(prompt, Some(IDEA_PROMPT));
+
+        let mut ro = session("@web", "Claude 1");
+        ro.read_only = true;
+        let (p, dir, prompt) = launch_flags(&ro, &config);
+        assert_eq!(p, claude::Permission::Plan);
+        assert!(dir.is_some());
+        assert_eq!(prompt, None);
+
+        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config);
+        assert_eq!(p, claude::Permission::Default);
+        assert_eq!((dir, prompt), (None, None));
+
+        // An extra session of a task is no different: it never gets the plugin.
+        let mut extra = session("PROJ-1", "Claude 2");
+        extra.primary = false;
+        let (p, dir, prompt) = launch_flags(&extra, &config);
+        assert_eq!(p, claude::Permission::Default);
+        assert_eq!((dir, prompt), (None, None));
+        extra.read_only = true;
+        let (p, dir, prompt) = launch_flags(&extra, &config);
+        assert_eq!(p, claude::Permission::Plan);
+        assert_eq!((dir, prompt), (None, None));
     }
 
     async fn app() -> AppState {
@@ -579,6 +660,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.
@@ -812,6 +894,159 @@ mod tests {
 
         let bare = point_to_notes(&app, &key, "/feature PROJ-1".into(), Some("  "));
         assert_eq!(bare, "/feature PROJ-1");
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_started_task_from_a_conversation_reads_the_edited_brief() {
+        use tower::ServiceExt;
+        let call = |app: &AppState, req: axum::http::Request<axum::body::Body>| {
+            let router = crate::api::router(app.clone());
+            async move {
+                let res = router.oneshot(req).await.unwrap();
+                let status = res.status();
+                let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (
+                    status,
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default(),
+                )
+            }
+        };
+        let json_req = |method: &str, path: &str, body: serde_json::Value| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap()
+        };
+
+        // A real repo to work in, and a conversation of the project.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let repo = home.join("web");
+        // Stands in for `claude`: records the arguments it got, then goes away.
+        let fake = home.join("fake-claude.sh");
+        let seen = home.join("args.txt");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 1\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("README.md"), "web\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        let config = crate::config::Config {
+            home: home.clone(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: Some(fake),
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+        let mut conv = session("@web", "Idea");
+        conv.id = "conv".into();
+        conv.primary = false;
+        conv.conversation = true;
+        app.store.create_session(&conv).await.unwrap();
+
+        let task = crate::api::build_task(
+            &app,
+            crate::api::NewTask {
+                key: String::new(),
+                title: "Reintentos".into(),
+                project: Some("web".into()),
+                notes: Some("brief original".into()),
+                in_checkout: None,
+                saving_mode: None,
+                workflow: None,
+                free: true,
+            },
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        app.store
+            .create_task_from_conversation(&task, "conv", "Idea", chrono::Utc::now())
+            .await
+            .unwrap();
+        let key = task.key.to_string();
+
+        let (status, edited) = call(
+            &app,
+            json_req(
+                "PATCH",
+                &format!("/api/v1/tasks/{key}"),
+                serde_json::json!({ "notes": "brief editado" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
+
+        let (status, started) = call(
+            &app,
+            json_req(
+                "POST",
+                "/api/v1/runs",
+                serde_json::json!({ "key": key, "title": "", "project": "web" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{started}");
+
+        let path = app.config.task_dir(&key).join("notes.md");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "brief editado");
+        // What the program received, not what we would have built.
+        let mut args = String::new();
+        for _ in 0..100 {
+            args = std::fs::read_to_string(&seen).unwrap_or_default();
+            if !args.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        for live in app.sessions.of_task(&key) {
+            let _ = live.pty.kill();
+        }
+        assert!(
+            args.contains(&format!("{})", path.display())),
+            "the prompt does not point to notes.md: {args}"
+        );
     }
 
     #[test]

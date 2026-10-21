@@ -72,31 +72,32 @@ impl Store {
     }
 
     pub async fn create_task(&self, task: &Task) -> Result<(), StoreError> {
-        let now = Utc::now().to_rfc3339();
-        let result = sqlx::query(
-            "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(task.key.as_str())
-        .bind(&task.title)
-        .bind(&task.project)
-        .bind(&task.workflow)
-        .bind(&task.phase)
-        .bind(serde_json::to_string(&task.status)?)
-        .bind(&task.notes)
-        .bind(task.in_checkout)
-        .bind(task.saving_mode)
-        .bind(task.handoff.as_ref().map(serde_json::to_string).transpose()?)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await;
-        match result {
-            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-                Err(StoreError::AlreadyExists(task.key.clone()))
-            }
-            other => other.map(|_| ()).map_err(Into::into),
-        }
+        insert_task(&self.pool, task).await
+    }
+
+    /// Creates a task and records, in the same transaction, that it came from a
+    /// conversation: either both exist or neither does.
+    pub async fn create_task_from_conversation(
+        &self,
+        task: &Task,
+        session: &str,
+        label: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        insert_task(&mut *tx, task).await?;
+        let event = Event::CreatedFromConversation {
+            session: session.to_string(),
+            label: label.to_string(),
+        };
+        sqlx::query("INSERT INTO task_events (task_key, at, event) VALUES (?, ?, ?)")
+            .bind(task.key.as_str())
+            .bind(at.to_rfc3339())
+            .bind(serde_json::to_string(&event)?)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
@@ -283,6 +284,37 @@ impl Store {
                 })
             })
             .collect()
+    }
+}
+
+async fn insert_task<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    task: &Task,
+) -> Result<(), StoreError> {
+    let now = Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(task.key.as_str())
+    .bind(&task.title)
+    .bind(&task.project)
+    .bind(&task.workflow)
+    .bind(&task.phase)
+    .bind(serde_json::to_string(&task.status)?)
+    .bind(&task.notes)
+    .bind(task.in_checkout)
+    .bind(task.saving_mode)
+    .bind(task.handoff.as_ref().map(serde_json::to_string).transpose()?)
+    .bind(&now)
+    .bind(&now)
+    .execute(executor)
+    .await;
+    match result {
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+            Err(StoreError::AlreadyExists(task.key.clone()))
+        }
+        other => other.map(|_| ()).map_err(Into::into),
     }
 }
 
@@ -506,6 +538,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
                 step: None,
             })
             .await
@@ -600,5 +633,43 @@ mod tests {
             .unwrap();
         let err = store.update_backlog_task(&key, &change).await.unwrap_err();
         assert!(matches!(err, StoreError::NotInBacklog(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn creates_a_task_from_a_conversation_in_one_step() {
+        let store = Store::in_memory().await.unwrap();
+        let at = Utc::now();
+        store
+            .create_task_from_conversation(&task("PROJ-1"), "s-1", "Idea", at)
+            .await
+            .unwrap();
+        let key = TaskKey::new("PROJ-1");
+        assert!(store.get_task(&key).await.unwrap().is_some());
+        let events = store.events(&key).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event,
+            Event::CreatedFromConversation {
+                session: "s-1".into(),
+                label: "Idea".into()
+            }
+        );
+        let json: String = sqlx::query_scalar("SELECT event FROM task_events WHERE task_key = ?")
+            .bind("PROJ-1")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "created-from-conversation", "session": "s-1", "label": "Idea"})
+        );
+
+        let err = store
+            .create_task_from_conversation(&task("PROJ-1"), "s-2", "Otra", at)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::AlreadyExists(_)), "{err}");
+        assert_eq!(store.events(&key).await.unwrap().len(), 1, "no stray event");
     }
 }

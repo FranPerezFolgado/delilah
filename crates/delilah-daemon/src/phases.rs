@@ -198,6 +198,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -280,6 +281,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
                 step: Some(delilah_core::Step::Plan),
             })
             .await

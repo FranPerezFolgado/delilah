@@ -24,6 +24,7 @@ const sess = (id: string, step: Step, primary: boolean, live = true): Session =>
   closed: false,
   live,
   read_only: false,
+  conversation: false,
   state: "working",
   step,
 });

@@ -651,6 +651,7 @@ async fn try_start<L: Launcher>(
         primary: true,
         closed: false,
         read_only: false,
+        conversation: false,
         step: Some(step),
     };
     let from = old.as_ref().map(|s| s.id.as_str()).unwrap_or("");
@@ -786,6 +787,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -815,6 +817,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
                 step: Some(Step::Plan),
             })
             .await
@@ -1141,6 +1144,7 @@ mod tests {
             primary: true,
             closed: false,
             read_only: false,
+            conversation: false,
             step: Some(Step::Implement),
         };
         app.store

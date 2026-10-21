@@ -67,6 +67,17 @@ pub async fn claude_hook(
         });
     }
 
+    // An idea conversation also keeps its own history.
+    let session_id = q
+        .session
+        .clone()
+        .or_else(|| live.as_ref().map(|l| l.id.clone()));
+    if let Some(id) = &session_id
+        && crate::conversation::is_conversation(&app, id).await
+    {
+        crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
+    }
+
     // What the session now waits on you for, for the inbox.
     if let Some(id) = q
         .session
@@ -197,6 +208,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -284,6 +296,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
                 step: None,
             })
             .await
@@ -375,6 +388,7 @@ mod limit_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

@@ -137,7 +137,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
         )}
       </header>
 
-      {item.ask && <AskCard ask={item.ask} onDone={onChanged} />}
+      {item.ask && <AskCard ask={item.ask} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />}
       {item.text && !item.ask && (
         <div className={`inbox-text ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={item.text} remoteImages="click" />

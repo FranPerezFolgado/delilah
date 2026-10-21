@@ -25,6 +25,8 @@ interface Props {
   onOpenSession: (owner: string, sessionId: string) => void;
   /** Starts a read-only Claude in the project's checkout. */
   onAsk: (project: string) => void;
+  /** Starts an idea conversation in the project. */
+  onIdea: (project: string) => void;
   onNewTask: () => void;
   /** Asks to confirm deleting a task (right-click on its row). */
   onDelete: (task: Task) => void;
@@ -64,7 +66,7 @@ function useRememberedSet(key: string) {
   return [set, toggle] as const;
 }
 
-export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, selected, onSelect, onOpenSession, onAsk, onNewTask, onDelete, waiting }: Props) {
+export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, selected, onSelect, onOpenSession, onAsk, onIdea, onNewTask, onDelete, waiting }: Props) {
   // Folded projects, remembered per viewer: a project with many sessions and tasks
   // would otherwise take the whole sidebar.
   const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
@@ -177,6 +179,9 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
               <button className="btn btn-ghost icon-btn" onClick={() => onAsk(g.project!.name)} title={t("Preguntar a Claude sobre el proyecto")} aria-label={t("Preguntar a Claude sobre {name}", { name: g.project.name })}>
                 <Icon name="plus" />
               </button>
+              <button className="btn btn-ghost icon-btn" onClick={() => onIdea(g.project!.name)} title={t("Nueva tarea con Claude")} aria-label={t("Nueva tarea con Claude en {name}", { name: g.project.name })}>
+                <Icon name="idea" />
+              </button>
             </div>
           ) : (
             <div className="phead">
@@ -191,7 +196,11 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
             const st = sessionStatus(s, undefined);
             return (
               <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? t("Claude en solo lectura") : s.label}>
-                <Icon name={s.kind === "shell" ? "console" : st.icon} className={s.kind === "shell" ? "c-mut" : st.cls} />
+                {s.conversation ? (
+                  <Icon name="idea" className={`idea ${st.cls}`} />
+                ) : (
+                  <Icon name={s.kind === "shell" ? "console" : st.icon} className={s.kind === "shell" ? "c-mut" : st.cls} />
+                )}
                 <span className="trunc" style={{ flex: 1 }}>{s.label}</span>
                 {s.read_only && <Icon name="lock" className="c-mut" />}
               </button>

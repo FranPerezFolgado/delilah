@@ -180,6 +180,8 @@ pub struct InboxPr {
 pub struct AskView {
     pub id: String,
     pub questions: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<crate::proposals::Proposal>,
 }
 
 /// `GET /api/v1/inbox`: most urgent first (what blocks an agent), newest first within.
@@ -218,6 +220,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             ask: Some(AskView {
                 id: ask.id,
                 questions: ask.questions,
+                proposal: ask.proposal,
             }),
             pr: None,
         });
@@ -588,6 +591,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
@@ -641,6 +645,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");
@@ -805,6 +810,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");
@@ -820,6 +826,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
                 step: Some(delilah_core::Step::Plan),
             })
             .await

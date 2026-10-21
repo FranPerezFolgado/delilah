@@ -92,6 +92,8 @@ export function App() {
       usage: () => api.usage().then(setUsage),
       projects: () => api.projects().then(setProjects),
       prs: () => api.prSummaries().then(setPrs),
+      // The open conversation view subscribes to this topic itself.
+      conversations: () => Promise.resolve(),
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
@@ -163,6 +165,11 @@ export function App() {
     }
     setSelected(key);
     setView("tasks");
+  };
+  /** Shows a new idea conversation, a session of the project's own screen. */
+  const openConversation = (name: string, s: Session) => {
+    refresh();
+    openTask(`@${name}`, s.id);
   };
   const openChanges = (key: string) => {
     const ts = sessionFor(key);
@@ -276,6 +283,12 @@ export function App() {
               })
               .catch((e) => setToast((e as Error).message))
           }
+          onIdea={(name) =>
+            api
+              .openProjectSession(name, { kind: "claude", conversation: true })
+              .then((s) => openConversation(name, s))
+              .catch((e) => setToast((e as Error).message))
+          }
           onNewTask={() => setNewTask(true)}
           onDelete={setDeleting}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
@@ -337,6 +350,7 @@ export function App() {
                   askPosition={askPosition}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
+                  onOpenTask={(key) => openTask(key)}
                   onConvert={(s) => {
                     setConvertFrom(s);
                     setNewTask(true);
@@ -409,6 +423,11 @@ export function App() {
             setStarting(null);
             refresh();
             openTask(t.key);
+          }}
+          onConversation={(name, s) => {
+            setNewTask(false);
+            setDraft(undefined);
+            openConversation(name, s);
           }}
           onSaved={(saved) => {
             setNewTask(false);
