@@ -15,8 +15,8 @@ Mode: format=markdown commits=yes
 | WP-05F | 3 | 3B | done | 1 | f2f90b6 | phase 3 review fixes (history label) |
 | WP-06 | 4 | 4A | done | 1 | 7d176ae | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
 | WP-06F | 4 | 4A | done | 1 | 6855266 | phase 4 review fixes |
-| WP-07 | 5 | 5A | verified | 1 | | |
-| WP-08 | 6 | 6A | pending | 0 | | |
+| WP-07 | 5 | 5A | done | 1 | 9ff12ac | |
+| WP-08 | 6 | 6A | implementing | 0 | | +phase 5 LOWs: write Saving before typing; tests for typed text and limited signals while saving |
 | WP-09 | 7 | 7A | pending | 0 | | |
 | WP-10 | 7 | 7B | pending | 0 | | |
 
@@ -29,3 +29,4 @@ Mode: format=markdown commits=yes
   - Moved to WP-06: handoff offer buttons on the task screen (US1-1/FR-005); running saving-mode toggle (FR-001).
   - Open (LOW): old Live keeps primary=true until it exits (~3 s) — F6 skipped, Live.primary readers span asks/actions/hooks/terminal; review handoff starts silently until WP-08 (notification); English history says "Moved to Implement" (reuses phase-name keys); module split of handoff.rs handlers; PATCH not atomic; no Origin check verified for state-changing POSTs (pre-existing).
 - Phase 4: spec COMPLIANT, architecture approve-with-minor-changes → fixed in WP-06F (shared stepLabel in chain.ts, owner-aware primary-follow effect, typed stages, tests). UI not checked visually (no browser tools in this session).
+- Phase 5: spec COMPLIANT (LOW test gaps + Saving written after typing → folded into WP-08). No other reviewers named.
