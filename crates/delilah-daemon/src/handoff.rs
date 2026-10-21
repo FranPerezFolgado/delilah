@@ -7,6 +7,8 @@
 use std::path::Path;
 use std::time::Duration;
 
+use axum::Json;
+use axum::extract::{Path as AxPath, State};
 use delilah_core::{Handoff, HandoffStage, Step, Task, TaskKey};
 use delilah_git::{GitOptions, Workspace};
 
@@ -23,6 +25,10 @@ const KILL_WAIT: Duration = Duration::from_secs(3);
 /// Serialises the check-and-set of a task's handoff, so two confirmations (or a
 /// confirmation and a turn end) can never both start the same step.
 static GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Tasks whose new session is being started right now (by daemon home and key), so a
+/// recovery tick never starts the same step a second time.
+static STARTING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// What the end of a step asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,6 +251,161 @@ where
     Ok(())
 }
 
+/// The `saving-mode` preference: off unless the user turned it on.
+pub(crate) async fn saving_mode_preference(app: &AppState) -> bool {
+    let value: Option<serde_json::Value> =
+        app.store.setting("pref:saving-mode").await.ok().flatten();
+    value
+        .as_ref()
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// The plan session edited code on its own: the user is implementing there, so no
+/// new session is offered for it.
+pub(crate) async fn on_code_edit(app: &AppState, key: &TaskKey) {
+    let _guard = GUARD.lock().await;
+    let Ok(task) = task_of(app, key).await else {
+        return;
+    };
+    let open = match &task.handoff {
+        None => true,
+        Some(h) => h.stage == HandoffStage::Offered,
+    };
+    if !task.saving_mode || !open {
+        return;
+    }
+    let Some(primary) = primary_session(app, key).await else {
+        return;
+    };
+    if primary.step == Some(Step::Plan) {
+        set(app, key, Step::Implement, HandoffStage::Skipped, None).await;
+    }
+}
+
+/// The user moved the task forward to implement: offer the new session if it is still
+/// in its plan one.
+pub(crate) async fn on_implement_chosen(app: &AppState, key: &TaskKey) {
+    let _guard = GUARD.lock().await;
+    let Ok(task) = task_of(app, key).await else {
+        return;
+    };
+    if !task.saving_mode || task.handoff.is_some() {
+        return;
+    }
+    let Some(primary) = primary_session(app, key).await else {
+        return;
+    };
+    if primary.step == Some(Step::Plan) {
+        set(app, key, Step::Implement, HandoffStage::Offered, None).await;
+    }
+}
+
+/// Finishes or re-offers a handoff a restart (or a failed start) left half done.
+pub(crate) async fn recover(app: &AppState, task: &Task) {
+    recover_with(app, task, &crate::run::launch_session).await;
+}
+
+async fn recover_with<L>(app: &AppState, task: &Task, launch: &L)
+where
+    L: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>,
+{
+    let Some(h) = task.handoff.as_ref().filter(|_| task.saving_mode) else {
+        return;
+    };
+    let key = &task.key;
+    let guard = GUARD.lock().await;
+    // Decide on what is stored now, not on what the tick read a moment ago.
+    let Ok(fresh) = task_of(app, key).await else {
+        return;
+    };
+    if fresh.handoff.as_ref() != Some(h) {
+        return;
+    }
+    match h.stage {
+        HandoffStage::Starting => {
+            if matches!(
+                app.store.session_of_step(key.as_str(), h.to).await,
+                Ok(Some(_))
+            ) {
+                if let Err(e) = app.store.set_handoff(key, None).await {
+                    tracing::warn!(task = %key, "cannot clear the handoff: {e}");
+                }
+                app.emit(Topic::Inbox);
+                app.emit(Topic::Tasks);
+            } else {
+                drop(guard);
+                start_with(app, key, h.to, launch).await;
+            }
+        }
+        HandoffStage::Saving => {
+            let gone = match primary_session(app, key).await {
+                Some(p) => app.sessions.get(&p.id).is_none(),
+                None => true,
+            };
+            if !gone {
+                return;
+            }
+            // The notes cannot be saved any more: carry on without them.
+            if h.to == Step::Implement {
+                set(app, key, h.to, HandoffStage::Offered, None).await;
+            } else {
+                set(app, key, h.to, HandoffStage::Starting, None).await;
+                drop(guard);
+                start_with(app, key, h.to, launch).await;
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct SavingModeReq {
+    pub on: bool,
+}
+
+/// `POST /api/v1/tasks/{key}/saving-mode`: turns it on or off on a task; off drops a
+/// pending handoff (the sessions stay).
+pub(crate) async fn set_saving_mode(
+    State(app): State<AppState>,
+    AxPath(key): AxPath<String>,
+    Json(req): Json<SavingModeReq>,
+) -> Result<Json<Task>, ApiError> {
+    let key = TaskKey::new(key);
+    let _guard = GUARD.lock().await;
+    task_of(&app, &key).await?;
+    app.store.set_saving_mode(&key, req.on).await?;
+    if !req.on {
+        app.store.set_handoff(&key, None).await?;
+    }
+    app.emit(Topic::Inbox);
+    app.emit(Topic::Tasks);
+    Ok(Json(task_of(&app, &key).await?))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct ActionReq {
+    pub action: String,
+}
+
+/// `POST /api/v1/tasks/{key}/handoff`: confirm, decline or retry the handoff.
+pub(crate) async fn act(
+    State(app): State<AppState>,
+    AxPath(key): AxPath<String>,
+    Json(req): Json<ActionReq>,
+) -> Result<Json<Task>, ApiError> {
+    let key = TaskKey::new(key);
+    match req.action.as_str() {
+        "confirm" => confirm(&app, &key).await?,
+        "decline" => decline(&app, &key).await?,
+        "retry" => retry(&app, &key).await?,
+        other => {
+            return Err(ApiError::bad_request(format!("unknown action `{other}`")));
+        }
+    }
+    Ok(Json(task_of(&app, &key).await?))
+}
+
 /// Starts `step`'s session: it becomes the main one, the previous is stopped (and
 /// stays listed), and the handoff is cleared. If the new session cannot start the
 /// previous one is main again and the handoff is `failed`, to retry.
@@ -256,7 +417,17 @@ async fn start_with<L>(app: &AppState, key: &TaskKey, step: Step, launch: &L)
 where
     L: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>,
 {
-    match try_start(app, key, step, launch).await {
+    let id = format!("{}:{key}", app.config.home.display());
+    {
+        let mut starting = STARTING.lock().unwrap();
+        if starting.contains(&id) {
+            return;
+        }
+        starting.push(id.clone());
+    }
+    let result = try_start(app, key, step, launch).await;
+    STARTING.lock().unwrap().retain(|s| *s != id);
+    match result {
         Ok(()) => {
             if let Err(e) = app.store.set_handoff(key, None).await {
                 tracing::warn!(task = %key, "cannot clear the handoff: {e}");
@@ -642,5 +813,91 @@ mod tests {
         let launched = launched.lock().unwrap();
         assert_eq!(launched[0].0.step, Some(Step::Review));
         assert!(launched[0].1.as_deref().unwrap().starts_with("/review"));
+    }
+
+    async fn put_handoff(app: &AppState, key: &TaskKey, to: Step, stage: HandoffStage) {
+        let h = Handoff {
+            to,
+            stage,
+            error: None,
+        };
+        app.store.set_handoff(key, Some(&h)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recovery_starts_a_starting_handoff_once() {
+        let (app, key) = setup().await;
+        put_handoff(&app, &key, Step::Implement, HandoffStage::Starting).await;
+        let launched = Launched::default();
+        let launcher = ok_launcher(&launched);
+        let stale = app.store.get_task(&key).await.unwrap().unwrap();
+        recover_with(&app, &stale, &launcher).await;
+        recover_with(&app, &stale, &launcher).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert!(handoff_of(&app, &key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn recovery_only_clears_a_handoff_whose_session_exists() {
+        let (app, key) = setup().await;
+        app.store
+            .create_session(&SessionRecord {
+                id: "impl-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Implementación".into(),
+                primary: false,
+                closed: false,
+                read_only: false,
+                step: Some(Step::Implement),
+            })
+            .await
+            .unwrap();
+        put_handoff(&app, &key, Step::Implement, HandoffStage::Starting).await;
+        let launched = Launched::default();
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        recover_with(&app, &task, &ok_launcher(&launched)).await;
+        assert!(launched.lock().unwrap().is_empty());
+        assert!(handoff_of(&app, &key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn recovery_skips_a_save_whose_session_is_gone() {
+        let (app, key) = setup().await;
+        let launched = Launched::default();
+        put_handoff(&app, &key, Step::Implement, HandoffStage::Saving).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        recover_with(&app, &task, &ok_launcher(&launched)).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Offered));
+        assert!(launched.lock().unwrap().is_empty());
+
+        put_handoff(&app, &key, Step::Review, HandoffStage::Saving).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        recover_with(&app, &task, &ok_launcher(&launched)).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert_eq!(launched.lock().unwrap()[0].0.step, Some(Step::Review));
+        assert!(handoff_of(&app, &key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_code_edit_in_the_plan_session_skips_the_offer() {
+        let (app, key) = setup().await;
+        on_code_edit(&app, &key).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Skipped));
+    }
+
+    #[tokio::test]
+    async fn choosing_implement_offers_only_from_the_plan_session() {
+        let (app, key) = setup().await;
+        on_implement_chosen(&app, &key).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Offered));
+        // A task without saving mode is left alone.
+        app.store.set_saving_mode(&key, false).await.unwrap();
+        app.store.set_handoff(&key, None).await.unwrap();
+        on_implement_chosen(&app, &key).await;
+        assert!(handoff_of(&app, &key).await.is_none());
     }
 }

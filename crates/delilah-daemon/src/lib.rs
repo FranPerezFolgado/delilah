@@ -7,8 +7,6 @@ mod changes;
 pub mod config;
 pub mod events;
 mod files;
-// Called by the hook, routes and scheduler that arrive with the next package.
-#[allow(dead_code)]
 mod handoff;
 mod hooks;
 pub mod inbox;

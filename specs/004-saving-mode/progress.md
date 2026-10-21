@@ -7,10 +7,10 @@ Mode: format=markdown commits=yes
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 2 | 2A | done | 1 | 27b27b6 | +hooks.rs (step: None in test literal) |
 | WP-01F | 2 | 2A | done | 1 | 6826120 | phase 2 review fixes F1–F6 |
-| WP-02 | 3 | 3A | verified | 1 | | |
-| WP-03 | 3 | 3B | pending | 0 | | |
-| WP-04 | 3 | 3B | pending | 0 | | |
-| WP-05 | 3 | 3B | pending | 0 | | |
+| WP-02 | 3 | 3A | verified | 1 | b83caae | |
+| WP-03 | 3 | 3B | verified | 1 | | +backlog saving_mode (create/PATCH) |
+| WP-04 | 3 | 3B | implementing | 0 | | |
+| WP-05 | 3 | 3B | implementing | 0 | | +TaskView.tsx (step-started label) |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 5 | 5A | pending | 0 | | |
 | WP-08 | 6 | 6A | pending | 0 | | |
