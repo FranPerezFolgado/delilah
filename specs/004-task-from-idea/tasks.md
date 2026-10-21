@@ -310,7 +310,7 @@
 
 ## Phase 7: Polish & cross-cutting
 
-- [ ] T038 [P] Add every new UI string to `app/src/i18n/en.ts`, Spanish source → English. Examples: "Nueva tarea con Claude", "Con Claude", "Tu idea", "Cuéntale tu idea…", "en cola", "Detener", "Enviar", "Ver terminal", "Ver conversación", "Claude espera en la terminal", "Creada {key}", "Cambiar algo", "Descartar", "Crear".
+- [X] T038 [P] Add every new UI string to `app/src/i18n/en.ts`, Spanish source → English. Examples: "Nueva tarea con Claude", "Con Claude", "Tu idea", "Cuéntale tu idea…", "en cola", "Detener", "Enviar", "Ver terminal", "Ver conversación", "Claude espera en la terminal", "Creada {key}", "Cambiar algo", "Descartar", "Crear".
 - [ ] T039 [P] Docs:
   - `docs/status.md`: built, plus the pending items (streaming and a chat view for other sessions, deleting conversations);
   - `docs/architecture.md`: the conversation session, `conversation_entries`, `conversation.rs`, the plugin dir, the launch table, the `conversations` topic, the `Ask.proposal` flow;

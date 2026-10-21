@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { Project, Session, Task, TaskStatus } from "../api";
 import { Sidebar } from "./Sidebar";
+import { setLanguage } from "../i18n";
 
 const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature" };
 const task = (key: string, status: TaskStatus): Task => ({
@@ -76,6 +77,8 @@ describe("Sidebar backlog", () => {
 });
 
 describe("Sidebar ideas", () => {
+  beforeEach(() => setLanguage("es"));
+  afterEach(() => setLanguage("en"));
   it("starts an idea conversation from the project's second button", () => {
     const { getByLabelText, onIdea } = setup([]);
     fireEvent.click(getByLabelText("Nueva tarea con Claude en web"));
