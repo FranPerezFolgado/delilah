@@ -448,6 +448,7 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
             })
             .await
             .unwrap();

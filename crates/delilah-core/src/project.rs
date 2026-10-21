@@ -37,4 +37,327 @@ pub struct Project {
     pub kind: ProjectKind,
     /// Workflow used when a run does not name one, e.g. `feature`.
     pub workflow: String,
+    /// Per-project settings kept by Delilah (never written into the repo).
+    #[serde(default)]
+    pub settings: ProjectSettings,
+}
+
+/// How a task's workspace is made for a plain-repo project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceMode {
+    /// Work in the main checkout.
+    #[default]
+    Checkout,
+    /// Work in a git worktree of its own.
+    Worktree,
+}
+
+/// How a shared path gets into a workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ShareMode {
+    Copy,
+    Link,
+}
+
+/// A path of the main checkout made available inside each workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedEntry {
+    /// Relative to the project root; no `..`.
+    pub path: String,
+    /// `None` lets the project kind decide at use.
+    #[serde(default)]
+    pub mode: Option<ShareMode>,
+}
+
+/// Which submodules a parent project's tasks always or never include.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SubmoduleRules {
+    pub always: Vec<String>,
+    pub never: Vec<String>,
+}
+
+/// Per-project settings. The default is how tasks started before they existed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectSettings {
+    pub workspace: WorkspaceMode,
+    /// Branch template; `{ticket}` is required, `{slug}` optional.
+    pub branch: String,
+    pub shared: Vec<SharedEntry>,
+    /// Command run in a new workspace; `None` (or blank) means none.
+    pub setup: Option<String>,
+    pub submodules: SubmoduleRules,
+}
+
+pub const DEFAULT_BRANCH_TEMPLATE: &str = "feature/{ticket}";
+
+impl Default for ProjectSettings {
+    fn default() -> Self {
+        Self {
+            workspace: WorkspaceMode::Checkout,
+            branch: DEFAULT_BRANCH_TEMPLATE.to_string(),
+            shared: Vec::new(),
+            setup: None,
+            submodules: SubmoduleRules::default(),
+        }
+    }
+}
+
+/// One problem found by [`validate`], tied to the field that has it.
+///
+/// `code` is stable (e.g. `branch.missing_ticket`) so the daemon can localise
+/// `message`, which is English.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldError {
+    /// e.g. `branch`, `shared[1].path`, `submodules.never[0]`.
+    pub field: String,
+    pub code: String,
+    pub message: String,
+}
+
+fn err(field: impl Into<String>, code: &str, message: impl Into<String>) -> FieldError {
+    FieldError {
+        field: field.into(),
+        code: code.to_string(),
+        message: message.into(),
+    }
+}
+
+/// Check settings before saving. Whether submodules exist in the parent needs
+/// git, so it is not checked here.
+pub fn validate(settings: &ProjectSettings, kind: ProjectKind) -> Vec<FieldError> {
+    let mut errors = Vec::new();
+
+    let branch = settings.branch.trim();
+    if branch.is_empty() {
+        errors.push(err(
+            "branch",
+            "branch.empty",
+            "The branch template is empty.",
+        ));
+    } else {
+        let mut has_ticket = false;
+        let mut rest = branch;
+        while let Some(open) = rest.find('{') {
+            let after = &rest[open + 1..];
+            let Some(close) = after.find('}') else {
+                errors.push(err(
+                    "branch",
+                    "branch.unknown_placeholder",
+                    "Unclosed `{` in the branch template.",
+                ));
+                break;
+            };
+            match &after[..close] {
+                "ticket" => has_ticket = true,
+                "slug" => {}
+                other => errors.push(err(
+                    "branch",
+                    "branch.unknown_placeholder",
+                    format!("Unknown placeholder `{{{other}}}`; use `{{ticket}}` or `{{slug}}`."),
+                )),
+            }
+            rest = &after[close + 1..];
+        }
+        if !has_ticket {
+            errors.push(err(
+                "branch",
+                "branch.missing_ticket",
+                "The branch template must contain `{ticket}`.",
+            ));
+        }
+    }
+
+    for (i, entry) in settings.shared.iter().enumerate() {
+        let field = format!("shared[{i}].path");
+        let path = entry.path.trim();
+        let p = std::path::Path::new(path);
+        if path.is_empty() {
+            errors.push(err(&field, "shared.path_empty", "The path is empty."));
+        } else if p.is_absolute() || path.starts_with('/') {
+            errors.push(err(
+                &field,
+                "shared.path_absolute",
+                "The path must be relative to the project.",
+            ));
+        } else if p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            errors.push(err(
+                &field,
+                "shared.path_parent",
+                "The path must not contain `..`.",
+            ));
+        } else if settings.shared[..i].iter().any(|e| e.path.trim() == path) {
+            errors.push(err(
+                &field,
+                "shared.path_duplicate",
+                "The path is already listed.",
+            ));
+        }
+    }
+
+    if kind == ProjectKind::Repo {
+        for (list, name) in [
+            (&settings.submodules.always, "always"),
+            (&settings.submodules.never, "never"),
+        ] {
+            for i in 0..list.len() {
+                errors.push(err(
+                    format!("submodules.{name}[{i}]"),
+                    "submodules.not_parent",
+                    "Submodule rules only apply to parent projects.",
+                ));
+            }
+        }
+    } else {
+        for (i, m) in settings.submodules.never.iter().enumerate() {
+            if settings.submodules.always.contains(m) {
+                errors.push(err(
+                    format!("submodules.never[{i}]"),
+                    "submodules.conflict",
+                    format!("`{m}` is in both the always and never lists."),
+                ));
+            }
+        }
+    }
+
+    errors
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> ProjectSettings {
+        ProjectSettings::default()
+    }
+
+    fn shared(path: &str) -> SharedEntry {
+        SharedEntry {
+            path: path.into(),
+            mode: None,
+        }
+    }
+
+    fn fields(errors: &[FieldError]) -> Vec<(&str, &str)> {
+        errors
+            .iter()
+            .map(|e| (e.field.as_str(), e.code.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn default_is_todays_behaviour() {
+        let s = ProjectSettings::default();
+        assert_eq!(s.workspace, WorkspaceMode::Checkout);
+        assert_eq!(s.branch, "feature/{ticket}");
+        assert!(s.shared.is_empty());
+        assert_eq!(s.setup, None);
+        assert!(s.submodules.always.is_empty() && s.submodules.never.is_empty());
+        assert!(validate(&s, ProjectKind::Repo).is_empty());
+    }
+
+    #[test]
+    fn empty_object_gives_defaults() {
+        let s: ProjectSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s, ProjectSettings::default());
+    }
+
+    #[test]
+    fn full_settings_round_trip() {
+        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]}}"#;
+        let s: ProjectSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.workspace, WorkspaceMode::Worktree);
+        assert_eq!(s.shared[0].mode, Some(ShareMode::Copy));
+        assert_eq!(s.shared[1].mode, None);
+        assert_eq!(serde_json::to_string(&s).unwrap(), json);
+    }
+
+    #[test]
+    fn serialises_every_field() {
+        let json = serde_json::to_string(&ProjectSettings::default()).unwrap();
+        assert_eq!(
+            json,
+            r#"{"workspace":"checkout","branch":"feature/{ticket}","shared":[],"setup":null,"submodules":{"always":[],"never":[]}}"#
+        );
+    }
+
+    #[test]
+    fn unknown_keys_are_refused() {
+        assert!(serde_json::from_str::<ProjectSettings>(r#"{"nope":1}"#).is_err());
+        assert!(
+            serde_json::from_str::<ProjectSettings>(r#"{"shared":[{"path":"a","x":1}]}"#).is_err()
+        );
+        assert!(serde_json::from_str::<ProjectSettings>(r#"{"submodules":{"x":[]}}"#).is_err());
+    }
+
+    #[test]
+    fn branch_rules() {
+        let mut s = settings();
+        s.branch = "feature/x".into();
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Repo)),
+            [("branch", "branch.missing_ticket")]
+        );
+        s.branch = "{ticket}/{foo}".into();
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Repo)),
+            [("branch", "branch.unknown_placeholder")]
+        );
+        s.branch = "  ".into();
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Repo)),
+            [("branch", "branch.empty")]
+        );
+        s.branch = "{ticket}-{slug}".into();
+        assert!(validate(&s, ProjectKind::Repo).is_empty());
+    }
+
+    #[test]
+    fn shared_path_rules() {
+        let mut s = settings();
+        s.shared = vec![
+            shared(".env"),
+            shared("/etc"),
+            shared("../x"),
+            shared(""),
+            shared(".env"),
+            shared("a/../b"),
+        ];
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Repo)),
+            [
+                ("shared[1].path", "shared.path_absolute"),
+                ("shared[2].path", "shared.path_parent"),
+                ("shared[3].path", "shared.path_empty"),
+                ("shared[4].path", "shared.path_duplicate"),
+                ("shared[5].path", "shared.path_parent"),
+            ]
+        );
+    }
+
+    #[test]
+    fn submodule_rules() {
+        let mut s = settings();
+        s.submodules.always = vec!["a".into()];
+        s.submodules.never = vec!["b".into(), "a".into()];
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Parent)),
+            [("submodules.never[1]", "submodules.conflict")]
+        );
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Repo)),
+            [
+                ("submodules.always[0]", "submodules.not_parent"),
+                ("submodules.never[0]", "submodules.not_parent"),
+                ("submodules.never[1]", "submodules.not_parent"),
+            ]
+        );
+    }
 }

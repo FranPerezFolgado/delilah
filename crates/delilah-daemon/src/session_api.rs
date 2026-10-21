@@ -453,6 +453,7 @@ mod project_tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
             })
             .await
             .unwrap();

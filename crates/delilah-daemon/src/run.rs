@@ -583,6 +583,7 @@ mod tests {
                 path: app.config.home.join("missing"),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
             })
             .await
             .unwrap();
