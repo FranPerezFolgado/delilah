@@ -1,4 +1,4 @@
-import type { Project, Session, SpecSummary, Task } from "../api";
+import type { Action, Activity, Project, Session, SpecSummary, Task } from "../api";
 import type { DeskState } from "./poses";
 import { t } from "../i18n";
 import { columnOf, type Column } from "../phases";
@@ -14,18 +14,30 @@ export interface DeskModel {
   project: string | null;
   /** The desk's place in its project's grid; stable while the session lives. */
   slot: number;
+  /** What the session is doing now; none when idle or unknown. */
+  activity?: Activity;
 }
 
-/** What a desk's character is doing, from the session's state; `activity` comes later. */
-export function deskState(session: Session, _activity?: unknown): DeskState {
+/** What a desk's character is doing: the session's state, and while it works, its action. */
+export function deskState(session: Session, activity?: Activity): DeskState {
   switch (session.state) {
     case "starting":
     case "waiting":
     case "paused":
       return session.state;
-    default:
-      return "thinking";
+    default: {
+      const action = activity?.action;
+      if (!action) return "thinking";
+      if (action.kind === "delegate") return action.background ? "thinking" : "supervising";
+      return action.kind;
+    }
   }
+}
+
+/** The action as a short line: `Edit · api.rs`, or just the tool without a target. */
+export function caption(action: Action | null | undefined): string | null {
+  if (!action) return null;
+  return action.target ? `${action.tool} · ${action.target}` : action.tool;
 }
 
 const STATE_WORD: Record<DeskState, string> = {
@@ -33,11 +45,19 @@ const STATE_WORD: Record<DeskState, string> = {
   thinking: "Pensando",
   waiting: "Esperándote",
   paused: "En pausa",
+  edit: "Editando",
+  read: "Leyendo",
+  run: "Ejecutando",
+  delegate: "Supervisando",
+  supervising: "Supervisando",
+  other: "Trabajando",
 };
 
-/** The character's accessible name: the task (or project) and what it is doing. */
-export function accessibleName(desk: DeskModel, activity?: unknown): string {
-  return `${desk.key}, ${t(STATE_WORD[deskState(desk.session, activity)])}`;
+/** The character's accessible name: the task (or project), what it is doing and the action. */
+export function accessibleName(desk: DeskModel, activity?: Activity): string {
+  const state = deskState(desk.session, activity);
+  const cap = state === "waiting" ? null : caption(activity?.action);
+  return `${desk.key}, ${t(STATE_WORD[state])}${cap ? `, ${cap}` : ""}`;
 }
 
 /** Slot maps per project (session id -> slot) of `areas`, to pass back to `groupByProject`. */

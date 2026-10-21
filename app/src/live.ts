@@ -3,7 +3,7 @@
 // everything is fetched again, as messages may have been missed meanwhile.
 import { DAEMON_URL } from "./api";
 
-export type Topic = "tasks" | "sessions" | "inbox" | "specs" | "usage" | "projects";
+export type Topic = "tasks" | "sessions" | "inbox" | "specs" | "usage" | "projects" | "activity";
 
 const listeners = new Map<Topic, Set<() => void>>();
 
@@ -14,7 +14,7 @@ export function on(topic: Topic, cb: () => void): () => void {
   return () => listeners.get(topic)!.delete(cb);
 }
 
-const ALL: Topic[] = ["tasks", "sessions", "inbox", "specs", "usage", "projects"];
+const ALL: Topic[] = ["tasks", "sessions", "inbox", "specs", "usage", "projects", "activity"];
 
 // Bursts (a transition emits tasks and inbox; a hook may add sessions) are merged
 // into one fetch per topic.

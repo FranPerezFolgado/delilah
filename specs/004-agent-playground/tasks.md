@@ -228,8 +228,8 @@
 
 ### UI
 
-- [ ] T031 [P] [US3] Add `ActionKind`, `Action`, `Helper`, `Activity` and `api.activity()` to `app/src/api.ts`, matching contracts/api.md, and `"activity"` to `Topic` in `app/src/live.ts`.
-- [ ] T032 [US3] Extend the tests in `app/src/playground/layout.test.ts`:
+- [X] T031 [P] [US3] Add `ActionKind`, `Action`, `Helper`, `Activity` and `api.activity()` to `app/src/api.ts`, matching contracts/api.md, and `"activity"` to `Topic` in `app/src/live.ts`.
+- [X] T032 [US3] Extend the tests in `app/src/playground/layout.test.ts`:
   - **`deskState`** with an activity:
     - `edit`, `read`, `run` and `other` map to their poses;
     - `delegate` with `background: false` → `supervising`;
@@ -237,7 +237,7 @@
     - a `waiting` session ignores any activity.
   - **`caption(action)`**: `"Edit · api.rs"`, `"Bash · cargo test…"`, and only the tool name with no target.
   - **`accessibleName`** includes the caption when there is one.
-- [ ] T033 [US3] Implement the T032 changes in `app/src/playground/layout.ts`. Make `usePlayground.ts` also load `api.activity()` on the `activity` topic and attach each session's activity to its `DeskModel`.
+- [X] T033 [US3] Implement the T032 changes in `app/src/playground/layout.ts`. Make `usePlayground.ts` also load `api.activity()` on the `activity` topic and attach each session's activity to its `DeskModel`.
 - [X] T034 [US3] Draw the action poses in `app/src/playground/sprites.ts` and add them to `CREDITS.md`:
   - `typing` (hands on keys, screen flicker);
   - `reading` (open book or paper);

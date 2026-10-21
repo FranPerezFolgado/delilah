@@ -360,6 +360,7 @@ export const api = {
     post<Session>(`/api/v1/projects/${project}/sessions`, s),
   allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
+  activity: () => request<{ sessions: Record<string, Activity> }>("/api/v1/activity"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   answerAsk: (id: string, answers: Record<string, string>) => post<null>(`/api/v1/asks/${id}/answer`, { answers }),
@@ -450,3 +451,29 @@ export function ago(iso: string): string {
 }
 
 export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+
+export type ActionKind = "edit" | "read" | "run" | "delegate" | "other";
+
+/** What a session is doing right now (a tool call in flight). */
+export interface Action {
+  id: string;
+  kind: ActionKind;
+  tool: string;
+  target: string | null;
+  background: boolean;
+  /** RFC 3339. */
+  since: string;
+}
+
+/** A helper (sub-agent) of a session; `role` may be empty. */
+export interface Helper {
+  id: string;
+  role: string;
+  action: Action | null;
+  since: string;
+}
+
+export interface Activity {
+  action: Action | null;
+  helpers: Helper[];
+}

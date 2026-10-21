@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Project, type Session, type SpecSummary, type Task } from "../api";
+import { api, type Activity, type Project, type Session, type SpecSummary, type Task } from "../api";
 import { connect, on } from "../live";
 import { groupByProject, slotMaps, type ProjectArea } from "./layout";
 
@@ -11,6 +11,7 @@ export function usePlayground(online?: boolean): { areas: ProjectArea[]; online:
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [specs, setSpecs] = useState<Record<string, SpecSummary>>({});
+  const [activity, setActivity] = useState<Record<string, Activity>>({});
   const [own, setOwn] = useState(true);
 
   useEffect(() => {
@@ -20,6 +21,8 @@ export function usePlayground(online?: boolean): { areas: ProjectArea[]; online:
       projects: () => api.projects().then(setProjects),
       // An older daemon has no specs: phases fall back to the start.
       specs: () => api.specs().catch(() => ({})).then(setSpecs),
+      // An older daemon has no activity: every session reads as idle.
+      activity: () => api.activity().catch(() => ({ sessions: {} })).then((a) => setActivity(a.sessions)),
     };
     const topics = Object.keys(fetchers) as (keyof typeof fetchers)[];
     topics.forEach((t) => fetchers[t]().catch(() => {}));
@@ -41,5 +44,9 @@ export function usePlayground(online?: boolean): { areas: ProjectArea[]; online:
     slots.current = slotMaps(next);
     return next;
   }, [sessions, tasks, projects, specs]);
-  return { areas, online: online ?? own };
+  const withActivity = useMemo(
+    () => areas.map((a) => ({ ...a, desks: a.desks.map((d) => ({ ...d, activity: activity[d.session.id] })) })),
+    [areas, activity],
+  );
+  return { areas: withActivity, online: online ?? own };
 }

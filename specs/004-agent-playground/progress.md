@@ -10,13 +10,13 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP-01 | 1 | 1A | done | 1 | 9c190e7 | tsc ok; "Arrancando" already existed |
 | WP-02 | 2 | 2A | done | 1 | a7fbadc | 11 tests; tests written with impl (not seen failing); @name of unregistered project gets own area |
 | WP-03 | 3 | 3A | done | 2 | 3ff4b70 | 18 tests; fix: empty cells for free slots (no desk shifts); art not yet seen rendered |
-| WP-04 | 4 | 4A | verified | 1 | (next) | class pg-desk--waiting; counter always shown (muted at 0) | |
-| WP-05 | 5 | 5A | pending | 0 | | |
+| WP-04 | 4 | 4A | done | 1 | 84c2379 | class pg-desk--waiting; counter always shown (muted at 0) | |
+| WP-05 | 5 | 5A | implementing | 1 | | |
 | WP-06 | 6 | 6A | done | 2 | da8f944 | 28 tests; tests failed first; ActivityEvent serde tag=type |
 | WP-07 | 6 | 6A | verified | 1 | ff47dce | |
 | WP-08 | 6 | 6B | done | 1 | a32eb33 | 8 tests failed first; mod is private in lib.rs |
 | WP-09 | 6 | 6C | done | 1 | b306827 | 106 daemon tests; red first; hook returns 204 |
-| WP-10 | 6 | 6D | pending | 0 | | |
+| WP-10 | 6 | 6D | verified | 1 | (next) | App fetchers no-op activity; new state words need en.ts entries (WP-11) |
 | WP-11 | 6 | 6E | pending | 0 | | |
 | WP-12 | 7 | 7A | pending | 0 | | |
 | WP-13 | 8 | 8A | pending | 0 | | |
@@ -38,3 +38,4 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
   - Note for WP-10: add "activity" to live.ts ALL as well as Topic; Action.target is string|null; Helper.role may be "".
   - Pre-existing, out of scope: hooks.jsonl has no size cap/rotation; PostToolUse already logs tool_response.
   - Visual check of the office (ui-verifier in a preview) deferred until WP-05 lands.
+- Phase 4 (84c2379): spec COMPLIANT; LOW: click test fixture has owner = session id; tasks.md still says .desk--waiting (class is pg-desk--waiting).

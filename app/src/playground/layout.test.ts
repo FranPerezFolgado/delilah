@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Project, Session, SpecSummary, Task } from "../api";
+import type { Action, Activity, Project, Session, SpecSummary, Task } from "../api";
 import { t } from "../i18n";
 import type { DeskModel } from "./layout";
-import { accessibleName, assignSlots, deskState, groupByProject, slotMaps } from "./layout";
+import { accessibleName, assignSlots, caption, deskState, groupByProject, slotMaps } from "./layout";
 
 describe("assignSlots", () => {
   it("numbers from 0 in input order when nothing was assigned", () => {
@@ -92,6 +92,38 @@ describe("deskState", () => {
     expect(deskState(session("s", "A", { state: "paused" }))).toBe("paused");
     expect(deskState(session("s", "A", { state: "working" }))).toBe("thinking");
   });
+
+  const act = (kind: Action["kind"], background = false): Activity => ({
+    action: { id: "a", kind, tool: "T", target: null, background, since: "2026-01-01T00:00:00Z" },
+    helpers: [],
+  });
+  const working = session("s", "A", { state: "working" });
+  it("maps the action kind to a state", () => {
+    expect(deskState(working, act("edit"))).toBe("edit");
+    expect(deskState(working, act("read"))).toBe("read");
+    expect(deskState(working, act("run"))).toBe("run");
+    expect(deskState(working, act("other"))).toBe("other");
+    expect(deskState(working, { action: null, helpers: [] })).toBe("thinking");
+  });
+  it("supervises on a foreground delegation, thinks on a background one", () => {
+    expect(deskState(working, act("delegate", false))).toBe("supervising");
+    expect(deskState(working, act("delegate", true))).toBe("thinking");
+  });
+  it("ignores the activity unless working", () => {
+    expect(deskState(session("s", "A", { state: "waiting" }), act("edit"))).toBe("waiting");
+    expect(deskState(session("s", "A", { state: "paused" }), act("run"))).toBe("paused");
+  });
+});
+
+describe("caption", () => {
+  const a = (tool: string, target: string | null): Action => ({ id: "a", kind: "edit", tool, target, background: false, since: "" });
+  it("joins tool and target, or gives the tool alone", () => {
+    expect(caption(a("Edit", "api.rs"))).toBe("Edit · api.rs");
+    expect(caption(a("Bash", "cargo test…"))).toBe("Bash · cargo test…");
+    expect(caption(a("Task", null))).toBe("Task");
+    expect(caption(null)).toBeNull();
+    expect(caption(undefined)).toBeNull();
+  });
 });
 
 describe("slots across regroupings", () => {
@@ -113,6 +145,14 @@ describe("accessibleName", () => {
     expect(accessibleName(model("working"))).toBe(`LIBRE-3, ${t("Pensando")}`);
     expect(accessibleName(model("paused"))).toBe(`LIBRE-3, ${t("En pausa")}`);
     expect(accessibleName(model("starting"))).toBe(`LIBRE-3, ${t("Arrancando")}`);
+  });
+  it("includes the caption and the supervising word", () => {
+    const act = (kind: Action["kind"], tool: string, target: string | null): Activity => ({
+      action: { id: "a", kind, tool, target, background: false, since: "" },
+      helpers: [],
+    });
+    expect(accessibleName(model("working"), act("edit", "Edit", "api.rs"))).toBe(`LIBRE-3, ${t("Editando")}, Edit · api.rs`);
+    expect(accessibleName(model("working"), act("delegate", "Task", null))).toBe(`LIBRE-3, ${t("Supervisando")}, Task`);
   });
   it("uses the project name for an @project desk", () => {
     expect(accessibleName(model("working", "web"))).toBe(`web, ${t("Pensando")}`);

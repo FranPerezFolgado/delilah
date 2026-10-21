@@ -89,6 +89,7 @@ export function App() {
       specs: () => api.specs().then(setSpecs),
       usage: () => api.usage().then(setUsage),
       projects: () => api.projects().then(setProjects),
+      activity: async () => {}, // only the playground uses it
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
