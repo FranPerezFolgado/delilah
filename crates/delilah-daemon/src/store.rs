@@ -404,7 +404,7 @@ mod tests {
             .await
             .unwrap();
         let event = Event::StepStarted {
-            step: "implement".into(),
+            step: delilah_core::Step::Implement,
             session: "s-2".into(),
         };
         let task = store

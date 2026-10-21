@@ -1,7 +1,7 @@
 //! The sessions opened in each task's workspace.
 
 use chrono::Utc;
-use delilah_core::{Event, Step};
+use delilah_core::{Event, Step, TaskKey};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -71,11 +71,13 @@ impl Store {
         task: &str,
         step: Step,
     ) -> Result<Option<SessionRecord>, StoreError> {
-        let row = sqlx::query(&format!("{SELECT} WHERE task_key = ? AND step = ?"))
-            .bind(task)
-            .bind(step.name())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(&format!(
+            "{SELECT} WHERE task_key = ? AND step = ? AND closed = 0"
+        ))
+        .bind(task)
+        .bind(step.name())
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(session_from_row).transpose()
     }
 
@@ -86,7 +88,7 @@ impl Store {
     pub async fn hand_over(
         &self,
         task: &str,
-        from_id: &str,
+        _from_id: &str,
         new: &SessionRecord,
     ) -> Result<SessionRecord, StoreError> {
         let step = new
@@ -94,17 +96,18 @@ impl Store {
             .ok_or_else(|| StoreError::Corrupt("a handoff session needs a step".into()))?;
         // IMMEDIATE, as in `apply_event`: a retry waits for the first attempt's result.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let existing = sqlx::query(&format!("{SELECT} WHERE task_key = ? AND step = ?"))
-            .bind(task)
-            .bind(step.name())
-            .fetch_optional(&mut *tx)
-            .await?;
+        let existing = sqlx::query(&format!(
+            "{SELECT} WHERE task_key = ? AND step = ? AND closed = 0"
+        ))
+        .bind(task)
+        .bind(step.name())
+        .fetch_optional(&mut *tx)
+        .await?;
         if let Some(row) = existing {
             return session_from_row(&row);
         }
-        sqlx::query("UPDATE sessions SET is_primary = 0 WHERE task_key = ? AND id = ?")
+        sqlx::query("UPDATE sessions SET is_primary = 0 WHERE task_key = ? AND is_primary = 1")
             .bind(task)
-            .bind(from_id)
             .execute(&mut *tx)
             .await?;
         let record = SessionRecord {
@@ -117,7 +120,7 @@ impl Store {
             .bind(task)
             .bind(Utc::now().to_rfc3339())
             .bind(serde_json::to_string(&Event::StepStarted {
-                step: step.name().into(),
+                step,
                 session: record.id.clone(),
             })?)
             .execute(&mut *tx)
@@ -135,16 +138,34 @@ impl Store {
         new_id: &str,
     ) -> Result<(), StoreError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("UPDATE sessions SET is_primary = 0 WHERE task_key = ? AND is_primary = 1")
+            .bind(task)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("UPDATE sessions SET is_primary = 0, closed = 1 WHERE task_key = ? AND id = ?")
             .bind(task)
             .bind(new_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("UPDATE sessions SET is_primary = 1 WHERE task_key = ? AND id = ?")
-            .bind(task)
-            .bind(from_id)
-            .execute(&mut *tx)
-            .await?;
+        let promoted =
+            sqlx::query("UPDATE sessions SET is_primary = 1 WHERE task_key = ? AND id = ?")
+                .bind(task)
+                .bind(from_id)
+                .execute(&mut *tx)
+                .await?;
+        if promoted.rows_affected() == 0 {
+            // Dropping `tx` rolls the demotions back.
+            return Err(StoreError::NotFound(TaskKey::new(task)));
+        }
+        // The history must not list a step that was undone.
+        sqlx::query(
+            "DELETE FROM task_events WHERE task_key = ? AND json_extract(event, '$.type') = 'step-started'
+             AND json_extract(event, '$.session') = ?",
+        )
+        .bind(task)
+        .bind(new_id)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -327,7 +348,7 @@ fn session_from_row(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
 
 #[cfg(test)]
 mod tests {
-    use delilah_core::{Task, TaskKey};
+    use delilah_core::Task;
 
     use super::*;
 
@@ -449,7 +470,7 @@ mod tests {
         assert_eq!(
             history.last().unwrap().event,
             Event::StepStarted {
-                step: "implement".into(),
+                step: Step::Implement,
                 session: "impl".into()
             }
         );
@@ -483,5 +504,99 @@ mod tests {
         );
         let undone = store.session("impl").await.unwrap().unwrap();
         assert!(undone.closed && !undone.primary);
+    }
+
+    async fn count(store: &Store, sql: &str) -> i64 {
+        sqlx::query_scalar(sql)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_handover_after_an_undo_starts_a_new_session() {
+        let store = store_with_plan_session().await;
+        store
+            .hand_over("PROJ-1", "plan", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        store
+            .undo_hand_over("PROJ-1", "plan", "impl")
+            .await
+            .unwrap();
+        let key = TaskKey::new("PROJ-1");
+        assert!(store.events(&key).await.unwrap().is_empty());
+        assert!(
+            store
+                .session_of_step("PROJ-1", Step::Implement)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let retry = store
+            .hand_over("PROJ-1", "plan", &step_session("impl-2", Step::Implement))
+            .await
+            .unwrap();
+        assert_eq!(retry.id, "impl-2");
+        assert!(retry.primary && !retry.closed);
+        assert!(!store.session("plan").await.unwrap().unwrap().primary);
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl-2"
+        );
+        assert_eq!(store.events(&key).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_handover_from_a_stale_session_still_leaves_one_primary() {
+        let store = store_with_plan_session().await;
+        store
+            .create_session(&session("other", SessionKind::Shell, false))
+            .await
+            .unwrap();
+        store
+            .hand_over("PROJ-1", "other", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        let sql = "SELECT COUNT(*) FROM sessions WHERE task_key = 'PROJ-1' AND is_primary = 1";
+        assert_eq!(count(&store, sql).await, 1);
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl"
+        );
+    }
+
+    #[tokio::test]
+    async fn undoing_towards_an_unknown_session_changes_nothing() {
+        let store = store_with_plan_session().await;
+        store
+            .hand_over("PROJ-1", "plan", &step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        let err = store.undo_hand_over("PROJ-1", "ghost", "impl").await;
+        assert!(matches!(err, Err(StoreError::NotFound(_))));
+        assert_eq!(
+            store.primary_session("PROJ-1").await.unwrap().unwrap().id,
+            "impl"
+        );
+        assert!(!store.session("impl").await.unwrap().unwrap().closed);
+        assert_eq!(
+            store.events(&TaskKey::new("PROJ-1")).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn two_open_sessions_of_one_step_are_refused() {
+        let store = store_with_plan_session().await;
+        store
+            .create_session(&step_session("impl", Step::Implement))
+            .await
+            .unwrap();
+        let dup = store
+            .create_session(&step_session("impl-2", Step::Implement))
+            .await;
+        assert!(dup.is_err());
     }
 }

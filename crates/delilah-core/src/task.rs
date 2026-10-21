@@ -115,7 +115,7 @@ pub enum Event {
     },
     /// A saving-mode handoff started the session of a step; the status does not change.
     StepStarted {
-        step: String,
+        step: Step,
         session: String,
     },
 }
@@ -554,9 +554,21 @@ mod tests {
     }
 
     #[test]
+    fn a_started_step_serialises_with_its_name() {
+        let event = Event::StepStarted {
+            step: Step::Implement,
+            session: "s-2".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"type":"step-started","step":"implement","session":"s-2"}"#
+        );
+    }
+
+    #[test]
     fn starting_a_step_keeps_every_status() {
         let event = Event::StepStarted {
-            step: "implement".into(),
+            step: Step::Implement,
             session: "s-2".into(),
         };
         let mut paused = running_task();
