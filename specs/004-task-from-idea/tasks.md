@@ -32,7 +32,7 @@
     - (e) writing `\x1b` to the PTY stops a turn, and whether `Stop` fires after it;
     - (f) the plugin's skill is listed and invocable as `/delilah:task-from-idea`.
   - If (a), (c) or (d) fails, stop and report: the design needs the research.md fallbacks before Phase 2.
-- [ ] T002 [P] Create the plugin source:
+- [X] T002 [P] Create the plugin source:
   - `crates/delilah-agents/plugin/.claude-plugin/plugin.json`: `{"name":"delilah","description":"Delilah: turn an idea into a task","version":"0.0.0"}`. The version is replaced at write time.
   - `crates/delilah-agents/plugin/skills/task-from-idea/SKILL.md`: front-matter `name: task-from-idea` and a `description` that triggers when the user wants a task made from an idea or from the conversation. The body is the six-point protocol in contracts/api.md "The plugin", written as instructions to Claude in English. It tells Claude to answer the user in their language and to include the four brief sections in Spanish headings (`## Idea`, `## Resumen`, `## Zonas afectadas`, `## Preguntas abiertas`).
 
