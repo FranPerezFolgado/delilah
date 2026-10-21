@@ -268,7 +268,7 @@
   - assert that the written `notes.md` holds the edited brief and that the prompt points to it (the existing `point_to_notes` behaviour).
 
   If it fails, fix `run.rs` so that a started backlog task always passes its current notes.
-- [ ] T033 [P] [US2] Show the history event:
+- [X] T033 [P] [US2] Show the history event:
   - wherever task events are listed in `app/src/components/TaskView.tsx` / `BacklogTaskView.tsx` (find the event-to-text mapping), render `created-from-conversation` (kebab-case, as the daemon serialises it) as "Creada desde la conversación «{label}»";
   - add `"Creada desde la conversación «{label}»"` to `app/src/i18n/en.ts`;
   - add a test for the mapping.

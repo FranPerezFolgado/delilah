@@ -40,6 +40,7 @@ export const EN: Record<string, string> = {
   "El archivo ha cambiado en disco": "The file changed on disk",
   "Tarea creada": "Task created",
   "Workspace listo": "Workspace ready",
+  "Creada desde la conversación «{label}»": "Created from the conversation “{label}”",
   "Cambio de fase": "Phase change",
   "El agente te espera": "The agent is waiting for you",
   "Respondiste": "You answered",

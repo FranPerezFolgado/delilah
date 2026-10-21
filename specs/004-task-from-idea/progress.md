@@ -21,7 +21,7 @@ Mode: format=markdown commits=yes
 | WP-03Fd | 3 | 3F | done | 1 | 87c606d | phase 3 fixes, daemon; stop on unknown session now 404 |
 | WP-03Fu | 3 | 3F | done | 1 | d9447f0 | phase 3 fixes, UI; strings for WP-18: Respondida en la terminal, Retirada |
 | WP-13 | 4 | 4A | implementing | 0 | | |
-| WP-14 | 4 | 4A | implementing | 0 | | |
+| WP-14 | 4 | 4A | verified | 1 | | |
 | WP-15 | 5 | 5A | pending | 0 | | |
 | WP-16 | 5 | 5A | pending | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |
