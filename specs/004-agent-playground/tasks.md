@@ -66,34 +66,34 @@
 
 **Independent Test**: start two tasks in a preview and open Playground. There are two desks with key, title and phase, and the characters change as the agents start, work and stop.
 
-- [ ] T008 [P] [US1] Write failing tests in `app/src/playground/layout.test.ts` for `deskState(session, activity?)`:
+- [X] T008 [P] [US1] Write failing tests in `app/src/playground/layout.test.ts` for `deskState(session, activity?)`:
   - `starting` → `starting`; `waiting` → `waiting`; `paused` → `paused`;
   - `working` with no activity → `thinking` (the other kinds come in US3).
-- [ ] T009 [P] [US1] Write failing tests for `Sprite` in `app/src/playground/Sprite.test.tsx` (jsdom):
+- [X] T009 [P] [US1] Write failing tests for `Sprite` in `app/src/playground/Sprite.test.tsx` (jsdom):
   - a 2×2 map with `.` and two palette letters renders an `<svg>` with `shape-rendering="crispEdges"` and one `<rect>` per horizontal run of one colour;
   - `.` renders nothing;
   - fills are `var(--pg-<key>)`;
   - with `frames=2` the frames sit side by side and the root carries `--pg-frames: 2`.
-- [ ] T010 [US1] Implement `deskState` in `app/src/playground/layout.ts` (T008).
-- [ ] T011 [US1] Implement `app/src/playground/Sprite.tsx` (T009).
-- [ ] T012 [US1] Draw the first sprites in `app/src/playground/sprites.ts`:
+- [X] T010 [US1] Implement `deskState` in `app/src/playground/layout.ts` (T008).
+- [X] T011 [US1] Implement `app/src/playground/Sprite.tsx` (T009).
+- [X] T012 [US1] Draw the first sprites in `app/src/playground/sprites.ts`:
   - **Format**: one string per row and one character per pixel; `.` is transparent, and each letter is a palette key (e.g. `k` outline, `s` skin, `h` hair, `c` clothes, `d` desk, `m` monitor, `l` screen light).
   - **Character**: 16×16, poses `arriving`, `thinking`, `waiting` (hand up and bubble) and `paused` (asleep with "z"), 2 frames each.
   - **Desk**: 32×16, with a monitor.
   - Export `POSES: Record<Pose, string[][]>` and `DESK`, and add a row per group to `CREDITS.md`.
-- [ ] T013 [US1] Write failing tests in `app/src/playground/PlaygroundView.test.tsx` (jsdom; the pattern is `Sidebar.test.tsx`). Use a mocked `usePlayground` (`vi.mock("./usePlayground")`):
+- [X] T013 [US1] Write failing tests in `app/src/playground/PlaygroundView.test.tsx` (jsdom; the pattern is `Sidebar.test.tsx`). Use a mocked `usePlayground` (`vi.mock("./usePlayground")`):
   - two areas render as `<section>`s with the project names as headings;
   - each desk shows the task key, the title (truncated, full text in `title`) and the phase label;
   - the character is a `<button>` with `data-pose` equal to `deskState`;
   - no desks → "Ningún agente trabajando";
   - re-rendering with one session removed and one added keeps the other desk's `data-slot`.
-- [ ] T014 [US1] Implement `app/src/playground/Desk.tsx` (the desk, the main character `<button data-pose data-slot>` and the label) and `app/src/playground/PlaygroundView.tsx`:
+- [X] T014 [US1] Implement `app/src/playground/Desk.tsx` (the desk, the main character `<button data-pose data-slot>` and the label) and `app/src/playground/PlaygroundView.tsx`:
   - project `<section>`s, each with a grid of slots from `assignSlots`, kept in a `useRef` per project;
   - the empty office;
   - a header with the title.
 
   This replaces the T007 placeholder, and T013 passes.
-- [ ] T015 [US1] Create `app/src/playground/playground.css`:
+- [X] T015 [US1] Create `app/src/playground/playground.css`:
   - the office background and the project areas;
   - the slot grid (`repeat(auto-fill, minmax(…))`, which wraps and scrolls past 8 desks);
   - the desk and label styles, with ellipsis on the title;

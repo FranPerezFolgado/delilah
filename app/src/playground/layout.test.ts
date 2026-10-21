@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Session, SpecSummary, Task } from "../api";
-import { assignSlots, groupByProject } from "./layout";
+import { assignSlots, deskState, groupByProject, slotMaps } from "./layout";
 
 describe("assignSlots", () => {
   it("numbers from 0 in input order when nothing was assigned", () => {
@@ -80,5 +80,25 @@ describe("groupByProject", () => {
     const areas = groupByProject([session("s1", "N-1"), session("s2", "W-1")], [task("N-1", null), task("W-1", "web")], projects, {});
     expect(areas.map((a) => a.project)).toEqual(["web", "—"]);
     expect(areas[1].desks[0].project).toBeNull();
+  });
+});
+
+describe("deskState", () => {
+  it("maps the session state, working without activity is thinking", () => {
+    expect(deskState(session("s", "A", { state: "starting" }))).toBe("starting");
+    expect(deskState(session("s", "A", { state: "waiting" }))).toBe("waiting");
+    expect(deskState(session("s", "A", { state: "paused" }))).toBe("paused");
+    expect(deskState(session("s", "A", { state: "working" }))).toBe("thinking");
+  });
+});
+
+describe("slots across regroupings", () => {
+  const projects = [proj("web")];
+  const tasks = [task("A", "web"), task("B", "web"), task("C", "web")];
+  it("keeps the slot of a desk when another leaves and a new one arrives", () => {
+    const first = groupByProject([session("a", "A"), session("b", "B")], tasks, projects, {});
+    expect(first[0].desks.map((d) => d.slot)).toEqual([0, 1]);
+    const second = groupByProject([session("b", "B"), session("c", "C")], tasks, projects, {}, slotMaps(first));
+    expect(Object.fromEntries(second[0].desks.map((d) => [d.session.id, d.slot]))).toEqual({ b: 1, c: 0 });
   });
 });

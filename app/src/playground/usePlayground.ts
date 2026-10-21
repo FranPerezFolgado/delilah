@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Project, type Session, type SpecSummary, type Task } from "../api";
 import { connect, on } from "../live";
-import { groupByProject, type ProjectArea } from "./layout";
+import { groupByProject, slotMaps, type ProjectArea } from "./layout";
 
 /** The playground's data: live sessions with their tasks and projects, fresh from the
  *  change feed. `online` given (the main window, which already holds the feed) is used
@@ -33,6 +33,12 @@ export function usePlayground(online?: boolean): { areas: ProjectArea[]; online:
     return connect(setOwn);
   }, [external]);
 
-  const areas = useMemo(() => groupByProject(sessions, tasks, projects, specs), [sessions, tasks, projects, specs]);
+  // Slots live here, not in the view, so they survive it unmounting.
+  const slots = useRef<Map<string, Map<string, number>>>(new Map());
+  const areas = useMemo(() => {
+    const next = groupByProject(sessions, tasks, projects, specs, slots.current);
+    slots.current = slotMaps(next);
+    return next;
+  }, [sessions, tasks, projects, specs]);
   return { areas, online: online ?? own };
 }

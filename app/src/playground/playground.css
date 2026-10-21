@@ -1,0 +1,36 @@
+/* The playground: an office with an area per project. Palette variables follow the
+   app's tokens, so dark and light both work. */
+.pg-office {
+  --pg-k: #15110d; --pg-s: #f1c9a0; --pg-h: #6b4423; --pg-c: var(--run);
+  --pg-d: #b98a58; --pg-b: #8c6538; --pg-m: #3a3d44; --pg-l: color-mix(in srgb, var(--run) 55%, #fff);
+  --pg-w: #fff; --pg-z: var(--pause);
+  height: 100%; overflow: auto; padding: 16px 20px; background: var(--bg); color: var(--tx);
+}
+@media (prefers-color-scheme: light) {
+  .pg-office { --pg-k: #2a2118; --pg-d: #c99a66; --pg-b: #a37744; --pg-m: #50545c; }
+}
+.pg-head h2 { margin: 0 0 12px; font-size: 15px; }
+.pg-empty { color: var(--tx3); }
+.pg-areas { display: flex; flex-direction: column; gap: 16px; }
+.pg-area { background: var(--panel); border: 1px solid var(--bd); border-radius: 8px; padding: 10px 12px; }
+.pg-area h3 { margin: 0 0 8px; font-size: 12px; color: var(--tx2); }
+.pg-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px;
+  max-height: 560px; overflow-y: auto; /* wraps and scrolls past 8 desks */
+}
+.pg-desk { min-width: 0; }
+.pg-scene { position: relative; width: 96px; height: 80px; margin: 0 auto; }
+.pg-scene svg { display: block; overflow: hidden; image-rendering: pixelated; }
+.pg-desk-art { position: absolute; left: 0; bottom: 0; width: 96px; height: 48px; }
+.pg-char {
+  position: absolute; left: 24px; top: 0; width: 48px; height: 48px; padding: 0; border: 0;
+  background: none; cursor: pointer; border-radius: 6px;
+}
+.pg-char:hover, .pg-char:focus-visible { outline: 2px solid var(--acc); }
+.pg-char svg { width: 48px; height: 48px; }
+.pg-anim { animation: pg-frames 0.8s steps(var(--pg-frames)) infinite; }
+@keyframes pg-frames { to { transform: translateX(calc(-1 * var(--pg-w) * var(--pg-frames))); } }
+.pg-label { display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 11px; min-width: 0; }
+.pg-title { max-width: 100%; color: var(--tx2); }
+.pg-phase { color: var(--tx3); }
+.pg-desk--empty { min-height: 1px; }

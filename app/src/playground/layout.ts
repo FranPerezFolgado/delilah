@@ -10,6 +10,38 @@ export interface DeskModel {
   title: string;
   phase: Column | null;
   project: string | null;
+  /** The desk's place in its project's grid; stable while the session lives. */
+  slot: number;
+}
+
+export type DeskState = "starting" | "thinking" | "waiting" | "paused";
+
+/** Character poses with a sprite; later packages add more to the union. */
+export type Pose = "arriving" | "thinking" | "waiting" | "paused";
+
+/** The pose that shows each desk state. */
+export const POSE_OF: Record<DeskState, Pose> = {
+  starting: "arriving",
+  thinking: "thinking",
+  waiting: "waiting",
+  paused: "paused",
+};
+
+/** What a desk's character is doing, from the session's state. */
+export function deskState(session: Session): DeskState {
+  switch (session.state) {
+    case "starting":
+    case "waiting":
+    case "paused":
+      return session.state;
+    default:
+      return "thinking";
+  }
+}
+
+/** Slot maps per project (session id -> slot) of `areas`, to pass back to `groupByProject`. */
+export function slotMaps(areas: ProjectArea[]): Map<string, Map<string, number>> {
+  return new Map(areas.map((a) => [a.project, new Map(a.desks.map((d) => [d.session.id, d.slot]))]));
 }
 
 export interface ProjectArea {
@@ -48,6 +80,7 @@ export function groupByProject(
   tasks: Task[],
   projects: Project[],
   specs: Record<string, SpecSummary>,
+  prevSlots: Map<string, Map<string, number>> = new Map(),
 ): ProjectArea[] {
   const byKey = new Map(tasks.map((t) => [t.key, t]));
   const buckets = new Map<string, DeskModel[]>();
@@ -56,7 +89,7 @@ export function groupByProject(
     let desk: DeskModel;
     if (session.task.startsWith("@")) {
       const name = session.task.slice(1);
-      desk = { session, owner: session.task, key: name, title: name, phase: null, project: name };
+      desk = { session, owner: session.task, key: name, title: name, phase: null, project: name, slot: 0 };
     } else {
       const task = byKey.get(session.task);
       if (!task) continue;
@@ -67,15 +100,20 @@ export function groupByProject(
         title: task.title,
         phase: columnOf(task, specs[task.key]),
         project: task.project,
+        slot: 0,
       };
     }
     const area = desk.project ?? NO_PROJECT;
     buckets.set(area, [...(buckets.get(area) ?? []), desk]);
   }
-  const areas = projects.filter((p) => buckets.has(p.name)).map((p) => ({ project: p.name, desks: buckets.get(p.name)! }));
+  const place = (project: string, desks: DeskModel[]): ProjectArea => {
+    const slots = assignSlots(prevSlots.get(project) ?? new Map(), desks.map((d) => d.session.id));
+    return { project, desks: desks.map((d) => ({ ...d, slot: slots.get(d.session.id)! })) };
+  };
+  const areas = projects.filter((p) => buckets.has(p.name)).map((p) => place(p.name, buckets.get(p.name)!));
   // A project that is not registered any more still shows its desks, before "—".
   const known = new Set(projects.map((p) => p.name));
-  for (const [project, desks] of buckets) if (project !== NO_PROJECT && !known.has(project)) areas.push({ project, desks });
-  if (buckets.has(NO_PROJECT)) areas.push({ project: NO_PROJECT, desks: buckets.get(NO_PROJECT)! });
+  for (const [project, desks] of buckets) if (project !== NO_PROJECT && !known.has(project)) areas.push(place(project, desks));
+  if (buckets.has(NO_PROJECT)) areas.push(place(NO_PROJECT, buckets.get(NO_PROJECT)!));
   return areas;
 }
