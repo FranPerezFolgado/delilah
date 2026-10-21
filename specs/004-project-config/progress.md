@@ -11,9 +11,9 @@ Mode: format=markdown commits=yes
 | WP-04 | 2 | 2B | done | 1 | 6ec349e | |
 | WP-05 | 2 | 2A | done | 1 | b3fe227 | |
 | WP-06 | 2 | 2A | done | 1 | 41936c8 | +Sidebar.test.tsx fixture |
-| WP-07 | 3 | 3A | pending | 0 | | |
-| WP-08 | 3 | 3A | pending | 0 | | |
-| WP-09 | 3 | 3A | pending | 0 | | |
+| WP-07 | 3 | 3A | verified | 1 | 4ff756f | +R1-R3 review follow-ups; cargo fmt of run.rs, store_projects.rs |
+| WP-08 | 3 | 3A | verified | 1 | f446162 | |
+| WP-09 | 3 | 3A | verified | 1 | 17cebbd | |
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-12 | 4 | 4B | pending | 0 | | |
