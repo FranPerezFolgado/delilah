@@ -72,7 +72,7 @@
 
 - [X] T006 [P] In `crates/delilah-core/src/task.rs`:
   - Add a failing test: `Event::CreatedFromConversation { session, label }` applies to a `Queued` task, leaving status and phase unchanged, and is rejected on a `Running` task.
-  - Then add the variant, serialized as `{"type":"created_from_conversation","session":…,"label":…}` (match the enum's existing serde tagging), and accept it in `Task::apply` only for `Queued`.
+  - Then add the variant, serialized as `{"type":"created-from-conversation","session":…,"label":…}` (match the enum's existing serde tagging), and accept it in `Task::apply` only for `Queued`.
 
 ### Daemon: schema and store
 
@@ -269,7 +269,7 @@
 
   If it fails, fix `run.rs` so that a started backlog task always passes its current notes.
 - [ ] T033 [P] [US2] Show the history event:
-  - wherever task events are listed in `app/src/components/TaskView.tsx` / `BacklogTaskView.tsx` (find the event-to-text mapping), render `created_from_conversation` as "Creada desde la conversación «{label}»";
+  - wherever task events are listed in `app/src/components/TaskView.tsx` / `BacklogTaskView.tsx` (find the event-to-text mapping), render `created-from-conversation` (kebab-case, as the daemon serialises it) as "Creada desde la conversación «{label}»";
   - add `"Creada desde la conversación «{label}»"` to `app/src/i18n/en.ts`;
   - add a test for the mapping.
 

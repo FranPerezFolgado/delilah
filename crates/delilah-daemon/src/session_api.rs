@@ -13,7 +13,7 @@ use crate::run::launch_session;
 use crate::sessions::LiveState;
 use crate::state::AppState;
 use crate::store::StoreError;
-use crate::store_sessions::{SessionKind, SessionRecord, project_of, project_owner};
+use crate::store_sessions::{EntryKind, SessionKind, SessionRecord, project_of, project_owner};
 
 #[derive(Debug, Serialize)]
 pub struct SessionView {
@@ -100,8 +100,10 @@ async fn open_for(
         && req.read_only.unwrap_or(project_of(&key).is_some());
 
     let existing = app.store.open_sessions(Some(&key)).await?;
+    // A conversation is always "Idea".
     let label = req
         .label
+        .filter(|_| !conversation)
         .filter(|l| !l.trim().is_empty())
         .or_else(|| conversation.then(|| "Idea".to_string()))
         .unwrap_or_else(|| {
@@ -128,8 +130,18 @@ async fn open_for(
         conversation,
     };
     app.store.create_session(&record).await?;
-    app.emit(Topic::Sessions);
     let prompt = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
+    if let (true, Some(text)) = (conversation, prompt) {
+        // The prompt goes to Claude on launch: the first line of the chat.
+        app.store
+            .add_entry(
+                &record.id,
+                EntryKind::User,
+                &serde_json::json!({ "text": text, "state": "sent", "from": "view" }),
+            )
+            .await?;
+    }
+    app.emit(Topic::Sessions);
     launch_session(app, &record, &ws.path, prompt, false)?;
     Ok((StatusCode::CREATED, Json(view(app, record))))
 }
@@ -146,6 +158,11 @@ pub async fn allow_edits(
         .await?
         .filter(|r| !r.closed && r.kind == SessionKind::Claude)
         .ok_or_else(|| ApiError::not_found(format!("no open Claude session {id}")))?;
+    if record.conversation {
+        return Err(ApiError::conflict(
+            "a conversation is read-only through dontAsk: there is nothing to allow",
+        ));
+    }
     app.store.set_read_only(&id, false).await?;
     record.read_only = false;
     if let Some(live) = app.sessions.get(&id) {
@@ -592,6 +609,68 @@ mod project_tests {
         assert_eq!(s["label"], "Claude 1");
         assert_eq!(s["read_only"], true);
         if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
+            let _ = live.pty.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn a_conversation_label_is_always_idea() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "label": "x" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        assert_eq!(s["label"], "Idea");
+        if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
+            let _ = live.pty.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn a_conversation_prompt_is_its_first_user_entry() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "prompt": "an idea" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        let id = s["id"].as_str().unwrap();
+        let entries = app.store.entries(id).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, EntryKind::User);
+        assert_eq!(
+            entries[0].body,
+            json!({ "text": "an idea", "state": "sent", "from": "view" })
+        );
+        if let Some(live) = app.sessions.get(id) {
+            let _ = live.pty.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn allow_edits_refuses_a_conversation() {
+        let (app, home) = project_app().await;
+        let (_, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true })),
+        )
+        .await;
+        let id = s["id"].as_str().unwrap().to_string();
+        let (status, body) = call(
+            &app,
+            Request::post(format!("/api/v1/sessions/{id}/allow-edits"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        if let Some(live) = app.sessions.get(&id) {
             let _ = live.pty.kill();
         }
         std::fs::remove_dir_all(home).ok();

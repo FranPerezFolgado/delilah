@@ -56,7 +56,8 @@ pub enum Permission {
 
 /// Tools and commands allowed under [`Permission::DontAsk`]. Each read-only Bash rule
 /// also in its RTK-rewritten form: a user-level PreToolUse hook such as RTK rewrites
-/// `git log` to `rtk git log`, and allow rules match the rewritten command.
+/// `git status` to `rtk git status`, and allow rules match the rewritten command.
+/// No `rg` nor `git log/show/diff`: `rg --pre` runs programs and `--output` writes files.
 const DONT_ASK_ALLOW: &[&str] = &[
     "Read",
     "Grep",
@@ -64,21 +65,13 @@ const DONT_ASK_ALLOW: &[&str] = &[
     "AskUserQuestion",
     "Skill",
     "TodoWrite",
-    "Bash(git log:*)",
-    "Bash(git show:*)",
-    "Bash(git diff:*)",
     "Bash(git status:*)",
     "Bash(ls:*)",
-    "Bash(rg:*)",
-    "Bash(rtk git log:*)",
-    "Bash(rtk git show:*)",
-    "Bash(rtk git diff:*)",
     "Bash(rtk git status:*)",
     "Bash(rtk ls:*)",
-    "Bash(rtk rg:*)",
 ];
 
-const DONT_ASK_DENY: &[&str] = &["Edit", "Write", "NotebookEdit"];
+const DONT_ASK_DENY: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];
 
 pub struct Launch<'a> {
     pub workspace: &'a Path,
@@ -154,6 +147,8 @@ pub fn command(launch: &Launch) -> CommandBuilder {
         }
         Permission::DontAsk => {
             cmd.args(["--permission-mode", "dontAsk"]);
+            // A cloned repo's own settings must not widen the allow list.
+            cmd.args(["--setting-sources", "user"]);
         }
     }
     if let Some(dir) = launch.plugin_dir {
@@ -597,6 +592,13 @@ mod tests {
             "{dont_ask:?}"
         );
         assert!(!argv(&launch()).contains(&"--permission-mode".to_string()));
+        // Only the read-only conversation drops the repo's own settings.
+        assert!(
+            has_pair(&dont_ask, "--setting-sources", "user"),
+            "{dont_ask:?}"
+        );
+        assert!(!plan.contains(&"--setting-sources".to_string()));
+        assert!(!argv(&launch()).contains(&"--setting-sources".to_string()));
     }
 
     #[test]
@@ -633,23 +635,15 @@ mod tests {
                 "AskUserQuestion",
                 "Skill",
                 "TodoWrite",
-                "Bash(git log:*)",
-                "Bash(git show:*)",
-                "Bash(git diff:*)",
                 "Bash(git status:*)",
                 "Bash(ls:*)",
-                "Bash(rg:*)",
-                "Bash(rtk git log:*)",
-                "Bash(rtk git show:*)",
-                "Bash(rtk git diff:*)",
                 "Bash(rtk git status:*)",
-                "Bash(rtk ls:*)",
-                "Bash(rtk rg:*)"
+                "Bash(rtk ls:*)"
             ])
         );
         assert_eq!(
             dont_ask["permissions"]["deny"],
-            json!(["Edit", "Write", "NotebookEdit"])
+            json!(["Edit", "MultiEdit", "Write", "NotebookEdit"])
         );
         assert!(s(Permission::Plan).get("permissions").is_none());
         assert!(s(Permission::Default).get("permissions").is_none());

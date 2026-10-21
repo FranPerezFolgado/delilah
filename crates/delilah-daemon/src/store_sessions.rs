@@ -93,6 +93,8 @@ pub struct Entry {
     pub id: i64,
     pub at: DateTime<Utc>,
     pub kind: EntryKind,
+    /// Always a JSON object; its fields sit next to `id`, `at` and `kind` when serialised.
+    #[serde(flatten)]
     pub body: Value,
 }
 
@@ -370,6 +372,39 @@ mod tests {
             read_only: false,
             conversation: false,
         }
+    }
+
+    #[test]
+    fn entries_serialise_flat() {
+        let at = DateTime::parse_from_rfc3339("2026-10-20T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let user = Entry {
+            id: 1,
+            at,
+            kind: EntryKind::User,
+            body: serde_json::json!({ "text": "hi", "state": "sent", "from": "view" }),
+        };
+        assert_eq!(
+            serde_json::to_value(&user).unwrap(),
+            serde_json::json!({
+                "id": 1, "at": "2026-10-20T10:00:00Z", "kind": "user",
+                "text": "hi", "state": "sent", "from": "view"
+            })
+        );
+        let card = Entry {
+            id: 2,
+            at,
+            kind: EntryKind::Card,
+            body: serde_json::json!({ "card": "ask", "outcome": null }),
+        };
+        assert_eq!(
+            serde_json::to_value(&card).unwrap(),
+            serde_json::json!({
+                "id": 2, "at": "2026-10-20T10:00:00Z", "kind": "card",
+                "card": "ask", "outcome": null
+            })
+        );
     }
 
     #[tokio::test]

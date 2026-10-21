@@ -94,14 +94,16 @@ a "carry on" prompt. Because the subscription is shared, a limit hit by any
 session pauses the task. The real `StopFailure` payload for a limit has not been
 observed yet (see the spike).
 
-**15. The idea conversation runs with `dontAsk` and an explicit allow list.**
+**26. The idea conversation runs with `dontAsk` and an explicit allow list.**
 `--permission-mode dontAsk` plus `permissions.allow`/`deny` in the session's
-settings file lets Claude read code (Read, Grep, Glob, a few read-only `git`, `ls`
-and `rg` commands) without a terminal prompt, and denies Edit, Write and
-NotebookEdit. Each Bash rule is also listed in its RTK form (`rtk git log:*`, ...):
-user-level PreToolUse hooks such as RTK rewrite `git log` to `rtk git log` and allow
-rules match the rewritten command; the extra rules are harmless without RTK.
-`--setting-sources` was ruled out because it drops the user's other settings.
+settings file lets Claude read code without a terminal prompt. Allowed: Read, Grep,
+Glob, AskUserQuestion, Skill, TodoWrite, `git status` and `ls`, each Bash rule also
+in its RTK form (`rtk git status:*`, ...): user-level PreToolUse hooks such as RTK
+rewrite commands and allow rules match the rewritten command. Denied: Edit,
+MultiEdit, Write and NotebookEdit. `--setting-sources user` drops the repo's
+`.claude/settings*.json`, so a cloned repo cannot widen the list; the user's own
+settings and hooks stay. `rg` and `git log/show/diff` were dropped: `rg --pre` runs
+programs and `--output` writes files.
 
 ## Workflows and tasks
 

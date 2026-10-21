@@ -55,14 +55,15 @@ Checked against Claude Code 2.1.292 (`claude --help`) and the code on `feature/L
 - **Decision**: idea conversations start with `--permission-mode dontAsk`. Their settings
   file (`tasks/@<project>/claude-<id>.json`) adds `permissions.allow`:
   - `Read`, `Grep`, `Glob`, `AskUserQuestion`, `Skill`, `TodoWrite`;
-  - read-only Bash: `Bash(git log:*)`, `Bash(git show:*)`, `Bash(git diff:*)`,
-    `Bash(git status:*)`, `Bash(ls:*)`, `Bash(rg:*)`.
+  - read-only Bash: `Bash(git status:*)`, `Bash(ls:*)`, plus their `rtk` forms.
 
-  It also adds `permissions.deny` for `Edit`, `Write` and `NotebookEdit`. Anything else
+  Final list and reasons (no `rg`, no `git log/show/diff`; `--setting-sources user`):
+  decisions.md #26. It also adds `permissions.deny` for `Edit`, `MultiEdit`, `Write` and
+  `NotebookEdit`. Anything else
   is denied without a prompt. Project sessions keep `--permission-mode plan`, unchanged.
 - **Rationale**: in plan mode Claude can call ExitPlanMode, whose approval only shows in
   the TUI (FR-005). In `dontAsk` nothing waits on a terminal prompt. CHK011: Claude
-  reads and searches, and only runs read-only `git`, `ls` and `rg`.
+  reads and searches, and only runs `git status` and `ls`.
 - **To verify in WP-1's spike**:
   1. `dontAsk` with the allow list never prompts.
   2. AskUserQuestion still reaches the PreToolUse hook.
@@ -207,7 +208,7 @@ user's other settings.
 | CHK020 threat | Unchanged: the API is loopback and Origin-guarded (`api.rs` guard). Any local process could already `POST /api/v1/tasks`. |
 | CHK021 where | `in_checkout: None`, as `delilah new`: the project's default applies when the task is started. |
 | CHK022 title | The same check as `create_task` (non-empty after trim). Refused cards answer `no se pudo crear: …`. |
-| CHK024 history | Event `created_from_conversation { session, label }`, shown as "Creada desde la conversación «label»". |
+| CHK024 history | Event `created-from-conversation { session, label }`, shown as "Creada desde la conversación «label»". |
 | CHK025 Bandeja | Idea conversations' cards also appear in the Bandeja. Answering in either place resolves the same ask. |
 | CHK026/027 | SC-002 is measured on the main path without "Ver terminal". SC-001 counts from the click on "Crear". |
 | CHK029 project removed | Its sessions and entries are deleted with it (`ON DELETE CASCADE`), as project sessions today. |

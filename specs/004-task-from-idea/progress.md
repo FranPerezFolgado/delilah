@@ -12,7 +12,8 @@ Mode: format=markdown commits=yes
 | WP-07 | 2 | 2A | verified | 1 | 5a88680 | App.tsx: no-op conversations fetcher |
 | WP-05 | 2 | 2B | verified | 1 | 7dae09c | +JSON round-trip of CreatedFromConversation |
 | WP-06 | 2 | 2B | verified | 1 | 2b0eda4 | |
-| WP-08 | 2 | 2C | verified | 2 | | |
+| WP-08 | 2 | 2C | verified | 2 | 4f7a642 | |
+| WP-02F | 2 | 2F | verified | 1 | | phase 2 review fixes |
 | WP-09 | 3 | 3A | pending | 0 | | |
 | WP-11 | 3 | 3A | pending | 0 | | |
 | WP-10 | 3 | 3B | pending | 0 | | split at T022/T023 if too large |
@@ -29,3 +30,4 @@ Mode: format=markdown commits=yes
 ## Reviews
 
 - Phase 1: spec-compliance COMPLIANT. MEDIUM (RTK rewrites break read-only Bash allow list) → decided: also allow `rtk` forms, done in WP-03.
+- Phase 2: spec COMPLIANT (minor gaps) · migration SAFE · contract 1 HIGH (Entry not flattened) · security 2 HIGH (rg --pre exec, git --output write), 1 MEDIUM (repo settings merged). Fixed in WP-02F: allow list cut to git status/ls (+rtk), MultiEdit denied, --setting-sources user for dontAsk, Entry flattened, allow-edits refuses conversations, prompt recorded as first user entry, label forced "Idea", docs aligned. LOW kept: plugin dir stays on all project sessions (FR-014 allows them to create tasks).
