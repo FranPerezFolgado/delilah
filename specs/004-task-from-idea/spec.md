@@ -37,6 +37,12 @@ cards, and end with a confirmation card.
 - Q: Is the idea conversation a terminal? → A: No. A conversation view: Claude's replies,
   question cards (as in tasks) and a free-text field, driven by a skill that Delilah
   launches. The terminal stays reachable as a fallback.
+- Q: Where does "Nueva tarea con Claude" appear? → A: In the "Nueva tarea" dialog (next
+  to Jira and Libre, after picking the project) and on the project's screen and its "+".
+- Q: What happens if the user writes while Claude is working? → A: The message is sent and
+  queued: Claude reads it after the current turn. A "Detener" button stops the turn.
+- Q: Is the conversation's history kept when it is reopened? → A: Yes, always, also after
+  Delilah or the Mac restarts. Claude resumes the same conversation.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -59,21 +65,24 @@ Claude's title and brief, and no terminal was shown.
 
 **Acceptance Scenarios**:
 
-1. **Given** project P, **When** the user picks "Nueva tarea con Claude", **Then** a
-   conversation view opens for P with a text field, and no terminal is shown.
+1. **Given** project P, **When** the user picks "Nueva tarea con Claude" (in the "Nueva
+   tarea" dialog with P chosen, or from P's screen or "+"), **Then** a conversation view opens for P with a text field, and no terminal is shown.
 2. **Given** the conversation is open, **When** the user sends a message, **Then** it
    appears in the conversation. While Claude works, the view shows that it is working
    (e.g. which files it is reading). When it finishes, its reply appears as a message.
-3. **Given** Claude asks a question, **When** it reaches the view, **Then** it shows as a
+3. **Given** Claude is working, **When** the user sends a message, **Then** it shows as
+   queued and Claude answers it after the current turn. **When** the user presses
+   "Detener", **Then** the turn stops and Claude waits for the next message.
+4. **Given** Claude asks a question, **When** it reaches the view, **Then** it shows as a
    card with its options and a free-text "Otra". The user's answer goes back to Claude.
-4. **Given** Claude has enough to propose a task, **When** it does, **Then** a confirmation
+5. **Given** Claude has enough to propose a task, **When** it does, **Then** a confirmation
    card shows the title and the full brief, with the options create / change / discard.
-5. **Given** the confirmation card, **When** the user picks "create", **Then** a new free task
+6. **Given** the confirmation card, **When** the user picks "create", **Then** a new free task
    (`LIBRE-n`) is created in P's backlog with that title and brief, and Claude replies with
    its key.
-6. **Given** the confirmation card, **When** the user asks for changes or discards,
+7. **Given** the confirmation card, **When** the user asks for changes or discards,
    **Then** no task is created and the conversation goes on.
-7. **Given** the conversation, **When** the user opens "Ver terminal", **Then** they see the
+8. **Given** the conversation, **When** the user opens "Ver terminal", **Then** they see the
    same Claude session in its terminal, and can go back to the conversation view.
 
 ---
@@ -153,8 +162,8 @@ different keys and briefs appear.
   terminal shows): the view shows Claude as waiting, and "Ver terminal" is the way out.
 - **Usage limit reached mid-conversation**: the view says Claude is paused by the limit,
   as task screens do.
-- **Closing the view**: the conversation stays listed under the project, like project
-  sessions, and can be reopened in the same view.
+- **Closing the view or restarting Delilah**: the conversation stays listed under the
+  project, like project sessions, and reopens in the same view with its whole history.
 - **Very long brief**: it is kept whole as notes. The agent's first instruction points
   to the notes instead of repeating them if they are too long to pass inline.
 - **Idea about another project**: the task goes to the conversation's project. Moving it
@@ -166,12 +175,16 @@ different keys and briefs appear.
 
 ### Functional Requirements
 
-- **FR-001**: Each project MUST offer a "Nueva tarea con Claude" action that opens an
-  idea conversation for that project.
+- **FR-001**: "Nueva tarea con Claude" MUST open an idea conversation for a project, and
+  MUST be offered in two places: the "Nueva tarea" dialog (as a third origin next to Jira
+  and Libre, for the chosen project), and the project's screen and its "+" in the sidebar.
 - **FR-002**: An idea conversation MUST be shown as a conversation view, without a
   terminal. It shows the user's messages, Claude's replies at the end of each turn, an
   indication of what Claude is doing while it works, Claude's questions as cards, and a
   free-text field to send messages.
+- **FR-002a**: While Claude is working, the user MUST still be able to send a message: it
+  shows in the conversation as queued and Claude reads it after the current turn. The view
+  MUST offer "Detener" to stop the current turn; queued messages are kept.
 - **FR-003**: Question cards in the conversation view MUST behave like the ones the Bandeja
   shows for tasks: options, several choices when the question allows them, and a free
   "Otra". They MUST also show a question's longer detail (such as the brief) when it
@@ -204,7 +217,9 @@ different keys and briefs appear.
 - **FR-015**: The task MUST record in its history that it was created from a
   conversation.
 - **FR-016**: Idea conversations MUST be listed under their project, like project
-  sessions, and reopen in the conversation view.
+  sessions, and reopen in the conversation view with their whole history (messages,
+  Claude's replies, cards and the answers given), also after Delilah or the computer
+  restarts. Claude resumes the same conversation.
 - **FR-017**: Manual task creation (dialog, CLI, "Convertir en tarea") MUST keep working
   unchanged.
 
@@ -214,6 +229,9 @@ different keys and briefs appear.
   the conversation view, from which tasks can be created. It outlives the tasks it creates.
 - **Conversation view**: the user's messages, Claude's end-of-turn replies, activity while
   it works, question cards and a text field. It is a view of one Claude session.
+- **Conversation entry**: one item of a conversation's history: a user message (sent or
+  queued), a Claude reply, or a question card with the answer given. Kept with the
+  conversation, in order.
 - **Brief**: the text Claude writes for a task: the idea, a summary, the affected areas and
   the open questions. It becomes the task's notes and its agent's starting point.
 - **Task** (existing): gains the brief as notes and a history entry saying it came from a
