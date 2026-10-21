@@ -86,6 +86,9 @@ mod tests {
             home: PathBuf::from("/tmp/delilah-home"),
             ..Config::from_env().unwrap()
         };
-        assert_eq!(config.plugin_dir(), PathBuf::from("/tmp/delilah-home/plugins/delilah"));
+        assert_eq!(
+            config.plugin_dir(),
+            PathBuf::from("/tmp/delilah-home/plugins/delilah")
+        );
     }
 }
