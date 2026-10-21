@@ -20,10 +20,10 @@ Mode: format=markdown commits=yes
 | WP-12 | 3 | 3C | done | 1 | 502d1e6 | strings for WP-18: Ver terminal, Ver conversación, Nueva tarea con Claude (en {name}), Con Claude, Tu idea, Opcional: cuéntale…, Abrir conversación |
 | WP-03Fd | 3 | 3F | done | 1 | 87c606d | phase 3 fixes, daemon; stop on unknown session now 404 |
 | WP-03Fu | 3 | 3F | done | 1 | d9447f0 | phase 3 fixes, UI; strings for WP-18: Respondida en la terminal, Retirada |
-| WP-13 | 4 | 4A | verified | 1 | 551037a | |
-| WP-14 | 4 | 4A | verified | 1 | 46f9f9f | |
-| WP-04F | 4 | 4F | done | 1 | | phase 4 fixes: hermetic run test |
-| WP-15 | 5 | 5A | pending | 0 | | |
+| WP-13 | 4 | 4A | done | 1 | 551037a | |
+| WP-14 | 4 | 4A | done | 1 | 46f9f9f | |
+| WP-04F | 4 | 4F | done | 1 | 3c7eebe | phase 4 fixes: hermetic run test |
+| WP-15 | 5 | 5A | verified | 1 | | |
 | WP-16 | 5 | 5A | verified | 1 | 12d54c8 | InboxView change untested | |
 | WP-17 | 6 | 6A | pending | 0 | | |
 | WP-18 | 7 | 7A | pending | 0 | | |

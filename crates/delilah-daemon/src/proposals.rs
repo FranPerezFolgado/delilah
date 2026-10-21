@@ -368,4 +368,67 @@ mod tests {
         assert_eq!(reply.error.as_deref(), Some("la conversación ya no existe"));
         assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
     }
+
+    /// A plain project session (a terminal, not a conversation) of `@web`.
+    async fn project_session(app: &AppState, read_only: bool) {
+        project_and_conversation(app).await;
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "plain".into(),
+                task: "@web".into(),
+                kind: crate::store_sessions::SessionKind::Claude,
+                label: "Claude 1".into(),
+                primary: false,
+                closed: false,
+                read_only,
+                conversation: false,
+            })
+            .await
+            .unwrap();
+    }
+
+    const PLAIN: &str = "/hooks/claude/ask?task=@web&session=plain";
+
+    #[tokio::test]
+    async fn a_project_sessions_proposal_creates_a_task_and_records_no_entries() {
+        let app = app().await;
+        project_session(&app, true).await;
+        let card = proposal_card(TITLE, NEW_TASK_HEADER, Some("brief"));
+        let (reply, _) = pick(&app, PLAIN, card, TITLE, CREATE).await;
+        let key = reply["task"].as_str().unwrap().to_string();
+        assert!(key.starts_with("LIBRE-"));
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 2);
+        // A terminal session has no chat history to record.
+        assert!(app.store.entries("plain").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_project_session_after_allow_edits_can_still_create() {
+        let app = app().await;
+        project_session(&app, true).await;
+        app.store.set_read_only("plain", false).await.unwrap();
+        let card = proposal_card(TITLE, NEW_TASK_HEADER, Some("brief"));
+        let (reply, _) = pick(&app, PLAIN, card, TITLE, CREATE).await;
+        assert!(reply["task"].as_str().unwrap().starts_with("LIBRE-"));
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_session_converted_into_a_task_cannot_create() {
+        let app = app().await;
+        project_session(&app, false).await;
+        // "Convertir en tarea": the session now belongs to the task.
+        app.store
+            .adopt_session("plain", "PROJ-1", "Principal")
+            .await
+            .unwrap();
+        let card = proposal_card(TITLE, NEW_TASK_HEADER, Some("brief"));
+        let (reply, out) = pick(&app, PLAIN, card, TITLE, CREATE).await;
+        assert_eq!(reply, json!({ "task": null }));
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
+            CREATE
+        );
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
 }

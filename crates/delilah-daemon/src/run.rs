@@ -586,6 +586,17 @@ mod tests {
         let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config);
         assert_eq!(p, claude::Permission::Default);
         assert_eq!((dir, prompt), (None, None));
+
+        // An extra session of a task is no different: it never gets the plugin.
+        let mut extra = session("PROJ-1", "Claude 2");
+        extra.primary = false;
+        let (p, dir, prompt) = launch_flags(&extra, &config);
+        assert_eq!(p, claude::Permission::Default);
+        assert_eq!((dir, prompt), (None, None));
+        extra.read_only = true;
+        let (p, dir, prompt) = launch_flags(&extra, &config);
+        assert_eq!(p, claude::Permission::Plan);
+        assert_eq!((dir, prompt), (None, None));
     }
 
     async fn app() -> AppState {

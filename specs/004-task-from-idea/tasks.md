@@ -283,13 +283,13 @@
 
 **Independent Test**: quickstart.md "By hand" 7 and 8.
 
-- [ ] T034 [US3] Add daemon tests in `crates/delilah-daemon/src/asks.rs`:
+- [X] T034 [US3] Add daemon tests in `crates/delilah-daemon/src/asks.rs`:
   - `a_project_sessions_proposal_creates_a_task_and_records_no_entries` (a non-conversation `@web` session);
   - `a_project_session_after_allow_edits_can_still_create`;
   - `a_session_converted_into_a_task_cannot_create` (after "Convertir en tarea" the owner is the task, so its card is ordinary).
 
   Fix `asks.rs` if any fails.
-- [ ] T035 [US3] Add a test in `crates/delilah-daemon/src/run.rs` or `session_api.rs` for the launch flags:
+- [X] T035 [US3] Add a test in `crates/delilah-daemon/src/run.rs` or `session_api.rs` for the launch flags:
   - a read-only project session gets `--permission-mode plan` and `--plugin-dir`, and no `--append-system-prompt`;
   - a task's primary and extra sessions get no `--plugin-dir`.
 
