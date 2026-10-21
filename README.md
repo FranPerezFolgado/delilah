@@ -123,6 +123,37 @@ Each item opens the task on the right tab. The sidebar counts what blocks an
 agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
 
+**Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
+token) and checks every 30 s. When the task's branch has a PR, it links it, per
+submodule for a parent, and moves the task to Revisión. You can also paste a PR's URL
+("Vincular por URL") or "Desvincular" one. Pointing `DELILAH_GH_BIN` at another
+binary swaps `gh` (previews use a fake one).
+
+- **The "PR" tab** (next to Cambios) shows the title, number and link, draft, open,
+  merged or closed, each CI check, the review state and the comment count, the
+  account `gh` uses and when it was last checked. "Actualizar" checks at once. If `gh`
+  is missing, signed out or has no access to the repo, the tab says so.
+- **The PR badge** on the board cards and the sidebar shows the same state at a glance;
+  for a parent with several PRs it shows the worst one.
+- **Bandeja items:** CI failed, changes requested and new comments on the PR, from
+  anyone but you. Each opens the PR, or "Pedir al agente que lo arregle" sends it to
+  the task's agent as comments to consider (never on its own), or "Descartar" it.
+  They count on the Dock badge. A new failing commit raises a new item; the same one
+  never twice.
+- **"Abrir PR"** (in the PR tab, once the branch has commits, and while some repo of the task has no open PR) shows a title and
+  description to edit (the Jira link and the commit subjects), "Borrador", and for a
+  parent a "Submódulo" picker, on the first free submodule with commits. It pushes the branch and opens the PR against the
+  default branch; if anything fails, nothing is linked and the error is shown.
+- **Archive on merge.** When all of a task's PRs are merged, Delilah marks it done and
+  archives it without asking: back to your previous branches in checkout mode, the
+  worktree removed otherwise, and the local task branches deleted (never the parent's
+  and never on GitHub). Every repo counts, also one without a PR: if any has uncommitted changes or
+  commits the PR does not contain (or, without a PR, unpushed ones), or cannot be
+  fetched, nothing is removed and the Bandeja says why, with "Archivar igualmente". A PR
+  closed without merging only notifies. You get one notification per merge, "mergeada y archivada" or "mergeada, sin
+  archivar". If branches are left, the Bandeja lists them (also once the task is
+  archived) and archiving by hand finishes it.
+
 **Questions with options.** When the agent asks with Claude Code's
 `AskUserQuestion` (as the `feature` workflow does), Delilah shows the question and
 its options in the Bandeja and on the session's tab: one click answers, as if

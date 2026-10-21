@@ -2,11 +2,13 @@
 
 mod actions;
 pub mod api;
+mod archive;
 pub mod asks;
 mod changes;
 pub mod config;
 pub mod events;
 mod files;
+pub mod gh;
 mod hooks;
 pub mod inbox;
 mod jira;
@@ -15,8 +17,14 @@ pub mod logs;
 pub mod notify;
 mod owners;
 pub mod phases;
+pub mod pr_api;
+pub mod pr_loop;
+#[cfg(test)]
+pub(crate) mod pr_testkit;
+pub mod pr_types;
 mod preferences;
 mod projects;
+pub mod prs;
 mod run;
 pub mod scheduler;
 pub mod secrets;
@@ -26,6 +34,7 @@ pub mod specs;
 pub mod state;
 pub mod store;
 mod store_projects;
+mod store_prs;
 mod store_runs;
 pub mod store_sessions;
 mod store_settings;

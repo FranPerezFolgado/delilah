@@ -154,3 +154,53 @@ repos is ever referenced or copied. Development uses
 (FranPerezFolgado). The machine also has work credentials, so confirm the account
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
+
+## Pull requests
+
+**26. GitHub through the user's `gh`, with no token in the daemon (2026-10-20).**
+Delilah runs the `gh` the user already has, on the login shell's PATH, behind a
+`Gh` trait so tests and previews can swap it (`DELILAH_GH_BIN`). `gh` already
+holds the tokens, honours `gh repo set-default` and talks to Enterprise hosts
+like the agent's own `gh pr create`. Storing a GitHub token in the daemon
+(Keychain or settings) and calling the API with `reqwest` or octocrab was ruled
+out: it copies a credential and adds a client. When `gh` is missing, signed out
+or without access, the PR tab says so and the Bandeja notifies once.
+
+**27. PRs are polled every 30 s, not pushed by webhooks (2026-10-20).** The daemon
+is on loopback behind no public address, so GitHub cannot reach it; a tunnel or
+a GitHub App would be new infrastructure and a new credential. One GraphQL call
+per open PR every 30 s is far under the rate limit, with back-off after a
+failure and an immediate check when a task is opened or the agent pushes.
+
+**28. PR notices are rows, not derived state (2026-10-20).** The inbox items for
+CI, reviews and a blocked archive live in `pr_notices`, unique per cause and
+resolved rather than deleted. Unlike session attention they cannot be recomputed
+from the snapshot: one already sent to the agent or dismissed must stay gone
+after a restart.
+
+**29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
+A failed CI or a review only reaches the Bandeja; "Pedir al agente que lo
+arregle" sends it, as comments to consider, not as instructions from the user.
+Auto-forwarding was ruled out: it would spend the subscription and let a
+reviewer's text steer the agent unseen.
+
+**30. Notify for comments from anyone but the signed-in account (2026-10-20).**
+Other people and bots count; only the user's own comments are skipped. Filtering
+bots was ruled out, since a CI bot's review is often the thing to read.
+
+**31. A merged task archives without asking, unless that would lose work
+(2026-10-21).** When every linked PR is merged the task is marked done and
+archived at once. Asking first was ruled out: the merge is the confirmation. The
+guard stays: every repo with a PR must be clean and its local branch contained
+in the PR's head (so squash and rebase merges pass), else an `archive-blocked`
+item offers a forced archive. The task's local branches are deleted at the
+verified sha, never the parent's and never a remote one. A branch left behind
+raises `archive-partial`, and archiving by hand finishes it. This overrides decision 18's "a checkout never refuses" for the
+merge archive only.
+
+**32. Repos without a PR never lose work; the merge archive checks every repo
+(2026-10-21).** A merge in one repo must not archive away another that has no PR:
+the check covers every repo of the workspace. One without a PR blocks the archive
+if it is dirty or has unpushed commits, and keeps its branch. A failed fetch blocks
+too, and the workspace is released without force. Deleting a branch compares it to
+the verified sha first, so a commit made after the check survives.

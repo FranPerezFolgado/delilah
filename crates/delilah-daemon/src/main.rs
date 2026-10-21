@@ -1,4 +1,6 @@
-use delilah_daemon::{api, config::Config, scheduler, specs, state::AppState, store::Store};
+use delilah_daemon::{
+    api, config::Config, pr_loop, scheduler, specs, state::AppState, store::Store,
+};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -44,6 +46,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.load_language().await;
     app.load_remote_control().await;
     scheduler::spawn(app.clone());
+    pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())

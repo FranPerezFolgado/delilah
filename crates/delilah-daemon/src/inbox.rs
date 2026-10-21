@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::actions::type_prompt;
 use crate::api::ApiError;
+use crate::archive::{KIND_BLOCKED, KIND_PARTIAL};
 use crate::state::AppState;
 
 /// Long answers are cut: the inbox shows the gist, the session tab the rest.
@@ -125,11 +126,17 @@ pub enum ItemKind {
     Question,
     /// A session's turn failed.
     Error,
+    /// The CI of a task's PR failed.
+    PrFailed,
+    /// A reviewer asked for changes or commented on a task's PR.
+    PrReview,
     /// The task waits on you, but no session said what for (e.g. after a restart).
     Waiting,
     Review,
     /// The agent stopped with commits on its branch: maybe it is ready for review.
     SuggestReview,
+    /// Archiving the task left a PR behind (blocked or partial).
+    PrBlocked,
     Paused,
     Failed,
 }
@@ -154,6 +161,16 @@ pub struct InboxItem {
     /// A question with options (AskUserQuestion) that can be answered from here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ask: Option<AskView>,
+    /// The PR notice this item stands for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<InboxPr>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InboxPr {
+    pub notice: i64,
+    pub url: String,
+    pub repo: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,6 +216,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 id: ask.id,
                 questions: ask.questions,
             }),
+            pr: None,
         });
     }
 
@@ -233,6 +251,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             text: Some(attention.text),
             since: Some(attention.since),
             ask: None,
+            pr: None,
         });
     }
 
@@ -269,6 +288,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 // When the event that raised it happened.
                 since: last_event(&app, t, event).await,
                 ask: None,
+                pr: None,
             });
         }
     }
@@ -296,6 +316,49 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             ),
             since: None,
             ask: None,
+            pr: None,
+        });
+    }
+
+    for n in app.store.open_notices().await? {
+        let kind = match n.kind.as_str() {
+            "ci-failed" => ItemKind::PrFailed,
+            "changes-requested" | "comments" => ItemKind::PrReview,
+            KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
+            _ => continue,
+        };
+        let Some(t) = task(&n.task_key) else {
+            continue;
+        };
+        // The archive notices are about the task as a whole, not one repo's PR. A
+        // partial archive is the one that outlives the workspace: it asks to finish.
+        let archive = matches!(n.kind.as_str(), KIND_BLOCKED | KIND_PARTIAL);
+        // An archived task (finished, its workspace gone) has nothing to act on.
+        if n.kind != KIND_PARTIAL
+            && t.status.is_terminal()
+            && app.store.workspace(&t.key).await?.is_none()
+        {
+            continue;
+        }
+        // An unlinked PR resolves its notices; one still open without its PR is stale.
+        let prs = app.store.prs_of(&t.key).await?;
+        let same_repo = prs.iter().find(|p| p.repo == n.repo);
+        let Some(pr) = same_repo.or(if archive { prs.first() } else { None }) else {
+            continue;
+        };
+        items.push(InboxItem {
+            kind,
+            task: n.task_key,
+            title: t.title.clone(),
+            session: None,
+            text: Some(n.text),
+            since: Some(n.created_at),
+            ask: None,
+            pr: Some(InboxPr {
+                notice: n.id,
+                url: pr.url.clone(),
+                repo: n.repo,
+            }),
         });
     }
 
@@ -500,6 +563,166 @@ mod tests {
 
         let hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
         read_until(&format!("got:{hex};")).await;
+    }
+
+    async fn app_with_pr_task() -> AppState {
+        use crate::config::Config;
+        use crate::store::Store;
+        use crate::store_prs::NewPr;
+
+        let config = Config {
+            home: std::env::temp_dir().join(format!("delilah-inbox-{}", uuid::Uuid::new_v4())),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let mut task = Task::new(key.clone(), "Fix it", "feature");
+        task.status = TaskStatus::Running;
+        app.store.create_task(&task).await.unwrap();
+        app.store
+            .link_pr(
+                &key,
+                &NewPr {
+                    repo: ".".into(),
+                    host: "github.com".into(),
+                    owner_name: "me/repo".into(),
+                    number: 7,
+                    url: "https://github.com/me/repo/pull/7".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+        app
+    }
+
+    async fn notify(app: &AppState, kind: &str, cause: &str) {
+        use crate::store_prs::NewNotice;
+        app.store
+            .insert_notice(
+                &delilah_core::TaskKey::new("PROJ-1"),
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: kind.into(),
+                    cause: cause.into(),
+                    text: format!("{kind} text"),
+                    detail: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn open_pr_notices_are_items_after_their_neighbours_and_resolved_ones_are_not() {
+        let app = app_with_pr_task().await;
+        notify(&app, "archive-blocked", "a").await;
+        notify(&app, "comments", "b").await;
+        notify(&app, "ci-failed", "c").await;
+        notify(&app, "changes-requested", "d").await;
+        let gone = app.store.open_notices().await.unwrap();
+        let resolved = gone.iter().find(|n| n.kind == "changes-requested").unwrap();
+        app.store.resolve_notice(resolved.id).await.unwrap();
+        app.review_hints.lock().unwrap().insert("PROJ-1".into());
+
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        let kinds: Vec<_> = items.iter().map(|i| i.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                ItemKind::PrFailed,
+                ItemKind::PrReview,
+                ItemKind::SuggestReview,
+                ItemKind::PrBlocked
+            ]
+        );
+        let failed = &items[0];
+        assert_eq!(failed.task, "PROJ-1");
+        assert_eq!(failed.title, "Fix it");
+        assert_eq!(failed.text.as_deref(), Some("ci-failed text"));
+        assert!(failed.session.is_none());
+        let pr = failed.pr.as_ref().unwrap();
+        assert_eq!(
+            (pr.url.as_str(), pr.repo.as_str()),
+            ("https://github.com/me/repo/pull/7", ".")
+        );
+        let json = serde_json::to_value(failed).unwrap();
+        assert_eq!(json["kind"], "pr-failed");
+        assert_eq!(json["pr"]["notice"], pr.notice);
+    }
+
+    #[tokio::test]
+    async fn notices_of_an_archived_task_are_not_items() {
+        let app = app_with_pr_task().await;
+        notify(&app, "ci-failed", "c").await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        assert!(items.iter().all(|i| i.pr.is_none()), "{items:?}");
+    }
+
+    #[tokio::test]
+    async fn an_archive_partial_of_a_done_task_without_workspace_still_reaches_the_inbox() {
+        use crate::store_prs::NewNotice;
+        let app = app_with_pr_task().await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        // The PR is of a submodule; the notice is about the task (repo ".").
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        app.store
+            .link_pr(
+                &key,
+                &crate::store_prs::NewPr {
+                    repo: "svc-a".into(),
+                    host: row.host.clone(),
+                    owner_name: row.owner_name.clone(),
+                    number: 8,
+                    url: "https://github.com/me/svc-a/pull/8".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+        app.store.unlink_pr(row.id).await.unwrap();
+        for kind in ["archive-partial", "archive-blocked"] {
+            app.store
+                .insert_notice(
+                    &key,
+                    &NewNotice {
+                        repo: ".".into(),
+                        kind: kind.into(),
+                        cause: "merge".into(),
+                        text: format!("{kind} text"),
+                        detail: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        // The blocked one is for a task still holding its workspace: archived, it is gone.
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].kind, ItemKind::PrBlocked);
+        assert_eq!(items[0].text.as_deref(), Some("archive-partial text"));
+        let pr = items[0].pr.as_ref().unwrap();
+        assert_eq!(pr.url, "https://github.com/me/svc-a/pull/8");
+        assert_eq!(pr.repo, ".");
     }
 
     #[test]

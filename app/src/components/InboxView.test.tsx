@@ -1,0 +1,102 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { api, ApiError, type InboxItem } from "../api";
+import * as platform from "../platform";
+import { InboxView } from "./InboxView";
+
+const item: InboxItem = {
+  kind: "pr-failed",
+  task: "PROJ-1",
+  title: "Reintentos",
+  session: null,
+  text: "CI falló: test",
+  since: null,
+  pr: { notice: 7, url: "https://github.com/o/r/pull/3", repo: "r" },
+};
+
+const view = (onChanged = () => {}) =>
+  render(<InboxView items={[item]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("InboxView PR items", () => {
+  it("forwards the notice to the agent", async () => {
+    const fwd = vi.spyOn(api, "forwardNotice").mockResolvedValue(null);
+    const onChanged = vi.fn();
+    view(onChanged);
+    fireEvent.click(screen.getByText("Ask the agent to fix it"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(fwd).toHaveBeenCalledWith(7);
+  });
+
+  it("shows the daemon's message and disables the button on 409", async () => {
+    vi.spyOn(api, "forwardNotice").mockRejectedValue(
+      new ApiError("paused until 14:30", 409, false, undefined, "2026-10-21T14:30:00Z"),
+    );
+    view();
+    fireEvent.click(screen.getByText("Ask the agent to fix it"));
+    await waitFor(() => expect(screen.getByText("paused until 14:30")).toBeTruthy());
+    expect((screen.getByText("Ask the agent to fix it") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps the button enabled on a 409 that is not a pause", async () => {
+    vi.spyOn(api, "forwardNotice").mockRejectedValue(new ApiError("no agent session", 409));
+    view();
+    fireEvent.click(screen.getByText("Ask the agent to fix it"));
+    await waitFor(() => expect(screen.getByText("no agent session")).toBeTruthy());
+    expect((screen.getByText("Ask the agent to fix it") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("dismisses the notice", async () => {
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    view();
+    fireEvent.click(screen.getByText("Discard"));
+    await waitFor(() => expect(dis).toHaveBeenCalledWith(7));
+  });
+
+  it("opens the PR externally", () => {
+    const open = vi.spyOn(platform, "openExternal").mockResolvedValue();
+    view();
+    fireEvent.click(screen.getByText("View PR"));
+    expect(open).toHaveBeenCalledWith("https://github.com/o/r/pull/3");
+  });
+});
+
+describe("InboxView pr-blocked", () => {
+  const blocked: InboxItem = { ...item, kind: "pr-blocked", text: "Hay cambios sin subir" };
+  const viewBlocked = (onChanged = () => {}) =>
+    render(<InboxView items={[blocked]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("archives anyway after confirming, then dismisses the notice", async () => {
+    const arch = vi.spyOn(api, "archive").mockResolvedValue({} as never);
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    viewBlocked();
+    fireEvent.click(screen.getByText("Archive anyway"));
+    expect(arch).not.toHaveBeenCalled();
+    expect(screen.getByText(/workspace and any remaining local branches will be removed/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Yes, archive"));
+    await waitFor(() => expect(dis).toHaveBeenCalledWith(7));
+    expect(arch).toHaveBeenCalledWith("PROJ-1", true);
+  });
+
+  it("shows the error and keeps the notice when archiving fails", async () => {
+    vi.spyOn(api, "archive").mockRejectedValue(new ApiError("boom", 500));
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    viewBlocked();
+    fireEvent.click(screen.getByText("Archive anyway"));
+    fireEvent.click(screen.getByText("Yes, archive"));
+    await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
+    expect(dis).not.toHaveBeenCalled();
+  });
+
+  it("dismisses the notice", async () => {
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    viewBlocked();
+    fireEvent.click(screen.getByText("Discard"));
+    await waitFor(() => expect(dis).toHaveBeenCalledWith(7));
+  });
+});

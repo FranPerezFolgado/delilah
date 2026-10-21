@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
-use crate::command::{GitError, GitOptions, git};
+use crate::command::{GitError, GitOptions, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Submodule {
@@ -39,6 +40,20 @@ impl Workspace {
             ProjectKind::Parent => self.branch_dirs(),
             ProjectKind::Repo => vec![(".".into(), self.path.clone())],
         }
+    }
+
+    /// The folder that holds the task's branch once the workspace is gone, for the repo
+    /// `label` (see [`Workspace::repos`]) of the project at `root`: its own checkout, or
+    /// the submodule there when it is set up. `None` when the folder is not a repo, or
+    /// when the label would lead out of `root`.
+    pub fn home_of(root: &Path, label: &str) -> Option<PathBuf> {
+        let root = root.canonicalize().ok()?;
+        if label == "." {
+            return Some(root);
+        }
+        let dir = root.join(label).canonicalize().ok()?;
+        // An uninitialised submodule folder would make git answer for the parent.
+        (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
     }
 
     /// Folders that hold the task's branch: each submodule, or the repo itself.
@@ -191,30 +206,55 @@ pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError
     if !ws.path.exists() {
         return Ok(());
     }
-    let only_this_branch = format!("--exclude={}", ws.branch);
     for (location, dir) in ws.branch_dirs() {
-        if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
-            return Err(GitError::Dirty { location });
+        check_dir(&location, &dir, &ws.branch, opts)?;
+    }
+    Ok(())
+}
+
+/// [`check_workspace`] for only the repos of `ws` whose label (see [`Workspace::repos`])
+/// is in `labels`: for the repos an archive after a merge has no merged PR to vouch for.
+pub fn check_repos(ws: &Workspace, labels: &[String], opts: &GitOptions) -> Result<(), GitError> {
+    if !ws.path.exists() {
+        return Ok(());
+    }
+    for (label, dir) in ws.repos() {
+        if labels.contains(&label) {
+            let location = if label == "." {
+                "the workspace".to_string()
+            } else {
+                label
+            };
+            check_dir(&location, &dir, &ws.branch, opts)?;
         }
-        // Commits of this branch that are neither pushed nor on another local branch
-        // (so a local, unpushed `main` it started from does not count).
-        let ahead = git(
-            &dir,
-            &[
-                "rev-list",
-                "--count",
-                "HEAD",
-                "--not",
-                "--remotes",
-                &only_this_branch,
-                "--branches",
-            ],
-            opts,
-        )?;
-        let count = ahead.parse().unwrap_or(0);
-        if count > 0 {
-            return Err(GitError::Unpushed { location, count });
-        }
+    }
+    Ok(())
+}
+
+fn check_dir(location: &str, dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+    let location = location.to_string();
+    if !git(dir, &["status", "--porcelain"], opts)?.is_empty() {
+        return Err(GitError::Dirty { location });
+    }
+    // Commits of this branch that are neither pushed nor on another local branch
+    // (so a local, unpushed `main` it started from does not count).
+    let only_this_branch = format!("--exclude={branch}");
+    let ahead = git(
+        dir,
+        &[
+            "rev-list",
+            "--count",
+            "HEAD",
+            "--not",
+            "--remotes",
+            &only_this_branch,
+            "--branches",
+        ],
+        opts,
+    )?;
+    let count = ahead.parse().unwrap_or(0);
+    if count > 0 {
+        return Err(GitError::Unpushed { location, count });
     }
     Ok(())
 }
@@ -412,4 +452,162 @@ pub fn leave_checkout(
         }
     }
     stuck
+}
+
+fn check_branch(branch: &str) -> Result<(), GitError> {
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(GitError::InvalidBranch(branch.to_string()));
+    }
+    Ok(())
+}
+
+/// Subjects of the commits on `branch` that are not in `base`, oldest first. Prefers
+/// `origin/<base>` over the local `<base>` when it exists.
+pub fn commit_subjects(
+    dir: &Path,
+    base: &str,
+    branch: &str,
+    opts: &GitOptions,
+) -> Result<Vec<String>, GitError> {
+    check_branch(branch)?;
+    check_branch(base)?;
+    let remote_base = format!("origin/{base}");
+    let base_ref = if git(
+        dir,
+        &["rev-parse", "--verify", "--quiet", &remote_base],
+        opts,
+    )
+    .is_ok()
+    {
+        remote_base
+    } else {
+        base.to_string()
+    };
+    let range = format!("{base_ref}..{branch}");
+    let out = git(dir, &["log", "--reverse", "--format=%s", &range], opts)?;
+    Ok(out.lines().map(str::to_string).collect())
+}
+
+/// True when `branch` has no upstream or has commits its upstream lacks.
+pub fn needs_push(dir: &Path, branch: &str, opts: &GitOptions) -> Result<bool, GitError> {
+    check_branch(branch)?;
+    let upstream = format!("{branch}@{{upstream}}");
+    if git(dir, &["rev-parse", "--abbrev-ref", &upstream], opts).is_err() {
+        return Ok(true);
+    }
+    let range = format!("{upstream}..{branch}");
+    let count = git(dir, &["rev-list", "--count", &range], opts)?;
+    Ok(count.trim().parse::<u32>().unwrap_or(1) > 0)
+}
+
+/// `git push -u origin <branch>`.
+pub fn push_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+    check_branch(branch)?;
+    git(dir, &["push", "-u", "origin", branch], opts).map(|_| ())
+}
+
+/// `git fetch --quiet origin`.
+pub fn fetch(dir: &Path, opts: &GitOptions) -> Result<(), GitError> {
+    git(dir, &["fetch", "--quiet", "origin"], opts).map(|_| ())
+}
+
+/// Fails, touching nothing, if archiving after a merged PR would lose work: uncommitted
+/// changes, or local commits of the task's branch beyond the PR's head. `heads` maps
+/// each repo label (see [`Workspace::repos`]) to the head the merged PR had; repos
+/// without an entry are not checked. A squash merge leaves the PR head out of the
+/// base branch, so the check is against that head, not against the base.
+pub fn check_merged(
+    ws: &Workspace,
+    heads: &HashMap<String, String>,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    // Removed by hand: nothing left in it to lose.
+    if !ws.path.exists() {
+        return Ok(());
+    }
+    if ws.kind == ProjectKind::Parent
+        && !git(
+            &ws.path,
+            &["status", "--porcelain", "--ignore-submodules=all"],
+            opts,
+        )?
+        .is_empty()
+    {
+        return Err(GitError::Dirty {
+            location: "the parent".into(),
+        });
+    }
+    for (location, dir) in ws.repos() {
+        let Some(head) = heads.get(&location) else {
+            continue;
+        };
+        if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+            return Err(GitError::Dirty { location });
+        }
+        let args = ["merge-base", "--is-ancestor", ws.branch.as_str(), head];
+        let mut code = git_code(&dir, &args, opts)?;
+        if code > 1 {
+            // Probably a head this clone has not fetched yet.
+            fetch(&dir, opts)?;
+            code = git_code(&dir, &args, opts)?;
+        }
+        match code {
+            0 => {}
+            1 => return Err(GitError::NotMerged { location }),
+            _ => {
+                // Surface git's own message.
+                git(&dir, &args, opts)?;
+                return Err(GitError::NotMerged { location });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The commit the local `branch` points at, or `None` when there is no such branch.
+pub fn branch_tip(dir: &Path, branch: &str, opts: &GitOptions) -> Result<Option<String>, GitError> {
+    check_branch(branch)?;
+    let reference = format!("refs/heads/{branch}");
+    if git_code(dir, &["show-ref", "--verify", "--quiet", &reference], opts)? != 0 {
+        return Ok(None);
+    }
+    git(dir, &["rev-parse", &reference], opts).map(Some)
+}
+
+/// A full commit id: what is safe to hand to git as one.
+pub fn is_sha(s: &str) -> bool {
+    (40..=64).contains(&s.len()) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Deletes the local `branch`. Fine if it is already gone; refuses the checked-out one.
+/// With `expected` (a commit id) it deletes only if the branch still points there, so
+/// a commit made since is never lost.
+pub fn delete_branch(
+    dir: &Path,
+    branch: &str,
+    expected: Option<&str>,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    check_branch(branch)?;
+    if expected.is_some_and(|sha| !is_sha(sha)) {
+        return Err(GitError::InvalidBranch(format!(
+            "{branch}@{}",
+            expected.unwrap_or_default()
+        )));
+    }
+    let reference = format!("refs/heads/{branch}");
+    if git_code(dir, &["show-ref", "--verify", "--quiet", &reference], opts)? != 0 {
+        return Ok(());
+    }
+    if git(dir, &["symbolic-ref", "--short", "HEAD"], opts).is_ok_and(|cur| cur == branch) {
+        return Err(GitError::Command {
+            dir: dir.to_path_buf(),
+            args: format!("branch -D {branch}"),
+            stderr: "it is the checked-out branch".into(),
+        });
+    }
+    match expected {
+        Some(sha) => git(dir, &["update-ref", "-d", &reference, sha], opts).map(|_| ()),
+        None => git(dir, &["branch", "-D", branch], opts).map(|_| ()),
+    }
 }

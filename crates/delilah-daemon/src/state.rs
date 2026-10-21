@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +9,9 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::events::{Events, Topic};
+use crate::gh::{CliGh, Gh, GhClient};
 use crate::notify::Notifier;
+use crate::prs::Backoff;
 use crate::secrets::Secrets;
 use crate::sessions::Sessions;
 use crate::specs::SpecSummary;
@@ -46,6 +48,14 @@ pub struct AppState {
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
+    /// The user's `gh`, behind a trait so tests answer with canned output.
+    pub gh: Arc<GhClient>,
+    /// Per repo (`host/owner/name`): when to try `gh` again after it failed.
+    pub(crate) pr_backoff: Arc<Mutex<Backoff>>,
+    /// Tasks whose PRs are being checked now: one check per task at a time.
+    pub(crate) pr_checking: Arc<Mutex<HashSet<String>>>,
+    /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
+    pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -74,7 +84,17 @@ impl AppState {
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             remote_control: Arc::default(),
+            gh: Arc::new(GhClient::new(Arc::new(CliGh))),
+            pr_backoff: Arc::default(),
+            pr_checking: Arc::default(),
+            pr_nudges: Arc::default(),
         }
+    }
+
+    /// The same state talking to another `gh` (tests inject a fake).
+    pub fn with_gh(mut self, gh: Arc<dyn Gh>) -> Self {
+        self.gh = Arc::new(GhClient::new(gh));
+        self
     }
 
     pub fn lang(&self) -> crate::lang::Lang {

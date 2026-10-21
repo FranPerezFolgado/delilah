@@ -440,3 +440,30 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .menu .c-err { color: var(--err); }
 .backlog-task { max-width: 720px; }
 .backlog-task textarea { resize: vertical; font: inherit; }
+
+/* Pull requests: the badge of a task and the PR tab. */
+.pr-badge { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; }
+.pr-badge svg.i { width: 12px; height: 12px; }
+.pr-badge.pr-open { color: var(--done); } .pr-badge.pr-merged { color: var(--acctx); } .pr-badge.pr-closed { color: var(--err); }
+.pr-badge.pr-draft { color: var(--tx3); }
+.pr-count { font-size: 10px; color: var(--tx2); }
+.pr-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--tx3); }
+.pr-ci-pending { background: var(--pause); } .pr-ci-success { background: var(--done); } .pr-ci-failure { background: var(--err); }
+.pr-view { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow: auto; flex: 1; }
+.pr-head, .pr-link { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pr-link .input { flex: 1; }
+.pr-card { border: 1px solid var(--bd); border-radius: 8px; background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.pr-card-top { display: flex; align-items: center; gap: 8px; }
+.pr-title { color: var(--tx); font-weight: 600; text-decoration: none; cursor: pointer; }
+.pr-title:hover { text-decoration: underline; }
+.pr-chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--bd2); color: var(--tx2); }
+.pr-chip.pr-open { color: var(--done); } .pr-chip.pr-merged { color: var(--acctx); } .pr-chip.pr-closed { color: var(--err); }
+.pr-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.pr-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.pr-checks li { display: flex; align-items: center; gap: 8px; }
+.pr-checks a { color: var(--tx); cursor: pointer; }
+.pr-open { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; }
+.pr-open-body { min-height: 140px; resize: vertical; font-family: inherit; }
+
+.pr-group { display: flex; flex-direction: column; gap: 8px; }
+.pr-group-title { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
