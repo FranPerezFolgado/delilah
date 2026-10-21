@@ -314,7 +314,7 @@ export interface PullRequest {
 }
 export interface TaskPrs { account: string | null; problem: { kind: string; message: string } | null; prs: PullRequest[] }
 /** What `Abrir PR` starts from: the branch's last commit as title and body. */
-export interface PrProposal { repo: string; title: string; body: string; base: string; needs_push: boolean }
+export interface PrProposal { repo: string; title: string; body: string; base: string; needs_push: boolean; repos: string[] }
 /** One task's PRs for badges: the worst of each field when it has several. */
 export interface PrSummary {
   task: string;

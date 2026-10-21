@@ -316,6 +316,7 @@ export const EN: Record<string, string> = {
   "Ver la tarea en Delilah": "View the task in Delilah",
   "Analizar con Claude": "Analyse with Claude",
   "Descripción": "Description",
+  "Submódulo": "Submodule",
   "Sin descripción.": "No description.",
   "Jira Cloud": "Jira Cloud",
   "Jira Server / Data Center": "Jira Server / Data Center",

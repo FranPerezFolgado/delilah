@@ -71,9 +71,28 @@ describe("PrView", () => {
 
   it("enables Open PR when a proposal exists", async () => {
     vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [] }));
-    vi.spyOn(api, "prProposal").mockResolvedValue({ repo: ".", title: "T", body: "", base: "main", needs_push: false });
+    vi.spyOn(api, "prProposal").mockResolvedValue({ repo: ".", title: "T", body: "", base: "main", needs_push: false, repos: ["."] });
     const { findByText, findByDisplayValue } = render(<PrView owner="PROJ-1" />);
     fireEvent.click(await findByText("Open PR"));
     await findByDisplayValue("T");
+  });
+
+  it("groups PRs under a heading per submodule", async () => {
+    const other = { ...pr, id: 8, repo: "web", number: 43, snapshot: { ...pr.snapshot!, title: "Cliente" } };
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [pr, other] }));
+    const { findByText, container } = render(<PrView owner="PROJ-1" />);
+    await findByText("#43 Cliente");
+    const heads = Array.from(container.querySelectorAll(".pr-group-title")).map((h) => h.textContent);
+    expect(heads).toEqual(["api", "web"]);
+    const groups = container.querySelectorAll(".pr-group");
+    expect(groups[0].textContent).toContain("#42 Reintentos");
+    expect(groups[1].textContent).toContain("#43 Cliente");
+  });
+
+  it("shows no heading for a single repo", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+    const { findByText, container } = render(<PrView owner="PROJ-1" />);
+    await findByText("#42 Reintentos");
+    expect(container.querySelector(".pr-group-title")).toBeNull();
   });
 });

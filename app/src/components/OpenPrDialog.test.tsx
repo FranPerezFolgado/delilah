@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const proposal: PrProposal = { repo: ".", title: "Add retries", body: "Body text", base: "main", needs_push: true };
+const proposal: PrProposal = { repo: ".", title: "Add retries", body: "Body text", base: "main", needs_push: true, repos: ["."] };
 const pr = { id: 1, number: 5 } as PullRequest;
 
 describe("OpenPrDialog", () => {
@@ -47,5 +47,29 @@ describe("OpenPrDialog", () => {
     await findByText("remote: permission denied");
     expect(onOpened).not.toHaveBeenCalled();
     expect((getByText("Open PR", { selector: "button" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows no submodule select for a plain repo", async () => {
+    vi.spyOn(api, "prProposal").mockResolvedValue(proposal);
+    const { findByDisplayValue, container } = render(<OpenPrDialog owner="K-1" onClose={() => {}} onOpened={() => {}} />);
+    await findByDisplayValue("Add retries");
+    expect(container.querySelector("select")).toBeNull();
+  });
+
+  it("offers the submodules, reloads on change and sends the chosen repo", async () => {
+    const repos = ["svc-a", "svc-b"];
+    const prop = vi.spyOn(api, "prProposal").mockImplementation(async (_k, repo = ".") => ({
+      ...proposal, repo: repo === "." ? "." : repo, title: `Title ${repo === "." ? "svc-a" : repo}`, repos,
+    }));
+    const open = vi.spyOn(api, "openPr").mockResolvedValue(pr);
+    const { findByDisplayValue, container, getByText } = render(<OpenPrDialog owner="K-1" onClose={() => {}} onOpened={() => {}} />);
+    await findByDisplayValue("Title svc-a");
+    const select = container.querySelector("select")!;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(repos);
+    fireEvent.change(select, { target: { value: "svc-b" } });
+    await findByDisplayValue("Title svc-b");
+    expect(prop).toHaveBeenLastCalledWith("K-1", "svc-b");
+    fireEvent.click(getByText("Open PR", { selector: "button" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("K-1", expect.objectContaining({ repo: "svc-b" })));
   });
 });

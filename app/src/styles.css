@@ -461,3 +461,6 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .pr-checks a { color: var(--tx); cursor: pointer; }
 .pr-open { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; }
 .pr-open-body { min-height: 140px; resize: vertical; font-family: inherit; }
+
+.pr-group { display: flex; flex-direction: column; gap: 8px; }
+.pr-group-title { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }

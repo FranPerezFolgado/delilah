@@ -87,6 +87,12 @@ export function PrView({ owner }: { owner: string }) {
     });
   };
 
+  // With PRs in more than one repo, the cards go under a heading per submodule path.
+  const byRepo = new Map<string, PullRequest[]>();
+  for (const pr of data?.prs ?? []) byRepo.set(pr.repo, [...(byRepo.get(pr.repo) ?? []), pr]);
+  const groups = [...byRepo.entries()];
+  const grouped = groups.length > 1;
+
   const problem = data?.problem;
   const checked = data?.prs.map((p) => p.checked_at).filter((c): c is string => !!c).sort().pop();
 
@@ -138,8 +144,13 @@ export function PrView({ owner }: { owner: string }) {
           }}
         />
       )}
-      {data?.prs.map((pr) => (
-        <PrCard key={pr.id} pr={pr} disabled={busy} onUnlink={() => run(() => api.unlinkPr(owner, pr.id))} />
+      {groups.map(([repo, prs]) => (
+        <div key={repo} className="pr-group">
+          {grouped && <h3 className="pr-group-title mono">{repo}</h3>}
+          {prs.map((pr) => (
+            <PrCard key={pr.id} pr={pr} disabled={busy} grouped={grouped} onUnlink={() => run(() => api.unlinkPr(owner, pr.id))} />
+          ))}
+        </div>
       ))}
 
       <div className="pr-link">
@@ -158,7 +169,7 @@ export function PrView({ owner }: { owner: string }) {
   );
 }
 
-function PrCard({ pr, disabled, onUnlink }: { pr: PullRequest; disabled: boolean; onUnlink: () => void }) {
+function PrCard({ pr, disabled, grouped, onUnlink }: { pr: PullRequest; disabled: boolean; grouped: boolean; onUnlink: () => void }) {
   const s = pr.snapshot;
   const state = s ? PR_STATES[s.draft && s.state === "open" ? "draft" : s.state] : null;
   return (
@@ -181,7 +192,7 @@ function PrCard({ pr, disabled, onUnlink }: { pr: PullRequest; disabled: boolean
         </button>
       </div>
       <div className="muted pr-meta">
-        {pr.repo !== "." && <span className="mono">{pr.repo}</span>}
+        {!grouped && pr.repo !== "." && <span className="mono">{pr.repo}</span>}
         {s && <span>{t("hacia {base}", { base: s.base })}</span>}
         {s?.review_decision && <span>{t(REVIEWS[s.review_decision])}</span>}
         {s && <span>{t("{n} comentarios", { n: s.comments })}</span>}

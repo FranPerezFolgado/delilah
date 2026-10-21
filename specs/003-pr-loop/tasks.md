@@ -171,7 +171,7 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 - [ ] T046 [US5] Make `check_task`, `on_merged` and the merged/closed rule in `crates/delilah-daemon/src/prs.rs` work per submodule (only submodules get PRs for parents; FR-038, FR-039); make T044 pass
 - [ ] T047 [US5] Validate and use `repo` in `proposal` / `open` of `crates/delilah-daemon/src/pr_api.rs`; make T045 pass
-- [ ] T048 [US5] Add the submodule select to `app/src/components/OpenPrDialog.tsx` (parents only, submodules without an open PR) and group cards by submodule in `app/src/components/PrView.tsx`; extend their tests
+- [X] T048 [US5] Add the submodule select to `app/src/components/OpenPrDialog.tsx` (parents only, submodules without an open PR) and group cards by submodule in `app/src/components/PrView.tsx`; extend their tests
 
 **Checkpoint**: all stories work independently.
 
