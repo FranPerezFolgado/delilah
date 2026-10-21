@@ -192,18 +192,21 @@ async fn save_notes_preference(app: &AppState) -> bool {
 /// the new session starts at once.
 ///
 /// Takes the guard of the caller (which has checked the handoff) and releases it.
+/// `entered` runs once the handoff is under way (saving written, or start marked),
+/// before the launch.
 async fn enter<L: Launcher>(
     app: &AppState,
     key: &TaskKey,
     to: Step,
     guard: tokio::sync::MutexGuard<'_, ()>,
     launch: &L,
+    entered: impl FnOnce(),
 ) {
     if save_notes_preference(app).await {
         if let Some(live) = app.sessions.primary(key.as_str()) {
             set(app, key, to, HandoffStage::Saving, None).await;
             match crate::actions::type_prompt(&live, "/save-session").await {
-                Ok(()) => return,
+                Ok(()) => return entered(),
                 Err(e) => {
                     tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
                 }
@@ -214,6 +217,7 @@ async fn enter<L: Launcher>(
         return;
     }
     set(app, key, to, HandoffStage::Starting, None).await;
+    entered();
     drop(guard);
     start_with(app, key, to, launch).await;
 }
@@ -249,14 +253,20 @@ async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: 
     match found {
         Boundary::Offer(to) => set(app, key, to, HandoffStage::Offered, None).await,
         Boundary::Start(to) => {
-            announce(app, key, &task, to);
-            enter(app, key, to, guard, launch).await;
+            enter(app, key, to, guard, launch, || {
+                announce(app, key, &task, to)
+            })
+            .await;
         }
     }
 }
 
 /// Tells the user, like a finished turn does, that a step started on its own.
+/// Quiet when the app is listening: it notifies itself, as for a finished turn.
 fn announce(app: &AppState, key: &TaskKey, task: &Task, to: Step) {
+    if app.events.listening() {
+        return;
+    }
     let lang = app.lang();
     app.notifier.send(
         format!(
@@ -332,7 +342,7 @@ async fn confirm_with<L: Launcher>(
             )));
         }
     };
-    enter(app, key, to, guard, launch).await;
+    enter(app, key, to, guard, launch, || {}).await;
     Ok(())
 }
 
@@ -1311,8 +1321,8 @@ mod tests {
         let (app, key) = setup().await;
         no_save_notes(&app).await;
         check_all(&app);
-        let mut rx = app.events.subscribe();
         let launched = Launched::default();
+        let mut rx = app.events.subscribe();
         on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
         {
             let launched = launched.lock().unwrap();
@@ -1327,15 +1337,67 @@ mod tests {
             assert!(prompt.contains("No hagas push ni abras una PR"));
         }
         assert!(handoff_of(&app, &key).await.is_none());
-        let sent = app.notifier.recorded();
-        assert_eq!(sent.len(), 1);
-        assert!(sent[0].title.starts_with("PROJ-1"), "{:?}", sent[0]);
-        assert!(sent[0].body.contains("Revisión"));
+        // The app is listening (`rx`) and notifies itself: the daemon stays quiet.
+        assert!(app.notifier.recorded().is_empty());
         let mut topics = vec![];
         while let Ok(t) = rx.try_recv() {
             topics.push(t);
         }
         assert!(topics.contains(&Topic::Inbox), "{topics:?}");
+    }
+
+    #[tokio::test]
+    async fn the_automatic_review_is_announced_when_nobody_listens() {
+        let (app, key) = setup().await;
+        no_save_notes(&app).await;
+        check_all(&app);
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        let sent = app.notifier.recorded();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].title.starts_with("PROJ-1"), "{:?}", sent[0]);
+        assert!(sent[0].body.contains("Revisión"));
+    }
+
+    #[tokio::test]
+    async fn the_automatic_review_waits_for_the_notes_then_launches_once() {
+        let (app, key) = setup().await;
+        let cmd = portable_pty::CommandBuilder::new("cat");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        check_all(&app);
+        let launched = Launched::default();
+        let launcher = ok_launcher(&launched);
+        on_turn_ended_with(&app, &key, &launcher).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Review, HandoffStage::Saving));
+        assert!(launched.lock().unwrap().is_empty());
+        // The save turn ends: the review starts, once.
+        on_turn_ended_with(&app, &key, &launcher).await;
+        {
+            let launched = launched.lock().unwrap();
+            assert_eq!(launched.len(), 1);
+            assert_eq!(launched[0].0.step, Some(Step::Review));
+        }
+        let _ = pty.kill();
+    }
+
+    #[tokio::test]
+    async fn a_failed_save_prompt_falls_back_to_starting() {
+        let (app, key) = setup().await;
+        let cmd = portable_pty::CommandBuilder::new("true");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        pty.wait().await;
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        check_all(&app);
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let launched = launched.lock().unwrap();
+        assert_eq!(launched.len(), 1);
+        assert_eq!(launched[0].0.step, Some(Step::Review));
     }
 
     #[test]

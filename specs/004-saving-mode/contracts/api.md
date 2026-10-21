@@ -36,7 +36,7 @@ Body `{ "action": "confirm" | "decline" | "retry" }` → `200 Task`.
 
 ## Inbox item `handoff`
 
-`text` says what is waiting: the offer ("Las tareas están listas. ¿Implementar en una sesión nueva?"), "Guardando las notas de la sesión…", or the failure. `session` is the outgoing primary. The UI shows the buttons by `task.handoff.stage`.
+`text` says what is waiting: the offer ("Las tareas están listas. ¿Implementar en una sesión nueva?"), "Guardando las notas de la sesión…", the start ("Pasando a la revisión en una sesión nueva…" for the automatic review, "Empezando la sesión nueva…" otherwise; transient: the item goes away once the new session is running), or the failure. `session` is the outgoing primary. The UI shows the buttons by `task.handoff.stage`.
 
 ## CLI
 

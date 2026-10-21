@@ -370,10 +370,11 @@ export const EN: Record<string, string> = {
   "Spec y plan": "Spec and plan",
   "Siguiente paso": "Next step",
   "Guardando las notas de la sesión…": "Saving the session's notes…",
+  "Empezando la sesión nueva…": "Starting the new session…",
   "terminada": "finished",
   "pendiente": "pending",
   "esperando": "waiting",
   "Desactivar": "Turn off",
   "Activar modo ahorro": "Turn on saving mode",
-  "te propone el siguiente paso": "suggests the next step",
+  "pasa a una sesión nueva": "moves on to a new session",
 };

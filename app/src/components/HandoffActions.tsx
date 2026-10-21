@@ -33,6 +33,7 @@ export function HandoffActions({ task, handoff, onDone, hideError }: Props) {
   return (
     <>
       {stage === "saving" && <span className="muted">{t("Guardando las notas de la sesión…")}</span>}
+      {stage === "starting" && <span className="muted">{t("Empezando la sesión nueva…")}</span>}
       {stage === "offered" && (
         <>
           <button className="btn btn-p" disabled={busy} onClick={() => act("confirm")}>
