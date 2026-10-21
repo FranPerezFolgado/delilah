@@ -1,4 +1,5 @@
 import type { Project, Session, SpecSummary, Task } from "../api";
+import type { DeskState } from "./poses";
 import { columnOf, type Column } from "../phases";
 
 export interface DeskModel {
@@ -14,21 +15,8 @@ export interface DeskModel {
   slot: number;
 }
 
-export type DeskState = "starting" | "thinking" | "waiting" | "paused";
-
-/** Character poses with a sprite; later packages add more to the union. */
-export type Pose = "arriving" | "thinking" | "waiting" | "paused";
-
-/** The pose that shows each desk state. */
-export const POSE_OF: Record<DeskState, Pose> = {
-  starting: "arriving",
-  thinking: "thinking",
-  waiting: "waiting",
-  paused: "paused",
-};
-
-/** What a desk's character is doing, from the session's state. */
-export function deskState(session: Session): DeskState {
+/** What a desk's character is doing, from the session's state; `activity` comes later. */
+export function deskState(session: Session, _activity?: unknown): DeskState {
   switch (session.state) {
     case "starting":
     case "waiting":

@@ -1,10 +1,12 @@
 import { phaseLabel } from "../phases";
-import { deskState, POSE_OF, type DeskModel } from "./layout";
+import { memo } from "react";
+import { deskState, type DeskModel } from "./layout";
+import { POSE_OF } from "./poses";
 import { Sprite } from "./Sprite";
 import { DESK, POSES } from "./sprites";
 
 /** One desk: the monitor, the agent at it and the label with the task and its phase. */
-export function Desk({ desk, onOpen }: { desk: DeskModel; onOpen: (task: string, session: string) => void }) {
+export const Desk = memo(function Desk({ desk, onOpen }: { desk: DeskModel; onOpen: (task: string, session: string) => void }) {
   const state = deskState(desk.session);
   return (
     <div className="pg-desk" data-owner={desk.owner} data-slot={desk.slot}>
@@ -30,4 +32,4 @@ export function Desk({ desk, onOpen }: { desk: DeskModel; onOpen: (task: string,
       </div>
     </div>
   );
-}
+});

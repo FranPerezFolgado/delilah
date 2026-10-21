@@ -35,6 +35,7 @@ export function usePlayground(online?: boolean): { areas: ProjectArea[]; online:
 
   // Slots live here, not in the view, so they survive it unmounting.
   const slots = useRef<Map<string, Map<string, number>>>(new Map());
+  // Mutating the ref here is safe: regrouping the same inputs gives the same slots.
   const areas = useMemo(() => {
     const next = groupByProject(sessions, tasks, projects, specs, slots.current);
     slots.current = slotMaps(next);

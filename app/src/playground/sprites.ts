@@ -1,4 +1,4 @@
-import type { Pose } from "./layout";
+import type { Pose } from "./poses";
 
 // Original pixel art for Delilah (see CREDITS.md). One string per row, one character
 // per pixel: `.` is transparent, the letters are palette keys painted with the CSS
