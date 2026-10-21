@@ -91,8 +91,8 @@ None: no new dependencies.
 
 **Independent Test**: engine test: implement-step primary turn ends with all tasks checked → review session launched with the review prompt, notification recorded.
 
-- [ ] T031 [US4] Write failing tests in `crates/delilah-daemon/src/handoff.rs`: implement step + all checked + `TurnEnded` → `Start(review)` without offer (through `saving` when save-notes is on); the review prompt asks to review, fix the confirmed findings, update stale docs and commit, and forbids push and PR (both languages); a notification is sent (`notify` recorded) and an inbox `handoff` item shows while `saving`/`starting`.
-- [ ] T032 [US4] Implement T031 in `crates/delilah-daemon/src/handoff.rs` and `crates/delilah-daemon/src/inbox.rs`.
+- [X] T031 [US4] Write failing tests in `crates/delilah-daemon/src/handoff.rs`: implement step + all checked + `TurnEnded` → `Start(review)` without offer (through `saving` when save-notes is on); the review prompt asks to review, fix the confirmed findings, update stale docs and commit, and forbids push and PR (both languages); a notification is sent (`notify` recorded) and an inbox `handoff` item shows while `saving`/`starting`.
+- [X] T032 [US4] Implement T031 in `crates/delilah-daemon/src/handoff.rs` and `crates/delilah-daemon/src/inbox.rs`.
 
 ---
 

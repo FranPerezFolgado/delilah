@@ -187,22 +187,35 @@ async fn save_notes_preference(app: &AppState) -> bool {
 
 /// Where a confirmed handoff goes next: the one place that decides between saving
 /// the outgoing session's notes and starting the new session right away. Saving
-/// types `/save-session` into the outgoing primary; with the preference off, or no
-/// live session to ask, the new session starts at once.
-async fn after_confirm(app: &AppState, key: &TaskKey) -> HandoffStage {
-    if !save_notes_preference(app).await {
-        return HandoffStage::Starting;
-    }
-    let Some(live) = app.sessions.primary(key.as_str()) else {
-        return HandoffStage::Starting;
-    };
-    match crate::actions::type_prompt(&live, "/save-session").await {
-        Ok(()) => HandoffStage::Saving,
-        Err(e) => {
-            tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
-            HandoffStage::Starting
+/// writes the `saving` stage first and then types `/save-session` into the outgoing
+/// primary; with the preference off, no live session to ask, or the typing failing,
+/// the new session starts at once.
+///
+/// Takes the guard of the caller (which has checked the handoff) and releases it.
+async fn enter<L: Launcher>(
+    app: &AppState,
+    key: &TaskKey,
+    to: Step,
+    guard: tokio::sync::MutexGuard<'_, ()>,
+    launch: &L,
+) {
+    if save_notes_preference(app).await {
+        if let Some(live) = app.sessions.primary(key.as_str()) {
+            set(app, key, to, HandoffStage::Saving, None).await;
+            match crate::actions::type_prompt(&live, "/save-session").await {
+                Ok(()) => return,
+                Err(e) => {
+                    tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
+                }
+            }
         }
     }
+    if !app.handoffs.mark_starting(key) {
+        return;
+    }
+    set(app, key, to, HandoffStage::Starting, None).await;
+    drop(guard);
+    start_with(app, key, to, launch).await;
 }
 
 /// The primary session finished a turn (not on the usage limit): see whether its step
@@ -212,6 +225,9 @@ pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
 }
 
 async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
+    // The stage is read under the guard: a save turn that ends right after the
+    // prompt was typed finds `saving` already written.
+    let guard = app.handoffs.guard.lock().await;
     let Ok(task) = task_of(app, key).await else {
         return;
     };
@@ -219,7 +235,7 @@ async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: 
         return;
     }
     if matches!(&task.handoff, Some(h) if h.stage == HandoffStage::Saving) {
-        return finish_save(app, key, launch).await;
+        return finish_save(app, key, guard, launch).await;
     }
     let Some(primary) = primary_session(app, key).await else {
         return;
@@ -230,33 +246,34 @@ async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: 
     let Some(found) = boundary(&task, primary.step, &spec) else {
         return;
     };
-    let guard = app.handoffs.guard.lock().await;
-    // Another turn end or a click may have got here first.
-    let Ok(fresh) = task_of(app, key).await else {
-        return;
-    };
-    if boundary(&fresh, primary.step, &spec) != Some(found) {
-        return;
-    }
     match found {
         Boundary::Offer(to) => set(app, key, to, HandoffStage::Offered, None).await,
         Boundary::Start(to) => {
-            let stage = after_confirm(app, key).await;
-            if stage == HandoffStage::Starting && !app.handoffs.mark_starting(key) {
-                return;
-            }
-            set(app, key, to, stage, None).await;
-            drop(guard);
-            if stage == HandoffStage::Starting {
-                start_with(app, key, to, launch).await;
-            }
+            announce(app, key, &task, to);
+            enter(app, key, to, guard, launch).await;
         }
     }
 }
 
+/// Tells the user, like a finished turn does, that a step started on its own.
+fn announce(app: &AppState, key: &TaskKey, task: &Task, to: Step) {
+    let lang = app.lang();
+    app.notifier.send(
+        format!(
+            "{key} {}",
+            lang.pick("pasa a la revisión", "moves on to the review")
+        ),
+        format!("{}: {}", step_label(lang, to), task.title),
+    );
+}
+
 /// The outgoing session's save turn ended: the new session can start.
-async fn finish_save<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
-    let guard = app.handoffs.guard.lock().await;
+async fn finish_save<L: Launcher>(
+    app: &AppState,
+    key: &TaskKey,
+    guard: tokio::sync::MutexGuard<'_, ()>,
+    launch: &L,
+) {
     let Ok(fresh) = task_of(app, key).await else {
         return;
     };
@@ -315,15 +332,7 @@ async fn confirm_with<L: Launcher>(
             )));
         }
     };
-    let stage = after_confirm(app, key).await;
-    if stage == HandoffStage::Starting && !app.handoffs.mark_starting(key) {
-        return Ok(());
-    }
-    set(app, key, to, stage, None).await;
-    drop(guard);
-    if stage == HandoffStage::Starting {
-        start_with(app, key, to, launch).await;
-    }
+    enter(app, key, to, guard, launch).await;
     Ok(())
 }
 
@@ -1286,5 +1295,149 @@ mod tests {
         app.store.set_handoff(&key, None).await.unwrap();
         on_implement_chosen(&app, &key).await;
         assert!(handoff_of(&app, &key).await.is_none());
+    }
+
+    fn check_all(app: &AppState) {
+        let ws = app.config.home.join("ws");
+        std::fs::write(
+            ws.join("specs/proj-1-x/tasks.md"),
+            "- [x] T001 One\n- [x] T002 Two\n",
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_last_checked_task_starts_the_review_without_an_offer_and_announces_it() {
+        let (app, key) = setup().await;
+        no_save_notes(&app).await;
+        check_all(&app);
+        let mut rx = app.events.subscribe();
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        {
+            let launched = launched.lock().unwrap();
+            assert_eq!(launched.len(), 1);
+            assert_eq!(launched[0].0.step, Some(Step::Review));
+            assert_eq!(launched[0].0.label, "Revisión");
+            assert!(launched[0].0.primary);
+            let prompt = launched[0].1.as_deref().unwrap();
+            assert!(prompt.starts_with("/review"));
+            assert!(prompt.contains("hallazgos confirmados"));
+            assert!(prompt.contains("documentación") && prompt.contains("commit"));
+            assert!(prompt.contains("No hagas push ni abras una PR"));
+        }
+        assert!(handoff_of(&app, &key).await.is_none());
+        let sent = app.notifier.recorded();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].title.starts_with("PROJ-1"), "{:?}", sent[0]);
+        assert!(sent[0].body.contains("Revisión"));
+        let mut topics = vec![];
+        while let Ok(t) = rx.try_recv() {
+            topics.push(t);
+        }
+        assert!(topics.contains(&Topic::Inbox), "{topics:?}");
+    }
+
+    #[test]
+    fn the_review_prompt_forbids_push_and_pr_in_both_languages() {
+        let en = step_prompt(Lang::En, Step::Review, "").unwrap();
+        for word in [
+            "review",
+            "confirmed findings",
+            "docs",
+            "commit",
+            "Do not push or open a PR",
+        ] {
+            assert!(en.contains(word), "{word}");
+        }
+        let es = step_prompt(Lang::Es, Step::Review, "").unwrap();
+        assert!(
+            es.contains("hallazgos confirmados") && es.contains("No hagas push ni abras una PR")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_automatic_review_shows_in_the_inbox_while_saving_and_starting() {
+        let (app, key) = setup().await;
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        check_all(&app);
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let axum::Json(items) = crate::inbox::list(State(app.clone())).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, crate::inbox::ItemKind::Handoff);
+        assert_eq!(app.notifier.recorded().len(), 1);
+
+        set(&app, &key, Step::Review, HandoffStage::Starting, None).await;
+        let axum::Json(items) = crate::inbox::list(State(app.clone())).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].text.as_deref(),
+            Some("Pasando a la revisión en una sesión nueva…")
+        );
+        let _ = pty.kill();
+    }
+
+    /// What a process that echoes its input has received, once it shows `needle`.
+    async fn typed_into(pty: &delilah_agents::pty::PtySession, needle: &str) -> String {
+        for _ in 0..100 {
+            let text = String::from_utf8_lossy(&pty.attach().0).to_string();
+            if text.contains(needle) {
+                return text;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        String::from_utf8_lossy(&pty.attach().0).to_string()
+    }
+
+    #[tokio::test]
+    async fn saving_types_exactly_save_session_and_writes_the_stage_first() {
+        let (app, key) = setup().await;
+        let cmd = portable_pty::CommandBuilder::new("cat");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        on_turn_ended(&app, &key).await;
+        let launched = Launched::default();
+        confirm_with(&app, &key, &ok_launcher(&launched))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(
+            handoff_of(&app, &key).await.unwrap().stage,
+            HandoffStage::Saving
+        );
+        let text = typed_into(&pty, "/save-session").await;
+        assert!(
+            text.lines().any(|l| l.trim() == "/save-session"),
+            "{text:?}"
+        );
+        let _ = pty.kill();
+    }
+
+    #[tokio::test]
+    async fn a_save_turn_ending_during_the_typing_still_sees_the_saving_stage() {
+        let (app, key) = setup().await;
+        let cmd = portable_pty::CommandBuilder::new("cat");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        on_turn_ended(&app, &key).await;
+        let launched = Launched::default();
+        let launcher = ok_launcher(&launched);
+        // The turn end races the confirmation: it must wait for the guard and then
+        // find `saving`, not the offer.
+        let (confirmed, _) = tokio::join!(confirm_with(&app, &key, &launcher), async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            on_turn_ended_with(&app, &key, &launcher).await;
+        });
+        confirmed.ok().unwrap();
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert_eq!(launched.lock().unwrap()[0].0.step, Some(Step::Implement));
+        let _ = pty.kill();
     }
 }

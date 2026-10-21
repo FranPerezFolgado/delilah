@@ -310,6 +310,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_limited_turn_end_or_failure_keeps_the_saving_stage() {
+        use delilah_agents::claude::Signal;
+        let (app, key) = planning().await;
+        let saving = delilah_core::Handoff {
+            to: delilah_core::Step::Implement,
+            stage: delilah_core::HandoffStage::Saving,
+            error: None,
+        };
+        app.store.set_handoff(&key, Some(&saving)).await.unwrap();
+        let hook = serde_json::json!({});
+        for signal in [Signal::TurnEnded, Signal::TurnFailed] {
+            on_hook(&app, "PROJ-1", signal, &hook, true, true).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            stage(&app, &key).await,
+            Some(delilah_core::HandoffStage::Saving)
+        );
+    }
+
+    #[tokio::test]
     async fn a_code_edit_from_the_plan_session_skips_the_handoff() {
         use delilah_agents::claude::Signal;
         let (app, key) = planning().await;

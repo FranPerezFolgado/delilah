@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use chrono::{DateTime, Utc};
 use delilah_agents::claude::Signal;
-use delilah_core::{HandoffStage, SpecPhase, Task, TaskStatus};
+use delilah_core::{HandoffStage, SpecPhase, Step, Task, TaskStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -301,7 +301,18 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 )
                 .to_string()
             }),
-            HandoffStage::Starting | HandoffStage::Skipped => continue,
+            HandoffStage::Starting => match h.to {
+                Step::Review => lang
+                    .pick(
+                        "Pasando a la revisión en una sesión nueva…",
+                        "Moving on to the review in a new session…",
+                    )
+                    .to_string(),
+                _ => lang
+                    .pick("Empezando la sesión nueva…", "Starting the new session…")
+                    .to_string(),
+            },
+            HandoffStage::Skipped => continue,
         };
         let session = app
             .store
@@ -625,6 +636,26 @@ mod tests {
             let Json(items) = list(State(app)).await.ok().unwrap();
             assert!(items.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn a_starting_handoff_shows_text_for_the_review_and_the_implementation() {
+        let app = app_with_handoff(Some(delilah_core::Handoff {
+            to: Step::Review,
+            stage: HandoffStage::Starting,
+            error: None,
+        }))
+        .await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, ItemKind::Handoff);
+        assert_eq!(
+            items[0].text.as_deref(),
+            Some("Pasando a la revisión en una sesión nueva…")
+        );
+        let app = app_with_handoff(handoff(HandoffStage::Starting, None)).await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items[0].text.as_deref(), Some("Empezando la sesión nueva…"));
     }
 
     #[test]

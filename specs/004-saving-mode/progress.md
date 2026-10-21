@@ -16,7 +16,7 @@ Mode: format=markdown commits=yes
 | WP-06 | 4 | 4A | done | 1 | 7d176ae | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
 | WP-06F | 4 | 4A | done | 1 | 6855266 | phase 4 review fixes |
 | WP-07 | 5 | 5A | done | 1 | 9ff12ac | |
-| WP-08 | 6 | 6A | implementing | 0 | | +phase 5 LOWs: write Saving before typing; tests for typed text and limited signals while saving |
+| WP-08 | 6 | 6A | verified | 1 | | +phase 5 LOWs: write Saving before typing; tests for typed text and limited signals while saving |
 | WP-09 | 7 | 7A | pending | 0 | | |
 | WP-10 | 7 | 7B | pending | 0 | | |
 
