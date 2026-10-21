@@ -18,8 +18,8 @@ Mode: format=markdown commits=yes
 | WP-07 | 5 | 5A | done | 1 | 9ff12ac | |
 | WP-08 | 6 | 6A | done | 1 | 5a98a51 | +phase 5 LOWs: write Saving before typing; tests for typed text and limited signals while saving |
 | WP-08F | 6 | 6A | done | 1 | d8d7411 | phase 6 review fixes |
-| WP-09 | 7 | 7A | pending | 0 | | |
-| WP-10 | 7 | 7B | pending | 0 | | |
+| WP-09 | 7 | 7A | done | 1 | 2a984e9 | |
+| WP-10 | 7 | 7B | skipped | 1 | | checks: workspace + web green; tauri needs binaries/delilahd sidecar (env); quickstart walk left to user (needs real agents) |
 
 ## Reviews
 
@@ -32,3 +32,4 @@ Mode: format=markdown commits=yes
 - Phase 4: spec COMPLIANT, architecture approve-with-minor-changes → fixed in WP-06F (shared stepLabel in chain.ts, owner-aware primary-follow effect, typed stages, tests). UI not checked visually (no browser tools in this session).
 - Phase 5: spec COMPLIANT (LOW test gaps + Saving written after typing → folded into WP-08). No other reviewers named.
 - Phase 6: spec COMPLIANT, contract NEEDS CARE (duplicate/misworded alert, stale contract doc) → fixed in WP-08F (announce quiet when app listens, neutral alert wording, starting text on task screen, 2 tests, contract doc).
+- Phase 7: docs written (decision 26); full checks: cargo workspace OK (daemon 149), web 105 OK + tsc clean; app/src-tauri test can't build here (missing binaries/delilahd-aarch64-apple-darwin, produced by the release build; branch doesn't touch src-tauri). T036 left unchecked: quickstart not walked.
