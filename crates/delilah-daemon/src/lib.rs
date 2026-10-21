@@ -16,6 +16,7 @@ pub mod logs;
 pub mod notify;
 mod owners;
 pub mod phases;
+pub mod pr_loop;
 pub mod pr_types;
 mod preferences;
 mod projects;

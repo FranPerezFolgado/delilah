@@ -3,9 +3,6 @@
 //! does. The process sits behind the [`Gh`] trait (one method) so tests answer with
 //! canned output; [`GhClient`] puts the typed calls on top of it.
 
-// The loop and the API that use these land in the next packages.
-#![allow(dead_code)]
-
 #[cfg(test)]
 pub(crate) mod fake;
 mod graphql;

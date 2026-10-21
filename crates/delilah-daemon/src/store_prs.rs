@@ -1,9 +1,6 @@
 //! Pull requests linked to tasks, what was last seen of them, and the notices they
 //! raised (see `prs.rs`).
 
-// The loop and the API that use these land in the next packages.
-#![allow(dead_code)]
-
 use chrono::{DateTime, Utc};
 use delilah_core::{TaskKey, TaskStatus};
 use serde_json::Value;
@@ -34,6 +31,7 @@ pub(crate) struct PrRow {
 
 /// What the inbox shows for a PR.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // used by the notices in the next packages
 pub(crate) struct NoticeRow {
     pub id: i64,
     pub task_key: String,
@@ -68,6 +66,7 @@ pub(crate) struct NewNotice {
 
 const PR_COLUMNS: &str = "id, task_key, repo, host, owner_name, number, url, linked_by, snapshot, \
      ci_failed_sha, review_seen, issue_comment_seen, review_comment_seen, checked_at, error, created_at";
+#[allow(dead_code)] // used by the notices in the next packages
 const NOTICE_COLUMNS: &str =
     "id, task_key, repo, kind, cause, text, detail, created_at, resolved_at";
 
@@ -105,6 +104,7 @@ fn pr_row(row: &SqliteRow) -> Result<PrRow, StoreError> {
     })
 }
 
+#[allow(dead_code)] // used by the notices in the next packages
 fn notice_row(row: &SqliteRow) -> Result<NoticeRow, StoreError> {
     let detail: Option<String> = row.try_get("detail")?;
     Ok(NoticeRow {
@@ -243,6 +243,7 @@ impl Store {
         rows.iter().map(pr_row).collect()
     }
 
+    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn pr(&self, id: i64) -> Result<Option<PrRow>, StoreError> {
         let row = sqlx::query(&format!(
             "SELECT {PR_COLUMNS} FROM pull_requests WHERE id = ?"
@@ -255,6 +256,7 @@ impl Store {
 
     /// Deletes the link, resolves its notices and remembers the URL so detection never
     /// brings it back. Returns the row, or `None` if there was none.
+    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn unlink_pr(&self, id: i64) -> Result<Option<PrRow>, StoreError> {
         let Some(row) = self.pr(id).await? else {
             return Ok(None);
@@ -386,6 +388,7 @@ impl Store {
 
     /// Adds a notice unless the same (task, repo, kind, cause) exists; whether it was
     /// new.
+    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn insert_notice(
         &self,
         key: &TaskKey,
@@ -396,6 +399,7 @@ impl Store {
     }
 
     /// The notices still showing, oldest first.
+    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn open_notices(&self) -> Result<Vec<NoticeRow>, StoreError> {
         let rows = sqlx::query(&format!(
             "SELECT {NOTICE_COLUMNS} FROM pr_notices WHERE resolved_at IS NULL ORDER BY id"
@@ -405,6 +409,7 @@ impl Store {
         rows.iter().map(notice_row).collect()
     }
 
+    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn notice(&self, id: i64) -> Result<Option<NoticeRow>, StoreError> {
         let row = sqlx::query(&format!(
             "SELECT {NOTICE_COLUMNS} FROM pr_notices WHERE id = ?"
@@ -416,6 +421,7 @@ impl Store {
     }
 
     /// Resolved notices stay (so they are not raised again); whether this one was open.
+    #[allow(dead_code)] // used by the API and the notices in the next packages
     pub(crate) async fn resolve_notice(&self, id: i64) -> Result<bool, StoreError> {
         let result = sqlx::query(
             "UPDATE pr_notices SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL",
@@ -427,6 +433,7 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    #[allow(dead_code)] // used by the notices in the next packages
     pub(crate) async fn resolve_notices_of(
         &self,
         key: &TaskKey,

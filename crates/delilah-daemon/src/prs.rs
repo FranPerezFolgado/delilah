@@ -2,9 +2,6 @@
 //! found, which PR to pick, the badge summary, the back-off after a failure). The I/O
 //! lives in `pr_loop`; the data types in `pr_types`.
 
-// The loop and the API that use these land in the next packages.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -78,6 +75,7 @@ pub fn pick(prs: &[ListedPr]) -> Option<&ListedPr> {
 
 /// The badge of a task's PRs; `None` if it has none. A PR not checked yet counts as
 /// open.
+#[allow(dead_code)] // used by the API in the next package
 pub(crate) fn summary(task: &str, rows: &[PrRow]) -> Option<PrSummary> {
     if rows.is_empty() {
         return None;

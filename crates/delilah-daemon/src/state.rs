@@ -51,7 +51,6 @@ pub struct AppState {
     /// The user's `gh`, behind a trait so tests answer with canned output.
     pub gh: Arc<GhClient>,
     /// Per repo (`host/owner/name`): when to try `gh` again after it failed.
-    #[allow(dead_code)] // read by the loop in the next package
     pub(crate) pr_backoff: Arc<Mutex<Backoff>>,
 }
 
