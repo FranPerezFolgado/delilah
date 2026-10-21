@@ -142,14 +142,14 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 ### Tests first
 
 - [X] T037 [P] [US4] Write failing tests in `crates/delilah-git/tests/workspace.rs` for `fetch`, `check_merged(ws, heads)` and `delete_branch`: a branch squash-merged on the remote passes (local head is the PR head); a local commit after the PR head → `NotMerged`; an uncommitted file → `Dirty`; for a parent, a dirty parent refuses but a submodule pointer change alone does not; `delete_branch` of a missing branch is Ok, of the current branch errors
-- [ ] T038 [US4] Write failing tests in `crates/delilah-daemon/src/prs.rs` for `on_merged` through `check_task` (fixture repo with bare remote): running task + merged PR → done, sessions stopped, worktree removed, local branch deleted, "merged and archived" notification; checkout-mode task → back to the previous branch, then branch deleted; dirty workspace → done, nothing removed, one `archive-blocked` notice; branch deletion failing after release → `archive-partial` notice; closed unmerged → only a notification, task unchanged
+- [X] T038 [US4] Write failing tests in `crates/delilah-daemon/src/prs.rs` for `on_merged` through `check_task` (fixture repo with bare remote): running task + merged PR → done, sessions stopped, worktree removed, local branch deleted, "merged and archived" notification; checkout-mode task → back to the previous branch, then branch deleted; dirty workspace → done, nothing removed, one `archive-blocked` notice; branch deletion failing after release → `archive-partial` notice; closed unmerged → only a notification, task unchanged
 - [X] T039 [P] [US4] Write a failing test in `crates/delilah-daemon/src/actions.rs` that `POST /tasks/{key}/archive` on a task with an open `archive-partial` notice deletes the leftover branch and resolves the notice
 
 ### Implementation
 
 - [X] T040 [US4] Implement `fetch`, `check_merged`, `delete_branch` and `GitError::NotMerged { location }` in `crates/delilah-git/src/workspace.rs` (+ `crates/delilah-git/src/command.rs` for the error); make T037 pass
 - [X] T041 [US4] Make `release_workspace` `pub(crate)` in `crates/delilah-daemon/src/actions.rs` and let `archive` finish an `archive-partial` (delete the remaining branches, resolve the notice); make T039 pass
-- [ ] T042 [US4] Implement `on_merged(app, key)` in `crates/delilah-daemon/src/prs.rs` per research R7 (MarkDone if not terminal → `fetch` + `check_merged` in `spawn_blocking` → `archive-blocked` notice, or `release_workspace(force = true)` + `delete_workspace` + `delete_branch` per repo → `archive-partial` on failure → notification), called from `check_task` when every row is merged and none closed unmerged; make T038 pass
+- [X] T042 [US4] Implement `on_merged(app, key)` in `crates/delilah-daemon/src/prs.rs` per research R7 (MarkDone if not terminal → `fetch` + `check_merged` in `spawn_blocking` → `archive-blocked` notice, or `release_workspace(force = true)` + `delete_workspace` + `delete_branch` per repo → `archive-partial` on failure → notification), called from `check_task` when every row is merged and none closed unmerged; make T038 pass
 - [X] T043 [US4] In `app/src/components/InboxView.tsx` render `pr-blocked` with its text, "Archivar igualmente" (`archive(key, true)`) and "Descartar"; in `app/src/alerts.ts` notify "mergeada y archivada" from summaries when unfocused; strings in `app/src/i18n/en.ts`; extend `app/src/components/InboxView.test.tsx`
 
 **Checkpoint**: the loop closes on its own for plain repo projects.
@@ -164,12 +164,12 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ### Tests first
 
-- [ ] T044 [US5] Write failing tests in `crates/delilah-daemon/src/prs.rs` with a parent fixture (two submodules, fake `gh` per repo folder): one PR detected per submodule (`repo` = submodule path); one merged → not archived; both merged → archived, submodule branches deleted, parent branch kept; one merged + one closed → not archived, notification; `summary` reports the worst state and `count = 2`
+- [X] T044 [US5] Write failing tests in `crates/delilah-daemon/src/prs.rs` with a parent fixture (two submodules, fake `gh` per repo folder): one PR detected per submodule (`repo` = submodule path); one merged → not archived; both merged → archived, submodule branches deleted, parent branch kept; one merged + one closed → not archived, notification; `summary` reports the worst state and `count = 2`
 - [X] T045 [P] [US5] Write a failing test in `crates/delilah-daemon/src/pr_api.rs`: proposal and open with `repo = <submodule>` push and create from that submodule's folder; an unknown repo → 400
 
 ### Implementation
 
-- [ ] T046 [US5] Make `check_task`, `on_merged` and the merged/closed rule in `crates/delilah-daemon/src/prs.rs` work per submodule (only submodules get PRs for parents; FR-038, FR-039); make T044 pass
+- [X] T046 [US5] Make `check_task`, `on_merged` and the merged/closed rule in `crates/delilah-daemon/src/prs.rs` work per submodule (only submodules get PRs for parents; FR-038, FR-039); make T044 pass
 - [X] T047 [US5] Validate and use `repo` in `proposal` / `open` of `crates/delilah-daemon/src/pr_api.rs`; make T045 pass
 - [X] T048 [US5] Add the submodule select to `app/src/components/OpenPrDialog.tsx` (parents only, submodules without an open PR) and group cards by submodule in `app/src/components/PrView.tsx`; extend their tests
 

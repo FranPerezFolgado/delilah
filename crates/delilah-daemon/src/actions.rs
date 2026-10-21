@@ -760,7 +760,7 @@ mod tests {
         git(&repo, &["branch", "feature/PROJ-1"]);
         let key = partially_archived(&app, &repo, "feature/PROJ-1").await;
 
-        archive_task(&app, &key)
+        let _ = archive_task(&app, &key)
             .await
             .map_err(|e| e.message)
             .unwrap();

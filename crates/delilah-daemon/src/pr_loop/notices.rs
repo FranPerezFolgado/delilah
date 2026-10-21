@@ -350,9 +350,12 @@ mod tests {
             assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
             let app = app.with_gh(gh_with(&ci_snapshot(state, "abc", "FAILURE")));
             check_task(&app, &key, true).await;
-            assert!(app.store.open_notices().await.unwrap().is_empty());
+            // (The workspace of this task is no repo, so a merge cannot archive it.)
+            let open = app.store.open_notices().await.unwrap();
+            assert!(open.iter().all(|n| n.kind == "archive-blocked"));
             let sent = app.notifier.recorded();
-            assert_eq!(sent.last().unwrap().title, format!("PROJ-1 {word}"));
+            let told = format!("PROJ-1 {word}");
+            assert!(sent.iter().any(|n| n.title == told));
         }
     }
 

@@ -3,6 +3,7 @@
 //! for the problems the user can fix).
 
 pub(crate) mod access;
+mod merge;
 mod notices;
 
 use std::collections::HashSet;
@@ -201,6 +202,11 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
     }
     if inbox {
         app.emit(Topic::Inbox);
+    }
+    // Every PR merged (none open or closed unmerged): the task is done and archived.
+    let rows = app.store.prs_of(key).await.unwrap_or_default();
+    if merge::all_merged(&rows) {
+        merge::on_merged(app, key, &rows).await;
     }
 }
 
