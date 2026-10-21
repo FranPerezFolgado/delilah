@@ -71,14 +71,14 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ### Tests first
 
-- [ ] T012 [P] [US1] Write failing API tests in `crates/delilah-daemon/src/projects.rs`: `PUT /api/v1/projects/{name}/settings` saves and returns the project; invalid input → 422 with `fields`, nothing saved; unknown project → 404; a submodule rule naming a submodule the fixture parent does not have → 422 on that field; `GET /api/v1/projects` returns full settings for projects with none saved
+- [X] T012 [P] [US1] Write failing API tests in `crates/delilah-daemon/src/projects.rs`: `PUT /api/v1/projects/{name}/settings` saves and returns the project; invalid input → 422 with `fields`, nothing saved; unknown project → 404; a submodule rule naming a submodule the fixture parent does not have → 422 on that field; `GET /api/v1/projects` returns full settings for projects with none saved
 - [X] T013 [P] [US1] Write failing tests in `crates/delilah-cli/src/main.rs` for parsing `project show`, `project set <name> workspace|branch|setup <value>`, `project set <name> shared add|rm <path> [--copy|--link]`, `project set <name> submodules always|never add|rm <path>`, `project unset <name> <setting>`
 - [X] T014 [P] [US1] Write failing tests in `app/src/components/ProjectSettings.test.tsx`: fields show the current settings; parent-only fields hidden for a repo project; save sends the whole settings; 422 field errors appear under their fields; leaving with unsaved edits asks to discard
 
 ### Implementation
 
-- [ ] T015 [US1] Implement `update_settings` in `crates/delilah-daemon/src/projects.rs` (core `validate` + submodule existence via `delilah_git::list_submodules`, localised messages with `app.lang().pick`, emit `Topic::Projects`), and route `PUT /api/v1/projects/{name}/settings` in `crates/delilah-daemon/src/api.rs`
-- [ ] T016 [US1] Extend `ApiError` in `crates/delilah-daemon/src/api.rs` so a 422 can carry `fields: [{field, message}]`
+- [X] T015 [US1] Implement `update_settings` in `crates/delilah-daemon/src/projects.rs` (core `validate` + submodule existence via `delilah_git::list_submodules`, localised messages with `app.lang().pick`, emit `Topic::Projects`), and route `PUT /api/v1/projects/{name}/settings` in `crates/delilah-daemon/src/api.rs`
+- [X] T016 [US1] Extend `ApiError` in `crates/delilah-daemon/src/api.rs` so a 422 can carry `fields: [{field, message}]`
 - [X] T017 [US1] Implement `project show`, `project set` and `project unset` in `crates/delilah-cli/src/main.rs` (read the project, change one field, `PUT`; print `field: message` lines and exit 1 on 422)
 - [X] T018 [P] [US1] Add `api.updateProjectSettings(name, settings)` returning field errors in `app/src/api.ts`
 - [X] T019 [US1] Build `app/src/components/ProjectSettings.tsx`: default place (WherePicker), branch template, shared entries (path + auto/copy/link, add/remove), setup command, always/never submodule pickers for parent projects; save, field errors, discard confirm

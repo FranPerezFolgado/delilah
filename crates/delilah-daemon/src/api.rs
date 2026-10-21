@@ -110,6 +110,10 @@ pub fn router(state: AppState) -> Router {
             axum::routing::patch(projects::update_project).delete(projects::delete_project),
         )
         .route(
+            "/api/v1/projects/{name}/settings",
+            axum::routing::put(projects::update_settings),
+        )
+        .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),
         )
@@ -335,15 +339,30 @@ pub struct ErrorBody {
     /// Refused because work in a worktree would be lost: the client may offer to force it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unpushed: bool,
+    /// For a 422 on a form: each problem, tied to its field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<delilah_core::FieldError>,
 }
 
 pub struct ApiError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
     pub(crate) unpushed: bool,
+    pub(crate) fields: Vec<delilah_core::FieldError>,
 }
 
 impl ApiError {
+    /// A 422 that names the fields at fault.
+    pub fn invalid_fields(
+        message: impl Into<String>,
+        fields: Vec<delilah_core::FieldError>,
+    ) -> Self {
+        Self {
+            fields,
+            ..Self::unprocessable(message)
+        }
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
@@ -389,6 +408,7 @@ impl ApiError {
             status,
             message: message.into(),
             unpushed: false,
+            fields: Vec::new(),
         }
     }
 }
@@ -420,6 +440,7 @@ impl IntoResponse for ApiError {
             Json(ErrorBody {
                 error: self.message,
                 unpushed: self.unpushed,
+                fields: self.fields,
             }),
         )
             .into_response()

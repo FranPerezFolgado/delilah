@@ -6,7 +6,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::suggest;
-use delilah_core::{Project, ProjectKind};
+use delilah_core::{FieldError, Project, ProjectKind, ProjectSettings};
 use serde::Deserialize;
 
 use crate::api::ApiError;
@@ -98,11 +98,147 @@ pub async fn update_project(
     if project.path != old.path || project.kind != old.kind {
         project.path = checked_root(project.path.clone(), project.kind).await?;
     }
+    // A repo project has no submodules, so rules left from when it was a parent go.
+    let clear_rules =
+        project.kind == ProjectKind::Repo && project.settings.submodules != Default::default();
+    if clear_rules {
+        project.settings.submodules = Default::default();
+    }
     app.store.update_project(&name, &project).await?;
+    if clear_rules {
+        app.store
+            .set_project_settings(&project.name, &project.settings)
+            .await?;
+    }
     app.emit(crate::events::Topic::Projects);
     app.emit(crate::events::Topic::Tasks);
     app.emit(crate::events::Topic::Sessions);
     Ok(Json(project))
+}
+
+/// `PUT /api/v1/projects/{name}/settings`: replaces the project's settings, or says
+/// which fields are wrong and saves nothing.
+pub async fn update_settings(
+    State(app): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<Project>, ApiError> {
+    let mut project = app.store.project(&name).await?;
+    let lang = app.lang();
+    let mut settings: ProjectSettings = serde_json::from_slice(&body).map_err(|e| {
+        let text = e.to_string();
+        // serde names the offending key between backticks: "unknown field `x`, ..."
+        let field = text.split('`').nth(1).unwrap_or_default().to_string();
+        let field = FieldError {
+            field,
+            code: "settings.invalid".into(),
+            message: lang
+                .pick(
+                    "Los ajustes no tienen el formato esperado.",
+                    "The settings are not in the expected format.",
+                )
+                .into(),
+        };
+        ApiError::invalid_fields(format!("{}: {text}", field.message), vec![field])
+    })?;
+    settings.setup = settings
+        .setup
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let mut errors = delilah_core::validate(&settings, project.kind);
+    if project.kind == ProjectKind::Parent
+        && !(settings.submodules.always.is_empty() && settings.submodules.never.is_empty())
+    {
+        let root = project.path.clone();
+        let known: Vec<String> =
+            tokio::task::spawn_blocking(move || delilah_git::list_submodules(&root))
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+                .map_err(|e| ApiError::unprocessable(e.to_string()))?
+                .into_iter()
+                .map(|s| s.path)
+                .collect();
+        for (list, key) in [
+            (&settings.submodules.always, "always"),
+            (&settings.submodules.never, "never"),
+        ] {
+            for (i, path) in list.iter().enumerate() {
+                if !known.contains(path) {
+                    errors.push(FieldError {
+                        field: format!("submodules.{key}[{i}]"),
+                        code: "submodules.unknown".into(),
+                        message: format!("`{path}` is not a submodule of this project."),
+                    });
+                }
+            }
+        }
+    }
+    if !errors.is_empty() {
+        for e in &mut errors {
+            e.message = localised(lang, e);
+        }
+        let summary = lang
+            .pick("Ajustes no válidos: ", "Invalid settings: ")
+            .to_string()
+            + &errors
+                .iter()
+                .map(|e| e.field.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+        return Err(ApiError::invalid_fields(summary, errors));
+    }
+
+    app.store.set_project_settings(&name, &settings).await?;
+    project.settings = settings;
+    app.emit(crate::events::Topic::Projects);
+    Ok(Json(project))
+}
+
+/// The message of a field error in the app's language, by its stable code. Messages
+/// that carry a name keep the English core text when Spanish has no template for them.
+fn localised(lang: crate::lang::Lang, e: &FieldError) -> String {
+    let (es, en) = match e.code.as_str() {
+        "branch.empty" => (
+            "La plantilla de rama está vacía.",
+            "The branch template is empty.",
+        ),
+        "branch.missing_ticket" => (
+            "La plantilla de rama debe contener `{ticket}`.",
+            "The branch template must contain `{ticket}`.",
+        ),
+        "branch.unknown_placeholder" => (
+            "La plantilla de rama tiene un marcador desconocido; usa `{ticket}` o `{slug}`.",
+            "The branch template has an unknown placeholder; use `{ticket}` or `{slug}`.",
+        ),
+        "shared.path_empty" => ("La ruta está vacía.", "The path is empty."),
+        "shared.path_absolute" => (
+            "La ruta debe ser relativa al proyecto.",
+            "The path must be relative to the project.",
+        ),
+        "shared.path_parent" => (
+            "La ruta no debe contener `..`.",
+            "The path must not contain `..`.",
+        ),
+        "shared.path_duplicate" => (
+            "La ruta ya está en la lista.",
+            "The path is already listed.",
+        ),
+        "submodules.not_parent" => (
+            "Las reglas de submódulos solo valen para proyectos parent.",
+            "Submodule rules only apply to parent projects.",
+        ),
+        "submodules.conflict" => (
+            "El submódulo está en las listas always y never a la vez.",
+            "The submodule is in both the always and never lists.",
+        ),
+        "submodules.unknown" => (
+            "El proyecto no tiene ese submódulo.",
+            "This project has no such submodule.",
+        ),
+        _ => return e.message.clone(),
+    };
+    lang.pick(es, en).to_string()
 }
 
 /// `DELETE /api/v1/projects/{name}`: refused while a task of it has a workspace, so no
@@ -358,5 +494,228 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert!(body["error"].as_str().unwrap().contains("not a git repo"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    use axum::http::StatusCode;
+
+    struct Env {
+        app: axum::Router,
+        dir: std::path::PathBuf,
+    }
+
+    async fn call(app: &axum::Router, req: Request<Body>) -> (StatusCode, Value) {
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = http_body_util::BodyExt::collect(res.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    fn json_req(method: &str, uri: &str, body: String) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    /// An app with the fixture parent (`parent`) and its repo `svc-orders` registered.
+    async fn env() -> Env {
+        let dir = std::env::temp_dir().join(format!("delilah-settings-{}", uuid::Uuid::new_v4()));
+        let fixture = Command::new("bash")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../scripts/make-fixture-parent.sh"
+            ))
+            .arg(dir.join("env"))
+            .output()
+            .unwrap();
+        assert!(fixture.status.success());
+        let config = Config {
+            home: dir.join("home"),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
+        for (path, kind) in [("parent", "parent"), ("parent/svc-orders", "repo")] {
+            let (status, _) = call(
+                &app,
+                json_req(
+                    "POST",
+                    "/api/v1/projects",
+                    json!({ "path": dir.join("env").join(path), "kind": kind }).to_string(),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED);
+        }
+        Env { app, dir }
+    }
+
+    async fn put(env: &Env, name: &str, body: Value) -> (StatusCode, Value) {
+        call(
+            &env.app,
+            json_req(
+                "PUT",
+                &format!("/api/v1/projects/{name}/settings"),
+                body.to_string(),
+            ),
+        )
+        .await
+    }
+
+    async fn project(env: &Env, name: &str) -> Value {
+        let (_, all) = call(
+            &env.app,
+            Request::get("/api/v1/projects")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        all.as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap()
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn list_reports_default_settings() {
+        let env = env().await;
+        let p = project(&env, "parent").await;
+        assert_eq!(p["settings"]["branch"], "feature/{ticket}");
+        assert_eq!(p["settings"]["workspace"], "checkout");
+        assert!(p["settings"]["shared"].as_array().unwrap().is_empty());
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_saves_and_returns_the_project() {
+        let env = env().await;
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({
+                "branch": "fix/{ticket}-{slug}",
+                "setup": "  make deps  ",
+                "shared": [{ "path": ".env" }],
+                "submodules": { "always": ["svc-orders"], "never": ["common-lib"] },
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["name"], "parent");
+        assert_eq!(body["settings"]["setup"], "make deps");
+        let saved = project(&env, "parent").await;
+        assert_eq!(saved["settings"]["branch"], "fix/{ticket}-{slug}");
+        assert_eq!(saved["settings"]["submodules"]["always"][0], "svc-orders");
+        // Missing fields are defaults: a PUT replaces.
+        let (_, body) = put(&env, "parent", json!({ "setup": "   " })).await;
+        assert_eq!(body["settings"]["branch"], "feature/{ticket}");
+        assert!(body["settings"]["setup"].is_null());
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_rejects_invalid_input_and_saves_nothing() {
+        let env = env().await;
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({ "branch": "feature/x", "shared": [{ "path": "/etc" }] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let fields = body["fields"].as_array().unwrap();
+        let codes: Vec<_> = fields
+            .iter()
+            .map(|f| (f["field"].as_str().unwrap(), f["code"].as_str().unwrap()))
+            .collect();
+        assert!(codes.contains(&("branch", "branch.missing_ticket")));
+        assert!(codes.contains(&("shared[0].path", "shared.path_absolute")));
+        assert!(
+            fields
+                .iter()
+                .all(|f| !f["message"].as_str().unwrap().is_empty())
+        );
+        assert!(body["error"].as_str().unwrap().contains("branch"));
+        let saved = project(&env, "parent").await;
+        assert_eq!(saved["settings"]["branch"], "feature/{ticket}");
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_rejects_a_submodule_the_parent_lacks() {
+        let env = env().await;
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({ "submodules": { "always": ["svc-orders", "nope"] } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["fields"][0]["field"], "submodules.always[1]");
+        assert_eq!(body["fields"][0]["code"], "submodules.unknown");
+        assert_eq!(body["fields"].as_array().unwrap().len(), 1);
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_unknown_project_is_404() {
+        let env = env().await;
+        let (status, _) = put(&env, "ghost", json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_unknown_key_or_wrong_type_is_422_with_fields() {
+        let env = env().await;
+        let (status, body) = put(&env, "parent", json!({ "bogus": 1 })).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["fields"][0]["field"], "bogus");
+        let (status, body) = put(&env, "parent", json!({ "shared": "x" })).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body["fields"].is_array());
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn changing_parent_to_repo_clears_submodule_rules() {
+        let env = env().await;
+        let (status, _) = put(
+            &env,
+            "parent",
+            json!({ "submodules": { "always": ["svc-orders"] } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, body) = call(
+            &env.app,
+            json_req(
+                "PATCH",
+                "/api/v1/projects/parent",
+                json!({ "kind": "repo" }).to_string(),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let p = project(&env, "parent").await;
+        assert!(
+            p["settings"]["submodules"]["always"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&env.dir).unwrap();
     }
 }

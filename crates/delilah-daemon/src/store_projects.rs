@@ -29,18 +29,20 @@ impl Store {
     }
 
     pub async fn list_projects(&self) -> Result<Vec<Project>, StoreError> {
-        let rows = sqlx::query("SELECT name, path, kind, workflow, settings FROM projects ORDER BY name")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query("SELECT name, path, kind, workflow, settings FROM projects ORDER BY name")
+                .fetch_all(&self.pool)
+                .await?;
         rows.iter().map(project_from_row).collect()
     }
 
     pub async fn project(&self, name: &str) -> Result<Project, StoreError> {
-        let row = sqlx::query("SELECT name, path, kind, workflow, settings FROM projects WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| StoreError::ProjectNotFound(name.to_string()))?;
+        let row =
+            sqlx::query("SELECT name, path, kind, workflow, settings FROM projects WHERE name = ?")
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| StoreError::ProjectNotFound(name.to_string()))?;
         project_from_row(&row)
     }
 
@@ -249,8 +251,7 @@ mod tests {
             ProjectSettings::default()
         );
 
-        let settings: ProjectSettings =
-            serde_json::from_str(r#"{"setup":"make setup"}"#).unwrap();
+        let settings: ProjectSettings = serde_json::from_str(r#"{"setup":"make setup"}"#).unwrap();
         assert_ne!(settings, ProjectSettings::default());
         store.set_project_settings("a", &settings).await.unwrap();
         assert_eq!(store.project("a").await.unwrap().settings, settings);

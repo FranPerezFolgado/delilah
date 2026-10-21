@@ -343,7 +343,11 @@ pub async fn launch_agent(
             live.pty.wait().await;
         }
         app.store
-            .adopt_session(&session.id, &key.to_string(), app.lang().pick("Principal", "Main"))
+            .adopt_session(
+                &session.id,
+                &key.to_string(),
+                app.lang().pick("Principal", "Main"),
+            )
             .await?;
         session.task = key.to_string();
         session.primary = true;
