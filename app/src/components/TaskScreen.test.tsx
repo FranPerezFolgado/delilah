@@ -20,7 +20,13 @@ vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
 vi.mock("./TaskView", () => ({ TaskView: () => null }));
 vi.mock("./ProjectView", () => ({ ProjectView: () => null }));
 vi.mock("./QuickOpen", () => ({ QuickOpen: () => null }));
-vi.mock("./AskCard", () => ({ AskCard: () => <div data-testid="askcard" /> }));
+vi.mock("./AskCard", () => ({
+  AskCard: (p: { ask: { proposal?: { title: string } | null }; onOpenTask?: (k: string) => void }) => (
+    <div data-testid="askcard" data-proposal={p.ask.proposal?.title ?? ""}>
+      <button onClick={() => p.onOpenTask?.("LIBRE-9")}>open-created</button>
+    </div>
+  ),
+}));
 
 const task = (status: TaskStatus): Task => ({
   key: "PROJ-1",
@@ -128,10 +134,10 @@ describe("TaskScreen conversation sessions", () => {
     since: null,
     ask: { id: "a1", questions: [] },
   } as unknown as InboxItem;
-  const openWithAsk = (s: Session) => {
+  const openWithAsk = (s: Session, ask: InboxItem = pendingAsk, onOpenTask?: (k: string) => void) => {
     sessionFor("@web").active = sessionTab(s.id);
     return render(
-      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[pendingAsk]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[ask]} askPosition="right" onChanged={() => {}} onConvert={() => {}} onOpenTask={onOpenTask} />,
     );
   };
 
@@ -139,5 +145,18 @@ describe("TaskScreen conversation sessions", () => {
     expect(openWithAsk(conv).container.querySelector(".ask-bar")).toBeNull();
     cleanup();
     expect(openWithAsk({ ...conv, conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
+  });
+
+  it("shows a proposal ask beside the terminal and opens the created task", () => {
+    const proposal = {
+      ...pendingAsk,
+      ask: { id: "a2", questions: [], proposal: { title: "Nueva", brief: "b" } },
+    } as unknown as InboxItem;
+    const onOpenTask = vi.fn();
+    const { getByTestId, getByText, queryByTestId } = openWithAsk({ ...conv, conversation: false }, proposal, onOpenTask);
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(getByTestId("askcard").getAttribute("data-proposal")).toBe("Nueva");
+    fireEvent.click(getByText("open-created"));
+    expect(onOpenTask).toHaveBeenCalledWith("LIBRE-9");
   });
 });

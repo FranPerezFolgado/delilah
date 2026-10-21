@@ -294,7 +294,7 @@
   - a task's primary and extra sessions get no `--plugin-dir`.
 
   Assert on the `Launch` built, by extracting `fn launch_flags(session: &SessionRecord, config: &Config) -> (Permission, Option<PathBuf>, Option<&'static str>)` from `launch_session` if needed.
-- [ ] T036 [P] [US3] Make sure the confirmation card renders where project sessions show asks: in `TaskScreen.tsx`, next to the terminal (line 614), and in `InboxView.tsx`. Pass `onOpenTask` so the created key links to the task, and extend `TaskScreen.test.tsx` with a proposal ask.
+- [X] T036 [P] [US3] Make sure the confirmation card renders where project sessions show asks: in `TaskScreen.tsx`, next to the terminal (line 614), and in `InboxView.tsx`. Pass `onOpenTask` so the created key links to the task, and extend `TaskScreen.test.tsx` with a proposal ask.
 
 **Checkpoint**: US3 works in a preview, and task agents cannot create tasks (quickstart 8).
 
