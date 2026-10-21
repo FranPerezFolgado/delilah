@@ -89,6 +89,22 @@ pub fn router(state: AppState) -> Router {
             post(crate::phases::dismiss),
         )
         .route("/api/v1/sessions/{id}/reply", post(inbox::reply))
+        .route(
+            "/api/v1/sessions/{id}/conversation",
+            get(crate::conversation::get),
+        )
+        .route(
+            "/api/v1/sessions/{id}/messages",
+            post(crate::conversation::send),
+        )
+        .route(
+            "/api/v1/sessions/{id}/messages/{entry}",
+            axum::routing::delete(crate::conversation::remove),
+        )
+        .route(
+            "/api/v1/sessions/{id}/stop",
+            post(crate::conversation::stop),
+        )
         .route("/api/v1/tasks/{key}/changes", get(changes::list))
         .route("/api/v1/tasks/{key}/changes/diff", get(changes::diff))
         .route("/api/v1/tasks/{key}/tree", get(files::tree))

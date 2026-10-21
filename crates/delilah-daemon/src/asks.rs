@@ -110,6 +110,22 @@ impl Asks {
         }
     }
 
+    /// Lets go of every question of one session (its turn was stopped); returns the
+    /// released ids.
+    pub fn release_session(&self, session: &str) -> Vec<String> {
+        let ids: Vec<String> = {
+            let pending = self.pending.lock().unwrap();
+            pending
+                .iter()
+                .filter(|(_, (ask, _))| ask.session.as_deref() == Some(session))
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        ids.into_iter()
+            .filter(|id| self.resolve(id, Outcome::Released))
+            .collect()
+    }
+
     fn get(&self, id: &str) -> Option<Ask> {
         self.pending.lock().unwrap().get(id).map(|(a, _)| a.clone())
     }
@@ -176,7 +192,10 @@ pub async fn hook(
         .pending
         .lock()
         .unwrap()
-        .insert(id.clone(), (ask, tx));
+        .insert(id.clone(), (ask.clone(), tx));
+    if let Some(session) = &q.session {
+        crate::conversation::card_added(&app, session, &ask).await;
+    }
     let _pending = Pending { app: &app, id };
 
     let live = q.session.as_deref().and_then(|s| app.sessions.get(s));
@@ -211,7 +230,21 @@ pub async fn hook(
                 }
             }))
         }
-        _ => Json(json!({})),
+        _ => {
+            // Timed out (a release already marked its card): answered in the terminal.
+            if let Some(session) = &q.session
+                && outcome.is_err()
+            {
+                crate::conversation::card_update(
+                    &app,
+                    session,
+                    &ask.id,
+                    json!({ "outcome": "terminal" }),
+                )
+                .await;
+            }
+            Json(json!({}))
+        }
     }
 }
 
@@ -253,6 +286,7 @@ pub async fn answer(
         .asks
         .take(&id)
         .ok_or_else(|| ApiError::not_found("that question is no longer waiting"))?;
+    let given = answer.answers.clone();
     let mut answers = answer.answers;
     let mut reply = json!({ "task": null });
     if let Some(proposal) = &ask.proposal {
@@ -271,6 +305,15 @@ pub async fn answer(
             };
             answers.insert(question.to_string(), Value::String(text));
         }
+    }
+    if let Some(session) = &ask.session {
+        let patch = json!({
+            "outcome": "answered",
+            "answer": given,
+            "task": reply["task"],
+            "error": reply["error"],
+        });
+        crate::conversation::card_update(&app, session, &ask.id, patch).await;
     }
     let _ = tx.send(Outcome::Answered(answers));
     app.emit(Topic::Inbox);
@@ -323,8 +366,13 @@ pub async fn release(
     State(app): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    let ask = app.asks.get(&id);
     if !app.asks.resolve(&id, Outcome::Released) {
         return Err(ApiError::not_found("that question is no longer waiting"));
+    }
+    if let Some(session) = ask.and_then(|a| a.session) {
+        crate::conversation::card_update(&app, &session, &id, json!({ "outcome": "terminal" }))
+            .await;
     }
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
@@ -679,6 +727,152 @@ mod tests {
             .unwrap();
         assert!(answer.starts_with("Crear — no se pudo crear: "));
         assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    async fn card(app: &AppState) -> Value {
+        let (_, body) = call(
+            app,
+            Request::get("/api/v1/sessions/conv/conversation")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == "card")
+            .cloned()
+            .unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn a_conversation_card_follows_its_ask_in_the_history() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+
+        // Pending, then answered with the task it created.
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move {
+                call(
+                    &app,
+                    post(CONV, proposal_card(TITLE, "Nueva tarea", Some("brief"))),
+                )
+                .await
+            }
+        });
+        let id = waiting_ask(&app).await["ask"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let pending = card(&app).await;
+        assert_eq!(pending["outcome"], "pending");
+        assert_eq!(pending["ask"], id);
+        assert_eq!(pending["proposal"]["title"], TITLE);
+        assert_eq!(pending["questions"][0]["header"], "Nueva tarea");
+        call(
+            &app,
+            post(
+                &format!("/api/v1/asks/{id}/answer"),
+                json!({ "answers": { TITLE: "Crear" } }),
+            ),
+        )
+        .await;
+        hook.await.unwrap();
+        let answered = card(&app).await;
+        assert_eq!(answered["outcome"], "answered");
+        assert_eq!(answered["answer"], json!({ TITLE: "Crear" }));
+        assert!(answered["task"].as_str().unwrap().starts_with("LIBRE-"));
+        assert_eq!(answered["error"], Value::Null);
+
+        // A failed creation keeps the reason.
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move {
+                call(
+                    &app,
+                    post(CONV, proposal_card(" ", "Nueva tarea", Some("b"))),
+                )
+                .await
+            }
+        });
+        let id = waiting_ask(&app).await["ask"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        call(
+            &app,
+            post(
+                &format!("/api/v1/asks/{id}/answer"),
+                json!({ "answers": { " ": "Crear" } }),
+            ),
+        )
+        .await;
+        hook.await.unwrap();
+        let (_, body) = call(
+            &app,
+            Request::get("/api/v1/sessions/conv/conversation")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let failed = body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"] == "card")
+            .nth(1)
+            .unwrap()
+            .clone();
+        assert_eq!(failed["outcome"], "answered");
+        assert_eq!(failed["task"], Value::Null);
+        assert!(!failed["error"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_released_conversation_card_is_marked_terminal() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move {
+                call(
+                    &app,
+                    post(CONV, proposal_card(TITLE, "Nueva tarea", Some("b"))),
+                )
+                .await
+            }
+        });
+        let id = waiting_ask(&app).await["ask"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        call(&app, post(&format!("/api/v1/asks/{id}/release"), json!({}))).await;
+        hook.await.unwrap();
+        assert_eq!(card(&app).await["outcome"], "terminal");
+    }
+
+    #[tokio::test]
+    async fn releasing_a_session_withdraws_only_its_asks() {
+        let asks = Asks::default();
+        let mut waiting = Vec::new();
+        for (id, session) in [("a", "conv"), ("b", "other")] {
+            let (tx, rx) = oneshot::channel();
+            let ask = Ask {
+                id: id.into(),
+                task: "@web".into(),
+                session: Some(session.into()),
+                questions: Value::Null,
+                proposal: None,
+                since: Utc::now(),
+            };
+            asks.pending.lock().unwrap().insert(id.into(), (ask, tx));
+            waiting.push(rx);
+        }
+        assert_eq!(asks.release_session("conv"), ["a"]);
+        assert!(matches!(waiting[0].try_recv(), Ok(Outcome::Released)));
+        assert_eq!(asks.list().len(), 1);
     }
 
     #[test]

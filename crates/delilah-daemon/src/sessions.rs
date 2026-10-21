@@ -1,7 +1,7 @@
 //! Sessions alive in this daemon right now, by session id.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use delilah_agents::pty::PtySession;
@@ -35,6 +35,10 @@ pub struct Live {
     /// Clients attached to the terminal right now.
     pub viewers: Arc<AtomicUsize>,
     pub state: Arc<Mutex<LiveState>>,
+    /// What the agent is doing right now, for a conversation's view.
+    pub activity: Arc<Mutex<Option<String>>>,
+    /// Claude waits on something only its terminal can answer (a permission prompt).
+    pub needs_terminal: Arc<AtomicBool>,
     events: Events,
 }
 
@@ -47,6 +51,28 @@ impl Live {
         let changed = std::mem::replace(&mut *self.state.lock().unwrap(), state) != state;
         if changed {
             self.events.emit(Topic::Sessions);
+        }
+    }
+
+    pub fn activity(&self) -> Option<String> {
+        self.activity.lock().unwrap().clone()
+    }
+
+    pub fn set_activity(&self, activity: Option<String>) {
+        let changed =
+            std::mem::replace(&mut *self.activity.lock().unwrap(), activity.clone()) != activity;
+        if changed {
+            self.events.emit(Topic::Conversations);
+        }
+    }
+
+    pub fn needs_terminal(&self) -> bool {
+        self.needs_terminal.load(Ordering::Relaxed)
+    }
+
+    pub fn set_needs_terminal(&self, needs: bool) {
+        if self.needs_terminal.swap(needs, Ordering::Relaxed) != needs {
+            self.events.emit(Topic::Conversations);
         }
     }
 }
@@ -86,6 +112,8 @@ impl Sessions {
             } else {
                 LiveState::Starting
             })),
+            activity: Arc::default(),
+            needs_terminal: Arc::default(),
             events: self.events.clone(),
         };
         self.live

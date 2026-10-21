@@ -67,6 +67,18 @@ pub async fn claude_hook(
         });
     }
 
+    // An idea conversation also keeps its own history.
+    let session_id = q
+        .session
+        .clone()
+        .or_else(|| live.as_ref().map(|l| l.id.clone()));
+    if let Some(id) = &session_id
+        && let Ok(Some(record)) = app.store.session(id).await
+        && record.conversation
+    {
+        crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
+    }
+
     // What the session now waits on you for, for the inbox.
     if let Some(id) = q
         .session

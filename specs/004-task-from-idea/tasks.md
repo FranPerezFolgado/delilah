@@ -172,7 +172,7 @@
 
 ### History, queue and stop (daemon)
 
-- [ ] T020 [US1] Write failing tests in a new `crates/delilah-daemon/src/conversation.rs` (`mod tests`; reuse the hook-posting helpers from `hooks.rs` tests, and a fake live session as those tests do):
+- [X] T020 [US1] Write failing tests in a new `crates/delilah-daemon/src/conversation.rs` (`mod tests`; reuse the hook-posting helpers from `hooks.rs` tests, and a fake live session as those tests do):
   - `GET /api/v1/sessions/{id}/conversation`: 404 for an unknown session, 409 for a non-conversation session, and the entries in order for a conversation;
   - `messages_sent_while_idle_are_typed_and_recorded_sent`;
   - `messages_sent_while_working_are_queued_and_typed_together_after_stop`: two queued entries; a `Stop` hook types `"a\n\nb"` once and marks both `sent`;
@@ -184,8 +184,8 @@
   - `a_permission_prompt_notification_sets_needs_terminal`;
   - `entries_are_recorded_only_for_conversation_sessions`;
   - `entries_survive_reopening_the_store_on_the_same_file` (temp-file store).
-- [ ] T021 [US1] Add `activity: Mutex<Option<String>>` and `needs_terminal: AtomicBool` to `Live`, with getters and setters, in `crates/delilah-daemon/src/sessions.rs`.
-- [ ] T022 [US1] Implement `crates/delilah-daemon/src/conversation.rs` and register it in `lib.rs`:
+- [X] T021 [US1] Add `activity: Mutex<Option<String>>` and `needs_terminal: AtomicBool` to `Live`, with getters and setters, in `crates/delilah-daemon/src/sessions.rs`.
+- [X] T022 [US1] Implement `crates/delilah-daemon/src/conversation.rs` and register it in `lib.rs`:
   - the handlers `get`, `send`, `remove`, `stop` (contracts/api.md);
   - `pub async fn on_hook(app, session, signal, hook)`, called from `hooks.rs` for conversation sessions: records user and Claude entries, sets activity and `needs_terminal`, and flushes the queue on `TurnEnded`;
   - `pub async fn flush_queue(app, live)`: joins with `\n\n`, uses `crate::actions::type_prompt`, marks the entries `sent`;
@@ -198,13 +198,13 @@
   - `POST /api/v1/sessions/{id}/stop`.
 
   Emit `Topic::Conversations` on every change. T020 then passes.
-- [ ] T023 [US1] Record card entries in `crates/delilah-daemon/src/asks.rs` for conversation sessions:
+- [X] T023 [US1] Record card entries in `crates/delilah-daemon/src/asks.rs` for conversation sessions:
   - `hook` adds a `card` entry (`pending`, questions, proposal);
   - `answer` updates it (`answered`, answer, task or error);
   - `release` and `release_session` update it to `terminal` or `withdrawn`.
 
   Add a test that each transition is reflected in `GET …/conversation`.
-- [ ] T024 [US1] Call `conversation::on_hook` from `crates/delilah-daemon/src/hooks.rs::claude` when the session record has `conversation`, after the live state is set (~line 68). Keep all non-conversation behaviour identical; the existing hooks tests must pass.
+- [X] T024 [US1] Call `conversation::on_hook` from `crates/delilah-daemon/src/hooks.rs::claude` when the session record has `conversation`, after the live state is set (~line 68). Keep all non-conversation behaviour identical; the existing hooks tests must pass.
 
 ### UI
 

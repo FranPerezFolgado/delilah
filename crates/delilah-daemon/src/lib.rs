@@ -5,6 +5,7 @@ pub mod api;
 pub mod asks;
 mod changes;
 pub mod config;
+mod conversation;
 pub mod events;
 mod files;
 mod hooks;
