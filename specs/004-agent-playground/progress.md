@@ -8,11 +8,11 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | verified | 1 | 9c190e7 | tsc ok; "Arrancando" already existed |
-| WP-02 | 2 | 2A | verified | 1 | (next) | 11 tests; tests written with impl (not seen failing); @name of unregistered project gets own area |
+| WP-02 | 2 | 2A | verified | 1 | a7fbadc | 11 tests; tests written with impl (not seen failing); @name of unregistered project gets own area |
 | WP-03 | 3 | 3A | pending | 0 | | |
 | WP-04 | 4 | 4A | pending | 0 | | |
 | WP-05 | 5 | 5A | pending | 0 | | |
-| WP-06 | 6 | 6A | implementing | 2 | | first run cut by usage limit, no changes |
+| WP-06 | 6 | 6A | verified | 2 | (next) | 28 tests; tests failed first; ActivityEvent serde tag=type |
 | WP-07 | 6 | 6A | pending | 0 | | |
 | WP-08 | 6 | 6B | pending | 0 | | |
 | WP-09 | 6 | 6C | pending | 0 | | |

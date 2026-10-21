@@ -173,7 +173,7 @@
 
 ### Adapter
 
-- [ ] T025 [P] [US3] Write failing tests in `crates/delilah-agents/src/claude.rs` (`#[cfg(test)]`):
+- [X] T025 [P] [US3] Write failing tests in `crates/delilah-agents/src/claude.rs` (`#[cfg(test)]`):
   - **`settings()`**:
     - `hooks` contains `PostToolUseFailure`, `SubagentStart` and `SubagentStop` posting to `/hooks/claude`;
     - `PreToolUse` has two entries, the `AskUserQuestion` one to `/hooks/claude/ask` (unchanged) and a `"*"` one to `/hooks/claude` with no 86400 timeout.
@@ -193,7 +193,7 @@
     - `Stop`, `StopFailure` and `SessionEnd` without `agent_id` → `TurnOver`;
     - `Notification` → `None`.
   - **`classify()`** still returns `Other` for `PreToolUse` and for `Subagent*`.
-- [ ] T026 [US3] Implement the T025 changes in `crates/delilah-agents/src/claude.rs`:
+- [X] T026 [US3] Implement the T025 changes in `crates/delilah-agents/src/claude.rs`:
   - add the events to `HOOK_EVENTS`;
   - build `PreToolUse` with both entries;
   - add `ActionKind`, `Action`, `AgentRef`, `ActivityEvent`, `action_of` and `classify_activity`, all deriving `Serialize` with kebab-case kinds.
