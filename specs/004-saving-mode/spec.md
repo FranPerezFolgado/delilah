@@ -115,19 +115,21 @@ the review session starts with the review instruction and the task moves to revi
 
 ### Functional Requirements
 
-- **FR-001**: A task MUST have a saving-mode setting, chosen when the task is created (also when saved to the backlog) and visible on the task afterwards.
+- **FR-001**: A task MUST have a saving-mode setting, chosen when the task is created (also when saved to the backlog), visible on the task afterwards and changeable while it runs (it applies from the next boundary; turning it off keeps the sessions already made).
 - **FR-002**: The default for new tasks MUST come from a user preference, so each installation (work Mac off, personal Mac on) gets the right default without choosing every time.
 - **FR-003**: When a saving-mode task starts, its first session MUST be labelled "Spec y plan" and told that, in saving mode, it should stop after the tasks are written and approved instead of implementing them.
 - **FR-004**: Delilah MUST detect the boundary planning → implementation (tasks written, none checked, first session's turn ended) and the boundary implementation → review (every task checked, the session's turn ended).
-- **FR-005**: The planning → implementation handoff MUST wait for the user to confirm it from the Bandeja or the task screen ("Implementar en sesión nueva"); that confirmation also approves the tasks. The implementation → review handoff MUST start on its own.
+- **FR-005**: The planning → implementation handoff MUST wait for the user to confirm it from the Bandeja or the task screen ("Implementar en sesión nueva"); that confirmation also approves the tasks. The user MUST also be able to decline it and keep working in the same session, which ends saving mode for that task. The implementation → review handoff MUST start on its own.
 - **FR-006**: A handoff MUST start a new session in the same workspace and branch, make it the task's main session (the one whose turns drive the task's status, questions and limits), and stop the previous one, keeping it listed, finished and reopenable.
 - **FR-007**: The implementation session MUST be started with the instruction to implement the feature from its spec folder; the review session with the review instruction for the branch. Both instructions are in the user's language.
 - **FR-008**: When the save-notes option is on, before a handoff Delilah MUST ask the outgoing session to save its session notes and wait for that turn to end; the option MUST be a user preference, on by default.
-- **FR-009**: The chain of a saving-mode task (its phases, which are done, active, pending) and a saving-mode marker MUST be shown in the task screen; tasks without saving mode show neither.
+- **FR-009**: The chain of a saving-mode task (its steps, which are done, active, pending, and a handoff waiting for the user or saving notes) and a saving-mode marker MUST be shown in the task screen; tasks without saving mode show neither.
 - **FR-010**: Usage-limit pauses, automatic resume after a reset, intercepted questions and the Bandeja MUST keep working with whichever session is the main one at the time.
 - **FR-011**: A handoff MUST be safe to retry: a restart or a pause in the middle never leaves a task with zero or two main sessions, nor starts the same phase's session twice.
 - **FR-012**: The handoffs MUST be recorded in the task's history (which phase, which session, when).
 - **FR-013**: Tasks without saving mode MUST behave exactly as today.
+- **FR-014**: If the new session cannot be started, the previous session MUST stay the main one and the failure MUST reach the Bandeja with a way to retry.
+- **FR-015**: An automatic handoff MUST be announced to the user the same way a finished turn is (Bandeja entry and notification).
 
 ### Key Entities
 
