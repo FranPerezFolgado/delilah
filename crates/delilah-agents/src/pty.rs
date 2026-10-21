@@ -23,6 +23,8 @@ pub struct PtySession {
     child: Mutex<Box<dyn Child + Send + Sync>>,
     output: Mutex<Output>,
     exited: watch::Receiver<bool>,
+    /// The child's exit status, set before `exited` fires.
+    exit_code: Mutex<Option<u32>>,
     /// Columns and rows: one size for everyone, set by whoever is driving it.
     size: watch::Sender<(u16, u16)>,
 }
@@ -68,6 +70,7 @@ impl PtySession {
                 live: broadcast::channel(LIVE_BUFFER_CHUNKS).0,
             }),
             exited,
+            exit_code: Mutex::new(None),
             size: watch::channel((cols, rows)).0,
         });
 
@@ -111,7 +114,9 @@ impl PtySession {
                 }
             }
         }
-        let _ = self.child.lock().unwrap().wait();
+        if let Ok(status) = self.child.lock().unwrap().wait() {
+            *self.exit_code.lock().unwrap() = Some(status.exit_code());
+        }
         let _ = exited.send(true);
     }
 
@@ -164,6 +169,11 @@ impl PtySession {
 
     pub fn has_exited(&self) -> bool {
         *self.exited.borrow()
+    }
+
+    /// The child's exit code; `None` until it has exited.
+    pub fn exit_code(&self) -> Option<u32> {
+        *self.exit_code.lock().unwrap()
     }
 
     /// Resolves once the process has exited and all its output has been read.
@@ -247,6 +257,17 @@ mod tests {
         assert_eq!(*sizes.borrow(), (120, 40));
         assert_eq!(session.size(), (120, 40));
         session.kill().unwrap();
+    }
+
+    #[tokio::test]
+    async fn reports_the_exit_code() {
+        for code in [0u32, 3] {
+            let session = PtySession::spawn(bash(&format!("exit {code}")), 80, 24, None).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), session.wait())
+                .await
+                .unwrap();
+            assert_eq!(session.exit_code(), Some(code));
+        }
     }
 
     #[tokio::test]
