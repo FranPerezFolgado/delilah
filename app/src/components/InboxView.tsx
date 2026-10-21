@@ -237,7 +237,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
         )}
         {item.kind === "pr-blocked" && item.pr && confirming && (
           <>
-            <span className="muted" style={{ fontSize: 12.5 }}>{t("Se borrará lo no subido. ¿Archivar igualmente?")}</span>
+            <span className="muted" style={{ fontSize: 12.5 }}>{t("Se quitará el workspace y las ramas locales que queden. Lo no subido se perderá si lo hay. ¿Archivar igualmente?")}</span>
             <button
               className="btn btn-p"
               disabled={busy}

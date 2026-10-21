@@ -36,9 +36,11 @@ export function PrView({ owner }: { owner: string }) {
   const [cannot, setCannot] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const none = !!data && data.prs.length === 0;
+  // Re-asks whenever the set of PRs changes: a repo may be free even if the task has PRs.
+  const prKey = data ? data.prs.map((p) => p.id).join(",") : null;
 
   useEffect(() => {
-    if (!none) return;
+    if (prKey === null) return;
     let live = true;
     api
       .prProposal(owner)
@@ -51,7 +53,7 @@ export function PrView({ owner }: { owner: string }) {
     return () => {
       live = false;
     };
-  }, [owner, none]);
+  }, [owner, prKey]);
 
   const load = useCallback(() => {
     api
@@ -103,6 +105,11 @@ export function PrView({ owner }: { owner: string }) {
           {data?.account ? t("Cuenta: {account}", { account: data.account }) : t("Sin cuenta de gh")}
         </span>
         <span style={{ flex: 1 }} />
+        {!none && cannot === "" && (
+          <button className="btn btn-p" onClick={() => setOpening(true)}>
+            {t("Abrir PR")}
+          </button>
+        )}
         <button className="btn" disabled={busy} onClick={() => run(() => api.refreshPrs(owner))}>
           {t("Actualizar")}
         </button>

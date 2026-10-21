@@ -18,23 +18,17 @@ export function OpenPrDialog({ owner, onClose, onOpened }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Loads the proposal for a repo and fills the fields. A parent project has no "." repo of its
-  // own: the first answer then lists the submodules without a PR, and we load the first of them.
+  // Loads the proposal and fills the fields. The daemon's default already points at a free
+  // repo (for a parent, the first submodule with commits); `pick` loads another one.
   useEffect(() => {
     let live = true;
-    const fill = (p: PrProposal) => {
-      setProposal(p);
-      setTitle(p.title);
-      setBody(p.body);
-    };
     api
       .prProposal(owner)
       .then((p) => {
         if (!live) return;
-        if (p.repos.length > 0 && !p.repos.includes(p.repo)) {
-          return api.prProposal(owner, p.repos[0]).then((q) => live && fill({ ...q, repos: p.repos }));
-        }
-        fill(p);
+        setProposal(p);
+        setTitle(p.title);
+        setBody(p.body);
       })
       .catch((e) => live && setError((e as Error).message));
     return () => {

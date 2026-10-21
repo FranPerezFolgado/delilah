@@ -95,4 +95,24 @@ describe("PrView", () => {
     await findByText("#42 Reintentos");
     expect(container.querySelector(".pr-group-title")).toBeNull();
   });
+
+  it("offers Open PR next to Refresh when PRs exist but a repo is free", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+    const prop = vi.spyOn(api, "prProposal").mockResolvedValue({ repo: "web", title: "T", body: "", base: "main", needs_push: false, repos: ["web", "api"] });
+    const { findByText, findByDisplayValue, findByRole } = render(<PrView owner="PROJ-1" />);
+    await findByText("#42 Reintentos");
+    fireEvent.click(await findByText("Open PR"));
+    await findByDisplayValue("T");
+    await findByRole("dialog");
+    expect(prop).toHaveBeenCalledWith("PROJ-1");
+  });
+
+  it("offers no Open PR when every repo already has one", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+    const prop = vi.spyOn(api, "prProposal").mockRejectedValue(new ApiError("ya", 409, false, "has-pr"));
+    const { findByText, queryByText } = render(<PrView owner="PROJ-1" />);
+    await findByText("#42 Reintentos");
+    await waitFor(() => expect(prop).toHaveBeenCalled());
+    expect(queryByText("Open PR")).toBeNull();
+  });
 });

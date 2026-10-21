@@ -71,7 +71,7 @@ export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], prs: PrSumma
     statuses.current = now;
   }, [tasks]);
 
-  // An approved or closed PR is news too (merged too: the daemon archives it).
+  // An approved or closed PR is news too (merged too; the daemon sends its own notification when it archives).
   useEffect(() => {
     const now = new Map(prs.map((p) => [p.task, { approved: p.review_decision === "approved", closed: p.state === "closed", merged: p.state === "merged" }]));
     if (prStates.current && !document.hasFocus()) {
@@ -80,7 +80,7 @@ export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], prs: PrSumma
         const cur = now.get(p.task)!;
         if (before && !before.approved && cur.approved) notify(`${p.task} ${t("aprobada")}`, "").catch(() => {});
         if (before && !before.closed && cur.closed) notify(`${p.task} ${t("PR cerrada")}`, "").catch(() => {});
-        if (before && !before.merged && cur.merged) notify(`${p.task} ${t("mergeada y archivada")}`, "").catch(() => {});
+        if (before && !before.merged && cur.merged) notify(`${p.task} ${t("PR mergeada")}`, "").catch(() => {});
       }
     }
     prStates.current = now;

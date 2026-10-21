@@ -77,6 +77,7 @@ describe("InboxView pr-blocked", () => {
     viewBlocked();
     fireEvent.click(screen.getByText("Archive anyway"));
     expect(arch).not.toHaveBeenCalled();
+    expect(screen.getByText(/workspace and any remaining local branches will be removed/)).toBeTruthy();
     fireEvent.click(screen.getByText("Yes, archive"));
     await waitFor(() => expect(dis).toHaveBeenCalledWith(7));
     expect(arch).toHaveBeenCalledWith("PROJ-1", true);
