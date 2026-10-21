@@ -10,12 +10,12 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP-01 | 1 | 1A | done | 1 | 9c190e7 | tsc ok; "Arrancando" already existed |
 | WP-02 | 2 | 2A | done | 1 | a7fbadc | 11 tests; tests written with impl (not seen failing); @name of unregistered project gets own area |
 | WP-03 | 3 | 3A | done | 2 | 3ff4b70 | 18 tests; fix: empty cells for free slots (no desk shifts); art not yet seen rendered |
-| WP-04 | 4 | 4A | pending | 0 | | |
+| WP-04 | 4 | 4A | implementing | 1 | | |
 | WP-05 | 5 | 5A | pending | 0 | | |
-| WP-06 | 6 | 6A | verified | 2 | da8f944 | 28 tests; tests failed first; ActivityEvent serde tag=type |
-| WP-07 | 6 | 6A | pending | 0 | | |
-| WP-08 | 6 | 6B | verified | 1 | a32eb33 | 8 tests failed first; mod is private in lib.rs |
-| WP-09 | 6 | 6C | verified | 1 | b306827 | 106 daemon tests; red first; hook returns 204 |
+| WP-06 | 6 | 6A | done | 2 | da8f944 | 28 tests; tests failed first; ActivityEvent serde tag=type |
+| WP-07 | 6 | 6A | verified | 1 | (next) | |
+| WP-08 | 6 | 6B | done | 1 | a32eb33 | 8 tests failed first; mod is private in lib.rs |
+| WP-09 | 6 | 6C | done | 1 | b306827 | 106 daemon tests; red first; hook returns 204 |
 | WP-10 | 6 | 6D | pending | 0 | | |
 | WP-11 | 6 | 6E | pending | 0 | | |
 | WP-12 | 7 | 7A | pending | 0 | | |
@@ -23,7 +23,7 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 â†’ 08 â
 | WP-14 | 9 | 9A | pending | 0 | | |
 | WP-15 | 9 | 9B | pending | 0 | | |
 | WP-03F | 3 | fix | done | 1 | af94ab7 | arch HIGH --pg-w collision + MEDIUM theme/paths/poses.ts/scale |
-| WP-09F | 6 | fix | verified | 1 | (next) | AskUserQuestion, no PreToolUse raw log, helper cap, ghost helpers, WebFetch userinfo |
+| WP-09F | 6 | fix | done | 1 | 15d97b9 | AskUserQuestion, no PreToolUse raw log, helper cap, ghost helpers, WebFetch userinfo |
 
 ## Reviews
 

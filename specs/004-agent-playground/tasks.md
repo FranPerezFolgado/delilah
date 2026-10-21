@@ -238,7 +238,7 @@
   - **`caption(action)`**: `"Edit · api.rs"`, `"Bash · cargo test…"`, and only the tool name with no target.
   - **`accessibleName`** includes the caption when there is one.
 - [ ] T033 [US3] Implement the T032 changes in `app/src/playground/layout.ts`. Make `usePlayground.ts` also load `api.activity()` on the `activity` topic and attach each session's activity to its `DeskModel`.
-- [ ] T034 [US3] Draw the action poses in `app/src/playground/sprites.ts` and add them to `CREDITS.md`:
+- [X] T034 [US3] Draw the action poses in `app/src/playground/sprites.ts` and add them to `CREDITS.md`:
   - `typing` (hands on keys, screen flicker);
   - `reading` (open book or paper);
   - `terminal` (green screen lines);
