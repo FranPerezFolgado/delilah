@@ -233,19 +233,19 @@
   - it renders as in T027 and scrolls to the bottom on new entries.
 
   Add the styles to `app/src/styles.css`, reusing the existing tokens. T027 then passes.
-- [ ] T029 [US1] In `app/src/components/TaskScreen.tsx`, for a project session with `conversation`:
+- [X] T029 [US1] In `app/src/components/TaskScreen.tsx`, for a project session with `conversation`:
   - render `ConversationView` instead of `TerminalPane` (around line 609);
   - add a header toggle "Ver terminal" / "Ver conversación", per session, in component state, defaulting to conversation;
   - hide the read-only/"Permitir cambios"/"Convertir en tarea" bar (lines 555–585) for conversations.
 
   Extend `app/src/components/TaskScreen.test.tsx`: a conversation session renders the view, not the terminal, and the toggle switches.
-- [ ] T030 [P] [US1] Add the entry points:
+- [X] T030 [P] [US1] Add the entry points:
   - in `app/src/components/ProjectView.tsx`, a "Nueva tarea con Claude" button next to "Preguntar a Claude" (line 31);
   - in `app/src/components/Sidebar.tsx`, the same action in the project's "+" (line 172 area; turn it into a small menu, or add a second icon button "Nueva tarea con Claude"), calling `api.openProjectSession(name, { kind: "claude", conversation: true })` and selecting the new session;
   - in the sidebar, list conversation sessions with an idea icon (`Icon.tsx`: add one if there is none).
 
   Extend `app/src/components/Sidebar.test.tsx` for the new action.
-- [ ] T031 [US1] In `app/src/components/NewTaskDialog.tsx`:
+- [X] T031 [US1] In `app/src/components/NewTaskDialog.tsx`:
   - add the third origin `"claude"` ("Con Claude") to the segmented control (lines 161–166). With it, show only the project picker and an optional textarea "Tu idea", and hide the key, title, notes and where fields;
   - on submit, call `api.openProjectSession(project.name, { kind: "claude", conversation: true, prompt: idea || undefined })`, close, and navigate to the session (the same callback the sidebar uses).
 

@@ -3,6 +3,7 @@ import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task } from "../api";
 import { AskCard } from "./AskCard";
+import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
 import { CHANGES, OVERVIEW, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
@@ -35,6 +36,8 @@ interface Props {
   onNewTask?: () => void;
   /** "Convertir en tarea" on one of the project's Claude sessions. */
   onConvert?: (session: Session) => void;
+  /** Goes to a task, e.g. the one a conversation created. */
+  onOpenTask?: (key: string) => void;
   /** The task's open sessions: each one is a tab. */
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
@@ -52,7 +55,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert }: Props) {
+export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert, onOpenTask }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -70,6 +73,15 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   const [starting, setStarting] = useState<string | null>(null);
   // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
   const [mounted, setMounted] = useState<Set<string>>(() => new Set());
+  // Conversations whose terminal is on screen instead of the conversation view.
+  const [terminals, setTerminals] = useState<Set<string>>(() => new Set());
+  const showTerminal = (id: string, on: boolean) =>
+    setTerminals((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
 
@@ -88,6 +100,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   shownRef.current = shown;
   const active = tab(shown);
   const shownSession = sessionOf(shown);
+  const shownConversation = project ? sessions.find((s) => s.id === shownSession && s.conversation) : undefined;
   if (shownSession && !mounted.has(shownSession)) setMounted(new Set(mounted).add(shownSession));
 
   // The live state of a file: the view's for the active one, the stored one otherwise.
@@ -204,9 +217,9 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   const sessionById = (id: string | null) => sessions.find((s) => s.id === id);
 
   /** Starts a Claude or a terminal in the workspace and shows its tab. */
-  const newSession = async (kind: SessionKind, prompt?: string, label?: string) => {
+  const newSession = async (kind: SessionKind, prompt?: string, label?: string, conversation?: boolean) => {
     const created = project
-      ? await api.openProjectSession(project.name, { kind, prompt, label })
+      ? await api.openProjectSession(project.name, { kind, prompt, label, ...(conversation ? { conversation } : {}) })
       : await api.openSession(owner, { kind, prompt, label });
     setStarting(created.id);
     activate(sessionTab(created.id));
@@ -460,6 +473,11 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <span className="mono muted trunc" style={{ marginRight: "auto" }}>{project?.path}</span>
           </>
         )}
+        {shownConversation && (
+          <button className="btn btn-ghost" onClick={() => showTerminal(shownConversation.id, !terminals.has(shownConversation.id))}>
+            {terminals.has(shownConversation.id) ? t("Ver conversación") : t("Ver terminal")}
+          </button>
+        )}
         {hasWorkspace && (
           <button
             className={`btn btn-ghost ${showTree ? "is-on" : ""}`}
@@ -520,6 +538,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               sessions={sessions}
               onOpenSession={showSession}
               onNewSession={newSession}
+              onNewIdea={() => newSession("claude", undefined, undefined, true)}
               onNewTask={onNewTask}
             />
           )}
@@ -550,9 +569,15 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             .map((s) => {
               const on = shownSession === s.id;
               const sessionAsks = asks.filter((a) => a.session?.id === s.id && a.ask);
+              const asConversation = !!project && s.conversation && !terminals.has(s.id);
+              const reopen = () =>
+                api
+                  .reopenSession(s.id)
+                  .then(onChanged)
+                  .catch((e) => setError((e as Error).message));
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
-                  {s.read_only && s.kind === "claude" && s.live && (
+                  {!asConversation && s.read_only && s.kind === "claude" && s.live && (
                     <div className="ebar warn">
                       <Icon name="lock" />
                       <span style={{ flex: 1 }}>
@@ -576,7 +601,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                       )}
                     </div>
                   )}
-                  {!s.read_only && s.kind === "claude" && s.live && project && onConvert && (
+                  {!asConversation && !s.read_only && s.kind === "claude" && s.live && project && onConvert && (
                     <div className="ebar">
                       <span style={{ flex: 1 }} className="muted">
                         {t("Claude sobre tu checkout, sin tarea.")}
@@ -586,17 +611,12 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                       </button>
                     </div>
                   )}
-                  {!s.live && (
+                  {!s.live && !asConversation && (
                     <div className="ebar">
                       <span style={{ flex: 1 }}>{t("Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).")}</span>
                       <button
                         className="btn btn-p"
-                        onClick={() =>
-                          api
-                            .reopenSession(s.id)
-                            .then(onChanged)
-                            .catch((e) => setError((e as Error).message))
-                        }
+                        onClick={reopen}
                       >
                         {t("Reabrir")}
                       </button>
@@ -606,7 +626,16 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                       terminal or loses an answer being written. */}
                   <div className={`tterm-body ask-${askPosition}`}>
                     {/* A new connection once it comes back to life. */}
-                    <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} kind={s.kind} focused={on} />
+                    {asConversation ? (
+                      <ConversationView
+                        session={s}
+                        onOpenTerminal={() => showTerminal(s.id, true)}
+                        onOpenTask={(key) => onOpenTask?.(key)}
+                        onReopen={reopen}
+                      />
+                    ) : (
+                      <TerminalPane key={`${s.id}:${s.live}:${s.read_only}`} sessionId={s.id} kind={s.kind} focused={on} />
+                    )}
                     {sessionAsks.length > 0 && (
                       <div className="ask-bar">
                         <div className="sec">{t("El agente te pregunta")}</div>

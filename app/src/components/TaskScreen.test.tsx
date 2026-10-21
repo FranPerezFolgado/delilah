@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
-import type { Project, SpecSummary, Task, TaskStatus } from "../api";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import type { Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
@@ -12,7 +13,8 @@ vi.mock("../api", async (orig) => {
     api: new Proxy({}, { get: () => () => new Promise(() => {}) }),
   };
 });
-vi.mock("./TerminalPane", () => ({ TerminalPane: () => null }));
+vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
+vi.mock("./ConversationView", () => ({ ConversationView: () => <div data-testid="conversation" /> }));
 vi.mock("./FileTree", () => ({ FileTree: () => null }));
 vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
 vi.mock("./TaskView", () => ({ TaskView: () => null }));
@@ -71,5 +73,49 @@ describe("TaskScreen header phase", () => {
 
   it("shows no phase pill on the project screen", () => {
     expect(head().querySelector(".phase-pill")).toBeNull();
+  });
+});
+
+describe("TaskScreen conversation sessions", () => {
+  const conv: Session = {
+    id: "s1",
+    task: "@web",
+    kind: "claude",
+    label: "Idea",
+    primary: false,
+    closed: false,
+    live: true,
+    read_only: false,
+    state: "waiting",
+    conversation: true,
+  };
+  const open = (s: Session) => {
+    sessionFor("@web").active = sessionTab(s.id);
+    return render(
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
+    );
+  };
+
+  it("shows the conversation view, not the terminal, with no convert bar", () => {
+    const { queryByTestId, container } = open(conv);
+    expect(queryByTestId("conversation")).not.toBeNull();
+    expect(queryByTestId("terminal")).toBeNull();
+    expect(container.querySelector(".tterm .ebar")).toBeNull();
+  });
+
+  it("toggles to the terminal and back", () => {
+    const { queryByTestId, getByText } = open(conv);
+    fireEvent.click(getByText("Ver terminal"));
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
+    fireEvent.click(getByText("Ver conversación"));
+    expect(queryByTestId("conversation")).not.toBeNull();
+    expect(queryByTestId("terminal")).toBeNull();
+  });
+
+  it("keeps the terminal for a plain session", () => {
+    const { queryByTestId } = open({ ...conv, conversation: false });
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
   });
 });
