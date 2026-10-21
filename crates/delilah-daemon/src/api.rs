@@ -67,6 +67,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/prs/{id}",
             axum::routing::delete(crate::pr_api::unlink),
         )
+        .route(
+            "/api/v1/pr-notices/{id}/forward",
+            post(crate::pr_api::forward),
+        )
+        .route(
+            "/api/v1/pr-notices/{id}/dismiss",
+            post(crate::pr_api::dismiss),
+        )
         .route("/api/v1/sessions", get(session_api::list_all))
         .route(
             "/api/v1/preferences/{key}",
@@ -346,12 +354,16 @@ pub struct ErrorBody {
     /// Refused because work in a worktree would be lost: the client may offer to force it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unpushed: bool,
+    /// A task paused by the limit: when it resumes by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_at: Option<chrono::DateTime<Utc>>,
 }
 
 pub struct ApiError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
     pub(crate) unpushed: bool,
+    pub(crate) resume_at: Option<chrono::DateTime<Utc>>,
 }
 
 impl ApiError {
@@ -379,6 +391,14 @@ impl ApiError {
         }
     }
 
+    /// A 409 for a task paused by the limit; the body says when it resumes.
+    pub fn paused(message: impl Into<String>, resume_at: chrono::DateTime<Utc>) -> Self {
+        Self {
+            resume_at: Some(resume_at),
+            ..Self::conflict(message)
+        }
+    }
+
     pub fn too_large(message: impl Into<String>) -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, message)
     }
@@ -400,6 +420,7 @@ impl ApiError {
             status,
             message: message.into(),
             unpushed: false,
+            resume_at: None,
         }
     }
 }
@@ -431,6 +452,7 @@ impl IntoResponse for ApiError {
             Json(ErrorBody {
                 error: self.message,
                 unpushed: self.unpushed,
+                resume_at: self.resume_at,
             }),
         )
             .into_response()
