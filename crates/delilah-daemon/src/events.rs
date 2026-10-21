@@ -136,7 +136,10 @@ mod tests {
 
     #[test]
     fn prs_topic_serializes_as_prs() {
-        assert_eq!(serde_json::to_string(&Topic::Prs).unwrap(), r#"{"type":"prs"}"#);
+        assert_eq!(
+            serde_json::to_string(&Topic::Prs).unwrap(),
+            r#"{"type":"prs"}"#
+        );
     }
 
     /// A bare HTTP POST to /api/v1/tasks, to keep test dependencies down.

@@ -8,6 +8,8 @@ Orchestrator steps (not for implementer agents):
 
 Check shorthand: `rust:<crate>` = `cargo test -p <crate>`; `app` = `cd app && npx tsc --noEmit && npx vitest related --run <files touched>`.
 
+> **Layout change after the Phase 2 review (WP-02F):** data types live in `crates/delilah-daemon/src/pr_types.rs`; `prs.rs` holds only pure logic (`ci_outcome`, `pick`, `summary`, `diff`, `Backoff`); the I/O orchestration (`check_task`, `spawn`, `nudge`, `on_merged`) goes in a new `crates/delilah-daemon/src/pr_loop.rs`; `gh` is a directory (`gh/mod.rs`, `gh/graphql.rs`, `gh/fake.rs`) and `AppState.gh` is a `GhClient`. Where a task below says `prs.rs` for those functions or their tests, use `pr_loop.rs`.
+
 ## WP-01 Setup: migration, Topic::Prs, fake gh
 - Phase: 1 Setup
 - Tasks: T002, T003, T004
@@ -31,7 +33,7 @@ Check shorthand: `rust:<crate>` = `cargo test -p <crate>`; `app` = `cd app && np
 ## WP-03 US1 check_task, polling loop and nudge
 - Phase: 3 US1 See the PR
 - Tasks: T012, T014, T016
-- Files: crates/delilah-daemon/src/prs.rs, crates/delilah-daemon/src/main.rs, crates/delilah-daemon/src/phases.rs
+- Files: crates/delilah-daemon/src/pr_loop.rs (new), crates/delilah-daemon/src/lib.rs, crates/delilah-daemon/src/main.rs, crates/delilah-daemon/src/phases.rs
 - Depends on: WP-02
 - Parallel group: 3A
 - Acceptance: FR-001, FR-002, FR-024, FR-025, FR-027, FR-028, FR-029, FR-022 — a PR from the task's branch is detected, linked and snapshotted; back-off and once-per-project access notice work; push/`gh pr create` hooks nudge a check

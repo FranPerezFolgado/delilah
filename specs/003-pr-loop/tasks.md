@@ -12,6 +12,8 @@ description: "Task list for PR loop"
 
 **Organization**: grouped by user story (US1 see the PR, US2 notices, US3 open a PR, US4 archive on merge, US5 changesets).
 
+> **Layout change after the Phase 2 review (WP-02F):** data types live in `crates/delilah-daemon/src/pr_types.rs`; `prs.rs` holds only pure logic (`ci_outcome`, `pick`, `summary`, `diff`, `Backoff`); the I/O orchestration (`check_task`, `spawn`, `nudge`, `on_merged`) goes in a new `crates/delilah-daemon/src/pr_loop.rs`; `gh` is a directory (`gh/mod.rs`, `gh/graphql.rs`, `gh/fake.rs`) and `AppState.gh` is a `GhClient`. Where a task below says `prs.rs` for those functions or their tests, use `pr_loop.rs`.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies on incomplete tasks)

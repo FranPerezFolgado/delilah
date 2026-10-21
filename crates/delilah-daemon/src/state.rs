@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use axum::extract::FromRef;
 use chrono::{DateTime, Utc};
@@ -10,8 +9,9 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::events::{Events, Topic};
-use crate::gh::{CliGh, Gh};
+use crate::gh::{CliGh, Gh, GhClient};
 use crate::notify::Notifier;
+use crate::prs::Backoff;
 use crate::secrets::Secrets;
 use crate::sessions::Sessions;
 use crate::specs::SpecSummary;
@@ -49,9 +49,10 @@ pub struct AppState {
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
     /// The user's `gh`, behind a trait so tests answer with canned output.
-    pub gh: Arc<dyn Gh>,
-    /// Per repo (`host/owner/name`): failures in a row and when to try again.
-    pub pr_backoff: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
+    pub gh: Arc<GhClient>,
+    /// Per repo (`host/owner/name`): when to try `gh` again after it failed.
+    #[allow(dead_code)] // read by the loop in the next package
+    pub(crate) pr_backoff: Arc<Mutex<Backoff>>,
 }
 
 impl AppState {
@@ -80,14 +81,14 @@ impl AppState {
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             remote_control: Arc::default(),
-            gh: Arc::new(CliGh::default()),
+            gh: Arc::new(GhClient::new(Arc::new(CliGh))),
             pr_backoff: Arc::default(),
         }
     }
 
     /// The same state talking to another `gh` (tests inject a fake).
     pub fn with_gh(mut self, gh: Arc<dyn Gh>) -> Self {
-        self.gh = gh;
+        self.gh = Arc::new(GhClient::new(gh));
         self
     }
 

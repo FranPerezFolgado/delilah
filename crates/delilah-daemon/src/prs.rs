@@ -1,149 +1,52 @@
-//! Pull requests linked to tasks: the snapshot types and the pure helpers over them
-//! (what a check found, which PR to pick, the badge summary).
+//! Pull requests linked to tasks: the pure logic over the snapshot types (what a check
+//! found, which PR to pick, the badge summary, the back-off after a failure). The I/O
+//! lives in `pr_loop`; the data types in `pr_types`.
 
 // The loop and the API that use these land in the next packages.
 #![allow(dead_code)]
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
+use crate::pr_types::{
+    Check, ListedPr, Outcome, PrState, PrSummary, ReviewDecision, Rollup, Snapshot,
+};
 use crate::store_prs::PrRow;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum PrState {
-    #[serde(alias = "OPEN")]
-    Open,
-    #[serde(alias = "MERGED")]
-    Merged,
-    #[serde(alias = "CLOSED")]
-    Closed,
+const BACKOFF_BASE: Duration = Duration::from_secs(30);
+const BACKOFF_CAP: Duration = Duration::from_secs(600);
+
+/// When to try each key (a repo, `host/owner/name`) again after `gh` failed: 30 s,
+/// doubling per failure in a row up to 10 min, or the moment GitHub said the rate limit
+/// resets.
+#[derive(Debug, Default)]
+pub struct Backoff {
+    /// Failures in a row and when the next try is due.
+    entries: HashMap<String, (u32, Instant)>,
 }
 
-/// How one check came out; `Neutral` is cancelled, skipped, neutral or stale, which
-/// never count as a failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Outcome {
-    Pending,
-    Success,
-    Failure,
-    Neutral,
-}
+impl Backoff {
+    /// Whether `key` may be tried at `now`.
+    pub fn due(&self, key: &str, now: Instant) -> bool {
+        self.entries.get(key).is_none_or(|(_, at)| now >= *at)
+    }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Check {
-    pub name: String,
-    pub outcome: Outcome,
-    #[serde(default)]
-    pub url: Option<String>,
-}
+    pub fn fail(&mut self, key: &str, now: Instant, reset: Option<Instant>) {
+        let failures = self
+            .entries
+            .get(key)
+            .map_or(0, |(n, _)| *n)
+            .saturating_add(1);
+        let wait = BACKOFF_BASE
+            .saturating_mul(2u32.saturating_pow((failures - 1).min(16)))
+            .min(BACKOFF_CAP);
+        self.entries
+            .insert(key.to_string(), (failures, reset.unwrap_or(now + wait)));
+    }
 
-/// The CI of a head as a whole.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Rollup {
-    Pending,
-    Success,
-    Failure,
-    None,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReviewDecision {
-    #[serde(alias = "APPROVED")]
-    Approved,
-    #[serde(alias = "CHANGES_REQUESTED")]
-    ChangesRequested,
-    #[serde(alias = "REVIEW_REQUIRED")]
-    ReviewRequired,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReviewState {
-    #[serde(alias = "APPROVED")]
-    Approved,
-    #[serde(alias = "CHANGES_REQUESTED")]
-    ChangesRequested,
-    #[serde(alias = "COMMENTED")]
-    Commented,
-    #[serde(other)]
-    Other,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Review {
-    pub id: i64,
-    pub author: String,
-    pub state: ReviewState,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CommentKind {
-    Issue,
-    Review,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Comment {
-    pub id: i64,
-    pub kind: CommentKind,
-    pub author: String,
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub line: Option<i64>,
-    pub body: String,
-}
-
-/// What GitHub said about a PR at the last check.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub state: PrState,
-    pub draft: bool,
-    pub title: String,
-    /// Head commit sha.
-    pub head: String,
-    pub base: String,
-    pub checks: Vec<Check>,
-    pub review_decision: Option<ReviewDecision>,
-    pub reviews: Vec<Review>,
-    pub comments: Vec<Comment>,
-}
-
-/// The highest ids already seen, so nothing is notified twice (see research R4).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Marks {
-    /// Head already notified as failed.
-    pub ci_failed_sha: Option<String>,
-    pub review: i64,
-    pub issue_comment: i64,
-    pub review_comment: i64,
-}
-
-/// A PR as `gh pr list` shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct ListedPr {
-    pub number: i64,
-    pub url: String,
-    pub state: PrState,
-    #[serde(rename = "updatedAt")]
-    pub updated_at: DateTime<Utc>,
-}
-
-/// One badge per task: the worst of each field across its PRs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrSummary {
-    pub task: String,
-    pub state: PrState,
-    pub draft: bool,
-    pub ci: Rollup,
-    pub review_decision: Option<ReviewDecision>,
-    pub count: usize,
+    pub fn ok(&mut self, key: &str) {
+        self.entries.remove(key);
+    }
 }
 
 /// Failure beats pending beats success; neutral checks are ignored; no checks at all
@@ -225,7 +128,10 @@ pub(crate) fn summary(task: &str, rows: &[PrRow]) -> Option<PrSummary> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use chrono::{DateTime, Utc};
+
     use super::*;
+    use crate::pr_types::Marks;
 
     pub(crate) fn check(name: &str, outcome: Outcome) -> Check {
         Check {
@@ -367,5 +273,37 @@ pub(crate) mod tests {
             serde_json::to_value(&s).unwrap(),
             serde_json::json!({"task":"PROJ-1","state":"open","draft":false,"ci":"success","review_decision":null,"count":1})
         );
+    }
+
+    #[test]
+    fn backoff_doubles_up_to_the_cap_and_ok_forgets() {
+        let t0 = Instant::now();
+        let mut b = Backoff::default();
+        assert!(b.due("r", t0));
+        b.fail("r", t0, None);
+        assert!(!b.due("r", t0 + Duration::from_secs(29)));
+        assert!(b.due("r", t0 + Duration::from_secs(30)));
+        b.fail("r", t0, None);
+        assert!(!b.due("r", t0 + Duration::from_secs(59)));
+        assert!(b.due("r", t0 + Duration::from_secs(60)));
+        for _ in 0..10 {
+            b.fail("r", t0, None);
+        }
+        assert!(!b.due("r", t0 + Duration::from_secs(599)));
+        assert!(b.due("r", t0 + Duration::from_secs(600)));
+        assert!(b.due("other", t0));
+        b.ok("r");
+        assert!(b.due("r", t0));
+        b.fail("r", t0, None);
+        assert!(!b.due("r", t0 + Duration::from_secs(29)));
+    }
+
+    #[test]
+    fn backoff_waits_for_the_rate_limit_reset_when_known() {
+        let t0 = Instant::now();
+        let mut b = Backoff::default();
+        b.fail("r", t0, Some(t0 + Duration::from_secs(3000)));
+        assert!(!b.due("r", t0 + Duration::from_secs(2999)));
+        assert!(b.due("r", t0 + Duration::from_secs(3000)));
     }
 }

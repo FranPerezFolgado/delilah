@@ -10,7 +10,7 @@ use serde_json::Value;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
-use crate::prs::{Marks, PrState, Snapshot};
+use crate::pr_types::{Marks, PrState, Snapshot};
 use crate::store::{Store, StoreError};
 
 /// One PR linked to a task, per repo of its workspace.
@@ -171,6 +171,24 @@ impl Store {
     /// keeps what was seen of it; a different one starts from nothing.
     pub(crate) async fn link_pr(&self, key: &TaskKey, pr: &NewPr) -> Result<PrRow, StoreError> {
         let mut tx = self.pool.begin().await?;
+        // A different PR leaves the notices of the old one meaningless.
+        let old_url: Option<String> =
+            sqlx::query_scalar("SELECT url FROM pull_requests WHERE task_key = ? AND repo = ?")
+                .bind(key.as_str())
+                .bind(&pr.repo)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if old_url.is_some_and(|old| old != pr.url) {
+            sqlx::query(
+                "UPDATE pr_notices SET resolved_at = ?
+                 WHERE task_key = ? AND repo = ? AND resolved_at IS NULL",
+            )
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .bind(&pr.repo)
+            .execute(&mut *tx)
+            .await?;
+        }
         // Never INSERT OR REPLACE: it would change the id.
         sqlx::query(
             "INSERT INTO pull_requests (task_key, repo, host, owner_name, number, url, linked_by, created_at)
@@ -426,8 +444,8 @@ mod tests {
     use delilah_git::Workspace;
 
     use super::*;
+    use crate::pr_types::{Outcome, PrState};
     use crate::prs::tests::{check, snapshot};
-    use crate::prs::{Outcome, PrState};
 
     async fn store_with(keys: &[&str]) -> Store {
         let store = Store::in_memory().await.unwrap();
@@ -518,6 +536,68 @@ mod tests {
         );
         assert_eq!(store.pr(first.id).await.unwrap().unwrap().number, 2);
         assert!(store.pr(999).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn linking_another_pr_resolves_the_notices_of_the_old_one() {
+        let store = store_with(&["PROJ-1"]).await;
+        let key = TaskKey::new("PROJ-1");
+        link(&store, "PROJ-1", ".", 1).await;
+        link(&store, "PROJ-1", "svc", 5).await;
+        for repo in [".", "svc"] {
+            store
+                .insert_notice(&key, &notice(repo, "ci-failed", "abc"))
+                .await
+                .unwrap();
+        }
+
+        // The same URL leaves them alone.
+        link(&store, "PROJ-1", ".", 1).await;
+        assert_eq!(store.open_notices().await.unwrap().len(), 2);
+
+        // Another PR in "." resolves that repo's only.
+        link(&store, "PROJ-1", ".", 2).await;
+        let open = store.open_notices().await.unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].repo, "svc");
+    }
+
+    #[tokio::test]
+    async fn set_pr_error_records_and_clears() {
+        let store = store_with(&["PROJ-1"]).await;
+        let pr = link(&store, "PROJ-1", ".", 1).await;
+        store.set_pr_error(pr.id, Some("network")).await.unwrap();
+        let row = store.pr(pr.id).await.unwrap().unwrap();
+        assert_eq!(row.error.as_deref(), Some("network"));
+        store.set_pr_error(pr.id, None).await.unwrap();
+        assert_eq!(store.pr(pr.id).await.unwrap().unwrap().error, None);
+    }
+
+    #[tokio::test]
+    async fn notice_reads_one_row_and_resolve_notice_closes_it_once() {
+        let store = store_with(&["PROJ-1"]).await;
+        let key = TaskKey::new("PROJ-1");
+        assert!(store.notice(1).await.unwrap().is_none());
+        store
+            .insert_notice(&key, &notice(".", "comments", "9"))
+            .await
+            .unwrap();
+        let id = store.open_notices().await.unwrap()[0].id;
+        let n = store.notice(id).await.unwrap().unwrap();
+        assert_eq!((n.kind.as_str(), n.cause.as_str()), ("comments", "9"));
+        assert!(n.resolved_at.is_none());
+        assert!(store.resolve_notice(id).await.unwrap());
+        assert!(!store.resolve_notice(id).await.unwrap());
+        assert!(!store.resolve_notice(id + 100).await.unwrap());
+        assert!(
+            store
+                .notice(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .resolved_at
+                .is_some()
+        );
     }
 
     #[tokio::test]
