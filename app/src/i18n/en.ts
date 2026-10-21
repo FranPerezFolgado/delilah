@@ -390,4 +390,12 @@ export const EN: Record<string, string> = {
   "Desvincular": "Unlink",
   "hacia {base}": "into {base}",
   "{n} comentarios": "{n} comments",
+  "Abrir PR": "Open PR",
+  "Abriendo…": "Opening…",
+  "Abrir pull request": "Open pull request",
+  "contra {base}": "against {base}",
+  "Se subirá la rama antes de abrirla": "The branch will be pushed before opening it",
+  "No hay commits nuevos en la rama": "No new commits on the branch",
+  "Ya hay una PR abierta": "There is already an open PR",
+  "La tarea no tiene workspace": "The task has no workspace",
 };

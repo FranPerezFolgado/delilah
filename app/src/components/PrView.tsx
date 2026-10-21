@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ago, api, type PullRequest, type TaskPrs } from "../api";
+import { ago, api, ApiError, type PullRequest, type TaskPrs } from "../api";
 import { on } from "../live";
 import { openExternal } from "../platform";
 import { PR_CI, PR_STATES, REVIEWS } from "./PrBadge";
 import { t } from "../i18n";
+import { OpenPrDialog } from "./OpenPrDialog";
 
 // What to do about each problem the daemon can report with `gh`.
 const FIXES: Record<string, string> = {
@@ -15,6 +16,13 @@ const FIXES: Record<string, string> = {
   "rate-limited": "Límite de peticiones alcanzado: se reintenta más tarde",
 };
 
+// Why "Abrir PR" is disabled, by the reason the daemon gives.
+const CANNOT: Record<string, string> = {
+  "no-commits": "No hay commits nuevos en la rama",
+  "has-pr": "Ya hay una PR abierta",
+  "no-workspace": "La tarea no tiene workspace",
+};
+
 const OUTCOME_CLASS = { pending: "c-wait", success: "c-done", failure: "c-err", neutral: "c-mut" } as const;
 
 /** The PR tab: the task's PRs with their checks and review, and the means to link one by URL. */
@@ -23,6 +31,27 @@ export function PrView({ owner }: { owner: string }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Whether a PR can be opened: null while unknown, else the reason it can't (or "" if it can).
+  const [cannot, setCannot] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const none = !!data && data.prs.length === 0;
+
+  useEffect(() => {
+    if (!none) return;
+    let live = true;
+    api
+      .prProposal(owner)
+      .then(() => live && setCannot(""))
+      .catch((e) => {
+        if (!live) return;
+        const reason = e instanceof ApiError ? e.reason : undefined;
+        setCannot(reason ? t(CANNOT[reason] ?? e.message) : e instanceof ApiError ? e.message : "");
+      });
+    return () => {
+      live = false;
+    };
+  }, [owner, none]);
 
   const load = useCallback(() => {
     api
@@ -86,7 +115,29 @@ export function PrView({ owner }: { owner: string }) {
       )}
       {error && <div className="error">{error}</div>}
 
-      {data && data.prs.length === 0 && <div className="empty">{t("Aún no hay PR")}</div>}
+      {none && (
+        <div className="empty">
+          <div>{t("Aún no hay PR")}</div>
+          {cannot !== null && (
+            <div className="pr-open">
+              <button className="btn btn-p" disabled={!!cannot} onClick={() => setOpening(true)}>
+                {t("Abrir PR")}
+              </button>
+              {cannot && <span className="muted">{cannot}</span>}
+            </div>
+          )}
+        </div>
+      )}
+      {opening && (
+        <OpenPrDialog
+          owner={owner}
+          onClose={() => setOpening(false)}
+          onOpened={() => {
+            setOpening(false);
+            load();
+          }}
+        />
+      )}
       {data?.prs.map((pr) => (
         <PrCard key={pr.id} pr={pr} disabled={busy} onUnlink={() => run(() => api.unlinkPr(owner, pr.id))} />
       ))}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, type PullRequest, type TaskPrs } from "../api";
+import { api, ApiError, type PullRequest, type TaskPrs } from "../api";
 import { PrView } from "./PrView";
 
 afterEach(() => {
@@ -59,5 +59,21 @@ describe("PrView", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("PROJ-1"));
     fireEvent.click(getByText("Unlink"));
     await waitFor(() => expect(unlink).toHaveBeenCalledWith("PROJ-1", 7));
+  });
+
+  it("disables Open PR with the reason when there is nothing to open", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [] }));
+    vi.spyOn(api, "prProposal").mockRejectedValue(new ApiError("sin commits", 409, false, "no-commits"));
+    const { findByText, getByText } = render(<PrView owner="PROJ-1" />);
+    await findByText("No new commits on the branch");
+    expect((getByText("Open PR") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("enables Open PR when a proposal exists", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [] }));
+    vi.spyOn(api, "prProposal").mockResolvedValue({ repo: ".", title: "T", body: "", base: "main", needs_push: false });
+    const { findByText, findByDisplayValue } = render(<PrView owner="PROJ-1" />);
+    fireEvent.click(await findByText("Open PR"));
+    await findByDisplayValue("T");
   });
 });

@@ -126,8 +126,8 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 - [X] T033 [US3] Implement `commit_subjects`, `needs_push`, `push_branch` in `crates/delilah-git/src/workspace.rs` (export from `crates/delilah-git/src/lib.rs`); make T031 pass
 - [ ] T034 [US3] Implement `proposal` and `open` handlers in `crates/delilah-daemon/src/pr_api.rs` (Jira site and mode from the daemon's Jira settings in `crates/delilah-daemon/src/jira.rs`; git calls in `spawn_blocking`), register routes in `crates/delilah-daemon/src/api.rs`; make T032 pass
-- [ ] T035 [P] [US3] Add `PrProposal`, `prProposal`, `openPr` to `app/src/api.ts`
-- [ ] T036 [US3] Write `app/src/components/OpenPrDialog.tsx` (loads the proposal; editable title and body; "Borrador" checkbox; errors inline; the submodule select is added in US5) with `app/src/components/OpenPrDialog.test.tsx`, and add the "Abrir PR" button to the empty state of `app/src/components/PrView.tsx` (disabled with the 409 reason); strings in `app/src/i18n/en.ts`
+- [X] T035 [P] [US3] Add `PrProposal`, `prProposal`, `openPr` to `app/src/api.ts`
+- [X] T036 [US3] Write `app/src/components/OpenPrDialog.tsx` (loads the proposal; editable title and body; "Borrador" checkbox; errors inline; the submodule select is added in US5) with `app/src/components/OpenPrDialog.test.tsx`, and add the "Abrir PR" button to the empty state of `app/src/components/PrView.tsx` (disabled with the 409 reason); strings in `app/src/i18n/en.ts`
 
 **Checkpoint**: every PR can carry the Jira link, without depending on the agent.
 

@@ -313,6 +313,8 @@ export interface PullRequest {
   snapshot: PrSnapshot | null;
 }
 export interface TaskPrs { account: string | null; problem: { kind: string; message: string } | null; prs: PullRequest[] }
+/** What `Abrir PR` starts from: the branch's last commit as title and body. */
+export interface PrProposal { repo: string; title: string; body: string; base: string; needs_push: boolean }
 /** One task's PRs for badges: the worst of each field when it has several. */
 export interface PrSummary {
   task: string;
@@ -329,6 +331,8 @@ export class ApiError extends Error {
     readonly status?: number,
     /** A delete refused because work in the task's worktree would be lost. */
     readonly unpushed = false,
+    /** Why a PR can't be opened (`no-commits`, `has-pr`, `no-workspace`). */
+    readonly reason?: string,
   ) {
     super(message);
   }
@@ -347,7 +351,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true);
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason);
   return data as T;
 }
 
@@ -402,6 +406,10 @@ export const api = {
   dismissNotice: (id: number) => post<null>(`/api/v1/pr-notices/${id}/dismiss`),
   refreshPrs: (key: string) => post<null>(`/api/v1/tasks/${key}/prs/refresh`),
   linkPr: (key: string, url: string) => post<PullRequest>(`/api/v1/tasks/${key}/prs/link`, { url }),
+  prProposal: (key: string, repo = ".") =>
+    request<PrProposal>(`/api/v1/tasks/${key}/prs/proposal?repo=${encodeURIComponent(repo)}`),
+  openPr: (key: string, req: { repo: string; title: string; body: string; draft: boolean }) =>
+    post<PullRequest>(`/api/v1/tasks/${key}/prs`, req),
   unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
