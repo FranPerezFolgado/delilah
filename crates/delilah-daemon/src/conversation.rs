@@ -16,8 +16,8 @@ use crate::sessions::{Live, LiveState};
 use crate::state::AppState;
 use crate::store_sessions::EntryKind;
 
-/// Longest message taken from the view, in characters.
-const MAX_MESSAGE_CHARS: usize = 16_000;
+/// Longest message taken from the view (and longest first prompt), in characters.
+pub(crate) const MAX_MESSAGE_CHARS: usize = 16_000;
 
 /// The conversation's session record, or the 404 / 409 of the contract.
 async fn ensure_conversation(app: &AppState, id: &str) -> Result<(), ApiError> {

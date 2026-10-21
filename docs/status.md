@@ -62,7 +62,6 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);
   - the usage-limit notice does not show in the conversation view;
-  - a card stays pending if its hook connection drops (the user has to answer it in the terminal);
   - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
   - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
 - **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).

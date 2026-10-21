@@ -15,8 +15,7 @@ use crate::state::AppState;
 use crate::store::StoreError;
 use crate::store_sessions::{EntryKind, SessionKind, SessionRecord, project_of, project_owner};
 
-/// The longest first prompt, as for a message in a conversation.
-const MAX_PROMPT_CHARS: usize = 16_000;
+use crate::conversation::MAX_MESSAGE_CHARS as MAX_PROMPT_CHARS;
 
 #[derive(Debug, Serialize)]
 pub struct SessionView {

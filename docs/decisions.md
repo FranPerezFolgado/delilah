@@ -96,14 +96,20 @@ observed yet (see the spike).
 
 **34. The idea conversation runs with `dontAsk` and an explicit allow list.**
 `--permission-mode dontAsk` plus `permissions.allow`/`deny` in the session's
-settings file lets Claude read code without a terminal prompt. Allowed: Read, Grep,
-Glob, AskUserQuestion, Skill, TodoWrite, `git status` and `ls`, each Bash rule also
+settings file lets Claude read code without a terminal prompt. Allowed: `Read(./**)`
+(the checkout) plus `Read(//<dir>/**)` for each `--add-dir`, AskUserQuestion,
+`Skill(delilah:task-from-idea)`, TodoWrite, `git status` and `ls`, each Bash rule also
 in its RTK form (`rtk git status:*`, ...): user-level PreToolUse hooks such as RTK
 rewrite commands and allow rules match the rewritten command. Denied: Edit,
-MultiEdit, Write and NotebookEdit. `--setting-sources user` drops the repo's
-`.claude/settings*.json`, so a cloned repo cannot widen the list; the user's own
-settings and hooks stay. `rg` and `git log/show/diff` were dropped: `rg --pre` runs
-programs and `--output` writes files.
+MultiEdit, Write, NotebookEdit and reading secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+`~/.config/gh`, `.env` files), so a prompt injection in the repo cannot copy them
+into a brief. `--setting-sources user` drops the repo's `.claude/settings*.json`, so
+a cloned repo cannot widen the list; the user's own settings and hooks stay, so
+broad allow rules in `~/.claude/settings.json` still apply. `--strict-mcp-config`
+keeps project and user MCP servers out. `rg` and `git log/show/diff` were dropped:
+`rg --pre` runs programs and `--output` writes files. Checked against claude 2.1.292
+(which has no separate Grep/Glob tools). Every session's prompt goes after `--`, so
+a prompt starting with `-` is never read as an option.
 
 **35. Tasks from ideas: the daemon creates them on the confirmation card.**
 Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card

@@ -152,7 +152,7 @@ and only changes while the task is under way (see `phases.rs`):
 
   | Session | Mode | Plugin dir | Other |
   |---|---|---|---|
-  | Idea conversation | `dontAsk` ([#34](decisions.md)) | yes | idea system prompt, `--setting-sources user` |
+  | Idea conversation | `dontAsk` ([#34](decisions.md)) | yes | idea system prompt, `--setting-sources user`, `--strict-mcp-config` |
   | Read-only project session | `plan` | yes | |
   | Other project session | default | yes | |
   | Task session (primary or extra) | default | no | |
@@ -172,8 +172,9 @@ and only changes while the task is under way (see `phases.rs`):
 **The idea conversation** ([#35](decisions.md), [#36](decisions.md)): a project session with `conversation = 1`. It is still a Claude in a PTY, but the UI shows `conversation_entries` instead of the terminal (which stays reachable).
 - Hooks feed the history: `UserPromptSubmit` and `Stop` record your messages and Claude's closing message; the AskUserQuestion ask becomes a `card`.
 - A card has an outcome: pending, answered, terminal (answered in the terminal) or withdrawn.
+- A card whose question is no longer waiting is withdrawn: when its hook connection drops, and for every pending card at daemon start-up (asks live only in memory).
 - **`Ask.proposal` flow:** a card headed `Nueva tarea` is a proposal. When you answer `Crear`, `asks::answer` calls `proposals.rs` first: it creates the backlog task (brief from the card's preview as notes, event `created-from-conversation`), and only then returns the answer to Claude, with the new key.
-- Writing while Claude works queues the message; it is sent when the turn ends. "Detener" writes ESC: Claude fires no `Stop` after ESC, so the daemon ends the turn itself and flushes the queue.
+- Writing while Claude works, or while a card waits, queues the message; it is sent when the turn ends. A flush claims the queued entries in one `UPDATE … RETURNING`, so two flushes never type the same message and a claimed one can no longer be removed. "Detener" writes ESC: Claude fires no `Stop` after ESC, so the daemon ends the turn itself and flushes the queue.
 
 **From hook to effect** (`hooks.rs`):
 
