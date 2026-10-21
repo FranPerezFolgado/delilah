@@ -5,9 +5,9 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | | spike: (a)-(f) pass |
-| WP-02 | 1 | 1A | verified | 1 | c05ac7c | |
-| WP-03 | 2 | 2A | pending | 0 | | |
+| WP-01 | 1 | 1A | done | 1 | 924520d | spike: (a)-(f) pass |
+| WP-02 | 1 | 1A | done | 1 | c05ac7c | |
+| WP-03 | 2 | 2A | pending | 0 | | allow list also allows `Bash(rtk <cmd>:*)` forms (user decision); record in docs/decisions.md |
 | WP-04 | 2 | 2A | pending | 0 | | |
 | WP-07 | 2 | 2A | pending | 0 | | |
 | WP-05 | 2 | 2B | pending | 0 | | |
@@ -25,3 +25,7 @@ Mode: format=markdown commits=yes
 | WP-18 | 7 | 7A | pending | 0 | | |
 | WP-19 | 7 | 7A | pending | 0 | | |
 | WP-20 | 7 | 7B | pending | 0 | | T041 manual walkthrough |
+
+## Reviews
+
+- Phase 1: spec-compliance COMPLIANT. MEDIUM (RTK rewrites break read-only Bash allow list) → decided: also allow `rtk` forms, done in WP-03.
