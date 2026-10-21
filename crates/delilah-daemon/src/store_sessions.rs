@@ -411,6 +411,37 @@ impl Store {
             .collect())
     }
 
+    /// Takes every queued user message of a session in one statement, marking it
+    /// `sent`, oldest first. Whoever gets an entry here is the only one to type it.
+    pub async fn claim_queued(&self, session: &str) -> Result<Vec<Entry>, StoreError> {
+        let rows = sqlx::query(
+            "UPDATE conversation_entries SET body = json_set(body, '$.state', 'sent')
+             WHERE session_id = ? AND kind = 'user' AND json_extract(body, '$.state') = 'queued'
+             RETURNING id, at, kind, body",
+        )
+        .bind(session)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut entries = rows
+            .iter()
+            .map(entry_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|e| e.id);
+        Ok(entries)
+    }
+
+    /// Marks every card still `pending` as `withdrawn` (the asks live in memory only,
+    /// so after a restart none of them can be answered); returns how many.
+    pub async fn withdraw_pending_cards(&self) -> Result<u64, StoreError> {
+        let done = sqlx::query(
+            "UPDATE conversation_entries SET body = json_set(body, '$.outcome', 'withdrawn')
+             WHERE kind = 'card' AND json_extract(body, '$.outcome') = 'pending'",
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected())
+    }
+
     /// The card of an ask in a conversation's history, if it is there.
     pub async fn card_entry(&self, session: &str, ask: &str) -> Result<Option<Entry>, StoreError> {
         let row = sqlx::query(
@@ -868,6 +899,48 @@ mod tests {
         assert!(store.delete_queued_entry("c", q.id).await.unwrap());
         assert!(!store.delete_queued_entry("c", q.id).await.unwrap());
         assert_eq!(store.entries("c").await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn claiming_the_queue_marks_it_sent_once() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        for text in ["a", "b"] {
+            let body = serde_json::json!({"text": text, "state": "queued", "from": "view"});
+            store.add_entry("c", EntryKind::User, &body).await.unwrap();
+        }
+        let sent = serde_json::json!({"text": "s", "state": "sent", "from": "view"});
+        store.add_entry("c", EntryKind::User, &sent).await.unwrap();
+
+        let claimed = store.claim_queued("c").await.unwrap();
+        let texts: Vec<_> = claimed.iter().map(|e| e.body["text"].clone()).collect();
+        assert_eq!(texts, ["a", "b"]);
+        assert!(claimed.iter().all(|e| e.body["state"] == "sent"));
+        assert!(store.claim_queued("c").await.unwrap().is_empty());
+        assert!(!store.delete_queued_entry("c", claimed[0].id).await.unwrap());
+        assert!(store.queued_entries("c").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_start_up_sweep_withdraws_pending_cards_only() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        for outcome in ["pending", "answered"] {
+            let body = serde_json::json!({"ask": outcome, "outcome": outcome});
+            store.add_entry("c", EntryKind::Card, &body).await.unwrap();
+        }
+        assert_eq!(store.withdraw_pending_cards().await.unwrap(), 1);
+        let outcomes: Vec<_> = store
+            .entries("c")
+            .await
+            .unwrap()
+            .iter()
+            .map(|e| e.body["outcome"].clone())
+            .collect();
+        assert_eq!(outcomes, ["withdrawn", "answered"]);
+        assert_eq!(store.withdraw_pending_cards().await.unwrap(), 0);
     }
 
     #[tokio::test]

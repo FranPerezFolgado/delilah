@@ -98,8 +98,17 @@ impl Asks {
             .collect()
     }
 
-    fn get(&self, id: &str) -> Option<Ask> {
+    pub(crate) fn get(&self, id: &str) -> Option<Ask> {
         self.pending.lock().unwrap().get(id).map(|(a, _)| a.clone())
+    }
+
+    /// Whether the session has a question waiting for your pick.
+    pub fn has_session(&self, session: &str) -> bool {
+        self.pending
+            .lock()
+            .unwrap()
+            .values()
+            .any(|(a, _)| a.session.as_deref() == Some(session))
     }
 
     /// Takes the ask off the list, so only one answer can ever act on it.
@@ -124,16 +133,20 @@ struct Pending<'a> {
 
 impl Drop for Pending<'_> {
     fn drop(&mut self) {
-        if self
-            .app
-            .asks
-            .pending
-            .lock()
-            .unwrap()
-            .remove(&self.id)
-            .is_some()
+        let removed = self.app.asks.pending.lock().unwrap().remove(&self.id);
+        let Some((ask, _)) = removed else {
+            return;
+        };
+        self.app.emit(Topic::Inbox);
+        // Still on the list: nobody answered it, so its card cannot stay pending.
+        // (A timeout already marked it `terminal`; that one stands.)
+        if let Some(session) = ask.session
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
         {
-            self.app.emit(Topic::Inbox);
+            let app = self.app.clone();
+            runtime.spawn(async move {
+                crate::conversation::card_withdraw_if_pending(&app, &session, &ask.id).await;
+            });
         }
     }
 }
@@ -647,6 +660,40 @@ pub(crate) mod tests {
         call(&app, post(&format!("/api/v1/asks/{id}/release"), json!({}))).await;
         hook.await.unwrap();
         assert_eq!(card(&app).await["outcome"], "terminal");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_hook_withdraws_its_card() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move {
+                call(
+                    &app,
+                    post(CONV, proposal_card(TITLE, "Nueva tarea", Some("b"))),
+                )
+                .await
+            }
+        });
+        waiting_ask(&app).await;
+        for _ in 0..100 {
+            if card(&app).await["outcome"] == "pending" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(card(&app).await["outcome"], "pending");
+        // Claude went away: the connection closes and the handler's future is dropped.
+        hook.abort();
+        for _ in 0..100 {
+            if card(&app).await["outcome"] == "withdrawn" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(card(&app).await["outcome"], "withdrawn");
+        assert!(app.asks.list().is_empty());
     }
 
     #[tokio::test]

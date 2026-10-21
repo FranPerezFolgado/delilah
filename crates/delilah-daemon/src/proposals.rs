@@ -34,6 +34,8 @@ pub fn failed_text(error: &str) -> String {
 /// Longest title and brief taken from a card; beyond it the card stays a plain one.
 const MAX_TITLE_CHARS: usize = 200;
 const MAX_BRIEF_BYTES: usize = 64 * 1024;
+/// Times a task creation is tried again when its key was taken meanwhile.
+const KEY_RETRIES: usize = 3;
 
 /// The title and brief of a task Claude proposes in an idea conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,20 +146,35 @@ async fn create_from_proposal(
         now.format("%Y-%m-%d"),
         proposal.brief
     );
-    let new = NewTask {
+    let new = || NewTask {
         key: String::new(),
         title: proposal.title.clone(),
         project: Some(project.to_string()),
-        notes: Some(notes),
+        notes: Some(notes.clone()),
         free: true,
         in_checkout: None,
         saving_mode: None,
         workflow: None,
     };
-    let task = crate::api::build_task(app, new).await?;
-    app.store
-        .create_task_from_conversation(&task, &record.id, &record.label, now)
-        .await?;
+    // Another conversation may take the key between allocating it and storing the
+    // task: allocate again (the counter has moved on).
+    let mut attempts = 0;
+    let task = loop {
+        let task = crate::api::build_task(app, new()).await?;
+        match app
+            .store
+            .create_task_from_conversation(&task, &record.id, &record.label, now)
+            .await
+        {
+            Err(crate::store::StoreError::AlreadyExists(_)) if attempts < KEY_RETRIES => {
+                attempts += 1;
+            }
+            other => {
+                other?;
+                break task;
+            }
+        }
+    };
     Ok(task.key.to_string())
 }
 
@@ -292,6 +309,79 @@ mod tests {
             out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
             "Cambiar algo"
         );
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_descartar_answer_creates_nothing() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card(TITLE, "Nueva tarea", Some("brief"));
+        let (reply, out) = pick(&app, CONV, card, TITLE, DISCARD).await;
+        assert_eq!(reply, json!({ "task": null }));
+        assert_eq!(
+            out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE],
+            DISCARD
+        );
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_conversation_stays_usable_after_crear() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card("Primera", NEW_TASK_HEADER, Some("uno"));
+        let (reply, _) = pick(&app, CONV, card, "Primera", CREATE).await;
+        assert!(reply["task"].is_string());
+        let record = app.store.session("conv").await.unwrap().unwrap();
+        assert!(!record.closed && record.conversation);
+        let (status, body) = call(
+            &app,
+            axum::http::Request::get("/api/v1/sessions/conv/conversation")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["entries"][0]["outcome"], "answered");
+        // A later proposal still creates its own task.
+        let card = proposal_card("Segunda", NEW_TASK_HEADER, Some("dos"));
+        let (second, _) = pick(&app, CONV, card, "Segunda", CREATE).await;
+        assert!(second["task"].is_string());
+        assert_ne!(second["task"], reply["task"]);
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn crear_after_the_project_was_deleted_fails_and_creates_nothing() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let card = proposal_card(TITLE, NEW_TASK_HEADER, Some("brief"));
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, post(CONV, card)).await }
+        });
+        let id = waiting_ask(&app).await["ask"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        app.store.delete_project("web").await.unwrap();
+        let (status, reply) = call(
+            &app,
+            post(
+                &format!("/api/v1/asks/{id}/answer"),
+                json!({ "answers": { TITLE: CREATE } }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(reply["task"], Value::Null);
+        assert!(!reply["error"].as_str().unwrap().is_empty());
+        let (_, out) = hook.await.unwrap();
+        let answer = out["hookSpecificOutput"]["updatedInput"]["answers"][TITLE]
+            .as_str()
+            .unwrap();
+        assert!(answer.starts_with("Crear — no se pudo crear: "), "{answer}");
         assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
     }
 

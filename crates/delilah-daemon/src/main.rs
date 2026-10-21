@@ -44,6 +44,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("could not write the Delilah plugin: {e}");
     }
     let store = Store::open(&config.database_path()).await?;
+    // The pending asks lived in the previous process: their cards cannot be answered.
+    match store.withdraw_pending_cards().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, "withdrew the cards left pending by the last run"),
+        Err(e) => tracing::warn!("could not withdraw the stale cards: {e}"),
+    }
 
     let listener = tokio::net::TcpListener::bind(config.addr).await?;
     tracing::info!(addr = %config.addr, home = %config.home.display(), "delilahd listening");

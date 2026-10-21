@@ -38,7 +38,18 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     ensure_conversation(&app, &id).await?;
-    let entries = app.store.entries(&id).await?;
+    let mut entries = json!(app.store.entries(&id).await?);
+    // Asks live in memory: a card whose ask is gone cannot be answered any more.
+    for entry in entries.as_array_mut().into_iter().flatten() {
+        if entry["kind"] == "card"
+            && entry["outcome"] == "pending"
+            && !entry["ask"]
+                .as_str()
+                .is_some_and(|ask| app.asks.get(ask).is_some())
+        {
+            entry["outcome"] = json!("withdrawn");
+        }
+    }
     let live = app.sessions.get(&id);
     Ok(Json(json!({
         "entries": entries,
@@ -75,7 +86,8 @@ pub async fn send(
         .sessions
         .get(&id)
         .ok_or_else(|| ApiError::conflict("the session is not running; reopen it to write"))?;
-    let queued = live.state() == LiveState::Working;
+    // A pending card holds the turn: what is typed now would land in the PTY under it.
+    let queued = live.state() == LiveState::Working || app.asks.has_session(&id);
     let state = if queued { "queued" } else { "sent" };
     // Recorded before typing: its prompt hook may come back before this returns.
     let entry = app
@@ -90,7 +102,7 @@ pub async fn send(
         crate::actions::type_prompt(&live, text).await?;
         let _ = app.store.set_attention(&id, None).await;
         app.emit(Topic::Inbox);
-    } else if live.state() != LiveState::Working {
+    } else if live.state() != LiveState::Working && !app.asks.has_session(&id) {
         // The turn ended between reading the state and recording the entry: its Stop
         // hook has already flushed the queue without this message, so flush again.
         flush_queue(&app, &live).await;
@@ -139,28 +151,23 @@ pub async fn stop(
 }
 
 /// Types every queued message at once, joined by a blank line, and marks them sent.
+/// The store hands each queued message to one caller only, so two flushes (the Stop
+/// hook and a message's own re-flush) never type the same one twice.
 pub async fn flush_queue(app: &AppState, live: &Live) {
-    let queued = match app.store.queued_entries(&live.id).await {
-        Ok(q) if !q.is_empty() => q,
+    // Marked sent as they are claimed: the prompt hook that follows must find them so.
+    let claimed = match app.store.claim_queued(&live.id).await {
+        Ok(c) if !c.is_empty() => c,
         Ok(_) => return,
         Err(e) => {
             tracing::warn!(session = %live.id, "cannot read the queue: {e}");
             return;
         }
     };
-    let text = queued
+    let text = claimed
         .iter()
         .filter_map(|e| e.body["text"].as_str())
         .collect::<Vec<_>>()
         .join("\n\n");
-    // Marked first: the prompt hook that follows must find them as `sent`.
-    for entry in &queued {
-        let mut body = entry.body.clone();
-        body["state"] = json!("sent");
-        if let Err(e) = app.store.update_entry(entry.id, &body).await {
-            tracing::warn!(session = %live.id, "cannot mark a message sent: {e}");
-        }
-    }
     if let Err(e) = crate::actions::type_prompt(live, &text).await {
         tracing::warn!(session = %live.id, "cannot type the queue: {}", e.message());
     }
@@ -262,14 +269,21 @@ async fn prompt_submitted(
         .into_iter()
         .filter(|e| e.kind == EntryKind::User && e.body["state"] == "sent")
         .collect();
-    for n in 1..=sent.len() {
-        let joined = sent[..n]
-            .iter()
+    let joined = |run: &[crate::store_sessions::Entry]| {
+        run.iter()
             .map(|e| e.body["text"].as_str().unwrap_or_default())
             .collect::<Vec<_>>()
-            .join("\n\n");
-        if joined.trim() == text {
-            for entry in &sent[..n] {
+            .join("\n\n")
+    };
+    // A contiguous run of sent entries, the one ending newest first. A sent entry
+    // that never showed in a prompt hook must not hide every later prompt.
+    for end in (1..=sent.len()).rev() {
+        for start in 0..end {
+            if joined(&sent[start..end]).trim() != text {
+                continue;
+            }
+            // What was sent before the match and never showed up is stale.
+            for entry in &sent[..end] {
                 let mut body = entry.body.clone();
                 body["state"] = json!("delivered");
                 app.store.update_entry(entry.id, &body).await?;
@@ -354,6 +368,16 @@ pub async fn card_added(app: &AppState, session: &str, card: &Card) {
 /// The card of `ask` ended without an answer from Delilah.
 pub async fn card_outcome(app: &AppState, session: &str, ask: &str, outcome: CardOutcome) {
     card_update(app, session, ask, |card| card.outcome = outcome).await;
+}
+
+/// The card of `ask` is withdrawn if nobody has answered it yet.
+pub async fn card_withdraw_if_pending(app: &AppState, session: &str, ask: &str) {
+    card_update(app, session, ask, |card| {
+        if card.outcome == CardOutcome::Pending {
+            card.outcome = CardOutcome::Withdrawn;
+        }
+    })
+    .await;
 }
 
 /// The card of `ask` was answered; `task` / `error` tell how creating a task went.
@@ -782,6 +806,111 @@ mod tests {
         assert_eq!(entries[1]["text"], "desde la terminal");
         assert_eq!(entries[1]["from"], "terminal");
         assert_eq!(entries[1]["state"], "delivered");
+    }
+
+    #[tokio::test]
+    async fn an_undelivered_sent_message_does_not_hide_the_next_prompt() {
+        let f = Fixture::new().await;
+        for text in ["nunca llega", "llega"] {
+            let body = json!({ "text": text, "state": "sent", "from": "view" });
+            f.app
+                .store
+                .add_entry("conv", EntryKind::User, &body)
+                .await
+                .unwrap();
+        }
+        f.hook(json!({ "hook_event_name": "UserPromptSubmit", "prompt": "llega" }))
+            .await;
+        let entries = f.entries().await;
+        assert_eq!(entries.len(), 2, "no duplicate from the terminal");
+        assert!(entries.iter().all(|e| e["state"] == "delivered"));
+        assert!(entries.iter().all(|e| e["from"] == "view"));
+    }
+
+    #[tokio::test]
+    async fn two_flushes_type_each_queued_message_once() {
+        let f = Fixture::new().await;
+        for text in ["a", "b"] {
+            let body = json!({ "text": text, "state": "queued", "from": "view" });
+            f.app
+                .store
+                .add_entry("conv", EntryKind::User, &body)
+                .await
+                .unwrap();
+        }
+        tokio::join!(
+            flush_queue(&f.app, &f.live),
+            flush_queue(&f.app, &f.live),
+            flush_queue(&f.app, &f.live)
+        );
+        let expected = "\x1b[200~a\n\nb\x1b[201~\r";
+        assert_eq!(f.typed(expected.len()).await, expected);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(f.typed(0).await, expected, "typed once");
+    }
+
+    #[tokio::test]
+    async fn a_message_claimed_by_a_flush_cannot_be_removed() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Working);
+        let id = f.send("later").await.1["id"].as_i64().unwrap();
+        f.app.store.claim_queued("conv").await.unwrap();
+        let req = Request::delete(format!("/api/v1/sessions/conv/messages/{id}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(f.call(req).await.0, StatusCode::CONFLICT);
+        assert_eq!(f.entries().await[0]["state"], "sent");
+    }
+
+    fn card_hook() -> Value {
+        json!({ "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": { "questions": [{
+            "question": "¿Cuál?", "header": "H", "multiSelect": false,
+            "options": [{ "label": "A", "description": "a" }, { "label": "B", "description": "b" }]
+        }]}})
+    }
+
+    #[tokio::test]
+    async fn a_message_sent_while_a_card_is_pending_is_queued() {
+        let f = Fixture::new().await;
+        let ask = tokio::spawn({
+            let f = Fixture {
+                app: f.app.clone(),
+                typed: f.typed.clone(),
+                live: f.live.clone(),
+            };
+            async move {
+                f.post("/hooks/claude/ask?task=@web&session=conv", card_hook())
+                    .await
+            }
+        });
+        for _ in 0..100 {
+            if !f.app.asks.list().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(f.live.state(), LiveState::Waiting);
+        let (status, entry) = f.send("espera").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(entry["state"], "queued");
+        assert_eq!(std::fs::read(&f.typed).unwrap_or_default(), b"");
+        ask.abort();
+    }
+
+    #[tokio::test]
+    async fn a_pending_card_without_a_waiting_ask_is_reported_withdrawn() {
+        let f = Fixture::new().await;
+        let card = Card::pending("ghost", &json!([]), None);
+        f.app
+            .store
+            .add_entry(
+                "conv",
+                EntryKind::Card,
+                &serde_json::to_value(card).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(f.entries().await[0]["outcome"], "withdrawn");
     }
 
     #[tokio::test]
