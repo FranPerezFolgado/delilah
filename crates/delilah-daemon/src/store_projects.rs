@@ -1,7 +1,7 @@
 //! Registered projects: the codebases tasks run against.
 
 use chrono::Utc;
-use delilah_core::{Project, ProjectKind};
+use delilah_core::{Project, ProjectKind, ProjectSettings};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
@@ -10,12 +10,13 @@ use crate::store::{Store, StoreError};
 impl Store {
     pub async fn create_project(&self, project: &Project) -> Result<(), StoreError> {
         let result = sqlx::query(
-            "INSERT INTO projects (name, path, kind, workflow, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO projects (name, path, kind, workflow, settings, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&project.name)
         .bind(project.path.to_string_lossy())
         .bind(project.kind.name())
         .bind(&project.workflow)
+        .bind(serde_json::to_string(&project.settings)?)
         .bind(Utc::now().to_rfc3339())
         .execute(&self.pool)
         .await;
@@ -28,24 +29,42 @@ impl Store {
     }
 
     pub async fn list_projects(&self) -> Result<Vec<Project>, StoreError> {
-        let rows = sqlx::query("SELECT name, path, kind, workflow FROM projects ORDER BY name")
+        let rows = sqlx::query("SELECT name, path, kind, workflow, settings FROM projects ORDER BY name")
             .fetch_all(&self.pool)
             .await?;
         rows.iter().map(project_from_row).collect()
     }
 
     pub async fn project(&self, name: &str) -> Result<Project, StoreError> {
-        let row = sqlx::query("SELECT name, path, kind, workflow FROM projects WHERE name = ?")
+        let row = sqlx::query("SELECT name, path, kind, workflow, settings FROM projects WHERE name = ?")
             .bind(name)
             .fetch_optional(&self.pool)
             .await?
             .ok_or_else(|| StoreError::ProjectNotFound(name.to_string()))?;
         project_from_row(&row)
     }
+
+    /// Replaces a project's settings.
+    pub async fn set_project_settings(
+        &self,
+        name: &str,
+        settings: &ProjectSettings,
+    ) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE projects SET settings = ? WHERE name = ?")
+            .bind(serde_json::to_string(settings)?)
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::ProjectNotFound(name.to_string()));
+        }
+        Ok(())
+    }
 }
 
 impl Store {
     /// Changes a project, renaming it everywhere it is referenced if its name changes.
+    /// Its settings are left alone: they change only through `set_project_settings`.
     pub async fn update_project(
         &self,
         old_name: &str,
@@ -127,13 +146,19 @@ impl Store {
 
 fn project_from_row(row: &SqliteRow) -> Result<Project, StoreError> {
     let kind: String = row.try_get("kind")?;
+    let name: String = row.try_get("name")?;
+    let stored: String = row.try_get("settings")?;
+    let settings = serde_json::from_str(&stored).unwrap_or_else(|e| {
+        tracing::warn!(project = %name, "unreadable project settings: {e}; using defaults");
+        ProjectSettings::default()
+    });
     Ok(Project {
-        name: row.try_get("name")?,
+        name,
         path: row.try_get::<String, _>("path")?.into(),
         kind: ProjectKind::parse(&kind)
             .ok_or_else(|| StoreError::Corrupt(format!("unknown project kind `{kind}`")))?,
         workflow: row.try_get("workflow")?,
-        settings: Default::default(),
+        settings,
     })
 }
 
@@ -210,5 +235,44 @@ mod tests {
             .unwrap();
         assert_eq!(kept.project, None);
         assert!(store.list_projects().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn settings_default_round_trip_survive_rename_and_tolerate_garbage() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_project(&project("a", "/w/a", ProjectKind::Repo))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.project("a").await.unwrap().settings,
+            ProjectSettings::default()
+        );
+
+        let settings: ProjectSettings =
+            serde_json::from_str(r#"{"setup":"make setup"}"#).unwrap();
+        assert_ne!(settings, ProjectSettings::default());
+        store.set_project_settings("a", &settings).await.unwrap();
+        assert_eq!(store.project("a").await.unwrap().settings, settings);
+        assert!(matches!(
+            store.set_project_settings("nope", &settings).await,
+            Err(StoreError::ProjectNotFound(_))
+        ));
+
+        store
+            .update_project("a", &project("b", "/w/a", ProjectKind::Repo))
+            .await
+            .unwrap();
+        assert_eq!(store.project("b").await.unwrap().settings, settings);
+
+        sqlx::query("UPDATE projects SET settings = 'not json' WHERE name = 'b'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.project("b").await.unwrap().settings,
+            ProjectSettings::default()
+        );
+        assert_eq!(store.list_projects().await.unwrap().len(), 1);
     }
 }

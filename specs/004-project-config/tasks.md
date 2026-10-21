@@ -48,14 +48,14 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 - [X] T002 [P] Write failing tests in `crates/delilah-core/src/project.rs`: `ProjectSettings::default()` equals today's behaviour (checkout, `feature/{ticket}`, no shared, no setup, empty always/never); `serde_json::from_str("{}")` gives the defaults; a JSON with every field round-trips; unknown keys are refused on input
 - [X] T003 [P] Write failing tests in `crates/delilah-core/src/project.rs` for `validate(&settings, kind) -> Vec<FieldError>`: branch without `{ticket}`, unknown placeholder `{foo}`, empty branch; shared path absolute, with `..`, empty, duplicated; submodule rules on a repo project; the same submodule in always and never; each error names its field (`branch`, `shared[1].path`, `submodules.never[0]`)
 - [X] T004 [P] Write a failing test in `crates/delilah-agents/src/pty.rs` that `exit_code()` returns `Some(0)` for `sh -c 'exit 0'` and `Some(3)` for `exit 3` after `wait()`
-- [ ] T005 [P] Write failing store tests in `crates/delilah-daemon/src/store_projects.rs`: a project created today reads back with default settings; `set_project_settings` round-trips; settings survive a rename; an unparsable stored value logs and reads as defaults
+- [X] T005 [P] Write failing store tests in `crates/delilah-daemon/src/store_projects.rs`: a project created today reads back with default settings; `set_project_settings` round-trips; settings survive a rename; an unparsable stored value logs and reads as defaults
 
 ### Implementation
 
 - [X] T006 Implement `ProjectSettings`, `WorkspaceMode`, `SharedEntry`, `ShareMode`, `SubmoduleRules`, `FieldError` and `validate()` in `crates/delilah-core/src/project.rs`; add `settings: ProjectSettings` with `#[serde(default)]` to `Project`; re-export from `crates/delilah-core/src/lib.rs`
 - [X] T007 [P] Keep the child's exit status in `crates/delilah-agents/src/pty.rs` (store it when `pump_output` waits on the child) and expose `exit_code() -> Option<u32>`
-- [ ] T008 Add `crates/delilah-daemon/migrations/0011_project_settings.sql`: `ALTER TABLE projects ADD COLUMN settings TEXT NOT NULL DEFAULT '{}';`
-- [ ] T009 Read `settings` into `Project` in every query of `crates/delilah-daemon/src/store_projects.rs`, and add `set_project_settings(name, &ProjectSettings)`
+- [X] T008 Add `crates/delilah-daemon/migrations/0011_project_settings.sql`: `ALTER TABLE projects ADD COLUMN settings TEXT NOT NULL DEFAULT '{}';`
+- [X] T009 Read `settings` into `Project` in every query of `crates/delilah-daemon/src/store_projects.rs`, and add `set_project_settings(name, &ProjectSettings)`
 - [X] T010 [P] Add `ProjectSettings`, `SharedEntry` and `Project.settings` to `app/src/api.ts`, following contracts/api.md
 - [X] T011 Split everything after `WorkspaceReady` in `start_run` (ticket file, notes, adopted or new primary session, `launch_session`) into `pub async fn launch_agent(app, key, ws, …)` in `crates/delilah-daemon/src/run.rs`, with no behaviour change; existing run tests stay green
 
