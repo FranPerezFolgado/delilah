@@ -66,6 +66,10 @@ done or pending is in [status.md](status.md).
 | `transitions.rs` | The one way to change a task's status, so every change emits events and notifications. |
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
 | `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), submodules, and the submodule suggestion. |
+| `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` swaps the binary. |
+| `pr_types.rs`, `prs.rs` | PR data types (snapshot, checks, reviews, comments) and the pure logic: `ci_outcome`, `pick`, `summary`, `diff`, back-off. |
+| `pr_loop/` | The I/O of the PR loop: `mod.rs` (the 30 s loop `spawn`, `nudge`, `check_task`, detection), `access.rs` (access problems, notified once per project), `notices.rs` (turns a snapshot diff into notices and notifications), `merge.rs` (`on_merged`, see Workspaces). |
+| `pr_api.rs`, `store_prs.rs` | The PR routes (list, summaries, refresh, link, unlink, proposal, open, forward, dismiss) and the SQLite access for PRs and their notices. |
 | `jira.rs`, `secrets.rs` | The Jira connection. The token lives in the Keychain; tests keep it in memory. |
 | `events.rs` | `GET /api/v1/events`: a WebSocket that only announces topics. |
 | `preferences.rs`, `store_settings.rs`, `lang.rs` | Preferences (`pref:<key>`), settings, and the language the daemon writes in. |
@@ -87,6 +91,9 @@ and a preview uses `fixtures/preview-home-N`.
 - `task_events`: the history.
 - `workspaces`: `task_key`, parent, path, branch, submodules JSON, kind, `previous`. For checkout mode, `previous` is JSON with the branches to go back to.
 - `sessions`: id, owner, kind, label, primary, attention.
+- `pull_requests`: one PR per (task, repo), with host, `owner/name`, number, URL, how it was linked (`detected`, `opened`, `pasted`), the last snapshot as JSON, the watermarks already notified (failed head, review and comment ids), `checked_at` and the last problem (`error`, `error_kind`).
+- `pr_unlinked`: URLs the user unlinked, never detected again for that task.
+- `pr_notices`: what the Bandeja shows for PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`), unique per (task, repo, kind, cause) and resolved rather than deleted. All three cascade when the task is deleted.
 - `projects`
 - `settings`
 
@@ -179,12 +186,20 @@ and only changes while the task is under way (see `phases.rs`):
 - **Archive** (`actions::archive`):
   - **Checkout mode:** goes back to the previous branches. It never refuses: uncommitted files stay, and a folder that cannot switch is logged and left on the task's branch.
   - **Worktree mode:** refuses while there are uncommitted changes or commits on no remote, unless `?force=true`. It then runs `git worktree remove --force`.
+- **Archive on merge** (`pr_loop::merge::on_merged`), when every linked PR of the task is merged and none was closed unmerged:
+  1. The task is marked done if it is not terminal, which stops its sessions.
+  2. Each repo is fetched and checked (`delilah_git::check_merged`): no uncommitted changes (the parent's too), and the local branch is contained in the PR's head. The head is the reference, not the base, so squash and rebase merges pass.
+  3. A failed check leaves everything as it is and raises an `archive-blocked` notice with the reason.
+  4. Otherwise the workspace is released (a checkout goes back to the previous branches first) and the task's local branch is deleted (`branch -D`, needed after a squash) in each submodule that has it. The parent's branch stays.
+  5. A failure after that started raises `archive-partial`, listing what was left; `POST /archive` by hand finishes it.
+
+  It asks nothing and never deletes a remote branch. A PR closed without merging stops the automatic archive; the task stays and the user archives by hand.
 - **Delete** (`DELETE /api/v1/tasks/{key}`, `delilah rm`): stops the task's agents, releases the workspace (the branch stays) and frees the key. The same force rule applies.
 
 ## Live updates
 
 The UI does not poll:
-- `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, or `resync`.
+- `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, `prs` (a task's PRs or their summaries changed), or `resync`.
 - The UI refetches that one endpoint (`app/src/live.ts`).
 - On reconnect it refetches everything, and a full refresh runs every 30 s as a safety net.
 
@@ -199,7 +214,7 @@ The UI does not poll:
   - `platform.ts`: the only Tauri imports, all dynamic, so the UI runs in a plain browser.
 - **Components:**
   - `Sidebar`, `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
-  - `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
+  - `PrView` (the PR tab), `PrBadge`, `OpenPrDialog`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
   - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `Markdown`.
 - **Editor:** `editor/` holds CodeMirror 6 and per-task tab state, kept in localStorage.
 - **i18n:**
