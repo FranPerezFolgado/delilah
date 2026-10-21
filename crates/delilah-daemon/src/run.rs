@@ -338,11 +338,17 @@ pub fn launch_session(
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
     let cmd = match session.kind {
         SessionKind::Claude => {
+            let permission = if session.read_only {
+                claude::Permission::Plan
+            } else {
+                claude::Permission::Default
+            };
             let settings = claude::write_settings(
                 &task_dir.join(format!("claude-{}.json", session.id)),
                 &app.config.url(),
                 &session.task,
                 &session.id,
+                permission,
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
@@ -353,7 +359,9 @@ pub fn launch_session(
                 prompt,
                 resume,
                 extra_dirs: &[task_dir.as_path()],
-                read_only: session.read_only && session.kind == SessionKind::Claude,
+                permission,
+                plugin_dir: None,
+                append_system_prompt: None,
                 remote_control: remote_name.as_deref(),
             })
         }

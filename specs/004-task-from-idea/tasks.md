@@ -46,14 +46,14 @@
 
 ### Agents crate: how Claude is launched
 
-- [ ] T003 Write failing tests in `crates/delilah-agents/src/claude.rs` (`mod tests`, next to the existing command tests around lines 380–520):
+- [X] T003 Write failing tests in `crates/delilah-agents/src/claude.rs` (`mod tests`, next to the existing command tests around lines 380–520):
   - `Permission::Plan` → `--permission-mode plan`;
   - `Permission::DontAsk` → `--permission-mode dontAsk`;
   - `Permission::Default` → no `--permission-mode`;
   - `plugin_dir: Some(p)` → `--plugin-dir p`, and absent when `None`;
   - `append_system_prompt: Some(s)` → `--append-system-prompt s`, also when `resume: true`;
   - `settings(…, Permission::DontAsk)` contains `permissions.allow` with exactly R3's list and `permissions.deny` `["Edit","Write","NotebookEdit"]`; other permissions add no `permissions` key.
-- [ ] T004 In `crates/delilah-agents/src/claude.rs`:
+- [X] T004 In `crates/delilah-agents/src/claude.rs`:
   - add `pub enum Permission { Default, Plan, DontAsk }`;
   - replace `Launch.read_only: bool` with `permission: Permission`;
   - add `plugin_dir: Option<&'a Path>` and `append_system_prompt: Option<&'a str>`;
@@ -61,7 +61,7 @@
   - give `settings()` / `write_settings()` a `permission` parameter that adds the R3 block for `DontAsk`.
 
   Update every `Launch { … }` literal in the crate's tests. T003 then passes.
-- [ ] T005 [P] Add `pub fn write_plugin(dir: &Path, version: &str) -> std::io::Result<()>` to `crates/delilah-agents/src/claude.rs`:
+- [X] T005 [P] Add `pub fn write_plugin(dir: &Path, version: &str) -> std::io::Result<()>` to `crates/delilah-agents/src/claude.rs`:
   - it writes the two files from T002 via `include_str!("../plugin/…")` under `dir`;
   - `plugin.json`'s version becomes `version`;
   - it overwrites existing files (idempotent).
