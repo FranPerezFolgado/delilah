@@ -150,7 +150,7 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 - [ ] T040 [US4] Implement `fetch`, `check_merged`, `delete_branch` and `GitError::NotMerged { location }` in `crates/delilah-git/src/workspace.rs` (+ `crates/delilah-git/src/command.rs` for the error); make T037 pass
 - [ ] T041 [US4] Make `release_workspace` `pub(crate)` in `crates/delilah-daemon/src/actions.rs` and let `archive` finish an `archive-partial` (delete the remaining branches, resolve the notice); make T039 pass
 - [ ] T042 [US4] Implement `on_merged(app, key)` in `crates/delilah-daemon/src/prs.rs` per research R7 (MarkDone if not terminal → `fetch` + `check_merged` in `spawn_blocking` → `archive-blocked` notice, or `release_workspace(force = true)` + `delete_workspace` + `delete_branch` per repo → `archive-partial` on failure → notification), called from `check_task` when every row is merged and none closed unmerged; make T038 pass
-- [ ] T043 [US4] In `app/src/components/InboxView.tsx` render `pr-blocked` with its text, "Archivar igualmente" (`archive(key, true)`) and "Descartar"; in `app/src/alerts.ts` notify "mergeada y archivada" from summaries when unfocused; strings in `app/src/i18n/en.ts`; extend `app/src/components/InboxView.test.tsx`
+- [X] T043 [US4] In `app/src/components/InboxView.tsx` render `pr-blocked` with its text, "Archivar igualmente" (`archive(key, true)`) and "Descartar"; in `app/src/alerts.ts` notify "mergeada y archivada" from summaries when unfocused; strings in `app/src/i18n/en.ts`; extend `app/src/components/InboxView.test.tsx`
 
 **Checkpoint**: the loop closes on its own for plain repo projects.
 

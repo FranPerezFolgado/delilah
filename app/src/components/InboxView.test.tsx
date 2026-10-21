@@ -55,3 +55,37 @@ describe("InboxView PR items", () => {
     expect(open).toHaveBeenCalledWith("https://github.com/o/r/pull/3");
   });
 });
+
+describe("InboxView pr-blocked", () => {
+  const blocked: InboxItem = { ...item, kind: "pr-blocked", text: "Hay cambios sin subir" };
+  const viewBlocked = (onChanged = () => {}) =>
+    render(<InboxView items={[blocked]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("archives anyway after confirming, then dismisses the notice", async () => {
+    const arch = vi.spyOn(api, "archive").mockResolvedValue({} as never);
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    viewBlocked();
+    fireEvent.click(screen.getByText("Archive anyway"));
+    expect(arch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Yes, archive"));
+    await waitFor(() => expect(dis).toHaveBeenCalledWith(7));
+    expect(arch).toHaveBeenCalledWith("PROJ-1", true);
+  });
+
+  it("shows the error and keeps the notice when archiving fails", async () => {
+    vi.spyOn(api, "archive").mockRejectedValue(new ApiError("boom", 500));
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    viewBlocked();
+    fireEvent.click(screen.getByText("Archive anyway"));
+    fireEvent.click(screen.getByText("Yes, archive"));
+    await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
+    expect(dis).not.toHaveBeenCalled();
+  });
+
+  it("dismisses the notice", async () => {
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    viewBlocked();
+    fireEvent.click(screen.getByText("Discard"));
+    await waitFor(() => expect(dis).toHaveBeenCalledWith(7));
+  });
+});

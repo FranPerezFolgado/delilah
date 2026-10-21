@@ -37,7 +37,7 @@ function gist(text: string | null, fallback: string): string {
 export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], prs: PrSummary[], open: (item: InboxItem) => void) {
   const seen = useRef<Set<string> | null>(null);
   const statuses = useRef<Map<string, string> | null>(null);
-  const prStates = useRef<Map<string, { approved: boolean; closed: boolean }> | null>(null);
+  const prStates = useRef<Map<string, { approved: boolean; closed: boolean; merged: boolean }> | null>(null);
   const pending = useRef<{ item: InboxItem; at: number } | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -71,15 +71,16 @@ export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], prs: PrSumma
     statuses.current = now;
   }, [tasks]);
 
-  // An approved or closed PR is news too (merged comes with the archive).
+  // An approved or closed PR is news too (merged too: the daemon archives it).
   useEffect(() => {
-    const now = new Map(prs.map((p) => [p.task, { approved: p.review_decision === "approved", closed: p.state === "closed" }]));
+    const now = new Map(prs.map((p) => [p.task, { approved: p.review_decision === "approved", closed: p.state === "closed", merged: p.state === "merged" }]));
     if (prStates.current && !document.hasFocus()) {
       for (const p of prs) {
         const before = prStates.current.get(p.task);
         const cur = now.get(p.task)!;
         if (before && !before.approved && cur.approved) notify(`${p.task} ${t("aprobada")}`, "").catch(() => {});
         if (before && !before.closed && cur.closed) notify(`${p.task} ${t("PR cerrada")}`, "").catch(() => {});
+        if (before && !before.merged && cur.merged) notify(`${p.task} ${t("mergeada y archivada")}`, "").catch(() => {});
       }
     }
     prStates.current = now;

@@ -71,6 +71,7 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   useLayoutEffect(() => {
     const el = replyRef.current;
     if (!el || SIZES_ITSELF) return;
@@ -221,6 +222,36 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
             </button>
             <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissNotice(item.pr!.notice))}>
               {t("Descartar")}
+            </button>
+          </>
+        )}
+        {item.kind === "pr-blocked" && item.pr && !confirming && (
+          <>
+            <button className="btn btn-p" disabled={busy} onClick={() => setConfirming(true)}>
+              {t("Archivar igualmente")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissNotice(item.pr!.notice))}>
+              {t("Descartar")}
+            </button>
+          </>
+        )}
+        {item.kind === "pr-blocked" && item.pr && confirming && (
+          <>
+            <span className="muted" style={{ fontSize: 12.5 }}>{t("Se borrará lo no subido. ¿Archivar igualmente?")}</span>
+            <button
+              className="btn btn-p"
+              disabled={busy}
+              onClick={() =>
+                act(async () => {
+                  await api.archive(item.task, true);
+                  await api.dismissNotice(item.pr!.notice);
+                })
+              }
+            >
+              {t("Sí, archivar")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirming(false)}>
+              {t("Cancelar")}
             </button>
           </>
         )}
