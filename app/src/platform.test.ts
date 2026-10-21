@@ -62,4 +62,15 @@ describe("platform (browser mode)", () => {
     await requestOpenTask({ task: "W-2", session: "s2" });
     expect(cb).toHaveBeenCalledTimes(1);
   });
+
+  it("onOpenTask drops malformed or oversized payloads", async () => {
+    const cb = vi.fn();
+    await onOpenTask(cb);
+    const tx = new FakeChannel("delilah");
+    tx.postMessage({ type: "open-task", task: 5, session: "s" });
+    tx.postMessage({ type: "open-task", task: "W-1" });
+    tx.postMessage({ type: "open-task", task: "", session: "s" });
+    tx.postMessage({ type: "open-task", task: "x".repeat(201), session: "s" });
+    expect(cb).not.toHaveBeenCalled();
+  });
 });

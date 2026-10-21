@@ -73,6 +73,7 @@ fn main() {
             // the Dock; Cmd+Q quits. The agents live in the daemon either way.
             if let WindowEvent::CloseRequested { api, .. } = event
                 && cfg!(target_os = "macos")
+                && window.label() == "main"
             {
                 api.prevent_close();
                 let _ = window.hide();

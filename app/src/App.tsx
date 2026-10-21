@@ -243,10 +243,11 @@ export function App() {
   openTaskRef.current = openTask;
   useEffect(() => {
     const off = onOpenTask(({ task, session }) => openTaskRef.current(task, session));
-    return () => void off.then((f) => f());
+    off.catch(() => {});
+    return () => void off.then((f) => f()).catch(() => {});
   }, []);
 
-  const task =tasks.find((t) => t.key === selected);
+  const task = tasks.find((t) => t.key === selected);
   // `@<name>` selects a project's own screen (sessions on its checkout).
   const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
   const owner = task?.key ?? (project ? `@${project.name}` : null);
