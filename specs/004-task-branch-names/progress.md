@@ -8,7 +8,7 @@ Mode: format=markdown commits=yes
 | WP-01 | 1 | 1A | implementing | 0 | | run with 2A (no shared files) |
 | WP-02 | 2 | 2A | implementing | 0 | | |
 | WP-03 | 2 | 2A | verified | 1 | | 28 tests, clippy clean |
-| WP-04 | 2 | 2A | implementing | 0 | | |
+| WP-04 | 2 | 2A | verified | 1 | | clippy pending (core in progress) |
 | WP-05 | 3 | 3A | pending | 0 | | |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 4 | 4A | pending | 0 | | |

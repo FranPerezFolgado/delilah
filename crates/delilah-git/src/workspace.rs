@@ -506,6 +506,54 @@ pub fn push_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), Gi
     git(dir, &["push", "-u", "origin", branch], opts).map(|_| ())
 }
 
+/// True when `name` is a local branch, or a remote-tracking branch of any remote, in `dir`.
+pub fn branch_taken(dir: &Path, name: &str, opts: &GitOptions) -> Result<bool, GitError> {
+    let out = git(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        opts,
+    )?;
+    let local = format!("refs/heads/{name}");
+    Ok(out.lines().any(|r| {
+        r == local
+            || r.strip_prefix("refs/remotes/")
+                .and_then(|rest| rest.split_once('/'))
+                .is_some_and(|(_, branch)| branch == name)
+    }))
+}
+
+/// `base` if no repo in `dirs` has that branch, else the first free `base-2`..`base-99`,
+/// else `base` with the unix time.
+pub fn free_branch(dirs: &[PathBuf], base: &str, opts: &GitOptions) -> Result<String, GitError> {
+    let taken = |name: &str| -> Result<bool, GitError> {
+        for dir in dirs {
+            if branch_taken(dir, name, opts)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    if !taken(base)? {
+        return Ok(base.to_string());
+    }
+    for n in 2..=99 {
+        let name = format!("{base}-{n}");
+        if !taken(&name)? {
+            return Ok(name);
+        }
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(format!("{base}-{secs}"))
+}
+
 /// `git fetch --quiet origin`.
 pub fn fetch(dir: &Path, opts: &GitOptions) -> Result<(), GitError> {
     git(dir, &["fetch", "--quiet", "origin"], opts).map(|_| ())

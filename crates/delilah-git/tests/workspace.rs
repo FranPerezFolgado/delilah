@@ -3,10 +3,10 @@ use std::process::Command;
 
 use delilah_core::ProjectKind;
 use delilah_git::{
-    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, branch_tip,
-    changes, check_merged, check_repos, check_workspace, commit_subjects, create_workspace,
-    delete_branch, fetch, file_diff, leave_checkout, list_submodules, needs_push, push_branch,
-    remove_workspace, repo_root, use_checkout,
+    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, branch_taken,
+    branch_tip, changes, check_merged, check_repos, check_workspace, commit_subjects,
+    create_workspace, delete_branch, fetch, file_diff, free_branch, leave_checkout,
+    list_submodules, needs_push, push_branch, remove_workspace, repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -674,5 +674,40 @@ fn home_of_is_the_repo_under_the_root_and_nothing_outside_it() {
     assert_eq!(
         Workspace::home_of(&root, "../env/remotes/svc-orders.git"),
         None
+    );
+}
+
+#[test]
+fn branch_taken_sees_local_and_remote_branches() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    assert!(!branch_taken(&repo, "feature/x", &opts).unwrap());
+    run(&repo, &["branch", "feature/x"]);
+    assert!(branch_taken(&repo, "feature/x", &opts).unwrap());
+    assert!(!branch_taken(&repo, "feature", &opts).unwrap());
+
+    // Only on the remote, after a fetch.
+    run(&repo, &["push", "origin", "feature/x:feature/y"]);
+    run(&repo, &["fetch", "origin"]);
+    assert!(branch_taken(&repo, "feature/y", &opts).unwrap());
+    let _ = remote;
+}
+
+#[test]
+fn free_branch_suffixes_until_free_in_every_dir() {
+    let (_t1, a, _r1) = pr_repo();
+    let (_t2, b, _r2) = pr_repo();
+    let opts = GitOptions::default();
+    let dirs = vec![a.clone(), b.clone()];
+    assert_eq!(free_branch(&dirs, "feature/x", &opts).unwrap(), "feature/x");
+    run(&b, &["branch", "feature/x"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-2"
+    );
+    run(&a, &["branch", "feature/x-2"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-3"
     );
 }
