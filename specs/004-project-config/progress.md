@@ -5,12 +5,12 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | implementing | 0 | | |
-| WP-02 | 2 | 2A | pending | 0 | | |
-| WP-03 | 2 | 2A | pending | 0 | | |
-| WP-04 | 2 | 2B | pending | 0 | | |
-| WP-05 | 2 | 2A | pending | 0 | | |
-| WP-06 | 2 | 2A | pending | 0 | | |
+| WP-01 | 1 | 1A | done | 1 | d2ef468 | |
+| WP-02 | 2 | 2A | verified | 2 | 3aea005 | +core Cargo.toml dev-dep; FieldError has code |
+| WP-03 | 2 | 2A | verified | 1 | d58e628 | |
+| WP-04 | 2 | 2B | verified | 1 | 6ec349e | |
+| WP-05 | 2 | 2A | verified | 1 | b3fe227 | |
+| WP-06 | 2 | 2A | verified | 1 | 41936c8 | +Sidebar.test.tsx fixture |
 | WP-07 | 3 | 3A | pending | 0 | | |
 | WP-08 | 3 | 3A | pending | 0 | | |
 | WP-09 | 3 | 3A | pending | 0 | | |
