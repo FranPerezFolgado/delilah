@@ -9,6 +9,7 @@ license.workspace = true
 chrono.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+unicode-normalization.workspace = true
 
 [lints]
 workspace = true

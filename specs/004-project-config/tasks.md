@@ -35,7 +35,7 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `unicode-normalization` to `crates/delilah-core/Cargo.toml` (workspace dependency in the root `Cargo.toml` if that is the convention there)
+- [X] T001 Add `unicode-normalization` to `crates/delilah-core/Cargo.toml` (workspace dependency in the root `Cargo.toml` if that is the convention there)
 
 ---
 
