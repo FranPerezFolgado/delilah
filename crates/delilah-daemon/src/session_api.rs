@@ -111,6 +111,7 @@ async fn open_for(
         primary: false,
         closed: false,
         read_only,
+        conversation: false,
     };
     app.store.create_session(&record).await?;
     app.emit(Topic::Sessions);
@@ -261,6 +262,7 @@ mod tests {
                 primary,
                 closed: false,
                 read_only: false,
+                conversation: false,
             };
             app.store.create_session(&record).await.unwrap();
             let mut cmd = CommandBuilder::new("bash");

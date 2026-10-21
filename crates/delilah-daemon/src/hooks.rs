@@ -284,6 +284,7 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
             })
             .await
             .unwrap();

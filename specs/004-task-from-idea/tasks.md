@@ -76,22 +76,22 @@
 
 ### Daemon: schema and store
 
-- [ ] T007 Create `crates/delilah-daemon/migrations/0011_idea_conversations.sql` as in data-model.md:
+- [X] T007 Create `crates/delilah-daemon/migrations/0011_idea_conversations.sql` as in data-model.md:
   - `ALTER TABLE sessions ADD COLUMN conversation INTEGER NOT NULL DEFAULT 0;`;
   - `conversation_entries` with its index.
-- [ ] T008 Write failing tests in `crates/delilah-daemon/src/store_sessions.rs` (`Store::in_memory()`):
+- [X] T008 Write failing tests in `crates/delilah-daemon/src/store_sessions.rs` (`Store::in_memory()`):
   - a session created with `conversation: true` reads back `true`, and existing creation paths read `false`;
   - `add_entry` / `entries(session)` return entries in insertion order with their JSON bodies;
   - `update_entry(id, body)` replaces the body;
   - `delete_queued_entry` deletes a `user`/`queued` entry and refuses (returns false) any other;
   - deleting the session's project cascades to its entries.
-- [ ] T009 In `crates/delilah-daemon/src/store_sessions.rs`:
+- [X] T009 In `crates/delilah-daemon/src/store_sessions.rs`:
   - add `conversation: bool` to `SessionRecord` (insert/select it, wherever the other columns are);
   - add `pub struct Entry { id: i64, at: DateTime<Utc>, kind: EntryKind, body: Value }` with `EntryKind { User, Claude, Card }`;
   - add the store methods `add_entry`, `entries`, `update_entry`, `delete_queued_entry` and `queued_entries(session)`.
 
   Fix every `SessionRecord { … }` literal (`run.rs:311`, `run.rs:521`, `hooks.rs:286`, `session_api.rs:113`, `session_api.rs:263`, tests) with `conversation: false`. T008 then passes.
-- [ ] T010 Write failing tests in `crates/delilah-daemon/src/store.rs`:
+- [X] T010 Write failing tests in `crates/delilah-daemon/src/store.rs`:
   - `create_task_from_conversation(&task, session, label, at)` inserts the task and one `task_events` row with `CreatedFromConversation`, in one transaction;
   - `events(key)` returns it;
   - a duplicate key fails and leaves no event.

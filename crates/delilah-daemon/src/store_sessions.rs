@@ -1,7 +1,8 @@
 //! The sessions opened in each task's workspace.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
@@ -55,13 +56,51 @@ pub struct SessionRecord {
     pub closed: bool,
     /// Claude in plan mode: it reads and explains, but does not edit.
     pub read_only: bool,
+    /// An idea conversation: a project's Claude session shown as a chat.
+    pub conversation: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntryKind {
+    User,
+    Claude,
+    Card,
+}
+
+impl EntryKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Claude => "claude",
+            Self::Card => "card",
+        }
+    }
+
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(Self::User),
+            "claude" => Some(Self::Claude),
+            "card" => Some(Self::Card),
+            _ => None,
+        }
+    }
+}
+
+/// One line of an idea conversation; the body's shape depends on the kind.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Entry {
+    pub id: i64,
+    pub at: DateTime<Utc>,
+    pub kind: EntryKind,
+    pub body: Value,
 }
 
 impl Store {
     pub async fn create_session(&self, s: &SessionRecord) -> Result<(), StoreError> {
         sqlx::query(
-            "INSERT INTO sessions (id, task_key, project, kind, label, is_primary, closed, created_at, read_only)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (id, task_key, project, kind, label, is_primary, closed, created_at, read_only, conversation)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&s.id)
         .bind(project_of(&s.task).is_none().then_some(&s.task))
@@ -72,6 +111,7 @@ impl Store {
         .bind(s.closed)
         .bind(Utc::now().to_rfc3339())
         .bind(s.read_only)
+        .bind(s.conversation)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -155,8 +195,7 @@ impl Store {
     }
 }
 
-const SELECT: &str =
-    "SELECT id, task_key, project, kind, label, is_primary, closed, read_only FROM sessions";
+const SELECT: &str = "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, conversation FROM sessions";
 
 impl Store {
     /// Records what a session waits on the user for, or clears it.
@@ -192,7 +231,7 @@ impl Store {
         &self,
     ) -> Result<Vec<(SessionRecord, crate::inbox::Attention)>, StoreError> {
         let rows = sqlx::query(
-            "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, attention FROM sessions
+            "SELECT id, task_key, project, kind, label, is_primary, closed, read_only, conversation, attention FROM sessions
              WHERE closed = 0 AND attention IS NOT NULL ORDER BY created_at, id",
         )
         .fetch_all(&self.pool)
@@ -204,6 +243,96 @@ impl Store {
             })
             .collect()
     }
+}
+
+impl Store {
+    /// Appends a line to a conversation.
+    pub async fn add_entry(
+        &self,
+        session: &str,
+        kind: EntryKind,
+        body: &Value,
+    ) -> Result<Entry, StoreError> {
+        let at = Utc::now();
+        let id = sqlx::query(
+            "INSERT INTO conversation_entries (session_id, at, kind, body) VALUES (?, ?, ?, ?)",
+        )
+        .bind(session)
+        .bind(at.to_rfc3339())
+        .bind(kind.name())
+        .bind(serde_json::to_string(body)?)
+        .execute(&self.pool)
+        .await?
+        .last_insert_rowid();
+        Ok(Entry {
+            id,
+            at,
+            kind,
+            body: body.clone(),
+        })
+    }
+
+    /// A conversation's whole history, in the order it happened.
+    pub async fn entries(&self, session: &str) -> Result<Vec<Entry>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, at, kind, body FROM conversation_entries WHERE session_id = ? ORDER BY id",
+        )
+        .bind(session)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(entry_from_row).collect()
+    }
+
+    /// The user's messages that wait for the turn to end, oldest first.
+    pub async fn queued_entries(&self, session: &str) -> Result<Vec<Entry>, StoreError> {
+        Ok(self
+            .entries(session)
+            .await?
+            .into_iter()
+            .filter(is_queued)
+            .collect())
+    }
+
+    pub async fn update_entry(&self, id: i64, body: &Value) -> Result<(), StoreError> {
+        sqlx::query("UPDATE conversation_entries SET body = ? WHERE id = ?")
+            .bind(serde_json::to_string(body)?)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Deletes a user message that is still queued; false when it is anything else.
+    pub async fn delete_queued_entry(&self, session: &str, id: i64) -> Result<bool, StoreError> {
+        let deleted = sqlx::query(
+            "DELETE FROM conversation_entries WHERE id = ? AND session_id = ? AND kind = 'user'
+             AND json_extract(body, '$.state') = 'queued'",
+        )
+        .bind(id)
+        .bind(session)
+        .execute(&self.pool)
+        .await?;
+        Ok(deleted.rows_affected() > 0)
+    }
+}
+
+fn is_queued(e: &Entry) -> bool {
+    e.kind == EntryKind::User && e.body["state"] == "queued"
+}
+
+fn entry_from_row(row: &SqliteRow) -> Result<Entry, StoreError> {
+    let kind: String = row.try_get("kind")?;
+    let at: String = row.try_get("at")?;
+    let body: String = row.try_get("body")?;
+    Ok(Entry {
+        id: row.try_get("id")?,
+        at: DateTime::parse_from_rfc3339(&at)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?
+            .with_timezone(&Utc),
+        kind: EntryKind::parse(&kind)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown entry kind `{kind}`")))?,
+        body: serde_json::from_str(&body)?,
+    })
 }
 
 fn session_from_row(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
@@ -220,6 +349,7 @@ fn session_from_row(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
         primary: row.try_get("is_primary")?,
         closed: row.try_get("closed")?,
         read_only: row.try_get("read_only")?,
+        conversation: row.try_get("conversation")?,
     })
 }
 
@@ -238,6 +368,7 @@ mod tests {
             primary,
             closed: false,
             read_only: false,
+            conversation: false,
         }
     }
 
@@ -281,5 +412,114 @@ mod tests {
             store.session("c").await.unwrap().unwrap().kind,
             SessionKind::Shell
         );
+    }
+
+    fn conversation(id: &str) -> SessionRecord {
+        SessionRecord {
+            task: project_owner("web"),
+            conversation: true,
+            ..session(id, SessionKind::Claude, false)
+        }
+    }
+
+    async fn with_project(store: &Store) {
+        store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn conversation_flag_reads_back() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        store
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .await
+            .unwrap();
+        store
+            .create_session(&session("a", SessionKind::Claude, true))
+            .await
+            .unwrap();
+        assert!(store.session("c").await.unwrap().unwrap().conversation);
+        assert!(!store.session("a").await.unwrap().unwrap().conversation);
+        assert!(store.open_sessions(None).await.unwrap()[0].conversation);
+    }
+
+    #[tokio::test]
+    async fn entries_keep_their_order_and_bodies() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        let user = serde_json::json!({"text": "hola", "state": "queued", "from": "view"});
+        let first = store.add_entry("c", EntryKind::User, &user).await.unwrap();
+        store
+            .add_entry("c", EntryKind::Claude, &serde_json::json!({"text": "ok"}))
+            .await
+            .unwrap();
+        store
+            .add_entry("c", EntryKind::Card, &serde_json::json!({"ask": "a1"}))
+            .await
+            .unwrap();
+
+        let all = store.entries("c").await.unwrap();
+        let kinds: Vec<_> = all.iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, [EntryKind::User, EntryKind::Claude, EntryKind::Card]);
+        assert_eq!(all[0], first);
+        assert_eq!(all[0].body, user);
+        assert_eq!(store.queued_entries("c").await.unwrap().len(), 1);
+
+        let sent = serde_json::json!({"text": "hola", "state": "sent", "from": "view"});
+        store.update_entry(first.id, &sent).await.unwrap();
+        assert_eq!(store.entries("c").await.unwrap()[0].body, sent);
+        assert!(store.queued_entries("c").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn only_queued_user_entries_are_deleted() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        let queued = serde_json::json!({"text": "a", "state": "queued", "from": "view"});
+        let sent = serde_json::json!({"text": "b", "state": "sent", "from": "view"});
+        let q = store
+            .add_entry("c", EntryKind::User, &queued)
+            .await
+            .unwrap();
+        let s = store.add_entry("c", EntryKind::User, &sent).await.unwrap();
+        let c = store
+            .add_entry("c", EntryKind::Claude, &serde_json::json!({"text": "x"}))
+            .await
+            .unwrap();
+
+        assert!(!store.delete_queued_entry("c", s.id).await.unwrap());
+        assert!(!store.delete_queued_entry("c", c.id).await.unwrap());
+        assert!(store.delete_queued_entry("c", q.id).await.unwrap());
+        assert!(!store.delete_queued_entry("c", q.id).await.unwrap());
+        assert_eq!(store.entries("c").await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn deleting_the_project_deletes_its_entries() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        store
+            .add_entry("c", EntryKind::Claude, &serde_json::json!({"text": "x"}))
+            .await
+            .unwrap();
+        store.delete_project("web").await.unwrap();
+        assert!(store.entries("c").await.unwrap().is_empty());
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM conversation_entries")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
     }
 }
