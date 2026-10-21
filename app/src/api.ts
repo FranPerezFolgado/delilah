@@ -33,11 +33,45 @@ export interface EventRecord {
 
 export type ProjectKind = "parent" | "repo";
 
+export type WorkspaceMode = "checkout" | "worktree";
+export type SharedMode = "copy" | "link";
+
+export interface SharedEntry {
+  path: string;
+  /** null: decided by the kind of entry when it is used. */
+  mode: SharedMode | null;
+}
+
+export interface ProjectSettings {
+  workspace: WorkspaceMode;
+  branch: string;
+  shared: SharedEntry[];
+  setup: string | null;
+  submodules: { always: string[]; never: string[] };
+}
+
+/** Body of a 422 from the settings endpoint: one message per invalid field. */
+export interface SettingsError {
+  error: string;
+  fields: { field: string; message: string }[];
+}
+
+/** The effective settings of a project with nothing configured. */
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  workspace: "checkout",
+  branch: "feature/{ticket}",
+  shared: [],
+  setup: null,
+  submodules: { always: [], never: [] },
+};
+
 export interface Project {
   name: string;
   path: string;
   kind: ProjectKind;
   workflow: string;
+  /** Effective settings, defaults included. */
+  settings: ProjectSettings;
 }
 
 export interface Submodule {
