@@ -316,7 +316,7 @@
   - the playground is DOM + SVG pixel maps (canvas, game engines and third-party sprite sheets ruled out, and why);
   - activity is in memory on its own topic;
   - "supervising" is derived from a foreground `Agent` call.
-- [ ] T048 Run every check (`cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`), then run quickstart.md end to end in a preview and note anything that only the desktop app can show (the native window).
+- [X] T048 Run every check (`cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`), then run quickstart.md end to end in a preview and note anything that only the desktop app can show (the native window).
 
 ---
 
