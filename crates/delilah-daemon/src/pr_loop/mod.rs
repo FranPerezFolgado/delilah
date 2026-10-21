@@ -3,17 +3,18 @@
 //! for the problems the user can fix).
 
 pub(crate) mod access;
+mod notices;
 
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
 use delilah_core::{ProjectKind, SpecPhase, TaskKey};
 use tokio::time::MissedTickBehavior;
 
 use self::access::{failed, succeeded};
+use self::notices::{Checked, record};
 use crate::events::Topic;
 use crate::gh::{GhError, PrRef, classify, parse_pr_url};
 use crate::phases;
@@ -169,6 +170,7 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
         .and_then(SpecPhase::parse)
         .is_some_and(|p| p >= SpecPhase::Review);
     let mut changed = false;
+    let mut inbox = false;
 
     if let Ok(Some((_, ws))) = app.store.workspace(key).await {
         let rows = app.store.prs_of(key).await.unwrap_or_default();
@@ -189,11 +191,16 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
             .as_ref()
             .is_none_or(|s| s.state == PrState::Open);
         if open || force {
-            changed |= snapshot(app, &project, &row, force).await;
+            let checked = snapshot(app, &project, &row, force).await;
+            changed |= checked.changed;
+            inbox |= checked.notices_changed;
         }
     }
     if changed {
         app.emit(Topic::Prs);
+    }
+    if inbox {
+        app.emit(Topic::Inbox);
     }
 }
 
@@ -265,10 +272,10 @@ async fn detect(
 
 /// Reads a linked PR and saves what it found. Whether to tell the open clients: after
 /// every good check (they show when it was made) and when the problem changed.
-async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bool {
+async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> Checked {
     let backoff_key = format!("{}/{}", row.host, row.owner_name);
     if !force && !due(app, &backoff_key) {
-        return false;
+        return Checked::default();
     }
     match app
         .gh
@@ -277,16 +284,10 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bo
     {
         Ok(snap) => {
             succeeded(app, project, &[&backoff_key]).await;
-            // The notices come with the next package: the marks stay as they were.
-            if let Err(e) = app
-                .store
-                .save_check(row.id, &snap, &row.marks, Utc::now(), &[], &[])
-                .await
-            {
+            record(app, row, &snap).await.unwrap_or_else(|e| {
                 tracing::warn!(task = %row.task_key, "could not save the PR check: {e}");
-                return false;
-            }
-            true
+                Checked::default()
+            })
         }
         Err(e) => {
             failed(app, project, &backoff_key, &e, force).await;
@@ -295,12 +296,16 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> bo
             if row.error.as_deref() == Some(text.as_str())
                 && row.error_kind.as_deref() == Some(kind)
             {
-                return false;
+                return Checked::default();
             }
-            app.store
-                .set_pr_error(row.id, Some((kind, &text)))
-                .await
-                .is_ok()
+            Checked {
+                changed: app
+                    .store
+                    .set_pr_error(row.id, Some((kind, &text)))
+                    .await
+                    .is_ok(),
+                notices_changed: false,
+            }
         }
     }
 }
@@ -333,11 +338,12 @@ pub(crate) async fn link_by_url(
         linked_by: linked_by.to_string(),
     };
     let row = app.store.link_pr(key, &new).await?;
-    app.store
-        .save_check(row.id, &snapshot, &row.marks, Utc::now(), &[], &[])
-        .await?;
+    let checked = record(app, &row, &snapshot).await?;
     phases::advance(app, key, SpecPhase::Review).await;
     app.emit(Topic::Prs);
+    if checked.notices_changed {
+        app.emit(Topic::Inbox);
+    }
     Ok(app.store.pr(row.id).await?.unwrap_or(row))
 }
 

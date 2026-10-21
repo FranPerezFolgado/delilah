@@ -24,6 +24,20 @@ pub(crate) fn bare_snapshot(state: &str, merged: bool) -> String {
     )
 }
 
+/// A GraphQL answer for an open PR at `head` with one check `build` that ended in
+/// `conclusion` (`SUCCESS`, `FAILURE`...), and the given merged/closed `state`.
+pub(crate) fn ci_snapshot(state: &str, head: &str, conclusion: &str) -> String {
+    format!(
+        r#"{{"data":{{"repository":{{"pullRequest":{{"state":"{state}","isDraft":false,"merged":{merged},
+      "headRefOid":"{head}","baseRefName":"main","title":"Add things","url":"u","reviewDecision":null,
+      "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":{{"contexts":{{"nodes":[
+        {{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"{conclusion}","detailsUrl":"https://ci/1"}}
+      ]}}}}}}}}]}},
+      "reviews":{{"nodes":[]}},"comments":{{"nodes":[]}},"reviewThreads":{{"nodes":[]}}}}}}}}}}"#,
+        merged = state == "MERGED"
+    )
+}
+
 type Reply = (Vec<String>, Result<String, GhError>);
 
 pub(crate) struct FakeGh {
