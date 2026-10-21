@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { setLanguage, t } from "../i18n";
-import { stepLabel } from "./TaskView";
+import { stepLabel } from "../chain";
 
 beforeEach(() => setLanguage("es"));
 

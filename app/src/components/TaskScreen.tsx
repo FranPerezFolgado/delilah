@@ -220,13 +220,16 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
 
   // After a handoff the new primary's terminal is the one to look at.
   const primaryId = task?.saving_mode ? (sessions.find((s) => s.primary)?.id ?? null) : null;
-  const lastPrimary = useRef(primaryId);
+  const lastPrimary = useRef({ owner, primaryId });
   useEffect(() => {
     const before = lastPrimary.current;
-    lastPrimary.current = primaryId;
-    if (before && primaryId && before !== primaryId) activate(sessionTab(primaryId));
+    lastPrimary.current = { owner, primaryId };
+    // Only a new primary of the same task: another task's is not a handoff.
+    if (before.owner === owner && before.primaryId && primaryId && before.primaryId !== primaryId) {
+      activate(sessionTab(primaryId));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [primaryId]);
+  }, [owner, primaryId]);
 
   const setSaving = (on: boolean) =>
     api

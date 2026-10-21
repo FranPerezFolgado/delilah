@@ -4,6 +4,7 @@ import { sessionStatus } from "./sessionLabels";
 import { on } from "../live";
 import { Icon } from "./Icon";
 import { SpecPanel } from "./SpecPanel";
+import { stepLabel } from "../chain";
 import { phaseLabel, type Column } from "../phases";
 import { locale, t } from "../i18n";
 
@@ -21,14 +22,6 @@ const EVENT_LABELS: Record<string, string> = {
   fail: "Falló",
   "start-aborted": "No se pudo empezar; vuelve al backlog",
 };
-
-const STEP_LABELS: Record<Step, string> = {
-  plan: "Spec y plan",
-  implement: "Implementación",
-  review: "Revisión",
-};
-
-export const stepLabel = (step: Step) => t(STEP_LABELS[step] ?? String(step));
 
 interface Props {
   task: Task;
