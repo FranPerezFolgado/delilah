@@ -13,7 +13,8 @@ Mode: format=markdown commits=yes
 | WP-05 | 3 | 3B | done | 1 | 7ed3968 | +TaskView.tsx label, alerts.ts, 4 test fixtures |
 | WP-03F | 3 | 3B | done | 1 | daba6f5 | phase 3 review fixes (daemon, CLI); F6 skipped (Live.primary readers out of scope) |
 | WP-05F | 3 | 3B | done | 1 | f2f90b6 | phase 3 review fixes (history label) |
-| WP-06 | 4 | 4A | verified | 1 | | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
+| WP-06 | 4 | 4A | done | 1 | 7d176ae | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
+| WP-06F | 4 | 4A | done | 1 | 6855266 | phase 4 review fixes |
 | WP-07 | 5 | 5A | pending | 0 | | |
 | WP-08 | 6 | 6A | pending | 0 | | |
 | WP-09 | 7 | 7A | pending | 0 | | |
@@ -27,3 +28,4 @@ Mode: format=markdown commits=yes
 - Phase 3: spec GAPS→fixed/deferred, architecture approve-with-changes→fixed, contract NEEDS CARE (FR-002 risk was a false alarm), security OK (2 LOW, 1 fixed), UI PARTIAL (no browser; API checks pass, 81 web tests). Fixed in WP-03F + WP-05F.
   - Moved to WP-06: handoff offer buttons on the task screen (US1-1/FR-005); running saving-mode toggle (FR-001).
   - Open (LOW): old Live keeps primary=true until it exits (~3 s) — F6 skipped, Live.primary readers span asks/actions/hooks/terminal; review handoff starts silently until WP-08 (notification); English history says "Moved to Implement" (reuses phase-name keys); module split of handoff.rs handlers; PATCH not atomic; no Origin check verified for state-changing POSTs (pre-existing).
+- Phase 4: spec COMPLIANT, architecture approve-with-minor-changes → fixed in WP-06F (shared stepLabel in chain.ts, owner-aware primary-follow effect, typed stages, tests). UI not checked visually (no browser tools in this session).
