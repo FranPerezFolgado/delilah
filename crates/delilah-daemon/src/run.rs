@@ -412,6 +412,9 @@ pub fn launch_session(
 ) -> Result<(), ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume = resume && claude::has_conversation(workspace, &session.id);
+    // No control character reaches the agent's command line.
+    let prompt = prompt.map(crate::actions::sanitize_prompt);
+    let prompt = prompt.as_deref();
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
@@ -424,6 +427,7 @@ pub fn launch_session(
                 &session.task,
                 &session.id,
                 permission,
+                &[task_dir.as_path()],
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));

@@ -15,6 +15,9 @@ use crate::state::AppState;
 use crate::store::StoreError;
 use crate::store_sessions::{EntryKind, SessionKind, SessionRecord, project_of, project_owner};
 
+/// The longest first prompt, as for a message in a conversation.
+const MAX_PROMPT_CHARS: usize = 16_000;
+
 #[derive(Debug, Serialize)]
 pub struct SessionView {
     #[serde(flatten)]
@@ -92,6 +95,21 @@ async fn open_for(
             "a conversation can only be opened in a project",
         ));
     }
+    // As in `conversation::send`: what reaches the terminal is what is recorded.
+    let prompt = req
+        .prompt
+        .as_deref()
+        .map(|p| crate::actions::sanitize_prompt(p.trim()))
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    if prompt
+        .as_deref()
+        .is_some_and(|p| p.chars().count() > MAX_PROMPT_CHARS)
+    {
+        return Err(ApiError::bad_request(format!(
+            "the prompt is longer than {MAX_PROMPT_CHARS} characters"
+        )));
+    }
     let ws = crate::owners::workspace(app, &key)
         .await
         .map_err(|_| ApiError::conflict(format!("{key} has no workspace (archived?)")))?;
@@ -131,7 +149,7 @@ async fn open_for(
         step: None,
     };
     app.store.create_session(&record).await?;
-    let prompt = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
+    let prompt = prompt.as_deref();
     if let (true, Some(text)) = (conversation, prompt) {
         // The prompt goes to Claude on launch: the first line of the chat.
         app.store
@@ -666,6 +684,31 @@ mod project_tests {
         if let Some(live) = app.sessions.get(id) {
             let _ = live.pty.kill();
         }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn the_first_prompt_is_sanitised_and_capped() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "prompt": "an\u{1b}[31m idea\u{3}" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        let id = s["id"].as_str().unwrap();
+        let entries = app.store.entries(id).await.unwrap();
+        assert_eq!(entries[0].body["text"], "an[31m idea");
+        if let Some(live) = app.sessions.get(id) {
+            let _ = live.pty.kill();
+        }
+        let long = "x".repeat(MAX_PROMPT_CHARS + 1);
+        let (status, body) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "prompt": long })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         std::fs::remove_dir_all(home).ok();
     }
 

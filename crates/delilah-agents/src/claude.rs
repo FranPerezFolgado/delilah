@@ -58,12 +58,12 @@ pub enum Permission {
 /// also in its RTK-rewritten form: a user-level PreToolUse hook such as RTK rewrites
 /// `git status` to `rtk git status`, and allow rules match the rewritten command.
 /// No `rg` nor `git log/show/diff`: `rg --pre` runs programs and `--output` writes files.
+/// Reading is scoped: the workspace (the cwd) and, per extra dir, that folder; see
+/// [`dont_ask_allow`]. Claude applies `Read` rules to Grep and Glob too.
 const DONT_ASK_ALLOW: &[&str] = &[
-    "Read",
-    "Grep",
-    "Glob",
     "AskUserQuestion",
-    "Skill",
+    // Only the plugin's skill, as the call is recorded: `{"skill":"delilah:task-from-idea"}`.
+    "Skill(delilah:task-from-idea)",
     "TodoWrite",
     "Bash(git status:*)",
     "Bash(ls:*)",
@@ -71,7 +71,31 @@ const DONT_ASK_ALLOW: &[&str] = &[
     "Bash(rtk ls:*)",
 ];
 
-const DONT_ASK_DENY: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];
+/// Editing tools, and the places secrets live (deny wins over the scoped allow).
+const DONT_ASK_DENY: &[&str] = &[
+    "Edit",
+    "MultiEdit",
+    "Write",
+    "NotebookEdit",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.config/gh/**)",
+    "Read(**/.env)",
+    "Read(**/.env.*)",
+];
+
+/// The allow list under [`Permission::DontAsk`]: reads limited to the workspace
+/// (`./**`, relative to the cwd) and each of `extra_dirs` (`//` marks an absolute path).
+fn dont_ask_allow(extra_dirs: &[&Path]) -> Vec<String> {
+    let mut allow = vec!["Read(./**)".to_string()];
+    for dir in extra_dirs {
+        let dir = dir.to_string_lossy();
+        allow.push(format!("Read(/{}/**)", dir.trim_end_matches('/')));
+    }
+    allow.extend(DONT_ASK_ALLOW.iter().map(|rule| rule.to_string()));
+    allow
+}
 
 pub struct Launch<'a> {
     pub workspace: &'a Path,
@@ -154,6 +178,8 @@ pub fn command(launch: &Launch) -> CommandBuilder {
             cmd.args(["--permission-mode", "dontAsk"]);
             // A cloned repo's own settings must not widen the allow list.
             cmd.args(["--setting-sources", "user"]);
+            // Nor may the project's or user's MCP servers reach an idea conversation.
+            cmd.arg("--strict-mcp-config");
         }
     }
     if let Some(dir) = launch.plugin_dir {
@@ -164,7 +190,8 @@ pub fn command(launch: &Launch) -> CommandBuilder {
         cmd.args(["--append-system-prompt", text]);
     }
     if let Some(prompt) = launch.prompt {
-        cmd.arg(prompt);
+        // After `--`, so a prompt starting with `-` is never read as an option.
+        cmd.args(["--", prompt]);
     }
     cmd.cwd(launch.workspace);
     cmd
@@ -180,6 +207,7 @@ pub fn settings(
     status_script: &Path,
     padding: Option<&Value>,
     permission: Permission,
+    extra_dirs: &[&Path],
 ) -> Value {
     let post = post_command(daemon_url, "/hooks/claude", task, session);
     let mut hooks: serde_json::Map<String, Value> = HOOK_EVENTS
@@ -210,7 +238,8 @@ pub fn settings(
     }
     let mut settings = json!({ "hooks": hooks, "statusLine": status_line });
     if permission == Permission::DontAsk {
-        settings["permissions"] = json!({ "allow": DONT_ASK_ALLOW, "deny": DONT_ASK_DENY });
+        settings["permissions"] =
+            json!({ "allow": dont_ask_allow(extra_dirs), "deny": DONT_ASK_DENY });
     }
     settings
 }
@@ -261,6 +290,7 @@ pub fn write_settings(
     task: &str,
     session: &str,
     permission: Permission,
+    extra_dirs: &[&Path],
 ) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -282,6 +312,7 @@ pub fn write_settings(
         &script,
         user.as_ref().and_then(|u| u.get("padding")),
         permission,
+        extra_dirs,
     );
     std::fs::write(path, serde_json::to_vec_pretty(&settings)?)?;
     Ok(path.to_path_buf())
@@ -410,6 +441,7 @@ mod tests {
             Path::new("/tmp/statusline-sess-1.sh"),
             None,
             Permission::Default,
+            &[],
         );
         for event in HOOK_EVENTS {
             let command = s["hooks"][event][0]["hooks"][0]["command"]
@@ -480,6 +512,7 @@ mod tests {
                 "abc",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -496,6 +529,7 @@ mod tests {
                 "abc",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "continúa"
             ]
         );
@@ -514,6 +548,7 @@ mod tests {
                 "PROJ-1 · Principal",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -532,6 +567,7 @@ mod tests {
                 "PROJ-1 · Principal",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "continúa"
             ]
         );
@@ -551,6 +587,7 @@ mod tests {
                 "/tmp/s.json",
                 "--permission-mode",
                 "plan",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -605,8 +642,25 @@ mod tests {
             has_pair(&dont_ask, "--setting-sources", "user"),
             "{dont_ask:?}"
         );
+        assert!(
+            dont_ask.contains(&"--strict-mcp-config".to_string()),
+            "{dont_ask:?}"
+        );
+        assert!(!plan.contains(&"--strict-mcp-config".to_string()));
         assert!(!plan.contains(&"--setting-sources".to_string()));
         assert!(!argv(&launch()).contains(&"--setting-sources".to_string()));
+    }
+
+    #[test]
+    fn a_prompt_goes_after_double_dash_so_it_is_never_an_option() {
+        for prompt in ["--dangerously-skip-permissions", "-p", "idea"] {
+            let args = argv(&Launch {
+                prompt: Some(prompt),
+                plugin_dir: Some(Path::new("/tmp/plugin")),
+                ..launch()
+            });
+            assert_eq!(args[args.len() - 2..], ["--", prompt], "{args:?}");
+        }
     }
 
     #[test]
@@ -632,16 +686,26 @@ mod tests {
 
     #[test]
     fn dont_ask_settings_allow_read_only_tools_and_deny_edits() {
-        let s = |p| settings("http://x", "T-1", "s", Path::new("/tmp/s.sh"), None, p);
+        let extra = Path::new("/home/u/.delilah/tasks/T-1");
+        let s = |p| {
+            settings(
+                "http://x",
+                "T-1",
+                "s",
+                Path::new("/tmp/s.sh"),
+                None,
+                p,
+                &[extra],
+            )
+        };
         let dont_ask = s(Permission::DontAsk);
         assert_eq!(
             dont_ask["permissions"]["allow"],
             json!([
-                "Read",
-                "Grep",
-                "Glob",
+                "Read(./**)",
+                "Read(//home/u/.delilah/tasks/T-1/**)",
                 "AskUserQuestion",
-                "Skill",
+                "Skill(delilah:task-from-idea)",
                 "TodoWrite",
                 "Bash(git status:*)",
                 "Bash(ls:*)",
@@ -651,7 +715,18 @@ mod tests {
         );
         assert_eq!(
             dont_ask["permissions"]["deny"],
-            json!(["Edit", "MultiEdit", "Write", "NotebookEdit"])
+            json!([
+                "Edit",
+                "MultiEdit",
+                "Write",
+                "NotebookEdit",
+                "Read(~/.ssh/**)",
+                "Read(~/.aws/**)",
+                "Read(~/.gnupg/**)",
+                "Read(~/.config/gh/**)",
+                "Read(**/.env)",
+                "Read(**/.env.*)"
+            ])
         );
         assert!(s(Permission::Plan).get("permissions").is_none());
         assert!(s(Permission::Default).get("permissions").is_none());
@@ -725,6 +800,7 @@ mod tests {
                 "/tmp/tasks/PROJ-1",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
