@@ -217,6 +217,53 @@ describe("helpers around a desk", () => {
     expect(spots).toEqual(["0", "2"]);
     expect(view.container.querySelectorAll(".pg-helper--leaving")).toHaveLength(1);
   });
+
+  it("removes a leaving helper after 300 ms even if the desk re-renders meanwhile", () => {
+    vi.useFakeTimers();
+    try {
+      withHelpers([h("a", "x", 1), h("b", "y", 2)]);
+      const view = render(<PlaygroundView onOpen={() => {}} />);
+      withHelpers([h("a", "x", 1)]);
+      view.rerender(<PlaygroundView onOpen={() => {}} />);
+      const out = view.container.querySelector(".pg-helper--leaving")!;
+      expect(out.getAttribute("aria-hidden")).toBe("true");
+      for (let i = 0; i < 2; i++) {
+        act(() => void vi.advanceTimersByTime(50));
+        withHelpers([h("a", "x", 1)]);
+        view.rerender(<PlaygroundView onOpen={() => {}} />);
+      }
+      act(() => void vi.advanceTimersByTime(350));
+      expect(view.container.querySelectorAll(".pg-helper--leaving")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a short label under each helper, the role for the generic look", () => {
+    withHelpers([h("a", "code-researcher", 1), h("b", "implementer", 2), h("c", "a-very-long-role-name", 3), h("d", "", 4)]);
+    const { container } = render(<PlaygroundView onOpen={() => {}} />);
+    const labels = live(container).map((e) => e.querySelector(".pg-helper-label"));
+    expect(labels.map((l) => l?.textContent)).toEqual([t("Investigador"), t("Implementador"), "a-very-long-role-name", t("Ayudante")]);
+    expect(labels[2]!.getAttribute("title")).toBe("a-very-long-role-name");
+  });
+
+  it("keeps a leaving helper's spot reserved until it is removed", () => {
+    vi.useFakeTimers();
+    try {
+      withHelpers([h("a", "x", 1), h("b", "y", 2)]);
+      const view = render(<PlaygroundView onOpen={() => {}} />);
+      withHelpers([h("a", "x", 1), h("n", "new", 3)]);
+      view.rerender(<PlaygroundView onOpen={() => {}} />);
+      const spot = (id: string) => live(view.container).find((e) => e.getAttribute("aria-label")?.startsWith(id))?.getAttribute("data-spot");
+      const leaving = view.container.querySelector(".pg-helper--leaving")!.getAttribute("data-spot");
+      expect(leaving).toBe("1");
+      expect(spot("new")).not.toBe(leaving);
+      act(() => void vi.advanceTimersByTime(350));
+      expect(view.container.querySelectorAll(".pg-helper--leaving")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("stale and hidden office", () => {

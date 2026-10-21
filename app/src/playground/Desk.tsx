@@ -5,7 +5,7 @@ import type { Helper } from "../api";
 import { accessibleName, assignSlots, caption, deskState, helperName, helperPose, roleLook, visibleHelpers, type DeskModel } from "./layout";
 import { POSE_OF } from "./poses";
 import { Sprite } from "./Sprite";
-import { DESK, POSES, ROLE_PROP_FRAMES } from "./sprites";
+import { DESK, POSES, ROLE_PROP_FRAMES, type Look } from "./sprites";
 
 /** Helper spots per session (helper id -> spot), module-level so they survive unmounting. */
 const SPOTS = new Map<string, Map<string, number>>();
@@ -16,25 +16,52 @@ interface Leaving {
   spot: number;
 }
 
-/** The helpers around a desk, at stable spots; a removed one lingers while it fades out. */
+/** The short text under a helper: the known looks have a name, the generic one shows its role. */
+const LOOK_NAME = { researcher: "Investigador", implementer: "Implementador", reviewer: "Revisor" } as const;
+const shortLabel = (look: Look, label: string) => (look === "generic" ? label : t(LOOK_NAME[look]));
+
+/** The helpers around a desk, at stable spots; a removed one lingers while it fades out,
+ *  keeping its spot until its own timer removes it. */
 function Helpers({ sessionId, helpers }: { sessionId: string; helpers: Helper[] }) {
   const { shown, rest } = visibleHelpers(helpers);
+  const prev = useRef(new Map<string, Leaving>());
+  const departing = useRef(new Map<string, Leaving>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const [, bump] = useState(0);
+
+  const shownIds = new Set(shown.map((h) => h.id));
+  for (const [id, l] of prev.current) if (!shownIds.has(id) && !departing.current.has(id)) departing.current.set(id, l);
+  for (const id of shownIds) departing.current.delete(id);
   // Idempotent: the same helpers give the same spots, so writing during render is safe.
-  const spots = assignSlots(SPOTS.get(sessionId) ?? new Map(), shown.map((h) => h.id));
+  // Leaving helpers still count, so a newcomer does not take their spot.
+  const spots = assignSlots(SPOTS.get(sessionId) ?? new Map(), [...shownIds, ...departing.current.keys()]);
   if (spots.size) SPOTS.set(sessionId, spots);
   else SPOTS.delete(sessionId);
+  prev.current = new Map(shown.map((h) => [h.id, { helper: h, spot: spots.get(h.id)! }]));
 
-  const prev = useRef(new Map<string, Leaving>());
-  const [leaving, setLeaving] = useState<Leaving[]>([]);
-  const now = new Map(shown.map((h) => [h.id, { helper: h, spot: spots.get(h.id)! }]));
+  // One timer per departure, kept across re-renders; only its own firing or a return clears it.
   useEffect(() => {
-    const gone = [...prev.current.values()].filter((l) => !now.has(l.helper.id));
-    prev.current = now;
-    if (!gone.length) return;
-    setLeaving((cur) => [...cur, ...gone]);
-    const timer = setTimeout(() => setLeaving((cur) => cur.filter((l) => !gone.includes(l))), LEAVE_MS);
-    return () => clearTimeout(timer);
+    for (const id of departing.current.keys()) {
+      if (timers.current.has(id)) continue;
+      timers.current.set(
+        id,
+        setTimeout(() => {
+          timers.current.delete(id);
+          departing.current.delete(id);
+          bump((n) => n + 1);
+        }, LEAVE_MS),
+      );
+    }
+    for (const [id, timer] of timers.current) {
+      if (departing.current.has(id)) continue;
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
   });
+  useEffect(() => {
+    const all = timers.current;
+    return () => all.forEach(clearTimeout);
+  }, []);
 
   const cell = (h: Helper, spot: number, out = false) => {
     const { look, label } = roleLook(h.role);
@@ -45,6 +72,7 @@ function Helpers({ sessionId, helpers }: { sessionId: string; helpers: Helper[] 
         className={`pg-helper${out ? " pg-helper--leaving" : ""}`}
         role="img"
         aria-label={helperName(h)}
+        aria-hidden={out ? true : undefined}
         title={label}
         data-look={look}
         data-pose={pose}
@@ -52,13 +80,16 @@ function Helpers({ sessionId, helpers }: { sessionId: string; helpers: Helper[] 
       >
         <Sprite frames={POSES[pose]} />
         <Sprite className="pg-prop" frames={ROLE_PROP_FRAMES[look]} />
+        <span className="pg-helper-label" title={label}>
+          {shortLabel(look, label)}
+        </span>
       </span>
     );
   };
   return (
     <>
       {shown.map((h) => cell(h, spots.get(h.id)!))}
-      {leaving.filter((l) => !now.has(l.helper.id)).map((l) => cell(l.helper, l.spot, true))}
+      {[...departing.current.values()].map((l) => cell(l.helper, spots.get(l.helper.id) ?? l.spot, true))}
       {rest.length > 0 && (
         <span className="pg-helper-more" title={rest.map((h) => roleLook(h.role).label).join(", ")}>
           +{rest.length}
