@@ -31,9 +31,15 @@ settings.
   from `code`. Codes: `branch.empty`, `branch.missing_ticket`,
   `branch.unknown_placeholder`, `shared.path_empty`, `shared.path_absolute`,
   `shared.path_parent`, `shared.path_duplicate`, `submodules.not_parent`,
-  `submodules.conflict`, `submodules.unknown` (a rule names a submodule the parent does
-  not have). A body with an unknown key or a wrong type is also `422`, with `fields`
+  `submodules.conflict`, `submodules.unknown` (a rule names a submodule path the parent does
+  not have), `settings.invalid` (malformed body, unknown key or wrong type; `field`
+  names the key when known, else is empty). A body with an unknown key or a wrong type is also `422`, with `fields`
   naming the key when known.
+
+## `PATCH /api/v1/projects/{name}` (kind change)
+
+Changing `kind` from `parent` to `repo` clears `settings.submodules` (both lists), since
+a plain repo has no submodules.
 
 ## `POST /api/v1/runs` (unchanged shape, new defaults)
 

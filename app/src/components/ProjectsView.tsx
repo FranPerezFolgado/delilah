@@ -132,6 +132,7 @@ export function ProjectsView({ projects, onChanged }: { projects: Project[]; onC
 function ProjectRow({ project, onChanged }: { project: Project; onChanged: () => void }) {
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savedNote, setSavedNote] = useState(false);
   const [name, setName] = useState(project.name);
   const [path, setPath] = useState(project.path);
   const [kind, setKind] = useState<ProjectKind>(project.kind);
@@ -221,14 +222,15 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
           </span>
         ) : (
           <span style={{ display: "inline-flex", gap: 4 }}>
-            <button className="btn btn-ghost" onClick={() => setSettingsOpen(true)}>{t("Ajustes")}</button>
+            <button className="btn btn-ghost" onClick={() => { setSavedNote(false); setSettingsOpen(true); }}>{t("Ajustes")}</button>
             <button className="btn btn-ghost" onClick={() => setMode("edit")}>{t("Editar")}</button>
             <button className="btn btn-ghost" onClick={() => setMode("delete")}>{t("Borrar")}</button>
           </span>
         )}
         {error && <div className="error selectable" style={{ whiteSpace: "normal" }}>{error}</div>}
+        {savedNote && !settingsOpen && <div className="muted" role="status" style={{ fontSize: 12 }}>{t("Ajustes guardados")}</div>}
         {settingsOpen && (
-          <ProjectSettings project={project} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); onChanged(); }} />
+          <ProjectSettings project={project} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setSavedNote(true); onChanged(); }} />
         )}
       </td>
     </tr>

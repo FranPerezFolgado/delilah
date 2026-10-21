@@ -12,6 +12,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
   const [subs, setSubs] = useState<Submodule[]>([]);
   const [errors, setErrors] = useState<Fields>([]);
   const [error, setError] = useState<string | null>(null);
+  const [subsLoaded, setSubsLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -19,7 +20,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
   const dirty = JSON.stringify(s) !== JSON.stringify(saved);
 
   useEffect(() => {
-    if (parent) api.submodules(project.name).then(setSubs).catch(() => {});
+    if (parent) api.submodules(project.name).then((l) => { setSubs(l); setSubsLoaded(true); }).catch(() => {});
   }, [parent, project.name]);
 
   const close = () => {
@@ -46,6 +47,11 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
       setBusy(false);
     }
   };
+
+  const placed = (field: string) =>
+    field === "workspace" || field === "branch" || field === "setup" || /^shared\[\d+\]/.test(field) ||
+    (parent && /^submodules\.(always|never)(\.|\[|$)/.test(field));
+  const unplaced = errors.filter((f) => !placed(f.field));
 
   const msgs = (prefix: string) =>
     errors.filter((f) => f.field === prefix || f.field.startsWith(prefix + ".") || f.field.startsWith(prefix + "["));
@@ -105,7 +111,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
               <div className="shared-row">
                 <input className="input mono" name={`shared-path-${i}`} aria-label={t("Ruta dentro del proyecto")} value={e.path}
                   onChange={(ev) => setShared(i, { path: ev.target.value })} />
-                <select className="input" aria-label="modo" value={e.mode ?? ""}
+                <select className="input" aria-label={t("Modo")} value={e.mode ?? ""}
                   onChange={(ev) => setShared(i, { mode: (ev.target.value || null) as SharedMode | null })}>
                   <option value="">{t("Automático")}</option>
                   <option value="copy">{t("Copiar")}</option>
@@ -137,8 +143,13 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
             <span>{list === "always" ? t("Submódulos siempre incluidos") : t("Submódulos nunca incluidos")}</span>
             <div className="picks">
               {subs.map((m) => (
-                <label key={m.name} className="muted">
-                  <input type="checkbox" checked={s.submodules[list].includes(m.name)} onChange={() => toggle(list, m.name)} /> {m.name}
+                <label key={m.path} className="muted">
+                  <input type="checkbox" checked={s.submodules[list].includes(m.path)} onChange={() => toggle(list, m.path)} /> {m.name}
+                </label>
+              ))}
+              {subsLoaded && s.submodules[list].filter((p) => !subs.some((m) => m.path === p)).map((p) => (
+                <label key={p} className="muted" data-stale={p}>
+                  <input type="checkbox" checked onChange={() => toggle(list, p)} /> {p} ({t("ya no existe en el proyecto")})
                 </label>
               ))}
             </div>
@@ -146,7 +157,12 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
           </div>
         ))}
 
-        {error && <div className="error selectable">{error}</div>}
+        {(error || unplaced.length > 0) && (
+          <div className="error selectable">
+            {error}
+            {unplaced.map((f, i) => <div key={i}>{f.field ? `${f.field}: ${f.message}` : f.message}</div>)}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={close} disabled={busy}>{t("Cancelar")}</button>
           <button className="btn btn-p" disabled={busy}>{busy ? t("Guardando…") : t("Guardar")}</button>

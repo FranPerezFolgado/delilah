@@ -627,6 +627,11 @@ fn find_project(api: &Api, name: &str) -> Result<Project, String> {
         .ok_or_else(|| format!("no such project: {name}"))
 }
 
+/// The project came from the list, so a bare 404/405 means the daemon lacks the route.
+fn is_missing_route(error: &str) -> bool {
+    error == "daemon answered 404 Not Found" || error == "daemon answered 405 Method Not Allowed"
+}
+
 /// Reads the project, changes one field and sends all settings back.
 fn change_project(api: &Api, name: &str, change: Change) -> Result<(), String> {
     let project = find_project(api, name)?;
@@ -635,7 +640,11 @@ fn change_project(api: &Api, name: &str, change: Change) -> Result<(), String> {
         .put(&format!("/api/v1/projects/{name}/settings"), &settings)
         .map_err(|e| {
             if e.fields.is_empty() {
-                e.error
+                if is_missing_route(&e.error) {
+                    "this delilahd doesn't support project settings; update/restart it".to_string()
+                } else {
+                    e.error
+                }
             } else {
                 e.fields
                     .iter()
@@ -778,6 +787,13 @@ mod tests {
     #[test]
     fn parses_show() {
         assert!(matches!(parse(&["show", "p"]), ProjectCommand::Show { name } if name == "p"));
+    }
+
+    #[test]
+    fn detects_a_daemon_without_the_settings_route() {
+        assert!(is_missing_route("daemon answered 404 Not Found"));
+        assert!(is_missing_route("daemon answered 405 Method Not Allowed"));
+        assert!(!is_missing_route("no such project: x"));
     }
 
     #[test]

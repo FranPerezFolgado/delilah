@@ -86,4 +86,45 @@ describe("ProjectSettings", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(again).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps submodule rules by path, not name, and renders a stored path checked", async () => {
+    vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "services/api" }, { name: "web", path: "services/web" }]);
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);
+    const p: Project = { ...parent, settings: { ...parent.settings, submodules: { always: [], never: ["services/web"] } } };
+    const { container } = render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(container.querySelectorAll(".picks input").length).toBe(4));
+    const boxes = container.querySelectorAll<HTMLInputElement>(".picks input");
+    expect(boxes[3].checked).toBe(true);
+    fireEvent.click(boxes[0]);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1].submodules).toEqual({ always: ["services/api"], never: ["services/web"] });
+  });
+
+  it("lets a stale stored path be unchecked", async () => {
+    vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "api" }]);
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);
+    const p: Project = { ...parent, settings: { ...parent.settings, submodules: { always: ["gone"], never: [] } } };
+    const { container } = render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(container.querySelector("[data-stale=gone]")).not.toBeNull());
+    fireEvent.click(container.querySelector("[data-stale=gone] input")!);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1].submodules.always).toEqual([]);
+  });
+
+  it("shows field errors it cannot place in the general banner", async () => {
+    vi.spyOn(api, "updateProjectSettings").mockRejectedValue(
+      new ApiError("invalid", 422, false, [
+        { field: "", code: "settings.invalid", message: "cuerpo inválido" },
+        { field: "submodules.unknown_key", code: "settings.invalid", message: "clave rara" },
+      ]),
+    );
+    const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(container.querySelector(".error:not(.field-error)")).not.toBeNull());
+    const banner = container.querySelector(".error:not(.field-error)")!.textContent!;
+    expect(banner).toContain("cuerpo inválido");
+    expect(banner).toContain("submodules.unknown_key: clave rara");
+  });
 });
