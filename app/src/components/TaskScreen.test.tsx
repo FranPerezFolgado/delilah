@@ -75,3 +75,37 @@ describe("TaskScreen header phase", () => {
     expect(head().querySelector(".phase-pill")).toBeNull();
   });
 });
+
+describe("TaskScreen saving mode", () => {
+  const saving = (status: TaskStatus, on = true) => {
+    const { container } = render(
+      <TaskScreen
+        owner="PROJ-1"
+        task={{ ...task(status), saving_mode: on }}
+        sessions={[]}
+        asks={[]}
+        askPosition="right"
+        onChanged={() => {}}
+      />,
+    );
+    return container;
+  };
+
+  it("shows the marker and the chain with saving mode", () => {
+    const c = saving({ type: "running" });
+    expect(c.querySelector(".saving-pill")?.textContent).toContain("Modo ahorro");
+    expect(c.querySelector(".chain")).not.toBeNull();
+    expect(c.textContent).not.toContain("Activar modo ahorro");
+  });
+
+  it("shows neither without it, only the activate action while running", () => {
+    const c = saving({ type: "running" }, false);
+    expect(c.querySelector(".saving-pill")).toBeNull();
+    expect(c.querySelector(".chain")).toBeNull();
+    expect(c.textContent).toContain("Activar modo ahorro");
+  });
+
+  it("offers no activate action on a done task", () => {
+    expect(saving({ type: "done" }, false).textContent).not.toContain("Activar modo ahorro");
+  });
+});

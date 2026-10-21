@@ -63,11 +63,11 @@ None: no new dependencies.
 
 **Independent Test**: `chainOf` unit tests and `SessionChain`/`TaskScreen` component tests with tasks in each stage.
 
-- [ ] T023 [P] [US2] Write failing tests in `app/src/chain.test.ts` for `chainOf(task, sessions)`: null without saving mode; three steps in order with labels; the primary's step `active`, earlier steps with a session `done`, later `pending`; a step with `handoff.to` and stage `offered`/`saving`/`starting` → `waiting`; `failed` → `waiting` with error; skipped implement → the plan step stays active.
-- [ ] T024 [US2] Implement `app/src/chain.ts` for T023.
-- [ ] T025 [US2] Write failing tests then implement `app/src/components/SessionChain.tsx` (+ `SessionChain.test.tsx`): ✓/●/○/⏳ per step with accessible labels ("Spec y plan, terminada"), done steps' "Abrir" selects their tab (or "Reabrir" when stopped), active step selects its tab.
-- [ ] T026 [US2] In `app/src/components/TaskScreen.tsx`: render `SessionChain` above the session tabs and a "Modo ahorro" marker next to `PhaseBadge`; when the primary session changes to a new one, select its tab; extend `app/src/components/TaskScreen.test.tsx` (marker and chain only with saving mode).
-- [ ] T027 [P] [US2] Styles for the chain and the marker in `app/src/styles.css`, readable at 1024 px wide.
+- [X] T023 [P] [US2] Write failing tests in `app/src/chain.test.ts` for `chainOf(task, sessions)`: null without saving mode; three steps in order with labels; the primary's step `active`, earlier steps with a session `done`, later `pending`; a step with `handoff.to` and stage `offered`/`saving`/`starting` → `waiting`; `failed` → `waiting` with error; skipped implement → the plan step stays active.
+- [X] T024 [US2] Implement `app/src/chain.ts` for T023.
+- [X] T025 [US2] Write failing tests then implement `app/src/components/SessionChain.tsx` (+ `SessionChain.test.tsx`): ✓/●/○/⏳ per step with accessible labels ("Spec y plan, terminada"), done steps' "Abrir" selects their tab (or "Reabrir" when stopped), active step selects its tab.
+- [X] T026 [US2] In `app/src/components/TaskScreen.tsx`: render `SessionChain` above the session tabs and a "Modo ahorro" marker next to `PhaseBadge`; when the primary session changes to a new one, select its tab; extend `app/src/components/TaskScreen.test.tsx` (marker and chain only with saving mode).
+- [X] T027 [P] [US2] Styles for the chain and the marker in `app/src/styles.css`, readable at 1024 px wide.
 
 **Checkpoint**: quickstart step 3 and 5 visible in a preview.
 

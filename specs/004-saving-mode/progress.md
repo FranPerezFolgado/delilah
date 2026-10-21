@@ -13,7 +13,7 @@ Mode: format=markdown commits=yes
 | WP-05 | 3 | 3B | done | 1 | 7ed3968 | +TaskView.tsx label, alerts.ts, 4 test fixtures |
 | WP-03F | 3 | 3B | done | 1 | daba6f5 | phase 3 review fixes (daemon, CLI); F6 skipped (Live.primary readers out of scope) |
 | WP-05F | 3 | 3B | done | 1 | f2f90b6 | phase 3 review fixes (history label) |
-| WP-06 | 4 | 4A | pending | 0 | | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
+| WP-06 | 4 | 4A | verified | 1 | | +handoff offer buttons on task screen; running saving-mode toggle (phase 3 spec review) |
 | WP-07 | 5 | 5A | pending | 0 | | |
 | WP-08 | 6 | 6A | pending | 0 | | |
 | WP-09 | 7 | 7A | pending | 0 | | |

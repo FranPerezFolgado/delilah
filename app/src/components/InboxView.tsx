@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ago, api, hhmm, type Handoff, type InboxItem, type InboxKind } from "../api";
+import { HandoffActions } from "./HandoffActions";
 import { Icon, type IconName } from "./Icon";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
@@ -222,28 +223,18 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
             {t("Reanudar ahora")}
           </button>
         )}
-        {item.kind === "handoff" && handoff?.stage === "offered" && (
-          <>
-            <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.handoff(item.task, "confirm"))}>
-              <Icon name="run" /> {t("Implementar en sesión nueva")}
-            </button>
-            <button className="btn" disabled={busy} onClick={() => act(() => api.handoff(item.task, "decline"))}>
-              {t("Seguir aquí")}
-            </button>
-          </>
-        )}
-        {item.kind === "handoff" && handoff?.stage === "failed" && (
-          <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.handoff(item.task, "retry"))}>
-            {t("Reintentar")}
-          </button>
+        {item.kind === "handoff" && (
+          <HandoffActions
+            task={item.task}
+            handoff={handoff}
+            onDone={onChanged}
+            hideError={!!handoff?.error && !!item.text?.includes(handoff.error)}
+          />
         )}
         {item.kind === "failed" && (
           <button className="btn" onClick={() => onOpenTask(item.task)}>{t("Abrir la tarea")}</button>
         )}
       </div>
-      {item.kind === "handoff" && handoff?.stage === "failed" && handoff.error && !item.text?.includes(handoff.error) && (
-        <div className="error selectable">{handoff.error}</div>
-      )}
       {error && <div className="error selectable">{error}</div>}
     </article>
   );
