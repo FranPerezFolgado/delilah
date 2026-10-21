@@ -529,6 +529,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.

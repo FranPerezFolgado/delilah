@@ -5,7 +5,7 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | implementing | 2 | | +1 line in 17 test Config literals (allowed) |
+| WP-01 | 1 | 1A | verified | 2 | | redone after a parallel checkout reverted it; +1 line in 17 test Config literals |
 | WP-02 | 2 | 2A | verified | 1 | | 22 tests, clippy clean |
 | WP-03 | 2 | 2A | verified | 1 | | 28 tests, clippy clean |
 | WP-04 | 2 | 2A | verified | 1 | | clippy pending (core in progress) |

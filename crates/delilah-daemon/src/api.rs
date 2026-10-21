@@ -522,6 +522,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -534,6 +535,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -778,6 +780,7 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: ui_origin.map(str::to_string),
+            claude_bin: "claude".into(),
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -825,6 +828,7 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

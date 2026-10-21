@@ -13,7 +13,7 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `claude_bin: PathBuf` to `Config` in `crates/delilah-daemon/src/config.rs`: read from env `DELILAH_CLAUDE_BIN`, default `claude`; settable in tests like the other fields (follow how `DELILAH_GH_BIN` is handled in `crates/delilah-daemon/src/gh/mod.rs`)
+- [X] T001 Add `claude_bin: PathBuf` to `Config` in `crates/delilah-daemon/src/config.rs`: read from env `DELILAH_CLAUDE_BIN`, default `claude`; settable in tests like the other fields (follow how `DELILAH_GH_BIN` is handled in `crates/delilah-daemon/src/gh/mod.rs`)
 
 ---
 
