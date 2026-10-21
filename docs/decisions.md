@@ -105,6 +105,29 @@ MultiEdit, Write and NotebookEdit. `--setting-sources user` drops the repo's
 settings and hooks stay. `rg` and `git log/show/diff` were dropped: `rg --pre` runs
 programs and `--output` writes files.
 
+**27. Tasks from ideas: the daemon creates them on the confirmation card.**
+Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card
+(title and brief in the `Crear` option's preview); when the user answers `Crear`, the
+daemon creates the backlog task and then returns the answer, with the key, to Claude.
+So a task exists only after a click, and the same code serves the idea
+conversation and project sessions. Rejected: Claude calling the `delilah` CLI or
+`curl` (needs Bash permissions, and nothing stops it from creating tasks unasked)
+and a Delilah MCP tool (a new server to run and configure, for what the existing
+ask hook already does). The brief is written by Claude, so it can be edited before
+the task starts.
+
+**28. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
+of plan mode; a plugin passed to project-owned sessions.**
+- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY.
+- **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#26](decisions.md) for the allow list.
+- **A session-only plugin.** The `task-from-idea` skill ships in `<home>/plugins/delilah`, passed with `--plugin-dir` to project-owned sessions only (task sessions never get it), so nothing is installed in the user's Claude.
+- **Spike findings** (`specs/004-task-from-idea/research.md`, claude 2.1.292):
+  - Edit and Write in `deny` are removed from the session, and `npm install` is refused without a prompt;
+  - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #26;
+  - AskUserQuestion reaches PreToolUse in `dontAsk`, with the preview intact, and the answer returns verbatim (accents and dashes included);
+  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
+  - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
+
 ## Workflows and tasks
 
 **15. SpecKit is the first workflow, through the user's `/feature` wrapper.**

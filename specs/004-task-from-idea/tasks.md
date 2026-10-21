@@ -311,7 +311,7 @@
 ## Phase 7: Polish & cross-cutting
 
 - [X] T038 [P] Add every new UI string to `app/src/i18n/en.ts`, Spanish source → English. Examples: "Nueva tarea con Claude", "Con Claude", "Tu idea", "Cuéntale tu idea…", "en cola", "Detener", "Enviar", "Ver terminal", "Ver conversación", "Claude espera en la terminal", "Creada {key}", "Cambiar algo", "Descartar", "Crear".
-- [ ] T039 [P] Docs:
+- [X] T039 [P] Docs:
   - `docs/status.md`: built, plus the pending items (streaming and a chat view for other sessions, deleting conversations);
   - `docs/architecture.md`: the conversation session, `conversation_entries`, `conversation.rs`, the plugin dir, the launch table, the `conversations` topic, the `Ask.proposal` flow;
   - `docs/decisions.md`: #26 "Tasks from ideas: the daemon creates them on the confirmation card" (R1, with the rejected CLI/curl/MCP), and #27 "Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead of plan mode; a session-only plugin" (R2–R5, with `stream-json` left for later). Include the spike's findings;

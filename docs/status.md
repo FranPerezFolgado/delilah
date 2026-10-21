@@ -2,7 +2,7 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-20
-(version 0.3.0).
+(version 0.3.0, plus "Nueva tarea con Claude").
 
 ## Built
 
@@ -34,6 +34,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
+- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). See [architecture.md](architecture.md) and decisions [#26](decisions.md), [#27](decisions.md), [#28](decisions.md).
 
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
@@ -44,6 +45,13 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 
 ## Pending and known problems
 
+- **Idea conversations, still missing:**
+  - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
+  - deleting conversations (the history is kept for good);
+  - the usage-limit notice does not show in the conversation view;
+  - a card stays pending if its hook connection drops (the user has to answer it in the terminal);
+  - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
+  - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
 - **The real usage-limit payload** has never been observed. When it first happens on the work Mac, check `hooks.jsonl` against `delilah-agents::limits` (see the [spike](spikes/2026-10-19-claude-pty.md)).
 - **SpecKit dirties the checkout.** Each `/speckit-plan` writes its block into CLAUDE.md, and a dirty checkout blocks new checkout tasks. Proposed: ignore that block in the clean-checkout check.
 - **The archive refusal message** (`workspace: . has uncommitted changes…`) names neither the task nor the files. It should list them.

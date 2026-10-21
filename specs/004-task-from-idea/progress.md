@@ -26,8 +26,8 @@ Mode: format=markdown commits=yes
 | WP-15 | 5 | 5A | done | 1 | 62a0531 | |
 | WP-16 | 5 | 5A | done | 1 | 12d54c8 | InboxView change untested | |
 | WP-17 | 6 | 6A | done | 1 | 6e74126 | |
-| WP-18 | 7 | 7A | done | 1 | | |
-| WP-19 | 7 | 7A | implementing | 0 | | |
+| WP-18 | 7 | 7A | done | 1 | 4423015 | |
+| WP-19 | 7 | 7A | done | 1 | | |
 | WP-20 | 7 | 7B | pending | 0 | | T041 manual walkthrough |
 
 ## Reviews
