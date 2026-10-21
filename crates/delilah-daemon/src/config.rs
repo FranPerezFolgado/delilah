@@ -66,7 +66,26 @@ impl Config {
         self.home.join("tasks").join(key)
     }
 
+    /// The Claude Code plugin Delilah writes at start-up (the idea-conversation skill).
+    pub fn plugin_dir(&self) -> PathBuf {
+        self.home.join("plugins/delilah")
+    }
+
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_dir_is_under_home() {
+        let config = Config {
+            home: PathBuf::from("/tmp/delilah-home"),
+            ..Config::from_env().unwrap()
+        };
+        assert_eq!(config.plugin_dir(), PathBuf::from("/tmp/delilah-home/plugins/delilah"));
     }
 }

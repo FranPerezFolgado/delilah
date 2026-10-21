@@ -100,8 +100,8 @@
 
 ### Daemon: plumbing
 
-- [ ] T011 [P] Add `Topic::Conversations` (path `/conversations`, doc comment as the others) to `crates/delilah-daemon/src/events.rs`, and to any topic list or serialisation there.
-- [ ] T012 Write the plugin at start-up:
+- [X] T011 [P] Add `Topic::Conversations` (path `/conversations`, doc comment as the others) to `crates/delilah-daemon/src/events.rs`, and to any topic list or serialisation there.
+- [X] T012 Write the plugin at start-up:
   - in `crates/delilah-daemon/src/state.rs` (or `main.rs`, wherever `Config` and the dirs are prepared), call `delilah_agents::claude::write_plugin(&config.home.join("plugins/delilah"), env!("CARGO_PKG_VERSION"))`;
   - log and continue on error;
   - add `pub fn plugin_dir(&self) -> PathBuf` to `crates/delilah-daemon/src/config.rs`.

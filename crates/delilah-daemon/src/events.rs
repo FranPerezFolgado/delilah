@@ -29,6 +29,8 @@ pub enum Topic {
     Usage,
     /// `/projects`
     Projects,
+    /// `/conversations`: an idea conversation opened, changed or ended.
+    Conversations,
     /// The client missed messages: fetch everything.
     Resync,
 }

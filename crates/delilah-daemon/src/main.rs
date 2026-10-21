@@ -36,6 +36,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&config.home, std::fs::Permissions::from_mode(0o700))?;
     }
+    if let Err(e) = delilah_agents::claude::write_plugin(&config.plugin_dir(), env!("CARGO_PKG_VERSION")) {
+        tracing::warn!("could not write the Delilah plugin: {e}");
+    }
     let store = Store::open(&config.database_path()).await?;
 
     let listener = tokio::net::TcpListener::bind(config.addr).await?;
