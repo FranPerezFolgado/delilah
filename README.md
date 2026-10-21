@@ -106,6 +106,8 @@ and the `tasks.md` checklist with the item the agent is on. Phase changes go to
 the task's history. Delilah only reads these files; the repo stays the source of
 truth.
 
+The task screen's header shows the task's phase (step number and name) next to its status, with the progress ("Implementación · 4/12") while implementing.
+
 Without SpecKit the phase comes from what the agent does: its first edit to code
 (outside `specs/` and `.specify/`) means Implementación, and `gh pr create` or
 `git push` means Revisión. When the agent stops with commits on its branch, the

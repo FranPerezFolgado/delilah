@@ -330,6 +330,7 @@ export function App() {
                   key={owner}
                   owner={owner}
                   task={task}
+                  spec={specs[owner]}
                   project={project}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
