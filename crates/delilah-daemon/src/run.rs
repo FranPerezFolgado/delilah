@@ -309,6 +309,7 @@ pub async fn start_run(
             primary: true,
             closed: false,
             read_only: false,
+            step: None,
         };
         app.store.create_session(&session).await?;
         launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
@@ -519,6 +520,7 @@ mod tests {
             primary: true,
             closed: false,
             read_only: false,
+            step: None,
         }
     }
 
