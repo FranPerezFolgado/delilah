@@ -154,3 +154,13 @@ repos is ever referenced or copied. Development uses
 (FranPerezFolgado). The machine also has work credentials, so confirm the account
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
+
+**26. Saving mode: a fresh session per phase.** It relaxes decision 15, which said
+Delilah never drives SpecKit's phases: Delilah still never drives what happens inside a
+phase, it only starts a new session between phases. With the option on, each phase (spec and
+plan, implementation, review) runs in its own Claude session, started from the spec
+files and git, which already hold everything the next phase needs.
+- **Why:** every turn re-reads the whole conversation. On LIBRE-3 (153 turns) the context grew from ~44k tokens to ~364k, ~33M re-read against 130k written. Estimated saving by cuts: ~37 % with one (planning → implementation), ~49 % with two (+ before the review), ~60 % cutting between implementation phases too. Each session pays its own base (~45-60k), so the returns diminish. Measure it per task from the sessions' transcripts (research R8, [quickstart](../specs/004-saving-mode/quickstart.md)); target: 30 % fewer tokens.
+- **Opt-in per task**, default from a preference: on a high usage limit it only adds handoffs.
+- **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
+- **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).

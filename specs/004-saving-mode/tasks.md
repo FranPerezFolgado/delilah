@@ -98,9 +98,9 @@ None: no new dependencies.
 
 ## Phase 7: Polish & cross-cutting
 
-- [ ] T033 [P] `docs/architecture.md`: sessions section (step, chain, primary switch) and a "Saving mode" subsection (boundaries, stages, recovery); the hook→effect table row for `TurnEnded`.
-- [ ] T034 [P] `docs/decisions.md`: new decision "Saving mode: a fresh session per phase" (why, measured numbers, what was ruled out: returning to the parent, cutting inside orchestrate for now), noting it relaxes decision 15.
-- [ ] T035 [P] `docs/status.md` (built; pending: one session per orchestrate phase) and `README.md` (the option, the chain, the settings).
+- [X] T033 [P] `docs/architecture.md`: sessions section (step, chain, primary switch) and a "Saving mode" subsection (boundaries, stages, recovery); the hook→effect table row for `TurnEnded`.
+- [X] T034 [P] `docs/decisions.md`: new decision "Saving mode: a fresh session per phase" (why, measured numbers, what was ruled out: returning to the parent, cutting inside orchestrate for now), noting it relaxes decision 15.
+- [X] T035 [P] `docs/status.md` (built; pending: one session per orchestrate phase) and `README.md` (the option, the chain, the settings).
 - [ ] T036 Run every check (`cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`) and walk quickstart.md in a preview.
 
 ---
