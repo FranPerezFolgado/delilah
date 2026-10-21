@@ -122,7 +122,7 @@
   - `append_system_prompt`: `Some(IDEA_PROMPT)` for a conversation. Define it as a `const` in `run.rs`, one paragraph: "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode."
 
   Pass the permission to `write_settings`. T013 then passes, along with the existing session and run tests.
-- [ ] T015 [P] In `app/src/api.ts`:
+- [X] T015 [P] In `app/src/api.ts`:
   - `Session.conversation: boolean`;
   - `AskQuestion.options[].preview?: string`;
   - `InboxItem.ask.proposal?: { title: string; brief: string } | null`;

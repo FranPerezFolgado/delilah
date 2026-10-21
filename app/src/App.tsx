@@ -87,6 +87,8 @@ export function App() {
       specs: () => api.specs().then(setSpecs),
       usage: () => api.usage().then(setUsage),
       projects: () => api.projects().then(setProjects),
+      // The open conversation view subscribes to this topic itself.
+      conversations: () => Promise.resolve(),
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
