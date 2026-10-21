@@ -57,6 +57,7 @@ done or pending is in [status.md](status.md).
 | `session_api.rs`, `sessions.rs`, `store_sessions.rs` | Extra Claude sessions and shells. Live sessions are kept in memory and their records in SQLite. Also project sessions (`@project`). |
 | `terminal.rs` | WebSocket terminal: scrollback first, then live bytes; text frames for `resize`. |
 | `hooks.rs` | `/hooks/claude` and `/hooks/claude/statusline`. Each hook is classified into a `Signal`, which sets the session's live state, the inbox attention, the task transition and the phase. |
+| `activity.rs` | What each session is doing right now, for the playground: the current action (tool + target) and its helpers (sub-agents). In memory only, never in SQLite. |
 | `asks.rs` | AskUserQuestion: the PreToolUse hook posts here and waits up to a day. The answer goes back as `updatedInput.answers`. |
 | `inbox.rs` | `GET /api/v1/inbox` (everything that waits on the user) and replies typed into a session. |
 | `phases.rs` | The phase: set by the user, moved forward by spec files and agent signals, and review hints. |
@@ -150,6 +151,8 @@ and only changes while the task is under way (see `phases.rs`):
 - **Folder trust.** A new workspace shows Claude's folder-trust dialog once.
   `run.rs` waits for it to settle, checks that "Yes" is selected and sends Enter.
 
+- **Activity hooks.** `PreToolUse` on `*` (next to the AskUserQuestion one), `PostToolUseFailure`, `SubagentStart` and `SubagentStop` also post to `/hooks/claude`. AskUserQuestion is never shown as an activity. PreToolUse payloads are not appended to `tasks/<KEY>/hooks.jsonl` (PostToolUse carries the same `tool_input`).
+
 **From hook to effect** (`hooks.rs`):
 
 | Signal (hook) | Effect |
@@ -159,6 +162,13 @@ and only changes while the task is under way (see `phases.rs`):
 | `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint |
 | `TurnFailed` (StopFailure) | inbox error, or a usage limit |
 | a turn ending while a usage window is at 100 % | `LimitReached` (any session: the subscription is shared) |
+
+**Activity** (`activity.rs`):
+- `PreToolUse` sets the session's action; its end (PostToolUse or failure) clears it. Only the last of parallel calls is kept.
+- The caption is the tool plus its target cut to 40 characters; `Write` content never leaves the daemon and `WebFetch` keeps the host only.
+- `SubagentStart` / `SubagentStop` add and remove helpers: up to 64 tracked per session, with a role from the agent type (researcher: `code-researcher`, `Explore`, `doc-searcher`; implementer; reviewer: `*-reviewer`; generic otherwise).
+- Cleared on Waiting or Paused, and on Stop, StopFailure and SessionEnd.
+- `GET /api/v1/activity` returns `{sessions: {<id>: {action, helpers}}}`; changes are announced on the `activity` topic.
 
 **Usage limits** (`limits.rs`, [spike](spikes/2026-10-19-claude-pty.md)):
 1. The latest `rate_limits` of each session comes from the status line.
@@ -184,7 +194,7 @@ and only changes while the task is under way (see `phases.rs`):
 ## Live updates
 
 The UI does not poll:
-- `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, or `resync`.
+- `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, `activity`, or `resync`.
 - The UI refetches that one endpoint (`app/src/live.ts`).
 - On reconnect it refetches everything, and a full refresh runs every 30 s as a safety net.
 
@@ -206,3 +216,7 @@ The UI does not poll:
   - Texts are Spanish in the code, wrapped in `t()` / `tn()`, and English lives in `i18n/en.ts`, keyed by the Spanish text.
   - **Every new text needs an `en.ts` entry**; dev builds warn in the console.
   - The daemon picks its own texts with `lang().pick(es, en)`.
+- **Playground** (`playground/`):
+  - `usePlayground.ts` joins sessions, tasks and the `activity` topic into areas (one per project) of desks with fixed slots; `layout.ts` does the slotting and helper spots;
+  - `PlaygroundView.tsx` (header, waiting counter, stale banner), `Desk.tsx`, `Sprite.tsx`, `sprites.ts` (the pixel maps, drawn as SVG) and `poses.ts` (desk state → pose); `playground.css` holds the animations;
+  - the separate window is a Tauri `WebviewWindow` labelled `playground` (`#playground`, `PlaygroundWindow.tsx`), opened from `platform.ts`. Closing it really closes it (only the main window hides on close); a click there tells the main window to open the task. In a browser it is a named tab talking over a `BroadcastChannel`.

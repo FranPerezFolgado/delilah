@@ -189,6 +189,33 @@ included) and opens it in a tab.
   images load from the workspace; in tickets and Bandeja messages a remote image waits
   for a click, so viewing them tells no third party.
 
+**Playground.** A view (in the sidebar) that draws every live Claude session as a
+character at a desk, an office floor with one area per project. Desks keep fixed
+slots, so a character never jumps when another leaves, and empty cells keep their
+place. What the character does says what its session does:
+
+- *arriving*: the session is starting; *thinking*: Claude is working with no tool in flight;
+- *typing* (editing or writing), *reading* (reading or searching), *terminal* (running a command), *busy* (any other tool), with a caption under the desk such as `Edit src/lib.rs`;
+- *phone*: "Supervisando", Claude is waiting on a sub-agent it launched in the foreground (one in the background leaves it thinking);
+- *waiting*: it needs you (highlighted); *paused*: the usage limit stopped it.
+
+The caption is the tool plus its target, cut to 40 characters. File contents never
+show (what a `Write` writes stays in the daemon) and a `WebFetch` shows the host
+only. When Claude launches sub-agents, **helpers** appear next to the desk, each
+with a role: researcher (`code-researcher`, `Explore`, `doc-searcher`),
+implementer, reviewer (`*-reviewer`) or generic. Up to 4 show, then "+N", and each
+keeps its spot while it lives. The header counts the agents waiting for you ("N
+esperando"); **clicking a character opens that task on the session's terminal**,
+where you answer. "Abrir en ventana" moves the playground to its own window to keep
+it on a side screen: closing that window really closes it, and a click there brings
+Delilah to the front with the task. In a plain browser it opens a named tab instead.
+
+With reduced motion in the system the characters stay in still poses, animations
+pause while the window is hidden, and while the daemon is unreachable a
+"Reconectando…" banner shows the last known state. Actions come from Claude's
+hooks, so **an agent started before this update shows no actions until it is
+relaunched** (it still shows thinking, waiting and paused).
+
 **Live updates.** The app does not poll. The daemon announces what changed on
 `GET /api/v1/events` (a WebSocket sending topics like `{"type":"inbox"}`) and the
 app fetches only that again, so a question reaches the Bandeja in well under a

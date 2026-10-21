@@ -35,6 +35,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
 
+**Playground** (`app/src/playground/`):
+- A view of every live session as a pixel character at a desk, by project, with poses for starting, thinking, editing, reading, running, supervising, waiting and paused, and a caption of the current tool.
+- Helpers for sub-agents, the waiting counter, click to open the task's terminal, and "Abrir en ventana" (a separate Tauri window, or a named tab in a browser).
+- Stale banner while offline, still poses with reduced motion, animations paused when hidden.
+
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
 - Help › Ver logs.
@@ -53,6 +58,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
   - a "Delilah Preview" Tauri build (another identifier and port) for native-only features;
   - a per-task "Preview" button that runs the project's preview command next to the terminal;
   - a browser MCP so the agent inside a task can see the preview UI.
+- **Playground limits:**
+  - only the last of several parallel tool calls is shown as the action;
+  - agents launched before the update have no `PreToolUse` hook in their settings, so they show no actions until relaunched;
+  - the native "playground" window and the pixel art have not been checked visually yet (no browser was available when it was built);
+  - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, PR handling, gates and budgets.
 - **Testing:** test the whole flow on the work Mac with a real ticket.

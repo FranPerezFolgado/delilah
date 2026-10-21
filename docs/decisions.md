@@ -154,3 +154,25 @@ repos is ever referenced or copied. Development uses
 (FranPerezFolgado). The machine also has work credentials, so confirm the account
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
+
+## Playground
+
+**26. The playground is DOM + SVG pixel maps.** Each character, desk and helper is
+a small pixel map in code (`sprites.ts`) drawn as SVG, animated with CSS. It stays
+in the React tree: it is accessible (real buttons with names), follows reduced
+motion and costs nothing while hidden. Ruled out: a canvas (no accessibility, a
+render loop for a handful of desks), game engines (a heavy dependency for a view
+that shows a few sprites) and third-party sprite sheets (licences, and a look we
+could not change).
+
+**27. Activity is in memory, on its own topic.** What a session is doing right now
+lasts seconds and is rebuilt by the next hook, so it is not stored in SQLite and
+not mixed into `sessions`. It has its own `activity` topic and
+`GET /api/v1/activity`, so the frequent tool events refetch only that.
+
+**28. "Supervising" is derived from a foreground `Agent` call.** While Claude is
+inside a foreground `Agent` call it is waiting on a sub-agent and has no tool
+event of its own, so the desk shows the phone pose and "Supervisando". An `Agent`
+call run in the background does not block Claude, so that desk keeps its thinking
+pose. Ruled out: a dedicated hook (none exists) and guessing from silence
+(thinking looks the same).

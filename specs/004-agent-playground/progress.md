@@ -19,12 +19,13 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 → 08 �
 | WP-10 | 6 | 6D | done | 1 | 69f6767 | App fetchers no-op activity; new state words need en.ts entries (WP-11) |
 | WP-11 | 6 | 6E | done | 1 | 329656f | data-pose is now the pose name; en.ts gets Editing/Reading/Running |
 | WP-12 | 7 | 7A | verified | 1 | dce6ced | 8 tests red first; new palette key y; spots in module-level map |
-| WP-13 | 8 | 8A | verified | 1 | (next) | T044 (art pass with screenshots) left to the user: no browser in this session |
-| WP-14 | 9 | 9A | pending | 0 | | |
+| WP-13 | 8 | 8A | verified | 1 | e29ddfd | T044 (art pass with screenshots) left to the user: no browser in this session |
+| WP-14 | 9 | 9A | verified | 2 | (next) | first run cut by usage limit |
 | WP-15 | 9 | 9B | pending | 0 | | |
 | WP-03F | 3 | fix | done | 1 | af94ab7 | arch HIGH --pg-w collision + MEDIUM theme/paths/poses.ts/scale |
 | WP-09F | 6 | fix | done | 1 | 15d97b9 | AskUserQuestion, no PreToolUse raw log, helper cap, ghost helpers, WebFetch userinfo |
 | WP-05F | 5 | fix | done | 1 | 8c08ade | hide-on-close only for main; payload validation; in-flight guard |
+| WP-12F | 7 | fix | implementing | 1 | | leaving helpers never removed (HIGH); visible helper label (MEDIUM); reserve leaving spot |
 
 ## Reviews
 
@@ -42,3 +43,4 @@ Scheduling follows "Depends on" in packages.md: the daemon track (WP-06 → 08 �
 - Phase 4 (84c2379): spec COMPLIANT; LOW: click test fixture has owner = session id; tasks.md still says .desk--waiting (class is pg-desk--waiting).
 - Phase 5 (8eab1c9, security+contract+spec in one pass): HIGH hidden playground not re-shown → WP-05F; MEDIUM payload validation → WP-05F; LOW separate capability for playground window: not done (same bundle/CSP).
 - ui-verifier: no browser tools in this session — visual scenarios not checked; preview 1 left running for the user (http://localhost:1501).
+- US3 UI + US4 (69f6767, 329656f, ff47dce, dce6ced): US3 COMPLIANT; US4 GAPS → WP-12F. LOW not fixed: capitalised state word in accessible names; SPOTS entry kept if a desk unmounts with helpers.

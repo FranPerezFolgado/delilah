@@ -305,14 +305,14 @@
 
 ## Phase 9: Polish & Cross-Cutting
 
-- [ ] T045 [P] `README.md`: a Playground section covering:
+- [X] T045 [P] `README.md`: a Playground section covering:
   - what each pose means;
   - the helpers and their roles;
   - the waiting counter and click-to-answer;
   - "Abrir en ventana";
   - that agents started before the update show no actions until relaunched.
-- [ ] T046 [P] `docs/status.md`: the playground is built; known limits (only the last of parallel tool calls is shown; agents launched before the update). `docs/architecture.md`: the activity module, the `activity` topic and endpoint, the new hook events, and `app/src/playground/`.
-- [ ] T047 [P] `docs/decisions.md`:
+- [X] T046 [P] `docs/status.md`: the playground is built; known limits (only the last of parallel tool calls is shown; agents launched before the update). `docs/architecture.md`: the activity module, the `activity` topic and endpoint, the new hook events, and `app/src/playground/`.
+- [X] T047 [P] `docs/decisions.md`:
   - the playground is DOM + SVG pixel maps (canvas, game engines and third-party sprite sheets ruled out, and why);
   - activity is in memory on its own topic;
   - "supervising" is derived from a foreground `Agent` call.
