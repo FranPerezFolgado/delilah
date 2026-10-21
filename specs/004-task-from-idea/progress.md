@@ -14,14 +14,14 @@ Mode: format=markdown commits=yes
 | WP-06 | 2 | 2B | done | 1 | 2b0eda4 | |
 | WP-08 | 2 | 2C | done | 2 | 4f7a642 | |
 | WP-02F | 2 | 2F | done | 1 | 050dadb | phase 2 review fixes |
-| WP-09 | 3 | 3A | verified | 1 | b1f19f6 | |
-| WP-11 | 3 | 3A | verified | 1 | 852b678 | new strings for WP-18: Creada, Crear, Cambiar algo, Abrir terminal, Escribe un mensaje…, Mensaje, Quitar mensaje, en cola, Cuéntale tu idea…, Claude espera en la terminal |
-| WP-10 | 3 | 3B | verified | 1 | 9e98f38 | gap: card stays pending if hook connection drops |
-| WP-12 | 3 | 3C | verified | 1 | 502d1e6 | strings for WP-18: Ver terminal, Ver conversación, Nueva tarea con Claude (en {name}), Con Claude, Tu idea, Opcional: cuéntale…, Abrir conversación |
-| WP-03Fd | 3 | 3F | verified | 1 | | phase 3 fixes, daemon; stop on unknown session now 404 |
-| WP-03Fu | 3 | 3F | verified | 1 | d9447f0 | phase 3 fixes, UI; strings for WP-18: Respondida en la terminal, Retirada |
-| WP-13 | 4 | 4A | pending | 0 | | |
-| WP-14 | 4 | 4A | pending | 0 | | |
+| WP-09 | 3 | 3A | done | 1 | b1f19f6 | |
+| WP-11 | 3 | 3A | done | 1 | 852b678 | new strings for WP-18: Creada, Crear, Cambiar algo, Abrir terminal, Escribe un mensaje…, Mensaje, Quitar mensaje, en cola, Cuéntale tu idea…, Claude espera en la terminal |
+| WP-10 | 3 | 3B | done | 1 | 9e98f38 | gap: card stays pending if hook connection drops |
+| WP-12 | 3 | 3C | done | 1 | 502d1e6 | strings for WP-18: Ver terminal, Ver conversación, Nueva tarea con Claude (en {name}), Con Claude, Tu idea, Opcional: cuéntale…, Abrir conversación |
+| WP-03Fd | 3 | 3F | done | 1 | 87c606d | phase 3 fixes, daemon; stop on unknown session now 404 |
+| WP-03Fu | 3 | 3F | done | 1 | d9447f0 | phase 3 fixes, UI; strings for WP-18: Respondida en la terminal, Retirada |
+| WP-13 | 4 | 4A | implementing | 0 | | |
+| WP-14 | 4 | 4A | implementing | 0 | | |
 | WP-15 | 5 | 5A | pending | 0 | | |
 | WP-16 | 5 | 5A | pending | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |
