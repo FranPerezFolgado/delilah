@@ -261,7 +261,7 @@
 
 **Independent Test**: quickstart.md "By hand" 6.
 
-- [ ] T032 [US2] Write a regression test in `crates/delilah-daemon/src/run.rs` (`mod tests`):
+- [X] T032 [US2] Write a regression test in `crates/delilah-daemon/src/run.rs` (`mod tests`):
   - create a backlog task with `build_task` + `create_task_from_conversation`;
   - `PATCH` its notes;
   - start it with `POST /api/v1/runs`;

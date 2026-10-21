@@ -757,6 +757,130 @@ mod tests {
         assert_eq!(bare, "/feature PROJ-1");
     }
 
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_started_task_from_a_conversation_reads_the_edited_brief() {
+        use tower::ServiceExt;
+        let call = |app: &AppState, req: axum::http::Request<axum::body::Body>| {
+            let router = crate::api::router(app.clone());
+            async move {
+                let res = router.oneshot(req).await.unwrap();
+                let status = res.status();
+                let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (
+                    status,
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default(),
+                )
+            }
+        };
+        let json_req = |method: &str, path: &str, body: serde_json::Value| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap()
+        };
+
+        // A real repo to work in, and a conversation of the project.
+        let home = std::env::temp_dir().join(format!("delilah-run-{}", uuid::Uuid::new_v4()));
+        let repo = home.join("web");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("README.md"), "web\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        let config = crate::config::Config {
+            home: home.clone(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+        let mut conv = session("@web", "Idea");
+        conv.id = "conv".into();
+        conv.primary = false;
+        conv.conversation = true;
+        app.store.create_session(&conv).await.unwrap();
+
+        let task = crate::api::build_task(
+            &app,
+            crate::api::NewTask {
+                key: String::new(),
+                title: "Reintentos".into(),
+                project: Some("web".into()),
+                notes: Some("brief original".into()),
+                in_checkout: None,
+                workflow: None,
+                free: true,
+            },
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        app.store
+            .create_task_from_conversation(&task, "conv", "Idea", chrono::Utc::now())
+            .await
+            .unwrap();
+        let key = task.key.to_string();
+
+        let (status, edited) = call(
+            &app,
+            json_req(
+                "PATCH",
+                &format!("/api/v1/tasks/{key}"),
+                serde_json::json!({ "notes": "brief editado" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
+
+        let (status, started) = call(
+            &app,
+            json_req(
+                "POST",
+                "/api/v1/runs",
+                serde_json::json!({ "key": key, "title": "", "project": "web" }),
+            ),
+        )
+        .await;
+        for live in app.sessions.of_task(&key) {
+            let _ = live.pty.kill();
+        }
+        assert_eq!(status, StatusCode::CREATED, "{started}");
+
+        let path = app.config.task_dir(&key).join("notes.md");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "brief editado");
+        let prompt = point_to_notes(&app, &task.key, "/feature".into(), Some("brief editado"));
+        assert!(prompt.ends_with(&format!("{})", path.display())), "{prompt}");
+    }
+
     #[test]
     fn remote_names_show_the_task_or_project_and_the_label() {
         assert_eq!(
