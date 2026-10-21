@@ -25,7 +25,7 @@ marker in the header; settings hold the defaults. See [research.md](research.md)
 
 **Primary Dependencies**: axum, sqlx (SQLite), tokio, portable-pty; React, Vite; vitest + Testing Library
 
-**Storage**: SQLite: migration `0011_saving_mode.sql` (`tasks.saving_mode`, `tasks.handoff`, `sessions.step`); preferences `saving-mode`, `save-notes` in `settings`
+**Storage**: SQLite: migration `0013_saving_mode.sql` (`tasks.saving_mode`, `tasks.handoff`, `sessions.step`); preferences `saving-mode`, `save-notes` in `settings`
 
 **Testing**: `cargo test -p delilah-daemon` (handoff state machine against fake PTY sessions as in `session_api.rs`/`scheduler.rs` tests), `cargo test -p delilah-core`, `cargo test -p delilah-cli`; `cd app && npx tsc --noEmit && npx vitest run` (`chain.test.ts`, `SessionChain.test.tsx`)
 
@@ -50,7 +50,7 @@ ground rules (`CLAUDE.md`) serve as gates instead:
 | Agent hooks/settings outside the repo, clean env | ✅ new sessions go through `launch_session` (settings in `tasks/<KEY>/`, clean env) |
 | Try changes only in a preview, never 7420 / pkill | ✅ quickstart uses `scripts/preview.sh` |
 | No remote operations without confirming the account | ✅ the review prompt forbids push and PR |
-| Migrations: never edit a shipped one | ✅ new `0011` |
+| Migrations: never edit a shipped one | ✅ new `0013` |
 | Contracts (`api.rs` ↔ `api.ts`) | ⚠️ changed, additively: [contracts/api.md](contracts/api.md); contract review at the end of the phase that touches them |
 | Decision 15 ("Delilah never drives SpecKit's phases") | ⚠️ relaxed on purpose: Delilah starts sessions between phases, never acts inside one; new decision entry in `docs/decisions.md` |
 
@@ -75,7 +75,7 @@ specs/004-saving-mode/
 
 ```text
 crates/delilah-core/src/task.rs                 # Task.saving_mode, Task.handoff, Handoff/Step/HandoffStage, Event::StepStarted (status unchanged)
-crates/delilah-daemon/migrations/0011_saving_mode.sql
+crates/delilah-daemon/migrations/0013_saving_mode.sql
 crates/delilah-daemon/src/store.rs              # read/write saving_mode, handoff; record StepStarted
 crates/delilah-daemon/src/store_sessions.rs     # SessionRecord.step; hand_over(task, from, new) and undo in one transaction; session_of_step
 crates/delilah-daemon/src/handoff.rs            # NEW: boundaries, state machine, prompts, start/rollback, recovery, API handlers

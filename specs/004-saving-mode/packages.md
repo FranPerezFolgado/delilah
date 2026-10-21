@@ -7,7 +7,7 @@ Phase 1 (Setup) has no tasks. Check names: `cargo test -p <crate>`, `app/src-tau
 ## WP-01 Core types, migration and session store
 - Phase: 2 Foundational
 - Tasks: T001, T002, T003, T004, T005, T006, T007
-- Files: crates/delilah-core/src/task.rs, crates/delilah-daemon/migrations/0011_saving_mode.sql, crates/delilah-daemon/src/store.rs, crates/delilah-daemon/src/store_sessions.rs, crates/delilah-daemon/src/run.rs, crates/delilah-daemon/src/session_api.rs
+- Files: crates/delilah-core/src/task.rs, crates/delilah-daemon/migrations/0013_saving_mode.sql, crates/delilah-daemon/src/store.rs, crates/delilah-daemon/src/store_sessions.rs, crates/delilah-daemon/src/run.rs, crates/delilah-daemon/src/session_api.rs
 - Depends on: —
 - Parallel group: 2A
 - Acceptance: FR-001, FR-006, FR-011, FR-012 — Step/Handoff types, saving_mode/handoff/step persisted, hand_over/undo_hand_over keep exactly one primary and are idempotent; no behaviour change.

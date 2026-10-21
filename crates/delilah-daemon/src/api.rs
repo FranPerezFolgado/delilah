@@ -56,6 +56,32 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/sessions",
             get(session_api::list_for_task).post(session_api::open),
         )
+        .route("/api/v1/prs", get(crate::pr_api::summaries))
+        .route(
+            "/api/v1/tasks/{key}/prs",
+            get(crate::pr_api::task_prs).post(crate::pr_api::open),
+        )
+        .route(
+            "/api/v1/tasks/{key}/prs/proposal",
+            get(crate::pr_api::proposal),
+        )
+        .route(
+            "/api/v1/tasks/{key}/prs/refresh",
+            post(crate::pr_api::refresh),
+        )
+        .route("/api/v1/tasks/{key}/prs/link", post(crate::pr_api::link))
+        .route(
+            "/api/v1/tasks/{key}/prs/{id}",
+            axum::routing::delete(crate::pr_api::unlink),
+        )
+        .route(
+            "/api/v1/pr-notices/{id}/forward",
+            post(crate::pr_api::forward),
+        )
+        .route(
+            "/api/v1/pr-notices/{id}/dismiss",
+            post(crate::pr_api::dismiss),
+        )
         .route("/api/v1/sessions", get(session_api::list_all))
         .route(
             "/api/v1/preferences/{key}",
@@ -361,12 +387,20 @@ pub struct ErrorBody {
     /// Refused because work in a worktree would be lost: the client may offer to force it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unpushed: bool,
+    /// A task paused by the limit: when it resumes by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_at: Option<chrono::DateTime<Utc>>,
+    /// Why a 409 happened, for the client to tell apart (`no-commits`, `has-pr`...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 pub struct ApiError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
     pub(crate) unpushed: bool,
+    pub(crate) resume_at: Option<chrono::DateTime<Utc>>,
+    pub(crate) reason: Option<String>,
 }
 
 impl ApiError {
@@ -386,10 +420,26 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, message)
     }
 
+    /// A 409 the client tells apart by `reason`.
+    pub fn conflict_reason(message: impl Into<String>, reason: &str) -> Self {
+        Self {
+            reason: Some(reason.to_string()),
+            ..Self::conflict(message)
+        }
+    }
+
     /// A 409 for work that would be lost; `?force=true` goes ahead anyway.
     pub fn unpushed(message: impl Into<String>) -> Self {
         Self {
             unpushed: true,
+            ..Self::conflict(message)
+        }
+    }
+
+    /// A 409 for a task paused by the limit; the body says when it resumes.
+    pub fn paused(message: impl Into<String>, resume_at: chrono::DateTime<Utc>) -> Self {
+        Self {
+            resume_at: Some(resume_at),
             ..Self::conflict(message)
         }
     }
@@ -415,6 +465,8 @@ impl ApiError {
             status,
             message: message.into(),
             unpushed: false,
+            resume_at: None,
+            reason: None,
         }
     }
 }
@@ -446,6 +498,8 @@ impl IntoResponse for ApiError {
             Json(ErrorBody {
                 error: self.message,
                 unpushed: self.unpushed,
+                resume_at: self.resume_at,
+                reason: self.reason,
             }),
         )
             .into_response()

@@ -1,6 +1,6 @@
 # Data model: Saving mode
 
-Migration `crates/delilah-daemon/migrations/0011_saving_mode.sql`:
+Migration `crates/delilah-daemon/migrations/0013_saving_mode.sql`:
 
 ```sql
 -- Saving mode: each phase of the task runs in a fresh Claude session.

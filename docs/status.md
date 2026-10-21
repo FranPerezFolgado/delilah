@@ -1,7 +1,7 @@
 # Status
 
 What Delilah does today, what is pending, and the known problems. Update this
-page when a feature lands or a decision is taken. Last updated: 2026-10-20
+page when a feature lands or a decision is taken. Last updated: 2026-10-21
 (version 0.3.0).
 
 ## Built
@@ -36,6 +36,13 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
 
+**PR loop:**
+- Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
+- A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
+- The Bandeja shows failed CI, changes requested and new comments (from anyone but the signed-in account), and "Pedir al agente que lo arregle" sends them to the agent, only when the user chooses.
+- "Abrir PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
+- A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
+
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
 - Help › Ver logs.
@@ -67,6 +74,10 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
   - a "Delilah Preview" Tauri build (another identifier and port) for native-only features;
   - a per-task "Preview" button that runs the project's preview command next to the terminal;
   - a browser MCP so the agent inside a task can see the preview UI.
+- **PR loop follow-ups:**
+  - cross-linked PRs of a changeset (each PR names the others);
+  - saving lessons to QMD when a task merges;
+  - "Abrir PR" against a base other than the default branch.
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
-- **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, PR handling, gates and budgets.
+- **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
 - **Testing:** test the whole flow on the work Mac with a real ticket.

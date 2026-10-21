@@ -162,6 +162,10 @@ pub async fn on_hook(
                     crate::handoff::on_code_edit(app, &key).await;
                 }
                 advance(app, &key, phase).await;
+                // Only a push or a PR means review: GitHub knows of it in a moment.
+                if phase == SpecPhase::Review {
+                    crate::pr_loop::nudge(app, &key);
+                }
             }
         }
         // Back to work: the question no longer stands.
@@ -364,5 +368,45 @@ mod tests {
             stage(&app, &key).await,
             Some(delilah_core::HandoffStage::Offered)
         );
+    }
+
+    #[tokio::test]
+    async fn a_push_or_a_pr_nudges_the_pr_loop_and_other_commands_do_not() {
+        use delilah_agents::claude::Signal;
+        use serde_json::json;
+        let fake = std::sync::Arc::new(crate::gh::fake::FakeGh::new());
+        let (app, key) = running().await;
+        let app = app.with_gh(fake.clone());
+        app.store
+            .save_workspace(
+                &key,
+                std::path::Path::new("/parent"),
+                &delilah_git::Workspace {
+                    path: "/ws".into(),
+                    branch: "feature/PROJ-1".into(),
+                    kind: delilah_core::ProjectKind::Repo,
+                    submodules: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        let hook = |c: &str| json!({ "tool_name": "Bash", "tool_input": { "command": c } });
+        for quiet in ["cargo test", "git status"] {
+            on_hook(&app, "PROJ-1", Signal::Working, &hook(quiet), true, false).await;
+        }
+        assert!(app.pr_nudges.lock().unwrap().is_empty());
+        assert!(fake.calls().is_empty());
+
+        on_hook(
+            &app,
+            "PROJ-1",
+            Signal::Working,
+            &hook("git push -u origin x"),
+            true,
+            false,
+        )
+        .await;
+        // The check itself waits for GitHub: what is asked of the loop is one pending nudge.
+        assert!(app.pr_nudges.lock().unwrap().contains("PROJ-1"));
     }
 }

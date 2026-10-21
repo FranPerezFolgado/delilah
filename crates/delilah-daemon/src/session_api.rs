@@ -184,17 +184,28 @@ pub async fn reopen(
     if app.sessions.get(&id).is_some_and(|l| !l.pty.has_exited()) {
         return Err(ApiError::conflict("the session is already running"));
     }
-    let ws = crate::owners::workspace(&app, &record.task)
+    relaunch(&app, &record, None).await?;
+    Ok(Json(view(&app, record)))
+}
+
+/// Starts an ended session again in its workspace (Claude with `--resume`), with
+/// `prompt` as its first message if any.
+pub(crate) async fn relaunch(
+    app: &AppState,
+    record: &SessionRecord,
+    prompt: Option<&str>,
+) -> Result<(), ApiError> {
+    let ws = crate::owners::workspace(app, &record.task)
         .await
         .map_err(|_| ApiError::conflict(format!("{} has no workspace (archived?)", record.task)))?;
     launch_session(
-        &app,
-        &record,
+        app,
+        record,
         &ws.path,
-        None,
+        prompt,
         record.kind == SessionKind::Claude,
     )?;
-    Ok(Json(view(&app, record)))
+    Ok(())
 }
 
 fn view(app: &AppState, record: SessionRecord) -> SessionView {

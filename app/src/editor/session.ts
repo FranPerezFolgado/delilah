@@ -5,6 +5,8 @@ import type { EditorState, Text } from "@codemirror/state";
 /** The tabs that are not files. File tabs are keyed by their workspace path. */
 export const OVERVIEW = "\0overview";
 export const CHANGES = "\0changes";
+/** The task's pull requests. Not saved apart from being the active tab. */
+export const PRS = "\0prs";
 /** A terminal tab: this prefix and the daemon's session id. */
 export const SESSION = "\0session:";
 export const sessionTab = (id: string) => SESSION + id;
