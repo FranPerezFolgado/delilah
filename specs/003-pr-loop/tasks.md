@@ -119,12 +119,12 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ### Tests first
 
-- [ ] T031 [P] [US3] Write failing tests in `crates/delilah-git/tests/workspace.rs` for new helpers `commit_subjects(dir, base, branch)`, `needs_push(dir, branch)` (no upstream or ahead) and `push_branch(dir, branch)` against a temp repo with a local bare remote
+- [X] T031 [P] [US3] Write failing tests in `crates/delilah-git/tests/workspace.rs` for new helpers `commit_subjects(dir, base, branch)`, `needs_push(dir, branch)` (no upstream or ahead) and `push_branch(dir, branch)` against a temp repo with a local bare remote
 - [ ] T032 [US3] Write failing tests in `crates/delilah-daemon/src/pr_api.rs`: proposal with Jira configured (cloud) and key `PROJ-1` → body starts with `<site>/browse/PROJ-1` and lists the commit subjects; free task `LIBRE-1` → no link; no commits beyond base → 409 `no-commits`; task with an open PR → 409 `has-pr`; `POST /tasks/{key}/prs` pushes to the bare remote, calls `gh pr create` with `--head`, `--base`, `--title`, `--body-file -` (and `--draft` when asked), links (`opened`) and moves to review; a push failure → 409 with git's stderr and no row
 
 ### Implementation
 
-- [ ] T033 [US3] Implement `commit_subjects`, `needs_push`, `push_branch` in `crates/delilah-git/src/workspace.rs` (export from `crates/delilah-git/src/lib.rs`); make T031 pass
+- [X] T033 [US3] Implement `commit_subjects`, `needs_push`, `push_branch` in `crates/delilah-git/src/workspace.rs` (export from `crates/delilah-git/src/lib.rs`); make T031 pass
 - [ ] T034 [US3] Implement `proposal` and `open` handlers in `crates/delilah-daemon/src/pr_api.rs` (Jira site and mode from the daemon's Jira settings in `crates/delilah-daemon/src/jira.rs`; git calls in `spawn_blocking`), register routes in `crates/delilah-daemon/src/api.rs`; make T032 pass
 - [ ] T035 [P] [US3] Add `PrProposal`, `prProposal`, `openPr` to `app/src/api.ts`
 - [ ] T036 [US3] Write `app/src/components/OpenPrDialog.tsx` (loads the proposal; editable title and body; "Borrador" checkbox; errors inline; the submodule select is added in US5) with `app/src/components/OpenPrDialog.test.tsx`, and add the "Abrir PR" button to the empty state of `app/src/components/PrView.tsx` (disabled with the 409 reason); strings in `app/src/i18n/en.ts`

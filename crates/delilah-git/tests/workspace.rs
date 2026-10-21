@@ -4,8 +4,8 @@ use std::process::Command;
 use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
-    check_workspace, create_workspace, file_diff, leave_checkout, list_submodules,
-    remove_workspace, repo_root, use_checkout,
+    check_workspace, commit_subjects, create_workspace, file_diff, leave_checkout, list_submodules,
+    needs_push, push_branch, remove_workspace, repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -380,5 +380,90 @@ fn the_checkout_is_not_used_with_uncommitted_changes() {
     assert!(matches!(
         use_checkout(&repo, &spec, &opts()),
         Err(GitError::Dirty { .. })
+    ));
+}
+
+// --- PR helpers: commit_subjects, needs_push, push_branch ---
+
+fn run(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn pr_repo() -> (TempDir, PathBuf, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let remote = tmp.path().join("remote.git");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    run(
+        tmp.path(),
+        &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+    );
+    run(&repo, &["init", "-b", "main"]);
+    run(&repo, &["config", "user.name", "T"]);
+    run(&repo, &["config", "user.email", "t@example.com"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "base"]);
+    run(
+        &repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run(&repo, &["push", "-u", "origin", "main"]);
+    (tmp, repo, remote)
+}
+
+#[test]
+fn pr_helpers_subjects_and_push() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    run(&repo, &["checkout", "-b", "feature/x"]);
+    assert!(
+        commit_subjects(&repo, "main", "feature/x", &opts)
+            .unwrap()
+            .is_empty()
+    );
+    run(&repo, &["commit", "--allow-empty", "-m", "first"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "second"]);
+    assert_eq!(
+        commit_subjects(&repo, "main", "feature/x", &opts).unwrap(),
+        vec!["first", "second"]
+    );
+    assert!(needs_push(&repo, "feature/x", &opts).unwrap());
+    push_branch(&repo, "feature/x", &opts).unwrap();
+    assert!(!needs_push(&repo, "feature/x", &opts).unwrap());
+    let heads = Command::new("git")
+        .arg("-C")
+        .arg(&remote)
+        .args(["branch", "--list", "feature/x"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&heads.stdout).contains("feature/x"));
+    run(&repo, &["commit", "--allow-empty", "-m", "third"]);
+    assert!(needs_push(&repo, "feature/x", &opts).unwrap());
+}
+
+#[test]
+fn pr_helpers_reject_dash_branch() {
+    let (_tmp, repo, _remote) = pr_repo();
+    let opts = GitOptions::default();
+    assert!(matches!(
+        push_branch(&repo, "-x", &opts),
+        Err(GitError::InvalidBranch(_))
+    ));
+    assert!(matches!(
+        needs_push(&repo, "-x", &opts),
+        Err(GitError::InvalidBranch(_))
+    ));
+    assert!(matches!(
+        commit_subjects(&repo, "main", "-x", &opts),
+        Err(GitError::InvalidBranch(_))
     ));
 }

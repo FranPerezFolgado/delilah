@@ -8,5 +8,6 @@ pub use changes::{ChangeKind, Changes, FileChange, base_commit, changes, file_di
 pub use command::{GitError, GitOptions};
 pub use workspace::{
     Submodule, Workspace, WorkspaceSpec, archive_workspace, changed_paths, check_workspace,
-    create_workspace, leave_checkout, list_submodules, remove_workspace, repo_root, use_checkout,
+    commit_subjects, create_workspace, leave_checkout, list_submodules, needs_push, push_branch,
+    remove_workspace, repo_root, use_checkout,
 };

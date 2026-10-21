@@ -413,3 +413,55 @@ pub fn leave_checkout(
     }
     stuck
 }
+
+fn check_branch(branch: &str) -> Result<(), GitError> {
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(GitError::InvalidBranch(branch.to_string()));
+    }
+    Ok(())
+}
+
+/// Subjects of the commits on `branch` that are not in `base`, oldest first. Prefers
+/// `origin/<base>` over the local `<base>` when it exists.
+pub fn commit_subjects(
+    dir: &Path,
+    base: &str,
+    branch: &str,
+    opts: &GitOptions,
+) -> Result<Vec<String>, GitError> {
+    check_branch(branch)?;
+    check_branch(base)?;
+    let remote_base = format!("origin/{base}");
+    let base_ref = if git(
+        dir,
+        &["rev-parse", "--verify", "--quiet", &remote_base],
+        opts,
+    )
+    .is_ok()
+    {
+        remote_base
+    } else {
+        base.to_string()
+    };
+    let range = format!("{base_ref}..{branch}");
+    let out = git(dir, &["log", "--reverse", "--format=%s", &range], opts)?;
+    Ok(out.lines().map(str::to_string).collect())
+}
+
+/// True when `branch` has no upstream or has commits its upstream lacks.
+pub fn needs_push(dir: &Path, branch: &str, opts: &GitOptions) -> Result<bool, GitError> {
+    check_branch(branch)?;
+    let upstream = format!("{branch}@{{upstream}}");
+    if git(dir, &["rev-parse", "--abbrev-ref", &upstream], opts).is_err() {
+        return Ok(true);
+    }
+    let range = format!("{upstream}..{branch}");
+    let count = git(dir, &["rev-list", "--count", &range], opts)?;
+    Ok(count.trim().parse::<u32>().unwrap_or(1) > 0)
+}
+
+/// `git push -u origin <branch>`.
+pub fn push_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+    check_branch(branch)?;
+    git(dir, &["push", "-u", "origin", branch], opts).map(|_| ())
+}
