@@ -4,8 +4,9 @@ use std::process::Command;
 use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
-    check_workspace, commit_subjects, create_workspace, file_diff, leave_checkout, list_submodules,
-    needs_push, push_branch, remove_workspace, repo_root, use_checkout,
+    check_merged, check_workspace, commit_subjects, create_workspace, delete_branch, fetch,
+    file_diff, leave_checkout, list_submodules, needs_push, push_branch, remove_workspace,
+    repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -464,6 +465,148 @@ fn pr_helpers_reject_dash_branch() {
     ));
     assert!(matches!(
         commit_subjects(&repo, "main", "-x", &opts),
+        Err(GitError::InvalidBranch(_))
+    ));
+}
+
+// --- merge check and branch deletion ---
+
+fn head(dir: &Path) -> String {
+    git(dir, &["rev-parse", "HEAD"])
+}
+
+/// A plain repo whose `feature/x` is pushed, and a squash commit lands on the
+/// remote's main. Returns the workspace and the PR head.
+fn merged_repo() -> (TempDir, Workspace, String, PathBuf) {
+    let (tmp, repo, remote) = pr_repo();
+    run(&repo, &["checkout", "-b", "feature/x"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "work"]);
+    run(&repo, &["push", "-u", "origin", "feature/x"]);
+    let pr_head = head(&repo);
+    run(&repo, &["checkout", "main"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "squash of work"]);
+    run(&repo, &["push", "origin", "main"]);
+    run(&repo, &["checkout", "feature/x"]);
+    let ws = Workspace {
+        path: repo,
+        branch: "feature/x".into(),
+        kind: ProjectKind::Repo,
+        submodules: vec![],
+    };
+    (tmp, ws, pr_head, remote)
+}
+
+fn heads(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn check_merged_passes_a_squash_merged_branch() {
+    let (_tmp, ws, pr_head, _remote) = merged_repo();
+    let o = GitOptions::default();
+    check_merged(&ws, &heads(&[(".", &pr_head)]), &o).unwrap();
+}
+
+#[test]
+fn check_merged_refuses_local_commits_after_the_pr_head() {
+    let (_tmp, ws, pr_head, _remote) = merged_repo();
+    run(&ws.path, &["commit", "--allow-empty", "-m", "extra"]);
+    let err = check_merged(&ws, &heads(&[(".", &pr_head)]), &GitOptions::default()).unwrap_err();
+    assert!(matches!(err, GitError::NotMerged { .. }), "{err}");
+    assert!(err.to_string().contains("not in the merged PR"));
+}
+
+#[test]
+fn check_merged_refuses_uncommitted_files() {
+    let (_tmp, ws, pr_head, _remote) = merged_repo();
+    std::fs::write(ws.path.join("wip.txt"), "x\n").unwrap();
+    let err = check_merged(&ws, &heads(&[(".", &pr_head)]), &GitOptions::default()).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+}
+
+#[test]
+fn check_merged_fetches_when_the_pr_head_is_unknown_locally() {
+    let (tmp, ws, _pr_head, remote) = merged_repo();
+    let other = tmp.path().join("other");
+    run(
+        tmp.path(),
+        &["clone", "-q", remote.to_str().unwrap(), "other"],
+    );
+    run(&other, &["config", "user.name", "T"]);
+    run(&other, &["config", "user.email", "t@example.com"]);
+    run(&other, &["checkout", "feature/x"]);
+    run(&other, &["commit", "--allow-empty", "-m", "late"]);
+    run(&other, &["push", "origin", "feature/x"]);
+    let new_head = head(&other);
+    let o = GitOptions::default();
+    check_merged(&ws, &heads(&[(".", &new_head)]), &o).unwrap();
+
+    let bogus = "0123456789012345678901234567890123456789";
+    let err = check_merged(&ws, &heads(&[(".", bogus)]), &o).unwrap_err();
+    assert!(matches!(err, GitError::Command { .. }), "{err}");
+}
+
+#[test]
+fn check_merged_ignores_repos_without_a_head_and_missing_workspaces() {
+    let (_tmp, mut ws, _pr_head, _remote) = merged_repo();
+    run(&ws.path, &["commit", "--allow-empty", "-m", "extra"]);
+    let o = GitOptions::default();
+    check_merged(&ws, &heads(&[]), &o).unwrap();
+    ws.path = ws.path.join("gone");
+    check_merged(&ws, &heads(&[(".", "abc")]), &o).unwrap();
+}
+
+#[test]
+fn check_merged_in_a_parent_refuses_a_dirty_parent_but_not_a_moved_pointer() {
+    let fx = Fixture::new();
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    commit_change(&ws, "svc-payments");
+    let sub = ws.path.join("svc-payments");
+    git(&sub, &["push", "-q", "origin", BRANCH]);
+    let hs = heads(&[("svc-payments", &head(&sub))]);
+
+    // The submodule pointer differs from the parent's commit: not a change.
+    check_merged(&ws, &hs, &opts()).unwrap();
+
+    std::fs::write(ws.path.join("notes.txt"), "x\n").unwrap();
+    let err = check_merged(&ws, &hs, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+    assert!(err.to_string().contains("the parent"), "{err}");
+}
+
+#[test]
+fn fetch_updates_the_remote_refs() {
+    let (tmp, repo, remote) = pr_repo();
+    let other = tmp.path().join("other");
+    run(
+        tmp.path(),
+        &["clone", "-q", remote.to_str().unwrap(), "other"],
+    );
+    run(&other, &["config", "user.name", "T"]);
+    run(&other, &["config", "user.email", "t@example.com"]);
+    run(&other, &["commit", "--allow-empty", "-m", "more"]);
+    run(&other, &["push", "origin", "main"]);
+    fetch(&repo, &GitOptions::default()).unwrap();
+    assert_eq!(git(&repo, &["rev-parse", "origin/main"]), head(&other));
+}
+
+#[test]
+fn delete_branch_removes_it_and_tolerates_missing_or_refuses_current() {
+    let (_tmp, repo, _remote) = pr_repo();
+    let o = GitOptions::default();
+    run(&repo, &["branch", "feature/y"]);
+    delete_branch(&repo, "feature/y", &o).unwrap();
+    assert!(
+        git(&repo, &["branch", "--list", "feature/y"]).is_empty(),
+        "branch still there"
+    );
+    delete_branch(&repo, "feature/y", &o).unwrap();
+    assert!(delete_branch(&repo, "main", &o).is_err());
+    assert!(matches!(
+        delete_branch(&repo, "-x", &o),
         Err(GitError::InvalidBranch(_))
     ));
 }

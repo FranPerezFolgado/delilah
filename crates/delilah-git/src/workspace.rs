@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
-use crate::command::{GitError, GitOptions, git};
+use crate::command::{GitError, GitOptions, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Submodule {
@@ -464,4 +465,79 @@ pub fn needs_push(dir: &Path, branch: &str, opts: &GitOptions) -> Result<bool, G
 pub fn push_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
     check_branch(branch)?;
     git(dir, &["push", "-u", "origin", branch], opts).map(|_| ())
+}
+
+/// `git fetch --quiet origin`.
+pub fn fetch(dir: &Path, opts: &GitOptions) -> Result<(), GitError> {
+    git(dir, &["fetch", "--quiet", "origin"], opts).map(|_| ())
+}
+
+/// Fails, touching nothing, if archiving after a merged PR would lose work: uncommitted
+/// changes, or local commits of the task's branch beyond the PR's head. `heads` maps
+/// each repo label (see [`Workspace::repos`]) to the head the merged PR had; repos
+/// without an entry are not checked. A squash merge leaves the PR head out of the
+/// base branch, so the check is against that head, not against the base.
+pub fn check_merged(
+    ws: &Workspace,
+    heads: &HashMap<String, String>,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    // Removed by hand: nothing left in it to lose.
+    if !ws.path.exists() {
+        return Ok(());
+    }
+    if ws.kind == ProjectKind::Parent
+        && !git(
+            &ws.path,
+            &["status", "--porcelain", "--ignore-submodules=all"],
+            opts,
+        )?
+        .is_empty()
+    {
+        return Err(GitError::Dirty {
+            location: "the parent".into(),
+        });
+    }
+    for (location, dir) in ws.repos() {
+        let Some(head) = heads.get(&location) else {
+            continue;
+        };
+        if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+            return Err(GitError::Dirty { location });
+        }
+        let args = ["merge-base", "--is-ancestor", ws.branch.as_str(), head];
+        let mut code = git_code(&dir, &args, opts)?;
+        if code > 1 {
+            // Probably a head this clone has not fetched yet.
+            fetch(&dir, opts)?;
+            code = git_code(&dir, &args, opts)?;
+        }
+        match code {
+            0 => {}
+            1 => return Err(GitError::NotMerged { location }),
+            _ => {
+                // Surface git's own message.
+                git(&dir, &args, opts)?;
+                return Err(GitError::NotMerged { location });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Deletes the local `branch`. Fine if it is already gone; refuses the checked-out one.
+pub fn delete_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+    check_branch(branch)?;
+    let reference = format!("refs/heads/{branch}");
+    if git_code(dir, &["show-ref", "--verify", "--quiet", &reference], opts)? != 0 {
+        return Ok(());
+    }
+    if git(dir, &["symbolic-ref", "--short", "HEAD"], opts).is_ok_and(|cur| cur == branch) {
+        return Err(GitError::Command {
+            dir: dir.to_path_buf(),
+            args: format!("branch -D {branch}"),
+            stderr: "it is the checked-out branch".into(),
+        });
+    }
+    git(dir, &["branch", "-D", branch], opts).map(|_| ())
 }
