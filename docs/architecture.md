@@ -59,6 +59,8 @@ done or pending is in [status.md](status.md).
 | `terminal.rs` | WebSocket terminal: scrollback first, then live bytes; text frames for `resize`. |
 | `hooks.rs` | `/hooks/claude` and `/hooks/claude/statusline`. Each hook is classified into a `Signal`, which sets the session's live state, the inbox attention, the task transition and the phase. |
 | `asks.rs` | AskUserQuestion: the PreToolUse hook posts here and waits up to a day. The answer goes back as `updatedInput.answers`. |
+| `proposals.rs` | A card headed `Nueva tarea` in a project's conversation is a task proposal: answering `Crear` creates the backlog task (brief as notes, `CreatedFromConversation` event) before Claude is told. Owns the protocol strings. Called by `asks::answer` through `on_answer`. |
+| `conversation.rs` | An idea conversation's history (`conversation_entries`, one row per message or card): your messages (sent now, or queued while Claude works and flushed when its turn ends), Claude's closing messages, and cards (`Card`, outcome pending / answered / terminal / withdrawn). Endpoints `GET /sessions/{id}/conversation`, `POST /sessions/{id}/messages`, `DELETE /sessions/{id}/messages/{entry}`, `POST /sessions/{id}/stop`. The live activity and "needs the terminal" flag sit on `Live` (`ConvoState`) and emit the `conversations` topic once per change. |
 | `inbox.rs` | `GET /api/v1/inbox` (everything that waits on the user) and replies typed into a session. |
 | `phases.rs` | The phase: set by the user, moved forward by spec files and agent signals, and review hints. |
 | `specs.rs` | A watcher (every 5 s) that reads each task's `specs/<feature>/` and records phase changes. |
@@ -88,13 +90,15 @@ and a preview uses `fixtures/preview-home-N`.
 |---|---|
 | `delilah.db` | SQLite (sqlx). The migrations are in `crates/delilah-daemon/migrations/NNNN_*.sql`, and a shipped one is never edited. |
 | `workspaces/<KEY>/` | Worktree-mode workspaces. Checkout-mode tasks work in the project's own folder. |
+| `plugins/delilah/` | The session-only plugin (`skills/task-from-idea/SKILL.md`), rewritten at every daemon start and passed with `--plugin-dir`. Never installed in the user's Claude. |
 | `tasks/<KEY>/` | Per-task files kept out of the repo: the Claude settings file with Delilah's hooks, the status line script, `ticket.md`, `hooks.jsonl` (raw hook log), and session logs. `tasks/@<project>/` holds the same for project sessions. |
 
 **Tables:**
 - `tasks`: key, title, project, workflow, phase, status JSON, notes, `in_checkout`.
 - `task_events`: the history.
 - `workspaces`: `task_key`, parent, path, branch, submodules JSON, kind, `previous`. For checkout mode, `previous` is JSON with the branches to go back to.
-- `sessions`: id, owner, kind, label, primary, attention.
+- `sessions`: id, owner, kind, label, primary, attention, `conversation` (1 for an idea conversation).
+- `conversation_entries`: session, time, kind (`user` / `claude` / `card`) and a JSON body.
 - `pull_requests`: one PR per (task, repo), with host, `owner/name`, number, URL, how it was linked (`detected`, `opened`, `pasted`), the last snapshot as JSON, the watermarks already notified (failed head, review and comment ids), `checked_at` and the last problem (`error`, `error_kind`).
 - `pr_unlinked`: URLs the user unlinked, never detected again for that task.
 - `pr_notices`: what the Bandeja shows for PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`), unique per (task, repo, kind, cause) and resolved rather than deleted. All three cascade when the task is deleted.
@@ -147,7 +151,14 @@ and only changes while the task is under way (see `phases.rs`):
   - `--settings tasks/<KEY>/…json`;
   - `--add-dir` when needed;
   - `--remote-control <name>` when that preference is on;
-  - `--permission-mode plan` for read-only project sessions.
+  - the mode and plugin by kind (`run.rs`, `launch_flags`), below.
+
+  | Session | Mode | Plugin dir | Other |
+  |---|---|---|---|
+  | Idea conversation | `dontAsk` ([#34](decisions.md)) | yes | idea system prompt, `--setting-sources user`, `--strict-mcp-config` |
+  | Read-only project session | `plan` | yes | |
+  | Other project session | default | yes | |
+  | Task session (primary or extra) | default | no | |
 - **Clean environment.** Claude runs with a clean environment plus the login
   shell's PATH (see `env.rs`). A Claude spawned with another Claude session's
   variables does not save its transcript.
@@ -161,13 +172,20 @@ and only changes while the task is under way (see `phases.rs`):
 - **Folder trust.** A new workspace shows Claude's folder-trust dialog once.
   `run.rs` waits for it to settle, checks that "Yes" is selected and sends Enter.
 
+**The idea conversation** ([#35](decisions.md), [#36](decisions.md)): a project session with `conversation = 1`. It is still a Claude in a PTY, but the UI shows `conversation_entries` instead of the terminal (which stays reachable).
+- Hooks feed the history: `UserPromptSubmit` and `Stop` record your messages and Claude's closing message; the AskUserQuestion ask becomes a `card`.
+- A card has an outcome: pending, answered, terminal (answered in the terminal) or withdrawn.
+- A card whose question is no longer waiting is withdrawn: when its hook connection drops, and for every pending card at daemon start-up (asks live only in memory).
+- **`Ask.proposal` flow:** a card headed `Nueva tarea` is a proposal. When you answer `Crear`, `asks::answer` calls `proposals.rs` first: it creates the backlog task (brief from the card's preview as notes, event `created-from-conversation`), and only then returns the answer to Claude, with the new key.
+- Writing while Claude works, or while a card waits, queues the message; it is sent when the turn ends. A flush claims the queued entries in one `UPDATE … RETURNING`, so two flushes never type the same message and a claimed one can no longer be removed. "Detener" writes ESC: Claude fires no `Stop` after ESC, so the daemon ends the turn itself and flushes the queue.
+
 **From hook to effect** (`hooks.rs`):
 
 | Signal (hook) | Effect |
 |---|---|
 | `PromptSubmitted` (UserPromptSubmit), `Working` (PostToolUse) | session working; primary → `UserAnswered`; drops the review hint; phase signals |
 | `NeedsUser` (Notification) | inbox attention (permission or idle); primary → `AgentAsked` |
-| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint |
+| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint; in saving mode, a phase boundary offers or starts the next session, and a `saving` handoff goes on to `starting` |
 | `TurnFailed` (StopFailure) | inbox error, or a usage limit |
 | a turn ending while a usage window is at 100 % | `LimitReached` (any session: the subscription is shared) |
 
@@ -175,6 +193,25 @@ and only changes while the task is under way (see `phases.rs`):
 1. The latest `rate_limits` of each session comes from the status line.
 2. A turn that ends with `five_hour` or `seven_day` at 100 % pauses the task until the latest `resets_at` among the full windows.
 3. The scheduler resumes it and sends the "carry on" prompt in the current language.
+
+### Saving mode (`handoff.rs`)
+
+A task with `saving_mode` runs each phase in a fresh Claude session, so the context
+re-read on every turn stays small. The chain of sessions is `Session.step`
+(`plan`, `implement`, `review`; at most one open session per task and step, a
+partial unique index). The primary switch is one transaction: the new session
+becomes `primary`, the old one stays in the task as a finished, reopenable tab
+(an extra when reopened: it never takes the main role back). The history records
+`step-started`.
+
+- **Boundaries** (`boundary`, checked when the primary's turn ends and when the phase is moved by hand):
+  - plan, `tasks.md` written and nothing checked: **offer** the implementation (the user confirms from the Bandeja or the task screen, or declines with "Seguir aquí", which clears the handoff and turns saving mode off for the whole task);
+  - every item checked: the review session **starts on its own**; when both hold, the furthest step wins.
+  - No spec folder, or no `tasks.md`: never a boundary.
+- **Stages** (`tasks.handoff`, `{to, stage, error}`, written before each side effect): `offered` → `saving` (types `/save-session` into the outgoing primary, if the `save-notes` preference is on and it is live) → `starting` (stops the old session, waits up to 3 s, launches the new one) → cleared. `failed` (with the error; Bandeja item and a "Reintentar" button) is another; `skipped` is set when the plan session edits code anyway (`on_code_edit`): the implementation is then never offered, the task carries on in that session, and the review handoff still applies. A failed save turn (`TurnFailed`) fails the handoff.
+- **Recovery** (`recover`, on each scheduler tick and at start): `saving` and `starting` are finished, `offered` is re-offered, and a step session that was recorded but never launched is relaunched. A `HandoffCoordinator` in `AppState` holds a mutex over the check-and-set and a set of tasks being started, so two confirmations or a tick never start the same step twice. A usage limit mid-handoff pauses the task as usual and the tick resumes it.
+- **API:** `POST /api/v1/tasks/{key}/handoff` (`confirm`, `decline`, `retry`), and `saving_mode` on task create, backlog create and `PATCH` (also while running). The preferences `saving-mode` (default for new tasks) and `save-notes` are in Settings.
+- **UI:** `chain.ts` and `SessionChain.tsx` draw the chain; `HandoffActions.tsx` is shared by the task screen and the Bandeja item (kind `handoff`: offered, saving, starting, failed). The automatic review is announced like a finished turn: quiet when the app is listening.
 
 ## Workspaces
 
@@ -211,7 +248,7 @@ and only changes while the task is under way (see `phases.rs`):
 ## Live updates
 
 The UI does not poll:
-- `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, `prs` (a task's PRs or their summaries changed), or `resync`.
+- `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, `prs` (a task's PRs or their summaries changed), `conversations`, or `resync`.
 - The UI refetches that one endpoint (`app/src/live.ts`).
 - On reconnect it refetches everything, and a full refresh runs every 30 s as a safety net.
 

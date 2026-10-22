@@ -19,6 +19,8 @@ pub struct Config {
     /// The `claude` binary for one-shot calls (`DELILAH_CLAUDE_BIN`, default `claude`);
     /// tests point it at a fake script.
     pub claude_bin: PathBuf,
+    /// Program to run instead of `claude`; only tests set it.
+    pub agent_program: Option<PathBuf>,
 }
 
 /// The binary named by `DELILAH_CLAUDE_BIN`, or `claude` when unset or empty.
@@ -63,6 +65,7 @@ impl Config {
             notify,
             ui_origin,
             claude_bin,
+            agent_program: None,
         })
     }
 
@@ -77,6 +80,11 @@ impl Config {
     /// Per-task files that must stay out of the repo: agent settings, logs, raw hooks.
     pub fn task_dir(&self, key: &str) -> PathBuf {
         self.home.join("tasks").join(key)
+    }
+
+    /// The Claude Code plugin Delilah writes at start-up (the idea-conversation skill).
+    pub fn plugin_dir(&self) -> PathBuf {
+        self.home.join("plugins/delilah")
     }
 
     pub fn url(&self) -> String {
@@ -99,6 +107,18 @@ mod tests {
         assert_eq!(
             claude_bin_from(Some("/tmp/fake-claude".into())),
             PathBuf::from("/tmp/fake-claude")
+        );
+    }
+
+    #[test]
+    fn plugin_dir_is_under_home() {
+        let config = Config {
+            home: PathBuf::from("/tmp/delilah-home"),
+            ..Config::from_env().unwrap()
+        };
+        assert_eq!(
+            config.plugin_dir(),
+            PathBuf::from("/tmp/delilah-home/plugins/delilah")
         );
     }
 }

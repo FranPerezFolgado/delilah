@@ -94,6 +94,46 @@ a "carry on" prompt. Because the subscription is shared, a limit hit by any
 session pauses the task. The real `StopFailure` payload for a limit has not been
 observed yet (see the spike).
 
+**34. The idea conversation runs with `dontAsk` and an explicit allow list.**
+`--permission-mode dontAsk` plus `permissions.allow`/`deny` in the session's
+settings file lets Claude read code without a terminal prompt. Allowed: `Read(./**)`
+(the checkout) plus `Read(//<dir>/**)` for each `--add-dir`, AskUserQuestion,
+`Skill(delilah:task-from-idea)`, TodoWrite, `git status` and `ls`, each Bash rule also
+in its RTK form (`rtk git status:*`, ...): user-level PreToolUse hooks such as RTK
+rewrite commands and allow rules match the rewritten command. Denied: Edit,
+MultiEdit, Write, NotebookEdit and reading secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+`~/.config/gh`, `.env` files), so a prompt injection in the repo cannot copy them
+into a brief. `--setting-sources user` drops the repo's `.claude/settings*.json`, so
+a cloned repo cannot widen the list; the user's own settings and hooks stay, so
+broad allow rules in `~/.claude/settings.json` still apply. `--strict-mcp-config`
+keeps project and user MCP servers out. `rg` and `git log/show/diff` were dropped:
+`rg --pre` runs programs and `--output` writes files. Checked against claude 2.1.292
+(which has no separate Grep/Glob tools). Every session's prompt goes after `--`, so
+a prompt starting with `-` is never read as an option.
+
+**35. Tasks from ideas: the daemon creates them on the confirmation card.**
+Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card
+(title and brief in the `Crear` option's preview); when the user answers `Crear`, the
+daemon creates the backlog task and then returns the answer, with the key, to Claude.
+So a task exists only after a click, and the same code serves the idea
+conversation and project sessions. Rejected: Claude calling the `delilah` CLI or
+`curl` (needs Bash permissions, and nothing stops it from creating tasks unasked)
+and a Delilah MCP tool (a new server to run and configure, for what the existing
+ask hook already does). The brief is written by Claude, so it can be edited before
+the task starts.
+
+**36. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
+of plan mode; a plugin passed to project-owned sessions.**
+- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY.
+- **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#34](decisions.md) for the allow list.
+- **A session-only plugin.** The `task-from-idea` skill ships in `<home>/plugins/delilah`, passed with `--plugin-dir` to project-owned sessions only (task sessions never get it), so nothing is installed in the user's Claude.
+- **Spike findings** (`specs/004-task-from-idea/research.md`, claude 2.1.292):
+  - Edit and Write in `deny` are removed from the session, and `npm install` is refused without a prompt;
+  - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #34;
+  - AskUserQuestion reaches PreToolUse in `dontAsk`, with the preview intact, and the answer returns verbatim (accents and dashes included);
+  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
+  - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
+
 ## Workflows and tasks
 
 **15. SpecKit is the first workflow, through the user's `/feature` wrapper.**
@@ -205,7 +245,7 @@ if it is dirty or has unpushed commits, and keeps its branch. A failed fetch blo
 too, and the workspace is released without force. Deleting a branch compares it to
 the verified sha first, so a commit made after the check survives.
 
-**33. Task branches are named by Claude from the title, and never reused or renamed
+**37. Task branches are named by Claude from the title, and never reused or renamed
 (2026-10-22).** A headless Claude (haiku, no tools, run in a temp dir so no project
 files load, `--setting-sources user` plus `disableAllHooks`, no session persistence)
 proposes 2-4 words. If it fails or is slow: a slug of the title, then the key. A Jira
@@ -217,3 +257,16 @@ task starts, because the PR, the worktree and the stored run depend on it. `--ba
 was ruled out for the Claude call: it skips OAuth and keychain auth, so it would not
 use the user's login. The task's agent naming its own branch was ruled out too: the
 branch must exist before the agent starts.
+
+## Saving mode
+
+**33. Saving mode: a fresh session per phase.** It relaxes decision 15, which said
+Delilah never drives SpecKit's phases: Delilah still never drives what happens inside a
+phase, it only starts a new session between phases. With the option on, each phase (spec and
+plan, implementation, review) runs in its own Claude session, started from the spec
+files and git, which already hold everything the next phase needs.
+- **Why:** every turn re-reads the whole conversation. On LIBRE-3 (153 turns) the context grew from ~44k tokens to ~364k, ~33M re-read against 130k written. Estimated saving by cuts: ~37 % with one (planning → implementation), ~49 % with two (+ before the review), ~60 % cutting between implementation phases too. Each session pays its own base (~45-60k), so the returns diminish. Measure it per task from the sessions' transcripts (research R8, [quickstart](../specs/004-saving-mode/quickstart.md)); target: 30 % fewer tokens.
+- **Opt-in per task**, default from a preference: on a high usage limit it only adds handoffs.
+- **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
+- **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
+

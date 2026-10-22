@@ -42,6 +42,7 @@ pub(crate) async fn task_with_workspace(
         notify: false,
         ui_origin: None,
         claude_bin: "claude".into(),
+        agent_program: None,
     };
     let app = AppState::new(Store::in_memory().await.unwrap(), config).with_gh(gh);
     let key = TaskKey::new("PROJ-1");

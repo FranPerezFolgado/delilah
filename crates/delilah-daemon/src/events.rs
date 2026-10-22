@@ -31,6 +31,8 @@ pub enum Topic {
     Projects,
     /// `/prs`: a task's PRs or their summaries changed.
     Prs,
+    /// `/conversations`: an idea conversation opened, changed or ended.
+    Conversations,
     /// The client missed messages: fetch everything.
     Resync,
 }
@@ -115,6 +117,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             claude_bin: "claude".into(),
+            agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

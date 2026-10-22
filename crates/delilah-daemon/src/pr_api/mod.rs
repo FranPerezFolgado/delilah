@@ -293,15 +293,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_signed_out_account_lookup_is_the_problem_when_nothing_else_is() {
-        let gh = Arc::new(
-            FakeGh::happy().on(
-                &["api", "user"],
-                Err(GhError::Failed {
-                    code: Some(4),
-                    stderr: SIGNED_OUT.into(),
-                }),
-            ),
-        );
+        let gh = Arc::new(FakeGh::happy().on(
+            &["api", "user"],
+            Err(GhError::Failed {
+                code: Some(4),
+                stderr: SIGNED_OUT.into(),
+            }),
+        ));
         let (router, _app, _dir) = setup(gh).await;
         let (_, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs", None).await;
         assert_eq!(v["account"], Value::Null);

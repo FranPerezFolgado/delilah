@@ -262,6 +262,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             claude_bin: "claude".into(),
+            agent_program: None,
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }

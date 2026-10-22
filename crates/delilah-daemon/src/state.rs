@@ -45,6 +45,8 @@ pub struct AppState {
     pub lang: crate::lang::Current,
     /// Tasks the inbox suggests moving to review (see `phases.rs`).
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
+    pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
@@ -83,6 +85,7 @@ impl AppState {
             asks: Arc::default(),
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
+            handoffs: Arc::default(),
             remote_control: Arc::default(),
             gh: Arc::new(GhClient::new(Arc::new(CliGh))),
             pr_backoff: Arc::default(),

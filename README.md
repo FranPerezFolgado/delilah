@@ -115,6 +115,23 @@ Bandeja asks "¿Pasar a revisión?". These signals and the spec files only move 
 task forward; you move it anywhere by clicking a phase in the task's phase bar,
 and asking for a review ("Revisar cambios") moves it to Revisión.
 
+**Saving mode.** Every turn of a Claude session re-reads the whole conversation, so
+long tasks get expensive. With "Modo ahorro" on (a checkbox when creating a task or
+saving it to the backlog, a toggle on a running task, `--saving-mode` /
+`--no-saving-mode` in `delilah run` and `new`), each phase runs in a fresh session.
+The first one ("Spec y plan") stops once `tasks.md` is written; the Bandeja and the
+task screen then offer "Implementar en sesión nueva" (which also approves the
+tasks) or "Seguir aquí" to carry on in the same session without saving mode. The
+implementation session ("Implementación") starts from the spec files; when every
+item is checked, a "Revisión" session starts on its own, reviews the branch and
+commits (it never pushes). The task screen shows the chain of sessions, with the
+earlier ones finished and reopenable; the newest is the main one. Before each
+change the outgoing session saves its notes with `/save-session`. If a handoff
+fails, the Bandeja shows it with "Reintentar"; after a restart Delilah finishes or
+re-offers it. In Settings: "Modo ahorro por defecto" (new tasks) and "Guardar notas
+antes de cambiar de sesión" (on by default). Needs the spec files: without a
+`specs/` folder there are no handoffs.
+
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
 it right there), a permission it needs (answered in its terminal), a failed turn,
@@ -179,7 +196,8 @@ Claude in **solo lectura** (`--permission-mode plan`). It reads, searches and
 explains, but does not edit, and nothing is created. "Permitir cambios en esta
 sesión" restarts it in normal mode on the same conversation. "Convertir en tarea" turns
 that Claude into a free task's primary session, keeping its conversation: the task
-works in your checkout, the folder the conversation belongs to.
+works in your checkout, the folder the conversation belongs to. A project session can
+also propose tasks (see "Nueva tarea con Claude" below).
 
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
 and starts `/feature <what you want to do>`). The agent works either **in your
@@ -199,6 +217,19 @@ A name already used (as a local branch or on a remote, in any repo of the task) 
 `-2`, `-3`…: a branch is never reused. `delilah run --branch <name>` is cleaned up
 the same way (`feature/` added once, spaces and accents turned into `-`/letters). The
 branch shows on the task's screen and stays the same for the whole task.
+
+**Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
+and Libre (after choosing the project), and on the project's screen and its "+".
+Instead of a form you tell Claude your idea in a conversation view, without a
+terminal: its replies, its questions as cards (like the Bandeja's) and a text field.
+You can write while it works (the message waits for the end of its turn) or press
+"Detener". Claude reads the code (read-only, it cannot edit) and ends with a
+`Nueva tarea` card with a title and a brief (the idea, a summary, affected areas and
+open questions). "Crear" puts the task in the project's **backlog** with that brief as
+its notes, and its history says "Creada desde la conversación «name»"; you review or
+edit it and start it as any other. The conversation stays open and keeps its history,
+also after restarting Delilah. Project sessions ("Preguntar a Claude") can create
+tasks the same way; a task's own sessions cannot.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself

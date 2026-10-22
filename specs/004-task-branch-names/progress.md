@@ -14,7 +14,7 @@ Mode: format=markdown commits=yes
 | WP-07 | 4 | 4A | done | 1 | | run early (UI only, api mocked) |
 | WP-08 | 5 | 5A | done | 1 | | run early alongside WP-05 (no shared files) |
 | WP-09 | 5 | 5A | done | 1 | | |
-| WP-10 | 6 | 6A | done | 1 | | decision 33 |
+| WP-10 | 6 | 6A | done | 1 | | decision 37 |
 | WP-11 | 6 | 6B | done | 1 | | all checks green; preview: API/CLI scenarios pass, dialog not checked in a browser (none available) |
 | WP-02F | 2 | fix | done | 1 | | review fixes: disableAllHooks, shared one-shot helper, claude_bin in suggest, key slug, compose guard, decomposed accents, remotes with `/` |
 

@@ -64,7 +64,12 @@ pub async fn set(
     let phase = SpecPhase::parse(&req.phase)
         .ok_or_else(|| ApiError::bad_request(format!("unknown phase `{}`", req.phase)))?;
     let key = TaskKey::new(key);
+    let before = app.store.get_task(&key).await?.and_then(|t| t.phase);
     record(&app, &key, phase).await?;
+    // Only a move forward to implement can offer a new session; going back never does.
+    if phase == SpecPhase::Implement && rank(before.as_deref()).is_none_or(|p| p < phase) {
+        crate::handoff::on_implement_chosen(&app, &key).await;
+    }
     Ok(Json(app.store.get_task(&key).await?.expect("task exists")))
 }
 
@@ -153,6 +158,9 @@ pub async fn on_hook(
     match signal {
         Signal::Working => {
             if let Some(phase) = signal_phase(hook) {
+                if primary && phase == SpecPhase::Implement {
+                    crate::handoff::on_code_edit(app, &key).await;
+                }
                 advance(app, &key, phase).await;
                 // Only a push or a PR means review: GitHub knows of it in a moment.
                 if phase == SpecPhase::Review {
@@ -164,7 +172,14 @@ pub async fn on_hook(
         Signal::PromptSubmitted => drop_hint(app, task),
         Signal::TurnEnded if primary && !limited => {
             let app = app.clone();
-            tokio::spawn(async move { maybe_hint(&app, &key).await });
+            tokio::spawn(async move {
+                crate::handoff::on_turn_ended(&app, &key).await;
+                maybe_hint(&app, &key).await;
+            });
+        }
+        Signal::TurnFailed if primary && !limited => {
+            let app = app.clone();
+            tokio::spawn(async move { crate::handoff::on_turn_failed(&app, &key).await });
         }
         _ => {}
     }
@@ -184,6 +199,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -241,6 +257,120 @@ mod tests {
         assert!(app.review_hints.lock().unwrap().contains("PROJ-1"));
         advance(&app, &key, SpecPhase::Review).await;
         assert!(!app.review_hints.lock().unwrap().contains("PROJ-1"));
+    }
+
+    /// A saving-mode task in its plan session, with a written spec in its workspace.
+    async fn planning() -> (AppState, TaskKey) {
+        let (app, key) = running().await;
+        app.store.set_saving_mode(&key, true).await.unwrap();
+        let path = app.config.home.join("ws");
+        std::fs::create_dir_all(path.join("specs/proj-1-x")).unwrap();
+        std::fs::write(path.join("specs/proj-1-x/tasks.md"), "- [ ] T001 One\n").unwrap();
+        let ws = delilah_git::Workspace {
+            path: path.clone(),
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store.save_workspace(&key, &path, &ws).await.unwrap();
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "plan-1".into(),
+                task: "PROJ-1".into(),
+                kind: crate::store_sessions::SessionKind::Claude,
+                label: "Spec y plan".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(delilah_core::Step::Plan),
+            })
+            .await
+            .unwrap();
+        (app, key)
+    }
+
+    async fn stage(app: &AppState, key: &TaskKey) -> Option<delilah_core::HandoffStage> {
+        let h = app.store.get_task(key).await.unwrap().unwrap().handoff;
+        h.map(|h| h.stage)
+    }
+
+    #[tokio::test]
+    async fn a_primary_turn_end_checks_the_handoff_but_a_limited_one_does_not() {
+        use delilah_agents::claude::Signal;
+        let (app, key) = planning().await;
+        let hook = serde_json::json!({});
+        on_hook(&app, "PROJ-1", Signal::TurnEnded, &hook, true, true).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(stage(&app, &key).await, None);
+        on_hook(&app, "PROJ-1", Signal::TurnEnded, &hook, true, false).await;
+        for _ in 0..50 {
+            if stage(&app, &key).await.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(
+            stage(&app, &key).await,
+            Some(delilah_core::HandoffStage::Offered)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limited_turn_end_or_failure_keeps_the_saving_stage() {
+        use delilah_agents::claude::Signal;
+        let (app, key) = planning().await;
+        let saving = delilah_core::Handoff {
+            to: delilah_core::Step::Implement,
+            stage: delilah_core::HandoffStage::Saving,
+            error: None,
+        };
+        app.store.set_handoff(&key, Some(&saving)).await.unwrap();
+        let hook = serde_json::json!({});
+        for signal in [Signal::TurnEnded, Signal::TurnFailed] {
+            on_hook(&app, "PROJ-1", signal, &hook, true, true).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            stage(&app, &key).await,
+            Some(delilah_core::HandoffStage::Saving)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_code_edit_from_the_plan_session_skips_the_handoff() {
+        use delilah_agents::claude::Signal;
+        let (app, key) = planning().await;
+        let edit = serde_json::json!({ "tool_name": "Edit", "tool_input": { "file_path": "/w/ws/src/main.rs" } });
+        on_hook(&app, "PROJ-1", Signal::Working, &edit, true, false).await;
+        assert_eq!(
+            stage(&app, &key).await,
+            Some(delilah_core::HandoffStage::Skipped)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_phase_route_offers_going_forward_to_implement_but_not_back() {
+        let (app, key) = planning().await;
+        let back = SetPhase {
+            phase: "specify".into(),
+        };
+        let _ = set(State(app.clone()), Path("PROJ-1".into()), Json(back))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(stage(&app, &key).await, None);
+        let forward = SetPhase {
+            phase: "implement".into(),
+        };
+        let _ = set(State(app.clone()), Path("PROJ-1".into()), Json(forward))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(
+            stage(&app, &key).await,
+            Some(delilah_core::HandoffStage::Offered)
+        );
     }
 
     #[tokio::test]

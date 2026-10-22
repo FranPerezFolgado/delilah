@@ -319,6 +319,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             claude_bin: "claude".into(),
+            agent_program: None,
         };
         let restarted = AppState::new(app.store.clone(), config)
             .with_gh(gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")));
@@ -417,7 +418,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_rerun_of_the_same_head_that_ends_green_resolves_and_the_same_red_is_not_told_twice() {
+    async fn a_rerun_of_the_same_head_that_ends_green_resolves_and_the_same_red_is_not_told_twice()
+    {
         let (app, key, _dir) = task_with_workspace(
             gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")),
             Some(SpecPhase::Review),

@@ -10,10 +10,12 @@ interface Props {
   onOpenSession: (id?: string) => void;
   onNewSession: (kind: SessionKind) => Promise<void>;
   onNewTask?: () => void;
+  /** "Nueva tarea con Claude": an idea conversation. */
+  onNewIdea?: () => void;
 }
 
 /** A project's first tab: its checkout, and sessions to ask about the code without a task. */
-export function ProjectView({ project, sessions, onOpenSession, onNewSession, onNewTask }: Props) {
+export function ProjectView({ project, sessions, onOpenSession, onNewSession, onNewTask, onNewIdea }: Props) {
   return (
     <div className="view-body">
       <div className="muted" style={{ fontSize: 12 }}>
@@ -30,6 +32,11 @@ export function ProjectView({ project, sessions, onOpenSession, onNewSession, on
         <button className="btn btn-p" onClick={() => onNewSession("claude")}>
           <Icon name="plus" /> {t("Preguntar a Claude")} <span className="kbd">{keyOf("new-claude")}</span>
         </button>
+        {onNewIdea && (
+          <button className="btn" onClick={onNewIdea}>
+            <Icon name="idea" /> {t("Nueva tarea con Claude")}
+          </button>
+        )}
         <button className="btn" onClick={() => onNewSession("shell")}>
           <Icon name="plus" /> {t("Terminal")} <span className="kbd">{keyOf("new-terminal")}</span>
         </button>

@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use chrono::{DateTime, Utc};
 use delilah_agents::claude::Signal;
-use delilah_core::{SpecPhase, Task, TaskStatus};
+use delilah_core::{HandoffStage, SpecPhase, Step, Task, TaskStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -17,6 +17,7 @@ use crate::actions::type_prompt;
 use crate::api::ApiError;
 use crate::archive::{KIND_BLOCKED, KIND_PARTIAL};
 use crate::state::AppState;
+use crate::store_sessions::SessionKind;
 
 /// Long answers are cut: the inbox shows the gist, the session tab the rest.
 const MAX_TEXT: usize = 4000;
@@ -133,6 +134,8 @@ pub enum ItemKind {
     /// The task waits on you, but no session said what for (e.g. after a restart).
     Waiting,
     Review,
+    /// A saving-mode step is over: the next session is offered, being prepared, or failed.
+    Handoff,
     /// The agent stopped with commits on its branch: maybe it is ready for review.
     SuggestReview,
     /// Archiving the task left a PR behind (blocked or partial).
@@ -177,6 +180,8 @@ pub struct InboxPr {
 pub struct AskView {
     pub id: String,
     pub questions: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<crate::proposals::Proposal>,
 }
 
 /// `GET /api/v1/inbox`: most urgent first (what blocks an agent), newest first within.
@@ -215,6 +220,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             ask: Some(AskView {
                 id: ask.id,
                 questions: ask.questions,
+                proposal: ask.proposal,
             }),
             pr: None,
         });
@@ -291,6 +297,68 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 pr: None,
             });
         }
+    }
+
+    for t in tasks.iter().filter(|t| !t.status.is_terminal()) {
+        let Some(h) = t.handoff.as_ref() else {
+            continue;
+        };
+        let lang = app.lang();
+        let text = match h.stage {
+            HandoffStage::Offered => lang
+                .pick(
+                    "Las tareas están listas. ¿Implementar en una sesión nueva?",
+                    "The tasks are ready. Implement in a new session?",
+                )
+                .to_string(),
+            HandoffStage::Saving => lang
+                .pick(
+                    "Guardando las notas de la sesión…",
+                    "Saving the session's notes…",
+                )
+                .to_string(),
+            HandoffStage::Failed => h.error.clone().unwrap_or_else(|| {
+                lang.pick(
+                    "No se pudo empezar la sesión nueva.",
+                    "The new session could not start.",
+                )
+                .to_string()
+            }),
+            HandoffStage::Starting => match h.to {
+                Step::Review => lang
+                    .pick(
+                        "Pasando a la revisión en una sesión nueva…",
+                        "Moving on to the review in a new session…",
+                    )
+                    .to_string(),
+                _ => lang
+                    .pick("Empezando la sesión nueva…", "Starting the new session…")
+                    .to_string(),
+            },
+            HandoffStage::Skipped => continue,
+        };
+        let session = app
+            .store
+            .open_sessions(Some(t.key.as_str()))
+            .await?
+            .into_iter()
+            .find(|s| s.primary && s.kind == SessionKind::Claude)
+            .map(|s| ItemSession {
+                live: app.sessions.get(&s.id).is_some(),
+                id: s.id,
+                label: s.label,
+                primary: true,
+            });
+        items.push(InboxItem {
+            kind: ItemKind::Handoff,
+            task: t.key.to_string(),
+            title: t.title.clone(),
+            session,
+            text: Some(text),
+            since: None,
+            ask: None,
+            pr: None,
+        });
     }
 
     let hints = app.review_hints.lock().unwrap().clone();
@@ -524,6 +592,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
@@ -578,6 +647,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");
@@ -733,5 +803,99 @@ mod tests {
         let cut = clip(&long);
         assert!(cut.ends_with('…'));
         assert!(cut.len() <= MAX_TEXT + '…'.len_utf8());
+    }
+
+    async fn app_with_handoff(h: Option<delilah_core::Handoff>) -> AppState {
+        let config = crate::config::Config {
+            home: std::env::temp_dir().join(format!("delilah-inbox-{}", uuid::Uuid::new_v4())),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+            claude_bin: "claude".into(),
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let mut t = Task::new(key.clone(), "t", "feature");
+        t.saving_mode = true;
+        app.store.create_task(&t).await.unwrap();
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "plan-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Spec y plan".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(delilah_core::Step::Plan),
+            })
+            .await
+            .unwrap();
+        app.store.set_handoff(&key, h.as_ref()).await.unwrap();
+        app
+    }
+
+    fn handoff(stage: HandoffStage, error: Option<&str>) -> Option<delilah_core::Handoff> {
+        Some(delilah_core::Handoff {
+            to: delilah_core::Step::Implement,
+            stage,
+            error: error.map(str::to_string),
+        })
+    }
+
+    #[tokio::test]
+    async fn an_offered_handoff_is_one_item_with_the_outgoing_session() {
+        let app = app_with_handoff(handoff(HandoffStage::Offered, None)).await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, ItemKind::Handoff);
+        assert_eq!(
+            items[0].text.as_deref(),
+            Some("Las tareas están listas. ¿Implementar en una sesión nueva?")
+        );
+        assert_eq!(items[0].session.as_ref().unwrap().id, "plan-1");
+    }
+
+    #[tokio::test]
+    async fn a_failed_handoff_shows_its_error_and_others_show_nothing() {
+        let app = app_with_handoff(handoff(HandoffStage::Failed, Some("no claude"))).await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text.as_deref(), Some("no claude"));
+        for h in [handoff(HandoffStage::Skipped, None), None] {
+            let app = app_with_handoff(h).await;
+            let Json(items) = list(State(app)).await.ok().unwrap();
+            assert!(items.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_starting_handoff_shows_text_for_the_review_and_the_implementation() {
+        let app = app_with_handoff(Some(delilah_core::Handoff {
+            to: Step::Review,
+            stage: HandoffStage::Starting,
+            error: None,
+        }))
+        .await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, ItemKind::Handoff);
+        assert_eq!(
+            items[0].text.as_deref(),
+            Some("Pasando a la revisión en una sesión nueva…")
+        );
+        let app = app_with_handoff(handoff(HandoffStage::Starting, None)).await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items[0].text.as_deref(), Some("Empezando la sesión nueva…"));
+    }
+
+    #[test]
+    fn the_handoff_sorts_after_review_and_before_the_review_hint() {
+        assert!(
+            ItemKind::Review < ItemKind::Handoff && ItemKind::Handoff < ItemKind::SuggestReview
+        );
     }
 }

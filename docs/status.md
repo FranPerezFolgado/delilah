@@ -2,7 +2,7 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-21
-(version 0.3.0).
+(version 0.3.0, plus "Nueva tarea con Claude").
 
 ## Built
 
@@ -35,6 +35,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
+- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md).
 
 **PR loop:**
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
@@ -56,8 +57,27 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - Previews (`scripts/preview.sh`) to try a branch next to the installed app.
 - Phases moved by the user, by spec files and by agent signals; archiving that never blocks in the checkout, and a forced archive for worktrees.
 
+**Saving mode** (a fresh Claude session per phase, opt-in per task):
+- Option on new tasks, backlog items and running tasks (also `--saving-mode` / `--no-saving-mode` in the CLI), with its default and "save notes first" in Settings.
+- The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
+- Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
+
 ## Pending and known problems
 
+- **Idea conversations, still missing:**
+  - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
+  - deleting conversations (the history is kept for good);
+  - the usage-limit notice does not show in the conversation view;
+  - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
+  - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
+- **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).
+- **Saving mode, known problems:**
+  - the old live session keeps `primary = true` in memory until it exits (~3 s);
+  - `PATCH` of `saving_mode` is not atomic with the other backlog fields;
+  - an unparsable `handoff` JSON fails the whole task list;
+  - the English history says "Moved to Implement" (it reuses the phase-name keys);
+  - a CLI older than the daemon fails on `step-started` events: ship them together;
+  - rolling the daemon back after using saving mode needs the `step-started` rows tolerated.
 - **The real usage-limit payload** has never been observed. When it first happens on the work Mac, check `hooks.jsonl` against `delilah-agents::limits` (see the [spike](spikes/2026-10-19-claude-pty.md)).
 - **SpecKit dirties the checkout.** Each `/speckit-plan` writes its block into CLAUDE.md, and a dirty checkout blocks new checkout tasks. Proposed: ignore that block in the clean-checkout check.
 - **The archive refusal message** (`workspace: . has uncommitted changes…`) names neither the task nor the files. It should list them.

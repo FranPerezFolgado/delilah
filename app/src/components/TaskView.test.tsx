@@ -1,40 +1,72 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
-import { api, type Task } from "../api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, waitFor } from "@testing-library/react";
+import type { EventRecord, Task } from "../api";
+import { setLanguage, t } from "../i18n";
+import { stepLabel } from "../chain";
 import { TaskView } from "./TaskView";
 
+const events = vi.fn<() => Promise<EventRecord[]>>();
+vi.mock("../api", async (orig) => {
+  const mod = await orig<typeof import("../api")>();
+  return { ...mod, api: new Proxy({}, { get: (_, k) => (k === "events" ? events : () => new Promise(() => {})) }) };
+});
+vi.mock("./SpecPanel", () => ({ SpecPanel: () => null }));
+
+const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, handoff: null };
+
+const show = (tk: Task = task) =>
+  render(
+    <TaskView task={tk} sessions={[]} onOpenSession={() => {}} onNewSession={async () => {}} onChanged={() => {}} onViewChanges={() => {}} />,
+  );
+
+beforeEach(() => setLanguage("es"));
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  localStorage.clear();
 });
 
-const base: Task = {
-  key: "K-1",
-  title: "Do it",
-  project: "p",
-  workflow: "default",
-  phase: null,
-  status: { type: "running" },
-};
+describe("TaskView history", () => {
+  it("labels a created-from-conversation event with the conversation label", async () => {
+    events.mockResolvedValue([
+      { at: "2026-01-01T10:00:00Z", event: { type: "created-from-conversation", session: "s1", label: "Idea X" } },
+    ] as EventRecord[]);
+    const { container } = show();
+    await waitFor(() => expect(container.querySelector(".history")!.textContent).toContain("Creada desde la conversación «Idea X»"));
+  });
+});
 
-const show = (task: Task) => {
-  vi.spyOn(api, "events").mockResolvedValue([]);
-  return render(
-    <TaskView task={task} sessions={[]} onOpenSession={() => {}} onNewSession={async () => {}} onChanged={() => {}} onViewChanges={() => {}} />,
-  );
-};
+describe("step-started history label", () => {
+  it("names the step, not a phase", () => {
+    const label = (step: "plan" | "implement" | "review") => t("Paso a {step} (sesión nueva)", { step: stepLabel(step) });
+    expect(label("plan")).toBe("Paso a Spec y plan (sesión nueva)");
+    expect(label("implement")).toBe("Paso a Implementación (sesión nueva)");
+    expect(label("review")).toBe("Paso a Revisión (sesión nueva)");
+  });
+
+  it("translates the step labels", () => {
+    setLanguage("en");
+    expect(stepLabel("plan")).toBe("Spec and plan");
+    expect(t("Paso a {step} (sesión nueva)", { step: stepLabel("review") })).toBe("Moved to Review (new session)");
+  });
+});
 
 describe("TaskView branch", () => {
+  beforeEach(() => {
+    setLanguage("en");
+    events.mockResolvedValue([]);
+  });
+
   it("shows the branch in monospace with its label", () => {
-    const { getByText, container } = show({ ...base, branch: "feature/K-1-do-it" });
+    const { getByText, container } = show({ ...task, branch: "feature/K-1-do-it" });
     const branch = getByText("feature/K-1-do-it");
     expect(branch.className).toContain("mono");
     expect(container.textContent).toContain("Branch");
   });
 
   it("shows nothing when the task has no branch", () => {
-    const { container } = show(base);
+    const { container } = show(task);
     expect(container.textContent).not.toContain("Branch");
     expect(container.querySelector("[data-testid=task-branch]")).toBeNull();
   });

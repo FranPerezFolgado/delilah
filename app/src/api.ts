@@ -13,6 +13,17 @@ export type TaskStatus =
   | { type: "done" }
   | { type: "failed"; reason: string };
 
+/** The steps of a saving-mode task, each in its own session. */
+export type Step = "plan" | "implement" | "review";
+export type HandoffStage = "offered" | "saving" | "starting" | "failed" | "skipped";
+
+/** A pending move to the next step's fresh session. */
+export interface Handoff {
+  to: Step;
+  stage: HandoffStage;
+  error?: string;
+}
+
 export interface Task {
   key: string;
   title: string;
@@ -26,6 +37,9 @@ export interface Task {
   in_checkout?: boolean | null;
   /** The branch of the task's workspace; absent without a workspace (read-only). */
   branch?: string | null;
+  /** Saving mode: each step runs in a fresh session. */
+  saving_mode: boolean;
+  handoff: Handoff | null;
 }
 
 export interface EventRecord {
@@ -68,6 +82,7 @@ export interface NewBacklogTask {
   free?: boolean;
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
+  saving_mode?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -77,6 +92,7 @@ export interface BacklogChange {
   notes?: string;
   project?: string;
   in_checkout?: boolean;
+  saving_mode?: boolean;
 }
 
 export interface RunRequest {
@@ -90,6 +106,8 @@ export interface RunRequest {
   free?: boolean;
   /** Work in the project's own checkout instead of a worktree. */
   in_checkout?: boolean;
+  /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
+  saving_mode?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
@@ -188,6 +206,10 @@ export interface Session {
   /** Claude in plan mode: reads and explains, does not edit. */
   read_only: boolean;
   state: SessionState | null;
+  /** An idea conversation (a project session that turns an idea into a task). */
+  conversation: boolean;
+  /** The saving-mode step it works on, if any. */
+  step: Step | null;
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -254,14 +276,40 @@ export interface FileContent {
 /** The file changed on disk (usually the agent) since the editor loaded it. */
 export class ConflictError extends Error {}
 
-export type InboxKind = "permission" | "question" | "error" | "waiting" | "review" | "suggest-review" | "paused" | "failed" | "pr-failed" | "pr-review" | "pr-blocked";
+export type InboxKind =
+  | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
+  | "pr-failed" | "pr-review" | "pr-blocked";
+
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
 export interface AskQuestion {
   question: string;
   header?: string;
-  options: { label: string; description?: string }[];
+  options: { label: string; description?: string; preview?: string }[];
   multiSelect?: boolean;
+}
+
+/** One entry of an idea conversation. */
+export type ConversationEntry =
+  | { id: number; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" }
+  | { id: number; at: string; kind: "claude"; text: string }
+  | {
+      id: number;
+      at: string;
+      kind: "card";
+      ask: string;
+      questions: AskQuestion[];
+      proposal: { title: string; brief: string } | null;
+      outcome: "pending" | "answered" | "terminal" | "withdrawn";
+      answer: Record<string, string> | null;
+      task: string | null;
+      error: string | null;
+    };
+
+export interface Conversation {
+  entries: ConversationEntry[];
+  activity: string | null;
+  needs_terminal: boolean;
 }
 
 /** Something that waits on you, from any task. */
@@ -273,7 +321,7 @@ export interface InboxItem {
   text: string | null;
   since: string | null;
   /** A question with options, answered from Delilah. */
-  ask?: { id: string; questions: AskQuestion[] };
+  ask?: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
   /** The PR notice behind a pr-* item. */
   pr?: { notice: number; url: string; repo: string };
 }
@@ -397,6 +445,9 @@ export const api = {
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  /** Answers the offer to continue in a fresh session, or retries a failed one. */
+  handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
   dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),
   usage: () => request<UsageReport | null>("/api/v1/usage"),
   jira: () => request<{ settings: JiraSettings | null }>("/api/v1/jira"),
@@ -412,7 +463,7 @@ export const api = {
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),
   reopenSession: (id: string) => post<Session>(`/api/v1/sessions/${id}/reopen`),
-  openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean }) =>
+  openProjectSession: (project: string, s: { kind: SessionKind; label?: string; prompt?: string; read_only?: boolean; conversation?: boolean }) =>
     post<Session>(`/api/v1/projects/${project}/sessions`, s),
   allowEdits: (id: string) => post<Session>(`/api/v1/sessions/${id}/allow-edits`),
   taskPrs: (key: string) => request<TaskPrs>(`/api/v1/tasks/${key}/prs`),
@@ -429,7 +480,12 @@ export const api = {
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
-  answerAsk: (id: string, answers: Record<string, string>) => post<null>(`/api/v1/asks/${id}/answer`, { answers }),
+  answerAsk: (id: string, answers: Record<string, string>) => post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, { answers }),
+  conversation: (id: string) => request<Conversation>(`/api/v1/sessions/${id}/conversation`),
+  sendMessage: (id: string, text: string) => post<ConversationEntry>(`/api/v1/sessions/${id}/messages`, { text }),
+  removeMessage: (id: string, entry: number) =>
+    request<null>(`/api/v1/sessions/${id}/messages/${entry}`, { method: "DELETE" }),
+  stopSession: (id: string) => post<null>(`/api/v1/sessions/${id}/stop`),
   releaseAsk: (id: string) => post<null>(`/api/v1/asks/${id}/release`),
   changes: (key: string) => request<RepoChanges[]>(`/api/v1/tasks/${key}/changes`),
   files: (key: string) => request<string[]>(`/api/v1/tasks/${key}/files`),

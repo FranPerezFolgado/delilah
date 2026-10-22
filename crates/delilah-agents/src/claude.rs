@@ -43,6 +43,60 @@ pub(crate) const KEPT_ENV: &[&str] = &[
     "NODE_EXTRA_CA_CERTS",
 ];
 
+/// How much the agent may do without asking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission {
+    Default,
+    /// Plan mode: Claude reads and explains, it does not edit.
+    Plan,
+    /// Anything not allowed is denied instead of asked, and editing tools are denied:
+    /// the idea conversation reads code without a terminal prompt in the way.
+    DontAsk,
+}
+
+/// Tools and commands allowed under [`Permission::DontAsk`]. Each read-only Bash rule
+/// also in its RTK-rewritten form: a user-level PreToolUse hook such as RTK rewrites
+/// `git status` to `rtk git status`, and allow rules match the rewritten command.
+/// No `rg` nor `git log/show/diff`: `rg --pre` runs programs and `--output` writes files.
+/// Reading is scoped: the workspace (the cwd) and, per extra dir, that folder; see
+/// [`dont_ask_allow`]. Claude applies `Read` rules to Grep and Glob too.
+const DONT_ASK_ALLOW: &[&str] = &[
+    "AskUserQuestion",
+    // Only the plugin's skill, as the call is recorded: `{"skill":"delilah:task-from-idea"}`.
+    "Skill(delilah:task-from-idea)",
+    "TodoWrite",
+    "Bash(git status:*)",
+    "Bash(ls:*)",
+    "Bash(rtk git status:*)",
+    "Bash(rtk ls:*)",
+];
+
+/// Editing tools, and the places secrets live (deny wins over the scoped allow).
+const DONT_ASK_DENY: &[&str] = &[
+    "Edit",
+    "MultiEdit",
+    "Write",
+    "NotebookEdit",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.config/gh/**)",
+    "Read(**/.env)",
+    "Read(**/.env.*)",
+];
+
+/// The allow list under [`Permission::DontAsk`]: reads limited to the workspace
+/// (`./**`, relative to the cwd) and each of `extra_dirs` (`//` marks an absolute path).
+fn dont_ask_allow(extra_dirs: &[&Path]) -> Vec<String> {
+    let mut allow = vec!["Read(./**)".to_string()];
+    for dir in extra_dirs {
+        let dir = dir.to_string_lossy();
+        allow.push(format!("Read(/{}/**)", dir.trim_end_matches('/')));
+    }
+    allow.extend(DONT_ASK_ALLOW.iter().map(|rule| rule.to_string()));
+    allow
+}
+
 pub struct Launch<'a> {
     pub workspace: &'a Path,
     pub session_id: &'a str,
@@ -52,11 +106,16 @@ pub struct Launch<'a> {
     pub resume: bool,
     /// Folders outside the workspace the agent may read, e.g. the task's ticket.
     pub extra_dirs: &'a [&'a Path],
-    /// Plan mode: Claude reads and explains, it does not edit.
-    pub read_only: bool,
+    pub permission: Permission,
+    /// A plugin folder to load for this session (`--plugin-dir`).
+    pub plugin_dir: Option<&'a Path>,
+    /// Extra instructions appended to Claude's system prompt, also when resuming.
+    pub append_system_prompt: Option<&'a str>,
     /// Remote Control: the session can also be followed and driven from claude.ai
     /// and the Claude app, under this name.
     pub remote_control: Option<&'a str>,
+    /// Program to run instead of `claude` (tests use a stand-in); `None` in production.
+    pub program: Option<&'a Path>,
 }
 
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
@@ -82,7 +141,10 @@ pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
 }
 
 pub fn command(launch: &Launch) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new("claude");
+    let mut cmd = match launch.program {
+        Some(program) => CommandBuilder::new(program),
+        None => CommandBuilder::new("claude"),
+    };
     cmd.env_clear();
     for (key, value) in crate::env::agent_env() {
         cmd.env(key, value);
@@ -107,11 +169,29 @@ pub fn command(launch: &Launch) -> CommandBuilder {
     }
     cmd.arg("--settings");
     cmd.arg(launch.settings);
-    if launch.read_only {
-        cmd.args(["--permission-mode", "plan"]);
+    match launch.permission {
+        Permission::Default => {}
+        Permission::Plan => {
+            cmd.args(["--permission-mode", "plan"]);
+        }
+        Permission::DontAsk => {
+            cmd.args(["--permission-mode", "dontAsk"]);
+            // A cloned repo's own settings must not widen the allow list.
+            cmd.args(["--setting-sources", "user"]);
+            // Nor may the project's or user's MCP servers reach an idea conversation.
+            cmd.arg("--strict-mcp-config");
+        }
+    }
+    if let Some(dir) = launch.plugin_dir {
+        cmd.arg("--plugin-dir");
+        cmd.arg(dir);
+    }
+    if let Some(text) = launch.append_system_prompt {
+        cmd.args(["--append-system-prompt", text]);
     }
     if let Some(prompt) = launch.prompt {
-        cmd.arg(prompt);
+        // After `--`, so a prompt starting with `-` is never read as an option.
+        cmd.args(["--", prompt]);
     }
     cmd.cwd(launch.workspace);
     cmd
@@ -126,6 +206,8 @@ pub fn settings(
     session: &str,
     status_script: &Path,
     padding: Option<&Value>,
+    permission: Permission,
+    extra_dirs: &[&Path],
 ) -> Value {
     let post = post_command(daemon_url, "/hooks/claude", task, session);
     let mut hooks: serde_json::Map<String, Value> = HOOK_EVENTS
@@ -154,7 +236,12 @@ pub fn settings(
     if let Some(padding) = padding {
         status_line["padding"] = padding.clone();
     }
-    json!({ "hooks": hooks, "statusLine": status_line })
+    let mut settings = json!({ "hooks": hooks, "statusLine": status_line });
+    if permission == Permission::DontAsk {
+        settings["permissions"] =
+            json!({ "allow": dont_ask_allow(extra_dirs), "deny": DONT_ASK_DENY });
+    }
+    settings
 }
 
 fn post_command(daemon_url: &str, path: &str, task: &str, session: &str) -> String {
@@ -202,6 +289,8 @@ pub fn write_settings(
     daemon_url: &str,
     task: &str,
     session: &str,
+    permission: Permission,
+    extra_dirs: &[&Path],
 ) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -222,9 +311,31 @@ pub fn write_settings(
         session,
         &script,
         user.as_ref().and_then(|u| u.get("padding")),
+        permission,
+        extra_dirs,
     );
     std::fs::write(path, serde_json::to_vec_pretty(&settings)?)?;
     Ok(path.to_path_buf())
+}
+
+/// Writes the Delilah plugin (the `task-from-idea` skill) under `dir`, with `version`
+/// in its manifest. Overwrites what is there, so it is safe to call on every start.
+pub fn write_plugin(dir: &Path, version: &str) -> std::io::Result<()> {
+    let mut manifest: Value =
+        serde_json::from_str(include_str!("../plugin/.claude-plugin/plugin.json"))?;
+    manifest["version"] = json!(version);
+    let manifest_dir = dir.join(".claude-plugin");
+    std::fs::create_dir_all(&manifest_dir)?;
+    std::fs::write(
+        manifest_dir.join("plugin.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    let skill_dir = dir.join("skills/task-from-idea");
+    std::fs::create_dir_all(&skill_dir)?;
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        include_str!("../plugin/skills/task-from-idea/SKILL.md"),
+    )
 }
 
 /// What a hook payload means for the task.
@@ -329,6 +440,8 @@ mod tests {
             "sess-1",
             Path::new("/tmp/statusline-sess-1.sh"),
             None,
+            Permission::Default,
+            &[],
         );
         for event in HOOK_EVENTS {
             let command = s["hooks"][event][0]["hooks"][0]["command"]
@@ -377,8 +490,11 @@ mod tests {
             prompt: Some("/feature PROJ-1"),
             resume: false,
             extra_dirs: &[],
-            read_only: false,
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
             remote_control: None,
+            program: None,
         };
         let args = |l: &Launch| {
             command(l)
@@ -396,6 +512,7 @@ mod tests {
                 "abc",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -412,11 +529,13 @@ mod tests {
                 "abc",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "continúa"
             ]
         );
         let remote = Launch {
             remote_control: Some("PROJ-1 · Principal"),
+            program: None,
             ..base
         };
         assert_eq!(
@@ -429,6 +548,7 @@ mod tests {
                 "PROJ-1 · Principal",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -447,11 +567,12 @@ mod tests {
                 "PROJ-1 · Principal",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "continúa"
             ]
         );
         let remote_plan = Launch {
-            read_only: true,
+            permission: Permission::Plan,
             ..remote
         };
         assert_eq!(
@@ -466,9 +587,186 @@ mod tests {
                 "/tmp/s.json",
                 "--permission-mode",
                 "plan",
+                "--",
                 "/feature PROJ-1"
             ]
         );
+    }
+
+    fn argv(l: &Launch) -> Vec<String> {
+        command(l)
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn launch() -> Launch<'static> {
+        Launch {
+            workspace: Path::new("/tmp/ws"),
+            session_id: "abc",
+            settings: Path::new("/tmp/s.json"),
+            prompt: None,
+            resume: false,
+            extra_dirs: &[],
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
+            remote_control: None,
+            program: None,
+        }
+    }
+
+    fn has_pair(args: &[String], flag: &str, value: &str) -> bool {
+        args.windows(2).any(|w| w[0] == flag && w[1] == value)
+    }
+
+    #[test]
+    fn permission_modes_map_to_flags() {
+        let plan = argv(&Launch {
+            permission: Permission::Plan,
+            ..launch()
+        });
+        assert!(has_pair(&plan, "--permission-mode", "plan"), "{plan:?}");
+        let dont_ask = argv(&Launch {
+            permission: Permission::DontAsk,
+            ..launch()
+        });
+        assert!(
+            has_pair(&dont_ask, "--permission-mode", "dontAsk"),
+            "{dont_ask:?}"
+        );
+        assert!(!argv(&launch()).contains(&"--permission-mode".to_string()));
+        // Only the read-only conversation drops the repo's own settings.
+        assert!(
+            has_pair(&dont_ask, "--setting-sources", "user"),
+            "{dont_ask:?}"
+        );
+        assert!(
+            dont_ask.contains(&"--strict-mcp-config".to_string()),
+            "{dont_ask:?}"
+        );
+        assert!(!plan.contains(&"--strict-mcp-config".to_string()));
+        assert!(!plan.contains(&"--setting-sources".to_string()));
+        assert!(!argv(&launch()).contains(&"--setting-sources".to_string()));
+    }
+
+    #[test]
+    fn a_prompt_goes_after_double_dash_so_it_is_never_an_option() {
+        for prompt in ["--dangerously-skip-permissions", "-p", "idea"] {
+            let args = argv(&Launch {
+                prompt: Some(prompt),
+                plugin_dir: Some(Path::new("/tmp/plugin")),
+                ..launch()
+            });
+            assert_eq!(args[args.len() - 2..], ["--", prompt], "{args:?}");
+        }
+    }
+
+    #[test]
+    fn plugin_dir_and_system_prompt_are_optional_flags() {
+        let plain = argv(&launch());
+        assert!(!plain.contains(&"--plugin-dir".to_string()));
+        assert!(!plain.contains(&"--append-system-prompt".to_string()));
+        let dir = Path::new("/tmp/plugin");
+        for resume in [false, true] {
+            let args = argv(&Launch {
+                plugin_dir: Some(dir),
+                append_system_prompt: Some("be brief"),
+                resume,
+                ..launch()
+            });
+            assert!(has_pair(&args, "--plugin-dir", "/tmp/plugin"), "{args:?}");
+            assert!(
+                has_pair(&args, "--append-system-prompt", "be brief"),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dont_ask_settings_allow_read_only_tools_and_deny_edits() {
+        let extra = Path::new("/home/u/.delilah/tasks/T-1");
+        let s = |p| {
+            settings(
+                "http://x",
+                "T-1",
+                "s",
+                Path::new("/tmp/s.sh"),
+                None,
+                p,
+                &[extra],
+            )
+        };
+        let dont_ask = s(Permission::DontAsk);
+        assert_eq!(
+            dont_ask["permissions"]["allow"],
+            json!([
+                "Read(./**)",
+                "Read(//home/u/.delilah/tasks/T-1/**)",
+                "AskUserQuestion",
+                "Skill(delilah:task-from-idea)",
+                "TodoWrite",
+                "Bash(git status:*)",
+                "Bash(ls:*)",
+                "Bash(rtk git status:*)",
+                "Bash(rtk ls:*)"
+            ])
+        );
+        assert_eq!(
+            dont_ask["permissions"]["deny"],
+            json!([
+                "Edit",
+                "MultiEdit",
+                "Write",
+                "NotebookEdit",
+                "Read(~/.ssh/**)",
+                "Read(~/.aws/**)",
+                "Read(~/.gnupg/**)",
+                "Read(~/.config/gh/**)",
+                "Read(**/.env)",
+                "Read(**/.env.*)"
+            ])
+        );
+        assert!(s(Permission::Plan).get("permissions").is_none());
+        assert!(s(Permission::Default).get("permissions").is_none());
+    }
+
+    #[test]
+    fn write_plugin_is_idempotent_and_sets_the_version() {
+        let dir = tempfile::tempdir().unwrap();
+        write_plugin(dir.path(), "1.2.3").unwrap();
+        write_plugin(dir.path(), "1.2.4").unwrap();
+        let manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join(".claude-plugin/plugin.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "delilah");
+        assert_eq!(manifest["version"], "1.2.4");
+        let skill =
+            std::fs::read_to_string(dir.path().join("skills/task-from-idea/SKILL.md")).unwrap();
+        assert!(skill.contains("name: task-from-idea"), "{skill}");
+    }
+
+    #[test]
+    fn the_program_override_replaces_claude_as_argv0() {
+        let fake = Path::new("/tmp/fake-claude");
+        let launch = |program| Launch {
+            workspace: Path::new("/tmp/ws"),
+            session_id: "abc",
+            settings: Path::new("/tmp/s.json"),
+            prompt: None,
+            resume: false,
+            extra_dirs: &[],
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
+            remote_control: None,
+            program,
+        };
+        let first = |l: &Launch| command(l).get_argv()[0].to_string_lossy().into_owned();
+        assert_eq!(first(&launch(None)), "claude");
+        assert_eq!(first(&launch(Some(fake))), "/tmp/fake-claude");
     }
 
     #[test]
@@ -481,8 +779,11 @@ mod tests {
             prompt: Some("/feature PROJ-1"),
             resume: false,
             extra_dirs: &[ticket_dir],
-            read_only: false,
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
             remote_control: None,
+            program: None,
         });
         let argv: Vec<String> = cmd
             .get_argv()
@@ -499,6 +800,7 @@ mod tests {
                 "/tmp/tasks/PROJ-1",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -513,8 +815,11 @@ mod tests {
             prompt: None,
             resume: false,
             extra_dirs: &[],
-            read_only: false,
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
             remote_control: None,
+            program: None,
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());
