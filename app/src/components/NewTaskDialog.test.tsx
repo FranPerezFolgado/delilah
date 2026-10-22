@@ -49,6 +49,48 @@ describe("NewTaskDialog", () => {
     expect(container.textContent).not.toContain("PROJ-1");
   });
 
+  describe("default workspace mode", () => {
+    const withMode = (name: string, workspace: "checkout" | "worktree") =>
+      ({ name, kind: "repo", settings: { ...DEFAULT_PROJECT_SETTINGS, workspace } }) as unknown as Project;
+    const radio = (c: HTMLElement, v: string) =>
+      Array.from(c.querySelectorAll('input[name="where"]'))[v === "checkout" ? 0 : 1] as HTMLInputElement;
+    const open = (projects: Project[], extra: Record<string, unknown> = {}) =>
+      render(<NewTaskDialog projects={projects} onClose={vi.fn()} onStarted={vi.fn()} onSaved={vi.fn()} {...extra} />);
+
+    it("preselects worktree when the project defaults to it", () => {
+      const { container } = open([withMode("a", "worktree")]);
+      expect(radio(container, "worktree").checked).toBe(true);
+      expect(radio(container, "checkout").checked).toBe(false);
+    });
+
+    it("preselects checkout when the project defaults to it", () => {
+      const { container } = open([withMode("a", "checkout")]);
+      expect(radio(container, "checkout").checked).toBe(true);
+    });
+
+    it("re-applies the default when the project changes and the picker is untouched", () => {
+      const { container } = open([withMode("a", "checkout"), withMode("b", "worktree")]);
+      fireEvent.change(container.querySelector("select") as HTMLSelectElement, { target: { value: "b" } });
+      expect(radio(container, "worktree").checked).toBe(true);
+    });
+
+    it("keeps a user choice across a title edit and a project change", () => {
+      const { container } = open([withMode("a", "checkout"), withMode("b", "worktree")]);
+      fireEvent.click(radio(container, "worktree"));
+      const [ticket] = Array.from(container.querySelectorAll("input[required]")) as HTMLInputElement[];
+      fireEvent.change(ticket, { target: { value: "P-1" } });
+      expect(radio(container, "worktree").checked).toBe(true);
+      fireEvent.change(container.querySelector("select") as HTMLSelectElement, { target: { value: "a" } });
+      expect(radio(container, "worktree").checked).toBe(true);
+    });
+
+    it("a backlog task's saved choice wins over the default", () => {
+      const existing = { key: "LIBRE-1", title: "t", project: "a", in_checkout: true, notes: "" } as never;
+      const { container } = open([withMode("a", "worktree")], { existing });
+      expect(radio(container, "checkout").checked).toBe(true);
+    });
+  });
+
   describe("always/never submodules", () => {
     const open = async () => {
       vi.spyOn(api, "submodules").mockResolvedValue([sub("svc-a"), sub("svc-b"), sub("svc-c")]);

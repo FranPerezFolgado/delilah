@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Project, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
 import { branchName } from "../branchName";
 import { t } from "../i18n";
@@ -33,8 +33,6 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [origin, setOrigin] = useState<"jira" | "libre">(
     fromSession || existing?.key.startsWith("LIBRE-") ? "libre" : "jira",
   );
-  // In the project's checkout (a branch there), or isolated in a worktree.
-  const [where, setWhere] = useState<Where>(existing ? whereOf(existing.in_checkout) : "checkout");
   const [key, setKey] = useState(existing?.key ?? draft?.key ?? "");
   const [title, setTitle] = useState(existing?.title ?? draft?.title ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
@@ -45,6 +43,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     (draft?.components.length ? projects.find((p) => p.kind === "parent") : undefined) ??
     projects[0];
   const [projectName, setProjectName] = useState(preferred?.name ?? "");
+  // In the project's checkout (a branch there), or isolated in a worktree: a backlog
+  // task's saved choice, else the project's default until the user picks one.
+  const [where, setWhere] = useState<Where>(existing ? whereOf(existing.in_checkout) : (preferred?.settings.workspace ?? "checkout"));
+  const whereTouched = useRef(!!existing);
   const [submodules, setSubmodules] = useState<Submodule[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -60,6 +62,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // "always" is in every selection and "never" in none (the daemon enforces both too).
   const withRules = (paths: string[]) => [...always, ...paths.filter((p) => !always.includes(p) && !never.includes(p))];
   const branchPreview = project ? branchName(project.settings.branch, previewKey, title) : null;
+
+  useEffect(() => {
+    if (!whereTouched.current && project) setWhere(project.settings.workspace);
+  }, [project?.name]);
 
   useEffect(() => {
     setPicked([]);
@@ -216,7 +222,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
               </label>
             )}
-            {!fromSession && <WherePicker value={where} onChange={setWhere} project={project} />}
+            {!fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w); }} project={project} />}
             {project?.kind === "parent" && (
               <div className="field">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
