@@ -165,11 +165,11 @@
   - `record(session)`, `record_for(task)` (via `fake::record`);
   - `register_fixtures()` adds `repo` as a repo project and `parent` as a parent project and returns their names;
   - `log_tail(n)`.
-- [ ] T027 Implement `crates/delilah-e2e/src/bin/e2e-env.rs` per contracts/e2e-env.md:
+- [X] T027 Implement `crates/delilah-e2e/src/bin/e2e-env.rs` per contracts/e2e-env.md:
   - `start [--ui-origin <url>] [--jira] [--keep]`: prints one JSON line, then waits until stdin hits EOF or SIGINT/SIGTERM. Use `ctrlc`-free handling: a thread reading stdin, plus a `tokio::signal` in the Jira runtime if needed. Then it drops the Env and exits 3 if the tripwire fired;
   - `fixture --into <dir>`.
   - Test in `crates/delilah-e2e/tests/e2e_env_bin.rs` (behind `e2e`): spawn it, read the line, `GET <api>/api/v1/health` OK, close stdin, it exits 0 and the daemon's port is closed.
-- [ ] T028 Add `[[test]]` entries with `required-features = ["e2e"]` to `crates/delilah-e2e/Cargo.toml` for every flow file (`fake_claude`, `projects`, `tasks`, `states`, `prs`, `jira`, `conversation`, `e2e_env_bin`, `real_claude`); `fake_bin` stays without it. Check `cargo test --workspace` doesn't build or run them.
+- [X] T028 Add `[[test]]` entries with `required-features = ["e2e"]` to `crates/delilah-e2e/Cargo.toml` for every flow file (`fake_claude`, `projects`, `tasks`, `states`, `prs`, `jira`, `conversation`, `e2e_env_bin`, `real_claude`); `fake_bin` stays without it. Check `cargo test --workspace` doesn't build or run them.
 - [ ] T029 [US1] Write `crates/delilah-e2e/tests/fake_claude.rs` covering US1 acceptance 1–6 against a real `Env`:
   1. start a task (`[fake:echo]`) and check the record: `cwd` = the worktree, `mode` new, `session_id` = the daemon's session id for the task, `settings` exists and holds the hooks, `prompt` contains the title, `env` keys ⊆ `KEPT_ENV` + `TERM`, `COLORTERM`;
   2. default scenario → the task's live state goes working → waiting, read through the API;

@@ -56,6 +56,8 @@ pub struct Env {
     pub gh: FakeGh,
     pub log: PathBuf,
     pub opts: EnvOptions,
+    /// Set by `finish`, which reports the tripwire itself instead of panicking in drop.
+    tripwire_reported: bool,
 }
 
 /// The directory with the built binaries: `DELILAH_E2E_TARGET` or `<repo>/target/debug`.
@@ -217,6 +219,7 @@ impl Env {
             gh,
             log,
             opts,
+            tripwire_reported: false,
         };
         if env.opts.jira {
             env.start_jira();
@@ -389,6 +392,21 @@ impl Env {
         tail_of(&self.log, n)
     }
 
+    /// Keeps `root` after this Env is gone; returns its path (for `e2e-env --keep`).
+    pub fn keep_root(&mut self) -> Option<PathBuf> {
+        self.dir.take().map(tempfile::TempDir::keep)
+    }
+
+    /// Stops everything and says whether the tripwire fired, without panicking.
+    pub fn finish(mut self) -> bool {
+        let fired = !self.opts.real_claude && self.tripwire_log().is_some();
+        if fired {
+            eprintln!("the real claude/gh was run (tripwire.log):\n{}", self.tripwire_log().unwrap_or_default());
+        }
+        self.tripwire_reported = true;
+        fired
+    }
+
     /// What the tripwire caught, if anything.
     pub fn tripwire_log(&self) -> Option<String> {
         std::fs::read_to_string(self.root.join("tripwire.log")).ok()
@@ -417,6 +435,7 @@ impl Drop for Env {
             eprintln!("DELILAH_E2E_KEEP: kept {}", kept.display());
         }
         if !self.opts.real_claude
+            && !self.tripwire_reported
             && let Some(text) = self.tripwire_log()
         {
             let msg = format!("the real claude/gh was run (tripwire.log):\n{text}");
