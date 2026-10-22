@@ -82,7 +82,7 @@ that no next step starts, and that "Reanudar autopiloto" picks the chain up agai
 
 **Acceptance Scenarios**:
 
-1. **Given** an autopilot step's session asks the user a question, **When** Delilah receives it, **Then** Delilah answers with the option the agent marked as recommended and the session goes on; the question and the chosen answer are written to the task's history. If no option is marked as recommended (or the question allows free text only), autopilot pauses with the question as its reason and it waits in the Bandeja as today.
+1. **Given** an autopilot step's session asks the user a question, **When** Delilah receives it, **Then** Delilah answers with the option the agent marked as recommended and the session goes on; the question and the chosen answer are written to the task's history. If any question in it has no option (or more than one) marked as recommended, autopilot pauses with the question as its reason and it waits in the Bandeja as today (FR-013a).
 2. **Given** a step's session ends its turn without reaching its step's end (the plan without `tasks.md`, the implementation with unchecked tasks, the review with outcome *blocked* or no outcome, e.g. checks still failing after the agent's own retries), **When** Delilah sees it, **Then** autopilot pauses with that reason and nothing else starts.
 3. **Given** a step's session fails or cannot be started, **When** the handoff fails, **Then** autopilot pauses with the failure as its reason (the existing handoff retry stays available).
 4. **Given** pushing the branch or opening the PR fails, **When** Delilah sees the error, **Then** autopilot pauses with the error, and "Abrir PR" stays available to the user as today.
@@ -173,6 +173,8 @@ is running with autopilot on, and its first session got the brief.
 - The review ends ready but the branch has no commits beyond its base, or every repo already has an open PR: no PR is opened; autopilot pauses with that reason if no PR exists, or simply finishes if one does.
 - Parent workspaces: the PR is opened for every repo of the task that has commits and no open PR, as "Abrir PR" does per submodule; a failure on one repo pauses autopilot with that repo named, keeping the PRs already opened.
 - The daemon restarts in the middle of the chain: the chain resumes from the stored handoff state as saving mode does today, and a half-done "open PR" is re-checked against the linked PRs before retrying, so a PR is never opened twice.
+- The session stops for a permission prompt or any other input in its terminal: autopilot pauses (it never approves permissions); the user answers in the terminal and resumes.
+- The review ends *ready* with uncommitted changes in the workspace: autopilot pauses rather than open a PR without them.
 - The user types in an autopilot session: that is allowed and does not pause autopilot; the boundaries are still evaluated when the turn ends.
 - The daemon restarts while a preview runs: the preview is not adopted again; it is marked stopped (URL removed) and the user can relaunch it from the task.
 - Two tasks on autopilot at once: each gets its own sessions and, if any, its own preview; previews never share a port.
@@ -183,7 +185,7 @@ is running with autopilot on, and its first session got the brief.
 
 **Flag and state**
 
-- **FR-001**: Each task MUST have an autopilot option, off by default (no preference for its default in this version), stored with the task and kept across restarts.
+- **FR-001**: Each task MUST have an autopilot option, off by default (no preference for its default in this version), stored with the task and kept across restarts. It is offered wherever saving mode is (tasks whose workflow is the spec workflow); project sessions and idea conversations have no autopilot.
 - **FR-002**: Autopilot on MUST imply saving mode on; turning saving mode off MUST turn autopilot off.
 - **FR-003**: An autopilot task MUST have an autopilot state visible through the API and the UI: *running* or *paused* with a reason (a short user-facing message), plus the time it paused.
 - **FR-004**: The user MUST be able to turn autopilot on or off on a new task, a backlog item, a running task and from the CLI (`--autopilot` / `--no-autopilot` on `run` and `new`), and to resume a paused autopilot.
@@ -201,15 +203,17 @@ is running with autopilot on, and its first session got the brief.
 
 **Pausing**
 
-- **FR-013**: Autopilot MUST pause (not stop the session, not change the task's phase) when: a step's turn ends without reaching its end (FR-008 *blocked* included); a step's session fails or cannot start; pushing or opening the PR fails; or the agent asks a question with no option marked as recommended (US2 scenario 1).
+- **FR-013**: Autopilot MUST pause (not stop the session, not change the task's phase) when: a step's turn ends without reaching its end (FR-008 *blocked* included); a step's session fails or cannot start; the session waits for the user for anything autopilot cannot answer (e.g. a permission prompt in the terminal); the review ends *ready* but the workspace has uncommitted changes; pushing or opening the PR fails; or the agent asks a question that autopilot cannot answer (FR-013a).
+- **FR-013a**: A question is answered by autopilot only when every question in it has exactly one option whose label is marked as recommended ("(Recommended)" or "(Recomendado)", the convention the agent's skills use); that option is chosen (for multi-select, only it). Otherwise autopilot pauses and the question waits in the Bandeja as today. Each automatic answer is written to the history with the question and the option chosen.
 - **FR-014**: A pause MUST create one Bandeja item per pause with the reason and the actions "Reanudar autopiloto" and "Seguir a mano" (which turns autopilot off), and send one notification.
 - **FR-015**: While paused, every manual action of saving mode (confirm or decline the handoff, retry, open the PR) MUST work as for a saving-mode task.
-- **FR-016**: Resuming MUST re-evaluate the chain from the task's current state (spec files, sessions, linked PRs) and continue from the first unfinished step, never repeating a finished one or opening a second PR for a repo.
+- **FR-016**: Resuming MUST re-evaluate the chain from the task's current state (spec files, sessions, linked PRs) and continue from the first unfinished step, never repeating a finished one or opening a second PR for a repo. If the step's session is still working, resuming only marks autopilot as running and the chain goes on at that session's next turn end.
 - **FR-017**: Hitting the usage limit MUST NOT pause autopilot: the task pauses by limit as today and the chain goes on after the reset.
 
 **Preview**
 
-- **FR-018**: A project MAY define a preview command in its Delilah settings (empty by default, editable from the app and the API), which Delilah (not the agent) starts and owns, in the task's workspace; for this repo it is `scripts/preview.sh`, which MUST be able to run without a terminal (non-interactive, in the first free slot) and report the URL it serves.
+- **FR-018**: A project MAY define a preview command in its Delilah settings (empty by default, editable from the app and the API), which Delilah (not the agent) starts and owns, in the task's workspace; the command MUST print the URL it serves on its output; for this repo it is `scripts/preview.sh`, which MUST be able to run without a terminal (non-interactive, in the first free slot) and report the URL it serves.
+- **FR-018a**: Delilah MUST take the first `http://` or `https://` URL the command prints as the preview's URL; if the command exits, or prints no URL within 2 minutes, the preview failed, and the reason shown includes the last lines of its output.
 - **FR-019**: The preview's URL MUST be shown on the task and included in the PR description when the preview started before the PR opened.
 - **FR-020**: A task's preview MUST be stopped when the task is done, archived or deleted, or when the user stops it from the task; a preview failure MUST NOT pause autopilot.
 - **FR-020a**: The user MUST be able to start and stop a task's preview by hand on any task of a project with a preview command; autopilot uses this same action.
