@@ -9,6 +9,9 @@
 #   scripts/preview.sh --fresh     # start from an empty state
 #   scripts/preview.sh --no-ui     # only the daemon (API, CLI, curl)
 #
+# Non-interactive (no terminal needed). The summary's first line is PREVIEW_URL=<url>: the
+# UI, or the API with --no-ui; it is also the first URL the script prints.
+#
 # State lives in fixtures/preview-home-<slot> (git-ignored), with the fake repos of
 # scripts/make-fixture-parent.sh to register as projects. Notifications are off
 # unless --notify. Agents launched from the preview are real Claude sessions.
@@ -25,7 +28,7 @@ while [[ $# -gt 0 ]]; do
     --fresh) FRESH=1; shift ;;
     --no-ui) UI=0; shift ;;
     --notify) NOTIFY=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -89,11 +92,14 @@ for _ in $(seq 1 60); do
   sleep 0.25
 done
 
+# PREVIEW_URL= is the first line and the first URL of the output: Delilah's autopilot
+# takes the first http(s) URL printed as the one the preview serves.
 cat <<EOF
+PREVIEW_URL=$([[ $UI == 1 ]] && echo "$UI_URL" || echo "$API")
 
 Delilah preview $SLOT ($(git -C "$ROOT" branch --show-current 2>/dev/null || echo "?"))
-  API    $API
   UI     $([[ $UI == 1 ]] && echo "$UI_URL" || echo "(off)")
+  API    $API
   state  $HOME_DIR
   logs   $LOG
   CLI    DELILAH_URL=$API $ROOT/target/debug/delilah …
