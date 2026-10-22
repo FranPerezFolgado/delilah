@@ -204,7 +204,7 @@
     - while running, the fixture's checkout is on `feature/<KEY>`;
     - after `archive`, it is back on the branch it was on before.
   - US2-9: a backlog task is deleted (API, and once via `delilah rm`), then `tasks` no longer has it and `<DELILAH_HOME>/tasks/<KEY>` is gone.
-- [ ] T032 [P] [US2] `crates/delilah-e2e/tests/states.rs`, flows US2-5 and US2-6:
+- [X] T032 [P] [US2] `crates/delilah-e2e/tests/states.rs`, flows US2-5 and US2-6:
   - US2-5:
     - default scenario: wait until the state is waiting;
     - `set_phase` to the next phase of the task's workflow (read the valid ones from `crates/delilah-daemon/src/phases.rs`);
@@ -213,7 +213,7 @@
   - US2-6:
     - `ask` scenario: the ask shows in `inbox`;
     - `answer_ask`: the ask leaves the inbox, the record has the answer, and the task goes back to working and then waiting (the scenario's `stop` after the ask).
-- [ ] T033 [P] [US2] `crates/delilah-e2e/tests/prs.rs`, flow US2-7, with `Env` `pr_poll` 1 s and the fake `gh` helpers:
+- [X] T033 [P] [US2] `crates/delilah-e2e/tests/prs.rs`, flow US2-7, with `Env` `pr_poll` 1 s and the fake `gh` helpers:
   - start a task;
   - `open_pr(1, feature/<KEY>)`: wait until `prs` shows PR 1 for the task;
   - `set_checks(1, failing)`: the task shows failing checks;
