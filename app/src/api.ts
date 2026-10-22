@@ -501,7 +501,8 @@ export const api = {
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
-  answerAsk: (id: string, answers: Record<string, string>) => post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, { answers }),
+  answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
+    post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, launch ? { answers, launch } : { answers }),
   conversation: (id: string) => request<Conversation>(`/api/v1/sessions/${id}/conversation`),
   sendMessage: (id: string, text: string) => post<ConversationEntry>(`/api/v1/sessions/${id}/messages`, { text }),
   removeMessage: (id: string, entry: number) =>

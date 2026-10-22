@@ -132,7 +132,7 @@ None: no new dependencies (`tokio` already has `process`; check its features in 
 
 - [X] T048 [US5] Write failing tests in `crates/delilah-daemon/src/proposals.rs` (and `asks.rs` for the body field): `Answer.launch = "autopilot"` with "Crear" creates the task with autopilot and saving mode on, then starts it through `run::start_run` in the conversation's project and its default work mode; a start failure returns `{task, error}` and leaves the backlog task with autopilot on; `launch` with any other answer is ignored.
 - [X] T049 [US5] Implement T048 in `crates/delilah-daemon/src/asks.rs` (`Answer.launch`) and `crates/delilah-daemon/src/proposals.rs` (`on_answer`).
-- [ ] T050 [US5] Write failing tests in `app/src/components/ProposalCard.test.tsx` and implement in `app/src/components/ProposalCard.tsx` (+ `app/src/api.ts` answer `launch`, `app/src/i18n/en.ts`): a "Crear y lanzar en autopiloto" button next to "Crear"; on success the card links to the running task; on error it shows the error.
+- [X] T050 [US5] Write failing tests in `app/src/components/ProposalCard.test.tsx` and implement in `app/src/components/ProposalCard.tsx` (+ `app/src/api.ts` answer `launch`, `app/src/i18n/en.ts`): a "Crear y lanzar en autopiloto" button next to "Crear"; on success the card links to the running task; on error it shows the error.
 
 ---
 
