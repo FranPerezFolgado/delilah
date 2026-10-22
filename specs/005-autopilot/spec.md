@@ -29,6 +29,8 @@ learns here (start a preview).
 - Q: When an autopilot step's agent asks a question, what happens? → A: Delilah answers with the option marked as recommended and goes on (logged in history); it pauses only when there is none.
 - Q: Who starts and owns the preview? → A: The daemon, as a long-lived process per task, stopped with the task.
 - Q: Is the PR a draft or ready for review? → A: A draft.
+- Q: Where does a project's preview command come from? → A: A per-project setting in Delilah, empty by default (no file in the repo).
+- Q: Can the preview be started by hand on any task? → A: Yes: "Lanzar preview" / "Parar preview" on any task of a project with a preview command; autopilot uses the same action.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -117,7 +119,7 @@ task screen shows the autopilot state.
 
 ### User Story 4 - A preview of the branch, ready when the PR opens (Priority: P2)
 
-For projects that define how to start a preview, autopilot starts one for the task's
+For projects whose settings define a preview command, autopilot starts one for the task's
 workspace once the review ends ready, before opening the PR, and shows its URL on the
 task (and in the PR's description). The user opens the PR notification, clicks the
 preview and tries the change.
@@ -126,7 +128,7 @@ preview and tries the change.
 PR without a preview is still a useful end state, and only projects with a preview
 command benefit.
 
-**Independent Test**: Register a fixture project with a preview command that serves a
+**Independent Test**: Register a fixture project, set its preview command to one that serves a
 page on a free port, run an autopilot task to the review's end, and check that the
 preview is running, its URL is on the task, and it is stopped when the task is done.
 
@@ -136,6 +138,7 @@ preview is running, its URL is on the task, and it is stopped when the task is d
 2. **Given** a project without a preview command, **When** the review ends ready, **Then** the preview step is skipped and the PR opens as in US1.
 3. **Given** the preview fails to start (no free slot, the command fails), **When** Delilah sees it, **Then** the PR still opens and the task shows that the preview could not start, with the reason; autopilot does not pause for it.
 4. **Given** a task with a running preview, **When** the task is done, archived or deleted, or the user stops the preview from the task, **Then** the preview is stopped and its URL removed.
+5. **Given** any task (autopilot or not) of a project with a preview command and a workspace, **When** the user chooses "Lanzar preview" on the task, **Then** the same preview starts and its URL is shown, with "Parar preview" to stop it; for a project without one, the action is not offered.
 
 ---
 
@@ -171,6 +174,7 @@ is running with autopilot on, and its first session got the brief.
 - Parent workspaces: the PR is opened for every repo of the task that has commits and no open PR, as "Abrir PR" does per submodule; a failure on one repo pauses autopilot with that repo named, keeping the PRs already opened.
 - The daemon restarts in the middle of the chain: the chain resumes from the stored handoff state as saving mode does today, and a half-done "open PR" is re-checked against the linked PRs before retrying, so a PR is never opened twice.
 - The user types in an autopilot session: that is allowed and does not pause autopilot; the boundaries are still evaluated when the turn ends.
+- The daemon restarts while a preview runs: the preview is not adopted again; it is marked stopped (URL removed) and the user can relaunch it from the task.
 - Two tasks on autopilot at once: each gets its own sessions and, if any, its own preview; previews never share a port.
 
 ## Requirements *(mandatory)*
@@ -205,9 +209,10 @@ is running with autopilot on, and its first session got the brief.
 
 **Preview**
 
-- **FR-018**: A project MAY define a preview command, which Delilah (not the agent) starts and owns; for this repo it is `scripts/preview.sh`, which MUST be able to run without a terminal (non-interactive, in the first free slot) and report the URL it serves.
+- **FR-018**: A project MAY define a preview command in its Delilah settings (empty by default, editable from the app and the API), which Delilah (not the agent) starts and owns, in the task's workspace; for this repo it is `scripts/preview.sh`, which MUST be able to run without a terminal (non-interactive, in the first free slot) and report the URL it serves.
 - **FR-019**: The preview's URL MUST be shown on the task and included in the PR description when the preview started before the PR opened.
 - **FR-020**: A task's preview MUST be stopped when the task is done, archived or deleted, or when the user stops it from the task; a preview failure MUST NOT pause autopilot.
+- **FR-020a**: The user MUST be able to start and stop a task's preview by hand on any task of a project with a preview command; autopilot uses this same action.
 
 **From an idea**
 
@@ -222,7 +227,7 @@ is running with autopilot on, and its first session got the brief.
 - **Autopilot state** (per task): on/off; when on, *running* or *paused*; the pause reason and time; whether it has finished (PR linked).
 - **Step outcome** (per review session): *ready* or *blocked* with a reason, plus the PR title and description, written by the agent where Delilah can read it.
 - **Preview** (per task, at most one): the project's preview command, the URL it serves, whether it is running, and the reason if it failed to start.
-- **Project preview command** (per project, optional): how to start a preview of a workspace without a terminal.
+- **Project preview command** (per project, optional, a Delilah project setting): how to start a preview of a workspace without a terminal.
 
 ## Success Criteria *(mandatory)*
 
