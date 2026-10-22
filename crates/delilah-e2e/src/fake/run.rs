@@ -169,6 +169,28 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     }
 }
 
+/// Claude keeps a conversation at `$HOME/.claude/projects/<cwd, non-alphanumerics as
+/// dashes>/<session>.jsonl`; the daemon passes `--resume` only if that file exists
+/// (`claude::has_conversation`). Written under the record's own `HOME` (the Env's
+/// temp home); nothing is written when the session has no `HOME`.
+fn write_transcript(record: &Record) {
+    let Some(home) = record.env.get("HOME") else { return };
+    let cwd = Path::new(&record.cwd);
+    let dir = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let folder: String = dir
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let dir = Path::new(home).join(".claude/projects").join(folder);
+    if std::fs::create_dir_all(&dir).is_ok() {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(format!("{}.jsonl", record.session_id)));
+    }
+}
+
 /// Plays `scenario` and returns the exit code. `record` must already hold the
 /// session facts; it is saved to `fake_dir` (when given) after each step.
 pub fn run<R: BufRead, W: Write>(
@@ -180,12 +202,24 @@ pub fn run<R: BufRead, W: Write>(
     out: &mut W,
 ) -> i32 {
     let mut r = Runner { record, hooks, fake_dir, input, out };
+    write_transcript(r.record);
+    let mut steps = scenario.steps.iter();
+    // Real Claude shows the folder-trust dialog before the session starts.
+    if let Some(first @ Step::TrustDialog(_)) = scenario.steps.first() {
+        steps.next();
+        let flow = r.step(first);
+        r.record.steps_done += 1;
+        r.save();
+        if let Flow::Exit(code) = flow {
+            return code;
+        }
+    }
     let source = if r.record.mode == "resume" { "resume" } else { "startup" };
     let start = payload::session_start(&r.record.session_id, &r.record.cwd, source);
     r.hook("SessionStart", &start);
     r.save();
 
-    for step in &scenario.steps {
+    for step in steps {
         let flow = r.step(step);
         r.record.steps_done += 1;
         r.save();
@@ -286,6 +320,35 @@ mod tests {
         assert_eq!(logged(o.dir.path(), "SessionStart")[0]["source"], "startup");
         let o = play("resume", "[]", "", None);
         assert_eq!(logged(o.dir.path(), "SessionStart")[0]["source"], "resume");
+    }
+
+    #[test]
+    fn trust_dialog_comes_before_session_start() {
+        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "\n", None);
+        assert_eq!(events(&o), ["SessionStart", "SessionEnd"]);
+        assert!(o.text.starts_with("Do you trust"), "{}", o.text);
+        assert_eq!(o.record.steps_done, 2);
+        // Declining ends the session before it ever started.
+        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "2\n", None);
+        assert_eq!(events(&o), ["SessionEnd"]);
+    }
+
+    #[test]
+    fn writes_the_transcript_the_daemon_looks_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = tempfile::tempdir().unwrap();
+        let hooks = settings(dir.path());
+        let mut rec = record("new");
+        rec.cwd = dir.path().display().to_string();
+        rec.env.insert("HOME".into(), fake.path().display().to_string());
+        run(&mut rec, &Scenario { steps: vec![] }, &hooks, None, &mut Cursor::new(vec![]), &mut Vec::new());
+        let canon = dir.path().canonicalize().unwrap();
+        let folder: String = canon
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        assert!(fake.path().join(".claude/projects").join(folder).join("s1.jsonl").is_file());
     }
 
     #[test]

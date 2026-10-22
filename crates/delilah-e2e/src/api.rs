@@ -144,6 +144,11 @@ impl Api {
         self.post(&format!("/api/v1/sessions/{session}/reply"), json!({"text": text}))
     }
 
+    /// Starts an ended session again (Claude with `--resume`).
+    pub fn reopen_session(&self, session: &str) -> Value {
+        self.post(&format!("/api/v1/sessions/{session}/reopen"), json!({}))
+    }
+
     pub fn prs(&self) -> Value {
         self.get("/api/v1/prs")
     }

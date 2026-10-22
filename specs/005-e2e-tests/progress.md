@@ -12,13 +12,13 @@ Mode: format=markdown commits=yes
 | WP-05 | 3 | 3A | verified | 1 | e83fa1a | |
 | WP-06 | 3 | 3B | verified | 1 | 444fb02 | |
 | WP-07 | 3 | 3C | verified | 1 | 9dcd9d6 | |
-| WP-08 | 3 | 3D | implementing | 1 | | |
+| WP-08 | 3 | 3D | verified | 1 | | |
 | WP-09 | 4 | 4A | pending | 0 | | Phase 4 ∥ Phase 5 |
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4A | pending | 0 | | |
 | WP-12 | 4 | 4B | pending | 0 | | |
 | WP-13 | 5 | 5A | verified | 1 | f276089 | |
-| WP-14 | 5 | 5B | verified | 1 | | |
+| WP-14 | 5 | 5B | verified | 1 | 493dff7 | |
 | WP-15 | 5 | 5B | implementing | 1 | | |
 | WP-16 | 6 | 6A | pending | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |

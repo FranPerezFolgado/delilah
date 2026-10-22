@@ -170,7 +170,7 @@
   - `fixture --into <dir>`.
   - Test in `crates/delilah-e2e/tests/e2e_env_bin.rs` (behind `e2e`): spawn it, read the line, `GET <api>/api/v1/health` OK, close stdin, it exits 0 and the daemon's port is closed.
 - [X] T028 Add `[[test]]` entries with `required-features = ["e2e"]` to `crates/delilah-e2e/Cargo.toml` for every flow file (`fake_claude`, `projects`, `tasks`, `states`, `prs`, `jira`, `conversation`, `e2e_env_bin`, `real_claude`); `fake_bin` stays without it. Check `cargo test --workspace` doesn't build or run them.
-- [ ] T029 [US1] Write `crates/delilah-e2e/tests/fake_claude.rs` covering US1 acceptance 1–6 against a real `Env`:
+- [X] T029 [US1] Write `crates/delilah-e2e/tests/fake_claude.rs` covering US1 acceptance 1–6 against a real `Env`:
   1. start a task (`[fake:echo]`) and check the record: `cwd` = the worktree, `mode` new, `session_id` = the daemon's session id for the task, `settings` exists and holds the hooks, `prompt` contains the title, `env` keys ⊆ `KEPT_ENV` + `TERM`, `COLORTERM`;
   2. default scenario → the task's live state goes working → waiting, read through the API;
   3. `ask` scenario → the ask appears in `inbox`; `answer_ask` → the record's `answers[0]` holds it;

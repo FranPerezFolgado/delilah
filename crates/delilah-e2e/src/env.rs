@@ -34,6 +34,9 @@ pub struct EnvOptions {
     pub real_claude: bool,
     /// Start the fake Jira server (set by the layer that provides it).
     pub jira: bool,
+    /// Test only: leave `DELILAH_AGENT_BIN` out, so the daemon runs `claude` from PATH
+    /// and hits the tripwire (US1 acceptance 6).
+    pub no_agent_bin: bool,
 }
 
 /// A running helper the Env stops on drop (the fake Jira server).
@@ -183,7 +186,9 @@ pub fn daemon_env(root: &Path, port: u16, opts: &EnvOptions) -> BTreeMap<String,
             path = format!("{path}:{g}");
         }
         set("PATH", path);
-        set("DELILAH_AGENT_BIN", format!("{r}/bin/claude-fake"));
+        if !opts.no_agent_bin {
+            set("DELILAH_AGENT_BIN", format!("{r}/bin/claude-fake"));
+        }
         set("DELILAH_GH_BIN", format!("{r}/bin/gh-fake"));
     }
     if let Some(origin) = &opts.ui_origin {
