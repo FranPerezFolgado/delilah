@@ -140,6 +140,10 @@ pub fn router(state: AppState) -> Router {
             get(projects::submodules),
         )
         .route(
+            "/api/v1/projects/{name}/branch-name",
+            post(crate::branch_name::propose_branch),
+        )
+        .route(
             "/api/v1/projects/{name}/suggest-submodules",
             post(projects::suggest_submodules),
         )

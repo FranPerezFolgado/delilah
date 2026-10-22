@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use axum::Json;
+use axum::extract::{Path, State};
 use delilah_agents::{branch_name, oneshot};
 use delilah_core::{Project, ProjectKind, branch};
 use delilah_git::GitOptions;
@@ -126,6 +128,50 @@ pub async fn propose(
     };
     tracing::info!(source = ?source, branch = ?branch, "named the branch");
     Ok(Proposal { branch, source })
+}
+
+/// How long Claude gets to name a branch the user is still typing the task for.
+const PROPOSE_LIMIT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ProposeRequest {
+    /// Left out for a new free task.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub free: bool,
+    #[serde(default)]
+    pub submodules: Vec<String>,
+}
+
+/// `POST /api/v1/projects/{name}/branch-name`: the branch a task would get, without
+/// creating anything.
+pub async fn propose_branch(
+    State(app): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<ProposeRequest>,
+) -> Result<Json<Proposal>, ApiError> {
+    let project = app.store.project(&name).await?;
+    if req.title.trim().is_empty() {
+        return Err(ApiError::bad_request("say what the task is about"));
+    }
+    let key = req.key.as_deref().map(str::trim).filter(|k| !k.is_empty());
+    let proposal = propose(
+        &app,
+        &project,
+        key,
+        req.title.trim(),
+        req.notes.as_deref(),
+        req.free,
+        &req.submodules,
+        PROPOSE_LIMIT,
+    )
+    .await?;
+    Ok(Json(proposal))
 }
 
 #[cfg(test)]
@@ -266,5 +312,62 @@ mod tests {
             .ok()
             .unwrap();
         assert_eq!(p.branch.as_deref(), Some("feature/retry-failed-payments-2"));
+    }
+
+    async fn post(app: AppState, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
+        use tower::ServiceExt;
+        let req = axum::http::Request::post(uri)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        let res = crate::api::router(app).oneshot(req).await.unwrap();
+        let status = res.status().as_u16();
+        let bytes = http_body_util::BodyExt::collect(res.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap_or_default())
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_proposes_a_branch() {
+        let (app, project) = setup(SAYS_NAME).await;
+        app.store.create_project(&project).await.unwrap();
+        let body = serde_json::json!({"key": "PROJ-12", "title": "Reintentar pagos"});
+        let (status, json) = post(app.clone(), "/api/v1/projects/web/branch-name", body).await;
+        assert_eq!(status, 200, "{json}");
+        assert_eq!(json["branch"], "feature/PROJ-12-retry-failed-payments");
+        assert_eq!(json["source"], "claude");
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_falls_back_to_the_title() {
+        let (app, project) = setup("exit 1").await;
+        app.store.create_project(&project).await.unwrap();
+        let body = serde_json::json!({"title": "Retry payments", "free": true});
+        let (status, json) = post(app, "/api/v1/projects/web/branch-name", body).await;
+        assert_eq!(status, 200, "{json}");
+        assert_eq!(json["branch"], "feature/retry-payments");
+        assert_eq!(json["source"], "title");
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_refuses_an_empty_title_and_an_unknown_project() {
+        let (app, project) = setup(SAYS_NAME).await;
+        app.store.create_project(&project).await.unwrap();
+        let (status, _) = post(
+            app.clone(),
+            "/api/v1/projects/web/branch-name",
+            serde_json::json!({"title": "  "}),
+        )
+        .await;
+        assert_eq!(status, 400);
+        let (status, _) = post(
+            app,
+            "/api/v1/projects/nope/branch-name",
+            serde_json::json!({"title": "x"}),
+        )
+        .await;
+        assert_eq!(status, 404);
     }
 }
