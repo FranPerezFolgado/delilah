@@ -11,7 +11,9 @@ export type TaskStatus =
   | { type: "waiting-for-user" }
   | { type: "paused-by-limit"; resume_at: string }
   | { type: "done" }
-  | { type: "failed"; reason: string };
+  | { type: "failed"; reason: string }
+  // The workspace setup failed, was cancelled or interrupted; reason is the end of its output.
+  | { type: "setup-failed"; reason: string };
 
 export interface Task {
   key: string;
@@ -197,7 +199,7 @@ export interface SubmoduleSuggestion {
   reason: string;
 }
 
-export type SessionKind = "claude" | "shell";
+export type SessionKind = "claude" | "shell" | "setup";
 export type SessionState = "starting" | "working" | "waiting" | "paused";
 
 /** A terminal in a task's workspace: its primary Claude, extra Claudes or shells. */
@@ -376,6 +378,9 @@ export const api = {
   deleteTask: (key: string, force = false) =>
     request<null>(`/api/v1/tasks/${key}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
+  setupRetry: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/retry`),
+  setupSkip: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/skip`),
+  setupCancel: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/cancel`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
@@ -476,6 +481,8 @@ export const statusLabel = (s: TaskStatus): string => {
       return t("Hecha");
     case "failed":
       return t("Fallida");
+    case "setup-failed":
+      return t("Setup fallido");
   }
 };
 

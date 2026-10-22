@@ -186,7 +186,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
             const st = sessionStatus(s, undefined);
             return (
               <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? t("Claude en solo lectura") : s.label}>
-                <Icon name={s.kind === "shell" ? "console" : st.icon} className={s.kind === "shell" ? "c-mut" : st.cls} />
+                <Icon name={s.kind !== "claude" ? "console" : st.icon} className={s.kind !== "claude" ? "c-mut" : st.cls} />
                 <span className="trunc" style={{ flex: 1 }}>{s.label}</span>
                 {s.read_only && <Icon name="lock" className="c-mut" />}
               </button>

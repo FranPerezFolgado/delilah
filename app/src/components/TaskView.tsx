@@ -1,3 +1,4 @@
+import { SetupBanner } from "./SetupBanner";
 import { useEffect, useState } from "react";
 import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type Session, type SessionKind, type Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
@@ -110,6 +111,9 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
             </button>
           </div>
         )}
+        {(s.type === "setup-failed" || sessions.some((x) => x.kind === "setup" && x.live)) && (
+          <SetupBanner task={task} running={sessions.some((x) => x.kind === "setup" && x.live)} onChanged={onChanged} />
+        )}
         {s.type === "waiting-for-user" && (
           <div className="notice wait">
             <Icon name="wait" className="c-wait" />
@@ -208,9 +212,9 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
                 return (
                   <div className="row" key={s.id} style={{ gridTemplateColumns: "1fr auto auto", alignItems: "center" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Icon name={s.kind === "shell" ? "console" : st.icon} className={st.cls} />
+                      <Icon name={s.kind !== "claude" ? "console" : st.icon} className={st.cls} />
                       <b style={{ fontWeight: 600 }}>{s.label}</b>
-                      <span className="muted">{s.kind === "shell" ? t("terminal") : s.primary ? t("Claude · principal") : "Claude"}</span>
+                      <span className="muted">{s.kind === "shell" ? t("terminal") : s.kind === "setup" ? t("Setup") : s.primary ? t("Claude · principal") : "Claude"}</span>
                     </span>
                     <span className={`pill ${st.cls}`} style={{ height: 18, fontSize: 11 }}>{st.label}</span>
                     {s.live ? (

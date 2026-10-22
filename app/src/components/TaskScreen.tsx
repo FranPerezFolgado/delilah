@@ -18,6 +18,7 @@ import { sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
+import { SetupBanner } from "./SetupBanner";
 import { TerminalPane } from "./TerminalPane";
 
 interface Props {
@@ -477,9 +478,9 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
                   key={s.id}
                   id={sessionTab(s.id)}
                   label={s.label}
-                  title={`${s.label} · ${s.kind === "shell" ? t("terminal") : "Claude"} · ${st.label}`}
-                  icon={s.kind === "shell" ? "console" : st.icon}
-                  iconClass={s.kind === "shell" ? "" : st.cls}
+                  title={`${s.label} · ${s.kind === "shell" ? t("terminal") : s.kind === "setup" ? t("Setup") : "Claude"} · ${st.label}`}
+                  icon={s.kind === "claude" ? st.icon : "console"}
+                  iconClass={s.kind === "claude" ? st.cls : ""}
                   shown={shown}
                   onActivate={activate}
                   onClose={s.primary ? undefined : close}
@@ -544,6 +545,9 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
               const sessionAsks = asks.filter((a) => a.session?.id === s.id && a.ask);
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                  {s.kind === "setup" && s.live && task && (
+                    <SetupBanner task={task} running onChanged={onChanged} />
+                  )}
                   {s.read_only && s.kind === "claude" && s.live && (
                     <div className="ebar warn">
                       <Icon name="lock" />

@@ -77,6 +77,8 @@ svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-widt
 .error { color: var(--err); font-size: 12px; }
 .notice { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--bd); }
 .notice.pause { background: var(--pausebg); }
+.notice.err { background: var(--bg2, transparent); align-items: flex-start; }
+.setup-reason { margin: 6px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 11px; padding: 8px; border-radius: 6px; border: 1px solid var(--bd); }
 .notice.wait { background: var(--accbg); }
 
 .history { display: flex; flex-direction: column; }

@@ -1,5 +1,12 @@
 // English for every text of the app, keyed by its Spanish original (see i18n.ts).
 export const EN: Record<string, string> = {
+  "Setup fallido": "Setup failed",
+  "Setup": "Setup",
+  "Preparando el workspace: el setup del proyecto está corriendo.": "Preparing the workspace: the project setup is running.",
+  "El setup del proyecto falló. Final de su salida:": "The project setup failed. End of its output:",
+  "Cancelar setup": "Cancel setup",
+  "Reintentar setup": "Retry setup",
+  "Lanzar sin setup": "Launch without setup",
   "Semana": "Week",
   "delilahd conectado": "delilahd connected",
   "delilahd sin conexión": "delilahd offline",
