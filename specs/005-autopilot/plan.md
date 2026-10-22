@@ -81,7 +81,7 @@ crates/delilah-core/src/task.rs                 # Autopilot, AutopilotState/Stag
 crates/delilah-core/src/project.rs              # Project.preview_command
 crates/delilah-daemon/migrations/0015_autopilot.sql
 crates/delilah-daemon/src/store.rs              # read/write autopilot (forcing saving_mode), clear on saving-mode off
-crates/delilah-daemon/src/store_projects.rs (or wherever projects are stored)  # preview_command
+crates/delilah-daemon/src/store_projects.rs     # preview_command
 crates/delilah-daemon/src/autopilot.rs          # NEW: shape(turn end), stall/nudge, pause/resume/advance, recommended(), finish (outcome → preview → PR), recover, API handler
 crates/delilah-daemon/src/handoff.rs            # consult autopilot::shape; Boundary::Finish for the review; autopilot prompts next to plan_note/step_prompt
 crates/delilah-daemon/src/preview.rs            # NEW: Previews registry, start (zsh -lc, process group, URL capture, timeout), stop, API handlers
