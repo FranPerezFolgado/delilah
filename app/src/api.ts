@@ -24,6 +24,24 @@ export interface Handoff {
   error?: string;
 }
 
+/** Autopilot on a task: where it is, and why it stopped if paused. */
+export interface Autopilot {
+  state: "running" | "paused" | "done";
+  stage?: "preview" | "opening_pr";
+  reason?: string;
+  since: string;
+  nudged?: Step;
+  review_session?: string;
+}
+
+/** A task's preview process (the project's preview command). */
+export interface PreviewView {
+  state: "starting" | "running" | "failed";
+  url?: string;
+  error?: string;
+  started_at: string;
+}
+
 export interface Task {
   key: string;
   title: string;
@@ -37,6 +55,8 @@ export interface Task {
   in_checkout?: boolean | null;
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
+  /** Autopilot: null when off. */
+  autopilot?: Autopilot | null;
   handoff: Handoff | null;
 }
 
@@ -52,6 +72,8 @@ export interface Project {
   path: string;
   kind: ProjectKind;
   workflow: string;
+  /** Command that serves a task's workspace as a preview; null or absent: none. */
+  preview_command?: string | null;
 }
 
 export interface Submodule {
@@ -81,6 +103,8 @@ export interface NewBacklogTask {
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -91,6 +115,8 @@ export interface BacklogChange {
   project?: string;
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
 }
 
 export interface RunRequest {
@@ -106,6 +132,8 @@ export interface RunRequest {
   in_checkout?: boolean;
   /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
@@ -269,7 +297,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "autopilot";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -433,6 +461,7 @@ export const api = {
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
   dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),

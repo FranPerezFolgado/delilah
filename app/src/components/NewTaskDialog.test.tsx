@@ -80,6 +80,7 @@ const started: Task = {
   phase: null,
   status: { type: "queued" },
   saving_mode: true,
+  autopilot: null,
   handoff: null,
 };
 
@@ -118,5 +119,45 @@ describe("NewTaskDialog saving mode", () => {
     await Promise.resolve();
     expect((getByLabelText("Modo ahorro") as HTMLInputElement).checked).toBe(true);
     expect(pref).not.toHaveBeenCalled();
+  });
+});
+
+describe("NewTaskDialog autopilot", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const mount = () =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
+
+  it("ticking it ticks and disables saving mode; unticking re-enables it, still ticked", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { getByLabelText } = mount();
+    const auto = getByLabelText("Autopiloto") as HTMLInputElement;
+    const saving = getByLabelText("Modo ahorro") as HTMLInputElement;
+    fireEvent.click(auto);
+    expect(saving.checked).toBe(true);
+    expect(saving.disabled).toBe(true);
+    fireEvent.click(auto);
+    expect(saving.disabled).toBe(false);
+    expect(saving.checked).toBe(true);
+  });
+
+  it("is sent with the run together with saving mode", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { getByLabelText, container } = mount();
+    fireEvent.click(getByLabelText("Autopiloto"));
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].autopilot).toBe(true);
+    expect(run.mock.calls[0][0].saving_mode).toBe(true);
+  });
+
+  it("is sent when saving to the backlog", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { getByLabelText, getByText } = mount();
+    fireEvent.click(getByLabelText("Autopiloto"));
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0]).toMatchObject({ autopilot: true, saving_mode: true });
   });
 });

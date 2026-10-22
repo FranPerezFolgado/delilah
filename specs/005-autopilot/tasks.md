@@ -93,17 +93,17 @@ None: no new dependencies (`tokio` already has `process`; check its features in 
 
 **Independent Test**: create tasks with and without autopilot from the dialog, the backlog and the CLI; the stored flag forces saving mode; the header shows running/paused/done; the Bandeja item resumes or turns it off.
 
-- [ ] T033 [US3] Write failing API tests in `crates/delilah-daemon/src/api.rs`/`handoff.rs`: `NewTask.autopilot` and `BacklogChange.autopilot` store it (forcing saving mode, `400` with `saving_mode: false`); `POST /tasks/{key}/autopilot {on}` on a running task with a pending `offered` handoff confirms it at once; `{on}` on a task that cannot have saving mode → `409 not-spec-workflow`; `POST /tasks/{key}/saving-mode {on:false}` clears autopilot.
-- [ ] T034 [US3] Implement T033 in `crates/delilah-daemon/src/api.rs` (`build_task`, backlog PATCH) and `crates/delilah-daemon/src/autopilot.rs` (`on` → `handoff::confirm` when offered).
-- [ ] T035 [P] [US3] Write failing tests and implement in `crates/delilah-cli/src/main.rs`: `--autopilot`/`--no-autopilot` on `new` and `run` (conflicting with `--no-saving-mode`), sent as `autopilot` in the body; `delilah autopilot <KEY> on|off|resume`.
-- [ ] T036 [P] [US3] `app/src/api.ts`: `Autopilot` type and `Task.autopilot`, `autopilot?` on `RunRequest`/`NewBacklogTask`/`BacklogChange`, `setAutopilot(key, action)`, `InboxKind` `"autopilot"`, the new history event types (contracts/api.md).
-- [ ] T037 [US3] Write failing tests in `app/src/components/NewTaskDialog.test.tsx` (and a new `BacklogTaskView.test.tsx`): ticking "Autopiloto" ticks and disables "Modo ahorro"; unticking re-enables it; the request carries `autopilot: true, saving_mode: true`.
-- [ ] T038 [US3] Implement T037 in `app/src/components/NewTaskDialog.tsx` and `app/src/components/BacklogTaskView.tsx`.
+- [X] T033 [US3] Write failing API tests in `crates/delilah-daemon/src/api.rs`/`handoff.rs`: `NewTask.autopilot` and `BacklogChange.autopilot` store it (forcing saving mode, `400` with `saving_mode: false`); `POST /tasks/{key}/autopilot {on}` on a running task with a pending `offered` handoff confirms it at once; `{on}` on a task that cannot have saving mode → `409 not-spec-workflow`; `POST /tasks/{key}/saving-mode {on:false}` clears autopilot.
+- [X] T034 [US3] Implement T033 in `crates/delilah-daemon/src/api.rs` (`build_task`, backlog PATCH) and `crates/delilah-daemon/src/autopilot.rs` (`on` → `handoff::confirm` when offered).
+- [X] T035 [P] [US3] Write failing tests and implement in `crates/delilah-cli/src/main.rs`: `--autopilot`/`--no-autopilot` on `new` and `run` (conflicting with `--no-saving-mode`), sent as `autopilot` in the body; `delilah autopilot <KEY> on|off|resume`.
+- [X] T036 [P] [US3] `app/src/api.ts`: `Autopilot` type and `Task.autopilot`, `autopilot?` on `RunRequest`/`NewBacklogTask`/`BacklogChange`, `setAutopilot(key, action)`, `InboxKind` `"autopilot"`, the new history event types (contracts/api.md).
+- [X] T037 [US3] Write failing tests in `app/src/components/NewTaskDialog.test.tsx` (and a new `BacklogTaskView.test.tsx`): ticking "Autopiloto" ticks and disables "Modo ahorro"; unticking re-enables it; the request carries `autopilot: true, saving_mode: true`.
+- [X] T038 [US3] Implement T037 in `app/src/components/NewTaskDialog.tsx` and `app/src/components/BacklogTaskView.tsx`.
 - [ ] T039 [US3] Write failing tests in a new `app/src/components/AutopilotMark.test.tsx`: running → "Autopiloto"; paused → "Autopiloto en pausa" with the reason; done → "PR abierta por autopiloto"; nothing when `autopilot` is null; the "Reanudar autopiloto" / "Seguir a mano" buttons call `setAutopilot`.
 - [ ] T040 [US3] Implement T039 in `app/src/components/AutopilotMark.tsx`, shown in the task header in `app/src/components/TaskScreen.tsx` and on the board card in `app/src/components/BoardView.tsx`; the paused banner with both actions in `app/src/components/HandoffActions.tsx`.
 - [ ] T041 [US3] Write failing tests in `app/src/components/InboxView.test.tsx` and implement in `app/src/components/InboxView.tsx`: an `autopilot` item shows its reason with "Reanudar autopiloto" and "Seguir a mano".
 - [ ] T042 [US3] Write failing tests in `app/src/chain.test.ts` and implement in `app/src/chain.ts` (and `app/src/components/SessionChain.tsx`): with autopilot on the chain adds "Preview" (only when the project has a preview command) and "PR" steps, `done` once the PR is linked, `waiting` with the pause reason when paused.
-- [ ] T043 [P] [US3] English strings for everything above in `app/src/i18n/en.ts`.
+- [X] T043 [P] [US3] English strings for everything above in `app/src/i18n/en.ts`.
 
 **Checkpoint**: the feature is usable from the app without the preview UI and the idea card.
 

@@ -51,6 +51,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // Each step in a fresh session: a backlog task keeps its choice, a new one starts from the preference.
   const [savingMode, setSavingMode] = useState(existing?.saving_mode ?? false);
   const savingTouched = useRef(!!existing);
+  // Autopilot implies saving mode: ticked and locked while it is on.
+  const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -133,7 +135,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode,
+        saving_mode: savingMode || autopilot,
+        ...(autopilot ? { autopilot: true } : {}),
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
@@ -159,7 +162,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode,
+        saving_mode: savingMode || autopilot,
+        ...(autopilot ? { autopilot: true } : {}),
       });
       onSaved(task);
     } catch (err) {
@@ -243,13 +247,30 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
                 <input
                   type="checkbox"
-                  checked={savingMode}
+                  checked={savingMode || autopilot}
+                  disabled={autopilot}
                   onChange={(e) => {
                     savingTouched.current = true;
                     setSavingMode(e.target.checked);
                   }}
                 />
                 <span>{t("Modo ahorro")}</span>
+              </label>
+            )}
+            {origin !== "claude" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
+                <input
+                  type="checkbox"
+                  checked={autopilot}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      savingTouched.current = true;
+                      setSavingMode(true);
+                    }
+                    setAutopilot(e.target.checked);
+                  }}
+                />
+                <span>{t("Autopiloto")}</span>
               </label>
             )}
             {origin !== "claude" && project?.kind === "parent" && (

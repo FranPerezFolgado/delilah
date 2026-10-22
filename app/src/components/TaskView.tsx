@@ -20,6 +20,11 @@ const EVENT_LABELS: Record<string, string> = {
   "agent-finished": "El agente terminó",
   "mark-done": "Marcada como hecha",
   fail: "Falló",
+  "autopilot-paused": "Autopiloto en pausa",
+  "autopilot-resumed": "Autopiloto reanudado",
+  "autopilot-answered": "Autopiloto respondió",
+  "autopilot-nudged": "Autopiloto empujó el paso",
+  "autopilot-finished": "Autopiloto terminó",
   "start-aborted": "No se pudo empezar; vuelve al backlog",
 };
 
