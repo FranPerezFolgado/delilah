@@ -252,6 +252,10 @@ pub struct Answer {
     /// Question text → the label chosen (several, comma-separated, for multiSelect),
     /// or your own words.
     pub answers: Map<String, Value>,
+    /// `autopilot` with `Crear` on a proposal: also start the new task on autopilot.
+    /// Ignored with any other answer.
+    #[serde(default)]
+    pub launch: Option<String>,
 }
 
 /// `POST /api/v1/asks/{id}/answer`: `{ task, error? }`. Answering `Crear` on a
@@ -286,8 +290,9 @@ pub async fn answer(
         .take(&id)
         .ok_or_else(|| ApiError::not_found("that question is no longer waiting"))?;
     let given = answer.answers.clone();
+    let launch = answer.launch;
     let mut answers = answer.answers;
-    let reply = proposals::on_answer(&app, &ask, &mut answers).await;
+    let reply = proposals::on_answer(&app, &ask, &mut answers, launch.as_deref()).await;
     if let Some(session) = &ask.session {
         crate::conversation::card_answered(
             &app,
