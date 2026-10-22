@@ -68,6 +68,7 @@ impl Store {
     }
 
     /// Changes a project, renaming it everywhere it is referenced if its name changes.
+    /// The preview command is not touched here: it has its own `set_preview_command`.
     pub async fn update_project(
         &self,
         old_name: &str,
@@ -79,13 +80,12 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         let updated = sqlx::query(
-            "UPDATE projects SET name = ?, path = ?, kind = ?, workflow = ?, preview_command = ? WHERE name = ?",
+            "UPDATE projects SET name = ?, path = ?, kind = ?, workflow = ? WHERE name = ?",
         )
         .bind(&project.name)
         .bind(project.path.to_string_lossy())
         .bind(project.kind.name())
         .bind(&project.workflow)
-        .bind(blank_to_none(project.preview_command.as_deref()))
         .bind(old_name)
         .execute(&mut *tx)
         .await;
@@ -271,5 +271,30 @@ mod tests {
             .unwrap();
         assert_eq!(kept.project, None);
         assert!(store.list_projects().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_project_keeps_the_preview_command() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_project(&project("web", "/w/web", ProjectKind::Repo))
+            .await
+            .unwrap();
+        store
+            .set_preview_command("web", Some("npm run dev"))
+            .await
+            .unwrap();
+        // A caller that builds the project without the command must not wipe it.
+        let renamed = project("site", "/w/web", ProjectKind::Repo);
+        store.update_project("web", &renamed).await.unwrap();
+        assert_eq!(
+            store
+                .project("site")
+                .await
+                .unwrap()
+                .preview_command
+                .as_deref(),
+            Some("npm run dev")
+        );
     }
 }

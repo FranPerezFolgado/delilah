@@ -56,6 +56,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/sessions",
             get(session_api::list_for_task).post(session_api::open),
         )
+        .route(
+            "/api/v1/tasks/{key}/preview",
+            get(crate::preview::get_preview)
+                .post(crate::preview::start_preview)
+                .delete(crate::preview::stop_preview),
+        )
         .route("/api/v1/prs", get(crate::pr_api::summaries))
         .route(
             "/api/v1/tasks/{key}/prs",

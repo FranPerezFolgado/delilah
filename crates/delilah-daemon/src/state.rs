@@ -58,6 +58,8 @@ pub struct AppState {
     pub(crate) pr_checking: Arc<Mutex<HashSet<String>>>,
     /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
+    /// The previews the daemon runs, one per task at most (see `preview.rs`).
+    pub previews: Arc<crate::preview::Previews>,
 }
 
 impl AppState {
@@ -71,6 +73,7 @@ impl AppState {
         Self {
             store,
             config: Arc::new(config),
+            previews: Arc::new(crate::preview::Previews::new(events.clone())),
             sessions: Arc::new(Sessions::new(events.clone())),
             usage: Arc::default(),
             notifier,

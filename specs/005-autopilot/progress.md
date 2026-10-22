@@ -7,8 +7,8 @@ Mode: format=markdown commits=yes
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 2 | 2A | done | 1 | 5cb27dd | +13 Project literal fixes in daemon (approved) |
 | WP-02 | 2 | 2B | done | 1 | 2fc0472 | create/update_project also write preview_command |
-| WP-03 | 3 | 3A | verified | 1 | | |
-| WP-04 | 3 | 3A | implementing | 0 | | |
+| WP-03 | 3 | 3A | verified | 1 | 6a8b39d | |
+| WP-04 | 3 | 3A | verified | 1 | | +phase-2 MEDIUM fix (update_project keeps preview_command); kill via /bin/kill (unsafe forbidden) |
 | WP-05 | 3 | 3B | pending | 0 | | |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 4 | 4B | pending | 0 | | |

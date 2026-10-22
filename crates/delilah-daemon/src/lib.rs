@@ -25,6 +25,7 @@ pub mod pr_loop;
 pub(crate) mod pr_testkit;
 pub mod pr_types;
 mod preferences;
+pub mod preview;
 mod projects;
 pub mod proposals;
 pub mod prs;
