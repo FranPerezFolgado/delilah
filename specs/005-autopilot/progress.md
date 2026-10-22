@@ -11,7 +11,7 @@ Mode: format=markdown commits=yes
 | WP-04 | 3 | 3A | done | 1 | 588bff3 | +phase-2 MEDIUM fix (update_project keeps preview_command); kill via /bin/kill (unsafe forbidden) |
 | WP-05 | 3 | 3B | done | 1 | e650aa4 | |
 | WP-05F | 3 | 3F | done | 1 | fc7e456 | phase-3 review fixes |
-| WP-06 | 4 | 4A | implementing | 0 | | |
+| WP-06 | 4 | 4A | verified | 2 | | RunRequest lives in run.rs; Spanish marker (Recomendado) |
 | WP-07 | 4 | 4B | pending | 0 | | |
 | WP-08 | 4 | 4C | pending | 0 | | |
 | WP-09 | 5 | 5A | pending | 0 | | |

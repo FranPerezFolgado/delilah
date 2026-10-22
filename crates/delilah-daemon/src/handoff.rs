@@ -120,6 +120,19 @@ pub(crate) fn plan_note(lang: Lang) -> &'static str {
     )
 }
 
+/// What the first session of an autopilot task is told on top of its prompt: run the
+/// spec workflow end to end on its own, then stop once `tasks.md` is written.
+pub(crate) fn autopilot_plan_note(lang: Lang, key: &str) -> String {
+    match lang {
+        Lang::Es => format!(
+            "Autopilot ({key}): nadie va a responder ni aprobar nada. Contesta tú las preguntas de configuración del workflow: salida en markdown, usa la rama actual de la tarea, sin fase de clarificación y con tareas generadas, solo spec y plan sin implementar. Aprueba tú cada fase y no preguntes nada que tenga una opción recomendada; si tienes que preguntar, marca una como \"(Recomendado)\". Cuando `tasks.md` esté escrito, para: Delilah seguirá en una sesión nueva."
+        ),
+        Lang::En => format!(
+            "Autopilot ({key}): nobody will answer or approve anything. Answer the workflow's setup questions yourself: markdown output, keep the task's current branch, no clarification phase, and generate the tasks, spec and plan only with no implementation. Approve every phase yourself and do not ask anything that has a recommended option; if you must ask, mark one \"(Recommended)\". Once `tasks.md` is written, stop: Delilah will carry on in a new session."
+        ),
+    }
+}
+
 /// What a step's session is told to do. `dir` is the spec folder in the workspace.
 fn step_prompt(lang: Lang, step: Step, dir: &str) -> Option<String> {
     match step {
