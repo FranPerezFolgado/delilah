@@ -53,13 +53,13 @@
 
 **Independent test**: `cargo test -p delilah-e2e` (unit tests). The end-to-end check of US1 against a real daemon is T029, once the harness exists.
 
-- [ ] T007 Create the crate `crates/delilah-e2e`:
+- [X] T007 Create the crate `crates/delilah-e2e`:
   - `Cargo.toml`: `publish = false`, `version.workspace`, `edition.workspace`, `license.workspace`, `[lints] workspace = true`.
   - Dependencies: `serde`, `serde_json`, `reqwest` (`blocking`, `json`, no default features, as the CLI), `tempfile`, `axum`, `tokio` (rt-multi-thread, net, macros). Use the versions the other crates already use.
   - `[features] e2e = []`.
   - Empty `src/lib.rs`, `src/fake/mod.rs`, and `src/bin/fake-claude.rs` with `fn main() {}`.
   - Check `cargo test --workspace` still builds (the workspace uses `members = ["crates/*"]`).
-- [ ] T008 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/args.rs` for argv parsing, using the exact arg vectors from the tests in `crates/delilah-agents/src/claude.rs` (`launch(...)` cases near lines 500–800):
+- [X] T008 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/args.rs` for argv parsing, using the exact arg vectors from the tests in `crates/delilah-agents/src/claude.rs` (`launch(...)` cases near lines 500–800):
   - new session;
   - `--resume`;
   - repeated `--add-dir`;
@@ -70,14 +70,14 @@
   - `--fake-dir <dir>` first;
   - an unknown option recorded, not an error;
   - errors for: missing `--settings`; both `--session-id` and `--resume`; neither.
-- [ ] T009 [US1] Implement `crates/delilah-e2e/src/fake/args.rs` (`FakeArgs { fake_dir, mode: New|Resume, session_id, settings, add_dirs, remote_control, permission_mode, setting_sources, strict_mcp, plugin_dir, append_system_prompt, prompt, unknown }`) until T008 passes.
-- [ ] T010 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/scenario.rs`:
+- [X] T009 [US1] Implement `crates/delilah-e2e/src/fake/args.rs` (`FakeArgs { fake_dir, mode: New|Resume, session_id, settings, add_dirs, remote_control, permission_mode, setting_sources, strict_mcp, plugin_dir, append_system_prompt, prompt, unknown }`) until T008 passes.
+- [X] T010 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/scenario.rs`:
   - parsing every step of data-model.md (`trust_dialog`, `print`, `hook`, `sleep_ms` (capped at 5000), `ask`, `stop`, `wait_input`, `fail`, `exit`);
   - an unknown step is a parse error carrying the step;
   - selection order: `[fake:<name>]` in the prompt → `<task>.json` → `default.json`;
   - a marker naming a missing file is an error, not a silent default;
   - with no prompt and no task file it uses `default.json`.
-- [ ] T011 [US1] Implement `crates/delilah-e2e/src/fake/scenario.rs` (`Scenario { steps: Vec<Step> }`, `Step` enum with serde, `select(fake_dir, prompt, task) -> Result<(String, Scenario)>`) until T010 passes.
+- [X] T011 [US1] Implement `crates/delilah-e2e/src/fake/scenario.rs` (`Scenario { steps: Vec<Step> }`, `Step` enum with serde, `select(fake_dir, prompt, task) -> Result<(String, Scenario)>`) until T010 passes.
 - [ ] T012 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/hooks.rs`:
   - Inputs: a settings JSON as produced by `delilah_agents::claude::settings(...)`. Add `delilah-agents` as a dev-dependency and call it with a fake URL. Replace the commands with `cat >> <tmp>/E.json` through a small helper that rewrites them.
   - Checks:
