@@ -359,7 +359,9 @@ export const api = {
   tasks: () => request<Task[]>("/api/v1/tasks"),
   events: (key: string) => request<EventRecord[]>(`/api/v1/tasks/${key}/events`),
   projects: () => request<Project[]>("/api/v1/projects"),
-  submodules: (project: string) => request<Submodule[]>(`/api/v1/projects/${project}/submodules`),
+  /** `all` includes the `never` submodules (the settings screen edits the rules). */
+  submodules: (project: string, opts: { all?: boolean } = {}) =>
+    request<Submodule[]>(`/api/v1/projects/${project}/submodules${opts.all ? "?all=true" : ""}`),
   suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),

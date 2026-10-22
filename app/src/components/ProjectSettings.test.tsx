@@ -101,6 +101,25 @@ describe("ProjectSettings", () => {
     expect(put.mock.calls[0][1].submodules).toEqual({ always: ["services/api"], never: ["services/web"] });
   });
 
+  it("shows a never submodule as a normal checkbox that can be unticked and re-ticked", async () => {
+    const spy = vi.spyOn(api, "submodules").mockResolvedValue([{ name: "web", path: "services/web" }]);
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);
+    const p: Project = { ...parent, settings: { ...parent.settings, submodules: { always: [], never: ["services/web"] } } };
+    const { container } = render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(container.querySelectorAll(".picks input").length).toBe(2));
+    expect(spy).toHaveBeenCalledWith(p.name, { all: true });
+    expect(container.querySelector("[data-stale]")).toBeNull();
+    const never = container.querySelectorAll<HTMLInputElement>(".picks input")[1];
+    expect(never.checked).toBe(true);
+    fireEvent.click(never);
+    expect(never.checked).toBe(false);
+    fireEvent.click(never);
+    expect(never.checked).toBe(true);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1].submodules.never).toEqual(["services/web"]);
+  });
+
   it("lets a stale stored path be unchecked", async () => {
     vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "api" }]);
     const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);

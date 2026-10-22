@@ -20,7 +20,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
   const dirty = JSON.stringify(s) !== JSON.stringify(saved);
 
   useEffect(() => {
-    if (parent) api.submodules(project.name).then((l) => { setSubs(l); setSubsLoaded(true); }).catch(() => {});
+    if (parent) api.submodules(project.name, { all: true }).then((l) => { setSubs(l); setSubsLoaded(true); }).catch(() => {});
   }, [parent, project.name]);
 
   const close = () => {

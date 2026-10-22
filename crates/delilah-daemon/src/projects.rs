@@ -276,10 +276,19 @@ fn without_never<T>(items: Vec<T>, never: &[String], path: impl Fn(&T) -> &Strin
         .collect()
 }
 
-/// The submodules a `parent` project offers, for the "new task" form.
+#[derive(Debug, Default, Deserialize)]
+pub struct SubmodulesQuery {
+    /// Every submodule, `never` ones included (for the settings screen, which edits the rules).
+    #[serde(default)]
+    pub all: bool,
+}
+
+/// The submodules a `parent` project offers, for the "new task" form: without the `never`
+/// ones unless `?all=true`.
 pub async fn submodules(
     State(app): State<AppState>,
     axum::extract::Path(name): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<SubmodulesQuery>,
 ) -> Result<Json<Vec<delilah_git::Submodule>>, ApiError> {
     let project = app.store.project(&name).await?;
     if project.kind != ProjectKind::Parent {
@@ -290,6 +299,9 @@ pub async fn submodules(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
+    if q.all {
+        return Ok(Json(subs));
+    }
     Ok(Json(without_never(subs, &never, |s| &s.path)))
 }
 
@@ -697,6 +709,23 @@ mod tests {
             .collect();
         assert!(paths.contains(&"svc-orders"), "{paths:?}");
         assert!(!paths.contains(&"common-lib"), "{paths:?}");
+        let (status, body) = call(
+            &env.app,
+            Request::builder()
+                .uri("/api/v1/projects/parent/submodules?all=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let paths: Vec<&str> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["path"].as_str().unwrap())
+            .collect();
+        assert!(paths.contains(&"svc-orders"), "{paths:?}");
+        assert!(paths.contains(&"common-lib"), "{paths:?}");
         std::fs::remove_dir_all(&env.dir).unwrap();
     }
 

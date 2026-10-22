@@ -772,7 +772,6 @@ fn default_branch(
     }
 }
 
-/// What to build for a task: its branch (see [`default_branch`]) in every repo.
 /// The submodules a parent task gets: the request's, then the `always` ones not yet in it.
 /// Refuses a rule naming a submodule the parent no longer has, and a request naming a
 /// `never` one.
@@ -829,6 +828,7 @@ fn effective_submodules(
     Ok(merged)
 }
 
+/// What to build for a task: its branch (see [`default_branch`]) in every repo.
 fn workspace_spec(
     path: std::path::PathBuf,
     project: &delilah_core::Project,

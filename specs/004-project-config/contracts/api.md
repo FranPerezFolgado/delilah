@@ -31,7 +31,9 @@ settings.
   from `code`. Codes: `branch.empty`, `branch.missing_ticket`,
   `branch.unknown_placeholder`, `shared.path_empty`, `shared.path_absolute`,
   `shared.path_parent`, `shared.path_duplicate`, `submodules.not_parent`,
-  `submodules.conflict`, `submodules.unknown` (a rule names a submodule path the parent does
+  `submodules.conflict`, `submodules.never` (a task request names a `never` submodule),
+  `submodules.stale_rule` (a rule names a submodule the parent no longer has),
+  `submodules.unknown` (a rule names a submodule path the parent does
   not have), `settings.invalid` (malformed body, unknown key or wrong type; `field`
   names the key when known, else is empty). A body with an unknown key or a wrong type is also `422`, with `fields`
   naming the key when known.
@@ -55,7 +57,8 @@ With a `setup` and a worktree, the response is `201` with the task in
 
 ## `GET /api/v1/projects/{name}/submodules` and `POST …/suggest-submodules`
 
-`never` submodules are left out of both responses.
+`never` submodules are left out of both responses. `GET …/submodules?all=true` returns every
+submodule, `never` ones included; the project settings screen uses it to edit the rules.
 
 ## Task status
 
