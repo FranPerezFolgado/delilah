@@ -101,8 +101,8 @@ None: no new dependencies (`tokio` already has `process`; check its features in 
 - [X] T038 [US3] Implement T037 in `app/src/components/NewTaskDialog.tsx` and `app/src/components/BacklogTaskView.tsx`.
 - [X] T039 [US3] Write failing tests in a new `app/src/components/AutopilotMark.test.tsx`: running → "Autopiloto"; paused → "Autopiloto en pausa" with the reason; done → "PR abierta por autopiloto"; nothing when `autopilot` is null; the "Reanudar autopiloto" / "Seguir a mano" buttons call `setAutopilot`.
 - [X] T040 [US3] Implement T039 in `app/src/components/AutopilotMark.tsx`, shown in the task header in `app/src/components/TaskScreen.tsx` and on the board card in `app/src/components/BoardView.tsx`; the paused banner with both actions in `app/src/components/HandoffActions.tsx`.
-- [ ] T041 [US3] Write failing tests in `app/src/components/InboxView.test.tsx` and implement in `app/src/components/InboxView.tsx`: an `autopilot` item shows its reason with "Reanudar autopiloto" and "Seguir a mano".
-- [ ] T042 [US3] Write failing tests in `app/src/chain.test.ts` and implement in `app/src/chain.ts` (and `app/src/components/SessionChain.tsx`): with autopilot on the chain adds "Preview" (only when the project has a preview command) and "PR" steps, `done` once the PR is linked, `waiting` with the pause reason when paused.
+- [X] T041 [US3] Write failing tests in `app/src/components/InboxView.test.tsx` and implement in `app/src/components/InboxView.tsx`: an `autopilot` item shows its reason with "Reanudar autopiloto" and "Seguir a mano".
+- [X] T042 [US3] Write failing tests in `app/src/chain.test.ts` and implement in `app/src/chain.ts` (and `app/src/components/SessionChain.tsx`): with autopilot on the chain adds "Preview" (only when the project has a preview command) and "PR" steps, `done` once the PR is linked, `waiting` with the pause reason when paused.
 - [X] T043 [P] [US3] English strings for everything above in `app/src/i18n/en.ts`.
 
 **Checkpoint**: the feature is usable from the app without the preview UI and the idea card.

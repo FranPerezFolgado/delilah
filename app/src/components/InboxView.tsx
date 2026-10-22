@@ -232,6 +232,16 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
             {t("Reanudar ahora")}
           </button>
         )}
+        {item.kind === "autopilot" && (
+          <>
+            <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.setAutopilot(item.task, "resume"))}>
+              {t("Reanudar autopiloto")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.setAutopilot(item.task, "off"))}>
+              {t("Seguir a mano")}
+            </button>
+          </>
+        )}
         {item.kind === "handoff" && (
           <HandoffActions
             task={item.task}

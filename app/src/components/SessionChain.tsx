@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Session, type Task } from "../api";
 import { chainOf, stepLabel, type ChainState } from "../chain";
 import { t } from "../i18n";
@@ -24,7 +24,23 @@ interface Props {
  *  the handoff, or still to come. Renders nothing without saving mode. */
 export function SessionChain({ task, sessions, onOpenSession, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
-  const chain = chainOf(task, sessions);
+  const [hasPreview, setHasPreview] = useState(false);
+  const [prLinked, setPrLinked] = useState(false);
+  const autopilot = !!task.autopilot;
+  const done = task.autopilot?.state === "done";
+
+  // The preview step exists only if the project has a command; the PR step is done once linked.
+  useEffect(() => {
+    if (!autopilot || !task.saving_mode) return;
+    let live = true;
+    api.projects().then((ps) => live && setHasPreview(!!ps.find((p) => p.name === task.project)?.preview_command)).catch(() => {});
+    api.taskPrs(task.key).then((r) => live && setPrLinked(r.prs.length > 0)).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [autopilot, done, task.saving_mode, task.project, task.key]);
+
+  const chain = chainOf(task, sessions, { hasPreview, prLinked });
   if (!chain) return null;
 
   const reopen = async (s: Session) => {
