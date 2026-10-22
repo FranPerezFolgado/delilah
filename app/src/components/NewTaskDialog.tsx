@@ -55,6 +55,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const project = projects.find((p) => p.name === projectName);
   // Free tasks have no key until the daemon creates one.
   const previewKey = origin === "libre" && !existing ? "LIBRE-?" : key.trim() || "LIBRE-?";
+  const always = project?.kind === "parent" ? project.settings.submodules.always : [];
+  const never = project?.kind === "parent" ? project.settings.submodules.never : [];
+  // "always" is in every selection and "never" in none (the daemon enforces both too).
+  const withRules = (paths: string[]) => [...always, ...paths.filter((p) => !always.includes(p) && !never.includes(p))];
   const branchPreview = project ? branchName(project.settings.branch, previewKey, title) : null;
 
   useEffect(() => {
@@ -64,9 +68,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     api
       .submodules(project.name)
       .then((subs) => {
-        setSubmodules(subs);
+        setSubmodules(subs.filter((s) => !never.includes(s.path)));
         const wanted = draft?.components ?? [];
-        setPicked(subs.filter((s) => wanted.includes(s.name) || wanted.includes(s.path)).map((s) => s.path));
+        const present = subs.map((s) => s.path);
+        setPicked(withRules(subs.filter((s) => wanted.includes(s.name) || wanted.includes(s.path)).map((s) => s.path)).filter((p) => present.includes(p)));
       })
       .catch((e) => setError(e.message));
   }, [project?.name, project?.kind]);
@@ -90,7 +95,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         description: draft?.description,
       });
       setSuggested(res.submodules);
-      setPicked(res.submodules.map((s) => s.path));
+      setPicked(withRules(res.submodules.map((s) => s.path)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -98,7 +103,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     }
   };
 
-  const toggle = (path: string) => setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
+  const toggle = (path: string) => !always.includes(path) && setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,7 +229,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <div className="choices">
                   {submodules.map((s) => (
                     <label key={s.path} className={`choice mono ${picked.includes(s.path) ? "on" : ""}`}>
-                      <input type="checkbox" checked={picked.includes(s.path)} onChange={() => toggle(s.path)} />
+                      <input type="checkbox" checked={picked.includes(s.path)} onChange={() => toggle(s.path)}
+                        disabled={always.includes(s.path)} title={always.includes(s.path) ? t("Siempre incluido (ajustes del proyecto)") : undefined} />
                       {s.path}
                     </label>
                   ))}

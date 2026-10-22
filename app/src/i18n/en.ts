@@ -266,6 +266,7 @@ export const EN: Record<string, string> = {
   "Copia aparte. Varias tareas en paralelo sin tocar tu carpeta; la primera vez clona los submódulos.": "A separate copy. Several tasks in parallel without touching your folder; the first time it clones the submodules.",
   "Submódulos que toca la tarea": "Submodules the task touches",
   "Claude está mirando el código…": "Claude is looking at the code…",
+  "Siempre incluido (ajustes del proyecto)": "Always included (project settings)",
   "Sugerir con Claude": "Suggest with Claude",
   "Primer mensaje (opcional; si lo dejas vacío usa": "First message (optional; if empty it uses",
   "<lo que quieres hacer>": "<what you want to do>",
