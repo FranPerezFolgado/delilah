@@ -65,9 +65,20 @@ fn site_allowed(site: &str, http_loopback: bool) -> bool {
     let Some(rest) = site.strip_prefix("http://") else {
         return false;
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    http_loopback && matches!(host, "127.0.0.1" | "localhost")
+    if !http_loopback {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // Userinfo or a backslash can hide the real host (`http://localhost:80@evil.com`).
+    if authority.contains(['@', '\\']) {
+        return false;
+    }
+    let (host, port) = match authority.split_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (authority, None),
+    };
+    port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && (host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
 }
 
 pub async fn connect(
@@ -413,6 +424,16 @@ mod tests {
         }
         assert!(!site_allowed("http://example.com", true));
         assert!(!site_allowed("http://127.0.0.1.evil.com", true));
+        for evil in [
+            "http://127.0.0.1:1@evil.com",
+            "http://localhost:80@evil.com",
+            "http://localhost@evil.com",
+            "http://127.0.0.1:80\\@evil.com",
+            "http://localhost:x",
+            "http://localhost:",
+        ] {
+            assert!(!site_allowed(evil, true), "{evil}");
+        }
         assert!(site_allowed("https://acme.atlassian.net", false));
     }
 

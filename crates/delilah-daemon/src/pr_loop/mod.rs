@@ -81,10 +81,14 @@ pub(crate) fn is_checking(app: &AppState, key: &TaskKey) -> bool {
         .contains(key.as_str())
 }
 
+fn poll_interval(config: &crate::config::Config) -> std::time::Duration {
+    config.pr_poll
+}
+
 /// Checks the PRs on a timer: the open ones, and the tasks in review that have none yet.
 pub fn spawn(app: AppState) {
     tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(app.config.pr_poll);
+        let mut ticker = tokio::time::interval(poll_interval(&app.config));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
@@ -399,6 +403,20 @@ async fn repo_of(app: &AppState, key: &TaskKey, pr: &PrRef) -> Result<String, Li
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_loop_ticks_at_the_configured_interval() {
+        let config = crate::config::Config::from_vars(|k| match k {
+            "HOME" => Some("/tmp".into()),
+            "DELILAH_PR_POLL_SECS" => Some("2".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(
+            super::poll_interval(&config),
+            std::time::Duration::from_secs(2)
+        );
+    }
+
     use delilah_core::{Project, Task};
 
     use super::*;

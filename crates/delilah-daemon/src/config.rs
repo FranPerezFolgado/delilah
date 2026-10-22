@@ -31,7 +31,9 @@ pub struct Config {
 
 impl Config {
     /// Reads `DELILAH_HOME` (default `~/.delilah`), `DELILAH_ADDR` (default
-    /// 127.0.0.1:7420) and `DELILAH_ALLOW_FILE_PROTOCOL=1`.
+    /// 127.0.0.1:7420), `DELILAH_ALLOW_FILE_PROTOCOL=1`, `DELILAH_NOTIFY`,
+    /// `DELILAH_UI_ORIGIN` and the test-only switches `DELILAH_AGENT_BIN`,
+    /// `DELILAH_SECRETS`, `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK` and `DELILAH_PR_POLL_SECS`.
     pub fn from_env() -> Result<Self, String> {
         Self::from_vars(|k| std::env::var(k).ok())
     }
@@ -97,6 +99,24 @@ impl Config {
             jira_http_loopback,
             pr_poll,
         })
+    }
+
+    /// What to log at start-up about the test-only switches that are set.
+    pub fn override_notes(var: impl Fn(&str) -> Option<String>) -> Vec<String> {
+        let mut notes = Vec::new();
+        if let Some(bin) = var("DELILAH_AGENT_BIN") {
+            notes.push(format!("agent program overridden: {bin}"));
+        }
+        if var("DELILAH_SECRETS").is_some() {
+            notes.push("secrets in memory".to_string());
+        }
+        if var("DELILAH_JIRA_ALLOW_HTTP_LOOPBACK").is_some_and(|v| v == "1") {
+            notes.push("jira over http on loopback allowed".to_string());
+        }
+        if let Some(secs) = var("DELILAH_PR_POLL_SECS") {
+            notes.push(format!("pr poll every {} s", secs.trim()));
+        }
+        notes
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -190,6 +210,18 @@ mod tests {
         assert!(c.secrets_in_memory);
         let e = Config::from_vars(vars(&[("DELILAH_SECRETS", "file")])).unwrap_err();
         assert_eq!(e, r#"DELILAH_SECRETS must be "memory" or unset"#);
+    }
+
+    #[test]
+    fn override_notes_log_every_switch_that_is_set() {
+        let none = |_: &str| None;
+        assert!(Config::override_notes(none).is_empty());
+        let notes = Config::override_notes(|k| match k {
+            "DELILAH_SECRETS" => Some("memory".into()),
+            "DELILAH_PR_POLL_SECS" => Some("30".into()),
+            _ => None,
+        });
+        assert_eq!(notes, ["secrets in memory", "pr poll every 30 s"]);
     }
 
     #[test]
