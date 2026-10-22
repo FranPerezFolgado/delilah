@@ -92,12 +92,12 @@
 ### Tests first
 
 - [X] T019 [US3] Store tests in `crates/delilah-daemon/src/store.rs` (`#[cfg(test)]`): `get_task` and `list_tasks` return `branch: Some("feature/PROJ-1")` after `save_workspace`, and `None` for a backlog task and after `delete_workspace`. Serialising a task without a branch omits the field
-- [ ] T020 [P] [US3] Vitest: `TaskView` shows the branch (monospace) when `task.branch` is set and nothing when it's absent, in `app/src/components/TaskScreen.test.tsx` (or a new `app/src/components/TaskView.test.tsx` if `TaskScreen` doesn't render `TaskView`)
+- [X] T020 [P] [US3] Vitest: `TaskView` shows the branch (monospace) when `task.branch` is set and nothing when it's absent, in `app/src/components/TaskScreen.test.tsx` (or a new `app/src/components/TaskView.test.tsx` if `TaskScreen` doesn't render `TaskView`)
 
 ### Implementation
 
 - [X] T021 [US3] Add `branch: Option<String>` (`#[serde(default, skip_serializing_if = "Option::is_none")]`) to `Task` in `crates/delilah-core/src/task.rs` (`None` in `Task::new`). Fill it in the three task `SELECT`s of `crates/delilah-daemon/src/store.rs` with `LEFT JOIN workspaces w ON w.task_key = t.key` (qualify the columns), and fix any `Task { … }` literals elsewhere that no longer compile
-- [ ] T022 [US3] In `app/src/api.ts`, add `branch?: string | null` to `Task` (read-only); in `app/src/components/TaskView.tsx`, show it under the title, monospace, with a `t("Rama")` label, only when present
+- [X] T022 [US3] In `app/src/api.ts`, add `branch?: string | null` to `Task` (read-only); in `app/src/components/TaskView.tsx`, show it under the title, monospace, with a `t("Rama")` label, only when present
 
 **Checkpoint**: `cargo test --workspace`, `cd app && npx tsc --noEmit && npx vitest run` green.
 

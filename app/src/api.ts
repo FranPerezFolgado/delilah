@@ -24,6 +24,8 @@ export interface Task {
   notes?: string | null;
   /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
   in_checkout?: boolean | null;
+  /** The branch of the task's workspace; absent without a workspace (read-only). */
+  branch?: string | null;
 }
 
 export interface EventRecord {
