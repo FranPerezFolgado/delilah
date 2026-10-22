@@ -14,9 +14,9 @@ Mode: format=markdown commits=yes
 | WP-07 | 3 | 3A | done | 1 | 4ff756f | +R1-R3 review follow-ups; cargo fmt of run.rs, store_projects.rs |
 | WP-08 | 3 | 3A | done | 1 | f446162 | |
 | WP-09 | 3 | 3A | done | 1 | 17cebbd | |
-| WP-10 | 4 | 4A | pending | 0 | | |
-| WP-11 | 4 | 4B | pending | 0 | | |
-| WP-12 | 4 | 4B | pending | 0 | | |
+| WP-10 | 4 | 4A | verified | 2 | c29d87f | |
+| WP-11 | 4 | 4B | verified | 1 | 1fcdaa7 | +app/tsconfig.json resolveJsonModule |
+| WP-12 | 4 | 4B | verified | 1 | 8cb6fce | |
 | WP-13 | 5 | 5A | pending | 0 | | |
 | WP-14 | 5 | 5A | pending | 0 | | |
 | WP-15 | 5 | 5B | pending | 0 | | |
