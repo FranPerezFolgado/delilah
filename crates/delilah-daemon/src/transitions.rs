@@ -25,6 +25,10 @@ impl AppState {
     async fn change(&self, key: &TaskKey, event: Event, notify: bool) -> Result<Task, StoreError> {
         let before = self.store.get_task(key).await?.map(|t| t.status);
         let task = self.store.apply_event(key, event, Utc::now()).await?;
+        if task.status.is_terminal() {
+            // Best effort and a no-op without a preview: the task is over either way.
+            self.previews.stop(key.as_str());
+        }
         self.emit(Topic::Tasks);
         self.emit(Topic::Inbox);
         if notify
@@ -81,5 +85,83 @@ impl AppState {
             _ => return,
         };
         self.notifier.send(title, body);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Store;
+
+    async fn running_task_with_preview(key: &str) -> AppState {
+        let config = crate::config::Config {
+            home: std::env::temp_dir().join(format!("delilah-tr-{}", uuid::Uuid::new_v4())),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        let key = TaskKey::new(key);
+        app.store
+            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .await
+            .unwrap();
+        for event in [Event::Start, Event::WorkspaceReady] {
+            app.store
+                .apply_event(&key, event, Utc::now())
+                .await
+                .unwrap();
+        }
+        app.previews
+            .start(
+                key.as_str(),
+                &std::env::temp_dir(),
+                "echo http://127.0.0.1:9/x; sleep 30",
+            )
+            .unwrap();
+        app
+    }
+
+    #[tokio::test]
+    async fn done_stops_the_preview() {
+        let app = running_task_with_preview("T-1").await;
+        app.transition(&TaskKey::new("T-1"), Event::MarkDone)
+            .await
+            .unwrap();
+        assert!(app.previews.view("T-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn failing_stops_the_preview() {
+        let app = running_task_with_preview("T-1").await;
+        app.transition(&TaskKey::new("T-1"), Event::Fail { reason: "x".into() })
+            .await
+            .unwrap();
+        assert!(app.previews.view("T-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_quiet_done_stops_the_preview_too() {
+        let app = running_task_with_preview("T-1").await;
+        app.transition_quiet(&TaskKey::new("T-1"), Event::MarkDone)
+            .await
+            .unwrap();
+        assert!(app.previews.view("T-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_non_terminal_change_keeps_the_preview() {
+        let app = running_task_with_preview("T-1").await;
+        app.transition(&TaskKey::new("T-1"), Event::AgentFinished)
+            .await
+            .ok();
+        if let Some(t) = app.store.get_task(&TaskKey::new("T-1")).await.unwrap()
+            && !t.status.is_terminal()
+        {
+            assert!(app.previews.view("T-1").is_some());
+        }
+        app.previews.stop("T-1");
     }
 }
