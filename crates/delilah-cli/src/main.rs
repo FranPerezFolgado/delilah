@@ -77,7 +77,8 @@ enum Command {
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
-        /// Defaults to feature/<KEY>.
+        /// Defaults to a name Claude proposes from the title (feature/…); a typed one is
+        /// normalised and made unique.
         #[arg(long)]
         branch: Option<String>,
         /// First prompt; defaults to `/feature <KEY>`.
