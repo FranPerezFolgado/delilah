@@ -25,8 +25,8 @@ Mode: format=markdown commits=yes
 | WP-18 | 5 | 5D | done | 1 | 25b53bc | +setup-kind arms in ProjectView/TaskView/Sidebar/TerminalPane/sessionLabels |
 | WP-19 | 6 | 6A | done | 1 | 27a45f2 | |
 | WP-20 | 6 | 6A | done | 1 | 6a1d630 | |
-| WP-21 | 7 | 7A | pending | 0 | | |
-| WP-22 | 7 | 7A | pending | 0 | | |
+| WP-21 | 7 | 7A | verified | 1 | 701f271 | |
+| WP-22 | 7 | 7A | verified | 1 | 2ee23cb | |
 | WP-23 | 8 | 8A | pending | 0 | | |
 | WP-24 | 8 | 8B | pending | 0 | | |
 | WP-09F | 3 | 3F | done | 1 | a8e72ce | review fixes: picker paths, unplaced errors, stale rules, save confirm, docs, CLI old-daemon msg |
