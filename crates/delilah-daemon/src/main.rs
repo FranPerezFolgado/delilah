@@ -59,11 +59,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn(app.clone());
     pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
-    let previews = app.previews.clone();
+    let shutdown = app.clone();
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
-    previews.stop_all().await;
+    shutdown.shutdown_runtime().await;
     Ok(())
 }
 

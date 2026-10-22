@@ -66,7 +66,7 @@ Missing/invalid ⇒ *blocked* with reason "the review did not report an outcome"
 
 ```rust
 pub struct PreviewView {          // serialised for the API
-    pub state: PreviewState,      // starting | running | failed | stopped
+    pub state: PreviewState,      // starting | running | failed
     pub url: Option<String>,
     pub error: Option<String>,    // with the last lines of output
     pub started_at: DateTime<Utc>,

@@ -58,9 +58,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v1/tasks/{key}/preview",
-            get(crate::preview::get_preview)
-                .post(crate::preview::start_preview)
-                .delete(crate::preview::stop_preview),
+            get(crate::preview_api::get_preview)
+                .post(crate::preview_api::start_preview)
+                .delete(crate::preview_api::stop_preview),
         )
         .route("/api/v1/prs", get(crate::pr_api::summaries))
         .route(

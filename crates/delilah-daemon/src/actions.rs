@@ -74,7 +74,7 @@ pub async fn archive(
             task.status.name()
         )));
     }
-    app.previews.stop(key.as_str());
+    app.end_task_runtime(&key);
     if finish_partial(&app, &key).await? {
         app.emit(Topic::Inbox);
     }
@@ -128,7 +128,7 @@ pub async fn delete(
             .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::unpushed(format!("{key} would lose work: {e}")))?;
     }
-    app.previews.stop(key.as_str());
+    app.end_task_runtime(&key);
     if task.status == TaskStatus::Queued {
         // No workspace yet; deleted only if still in the backlog, so a start that
         // slipped in since it was read is never left without its task.

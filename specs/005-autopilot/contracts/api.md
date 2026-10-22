@@ -33,12 +33,12 @@ Body `{ "action": "on" | "off" | "resume" }` → `200 Task`.
 
 ## Preview
 
-- `GET /api/v1/tasks/{key}/preview` → `200 PreviewView | null`
-- `POST /api/v1/tasks/{key}/preview` → starts it; `201 PreviewView` (`state: "starting"`). `409 reason "no-preview-command"` if the project has none, `"no-workspace"` before the task has one, `"running"` if one is already starting/running.
+- `GET /api/v1/tasks/{key}/preview` → `200 PreviewView`, or `200 null` when the task has no preview (stopping removes it)
+- `POST /api/v1/tasks/{key}/preview` → starts it; `201 PreviewView` (`state: "starting"`). `409 reason "no-preview-command"` if the project has none, `"no-workspace"` before the task has one, `"running"` if one is already starting/running. `422` if the command cannot be spawned.
 - `DELETE /api/v1/tasks/{key}/preview` → `204`.
 
 ```ts
-interface PreviewView { state: "starting" | "running" | "failed" | "stopped"; url?: string; error?: string; started_at: string }
+interface PreviewView { state: "starting" | "running" | "failed"; url?: string; error?: string; started_at: string }
 ```
 
 ## Projects

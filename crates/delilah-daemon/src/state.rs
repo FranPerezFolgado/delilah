@@ -59,7 +59,7 @@ pub struct AppState {
     /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
     /// The previews the daemon runs, one per task at most (see `preview.rs`).
-    pub previews: Arc<crate::preview::Previews>,
+    pub(crate) previews: Arc<crate::preview::Previews>,
 }
 
 impl AppState {

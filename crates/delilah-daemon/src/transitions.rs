@@ -22,12 +22,22 @@ impl AppState {
         self.change(key, event, false).await
     }
 
+    /// A task is over (done, failed, archived, deleted): what runs for it ends. The
+    /// place for per-task runtime cleanup; best effort, and a no-op when nothing runs.
+    pub(crate) fn end_task_runtime(&self, key: &TaskKey) {
+        self.previews.stop(key.as_str());
+    }
+
+    /// For the daemon's shutdown: nothing is left running behind it.
+    pub async fn shutdown_runtime(&self) {
+        self.previews.stop_all().await;
+    }
+
     async fn change(&self, key: &TaskKey, event: Event, notify: bool) -> Result<Task, StoreError> {
         let before = self.store.get_task(key).await?.map(|t| t.status);
         let task = self.store.apply_event(key, event, Utc::now()).await?;
         if task.status.is_terminal() {
-            // Best effort and a no-op without a preview: the task is over either way.
-            self.previews.stop(key.as_str());
+            self.end_task_runtime(key);
         }
         self.emit(Topic::Tasks);
         self.emit(Topic::Inbox);
@@ -154,14 +164,55 @@ mod tests {
     #[tokio::test]
     async fn a_non_terminal_change_keeps_the_preview() {
         let app = running_task_with_preview("T-1").await;
-        app.transition(&TaskKey::new("T-1"), Event::AgentFinished)
+        let task = app
+            .transition(&TaskKey::new("T-1"), Event::AgentAsked)
             .await
-            .ok();
-        if let Some(t) = app.store.get_task(&TaskKey::new("T-1")).await.unwrap()
-            && !t.status.is_terminal()
-        {
-            assert!(app.previews.view("T-1").is_some());
-        }
+            .unwrap();
+        assert!(!task.status.is_terminal());
+        assert!(app.previews.view("T-1").is_some());
         app.previews.stop("T-1");
+    }
+
+    #[tokio::test]
+    async fn stop_all_ends_every_group() {
+        let app = running_task_with_preview("T-1").await;
+        let dir = std::env::temp_dir();
+        let pid_file = dir.join(format!("delilah-stopall-{}", uuid::Uuid::new_v4()));
+        app.previews
+            .start(
+                "T-2",
+                &dir,
+                &format!("sleep 30 & echo $! > {}; wait", pid_file.display()),
+            )
+            .unwrap();
+        let mut pid = String::new();
+        for _ in 0..200 {
+            pid = std::fs::read_to_string(&pid_file).unwrap_or_default();
+            if pid.ends_with('\n') {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        let _ = std::fs::remove_file(&pid_file);
+        let pid = pid.trim().to_string();
+        let alive = || {
+            std::process::Command::new("/bin/kill")
+                .args(["-0", &pid])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(alive());
+        app.shutdown_runtime().await;
+        assert!(app.previews.view("T-1").is_none());
+        assert!(app.previews.view("T-2").is_none());
+        for _ in 0..100 {
+            if !alive() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("a group is still alive");
     }
 }

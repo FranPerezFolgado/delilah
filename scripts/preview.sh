@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
     --fresh) FRESH=1; shift ;;
     --no-ui) UI=0; shift ;;
     --notify) NOTIFY=1; shift ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^[^#]/{/^#/p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
