@@ -11,10 +11,11 @@ Mode: format=markdown commits=yes
 | WP-04 | 3 | 3A | done | 1 | 588bff3 | +phase-2 MEDIUM fix (update_project keeps preview_command); kill via /bin/kill (unsafe forbidden) |
 | WP-05 | 3 | 3B | done | 1 | e650aa4 | |
 | WP-05F | 3 | 3F | done | 1 | fc7e456 | phase-3 review fixes |
-| WP-06 | 4 | 4A | verified | 2 | 13520d9 | RunRequest lives in run.rs; Spanish marker (Recomendado) |
-| WP-07 | 4 | 4B | verified | 2 | d16dd66 | +pr_api/mod.rs re-export, proposal_for extracted; TODO(WP-09) seams |
-| WP-08 | 4 | 4C | verified | 1 | | scheduler.rs test only (tick already recovers) |
-| WP-09 | 5 | 5A | pending | 0 | | |
+| WP-06 | 4 | 4A | done | 2 | 13520d9 | RunRequest lives in run.rs; Spanish marker (Recomendado) |
+| WP-07 | 4 | 4B | done | 2 | d16dd66 | +pr_api/mod.rs re-export, proposal_for extracted; TODO(WP-09) seams |
+| WP-08 | 4 | 4C | done | 1 | a6fff3e | scheduler.rs test only (tick already recovers) |
+| WP-08F | 4 | 4F | done | 1 | 18f6063 | phase-4 review fixes (+1-line store.rs test literal); TODO for WP-20 decisions.md: preview URL kept for loopback, credentials/query/fragment stripped |
+| WP-09 | 5 | 5A | implementing | 0 | | |
 | WP-10 | 5 | 5B | pending | 0 | | |
 | WP-11 | 5 | 5B | pending | 0 | | |
 | WP-12 | 6 | 6A | pending | 0 | | |
