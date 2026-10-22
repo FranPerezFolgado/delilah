@@ -22,8 +22,8 @@ Mode: format=markdown commits=yes
 | WP-12 | 6 | 6A | verified | 1 | 1dcc34f | +1-line literal fixes in proposals.rs, run.rs; rule: workflow == feature |
 | WP-13 | 6 | 6A | verified | 1 | df9be0b | hook FAIL from parallel run, green after |
 | WP-14 | 6 | 6A | verified | 1 | 54f6212 | +alerts.ts, InboxView KINDS, TaskView EVENT_LABELS; Task.autopilot optional in TS |
-| WP-15 | 6 | 6B | pending | 0 | | |
-| WP-16 | 6 | 6B | pending | 0 | | |
+| WP-15 | 6 | 6B | verified | 1 | 8cb0eb2 | +SessionChain HandoffActions line, styles.css |
+| WP-16 | 6 | 6B | verified | 1 | c89800c | SessionChain loads projects + taskPrs |
 | WP-17 | 7 | 7A | pending | 0 | | |
 | WP-18 | 8 | 8A | pending | 0 | | |
 | WP-19 | 8 | 8B | pending | 0 | | |
