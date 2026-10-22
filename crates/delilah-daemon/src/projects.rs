@@ -268,6 +268,14 @@ pub async fn delete_project(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Leaves out the entries whose path is in the project's `never` rule.
+fn without_never<T>(items: Vec<T>, never: &[String], path: impl Fn(&T) -> &String) -> Vec<T> {
+    items
+        .into_iter()
+        .filter(|i| !never.contains(path(i)))
+        .collect()
+}
+
 /// The submodules a `parent` project offers, for the "new task" form.
 pub async fn submodules(
     State(app): State<AppState>,
@@ -277,11 +285,12 @@ pub async fn submodules(
     if project.kind != ProjectKind::Parent {
         return Ok(Json(Vec::new()));
     }
+    let never = project.settings.submodules.never.clone();
     let subs = tokio::task::spawn_blocking(move || delilah_git::list_submodules(&project.path))
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::unprocessable(e.to_string()))?;
-    Ok(Json(subs))
+    Ok(Json(without_never(subs, &never, |s| &s.path)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,6 +322,7 @@ pub async fn suggest_submodules(
         )));
     }
     let root = project.path.clone();
+    let never = project.settings.submodules.never.clone();
     let known: Vec<String> =
         tokio::task::spawn_blocking(move || delilah_git::list_submodules(&root))
             .await
@@ -320,6 +330,7 @@ pub async fn suggest_submodules(
             .map_err(|e| ApiError::unprocessable(e.to_string()))?
             .into_iter()
             .map(|s| s.path)
+            .filter(|p| !never.contains(p))
             .collect();
     let description = match req.description {
         Some(d) => d,
@@ -354,6 +365,11 @@ pub async fn suggest_submodules(
         .map_err(|e| ApiError::internal(format!("cannot run claude: {e}")))?;
     let submodules = suggest::parse(&String::from_utf8_lossy(&output.stdout), &known)
         .map_err(ApiError::unprocessable)?;
+    let submodules = without_never(
+        submodules,
+        &project.settings.submodules.never,
+        |s: &suggest::Suggestion| &s.path,
+    );
     tracing::info!(task = %req.key, suggested = submodules.len(), "suggested submodules");
     Ok(Json(SuggestResponse {
         submodules,
@@ -438,6 +454,7 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
+    use super::{suggest, without_never};
     use crate::config::Config;
     use crate::state::AppState;
     use crate::store::Store;
@@ -651,6 +668,51 @@ mod tests {
         let saved = project(&env, "parent").await;
         assert_eq!(saved["settings"]["branch"], "feature/{ticket}");
         std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn submodules_omit_the_never_ones() {
+        let env = env().await;
+        let (status, _) = put(
+            &env,
+            "parent",
+            json!({ "submodules": { "never": ["common-lib"] } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, body) = call(
+            &env.app,
+            Request::builder()
+                .uri("/api/v1/projects/parent/submodules")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let paths: Vec<&str> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["path"].as_str().unwrap())
+            .collect();
+        assert!(paths.contains(&"svc-orders"), "{paths:?}");
+        assert!(!paths.contains(&"common-lib"), "{paths:?}");
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[test]
+    fn suggestions_drop_the_never_ones() {
+        let s = |p: &str| suggest::Suggestion {
+            path: p.into(),
+            reason: String::new(),
+        };
+        let kept = without_never(
+            vec![s("a"), s("b")],
+            &["b".to_string()],
+            |s: &suggest::Suggestion| &s.path,
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].path, "a");
     }
 
     #[tokio::test]

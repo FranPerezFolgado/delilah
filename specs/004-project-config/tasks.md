@@ -152,13 +152,13 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ### Tests first
 
-- [ ] T045 [P] [US4] Write failing daemon tests in `crates/delilah-daemon/src/run.rs` and `crates/delilah-daemon/src/projects.rs`: always added to the request's selection; a request naming a never submodule → 422 naming it; a rule naming a submodule the parent no longer has → 422 pointing at the settings; `GET …/submodules` and `POST …/suggest-submodules` omit never
+- [X] T045 [P] [US4] Write failing daemon tests in `crates/delilah-daemon/src/run.rs` and `crates/delilah-daemon/src/projects.rs`: always added to the request's selection; a request naming a never submodule → 422 naming it; a rule naming a submodule the parent no longer has → 422 pointing at the settings; `GET …/submodules` and `POST …/suggest-submodules` omit never
 - [X] T046 [P] [US4] Write failing tests for `app/src/components/NewTaskDialog.tsx`: always submodules checked and disabled; never ones not listed
 
 ### Implementation
 
-- [ ] T047 [US4] Merge always/never into `WorkspaceSpec.submodules` and validate in `crates/delilah-daemon/src/run.rs`
-- [ ] T048 [US4] Filter never out of `submodules` and `suggest_submodules` in `crates/delilah-daemon/src/projects.rs`
+- [X] T047 [US4] Merge always/never into `WorkspaceSpec.submodules` and validate in `crates/delilah-daemon/src/run.rs`
+- [X] T048 [US4] Filter never out of `submodules` and `suggest_submodules` in `crates/delilah-daemon/src/projects.rs`
 - [X] T049 [US4] Preselect and lock always, hide never in `app/src/components/NewTaskDialog.tsx`
 
 ---

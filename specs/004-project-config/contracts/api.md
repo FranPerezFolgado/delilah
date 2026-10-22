@@ -45,7 +45,11 @@ a plain repo has no submodules.
 
 When `in_checkout` is absent and the task has no choice saved, it comes from
 `settings.workspace`. When `branch` is absent, from `settings.branch`. `submodules` is
-merged: `+ always`, and a request naming a `never` submodule gets `422` naming it.
+merged: `+ always` (request order first, no duplicates; an empty selection is valid when
+`always` is not), and a request naming a `never` submodule gets `422` naming it, with the
+`{error, fields}` shape: field `submodules[i]`, code `submodules.never`. A rule naming a
+submodule the parent no longer has gets `422` with field `settings.submodules.always[i]`
+(or `never[i]`), code `submodules.stale_rule`, and a message pointing at the project's settings.
 With a `setup` and a worktree, the response is `201` with the task in
 `preparing-workspace`; the agent launches later.
 

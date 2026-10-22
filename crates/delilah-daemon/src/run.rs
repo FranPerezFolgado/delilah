@@ -121,6 +121,29 @@ pub async fn start_run(
         ));
     }
     let project = app.store.project(&req.project).await?;
+    let rules = &project.settings.submodules;
+    if project.kind == ProjectKind::Parent && !(rules.always.is_empty() && rules.never.is_empty()) {
+        let root = project.path.clone();
+        let available: Vec<String> =
+            tokio::task::spawn_blocking(move || delilah_git::list_submodules(&root))
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+                .map_err(|e| ApiError::unprocessable(e.to_string()))?
+                .into_iter()
+                .map(|s| s.path)
+                .collect();
+        match effective_submodules(&req.submodules, rules, &available, app.lang()) {
+            Ok(merged) => req.submodules = merged,
+            Err(fields) => {
+                let summary = fields
+                    .iter()
+                    .map(|f| f.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Err(ApiError::invalid_fields(summary, fields));
+            }
+        }
+    }
     match (project.kind, req.submodules.is_empty()) {
         (ProjectKind::Parent, true) => {
             return Err(ApiError::bad_request(format!(
@@ -750,6 +773,62 @@ fn default_branch(
 }
 
 /// What to build for a task: its branch (see [`default_branch`]) in every repo.
+/// The submodules a parent task gets: the request's, then the `always` ones not yet in it.
+/// Refuses a rule naming a submodule the parent no longer has, and a request naming a
+/// `never` one.
+fn effective_submodules(
+    requested: &[String],
+    rules: &delilah_core::SubmoduleRules,
+    available: &[String],
+    lang: crate::lang::Lang,
+) -> Result<Vec<String>, Vec<delilah_core::FieldError>> {
+    let mut errors = Vec::new();
+    for (list, key) in [(&rules.always, "always"), (&rules.never, "never")] {
+        for (i, path) in list.iter().enumerate() {
+            if !available.contains(path) {
+                errors.push(delilah_core::FieldError {
+                    field: format!("settings.submodules.{key}[{i}]"),
+                    code: "submodules.stale_rule".into(),
+                    message: match lang {
+                        crate::lang::Lang::Es => format!(
+                            "`{path}` ya no existe en el proyecto; quítalo en los ajustes del proyecto."
+                        ),
+                        crate::lang::Lang::En => format!(
+                            "`{path}` no longer exists in the project; remove it in the project's settings."
+                        ),
+                    },
+                });
+            }
+        }
+    }
+    for (i, path) in requested.iter().enumerate() {
+        if rules.never.contains(path) {
+            errors.push(delilah_core::FieldError {
+                field: format!("submodules[{i}]"),
+                code: "submodules.never".into(),
+                message: match lang {
+                    crate::lang::Lang::Es => {
+                        format!("`{path}` está excluido en los ajustes del proyecto (never).")
+                    }
+                    crate::lang::Lang::En => {
+                        format!("`{path}` is excluded in the project's settings (never).")
+                    }
+                },
+            });
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let mut merged: Vec<String> = Vec::new();
+    for path in requested.iter().chain(&rules.always) {
+        if !merged.contains(path) {
+            merged.push(path.clone());
+        }
+    }
+    Ok(merged)
+}
+
 fn workspace_spec(
     path: std::path::PathBuf,
     project: &delilah_core::Project,
@@ -1129,6 +1208,115 @@ mod tests {
             .unwrap()
             .unwrap()
             .status
+    }
+
+    fn rules(always: &[&str], never: &[&str]) -> delilah_core::SubmoduleRules {
+        let v = |l: &[&str]| l.iter().map(|s| s.to_string()).collect();
+        delilah_core::SubmoduleRules {
+            always: v(always),
+            never: v(never),
+        }
+    }
+
+    fn names(l: &[&str]) -> Vec<String> {
+        l.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn always_is_added_after_the_requested_without_duplicates() {
+        let available = names(&["a", "b", "c"]);
+        let merged = effective_submodules(
+            &names(&["c", "a"]),
+            &rules(&["a", "b"], &[]),
+            &available,
+            crate::lang::Lang::En,
+        )
+        .unwrap();
+        assert_eq!(merged, names(&["c", "a", "b"]));
+        let merged =
+            effective_submodules(&[], &rules(&["b"], &[]), &available, crate::lang::Lang::En)
+                .unwrap();
+        assert_eq!(merged, names(&["b"]));
+    }
+
+    #[test]
+    fn a_requested_never_submodule_is_refused_naming_it() {
+        let err = effective_submodules(
+            &names(&["a", "c"]),
+            &rules(&[], &["c"]),
+            &names(&["a", "c"]),
+            crate::lang::Lang::En,
+        )
+        .unwrap_err();
+        assert_eq!(err.len(), 1);
+        assert_eq!(err[0].field, "submodules[1]");
+        assert!(err[0].message.contains("`c`"));
+    }
+
+    #[test]
+    fn a_rule_naming_a_missing_submodule_points_at_the_settings() {
+        let err = effective_submodules(
+            &names(&["a"]),
+            &rules(&["gone"], &[]),
+            &names(&["a"]),
+            crate::lang::Lang::Es,
+        )
+        .unwrap_err();
+        assert_eq!(err[0].field, "settings.submodules.always[0]");
+        assert!(err[0].message.contains("`gone`"));
+        assert!(err[0].message.contains("ajustes del proyecto"));
+    }
+
+    #[tokio::test]
+    async fn a_parent_run_with_a_never_or_stale_rule_is_refused_with_422() {
+        let dir = std::env::temp_dir().join(format!("delilah-run-rules-{}", uuid::Uuid::new_v4()));
+        let fixture = std::process::Command::new("bash")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../scripts/make-fixture-parent.sh"
+            ))
+            .arg(dir.join("env"))
+            .output()
+            .unwrap();
+        assert!(fixture.status.success());
+        let config = crate::config::Config {
+            home: dir.join("home"),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: true,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        let mut project = delilah_core::Project {
+            name: "parent".into(),
+            path: dir.join("env/parent"),
+            kind: ProjectKind::Parent,
+            workflow: "feature".into(),
+            settings: Default::default(),
+        };
+        project.settings.submodules = rules(&[], &["common-lib"]);
+        app.store.create_project(&project).await.unwrap();
+        let mut req = request("PROJ-1", false);
+        req.project = "parent".into();
+        req.submodules = names(&["svc-orders", "common-lib"]);
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.fields[0].field, "submodules[1]");
+        assert!(err.message.contains("common-lib"));
+
+        project.settings.submodules = rules(&["svc-gone"], &[]);
+        app.store
+            .set_project_settings("parent", &project.settings)
+            .await
+            .unwrap();
+        let mut req = request("PROJ-2", false);
+        req.project = "parent".into();
+        req.submodules = names(&["svc-orders"]);
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.fields[0].field, "settings.submodules.always[0]");
+        assert!(err.message.contains("svc-gone"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]
