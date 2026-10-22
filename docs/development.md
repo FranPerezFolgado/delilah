@@ -36,6 +36,55 @@ How to use a preview:
 The git tests build throwaway repos and need `git -c protocol.file.allow=always`;
 the fixtures use it already.
 
+## End-to-end tests
+
+Two layers drive a real `delilahd` against a **fake Claude** (and a fake `gh` and Jira):
+- **API/CLI** (`crates/delilah-e2e/tests/*.rs`, behind the `e2e` feature, so `cargo test --workspace` does not run them): 11 flows through HTTP and the `delilah` binary.
+- **UI** (`app/e2e/*.spec.ts`, Playwright, Chromium headless): 6 flows in the browser, against one daemon and one Vite per run, tests serial.
+
+```bash
+scripts/e2e.sh                  # both layers: API/CLI, then UI
+scripts/e2e.sh api              # or: ui
+scripts/e2e.sh api -- <filter>  # only the tests whose name matches
+scripts/e2e.sh --real-claude    # the smoke test, see below
+```
+
+It builds the daemon, the CLI and the harness first, and ends with `api: PASS (Ns)` / `ui: FAIL (Ns)` (non-zero exit if any failed). The first UI run installs Chromium. On a failing UI test, `app/playwright-report/` has the screenshot, trace and daemon log.
+
+- **Safe with the installed Delilah running.** Each test gets a temp root with its own `HOME`, `DELILAH_HOME`, fixture repos and a free port (never 7420 nor 7501-7509), and the daemon runs with `env -i`. A tripwire `claude`/`gh` first on PATH fails the test if either real binary is ever reached. Nothing touches `~/.delilah`. Never kill a daemon by name here either.
+- **Run it before a PR that touches the daemon, the CLI or the UI.** Local only: there is no CI.
+- `DELILAH_E2E_KEEP=1` keeps the temp roots of failed tests (the path is printed). `target/debug/e2e-env start --jira --keep` starts a debug environment: use its printed `api` with `DELILAH_URL=<api> target/debug/delilah ls`, then Ctrl-D.
+- Waits are bounded (`wait_until`, 15 s by default, 30 s at most): fix flakiness by waiting for the condition, never by raising a timeout.
+
+**Adding an API flow.** A `#[test]` in `crates/delilah-e2e/tests/<area>.rs`:
+
+```rust
+let env = Env::start(EnvOptions::default());
+env.scenario("asks", json!({"steps": [{"ask": {"question": "¿A o B?", "options": ["A", "B"]}}, {"stop": "ok"}]}));
+let key = env.api().new_task(&env.fixtures.repo_project(), "Add X [fake:asks]");
+let ask = env.wait_until("ask in inbox", || env.api().inbox().asks().first().cloned());
+env.api().answer(&ask.id, "A");
+env.wait_until("fake got the answer", || env.record_for(&key).answers.first().cloned());
+```
+
+**Adding a UI flow.** A new `app/e2e/<flow>.spec.ts` using the `e2e` fixture (`api`, `fixture()`, `scenario()`) from `app/e2e/fixtures.ts`, as the existing specs do. Each test makes its own fixture copies and registers them as its own projects.
+
+**Scenarios.** `env.scenario(name, json)` writes `<root>/fake/scenarios/<name>.json`; a task picks one with `[fake:<name>]` in its prompt, else `<task>.json`, else `default.json` (stop, then wait for input). After the last step the fake waits for input like an idle Claude. What each fake session saw (args, hooks, answers, inputs) is in `<root>/fake/records/<session>.json` (`env.record_for`). An unknown step makes the fake run `StopFailure` and exit 2.
+
+| Step | Effect |
+|---|---|
+| `trust_dialog` | prints the folder-trust dialog and waits for Enter (a leading one comes before `SessionStart`, as in Claude) |
+| `print` | writes text to the terminal |
+| `hook` | runs the settings' hook for that event with a minimal payload |
+| `sleep_ms` | waits (at most 5000) |
+| `ask` | runs the `AskUserQuestion` `PreToolUse` hook, records the answer, then `PostToolUse`. Each option is a string or `{label, description?, preview?}` (`Nueva tarea` + `Crear` with a `preview` is the task-from-idea card) |
+| `stop` | runs the `Stop` hook with the message |
+| `wait_input` | reads one line from the terminal, records it, runs `UserPromptSubmit` |
+| `fail` | prints the message and runs `StopFailure`, then stays alive reading input (later steps are skipped; the error item stays in the inbox until the session ends) |
+| `exit` | runs `SessionEnd` and exits with the code |
+
+**The smoke test.** `scripts/e2e.sh --real-claude` runs one real Claude Code session (a task "Reply OK and stop.", wait for working then waiting, close, archive). It needs `DELILAH_E2E_REAL_CLAUDE=1` (the script sets it), uses the user's real `HOME` (still its own `DELILAH_HOME` and port, no tripwire) and **spends subscription usage**, so it is opt-in and never part of the default run.
+
 ## Conventions
 
 - **Comments** explain why, not what. Match the existing density and tone: short, plain English, the reason for a choice or a gotcha.

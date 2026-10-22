@@ -56,8 +56,16 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
 
+**End-to-end tests:**
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`). Local only, no CI. See [development.md](development.md#end-to-end-tests).
+
 ## Pending and known problems
 
+- **End-to-end tests, pending and known:**
+  - the UI quick-open test covers the file quick open (the UI has no task switcher);
+  - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
+  - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
+  - final timing and flakiness numbers are pending (recorded by the verification step).
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);

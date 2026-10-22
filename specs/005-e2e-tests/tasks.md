@@ -299,7 +299,7 @@
   - a task on `repo` titled `Reply OK and stop.`;
   - wait (≤ 30 s each) for working, then waiting; close the session through the API and archive the task.
   Add `--real-claude` to `scripts/e2e.sh` running `cargo test -p delilah-e2e --features e2e --test real_claude -- --ignored` with the env var set and a warning line that it uses the subscription.
-- [ ] T051 [P] [US4] Update `docs/development.md` with a new section "End-to-end tests" after "Checks":
+- [X] T051 [P] [US4] Update `docs/development.md` with a new section "End-to-end tests" after "Checks":
   - what the two layers are;
   - `scripts/e2e.sh` usage;
   - that it's safe with the installed Delilah running (temp HOME, free ports, tripwire);
@@ -309,13 +309,13 @@
   - `DELILAH_E2E_KEEP=1`;
   - the smoke test and its cost.
   Also add the new env vars to wherever the doc lists the daemon's env vars, marked test-only.
-- [ ] T052 [P] [US4] Add a decision to `docs/decisions.md` (new numbered entry under "Working on Delilah"): end-to-end tests with a fake Claude. Cover R1 (Rust binary that runs the settings' hooks), R2 (`DELILAH_AGENT_BIN`), R3/R4 (temp HOME and tripwire), R7 (separate crate behind a feature), R9 (one daemon per UI run, serial), R12 (local only), and what was ruled out (shell fake, replaying real sessions, CI on macOS runners, a UI runtime daemon switch).
-- [ ] T053 [P] [US4] Update `docs/architecture.md`:
+- [X] T052 [P] [US4] Add a decision to `docs/decisions.md` (new numbered entry under "Working on Delilah"): end-to-end tests with a fake Claude. Cover R1 (Rust binary that runs the settings' hooks), R2 (`DELILAH_AGENT_BIN`), R3/R4 (temp HOME and tripwire), R7 (separate crate behind a feature), R9 (one daemon per UI run, serial), R12 (local only), and what was ruled out (shell fake, replaying real sessions, CI on macOS runners, a UI runtime daemon switch).
+- [X] T053 [P] [US4] Update `docs/architecture.md`:
   - crates table: add `crates/delilah-e2e` (harness, `fake-claude`, `e2e-env`);
   - `scripts/` row: add `e2e.sh`;
   - mention `app/e2e/`;
   - in the daemon config, the four test-only env vars.
-- [ ] T054 [P] [US4] Update `docs/status.md`: E2E tests built (17 flows, fake Claude, local only), plus anything left pending or found flaky.
+- [X] T054 [P] [US4] Update `docs/status.md`: E2E tests built (17 flows, fake Claude, local only), plus anything left pending or found flaky.
 - [ ] T055 Run the full checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets` (no new warnings), `cargo test --manifest-path app/src-tauri/Cargo.toml` (after `scripts/build-sidecar.sh debug` if needed), `cd app && npx tsc --noEmit && npx vitest run`, `scripts/e2e.sh`.
 - [ ] T056 SC-004 / SC-005: time `scripts/e2e.sh api` and `scripts/e2e.sh ui` (API < 3 min, UI < 5 min after a build), then run `scripts/e2e.sh` 10 times in a row. Record times and results in `specs/005-e2e-tests/progress.md`. Fix any flaky test by replacing its timing assumption with a `wait_until`, never by raising a timeout above 30 s.
 - [ ] T057 Version bump, patch 0.4.0 → 0.4.1 (re-check `main`'s version first with `git show main:Cargo.toml | grep '^version'`):
