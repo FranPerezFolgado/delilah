@@ -39,6 +39,20 @@ delilah new SIGNAL-13 --project signal --title "Feed cache" --notes "Look at the
 delilah new --free --project signal --title "Try a lighter JSON parser"   # named LIBRE-n
 delilah run SIGNAL-13     # starts the backlog task in its project; its notes reach the agent
 
+delilah new SIGNAL-14 --project signal --title "Feed cache" --worktree   # --checkout or --worktree; neither: the project's setting
+delilah run SIGNAL-13 --checkout   # same flags; neither: the backlog task's choice, else the project's setting
+
+# Per-project settings (see "Project settings" below)
+delilah project show signal                          # effective settings, defaults marked
+delilah project set signal workspace worktree        # checkout | worktree
+delilah project set signal branch 'feature/{ticket}-{slug}'
+delilah project set signal setup 'npm ci'
+delilah project set signal shared add .env --copy    # --copy | --link; neither: automatic
+delilah project set signal shared rm .env
+delilah project set signal submodules always add svc-common   # always|never add|rm <path>
+delilah project unset signal setup                   # back to the default
+delilah setup retry|skip|cancel SIGNAL-13            # when a task's setup failed or is running
+
 delilah ls                 # tasks and their state
 delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
@@ -147,6 +161,43 @@ explains, but does not edit, and nothing is created. "Permitir cambios en esta
 sesión" restarts it in normal mode on the same conversation. "Convertir en tarea" turns
 that Claude into a free task's primary session, keeping its conversation: the task
 works in your checkout, the folder the conversation belongs to.
+
+**Project settings.** In Proyectos, "Ajustes" on a project opens its settings.
+They are personal to your Delilah (stored by the daemon, nothing is written in the
+repo) and the same ones can be edited with `delilah project show|set|unset`.
+Whatever is not set keeps its default, which `show` marks.
+
+- **Dónde trabaja** (workspace mode): checkout or worktree, for new tasks. The default is
+  checkout. A task started without saying where follows it; the new task form
+  preselects it, and a backlog task keeps the choice you saved on it.
+  `--checkout` / `--worktree` on `delilah new` and `delilah run` override it.
+- **Rama** (branch template): the branch a task gets, e.g. `feature/{ticket}-{slug}`.
+  `{ticket}` is the key and `{slug}` is the title made safe for a branch name (lower
+  case, no accents, hyphens, at most 40 characters). If the slug comes out empty
+  the `/`, `-`, `_` and `.` around it are dropped. The new task form shows the
+  resulting branch while you type the title.
+- **Archivos compartidos**: files or folders of the checkout that a **worktree**
+  needs but git does not carry (`.env`, `node_modules`). Each is copied or linked
+  (a symlink to the original); "Automático" links folders and copies files. What
+  already exists in the worktree is left alone, and a missing source or an unsafe
+  path (outside the project, or inside `.git`) is skipped and noted in the task's
+  `workspace.log` without stopping the task.
+- **Comando de preparación** (setup): a command (e.g. `npm ci`) that runs once in a
+  new worktree, after the shared entries and before the agent starts. It runs in
+  your login shell with a 10 minute limit, as a read-only "Setup" tab of the task
+  with its full output (also in `tasks/<KEY>/`). If it succeeds the agent starts.
+  If it fails, times out or is cancelled, the task stops as `setup-failed` with the
+  end of the output, and offers "Reintentar setup", "Lanzar sin setup" and "Cancelar setup" (a
+  running setup can be cancelled too; the whole process group is stopped). The same
+  from the terminal: `delilah setup retry|skip|cancel <KEY>`. If the daemon restarts
+  during a setup, the task shows it as interrupted and can be retried. A failed
+  setup task can be archived. Checkout tasks do not run the setup.
+- **Submódulos siempre / nunca incluidos** (parents): "always" ones are added to
+  every run; "never" ones are not offered in the new task form's picker. A rule
+  that names a submodule that no longer exists is rejected with an error pointing
+  at the settings.
+
+Errors in the form appear next to the field (and as `field: message` in the CLI).
 
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
 and starts `/feature <what you want to do>`). The agent works either **in your

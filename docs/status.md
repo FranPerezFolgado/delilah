@@ -1,7 +1,7 @@
 # Status
 
 What Delilah does today, what is pending, and the known problems. Update this
-page when a feature lands or a decision is taken. Last updated: 2026-10-20
+page when a feature lands or a decision is taken. Last updated: 2026-10-22
 (version 0.3.0).
 
 ## Built
@@ -35,6 +35,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
 
+**Project settings** (spec `004-project-config`, personal to the install, in `projects.settings`):
+- A settings screen (Proyectos › Ajustes) and `delilah project show|set|unset`: default workspace mode, branch template, shared entries, setup command, always/never submodules.
+- The branch template is shown live in the new task form; `delilah new|run` take `--checkout` / `--worktree`.
+- Shared entries are copied or linked into new worktrees.
+- A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
+
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
 - Help › Ver logs.
@@ -53,6 +59,10 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
   - a "Delilah Preview" Tauri build (another identifier and port) for native-only features;
   - a per-task "Preview" button that runs the project's preview command next to the terminal;
   - a browser MCP so the agent inside a task can see the preview UI.
+- **Project settings, open items:**
+  - the settings screen, the setup banner and the new task form were never checked in a browser during that feature's reviews (API and CLI were);
+  - low: no test for the "Ajustes guardados" confirmation; a PATCH that changes a project's kind does two non-atomic writes; the Spanish "unknown submodule" message omits the path; the CLI's 422 output is untested end to end; no migration test over pre-existing rows; `ß`/`Æ` become hyphens in branch slugs;
+  - PR options (link a changeset's PRs) are still not built.
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
-- **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, PR handling, gates and budgets.
+- **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, PR handling, gates and budgets.
 - **Testing:** test the whole flow on the work Mac with a real ticket.

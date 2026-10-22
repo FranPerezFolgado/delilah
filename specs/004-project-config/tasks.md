@@ -183,8 +183,8 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ## Phase 8: Polish & Cross-Cutting
 
-- [ ] T054 [P] Document project settings for users in `README.md` (settings screen, CLI, setup behaviour)
-- [ ] T055 [P] Update `docs/status.md` (built), `docs/architecture.md` (settings column, `setup.rs`, `share.rs`, `SetupFailed`, `SessionKind::Setup`) and `docs/vision.md` (delilah.toml → project settings; PR options still pending)
+- [X] T054 [P] Document project settings for users in `README.md` (settings screen, CLI, setup behaviour)
+- [X] T055 [P] Update `docs/status.md` (built), `docs/architecture.md` (settings column, `setup.rs`, `share.rs`, `SetupFailed`, `SessionKind::Setup`) and `docs/vision.md` (delilah.toml → project settings; PR options still pending)
 - [ ] T056 Run `cargo test --workspace`, `cargo clippy --workspace`, `cd app && npx tsc --noEmit && npx vitest run`
 - [ ] T057 Walk through `specs/004-project-config/quickstart.md` in a preview (`scripts/preview.sh --fresh`)
 

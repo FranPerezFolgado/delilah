@@ -130,6 +130,46 @@ is kept by the daemon and edited from a settings screen and the CLI. A
 Sharing settings through the repo can come later, as a base the stored settings
 override. See `specs/004-project-config`.
 
+Also ruled out: a preview endpoint for branch names (the UI has a TypeScript
+mirror of the slug rules instead, checked against the same test cases), and hard
+links for shared folders (they do not work across volumes or for folders).
+
+**27. A field error has a stable `code`; the daemon writes the message.** Settings
+validation returns `FieldError { field, code, message }`. The app and CLI can
+rely on the code, and the message comes from the daemon in the user's language.
+
+**28. Settings are JSON in `projects.settings`.** Migration 0011 adds the column.
+Unknown keys are rejected (`deny_unknown_fields`, a 422 with the fields), so a typo
+does not pass silently. A stored value that cannot be read gives the defaults and
+a warning instead of breaking the project.
+
+**29. The branch template's slug.** The title goes through NFKD, loses its marks,
+becomes ASCII lower case with `-`, and is cut to 40 characters at a hyphen.
+Around an empty `{slug}` the `/`, `-`, `_` and `.` next to it are dropped. Rust
+and TypeScript implement it twice and share
+`crates/delilah-core/tests/branch_names.json`.
+
+**30. Shared entries are copied (`cp -cR`, a clone on APFS) or linked (an absolute
+symlink).** The source is canonicalised and must stay under the checkout; nothing
+is written through a symlink in the worktree; a `.git` component is refused. A
+problem with one entry never stops the task: it is noted in
+`<task_dir>/workspace.log` and the rest go on.
+
+**31. The setup command runs as a read-only `Setup` session.** `$SHELL -lc` in
+the worktree, with the agent's clean environment, 10 minutes at most.
+- Cancel and timeout kill the whole process group (`kill -- -pgid`, no `unsafe`).
+- The launch inputs are saved in `<task_dir>/launch.json`, so retry and skip survive a daemon restart; setups interrupted by one are marked at start.
+- `SetupFailed` is not terminal (retry, skip, or leave it) but the task can be archived.
+
+**32. Submodule rules.** `GET …/submodules` hides the `never` ones by default;
+`?all=true` is for the settings screen. `always` ones are merged into every run.
+A rule that names a submodule that no longer exists is a 422 pointing at the
+settings.
+
+**33. The workspace mode is the request's, else the backlog task's saved choice,
+else the project's `workspace` setting (default checkout).** The CLI sends it only
+when `--checkout` or `--worktree` is given, so the daemon decides otherwise.
+
 ## UI
 
 **20. Hand-rolled i18n.** `t("texto en español")`, with English in `i18n/en.ts`

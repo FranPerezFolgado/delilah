@@ -38,7 +38,7 @@ done or pending is in [status.md](status.md).
 |---|---|
 | `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds. Pure, no I/O. |
 | `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`). |
-| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), what a branch changed (`changes.rs`). |
+| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), what a branch changed (`changes.rs`), shared entries copied or linked into a worktree (`share.rs`). |
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
@@ -65,7 +65,8 @@ done or pending is in [status.md](status.md).
 | `actions.rs` | Resume, done, archive, delete, and the usage report. |
 | `transitions.rs` | The one way to change a task's status, so every change emits events and notifications. |
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
-| `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), submodules, and the submodule suggestion. |
+| `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), their settings (validation, `FieldError` with a stable `code`, localised by the daemon), submodules (`GET …/submodules` hides `never` ones unless `?all=true`), and the submodule suggestion. |
+| `setup.rs` | A project's setup command: runs `$SHELL -lc` in the worktree as a `Setup` session (10 min), cancel/retry/skip, recovery of interrupted setups at start. |
 | `jira.rs`, `secrets.rs` | The Jira connection. The token lives in the Keychain; tests keep it in memory. |
 | `events.rs` | `GET /api/v1/events`: a WebSocket that only announces topics. |
 | `preferences.rs`, `store_settings.rs`, `lang.rs` | Preferences (`pref:<key>`), settings, and the language the daemon writes in. |
@@ -87,8 +88,8 @@ and a preview uses `fixtures/preview-home-N`.
 - `task_events`: the history.
 - `workspaces`: `task_key`, parent, path, branch, submodules JSON, kind, `previous`. For checkout mode, `previous` is JSON with the branches to go back to.
 - `sessions`: id, owner, kind, label, primary, attention.
-- `projects`
-- `settings`
+- `projects`: name, path, kind, and `settings` (JSON, migration 0011; `deny_unknown_fields`; an unreadable value falls back to the defaults with a warning).
+- `settings`: the app's preferences (not the per-project ones).
 
 ## Tasks
 
@@ -107,7 +108,11 @@ names folders and goes into hook commands. Free tasks are named `LIBRE-n`.
 | PausedByLimit | ResetDue (after `resume_at`) / ManualResume | Running |
 | Running | AgentFinished | Done |
 | Running, WaitingForUser, PausedByLimit | MarkDone | Done |
+| PreparingWorkspace | SetupFailed | SetupFailed { reason } |
+| SetupFailed | RetrySetup / SkipSetup | PreparingWorkspace |
 | any non-terminal | Fail | Failed |
+
+`SetupFailed` is not terminal (the task can be retried, skipped or left alone) but can be archived.
 
 **The phase** (`specify → plan → implement → review`) is separate from the status
 and only changes while the task is under way (see `phases.rs`):
@@ -129,7 +134,7 @@ and only changes while the task is under way (see `phases.rs`):
   project session working in the project's checkout. `owners::workspace` resolves
   the folder for either.
 - **Kinds.** The kinds are the primary Claude (its turns drive the task's status),
-  extra Claudes, and login shells. Each runs in a PTY owned by the daemon; its
+  extra Claudes, login shells, and `SessionKind::Setup`: the read-only session of a project's setup command (no input, its log is the full output). Each runs in a PTY owned by the daemon; its
   scrollback is kept and logged to `tasks/<KEY>/`.
 - **The `claude` command line:**
   - `--session-id <uuid>`, or `--resume <uuid>` when reopening, only if the conversation exists;
@@ -179,6 +184,7 @@ and only changes while the task is under way (see `phases.rs`):
 - **Archive** (`actions::archive`):
   - **Checkout mode:** goes back to the previous branches. It never refuses: uncommitted files stay, and a folder that cannot switch is logged and left on the task's branch.
   - **Worktree mode:** refuses while there are uncommitted changes or commits on no remote, unless `?force=true`. It then runs `git worktree remove --force`.
+- **Project settings in a run** (`run.rs`): the mode is the request's, else a backlog task's saved choice, else `settings.workspace` (default checkout). The branch comes from the template (Rust and TS share `crates/delilah-core/tests/branch_names.json`). In worktree mode, after the worktree exists: shared entries (`share.rs`, notes in `tasks/<KEY>/workspace.log`), then the setup (`setup.rs`), then the agent. The launch inputs go to `tasks/<KEY>/launch.json` so retry/skip survive a restart; `always` submodules are merged into every run, and a rule naming a missing submodule is a 422 pointing at the settings.
 - **Delete** (`DELETE /api/v1/tasks/{key}`, `delilah rm`): stops the task's agents, releases the workspace (the branch stays) and frees the key. The same force rule applies.
 
 ## Live updates
@@ -199,7 +205,7 @@ The UI does not poll:
   - `platform.ts`: the only Tauri imports, all dynamic, so the UI runs in a plain browser.
 - **Components:**
   - `Sidebar`, `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
-  - `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
+  - `ProjectSettings` (the settings screen), `SetupBanner`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
   - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `Markdown`.
 - **Editor:** `editor/` holds CodeMirror 6 and per-task tab state, kept in localStorage.
 - **i18n:**

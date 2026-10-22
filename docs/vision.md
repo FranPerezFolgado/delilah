@@ -50,11 +50,12 @@ Phase detection would be by artifacts by default, or reported by the skill
 (`report_phase`). Today only the `feature` workflow exists, and its phases are
 tracked (see `phases.rs`), not driven.
 
-**Per-project `delilah.toml`:**
-- the workspace mode and branch template (`feature/{ticket}-{slug}`);
-- shared folders (`.env`, `node_modules`) and a setup script;
-- submodules to always include or always exclude;
-- PR options (link the PRs of a changeset to each other and to Jira).
+**Per-project settings (mostly built).** Not a `delilah.toml`: they are stored by
+the daemon and edited from the app and the CLI (see decision 26 and
+`specs/004-project-config`). Built: the workspace mode, the branch template, shared
+folders, a setup command, and submodules to always or never include. Still pending:
+- PR options (link the PRs of a changeset to each other and to Jira);
+- sharing settings through the repo, as a base the stored ones override.
 
 **Closing the loop:**
 - Delilah opens the PRs, or links the ones the agent opened.
