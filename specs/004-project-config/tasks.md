@@ -121,13 +121,13 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ### Tests first
 
-- [ ] T030 [P] [US3] Write failing tests in `crates/delilah-git/src/share.rs` with temp dirs: copy a file; link a folder (symlink to the checkout's absolute path); auto mode by kind; an entry already in the worktree left alone and reported; a missing source skipped and reported
+- [X] T030 [P] [US3] Write failing tests in `crates/delilah-git/src/share.rs` with temp dirs: copy a file; link a folder (symlink to the checkout's absolute path); auto mode by kind; an entry already in the worktree left alone and reported; a missing source skipped and reported
 - [X] T031 [P] [US3] Write failing transition tests in `crates/delilah-core/src/task.rs`: `PreparingWorkspace` + `SetupFailed` → `SetupFailed`; `SetupFailed` + `RetrySetup`/`SkipSetup` → `PreparingWorkspace`; `SetupFailed` + `Fail`/`MarkDone` allowed; `SetupFailed` is not terminal; the new events are refused from other statuses
 - [ ] T032 [P] [US3] Write failing daemon tests in `crates/delilah-daemon/src/setup.rs`: setup exit 0 → task `running` and an agent session launched; exit 3 → `setup-failed` with the last 20 lines; retry runs it again; skip launches the agent; cancel → `setup-failed` "cancelled"; a task left in `preparing-workspace` with no live setup at startup → `setup-failed` "interrupted"; checkout tasks never run the setup nor share entries
 
 ### Implementation
 
-- [ ] T033 [P] [US3] Implement `share_entries(checkout, worktree, &[SharedEntry]) -> Vec<ShareNote>` in `crates/delilah-git/src/share.rs` (copy with `cp -cR`, link with an absolute symlink) and export it from `crates/delilah-git/src/lib.rs`
+- [X] T033 [P] [US3] Implement `share_entries(checkout, worktree, &[SharedEntry]) -> Vec<ShareNote>` in `crates/delilah-git/src/share.rs` (copy with `cp -cR`, link with an absolute symlink) and export it from `crates/delilah-git/src/lib.rs`
 - [X] T034 [US3] Add `TaskStatus::SetupFailed { reason }` (`setup-failed`) and the events `SetupFailed`, `RetrySetup`, `SkipSetup` with their transitions in `crates/delilah-core/src/task.rs`
 - [ ] T035 [P] [US3] Add `SessionKind::Setup` (read-only, no input forwarded) in `crates/delilah-daemon/src/store_sessions.rs` and handle it where kinds are matched (`session_api.rs`, `sessions.rs`)
 - [ ] T036 [US3] Implement `crates/delilah-daemon/src/setup.rs`: start a setup session (`$SHELL -lc <setup>`, worktree cwd, `agent_env()`, log in the task dir), 10-minute timeout, exit handling via `exit_code()`, `SetupFailed` with the output tail, and `cancel`, `retry`, `skip`; on success or skip apply `WorkspaceReady` and call `launch_agent`
