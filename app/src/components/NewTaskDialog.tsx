@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Project, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
+import { branchName } from "../branchName";
 import { t } from "../i18n";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 
@@ -52,6 +53,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
+  // Free tasks have no key until the daemon creates one.
+  const branchPreview = project ? branchName(project.settings.branch, key.trim() || "LIBRE-?", title) : null;
 
   useEffect(() => {
     setPicked([]);
@@ -185,6 +188,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                   {t("Delilah le pone una clave LIBRE-n. Arranca con /feature y esta descripción.")}
                 </span>
               </label>
+            )}
+            {branchPreview && (
+              <div className="muted mono" style={{ fontSize: 11.5 }}>
+                {t("Rama: {branch}", { branch: branchPreview })}
+              </div>
             )}
             <label className="field">
               <span>{t("Proyecto")}</span>

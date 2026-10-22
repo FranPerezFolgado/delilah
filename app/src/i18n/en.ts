@@ -357,6 +357,7 @@ export const EN: Record<string, string> = {
   "Eliminando…": "Deleting…",
   "Ajustes de {name}": "Settings of {name}",
   "Rama (usa {ticket})": "Branch (use {ticket})",
+  "Rama: {branch}": "Branch: {branch}",
   "Archivos compartidos": "Shared files",
   "Ruta dentro del proyecto": "Path inside the project",
   "Automático": "Automatic",
