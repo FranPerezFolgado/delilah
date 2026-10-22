@@ -5,8 +5,8 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 2 | 2A | verified | 1 | | +13 Project literal fixes in daemon (approved) |
-| WP-02 | 2 | 2B | pending | 0 | | |
+| WP-01 | 2 | 2A | verified | 1 | 5cb27dd | +13 Project literal fixes in daemon (approved) |
+| WP-02 | 2 | 2B | verified | 1 | | create/update_project also write preview_command |
 | WP-03 | 3 | 3A | pending | 0 | | |
 | WP-04 | 3 | 3A | pending | 0 | | |
 | WP-05 | 3 | 3B | pending | 0 | | |

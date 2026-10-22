@@ -10,12 +10,13 @@ use crate::store::{Store, StoreError};
 impl Store {
     pub async fn create_project(&self, project: &Project) -> Result<(), StoreError> {
         let result = sqlx::query(
-            "INSERT INTO projects (name, path, kind, workflow, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO projects (name, path, kind, workflow, preview_command, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&project.name)
         .bind(project.path.to_string_lossy())
         .bind(project.kind.name())
         .bind(&project.workflow)
+        .bind(blank_to_none(project.preview_command.as_deref()))
         .bind(Utc::now().to_rfc3339())
         .execute(&self.pool)
         .await;
@@ -28,23 +29,44 @@ impl Store {
     }
 
     pub async fn list_projects(&self) -> Result<Vec<Project>, StoreError> {
-        let rows = sqlx::query("SELECT name, path, kind, workflow FROM projects ORDER BY name")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT name, path, kind, workflow, preview_command FROM projects ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(project_from_row).collect()
     }
 
     pub async fn project(&self, name: &str) -> Result<Project, StoreError> {
-        let row = sqlx::query("SELECT name, path, kind, workflow FROM projects WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| StoreError::ProjectNotFound(name.to_string()))?;
+        let row = sqlx::query(
+            "SELECT name, path, kind, workflow, preview_command FROM projects WHERE name = ?",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| StoreError::ProjectNotFound(name.to_string()))?;
         project_from_row(&row)
     }
 }
 
 impl Store {
+    /// Sets the command that starts the project's preview; empty or blank clears it.
+    pub async fn set_preview_command(
+        &self,
+        name: &str,
+        command: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE projects SET preview_command = ? WHERE name = ?")
+            .bind(blank_to_none(command))
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::ProjectNotFound(name.to_string()));
+        }
+        Ok(())
+    }
+
     /// Changes a project, renaming it everywhere it is referenced if its name changes.
     pub async fn update_project(
         &self,
@@ -57,12 +79,13 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         let updated = sqlx::query(
-            "UPDATE projects SET name = ?, path = ?, kind = ?, workflow = ? WHERE name = ?",
+            "UPDATE projects SET name = ?, path = ?, kind = ?, workflow = ?, preview_command = ? WHERE name = ?",
         )
         .bind(&project.name)
         .bind(project.path.to_string_lossy())
         .bind(project.kind.name())
         .bind(&project.workflow)
+        .bind(blank_to_none(project.preview_command.as_deref()))
         .bind(old_name)
         .execute(&mut *tx)
         .await;
@@ -125,6 +148,11 @@ impl Store {
     }
 }
 
+/// A blank command means none: stored as NULL.
+fn blank_to_none(command: Option<&str>) -> Option<&str> {
+    command.filter(|c| !c.trim().is_empty())
+}
+
 fn project_from_row(row: &SqliteRow) -> Result<Project, StoreError> {
     let kind: String = row.try_get("kind")?;
     Ok(Project {
@@ -133,7 +161,7 @@ fn project_from_row(row: &SqliteRow) -> Result<Project, StoreError> {
         kind: ProjectKind::parse(&kind)
             .ok_or_else(|| StoreError::Corrupt(format!("unknown project kind `{kind}`")))?,
         workflow: row.try_get("workflow")?,
-        preview_command: None,
+        preview_command: row.try_get("preview_command")?,
     })
 }
 
@@ -176,6 +204,39 @@ mod tests {
         assert_eq!(store.list_projects().await.unwrap().len(), 2);
         assert!(matches!(
             store.project("nope").await,
+            Err(StoreError::ProjectNotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn preview_command_is_stored_and_blank_means_none() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_project(&project("p", "/w/p", ProjectKind::Repo))
+            .await
+            .unwrap();
+        assert_eq!(store.project("p").await.unwrap().preview_command, None);
+        store
+            .set_preview_command("p", Some("npm run dev"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.project("p").await.unwrap().preview_command.as_deref(),
+            Some("npm run dev")
+        );
+        assert_eq!(
+            store.list_projects().await.unwrap()[0]
+                .preview_command
+                .as_deref(),
+            Some("npm run dev")
+        );
+        store.set_preview_command("p", Some("  ")).await.unwrap();
+        assert_eq!(store.project("p").await.unwrap().preview_command, None);
+        store.set_preview_command("p", Some("x")).await.unwrap();
+        store.set_preview_command("p", Some("")).await.unwrap();
+        assert_eq!(store.project("p").await.unwrap().preview_command, None);
+        assert!(matches!(
+            store.set_preview_command("nope", None).await,
             Err(StoreError::ProjectNotFound(_))
         ));
     }
