@@ -23,8 +23,8 @@ Mode: format=markdown commits=yes
 | WP-16 | 5 | 5C | done | 1 | 25aec7a | share notes in task_dir/workspace.log; setup routes return 202 + task |
 | WP-17 | 5 | 5D | done | 1 | 29ea27f | |
 | WP-18 | 5 | 5D | done | 1 | 25b53bc | +setup-kind arms in ProjectView/TaskView/Sidebar/TerminalPane/sessionLabels |
-| WP-19 | 6 | 6A | pending | 0 | | |
-| WP-20 | 6 | 6A | pending | 0 | | |
+| WP-19 | 6 | 6A | verified | 1 | 27a45f2 | |
+| WP-20 | 6 | 6A | verified | 1 | 6a1d630 | |
 | WP-21 | 7 | 7A | pending | 0 | | |
 | WP-22 | 7 | 7A | pending | 0 | | |
 | WP-23 | 8 | 8A | pending | 0 | | |
