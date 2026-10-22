@@ -21,15 +21,33 @@ export interface E2eEnv {
   ui: string;
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
+// Ports of the installed app and of the previews: never taken, even when free.
+function reserved(port: number): boolean {
+  return port === 1420 || port === 7420 || (port >= 1501 && port <= 1509) || (port >= 7501 && port <= 7509);
+}
+
+async function freePort(): Promise<number> {
+  for (;;) {
+    const port = await new Promise<number>((resolve, reject) => {
+      const srv = createServer();
+      srv.once("error", reject);
+      srv.listen(0, "127.0.0.1", () => {
+        const { port } = srv.address() as { port: number };
+        srv.close(() => resolve(port));
+      });
     });
-  });
+    if (!reserved(port)) return port;
+  }
+}
+
+/** SIGTERM, then SIGKILL if it has not exited after `ms`. */
+async function stop(child: ChildProcess, ms: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const done = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGTERM");
+  const timer = setTimeout(() => child.kill("SIGKILL"), ms);
+  await done;
+  clearTimeout(timer);
 }
 
 function exited(child: ChildProcess): Promise<number | null> {
@@ -53,6 +71,13 @@ async function waitFor(url: string, child: ChildProcess, what: string): Promise<
   throw new Error(`${what} did not answer on ${url} within 60 s`);
 }
 
+function viteEnv(api: string): NodeJS.ProcessEnv {
+  const keep = ["PATH", "HOME", "TMPDIR", "NODE_ENV"];
+  const e: NodeJS.ProcessEnv = { VITE_DELILAH_URL: api };
+  for (const k of keep) if (process.env[k] !== undefined) e[k] = process.env[k];
+  return e;
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
   if (!existsSync(E2E_ENV)) {
     throw new Error(
@@ -66,10 +91,21 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     stdio: ["pipe", "pipe", "inherit"],
   });
   let vite: ChildProcess | undefined;
+  // Last resort if the runner dies: do not leave our vite behind.
+  const killVite = () => {
+    if (vite && vite.exitCode === null) vite.kill("SIGKILL");
+  };
+  process.once("exit", killVite);
+  process.once("SIGINT", () => {
+    killVite();
+    process.exit(130);
+  });
   const teardown = async () => {
-    if (vite && vite.exitCode === null) vite.kill("SIGTERM");
+    if (vite) await stop(vite, 5000);
     envProc.stdin?.end();
+    const killer = setTimeout(() => envProc.kill("SIGKILL"), 15_000);
     const code = await exited(envProc);
+    clearTimeout(killer);
     if (code === 3) throw new Error("e2e-env: the tripwire fired (something touched the real Delilah)");
   };
 
@@ -87,7 +123,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     vite = spawn(
       path.join(APP, "node_modules", ".bin", "vite"),
       ["--port", String(port), "--strictPort", "--host", "localhost"],
-      { cwd: APP, env: { ...process.env, VITE_DELILAH_URL: env.api }, stdio: "ignore" },
+      { cwd: APP, env: viteEnv(env.api), stdio: "ignore" },
     );
     await Promise.all([waitFor(`${env.api}/api/v1/projects`, envProc, "daemon"), waitFor(ui, vite, "vite")]);
 

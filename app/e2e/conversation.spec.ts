@@ -22,7 +22,7 @@ test("confirming the proposal card in a project conversation opens the new task"
   });
 
   await page.goto("/");
-  // The sidebar's button for this project (earlier specs leave other projects behind).
+  // The sidebar's button for this project.
   await page.getByRole("button", { name: `Nueva tarea con Claude en ${p.name}` }).click();
 
   await page.getByRole("textbox", { name: "Mensaje" }).fill("I want a user dashboard");

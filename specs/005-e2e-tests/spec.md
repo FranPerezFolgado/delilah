@@ -244,3 +244,4 @@ fixture repo, sees it start and stop through the hooks, and closes it.
 - The tests run on macOS (the only platform Delilah supports today).
 - The existing unit tests stay as they are; end-to-end tests are an extra layer, run by their own command and not by the normal per-crate test commands, so those stay fast.
 - Only the Claude Code adapter exists, so only one fake agent is needed.
+- The daemon looks for a task's PR only while the task is in the review phase, but the task's PR tab reads PRs on demand, so the UI PR test does not need to move the task to review.

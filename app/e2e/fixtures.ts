@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +11,7 @@ const E2E_ENV_BIN = path.resolve(import.meta.dirname, "..", "..", "target", "deb
 export interface Api {
   get<T = unknown>(p: string): Promise<T>;
   post<T = unknown>(p: string, body?: unknown): Promise<T>;
+  del(p: string): Promise<void>;
 }
 export interface Fixture {
   repo: string;
@@ -21,8 +23,6 @@ export interface Project {
   path: string;
   [k: string]: unknown;
 }
-
-let counter = 0;
 
 export const test = base.extend<{
   env: E2eEnv;
@@ -49,7 +49,7 @@ export const test = base.extend<{
       const text = await res.text();
       return text ? JSON.parse(text) : undefined;
     };
-    await use({ get: (p) => call("GET", p), post: (p, b) => call("POST", p, b) } as Api);
+    await use({ get: (p) => call("GET", p), post: (p, b) => call("POST", p, b), del: (p) => call("DELETE", p) as Promise<void> } as Api);
   },
   fixture: async ({}, use) => {
     await use(() => {
@@ -59,20 +59,28 @@ export const test = base.extend<{
   },
   scenario: async ({ env }, use) => {
     await use((name, steps) => {
+      if (/[/\\]|\.\./.test(name.replace(/^@/, ""))) throw new Error(`bad scenario name: ${name}`);
       const dir = path.join(env.fake_dir, "scenarios");
       mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(steps));
     });
   },
   project: async ({ api, fixture }, use) => {
+    const made: Project[] = [];
     await use(async (kind = "repo") => {
       const f = fixture();
-      return api.post<Project>("/api/v1/projects", {
+      const p = await api.post<Project>("/api/v1/projects", {
         path: kind === "repo" ? f.repo : f.parent,
         kind,
-        name: `e2e-${kind}-${Date.now()}-${counter++}`,
+        name: `e2e-${kind}-${randomUUID().slice(0, 8)}`,
       });
+      made.push(p);
+      return p;
     });
+    // The daemon is shared by every test: leave no project behind.
+    for (const p of made) {
+      await api.del(`/api/v1/projects/${encodeURIComponent(p.name)}`).catch(() => {});
+    }
   },
   // Auto fixture: on failure attach the tail of the daemon log (FR-015).
   daemonLog: [

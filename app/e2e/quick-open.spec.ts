@@ -7,7 +7,8 @@ test.use({ locale: "es-ES" });
 test("quick open finds a workspace file by part of its name and Enter opens it", async ({ page, project, api }) => {
   const p = await project("repo");
   const title = `Quick open ${Date.now()}`;
-  const task = await api.post<{ key: string }>("/api/v1/runs", {
+  // Starting the task creates the workspace whose files quick open searches.
+  await api.post("/api/v1/runs", {
     key: "", title, project: p.name, submodules: [], free: true,
   });
 
@@ -15,7 +16,6 @@ test("quick open finds a workspace file by part of its name and Enter opens it",
   await page.getByRole("button", { name: /^Tareas/ }).click();
   await page.locator(".board .kcard", { hasText: title }).click();
   await expect(page.getByRole("tab", { name: "PR", exact: true })).toBeVisible();
-  void task;
 
   await page.keyboard.press("ControlOrMeta+p");
   const dialog = page.getByRole("dialog", { name: "Abrir archivo" });

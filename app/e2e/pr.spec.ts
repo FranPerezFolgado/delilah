@@ -51,7 +51,11 @@ function openFailingPr(dir: string, n: number, branch: string, title: string) {
               { databaseId: 100, state: "CHANGES_REQUESTED", author: { login: "reviewer" }, body: "Please fix the build", submittedAt: "2026-10-20T10:00:00Z" },
             ],
           },
-          comments: { nodes: [] },
+          comments: {
+            nodes: [
+              { databaseId: 200, author: { login: "reviewer" }, body: "Looks odd here", createdAt: "2026-10-20T10:30:00Z" },
+            ],
+          },
           reviewThreads: { nodes: [] },
         },
       },
@@ -76,6 +80,7 @@ test("the PR tab shows the PR state, the failing check and the review comment", 
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator(".pr-chip")).toHaveText("Abierta");
   await expect(card.locator(".pr-meta")).toContainText("Cambios pedidos");
+  await expect(card.locator(".pr-meta")).toContainText("1 comentarios");
   await expect(card.locator(".pr-meta")).toContainText("CI fallido");
   const check = card.locator(".pr-checks li", { hasText: "build" });
   await expect(check.locator(".pr-ci-failure")).toBeVisible();

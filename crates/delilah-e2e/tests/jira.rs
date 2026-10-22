@@ -54,5 +54,7 @@ fn jira_issues_become_tasks_and_the_token_stays_in_memory() {
     let mut found = Vec::new();
     files_with(&env.root, "not-a-token", &mut found);
     assert!(found.is_empty(), "token written to disk: {found:?}");
+    let log = env.log_tail(usize::MAX);
+    assert!(!log.contains("not-a-token"), "token in the daemon log");
     assert!(env.tripwire_log().is_none());
 }

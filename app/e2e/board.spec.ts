@@ -3,7 +3,7 @@ import { expect, test } from "./fixtures";
 test.use({ locale: "en-GB" });
 
 test("a started task appears on the board and goes from working to waiting", async ({ page, project, scenario }) => {
-  scenario("slow-stop", { steps: [{ sleep_ms: 1500 }, { stop: "ok" }] });
+  scenario("slow-stop", { steps: [{ sleep_ms: 4000 }, { stop: "ok" }] });
   const p = await project("repo");
   const title = `Slow stop ${Date.now()} [fake:slow-stop]`;
 

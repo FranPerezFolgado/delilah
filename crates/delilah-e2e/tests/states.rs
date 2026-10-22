@@ -1,6 +1,7 @@
 //! US2-5, US2-6: the API, the CLI and the event stream agree on a task's state and phase;
 //! an ask is answered and the task goes on (FR-010, FR-011, FR-012).
 
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -50,11 +51,16 @@ fn agree(env: &Env, key: &str, phase: Option<&str>, status: &str) {
     assert_eq!(cli_state(env, key), seen, "CLI and API disagree");
 }
 
-/// Runs `act` while listening to the event stream; returns the topics heard.
-fn events_during(env: &Env, act: impl FnOnce()) -> Vec<String> {
+/// Runs `act` once the event socket is connected, listening for `ms`; returns the topics heard.
+fn events_during(env: &Env, ms: u64, act: impl FnOnce()) -> Vec<String> {
     let api = env.api();
-    let listener = thread::spawn(move || api.events(2500));
-    thread::sleep(Duration::from_millis(500));
+    let (tx, rx) = mpsc::channel();
+    let listener = thread::spawn(move || {
+        api.events_when_connected(ms, move || {
+            let _ = tx.send(());
+        })
+    });
+    rx.recv_timeout(T).expect("the events socket to connect");
     act();
     listener.join().expect("event listener")
 }
@@ -65,17 +71,19 @@ fn api_cli_and_events_agree_through_a_tasks_life() {
     start(&env, "E2E-20", "");
     agree(&env, "E2E-20", None, "waiting-for-user");
 
-    let heard = events_during(&env, || {
+    let heard = events_during(&env, 2500, || {
         env.api().set_phase("E2E-20", "plan");
     });
     assert!(heard.iter().any(|t| t == "tasks"), "no tasks event: {heard:?}");
+    assert_eq!(api_state(&env, "E2E-20").0, "plan", "the event came but the phase did not change");
     agree(&env, "E2E-20", Some("plan"), "waiting-for-user");
 
-    let heard = events_during(&env, || {
+    let heard = events_during(&env, 2500, || {
         let (status, out, err) = env.cli().run(&["done", "E2E-20"]);
         assert!(status.success(), "delilah done failed: {status}\n{out}\n{err}");
     });
     assert!(heard.iter().any(|t| t == "tasks"), "no tasks event: {heard:?}");
+    assert_eq!(api_state(&env, "E2E-20").1, "done", "the event came but the task is not done");
     agree(&env, "E2E-20", Some("plan"), "done");
     let (_, out, _) = env.cli().run(&["ls"]);
     assert!(out.contains("E2E-20"), "{out}");
@@ -100,25 +108,30 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     agree(&env, "E2E-21", None, "waiting-for-user");
 
     let id = ask["id"].as_str().unwrap().to_string();
-    let heard = events_during(&env, || {
+    let heard = events_during(&env, 2500, || {
         env.api().answer_ask(&id, json!({"Which colour?": "blue"}));
     });
     assert!(heard.iter().any(|t| t == "inbox"), "no inbox event: {heard:?}");
 
     agree(&env, "E2E-21", None, "running");
-    env.wait_for("the ask left the inbox", T, || {
-        let inbox = env.api().inbox();
-        if items(&inbox).iter().any(|i| i["ask"]["id"] == id.as_str()) { Err(inbox) } else { Ok(()) }
+    // The scenario sleeps 2.5 s after the answer, so the stop happens inside this window.
+    let mut rec = None;
+    let heard = events_during(&env, 6000, || {
+        env.wait_for("the ask left the inbox", T, || {
+            let inbox = env.api().inbox();
+            if items(&inbox).iter().any(|i| i["ask"]["id"] == id.as_str()) { Err(inbox) } else { Ok(()) }
+        });
+        rec = Some(env.wait_for("the answer in the record", T, || match env.record_for("E2E-21") {
+            Some(r) if !r.answers.is_empty() => Ok(r),
+            other => Err(other.map(|r| r.answers)),
+        }));
+        // Past the ask the scenario stops: the task is waiting for the user again.
+        agree(&env, "E2E-21", None, "waiting-for-user");
     });
-    let rec = env.wait_for("the answer in the record", T, || match env.record_for("E2E-21") {
-        Some(r) if !r.answers.is_empty() => Ok(r),
-        other => Err(other.map(|r| r.answers)),
-    });
+    assert!(
+        heard.iter().any(|t| t == "tasks" || t == "sessions"),
+        "no tasks/sessions event for the stop: {heard:?}"
+    );
+    let rec = rec.unwrap();
     assert!(rec.answers[0].to_string().contains("blue"), "{:?}", rec.answers);
-    // Past the ask the scenario stops: the task is waiting for the user again.
-    env.wait_for("the stop after the ask", T, || match env.record_for("E2E-21") {
-        Some(r) if r.exited.is_some() || r.steps_done >= 3 => Ok(()),
-        other => Err(other.map(|r| (r.steps_done, r.exited))),
-    });
-    agree(&env, "E2E-21", None, "waiting-for-user");
 }
