@@ -346,6 +346,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
             .try_get::<Option<String>, _>("handoff")?
             .map(|json| serde_json::from_str(&json))
             .transpose()?,
+        autopilot: None,
     })
 }
 
@@ -591,6 +592,7 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();

@@ -670,6 +670,7 @@ mod tests {
                 path: app.config.home.join("missing"),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -976,6 +977,7 @@ mod tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();

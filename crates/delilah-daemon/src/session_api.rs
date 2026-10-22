@@ -531,6 +531,7 @@ mod project_tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -594,6 +595,7 @@ mod project_tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();

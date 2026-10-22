@@ -636,6 +636,7 @@ mod tests {
                 path: repo.to_path_buf(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();

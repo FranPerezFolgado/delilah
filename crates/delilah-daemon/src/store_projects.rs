@@ -133,6 +133,7 @@ fn project_from_row(row: &SqliteRow) -> Result<Project, StoreError> {
         kind: ProjectKind::parse(&kind)
             .ok_or_else(|| StoreError::Corrupt(format!("unknown project kind `{kind}`")))?,
         workflow: row.try_get("workflow")?,
+        preview_command: None,
     })
 }
 
@@ -146,6 +147,7 @@ mod tests {
             path: path.into(),
             kind,
             workflow: "feature".into(),
+            preview_command: None,
         }
     }
 

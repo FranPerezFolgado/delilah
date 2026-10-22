@@ -48,6 +48,7 @@ pub async fn add_project(
         path: root,
         kind: new.kind,
         workflow: new.workflow,
+        preview_command: None,
     };
     app.store.create_project(&project).await?;
     app.emit(crate::events::Topic::Projects);

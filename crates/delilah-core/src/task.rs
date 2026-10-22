@@ -123,6 +123,25 @@ pub enum Event {
         step: Step,
         session: String,
     },
+    /// Autopilot paused itself; the status does not change.
+    AutopilotPaused {
+        reason: String,
+    },
+    /// The user resumed autopilot; the status does not change.
+    AutopilotResumed,
+    /// Autopilot answered a question with its recommended option.
+    AutopilotAnswered {
+        question: String,
+        answer: String,
+    },
+    /// Autopilot nudged a stalled step (once per step).
+    AutopilotNudged {
+        step: Step,
+    },
+    /// Autopilot opened the PRs (URLs) and is done.
+    AutopilotFinished {
+        prs: Vec<String>,
+    },
 }
 
 impl Event {
@@ -142,6 +161,11 @@ impl Event {
             Self::StartAborted { .. } => "start-aborted",
             Self::CreatedFromConversation { .. } => "created-from-conversation",
             Self::StepStarted { .. } => "step-started",
+            Self::AutopilotPaused { .. } => "autopilot-paused",
+            Self::AutopilotResumed => "autopilot-resumed",
+            Self::AutopilotAnswered { .. } => "autopilot-answered",
+            Self::AutopilotNudged { .. } => "autopilot-nudged",
+            Self::AutopilotFinished { .. } => "autopilot-finished",
         }
     }
 }
@@ -217,6 +241,38 @@ pub struct Handoff {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutopilotState {
+    Running,
+    Paused,
+    Done,
+}
+
+/// Where autopilot's final actions are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutopilotStage {
+    Preview,
+    OpeningPr,
+}
+
+/// Autopilot of a task: the chain runs by itself until the PRs are open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Autopilot {
+    pub state: AutopilotState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<AutopilotStage>,
+    /// Why it paused (user-facing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// When `state` last changed.
+    pub since: DateTime<Utc>,
+    /// The step that already got its one nudge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudged: Option<Step>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub key: TaskKey,
@@ -241,6 +297,9 @@ pub struct Task {
     /// The handoff to the next step under way, if any.
     #[serde(default)]
     pub handoff: Option<Handoff>,
+    /// Autopilot, if on (`None` = off).
+    #[serde(default)]
+    pub autopilot: Option<Autopilot>,
 }
 
 impl Task {
@@ -256,6 +315,7 @@ impl Task {
             in_checkout: None,
             saving_mode: false,
             handoff: None,
+            autopilot: None,
         }
     }
 
@@ -272,7 +332,15 @@ impl Task {
             self.phase = Some(phase);
             return Ok(());
         }
-        if let Event::StepStarted { .. } = event {
+        if matches!(
+            event,
+            Event::StepStarted { .. }
+                | Event::AutopilotPaused { .. }
+                | Event::AutopilotResumed
+                | Event::AutopilotAnswered { .. }
+                | Event::AutopilotNudged { .. }
+                | Event::AutopilotFinished { .. }
+        ) {
             return Ok(());
         }
         self.status = next_status(&self.status, event)?;
@@ -609,6 +677,107 @@ mod tests {
             let before = task.clone();
             task.apply(event.clone()).unwrap();
             assert_eq!(task, before);
+        }
+    }
+
+    #[test]
+    fn autopilot_round_trips() {
+        let a = Autopilot {
+            state: AutopilotState::Paused,
+            stage: None,
+            reason: Some("stalled".into()),
+            since: at(10, 0),
+            nudged: None,
+        };
+        let json = serde_json::to_string(&a).unwrap();
+        assert_eq!(
+            json,
+            r#"{"state":"paused","reason":"stalled","since":"2026-10-19T10:00:00Z"}"#
+        );
+        assert_eq!(serde_json::from_str::<Autopilot>(&json).unwrap(), a);
+        let b = Autopilot {
+            state: AutopilotState::Running,
+            stage: Some(AutopilotStage::OpeningPr),
+            reason: None,
+            since: at(10, 0),
+            nudged: Some(Step::Review),
+        };
+        let json = serde_json::to_string(&b).unwrap();
+        assert!(json.contains(r#""stage":"opening_pr""#) && json.contains(r#""nudged":"review""#));
+        assert_eq!(serde_json::from_str::<Autopilot>(&json).unwrap(), b);
+        assert_eq!(
+            serde_json::to_string(&AutopilotStage::Preview).unwrap(),
+            "\"preview\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AutopilotState::Done).unwrap(),
+            "\"done\""
+        );
+    }
+
+    #[test]
+    fn old_tasks_load_without_autopilot() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,
+            "status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.autopilot, None);
+    }
+
+    fn autopilot_events() -> Vec<(Event, &'static str)> {
+        vec![
+            (
+                Event::AutopilotPaused { reason: "r".into() },
+                "autopilot-paused",
+            ),
+            (Event::AutopilotResumed, "autopilot-resumed"),
+            (
+                Event::AutopilotAnswered {
+                    question: "q".into(),
+                    answer: "a".into(),
+                },
+                "autopilot-answered",
+            ),
+            (
+                Event::AutopilotNudged { step: Step::Plan },
+                "autopilot-nudged",
+            ),
+            (
+                Event::AutopilotFinished {
+                    prs: vec!["u".into()],
+                },
+                "autopilot-finished",
+            ),
+        ]
+    }
+
+    #[test]
+    fn autopilot_events_serialise_kebab_case() {
+        for (event, name) in autopilot_events() {
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["type"], name);
+            assert_eq!(event.name(), name);
+            assert_eq!(serde_json::from_value::<Event>(json).unwrap(), event);
+        }
+    }
+
+    #[test]
+    fn autopilot_events_keep_every_status() {
+        let mut paused = running_task();
+        paused
+            .apply(Event::LimitReached {
+                resume_at: at(15, 0),
+            })
+            .unwrap();
+        for (event, _) in autopilot_events() {
+            for mut task in [
+                running_task(),
+                paused.clone(),
+                Task::new(TaskKey::new("PROJ-5"), "t", "feature"),
+            ] {
+                let before = task.clone();
+                task.apply(event.clone()).unwrap();
+                assert_eq!(task, before);
+            }
         }
     }
 }
