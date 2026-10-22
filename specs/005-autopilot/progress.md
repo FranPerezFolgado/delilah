@@ -27,6 +27,6 @@ Mode: format=markdown commits=yes
 | WP-16F | 6 | 6F | done | 1 | 0bd45e9 | phase-6 review fixes (+running-task toggle, workflow gate); UI not browser-checked (no browser tools) |
 | WP-17 | 7 | 7A | verified | 1 | 5131bb3 | PreviewControl fetches projects itself |
 | WP-18 | 8 | 8A | verified | 1 | 68423d8 | non-spec workflow → task + refusal |
-| WP-19 | 8 | 8B | implementing | 0 | | |
+| WP-19 | 8 | 8B | verified | 1 | 0967841 | |
 | WP-20 | 9 | 9A | pending | 0 | | |
 | WP-21 | 9 | 9B | pending | 0 | | |
