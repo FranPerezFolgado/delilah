@@ -40,4 +40,13 @@ describe("ProjectView preview command", () => {
     fireEvent.blur(getByLabelText("Comando de preview"));
     expect(update).not.toHaveBeenCalled();
   });
+
+  it("shows the error when saving fails", async () => {
+    vi.spyOn(api, "updateProject").mockRejectedValue(new Error("no se pudo guardar"));
+    const { getByLabelText, findByText } = view();
+    const input = getByLabelText("Comando de preview");
+    fireEvent.change(input, { target: { value: "pnpm dev" } });
+    fireEvent.blur(input);
+    await findByText("no se pudo guardar");
+  });
 });

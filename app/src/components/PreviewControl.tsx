@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type PreviewView } from "../api";
+import { api, ApiError, type PreviewView, type TaskStatus } from "../api";
 import { t } from "../i18n";
 import { on } from "../live";
 import { openExternal } from "../platform";
@@ -8,10 +8,12 @@ interface Props {
   taskKey: string;
   /** The task's project name; the control exists only when it has a preview command. */
   project: string | null;
+  /** The task's status; a finished task (done or failed) cannot start a preview. */
+  status?: TaskStatus;
 }
 
 /** Starts, shows and stops a task's preview (the project's preview command). */
-export function PreviewControl({ taskKey, project }: Props) {
+export function PreviewControl({ taskKey, project, status }: Props) {
   const [hasCommand, setHasCommand] = useState(false);
   const [preview, setPreview] = useState<PreviewView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,7 +31,7 @@ export function PreviewControl({ taskKey, project }: Props) {
     return () => off.forEach((f) => f());
   }, [refresh]);
 
-  if (!hasCommand) return null;
+  if (!hasCommand || status?.type === "done" || status?.type === "failed") return null;
 
   const start = async () => {
     setBusy(true);
@@ -38,6 +40,7 @@ export function PreviewControl({ taskKey, project }: Props) {
       setPreview(await api.startPreview(taskKey));
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.reason === "running") refresh();
+      else if (e instanceof ApiError && e.status === 409 && e.reason === "no-workspace") setError(t("La tarea aún no tiene espacio de trabajo"));
       else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);

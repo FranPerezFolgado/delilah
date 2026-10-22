@@ -72,8 +72,18 @@ pub(crate) fn allowed(key: &TaskKey, workflow: &str) -> bool {
 
 /// The 409 for autopilot asked for where it cannot be.
 pub(crate) fn not_spec_workflow(key: &TaskKey) -> crate::api::ApiError {
+    refusal(key.as_str(), crate::lang::Lang::En)
+}
+
+/// The same refusal in the app's language, for the texts a person reads (a proposal's
+/// card).
+pub(crate) fn refusal(key: &str, lang: crate::lang::Lang) -> crate::api::ApiError {
     crate::api::ApiError::conflict_reason(
-        format!("{key} is not on the spec workflow, so it cannot have autopilot"),
+        lang.pick(
+            &format!("{key} no está en el workflow de spec, así que no puede tener autopiloto"),
+            &format!("{key} is not on the spec workflow, so it cannot have autopilot"),
+        )
+        .to_string(),
         "not-spec-workflow",
     )
 }

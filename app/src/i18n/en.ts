@@ -466,6 +466,7 @@ export const EN: Record<string, string> = {
   "Preview": "Preview",
   "PR": "PR",
   "Lanzar preview": "Start preview",
+  "La tarea aún no tiene espacio de trabajo": "The task has no workspace yet",
   "Parar preview": "Stop preview",
   "Preview arrancando": "Preview starting",
   "Preview en marcha": "Preview running",

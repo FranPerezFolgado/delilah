@@ -2,8 +2,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { setLanguage } from "../i18n";
-import { api, type PreviewView, type Project } from "../api";
+import { api, ApiError, type PreviewView, type Project } from "../api";
 import { PreviewControl } from "./PreviewControl";
+
+const live = vi.hoisted(() => ({ handlers: {} as Record<string, () => void> }));
+vi.mock("../live", () => ({
+  on: (topic: string, cb: () => void) => {
+    live.handlers[topic] = cb;
+    return () => {};
+  },
+}));
 
 const openExternal = vi.hoisted(() => vi.fn());
 vi.mock("../platform", async (orig) => ({ ...(await orig<typeof import("../platform")>()), openExternal }));
@@ -64,5 +72,56 @@ describe("PreviewControl", () => {
     vi.spyOn(api, "getPreview").mockResolvedValue(view({ state: "failed", error: "puerto ocupado" }));
     const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
     await findByText(/puerto ocupado/);
+  });
+
+  it("is hidden without a project", async () => {
+    const projects = vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
+    vi.spyOn(api, "getPreview").mockResolvedValue(null);
+    const { container } = render(<PreviewControl taskKey="T-1" project={null} />);
+    await Promise.resolve();
+    expect(projects).not.toHaveBeenCalled();
+    expect(container.textContent).toBe("");
+  });
+
+  it("refetches when the tasks topic fires", async () => {
+    vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
+    const get = vi.spyOn(api, "getPreview").mockResolvedValue(null);
+    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
+    await findByText("Lanzar preview");
+    const calls = get.mock.calls.length;
+    live.handlers.tasks();
+    await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(calls));
+  });
+
+  it("refetches on a 409 running instead of showing an error", async () => {
+    vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
+    const get = vi.spyOn(api, "getPreview").mockResolvedValueOnce(null).mockResolvedValue(view({ url: "http://localhost:1" }));
+    vi.spyOn(api, "startPreview").mockRejectedValue(new ApiError("ya en marcha", 409, false, "running"));
+    const { findByText, queryByText } = render(<PreviewControl taskKey="T-1" project="app" />);
+    fireEvent.click(await findByText("Lanzar preview"));
+    await findByText("http://localhost:1");
+    expect(queryByText("ya en marcha")).toBeNull();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("is hidden on a done or failed task", async () => {
+    const projects = vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
+    vi.spyOn(api, "getPreview").mockResolvedValue(null);
+    for (const status of [{ type: "done" }, { type: "failed", reason: "x" }] as const) {
+      const { container, unmount } = render(<PreviewControl taskKey="T-1" project="app" status={status} />);
+      await waitFor(() => expect(projects).toHaveBeenCalled());
+      expect(container.textContent).toBe("");
+      unmount();
+    }
+  });
+
+  it("explains a task without workspace", async () => {
+    vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
+    vi.spyOn(api, "getPreview").mockResolvedValue(null);
+    vi.spyOn(api, "startPreview").mockRejectedValue(new ApiError("the task has no workspace yet", 409, false, "no-workspace"));
+    const { findByText, queryByText } = render(<PreviewControl taskKey="T-1" project="app" status={{ type: "queued" }} />);
+    fireEvent.click(await findByText("Lanzar preview"));
+    await findByText("La tarea aún no tiene espacio de trabajo");
+    expect(queryByText(/the task has no workspace/)).toBeNull();
   });
 });

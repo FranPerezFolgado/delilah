@@ -54,7 +54,7 @@ interface PreviewView { state: "starting" | "running" | "failed"; url?: string; 
 
 ## Asks
 
-- `POST /api/v1/asks/{id}/answer` body gains `launch?: "autopilot"`, only meaningful when answering `Crear` on a task proposal: the created task starts at once with autopilot on. Response unchanged (`{ task, error? }`; `error` set when the start fails, the task stays in the backlog).
+- `POST /api/v1/asks/{id}/answer` body gains `launch?: "autopilot"`, only meaningful when answering `Crear` on a task proposal: the created task starts at once with autopilot on. Response unchanged (`{ task, error? }`; `error` set when the start fails, the task stays in the backlog). On a non-spec workflow, `launch: "autopilot"` still answers 200 with `task` set (a plain backlog task, no autopilot) and `error` set to the refusal; unknown `launch` values are ignored.
 
 ## History
 

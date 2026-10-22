@@ -517,7 +517,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
-              <PreviewControl taskKey={owner} project={task.project} />
+              <PreviewControl taskKey={owner} project={task.project} status={task.status} />
               {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
                 <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
                   {t("Desactivar")}
