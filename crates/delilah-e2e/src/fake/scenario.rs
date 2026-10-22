@@ -103,7 +103,7 @@ fn marker(prompt: &str) -> Option<&str> {
 
 /// A scenario name is a plain file stem: `[A-Za-z0-9._-]+`, no leading dot. One
 /// leading `@` is allowed: a project conversation's task is `@<project name>`.
-fn valid_name(name: &str) -> bool {
+pub fn valid_name(name: &str) -> bool {
     let name = name.strip_prefix('@').unwrap_or(name);
     !name.is_empty()
         && !name.starts_with('.')

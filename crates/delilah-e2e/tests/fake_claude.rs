@@ -124,12 +124,26 @@ fn a_failing_script_shows_the_session_as_failed() {
     let env = Env::start(EnvOptions::default());
     env.scenario("fail", &json!({"steps": [{"fail": "boom"}]}));
     start(&env, "E2E-5", "Fail", "[fake:fail]");
-    let rec = wait_record(&env, "E2E-5", "the failed exit", |r| r.exited == Some(1));
-    assert!(rec.hooks.iter().any(|h| h.event == "StopFailure"), "{:?}", rec.hooks);
-    // The daemon treats a StopFailure as the turn ending; the process is gone.
-    let sessions = env.api().sessions();
-    let me = items(&sessions).iter().find(|s| s["id"] == rec.session_id.as_str()).unwrap();
-    assert_eq!(me["live"], false, "{me}");
+    // Like real Claude, the fake stays alive after a failed turn; the daemon shows the
+    // error in the inbox for that task, and the session as live.
+    let item = env.wait_for("the error item in the inbox", T, || {
+        let inbox = env.api().inbox();
+        match items(&inbox).iter().find(|i| i["task"] == "E2E-5" && i["kind"] == "error") {
+            Some(i) => Ok(i.clone()),
+            None => Err(inbox),
+        }
+    });
+    assert!(item["text"].as_str().unwrap_or("").contains("boom"), "{item}");
+    let rec = wait_record(&env, "E2E-5", "the StopFailure hook", |r| {
+        r.hooks.iter().any(|h| h.event == "StopFailure")
+    });
+    assert_eq!(rec.exited, None, "{rec:?}");
+    let (_, state) = live_session(&env, "E2E-5").expect("a live session after the failure");
+    assert!(!state.is_empty());
+    // It is still there a moment later (the SessionEnd would clear the item).
+    std::thread::sleep(Duration::from_millis(500));
+    let inbox = env.api().inbox();
+    assert!(items(&inbox).iter().any(|i| i["task"] == "E2E-5" && i["kind"] == "error"), "{inbox}");
 }
 
 #[test]

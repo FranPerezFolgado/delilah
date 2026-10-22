@@ -18,9 +18,10 @@ pub fn items(v: &Value) -> &[Value] {
     v.as_array().unwrap_or_else(|| panic!("expected a JSON array, got {v}"))
 }
 
-/// `task["status"]`.
+/// `task["status"]["type"]` (the status is an object); a plain string also works.
 pub fn status_of(task: &Value) -> &str {
-    task["status"].as_str().unwrap_or("")
+    let s = &task["status"];
+    s["type"].as_str().or_else(|| s.as_str()).unwrap_or("")
 }
 
 /// `task["phase"]`, empty if none.
@@ -190,11 +191,17 @@ impl Api {
     /// topic names received (lowercase, as sent: `["tasks", "inbox"]`), in order. Bounded: at most
     /// `ms` plus the connect time.
     pub fn events(&self, ms: u64) -> Vec<String> {
+        self.events_when_connected(ms, || {})
+    }
+
+    /// Like [`Api::events`], calling `connected` once the WebSocket handshake is done.
+    pub fn events_when_connected(&self, ms: u64, connected: impl FnOnce()) -> Vec<String> {
         let addr = self.base.trim_start_matches("http://");
         let stream = TcpStream::connect(addr).unwrap_or_else(|e| panic!("events {addr}: {e}"));
         let url = format!("ws://{addr}/api/v1/events");
         let (mut ws, _) = tungstenite::client(url, stream)
             .unwrap_or_else(|e| panic!("events handshake: {e}"));
+        connected();
         let deadline = Instant::now() + Duration::from_millis(ms);
         let mut topics = Vec::new();
         loop {
@@ -226,6 +233,18 @@ impl Api {
     }
 }
 
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn status_of_reads_the_type_of_the_status_object() {
+        assert_eq!(status_of(&json!({"status": {"type": "running"}})), "running");
+        assert_eq!(status_of(&json!({"status": "done"})), "done");
+        assert_eq!(status_of(&json!({})), "");
+    }
+}
+
 #[cfg(all(test, feature = "e2e"))]
 mod tests {
     use super::*;
@@ -248,8 +267,13 @@ mod tests {
         assert!(connected["account"].is_string(), "{connected}");
         assert!(!items(&api.jira_issues("assigned", "open", "all")).is_empty());
         let a2 = Api::new(&env.api);
-        let t = std::thread::spawn(move || a2.events(1500));
-        std::thread::sleep(Duration::from_millis(400));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let t = std::thread::spawn(move || {
+            a2.events_when_connected(3000, move || {
+                let _ = tx.send(());
+            })
+        });
+        rx.recv_timeout(Duration::from_secs(10)).expect("the events socket to connect");
         api.new_task(json!({"key": "E2E-1", "title": "t", "free": true}));
         let topics = t.join().unwrap();
         assert!(topics.iter().any(|t| t == "tasks"), "{topics:?}");

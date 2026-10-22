@@ -74,10 +74,10 @@ tripwire, user's HOME), `jira: bool`.
 | `ask` | runs the `PreToolUse` / `AskUserQuestion` hook with a `tool_input.questions` payload; reads the hook's stdout; records `updatedInput.answers`; then a `PostToolUse` hook |
 | `stop` | runs the `Stop` hook with `last_assistant_message` |
 | `wait_input` | reads one line from the terminal, records it, runs `UserPromptSubmit`, goes on |
-| `fail` | runs `StopFailure`, prints the message, exits 1 |
+| `fail` | prints the message, runs `StopFailure`, then stays alive reading input like Claude after a failed turn (later steps are skipped; EOF -> `SessionEnd`, exit 0). The daemon keeps the error item in the inbox until the session ends |
 | `exit` | runs `SessionEnd`, exits with the code |
 
-Before the first step the fake always runs `SessionStart`. After the last step (if it
+Before the first step the fake always runs `SessionStart` (a leading `trust_dialog` step comes first: the dialog precedes `SessionStart`, as in real Claude). On start it also creates the transcript `<home>/.claude/projects/<cwd, non-alphanumerics as dashes>/<session>.jsonl` (empty), only when the session's `HOME` is absolute and is the Env's temp home (`<root>/home`, next to `<root>/fake`), so the daemon resumes with `--resume`. After the last step (if it
 didn't exit), it waits for input forever, like Claude idle: every line typed is
 recorded and answered with `UserPromptSubmit` + `Stop`. On EOF or SIGHUP it runs
 `SessionEnd` and exits 0.

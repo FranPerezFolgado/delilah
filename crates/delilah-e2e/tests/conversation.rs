@@ -15,17 +15,14 @@ fn confirming_the_proposal_card_creates_a_backlog_task_with_the_brief() {
     env.register_fixtures();
     let title = "Dashboard de uso";
     let brief = "Build a user dashboard with usage charts.";
-    // `env.scenario` takes plain names; a conversation's task is `@<project>`.
-    std::fs::write(
-        env.fake_dir().join("scenarios/@signal.json"),
-        json!({"steps": [
+    env.scenario(
+        "@signal",
+        &json!({"steps": [
             {"ask": {"question": title, "header": "Nueva tarea",
                 "options": [{"label": "Crear", "preview": brief}, "Cambiar algo", "Descartar"]}},
             {"stop": "ok"},
-        ]})
-        .to_string(),
-    )
-    .unwrap();
+        ]}),
+    );
 
     let api = env.api();
     let session = api.open_project_session("signal", true);

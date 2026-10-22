@@ -68,7 +68,23 @@ Do you trust the files in this folder?
   2. No, exit
 ```
 
+The dialog comes before `SessionStart`: the hook only runs after it is accepted
+(declined: only `SessionEnd`, exit 1).
+
 Then it reads input: `\r` or `\n` → yes; `2` then Enter → no (exit 1).
+
+## Transcript
+
+At start it creates an empty `<HOME>/.claude/projects/<cwd with non-alphanumerics as
+dashes>/<session id>.jsonl`, which is what the daemon checks before passing `--resume`.
+It does so only if `HOME` is absolute and equals the Env's temp home (`<fake-dir>/../home`)
+and the session id has no `/` or `..`; otherwise nothing is written.
+
+## The `fail` step
+
+Prints the message and runs `StopFailure`, then idles like after a stop (answers each
+line typed; EOF -> `SessionEnd`, exit 0). Real Claude stays alive after a failed turn,
+and the daemon's inbox error item lasts until `SessionEnd`.
 
 ## Guarantees
 

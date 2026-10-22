@@ -45,6 +45,13 @@ fn start(args: &[String]) -> Result<u8, String> {
             other => return Err(format!("unknown argument {other:?}\n{USAGE}")),
         }
     }
+    // Signals are caught before the Env exists, so one during startup still unwinds
+    // through the Env's drop (it only sets a flag, polled once the Env is up).
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let stop = rt.block_on(async { Stop::install() })?;
     let mut env = std::panic::catch_unwind(|| Env::start(opts))
         .map_err(|_| "could not start the environment (see above)".to_string())?;
     if keep {
@@ -62,32 +69,38 @@ fn start(args: &[String]) -> Result<u8, String> {
     });
     println!("{line}");
 
-    wait_for_stop()?;
+    rt.block_on(stop.wait());
     Ok(if env.finish() { 3 } else { 0 })
 }
 
-/// Blocks until stdin hits EOF or SIGINT/SIGTERM arrives.
-fn wait_for_stop() -> Result<(), String> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let mut term = signal(SignalKind::terminate()).map_err(|e| e.to_string())?;
-        let mut int = signal(SignalKind::interrupt()).map_err(|e| e.to_string())?;
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+/// SIGINT/SIGTERM handlers, installed before the Env starts, plus stdin EOF.
+struct Stop {
+    term: tokio::signal::unix::Signal,
+    int: tokio::signal::unix::Signal,
+    stdin: tokio::sync::oneshot::Receiver<()>,
+}
+
+impl Stop {
+    /// Must run inside a runtime. A signal received before `wait` stays pending.
+    fn install() -> Result<Stop, String> {
+        let term = signal(SignalKind::terminate()).map_err(|e| e.to_string())?;
+        let int = signal(SignalKind::interrupt()).map_err(|e| e.to_string())?;
+        let (tx, stdin) = tokio::sync::oneshot::channel::<()>();
         std::thread::spawn(move || {
             let mut sink = Vec::new();
             let _ = std::io::stdin().read_to_end(&mut sink);
             let _ = tx.send(());
         });
+        Ok(Stop { term, int, stdin })
+    }
+
+    async fn wait(mut self) {
         tokio::select! {
-            _ = rx => {}
-            _ = term.recv() => {}
-            _ = int.recv() => {}
+            _ = &mut self.stdin => {}
+            _ = self.term.recv() => {}
+            _ = self.int.recv() => {}
         }
-        Ok(())
-    })
+    }
 }
 
 fn fixture(args: &[String]) -> Result<u8, String> {

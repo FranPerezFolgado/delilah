@@ -28,6 +28,8 @@ struct Runner<'a, R, W> {
 /// How a step ended: go on, or leave with an exit code.
 enum Flow {
     Next,
+    /// Stop playing steps and wait for input, like Claude after a failed turn.
+    Idle,
     Exit(i32),
 }
 
@@ -122,7 +124,7 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
             Step::Fail(message) => {
                 self.print(&format!("{message}\n"));
                 self.hook("StopFailure", &payload::stop_failure(&session, &cwd, message));
-                return Flow::Exit(self.end("error", 1));
+                return Flow::Idle;
             }
             Step::Exit(code) => return Flow::Exit(self.end("exit", *code)),
         }
@@ -169,12 +171,32 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     }
 }
 
+/// The Env's temp home, derived from the fake dir (`<root>/fake`, `<root>/home`).
+fn env_home(fake_dir: &Path) -> Option<std::path::PathBuf> {
+    fake_dir.parent().map(|root| root.join("home"))
+}
+
 /// Claude keeps a conversation at `$HOME/.claude/projects/<cwd, non-alphanumerics as
 /// dashes>/<session>.jsonl`; the daemon passes `--resume` only if that file exists
-/// (`claude::has_conversation`). Written under the record's own `HOME` (the Env's
-/// temp home); nothing is written when the session has no `HOME`.
-fn write_transcript(record: &Record) {
-    let Some(home) = record.env.get("HOME") else { return };
+/// (`claude::has_conversation`). Written only when the record's `HOME` is absolute and
+/// is the Env's own temp home (`<fake_dir>/../home`), so the fake can never touch a
+/// real home; otherwise nothing is written.
+fn write_transcript(record: &Record, fake_dir: Option<&Path>) {
+    let (Some(home), Some(fake_dir)) = (record.env.get("HOME"), fake_dir) else { return };
+    let home = Path::new(home);
+    let id = &record.session_id;
+    if !home.is_absolute()
+        || id.is_empty()
+        || id.contains('/')
+        || id.contains('\\')
+        || id.contains("..")
+    {
+        return;
+    }
+    let (Ok(got), Some(want)) = (home.canonicalize(), env_home(fake_dir)) else { return };
+    if want.canonicalize().ok().as_ref() != Some(&got) {
+        return;
+    }
     let cwd = Path::new(&record.cwd);
     let dir = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
     let folder: String = dir
@@ -182,12 +204,12 @@ fn write_transcript(record: &Record) {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let dir = Path::new(home).join(".claude/projects").join(folder);
+    let dir = got.join(".claude/projects").join(folder);
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(dir.join(format!("{}.jsonl", record.session_id)));
+            .open(dir.join(format!("{id}.jsonl")));
     }
 }
 
@@ -202,7 +224,7 @@ pub fn run<R: BufRead, W: Write>(
     out: &mut W,
 ) -> i32 {
     let mut r = Runner { record, hooks, fake_dir, input, out };
-    write_transcript(r.record);
+    write_transcript(r.record, fake_dir);
     let mut steps = scenario.steps.iter();
     // Real Claude shows the folder-trust dialog before the session starts.
     if let Some(first @ Step::TrustDialog(_)) = scenario.steps.first() {
@@ -223,8 +245,10 @@ pub fn run<R: BufRead, W: Write>(
         let flow = r.step(step);
         r.record.steps_done += 1;
         r.save();
-        if let Flow::Exit(code) = flow {
-            return code;
+        match flow {
+            Flow::Exit(code) => return code,
+            Flow::Idle => break,
+            Flow::Next => {}
         }
     }
 
@@ -335,20 +359,67 @@ mod tests {
 
     #[test]
     fn writes_the_transcript_the_daemon_looks_for() {
-        let dir = tempfile::tempdir().unwrap();
-        let fake = tempfile::tempdir().unwrap();
-        let hooks = settings(dir.path());
-        let mut rec = record("new");
-        rec.cwd = dir.path().display().to_string();
-        rec.env.insert("HOME".into(), fake.path().display().to_string());
-        run(&mut rec, &Scenario { steps: vec![] }, &hooks, None, &mut Cursor::new(vec![]), &mut Vec::new());
+        let (dir, root, rec) = transcript_run("s1", |home| home.display().to_string());
         let canon = dir.path().canonicalize().unwrap();
         let folder: String = canon
             .to_string_lossy()
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
             .collect();
-        assert!(fake.path().join(".claude/projects").join(folder).join("s1.jsonl").is_file());
+        let want = root.path().join("home/.claude/projects").join(folder).join("s1.jsonl");
+        assert!(want.is_file());
+        assert_eq!(rec.session_id, "s1");
+    }
+
+    /// Runs an empty scenario with fake dir `<root>/fake`; `home_of` maps the Env's
+    /// home to the record's `HOME`.
+    fn transcript_run(
+        session: &str,
+        home_of: impl Fn(&Path) -> String,
+    ) -> (tempfile::TempDir, tempfile::TempDir, Record) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("fake")).unwrap();
+        std::fs::create_dir_all(root.path().join("home")).unwrap();
+        let hooks = settings(dir.path());
+        let mut rec = record("new");
+        rec.session_id = session.into();
+        rec.cwd = dir.path().display().to_string();
+        rec.env.insert("HOME".into(), home_of(&root.path().join("home")));
+        let fake = root.path().join("fake");
+        run(&mut rec, &Scenario { steps: vec![] }, &hooks, Some(&fake), &mut Cursor::new(vec![]), &mut Vec::new());
+        (dir, root, rec)
+    }
+
+    fn jsonl_count(home: &Path) -> usize {
+        fn walk(p: &Path) -> usize {
+            std::fs::read_dir(p).map(|d| d.flatten().map(|e| {
+                let p = e.path();
+                if p.is_dir() { walk(&p) } else if p.extension().is_some_and(|x| x == "jsonl") { 1 } else { 0 }
+            }).sum()).unwrap_or(0)
+        }
+        walk(home)
+    }
+
+    #[test]
+    fn no_transcript_for_a_home_that_is_not_the_envs() {
+        let other = tempfile::tempdir().unwrap();
+        let o = other.path().display().to_string();
+        let (_d, root, _) = transcript_run("s1", |_| o.clone());
+        assert_eq!(jsonl_count(other.path()), 0);
+        assert_eq!(jsonl_count(&root.path().join("home")), 0);
+        let (_d, root, _) = transcript_run("s1", |_| "/Users/someone".into());
+        assert_eq!(jsonl_count(&root.path().join("home")), 0);
+    }
+
+    #[test]
+    fn no_transcript_for_a_relative_home_or_a_bad_session_id() {
+        let (_d, root, _) = transcript_run("s1", |_| "home".into());
+        assert_eq!(jsonl_count(root.path()), 0);
+        for bad in ["../x", "a/b", ".."] {
+            let (_d, root, _) = transcript_run(bad, |h| h.display().to_string());
+            assert_eq!(jsonl_count(root.path()), 0, "{bad}");
+        }
     }
 
     #[test]
@@ -462,11 +533,14 @@ mod tests {
     }
 
     #[test]
-    fn fail_runs_stop_failure_and_exits_1() {
-        let o = play("new", r#"[{"fail":"boom"},{"print":"never"}]"#, "", None);
-        assert_eq!(o.code, 1);
+    fn fail_runs_stop_failure_and_stays_alive_until_eof() {
+        let o = play("new", r#"[{"fail":"boom"},{"print":"never"}]"#, "again\n", None);
         assert_eq!(logged(o.dir.path(), "StopFailure")[0]["error"], "boom");
         assert!(!o.text.contains("never"));
+        // Like Claude after a failed turn: still reading input, SessionEnd only at EOF.
+        assert_eq!(o.record.inputs, vec!["again"]);
+        assert_eq!(events(&o), ["SessionStart", "StopFailure", "UserPromptSubmit", "Stop", "SessionEnd"]);
+        assert_eq!(o.code, 0);
     }
 
     #[test]

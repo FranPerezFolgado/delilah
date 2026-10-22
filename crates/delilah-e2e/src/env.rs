@@ -30,7 +30,8 @@ pub struct EnvOptions {
     pub default_scenario: Option<Value>,
     /// `DELILAH_UI_ORIGIN`, for the UI layer.
     pub ui_origin: Option<String>,
-    /// Smoke test only: no fake, no tripwire, the user's HOME.
+    /// Smoke test only: the real `claude` with the user's HOME; `gh` stays fake and
+    /// tripwired. Takes effect only with `DELILAH_E2E_REAL_CLAUDE=1` (else panics).
     pub real_claude: bool,
     /// Start the fake Jira server (set by the layer that provides it).
     pub jira: bool,
@@ -102,6 +103,11 @@ fn write_exec(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
 }
 
+/// `s` as one single-quoted shell word (`'` becomes `'\''`).
+pub fn sh_quote(s: impl std::fmt::Display) -> String {
+    format!("'{}'", s.to_string().replace('\'', "'\\''"))
+}
+
 /// Builds the folder tree under `root` (see data-model.md "Layout of root").
 pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
     let r = root.display();
@@ -111,6 +117,7 @@ pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
         "delilah",
         "bin",
         "tripwire",
+        "tripwire-gh",
         "fake/scenarios",
         "fake/records",
         "gh",
@@ -118,7 +125,7 @@ pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
     ] {
         std::fs::create_dir_all(root.join(d))?;
     }
-    std::fs::write(home.join(".zshrc"), format!("export PATH='{r}/tripwire':\"$PATH\"\n"))?;
+    std::fs::write(home.join(".zshrc"), format!("export PATH={}\":$PATH\"\n", sh_quote(format!("{r}/tripwire"))))?;
     std::fs::write(
         home.join(".gitconfig"),
         "[user]\n\tname = Delilah E2E\n\temail = e2e@delilah.invalid\n\
@@ -127,21 +134,26 @@ pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
     write_exec(
         &root.join("bin/claude-fake"),
         &format!(
-            "#!/bin/sh\nexec '{}/fake-claude' --fake-dir '{r}/fake' \"$@\"\n",
-            target_dir().display()
+            "#!/bin/sh\nexec {} --fake-dir {} \"$@\"\n",
+            sh_quote(target_dir().join("fake-claude").display()),
+            sh_quote(format!("{r}/fake"))
         ),
     )?;
     write_exec(
         &root.join("bin/gh-fake"),
         &format!(
-            "#!/bin/sh\nFAKE_GH_DIR='{r}/gh' exec '{}' \"$@\"\n",
-            gh_script().display()
+            "#!/bin/sh\nFAKE_GH_DIR={} exec {} \"$@\"\n",
+            sh_quote(format!("{r}/gh")),
+            sh_quote(gh_script().display())
         ),
     )?;
-    for name in ["claude", "gh"] {
+    for (dir, name) in [("tripwire", "claude"), ("tripwire", "gh"), ("tripwire-gh", "gh")] {
         write_exec(
-            &root.join("tripwire").join(name),
-            &format!("#!/bin/sh\necho \"{name} $*\" >> '{r}/tripwire.log'\nexit 1\n"),
+            &root.join(dir).join(name),
+            &format!(
+                "#!/bin/sh\necho \"{name} $*\" >> {}\nexit 1\n",
+                sh_quote(format!("{r}/tripwire.log"))
+            ),
         )?;
     }
     let scenario = match &opts.default_scenario {
@@ -162,6 +174,16 @@ fn git_dir() -> Option<String> {
 
 /// Exactly the variables the daemon gets (research R3); it is started after `env_clear()`.
 pub fn daemon_env(root: &Path, port: u16, opts: &EnvOptions) -> BTreeMap<String, String> {
+    daemon_env_from(root, port, opts, &|k| std::env::var(k).ok())
+}
+
+/// [`daemon_env`] with the host's variables read through `host`.
+fn daemon_env_from(
+    root: &Path,
+    port: u16,
+    opts: &EnvOptions,
+    host: &dyn Fn(&str) -> Option<String>,
+) -> BTreeMap<String, String> {
     let r = root.display().to_string();
     let mut env = BTreeMap::new();
     let mut set = |k: &str, v: String| {
@@ -176,9 +198,16 @@ pub fn daemon_env(root: &Path, port: u16, opts: &EnvOptions) -> BTreeMap<String,
     set("DELILAH_PR_POLL_SECS", "1".into());
     set("SHELL", "/bin/zsh".into());
     if opts.real_claude {
-        let home = std::env::var("HOME").unwrap_or_default();
+        assert!(
+            host("DELILAH_E2E_REAL_CLAUDE").as_deref() == Some("1"),
+            "EnvOptions.real_claude runs the real claude with your real HOME: \
+             set DELILAH_E2E_REAL_CLAUDE=1 to allow it"
+        );
+        let home = host("HOME").unwrap_or_default();
         set("HOME", home);
-        set("PATH", std::env::var("PATH").unwrap_or_default());
+        // Only claude is real: gh is the fake, and a gh tripwire comes first on PATH.
+        set("PATH", format!("{r}/tripwire-gh:{}", std::env::var("PATH").unwrap_or_default()));
+        set("DELILAH_GH_BIN", format!("{r}/bin/gh-fake"));
     } else {
         set("HOME", format!("{r}/home"));
         let mut path = format!("{r}/tripwire:/usr/bin:/bin:/usr/sbin:/sbin");
@@ -291,7 +320,21 @@ impl Env {
                 .unwrap_or_else(|e| panic!("start {}: {e}", bin.display()));
             self.daemon = Some(child);
             match self.wait_ready() {
-                Ready::Yes => return,
+                Ready::Yes => {
+                    // Another daemon may have answered on a raced port: ours must be alive.
+                    let alive = self.daemon.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+                    if alive {
+                        return;
+                    }
+                    self.daemon = None;
+                    if attempt < attempts {
+                        continue;
+                    }
+                    panic!(
+                        "delilahd exited right after start\n--- daemon log (tail) ---\n{}",
+                        tail_of(&self.log, 40)
+                    );
+                }
                 Ready::Exited(status) => {
                     self.daemon = None;
                     let text = std::fs::read_to_string(&self.log).unwrap_or_default();
@@ -364,12 +407,7 @@ impl Env {
 
     /// Writes `fake/scenarios/<name>.json` (`name` is a session title marker or a task key).
     pub fn scenario(&self, name: &str, json: &Value) {
-        assert!(
-            !name.is_empty()
-                && !name.starts_with('.')
-                && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')),
-            "bad scenario name {name:?}"
-        );
+        assert!(crate::fake::scenario::valid_name(name), "bad scenario name {name:?}");
         let path = self.fake_dir().join("scenarios").join(format!("{name}.json"));
         std::fs::write(&path, json.to_string())
             .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -420,7 +458,7 @@ impl Env {
 
     /// Stops everything and says whether the tripwire fired, without panicking.
     pub fn finish(mut self) -> bool {
-        let fired = !self.opts.real_claude && self.tripwire_log().is_some();
+        let fired = self.tripwire_log().is_some();
         if fired {
             eprintln!("the real claude/gh was run (tripwire.log):\n{}", self.tripwire_log().unwrap_or_default());
         }
@@ -455,8 +493,7 @@ impl Drop for Env {
             let kept = dir.keep();
             eprintln!("DELILAH_E2E_KEEP: kept {}", kept.display());
         }
-        if !self.opts.real_claude
-            && !self.tripwire_reported
+        if !self.tripwire_reported
             && let Some(text) = self.tripwire_log()
         {
             let msg = format!("the real claude/gh was run (tripwire.log):\n{text}");
@@ -556,6 +593,45 @@ mod tests {
         assert_eq!(env["DELILAH_NOTIFY"], "0");
         assert_eq!(env["DELILAH_PR_POLL_SECS"], "1");
         assert!(!env.keys().any(|k| k == "DELILAH_URL" || k.starts_with("CLAUDE") || k.starts_with("ANTHROPIC")));
+    }
+
+    #[test]
+    fn real_claude_needs_the_opt_in_and_keeps_gh_fake_and_tripwired() {
+        let opts = EnvOptions { real_claude: true, ..Default::default() };
+        let root = Path::new("/tmp/x");
+        let without = |k: &str| (k == "PATH").then(|| "/usr/bin".to_string());
+        let r = std::panic::catch_unwind(|| daemon_env_from(root, 9999, &opts, &without));
+        assert!(r.is_err(), "no opt-in must panic");
+        let with = |k: &str| match k {
+            "DELILAH_E2E_REAL_CLAUDE" => Some("1".to_string()),
+            "HOME" => Some("/Users/me".to_string()),
+            "PATH" => Some("/usr/bin".to_string()),
+            _ => None,
+        };
+        let env = daemon_env_from(root, 9999, &opts, &with);
+        assert_eq!(env["HOME"], "/Users/me");
+        assert_eq!(env["DELILAH_GH_BIN"], "/tmp/x/bin/gh-fake");
+        assert!(env["PATH"].starts_with("/tmp/x/tripwire-gh:"), "{}", env["PATH"]);
+        assert!(!env.contains_key("DELILAH_AGENT_BIN"));
+    }
+
+    #[test]
+    fn sh_quote_survives_a_quote_in_the_path() {
+        assert_eq!(sh_quote("/a b/c"), "'/a b/c'");
+        assert_eq!(sh_quote("/it's"), "'/it'\\''s'");
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("it's here");
+        std::fs::create_dir_all(&root).unwrap();
+        layout(&root, &EnvOptions::default()).unwrap();
+        let st = Command::new(root.join("tripwire/claude")).arg("x").status().unwrap();
+        assert!(!st.success());
+        assert_eq!(std::fs::read_to_string(root.join("tripwire.log")).unwrap(), "claude x\n");
+    }
+
+    #[test]
+    fn scenario_names_allow_one_leading_at() {
+        assert!(crate::fake::scenario::valid_name("@signal"));
+        assert!(!crate::fake::scenario::valid_name("@@x"));
     }
 
     #[test]
