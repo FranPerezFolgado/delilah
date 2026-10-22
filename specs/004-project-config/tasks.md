@@ -135,7 +135,7 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 - [X] T038 [US3] Route `POST /api/v1/tasks/{key}/setup/retry|skip|cancel` in `crates/delilah-daemon/src/api.rs` (409 from the wrong status)
 - [X] T039 [US3] At daemon start, mark tasks stuck in `PreparingWorkspace` with no live setup as `SetupFailed("interrupted")`, where sessions are restored (`crates/delilah-daemon/src/main.rs` or `sessions.rs`)
 - [X] T040 [US3] Let archive and delete in `crates/delilah-daemon/src/actions.rs` treat `SetupFailed` like any task with a worktree (refusal during `PreparingWorkspace` stays)
-- [ ] T041 [P] [US3] Add `delilah setup retry|skip|cancel <KEY>` to `crates/delilah-cli/src/main.rs`
+- [X] T041 [P] [US3] Add `delilah setup retry|skip|cancel <KEY>` to `crates/delilah-cli/src/main.rs`
 - [ ] T042 [P] [US3] Add the `setup-failed` status, its label, and `api.setupRetry/Skip/Cancel` to `app/src/api.ts` and `app/src/status.ts`
 - [ ] T043 [US3] In `app/src/components/TaskScreen.tsx`: show the Setup session tab with "Cancelar setup" while preparing; on `setup-failed`, a banner with the reason and "Reintentar setup" / "Lanzar sin setup"; with tests in `app/src/components/TaskScreen.test.tsx` or a small extracted `SetupBanner.tsx` + test
 - [ ] T044 [P] [US3] Texts in `app/src/i18n/en.ts`; banner styles in `app/src/styles.css`

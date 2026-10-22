@@ -117,6 +117,19 @@ enum Command {
     /// Registers and lists projects.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Acts on a task whose project setup failed or is running.
+    #[command(subcommand)]
+    Setup(SetupCommand),
+}
+
+#[derive(Subcommand)]
+enum SetupCommand {
+    /// Runs the setup again after it failed.
+    Retry { key: String },
+    /// Launches the agent without the setup, after it failed.
+    Skip { key: String },
+    /// Cancels a running setup (handled like a failure).
+    Cancel { key: String },
 }
 
 #[derive(Subcommand)]
@@ -531,6 +544,16 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 task.key
             );
         }
+        Command::Setup(cmd) => {
+            let (key, action) = match cmd {
+                SetupCommand::Retry { key } => (key, "retry"),
+                SetupCommand::Skip { key } => (key, "skip"),
+                SetupCommand::Cancel { key } => (key, "cancel"),
+            };
+            let task: Task =
+                api.post(&format!("/api/v1/tasks/{key}/setup/{action}"), &json!({}))?;
+            println!("{} is {}.", task.key, status_label(&task.status));
+        }
         Command::Archive { key, force } => {
             let query = if force { "?force=true" } else { "" };
             let task: Task =
@@ -669,6 +692,15 @@ fn status_label(status: &TaskStatus) -> String {
             )
         }
         TaskStatus::Failed { reason } => format!("failed: {reason}"),
+        TaskStatus::SetupFailed { reason } => {
+            let last = reason
+                .lines()
+                .rev()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("");
+            format!("setup-failed: {last}")
+        }
         TaskStatus::Queued => "backlog".to_string(),
         other => other.name().to_string(),
     }
@@ -782,6 +814,28 @@ mod tests {
             ProjectCommand::Unset { setting, .. } => Change::Unset(setting),
             _ => panic!("not set/unset"),
         }
+    }
+
+    #[test]
+    fn parses_setup_commands() {
+        for (word, ok) in [("retry", 0), ("skip", 1), ("cancel", 2)] {
+            let cli = Cli::try_parse_from(["delilah", "setup", word, "K-1"]).expect("parses");
+            let hit = match cli.command {
+                Command::Setup(SetupCommand::Retry { key }) => (0, key),
+                Command::Setup(SetupCommand::Skip { key }) => (1, key),
+                Command::Setup(SetupCommand::Cancel { key }) => (2, key),
+                _ => panic!("not a setup command"),
+            };
+            assert_eq!(hit, (ok, "K-1".to_string()));
+        }
+    }
+
+    #[test]
+    fn setup_failed_label_shows_last_line_of_reason() {
+        let status = TaskStatus::SetupFailed {
+            reason: "first\nboom\n\n".into(),
+        };
+        assert_eq!(status_label(&status), "setup-failed: boom");
     }
 
     #[test]
