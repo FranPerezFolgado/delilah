@@ -288,7 +288,7 @@
   - UI: `npm --prefix app ci` if `app/node_modules` is missing, `npx --prefix app playwright install chromium` (idempotent), `npm --prefix app run e2e`;
   - summary lines `api: PASS|FAIL (…s)` and `ui: PASS|FAIL (…s)`; exit non-zero if any failed;
   - `--help` from the header comment, like `scripts/preview.sh`.
-- [ ] T049 [US4] Check US4-3 and US4-4 by hand and note the results in `specs/005-e2e-tests/progress.md`:
+- [X] T049 [US4] Check US4-3 and US4-4 by hand and note the results in `specs/005-e2e-tests/progress.md`:
   - with the installed Delilah running, note its daemon PID (`lsof -nP -iTCP:7420 -sTCP:LISTEN`);
   - run `scripts/e2e.sh`, then confirm the PID is the same and `curl -s 127.0.0.1:7420/api/v1/health` is OK;
   - interrupt a run with Ctrl-C mid-API-layer, then confirm `pgrep -fl 'e2e-env|fake-claude'` lists nothing and no `delilahd` other than the installed one is listening (`lsof -nP -iTCP -sTCP:LISTEN | grep delilahd`).
@@ -316,8 +316,8 @@
   - mention `app/e2e/`;
   - in the daemon config, the four test-only env vars.
 - [X] T054 [P] [US4] Update `docs/status.md`: E2E tests built (17 flows, fake Claude, local only), plus anything left pending or found flaky.
-- [ ] T055 Run the full checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets` (no new warnings), `cargo test --manifest-path app/src-tauri/Cargo.toml` (after `scripts/build-sidecar.sh debug` if needed), `cd app && npx tsc --noEmit && npx vitest run`, `scripts/e2e.sh`.
-- [ ] T056 SC-004 / SC-005: time `scripts/e2e.sh api` and `scripts/e2e.sh ui` (API < 3 min, UI < 5 min after a build), then run `scripts/e2e.sh` 10 times in a row. Record times and results in `specs/005-e2e-tests/progress.md`. Fix any flaky test by replacing its timing assumption with a `wait_until`, never by raising a timeout above 30 s.
+- [X] T055 Run the full checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets` (no new warnings), `cargo test --manifest-path app/src-tauri/Cargo.toml` (after `scripts/build-sidecar.sh debug` if needed), `cd app && npx tsc --noEmit && npx vitest run`, `scripts/e2e.sh`.
+- [X] T056 SC-004 / SC-005: time `scripts/e2e.sh api` and `scripts/e2e.sh ui` (API < 3 min, UI < 5 min after a build), then run `scripts/e2e.sh` 10 times in a row. Record times and results in `specs/005-e2e-tests/progress.md`. Fix any flaky test by replacing its timing assumption with a `wait_until`, never by raising a timeout above 30 s.
 - [ ] T057 Version bump, patch 0.4.0 → 0.4.1 (re-check `main`'s version first with `git show main:Cargo.toml | grep '^version'`):
   - edit the four places of `docs/development.md#releasing`: `Cargo.toml` (workspace), `app/src-tauri/Cargo.toml`, `app/package.json`, `app/src-tauri/tauri.conf.json`;
   - refresh the lockfiles: `cargo check --workspace`, `(cd app/src-tauri && cargo check)`, `(cd app && npm install --package-lock-only)`;
