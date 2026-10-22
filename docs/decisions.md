@@ -257,3 +257,65 @@ files and git, which already hold everything the next phase needs.
 - **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
 - **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
 
+## Autopilot
+
+**37. Autopilot is a policy over saving mode, not a second engine (2026-10-22).** A task
+with autopilot runs plan → implement → review → draft PR by itself. `handoff.rs` keeps
+owning the step sessions, the persisted handoff and recovery; `autopilot/` only changes
+who confirms a handoff (`shape`), what each session is told, and what happens after the
+review. State is one nullable JSON column, `tasks.autopilot`, written before each side
+effect, so a restart repeats nothing; it implies saving mode.
+- **Ruled out:** a parallel state machine on the same hooks (two owners of the primary session, double starts); editing the user's global skills with an `--autopilot` argument (outside this repo; the session prompt already overrides their stops, and the skills can learn it later).
+
+**38. One nudge per step, and recommended answers inside the hook (2026-10-22).** This
+stretches #15 and #33 (Delilah never acts inside a phase): after a turn end that reaches
+no boundary, the primary session gets one typed nudge per step, and a second stall pauses.
+The workflow's approval stops are plain text, so without it nearly every plan step would
+pause; unlimited nudges could loop. A question whose every item has exactly one option
+labelled "(Recommended)" is answered in the AskUserQuestion hook (no inbox item, history
+`autopilot-answered`); any other question pauses. Delilah still never drives the
+workflow's own phases.
+
+**39. Autopilot pushes and opens a draft PR with the user's own `gh` (2026-10-22).** It
+does so without asking at that moment, like "Abrir PR" (#26): the user opted in per task,
+the PR is a draft, and nothing is merged. The stage `opening_pr` is persisted and PRs are
+re-detected first, so a restart never opens a second one.
+
+**40. The daemon owns previews, not the agent (2026-10-22).** A preview an agent starts
+outlives its session with nobody to stop it. The daemon runs the project's
+`preview_command` in the task's workspace, stops it with the task (done, failed, archived,
+deleted) and at shutdown, and keeps it in memory only: a restart does not adopt it. It
+runs in a login shell because launchd's PATH lacks cargo and npm; agents keep their clean
+environment.
+
+**41. The PR body keeps loopback preview URLs, without userinfo, query or fragment
+(2026-10-22).** The spec wants the preview URL in the PR, and for this repo it is
+`localhost`. Credentials and tokens in a URL must not reach a possibly public PR.
+
+**42. The agent's own "(Recommended)" label is trusted; permission prompts are never
+answered (2026-10-22).** Automatic answers pick the option the agent marked. Accepted
+risk: a destructive option the agent marks as recommended would be picked. A permission
+prompt always pauses the autopilot instead.
+
+**43. Process groups are signalled with `/bin/kill -- -<pgid>` (2026-10-22).** The
+workspace forbids `unsafe`, so no `libc::killpg`. The waiter task owns the child; a
+delayed KILL is sent only if the leader has not been reaped, so a reused pid is never
+hit.
+
+**44. Autopilot state changes are compare-and-set (2026-10-22).** `Store::update_autopilot`
+writes only if the stored value is still the one the closure saw, so a pause or "off"
+that came in during a finish (a preview wait takes minutes) is never overwritten. The
+finish's writes also check they still belong to the same review session.
+
+**45. "Can have autopilot" means a task on the `feature` (spec) workflow (2026-10-22).**
+Not a project session, not another workflow: without spec files there are no handoffs.
+Enforced on every entry point (task create, backlog, `PATCH`, the autopilot endpoint, the
+proposal card) with a 409 `not-spec-workflow`.
+
+**46. Recovering an interrupted finish needs `Autopilot.review_session` (2026-10-22).** It
+names the outcome file to read. Autopilots stored before the field existed do not
+auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
+
+**47. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
+project sessions create tasks, so a card is not tied to an idea conversation; only a
+closed session's card is refused.
