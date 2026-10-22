@@ -15,9 +15,9 @@ Mode: format=markdown commits=yes
 | WP-07 | 4 | 4B | done | 2 | d16dd66 | +pr_api/mod.rs re-export, proposal_for extracted; TODO(WP-09) seams |
 | WP-08 | 4 | 4C | done | 1 | a6fff3e | scheduler.rs test only (tick already recovers) |
 | WP-08F | 4 | 4F | done | 1 | 18f6063 | phase-4 review fixes (+1-line store.rs test literal); TODO for WP-20 decisions.md: preview URL kept for loopback, credentials/query/fragment stripped |
-| WP-09 | 5 | 5A | verified | 1 | | +delilah-git Workspace::uncommitted; `on` = 400 TODO(WP-12) |
-| WP-10 | 5 | 5B | pending | 0 | | |
-| WP-11 | 5 | 5B | pending | 0 | | |
+| WP-09 | 5 | 5A | verified | 1 | bdecd2b | +delilah-git Workspace::uncommitted; `on` = 400 TODO(WP-12) |
+| WP-10 | 5 | 5B | verified | 1 | 798de49 | hook FAIL was the parallel package mid-edit; full suite green after |
+| WP-11 | 5 | 5B | verified | 1 | e57e216 | +hooks.rs call site; hook FAIL from parallel run, green after |
 | WP-12 | 6 | 6A | pending | 0 | | |
 | WP-13 | 6 | 6A | pending | 0 | | |
 | WP-14 | 6 | 6A | pending | 0 | | |
