@@ -115,10 +115,10 @@ None: no new dependencies (`tokio` already has `process`; check its features in 
 
 **Independent Test**: set a fixture project's preview command, "Lanzar preview" on a task → URL shown; "Parar preview" → gone; archive → gone.
 
-- [ ] T044 [P] [US4] `app/src/api.ts`: `PreviewView`, `getPreview/startPreview/stopPreview`, `Project.preview_command`, `updateProject` accepting it.
-- [ ] T045 [US4] Write failing tests in a new `app/src/components/PreviewControl.test.tsx`: hidden when the task's project has no preview command; "Lanzar preview" → starting; running → the URL as a link that opens in the browser and "Parar preview"; failed → the error with "Reintentar".
-- [ ] T046 [US4] Implement T045 in `app/src/components/PreviewControl.tsx`, placed in the task screen header area in `app/src/components/TaskScreen.tsx`, refreshed on the tasks topic.
-- [ ] T047 [US4] Write failing tests and implement the "Comando de preview" field in `app/src/components/ProjectView.tsx` (save on blur/enter, empty clears), with its strings in `app/src/i18n/en.ts`.
+- [X] T044 [P] [US4] `app/src/api.ts`: `PreviewView`, `getPreview/startPreview/stopPreview`, `Project.preview_command`, `updateProject` accepting it.
+- [X] T045 [US4] Write failing tests in a new `app/src/components/PreviewControl.test.tsx`: hidden when the task's project has no preview command; "Lanzar preview" → starting; running → the URL as a link that opens in the browser and "Parar preview"; failed → the error with "Reintentar".
+- [X] T046 [US4] Implement T045 in `app/src/components/PreviewControl.tsx`, placed in the task screen header area in `app/src/components/TaskScreen.tsx`, refreshed on the tasks topic.
+- [X] T047 [US4] Write failing tests and implement the "Comando de preview" field in `app/src/components/ProjectView.tsx` (save on blur/enter, empty clears), with its strings in `app/src/i18n/en.ts`.
 
 **Checkpoint**: previews work for any task, and autopilot's preview step shows in the UI.
 

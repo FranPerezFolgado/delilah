@@ -445,7 +445,7 @@ export const api = {
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
-  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string }) =>
+  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string; preview_command?: string | null }) =>
     request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
   deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
@@ -460,6 +460,11 @@ export const api = {
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  /** The task's preview, or null when it has none. */
+  getPreview: (key: string) => request<PreviewView | null>(`/api/v1/tasks/${key}/preview`),
+  /** Starts it. 409 `no-preview-command` / `no-workspace` / `running`; 422 when it can't be spawned. */
+  startPreview: (key: string) => post<PreviewView>(`/api/v1/tasks/${key}/preview`),
+  stopPreview: (key: string) => request<null>(`/api/v1/tasks/${key}/preview`, { method: "DELETE" }),
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
   setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */

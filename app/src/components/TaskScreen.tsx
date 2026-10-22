@@ -17,6 +17,7 @@ import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
 import { AutopilotMark } from "./AutopilotMark";
+import { PreviewControl } from "./PreviewControl";
 import { PhaseBadge } from "./PhaseBadge";
 import { SessionChain } from "./SessionChain";
 import { headerPhaseOf } from "../phases";
@@ -516,6 +517,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
+              <PreviewControl taskKey={owner} project={task.project} />
               {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
                 <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
                   {t("Desactivar")}
