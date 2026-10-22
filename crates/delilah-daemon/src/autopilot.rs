@@ -10,15 +10,21 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use axum::Json;
+use axum::extract::{Path as AxPath, State};
 use chrono::Utc;
-use delilah_core::{Autopilot, AutopilotStage, AutopilotState, Event, Step, Task, TaskKey};
+use delilah_core::{
+    Autopilot, AutopilotStage, AutopilotState, Event, HandoffStage, Step, Task, TaskKey,
+};
+use delilah_git::GitOptions;
 
 use crate::api::ApiError;
 use crate::events::Topic;
-use crate::handoff::Boundary;
+use crate::handoff::{Boundary, Launcher};
 use crate::lang::Lang;
 use crate::pr_types::PrState;
 use crate::preview::PreviewState;
+use crate::specs::SpecSummary;
 use crate::state::AppState;
 
 /// Whether the task is on autopilot and not paused or done.
@@ -259,21 +265,61 @@ pub(crate) enum FinishStop {
     OpenPr(ApiError),
     /// The autopilot's state cannot be written: worth trying again later.
     StateWrite(String),
+    /// The review is ready but these repos have uncommitted changes.
+    Uncommitted(Vec<String>),
 }
 
 impl FinishStop {
     /// Whether trying again changes nothing.
     fn is_terminal(&self) -> bool {
-        matches!(self, Self::Blocked(_) | Self::NoCommits | Self::NoWorkspace)
+        matches!(
+            self,
+            Self::Blocked(_) | Self::NoCommits | Self::NoWorkspace | Self::Uncommitted(_)
+        )
     }
 
-    fn describe(&self) -> String {
+    /// The pause's reason, in the app language.
+    fn describe(&self, lang: Lang) -> String {
         match self {
-            Self::Blocked(reason) => format!("the review is blocked: {reason}"),
-            Self::NoCommits => "there are no commits to open a PR with".into(),
-            Self::NoWorkspace => "the task has no workspace".into(),
-            Self::OpenPr(e) => format!("cannot open the PR: {}", e.message()),
-            Self::StateWrite(e) => format!("cannot record the state: {e}"),
+            Self::Blocked(reason) => format!(
+                "{}: {reason}",
+                lang.pick("la revisión está bloqueada", "the review is blocked")
+            ),
+            Self::NoCommits => lang
+                .pick(
+                    "no hay commits con los que abrir una PR",
+                    "there are no commits to open a PR with",
+                )
+                .into(),
+            Self::NoWorkspace => lang
+                .pick("la tarea no tiene workspace", "the task has no workspace")
+                .into(),
+            Self::OpenPr(e) => format!(
+                "{}: {}",
+                lang.pick("no puedo abrir la PR", "cannot open the PR"),
+                e.message()
+            ),
+            Self::StateWrite(e) => format!(
+                "{}: {e}",
+                lang.pick("no puedo guardar el estado", "cannot record the state")
+            ),
+            Self::Uncommitted(repos) => {
+                let repos: Vec<&str> = repos
+                    .iter()
+                    .map(|r| match r.as_str() {
+                        "." => lang.pick("el workspace", "the workspace"),
+                        other => other,
+                    })
+                    .collect();
+                format!(
+                    "{}: {}",
+                    lang.pick(
+                        "la revisión terminó con cambios sin commit en",
+                        "the review ended with uncommitted changes in"
+                    ),
+                    repos.join(", ")
+                )
+            }
         }
     }
 }
@@ -292,25 +338,240 @@ async fn finish_guarded(app: &AppState, key: &TaskKey, session: &str, _guard: Fi
         app.finishing.forget(key);
         return;
     };
-    tracing::warn!(task = %key, "autopilot stops: {}", stop.describe());
-    // TODO(WP-09): pause the autopilot with this reason (`stop.describe()`).
-    // Until then it only has to stop: a terminal stop, or a retryable one that keeps
-    // failing, clears the stage so `recover` does not take it up again on every tick.
+    let reason = stop.describe(app.lang());
+    tracing::warn!(task = %key, "autopilot stops: {reason}");
+    // A terminal stop, or a retryable one that keeps failing, pauses the autopilot: a
+    // paused one is not taken up again by `recover`, and a resume re-runs the (idempotent)
+    // opening from the stage it left.
     if stop.is_terminal() || app.finishing.failed(key) >= MAX_ATTEMPTS {
         app.finishing.forget(key);
-        clear_stage(app, key).await;
+        pause(app, key, reason).await;
     }
 }
 
-/// Takes the stage off a running autopilot, so no recovery resumes it.
-async fn clear_stage(app: &AppState, key: &TaskKey) {
+/// Pauses a running autopilot: records why and when, writes it to the history, tells
+/// the inbox and sends one notification (none when the app is listening). The session
+/// and the task's phase are left alone. A paused, done or absent autopilot is not
+/// touched, so a second cause for the same pause notifies nothing.
+pub(crate) async fn pause(app: &AppState, key: &TaskKey, reason: impl Into<String>) {
+    let reason = reason.into();
     let Ok(Some(task)) = app.store.get_task(key).await else {
         return;
     };
-    if let Some(mut a) = task.autopilot.filter(|a| a.stage.is_some()) {
-        a.stage = None;
-        let _ = write_state(app, key, &a).await;
+    let Some(mut a) = task.autopilot.clone().filter(|_| is_running(&task)) else {
+        return;
+    };
+    a.state = AutopilotState::Paused;
+    a.reason = Some(reason.clone());
+    a.since = Utc::now();
+    if write_state(app, key, &a).await.is_err() {
+        return;
     }
+    if let Err(e) = app
+        .transition(
+            key,
+            Event::AutopilotPaused {
+                reason: reason.clone(),
+            },
+        )
+        .await
+    {
+        tracing::warn!(task = %key, "cannot record the autopilot's pause: {e}");
+    }
+    app.emit(Topic::Inbox);
+    if !app.events.listening() {
+        let lang = app.lang();
+        app.notifier.send(
+            format!(
+                "{key} {}",
+                lang.pick("autopilot en pausa", "autopilot paused")
+            ),
+            format!("{}: {reason}", task.title),
+        );
+    }
+}
+
+fn tasks_unchecked(lang: Lang, n: usize) -> String {
+    match (lang, n) {
+        (Lang::Es, 1) => "1 tarea sin marcar".into(),
+        (Lang::Es, n) => format!("{n} tareas sin marcar"),
+        (Lang::En, 1) => "1 task unchecked".into(),
+        (Lang::En, n) => format!("{n} tasks unchecked"),
+    }
+}
+
+fn nudge_text(lang: Lang) -> &'static str {
+    lang.pick(
+        "Autopilot: sigue adelante sin preguntar; elige tú la opción recomendada; si de verdad no puedes continuar, di por qué y para.",
+        "Autopilot: carry on without asking; pick the recommended option yourself; if you truly cannot go on, say why and stop.",
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn tests_nudge(lang: Lang) -> &'static str {
+    nudge_text(lang)
+}
+
+/// The primary session's turn ended on autopilot without reaching its step's end. The
+/// first stall of a step gets one nudge typed into the session; a second pauses with
+/// the step's reason. The review never stalls here: its end is its outcome file.
+pub(crate) async fn stall(app: &AppState, key: &TaskKey, step: Option<Step>, spec: &SpecSummary) {
+    let Some(step) = step.filter(|s| *s != Step::Review) else {
+        return;
+    };
+    let Ok(Some(task)) = app.store.get_task(key).await else {
+        return;
+    };
+    let Some(mut a) = task.autopilot.clone().filter(|_| is_running(&task)) else {
+        return;
+    };
+    let lang = app.lang();
+    let reason = if spec.dir.is_none() || spec.total == 0 {
+        lang.pick("tasks.md no está escrito", "tasks.md not written")
+            .to_string()
+    } else {
+        tasks_unchecked(lang, spec.total.saturating_sub(spec.done))
+    };
+    if a.nudged == Some(step) {
+        return pause(app, key, reason).await;
+    }
+    let Some(live) = app.sessions.primary(key.as_str()) else {
+        return pause(app, key, reason).await;
+    };
+    a.nudged = Some(step);
+    if write_state(app, key, &a).await.is_err() {
+        return;
+    }
+    if let Err(e) = app.transition(key, Event::AutopilotNudged { step }).await {
+        tracing::warn!(task = %key, "cannot record the nudge: {e}");
+    }
+    if let Err(e) = crate::actions::type_prompt(&live, nudge_text(lang)).await {
+        pause(app, key, format!("{reason}: {}", e.message())).await;
+    }
+}
+
+/// Resumes a paused autopilot: running again, the nudge forgotten, and the chain
+/// re-evaluated from the current state (`advance`).
+pub(crate) async fn resume(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
+    resume_with(app, key, &crate::run::launch_session).await
+}
+
+pub(crate) async fn resume_with<L: Launcher>(
+    app: &AppState,
+    key: &TaskKey,
+    launch: &L,
+) -> Result<(), ApiError> {
+    let task = task_of(app, key).await?;
+    let Some(mut a) = task.autopilot.filter(|a| a.state == AutopilotState::Paused) else {
+        return Err(ApiError::conflict_reason(
+            format!("the autopilot of {key} is not paused"),
+            "not-paused",
+        ));
+    };
+    a.state = AutopilotState::Running;
+    a.reason = None;
+    a.nudged = None;
+    a.since = Utc::now();
+    write_state(app, key, &a)
+        .await
+        .map_err(|e| ApiError::internal(e.describe(Lang::En)))?;
+    app.finishing.forget(key);
+    if let Err(e) = app.transition(key, Event::AutopilotResumed).await {
+        tracing::warn!(task = %key, "cannot record the autopilot's resume: {e}");
+    }
+    app.emit(Topic::Inbox);
+    advance_with(app, key, launch).await;
+    Ok(())
+}
+
+/// Goes on with the chain from what exists now: an interrupted finish is run again,
+/// a session still working is left to reach its turn end, a failed or offered handoff
+/// goes on, and an idle session is looked at as at a turn end.
+pub(crate) async fn advance_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
+    let Ok(Some(task)) = app.store.get_task(key).await else {
+        return;
+    };
+    let Some(a) = task.autopilot.as_ref().filter(|_| is_running(&task)) else {
+        return;
+    };
+    if matches!(
+        a.stage,
+        Some(AutopilotStage::OpeningPr | AutopilotStage::Preview)
+    ) && let Some(session) = a.review_session.clone()
+    {
+        if let Some(guard) = app.finishing.try_guard(key) {
+            let (app, key) = (app.clone(), key.clone());
+            tokio::spawn(async move { finish_guarded(&app, &key, &session, guard).await });
+        }
+        return;
+    }
+    if app
+        .sessions
+        .primary(key.as_str())
+        .is_some_and(|l| l.state() == crate::sessions::LiveState::Working)
+    {
+        return;
+    }
+    match task.handoff.as_ref().map(|h| h.stage) {
+        Some(HandoffStage::Failed) => {
+            let _ = crate::handoff::retry_with(app, key, launch).await;
+        }
+        Some(HandoffStage::Offered) => {
+            let _ = crate::handoff::confirm_with(app, key, launch).await;
+        }
+        Some(HandoffStage::Saving | HandoffStage::Starting) => {}
+        _ => crate::handoff::on_turn_ended_with(app, key, launch).await,
+    }
+}
+
+async fn task_of(app: &AppState, key: &TaskKey) -> Result<Task, ApiError> {
+    app.store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))
+}
+
+/// `POST /api/v1/tasks/{key}/autopilot`: `resume` or `off`.
+pub(crate) async fn act(
+    State(app): State<AppState>,
+    AxPath(key): AxPath<String>,
+    Json(req): Json<crate::handoff::ActionReq>,
+) -> Result<Json<Task>, ApiError> {
+    let key = TaskKey::new(key);
+    match req.action.as_str() {
+        "resume" => resume(&app, &key).await?,
+        "off" => {
+            task_of(&app, &key).await?;
+            app.store.set_autopilot(&key, None).await?;
+            app.emit(Topic::Inbox);
+            app.emit(Topic::Tasks);
+        }
+        // TODO(WP-12): `on` (saving mode too, and confirm a pending offer).
+        "on" => return Err(ApiError::bad_request("`on` is not available yet")),
+        other => {
+            return Err(ApiError::bad_request(format!("unknown action `{other}`")));
+        }
+    }
+    Ok(Json(task_of(&app, &key).await?))
+}
+
+/// The repos of the task's workspace with uncommitted changes; none when it cannot be
+/// read (the PR step reports a missing workspace itself).
+async fn uncommitted(app: &AppState, key: &TaskKey) -> Vec<String> {
+    let Ok(Some((_, ws))) = app.store.workspace(key).await else {
+        return vec![];
+    };
+    if !ws.path.is_dir() {
+        return vec![];
+    }
+    let opts = GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    };
+    tokio::task::spawn_blocking(move || ws.uncommitted(&opts))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default()
 }
 
 async fn run_finish(app: &AppState, key: &TaskKey, session: &str) -> Result<(), FinishStop> {
@@ -334,6 +595,12 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) -> Result<(), 
     }
     autopilot.review_session = Some(session.to_string());
     if !reopening {
+        // Before anything is pushed: what the agent left uncommitted would not be in
+        // the PR.
+        let dirty = uncommitted(app, key).await;
+        if !dirty.is_empty() {
+            return Err(FinishStop::Uncommitted(dirty));
+        }
         preview_step(app, key, &mut autopilot).await?;
     }
     let preview_url = app
@@ -474,7 +741,13 @@ async fn open_prs(
         }
         crate::pr_api::open_for(app, key, Some(&repo), &title, &body, true)
             .await
-            .map_err(FinishStop::OpenPr)?;
+            .map_err(|mut e| {
+                // On a parent the pause says which repo failed.
+                if ws.kind == delilah_core::ProjectKind::Parent {
+                    e.message = format!("{repo}: {}", e.message);
+                }
+                FinishStop::OpenPr(e)
+            })?;
     }
     Ok(())
 }
@@ -537,7 +810,7 @@ pub(crate) async fn prepare_step(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::gh::fake::{FakeGh, PR_LIST, PR_URL, REPO_VIEW, bare_snapshot};
@@ -862,10 +1135,7 @@ mod tests {
         write_outcome(&app, &key, r#"{"outcome":"blocked","reason":"tests fail"}"#);
         finish(&app, &key, "rev-1").await;
         assert!(creates(&gh).is_empty());
-        assert_eq!(
-            autopilot_of(&app, &key).await.state,
-            AutopilotState::Running
-        );
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Paused);
     }
 
     #[tokio::test]
@@ -1025,13 +1295,13 @@ mod tests {
         autopilot_of(app, key).await.stage
     }
 
-    /// After a stop the autopilot is still running but a recovery tick leaves it alone.
+    /// After a stop the autopilot is paused and a recovery tick leaves it alone.
     async fn assert_not_retried(app: &AppState, key: &TaskKey, gh: &FakeGh) {
         let calls = gh.calls().len();
         let task = app.store.get_task(key).await.unwrap().unwrap();
         recover_and_wait(app, &task).await;
         assert_eq!(gh.calls().len(), calls, "recovery retried");
-        assert_eq!(autopilot_of(app, key).await.state, AutopilotState::Running);
+        assert_eq!(autopilot_of(app, key).await.state, AutopilotState::Paused);
     }
 
     #[tokio::test]
@@ -1048,18 +1318,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_commits_is_terminal_and_clears_the_stage() {
+    async fn no_commits_is_terminal_and_pauses_keeping_the_stage() {
         let gh = gh("[]");
         let (app, key, _dir) =
             task_with_commits(gh.clone(), Some(AutopilotStage::OpeningPr), &[]).await;
         finish(&app, &key, "rev-1").await;
         assert!(creates(&gh).is_empty());
-        assert_eq!(stage_of(&app, &key).await, None);
+        assert_eq!(stage_of(&app, &key).await, Some(AutopilotStage::OpeningPr));
         assert_not_retried(&app, &key, &gh).await;
     }
 
     #[tokio::test]
-    async fn a_task_without_workspace_is_terminal_and_clears_the_stage() {
+    async fn a_task_without_workspace_is_terminal_and_pauses() {
         let config = crate::config::Config {
             home: std::env::temp_dir().join(format!("delilah-ap-{}", uuid::Uuid::new_v4())),
             addr: "127.0.0.1:7420".parse().unwrap(),
@@ -1082,7 +1352,7 @@ mod tests {
         };
         app.store.set_autopilot(&key, Some(&a)).await.unwrap();
         finish(&app, &key, "rev-1").await;
-        assert_eq!(stage_of(&app, &key).await, None);
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Paused);
         assert_not_retried(&app, &key, &gh).await;
     }
 
@@ -1135,7 +1405,9 @@ mod tests {
             .next = Instant::now();
         recover_and_wait(&app, &task).await;
         assert_eq!(creates(&gh).len(), MAX_ATTEMPTS as usize);
-        assert_eq!(stage_of(&app, &key).await, None);
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert!(a.reason.unwrap().contains("network"));
         assert_not_retried(&app, &key, &gh).await;
         assert_eq!(creates(&gh).len(), MAX_ATTEMPTS as usize);
     }
@@ -1299,5 +1571,366 @@ mod tests {
         assert!(body.contains("Preview: http://127.0.0.1:9/x\n"), "{body}");
         assert!(!body.contains("token") && !body.contains("u:p"));
         app.previews.stop(key.as_str());
+    }
+
+    // ---- Pause, resume, failures (WP-09) ----
+
+    type Launched = Mutex<Vec<(SessionRecord, Option<String>)>>;
+
+    fn stub(
+        launched: &Launched,
+    ) -> impl Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError> + '_
+    {
+        move |_, s, _, prompt, _| {
+            launched
+                .lock()
+                .unwrap()
+                .push((s.clone(), prompt.map(str::to_string)));
+            Ok(())
+        }
+    }
+
+    fn paused() -> Autopilot {
+        Autopilot {
+            state: AutopilotState::Paused,
+            reason: Some("x".into()),
+            nudged: Some(Step::Plan),
+            ..running()
+        }
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    }
+
+    /// Writes (and optionally commits) the spec's `tasks.md` in the workspace.
+    fn write_spec(app: &AppState, tasks: &str, commit: bool) {
+        let ws = app.config.home.parent().unwrap().join("ws");
+        std::fs::create_dir_all(ws.join("specs/proj-1-x")).unwrap();
+        std::fs::write(ws.join("specs/proj-1-x/tasks.md"), tasks).unwrap();
+        if commit {
+            git_in(&ws, &["add", "."]);
+            git_in(&ws, &["commit", "-m", "spec"]);
+        }
+    }
+
+    async fn paused_task(
+        gh: Arc<FakeGh>,
+        stage: Option<AutopilotStage>,
+    ) -> (AppState, TaskKey, TempDir) {
+        let (app, key, dir) = task_with_commits(gh, stage, &["first"]).await;
+        app.store.set_saving_mode(&key, true).await.unwrap();
+        let a = Autopilot {
+            stage,
+            review_session: Some("rev-1".into()),
+            ..paused()
+        };
+        app.store.set_autopilot(&key, Some(&a)).await.unwrap();
+        (app, key, dir)
+    }
+
+    async fn session(app: &AppState, id: &str, step: Step) {
+        app.store
+            .create_session(&SessionRecord {
+                id: id.into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "s".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(step),
+            })
+            .await
+            .unwrap();
+    }
+
+    fn event_names(events: &[crate::store::EventRecord]) -> Vec<&'static str> {
+        events.iter().map(|e| e.event.name()).collect()
+    }
+
+    async fn wait_for(app: &AppState, key: &TaskKey, state: AutopilotState) {
+        for _ in 0..400 {
+            if autopilot_of(app, key).await.state == state {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the autopilot never became {state:?}");
+    }
+
+    #[tokio::test]
+    async fn pausing_records_the_reason_emits_the_inbox_and_notifies_once() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        pause(&app, &key, "tests fail").await;
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("tests fail"));
+        let events = app.store.events(&key).await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.event
+                    == Event::AutopilotPaused {
+                        reason: "tests fail".into()
+                    })
+                .count(),
+            1
+        );
+        let sent = app.notifier.recorded();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].body.contains("tests fail"));
+        // Already paused: nothing more.
+        pause(&app, &key, "other").await;
+        assert_eq!(app.notifier.recorded().len(), 1);
+        assert_eq!(
+            autopilot_of(&app, &key).await.reason.as_deref(),
+            Some("tests fail")
+        );
+        // The task's phase and status are untouched.
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(!task.status.is_terminal());
+    }
+
+    #[tokio::test]
+    async fn pausing_emits_the_inbox_topic_and_stays_quiet_when_the_app_listens() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        let mut rx = app.events.subscribe();
+        pause(&app, &key, "r").await;
+        let mut topics = vec![];
+        while let Ok(t) = rx.try_recv() {
+            topics.push(t);
+        }
+        assert!(topics.contains(&Topic::Inbox), "{topics:?}");
+        assert!(app.notifier.recorded().is_empty());
+    }
+
+    #[tokio::test]
+    async fn resuming_a_paused_autopilot_that_is_not_paused_is_409_not_paused() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        let launched = Launched::default();
+        let err = resume_with(&app, &key, &stub(&launched)).await.unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("not-paused"));
+        // No autopilot at all is the same.
+        app.store.set_autopilot(&key, None).await.unwrap();
+        let err = resume_with(&app, &key, &stub(&launched)).await.unwrap_err();
+        assert_eq!(err.reason.as_deref(), Some("not-paused"));
+    }
+
+    #[tokio::test]
+    async fn resuming_an_idle_plan_with_tasks_starts_the_implementation() {
+        let (app, key, _dir) = paused_task(gh("[]"), None).await;
+        session(&app, "plan-1", Step::Plan).await;
+        write_spec(&app, "- [ ] T001 One\n- [ ] T002 Two\n", false);
+        let launched = Launched::default();
+        resume_with(&app, &key, &stub(&launched))
+            .await
+            .ok()
+            .unwrap();
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(
+            (a.state, a.reason, a.nudged),
+            (AutopilotState::Running, None, None)
+        );
+        {
+            let launched = launched.lock().unwrap();
+            assert_eq!(launched.len(), 1);
+            assert_eq!(launched[0].0.step, Some(Step::Implement));
+        }
+        let events = app.store.events(&key).await.unwrap();
+        assert!(event_names(&events).contains(&"autopilot-resumed"));
+    }
+
+    #[tokio::test]
+    async fn resuming_an_idle_review_with_a_ready_outcome_finishes() {
+        let gh = gh("[]");
+        let (app, key, _dir) = ready_task(gh.clone(), None).await;
+        app.store.set_saving_mode(&key, true).await.unwrap();
+        write_spec(&app, "- [x] T001 One\n", true);
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        let mut a = autopilot_of(&app, &key).await;
+        a.state = AutopilotState::Paused;
+        app.store.set_autopilot(&key, Some(&a)).await.unwrap();
+        let launched = Launched::default();
+        resume_with(&app, &key, &stub(&launched))
+            .await
+            .ok()
+            .unwrap();
+        wait_for(&app, &key, AutopilotState::Done).await;
+        assert_eq!(creates(&gh).len(), 1);
+        assert!(launched.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn resuming_at_opening_pr_reopens_without_a_second_pr() {
+        let gh = gh(PR_LIST);
+        let (app, key, _dir) = paused_task(gh.clone(), Some(AutopilotStage::OpeningPr)).await;
+        let launched = Launched::default();
+        resume_with(&app, &key, &stub(&launched))
+            .await
+            .ok()
+            .unwrap();
+        wait_for(&app, &key, AutopilotState::Done).await;
+        assert!(creates(&gh).is_empty());
+        assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn resuming_while_the_session_works_only_marks_running() {
+        let (app, key, _dir) = paused_task(gh("[]"), None).await;
+        session(&app, "plan-1", Step::Plan).await;
+        write_spec(&app, "- [ ] T001 One\n", false);
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty);
+        app.sessions
+            .get("plan-1")
+            .unwrap()
+            .set_state(crate::sessions::LiveState::Working);
+        let launched = Launched::default();
+        resume_with(&app, &key, &stub(&launched))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(
+            autopilot_of(&app, &key).await.state,
+            AutopilotState::Running
+        );
+        assert!(launched.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_route_resumes_turns_off_and_refuses_on() {
+        use axum::extract::{Path as AxPath, State};
+        let (app, key, _dir) = paused_task(gh("[]"), None).await;
+        let call = |action: &str| {
+            act(
+                State(app.clone()),
+                AxPath("PROJ-1".to_string()),
+                Json(crate::handoff::ActionReq {
+                    action: action.into(),
+                }),
+            )
+        };
+        assert_eq!(
+            call("on").await.unwrap_err().status,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call("what").await.unwrap_err().status,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        let task = call("off").await.ok().unwrap().0;
+        assert!(task.autopilot.is_none());
+        assert!(task.saving_mode, "saving mode stays");
+        let err = call("resume").await.unwrap_err();
+        assert_eq!(err.reason.as_deref(), Some("not-paused"));
+        let _ = key;
+    }
+
+    #[tokio::test]
+    async fn ready_with_uncommitted_changes_pauses_before_any_push() {
+        let gh = gh("[]");
+        let (app, key, dir) = ready_task(gh.clone(), None).await;
+        std::fs::write(dir.path().join("ws/forgotten.txt"), "x").unwrap();
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        finish(&app, &key, "rev-1").await;
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert!(a.reason.unwrap().contains("sin commit"));
+        assert!(creates(&gh).is_empty());
+        let pushed = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin"))
+            .output()
+            .unwrap();
+        assert!(!pushed.status.success(), "nothing was pushed");
+    }
+
+    #[tokio::test]
+    async fn the_pause_reasons_follow_the_language() {
+        let stop = FinishStop::Uncommitted(vec![".".into(), "svc-a".into()]);
+        assert_eq!(
+            stop.describe(Lang::En),
+            "the review ended with uncommitted changes in: the workspace, svc-a"
+        );
+        assert!(stop.describe(Lang::Es).contains("cambios sin commit"));
+        assert!(stop.is_terminal());
+    }
+
+    /// A parent task with repos `svc-a` and `svc-b` that both have commits, ready to
+    /// open, with `svc-b`'s origin removed so pushing there fails.
+    async fn parent_ready(gh: Arc<FakeGh>) -> (AppState, TaskKey, TempDir) {
+        let (app, key, dir) = task_with_workspace(gh, None).await;
+        let ws_path = dir.path().join("ws");
+        for sub in ["svc-a", "svc-b"] {
+            git_repo_with_origin(
+                &ws_path.join(sub),
+                &dir.path().join(format!("origin-{sub}")),
+                "feature/PROJ-1",
+                &[sub],
+            );
+        }
+        let ws = delilah_git::Workspace {
+            path: ws_path.clone(),
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Parent,
+            submodules: vec!["svc-a".into(), "svc-b".into()],
+        };
+        app.store
+            .save_workspace(&key, Path::new("/parent"), &ws)
+            .await
+            .unwrap();
+        let a = Autopilot {
+            review_session: Some("rev-1".into()),
+            ..running()
+        };
+        app.store.set_autopilot(&key, Some(&a)).await.unwrap();
+        git_in(&ws_path.join("svc-b"), &["remote", "remove", "origin"]);
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        (app, key, dir)
+    }
+
+    #[tokio::test]
+    async fn a_failure_on_the_second_repo_pauses_naming_it_and_a_resume_opens_only_it() {
+        let gh = gh("[]");
+        let (app, key, dir) = parent_ready(gh.clone()).await;
+        app.lang.set(Lang::En);
+        for _ in 0..MAX_ATTEMPTS {
+            finish(&app, &key, "rev-1").await;
+        }
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert!(a.reason.unwrap().contains("svc-b"));
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].repo, "svc-a");
+        assert_eq!(creates(&gh).len(), 1);
+
+        // The user fixes the remote and resumes: only svc-b is opened.
+        let origin = dir.path().join("origin-svc-b");
+        git_in(
+            &dir.path().join("ws/svc-b"),
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        let launched = Launched::default();
+        resume_with(&app, &key, &stub(&launched))
+            .await
+            .ok()
+            .unwrap();
+        wait_for(&app, &key, AutopilotState::Done).await;
+        assert_eq!(creates(&gh).len(), 2);
+        assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 2);
     }
 }

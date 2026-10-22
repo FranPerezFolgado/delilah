@@ -121,6 +121,7 @@ pub fn router(state: AppState) -> Router {
             post(crate::handoff::set_saving_mode),
         )
         .route("/api/v1/tasks/{key}/handoff", post(crate::handoff::act))
+        .route("/api/v1/tasks/{key}/autopilot", post(crate::autopilot::act))
         .route(
             "/api/v1/tasks/{key}/review-hint/dismiss",
             post(crate::phases::dismiss),

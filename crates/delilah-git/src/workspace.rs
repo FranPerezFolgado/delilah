@@ -56,6 +56,18 @@ impl Workspace {
         (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
     }
 
+    /// The repos (as in [`Workspace::repos`]) with uncommitted changes. Errors when a
+    /// folder cannot be read by git.
+    pub fn uncommitted(&self, opts: &GitOptions) -> Result<Vec<String>, GitError> {
+        let mut dirty = Vec::new();
+        for (label, dir) in self.repos() {
+            if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+                dirty.push(label);
+            }
+        }
+        Ok(dirty)
+    }
+
     /// Folders that hold the task's branch: each submodule, or the repo itself.
     fn branch_dirs(&self) -> Vec<(String, PathBuf)> {
         match self.kind {
