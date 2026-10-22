@@ -452,6 +452,7 @@ export const EN: Record<string, string> = {
   "PR abierta por autopiloto": "PR opened by autopilot",
   "Reanudar autopiloto": "Resume autopilot",
   "Seguir a mano": "Carry on by hand",
+  "Abriendo la PR": "Opening PR",
   "Autopiloto reanudado": "Autopilot resumed",
   "Autopiloto respondió": "Autopilot answered",
   "Autopiloto empujó el paso": "Autopilot nudged the step",

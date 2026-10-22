@@ -498,3 +498,11 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 
 .pr-group { display: flex; flex-direction: column; gap: 8px; }
 .pr-group-title { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
+
+/* Autopilot: the mark in the header and on the card, and the paused banner. */
+.autopilot-pill { border-color: var(--acc); color: var(--tx); }
+.autopilot-pill svg.i { width: 12px; height: 12px; }
+.autopilot-pill.autopilot-paused { border-color: var(--pause); color: var(--pause); }
+.autopilot-pill.autopilot-done { border-color: var(--done); color: var(--done); }
+.autopilot-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-basis: 100%; padding: 6px 10px;
+  border: 1px solid var(--pause); border-radius: 6px; font-size: 12.5px; }

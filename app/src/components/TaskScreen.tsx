@@ -16,6 +16,7 @@ import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
+import { AutopilotMark } from "./AutopilotMark";
 import { PhaseBadge } from "./PhaseBadge";
 import { SessionChain } from "./SessionChain";
 import { headerPhaseOf } from "../phases";
@@ -504,6 +505,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
+              <AutopilotMark autopilot={task.autopilot} />
               {task.saving_mode && (
                 <span className="pill saving-pill">
                   {t("Modo ahorro")}

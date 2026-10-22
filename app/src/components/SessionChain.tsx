@@ -60,7 +60,7 @@ export function SessionChain({ task, sessions, onOpenSession, onChanged }: Props
               </button>
             )}
             {c.state === "waiting" && (
-              <HandoffActions task={task.key} handoff={task.handoff} onDone={onChanged} />
+              <HandoffActions task={task.key} handoff={task.handoff} autopilot={task.autopilot} onDone={onChanged} />
             )}
           </div>
         );
