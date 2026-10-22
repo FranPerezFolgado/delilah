@@ -150,6 +150,11 @@ impl Api {
         self.post(&format!("/api/v1/sessions/{session}/reopen"), json!({}))
     }
 
+    /// Closes a live session (ends the Claude process).
+    pub fn close_session(&self, session: &str) -> Value {
+        self.post(&format!("/api/v1/sessions/{session}/close"), json!({}))
+    }
+
     /// Opens a Claude session in the project's checkout; `conversation` makes it an idea
     /// conversation. Returns the `Session`.
     pub fn open_project_session(&self, project: &str, conversation: bool) -> Value {

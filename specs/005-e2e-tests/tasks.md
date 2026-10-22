@@ -279,7 +279,7 @@
 
 ## Phase 6: Runner, smoke test, docs, release (plan phase 6) — User Stories 4 (P2) and 5 (P3)
 
-- [ ] T048 [US4] Write `scripts/e2e.sh` per contracts/e2e-env.md:
+- [X] T048 [US4] Write `scripts/e2e.sh` per contracts/e2e-env.md:
   - `set -euo pipefail`;
   - `unset DELILAH_URL DELILAH_HOME DELILAH_ADDR DELILAH_AGENT_BIN DELILAH_GH_BIN FAKE_GH_DIR` first;
   - args `api|ui|--real-claude`, `-- <filter>`;
@@ -293,7 +293,7 @@
   - run `scripts/e2e.sh`, then confirm the PID is the same and `curl -s 127.0.0.1:7420/api/v1/health` is OK;
   - interrupt a run with Ctrl-C mid-API-layer, then confirm `pgrep -fl 'e2e-env|fake-claude'` lists nothing and no `delilahd` other than the installed one is listening (`lsof -nP -iTCP -sTCP:LISTEN | grep delilahd`).
   If Ctrl-C leaves daemons behind (the test binary is killed before `Drop`), fix it: start each `delilahd` in its own process group and add a `ctrlc`-style handler in the harness that kills the recorded children by PID. Never kill by name.
-- [ ] T050 [US5] Write `crates/delilah-e2e/tests/real_claude.rs`:
+- [X] T050 [US5] Write `crates/delilah-e2e/tests/real_claude.rs`:
   - one `#[ignore]` test that also returns early unless `DELILAH_E2E_REAL_CLAUDE=1`;
   - `EnvOptions { real_claude: true }`: no `DELILAH_AGENT_BIN`, no tripwire, `HOME` = the user's real HOME (research R10), own `DELILAH_HOME` and port;
   - a task on `repo` titled `Reply OK and stop.`;
