@@ -192,15 +192,14 @@ pub async fn start_run(
     };
     app.transition(&key, Event::Start).await?;
 
-    let spec = WorkspaceSpec {
-        path: app.config.workspaces_dir().join(&req.key),
-        branch: req
-            .branch
-            .clone()
-            .unwrap_or_else(|| format!("feature/{}", req.key)),
-        kind: project.kind,
-        submodules: req.submodules.clone(),
-    };
+    let spec = workspace_spec(
+        app.config.workspaces_dir().join(&req.key),
+        &project,
+        req.branch.as_deref(),
+        &key,
+        &req.title,
+        &req.submodules,
+    );
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
@@ -555,9 +554,122 @@ pub(crate) async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
     Ok(format!("LIBRE-{n}"))
 }
 
+/// The branch a task works on: the one asked for, else the project's branch template.
+fn default_branch(
+    explicit: Option<&str>,
+    settings: &delilah_core::ProjectSettings,
+    key: &TaskKey,
+    title: &str,
+) -> String {
+    match explicit.map(str::trim).filter(|b| !b.is_empty()) {
+        Some(branch) => branch.to_string(),
+        None => delilah_core::branch_name(&settings.branch, key.as_str(), title.trim()),
+    }
+}
+
+/// What to build for a task: its branch (see [`default_branch`]) in every repo.
+fn workspace_spec(
+    path: std::path::PathBuf,
+    project: &delilah_core::Project,
+    explicit_branch: Option<&str>,
+    key: &TaskKey,
+    title: &str,
+    submodules: &[String],
+) -> WorkspaceSpec {
+    WorkspaceSpec {
+        path,
+        branch: default_branch(explicit_branch, &project.settings, key, title),
+        kind: project.kind,
+        submodules: submodules.to_vec(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn templated(template: &str) -> delilah_core::ProjectSettings {
+        delilah_core::ProjectSettings {
+            branch: template.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn branch_follows_the_template() {
+        let key = TaskKey::new("PROJ-7");
+        let s = templated("feature/{ticket}-{slug}");
+        assert_eq!(
+            default_branch(None, &s, &key, "Fix the Login bug"),
+            "feature/PROJ-7-fix-the-login-bug"
+        );
+    }
+
+    #[test]
+    fn explicit_branch_wins_over_the_template() {
+        let key = TaskKey::new("PROJ-7");
+        let s = templated("feature/{ticket}-{slug}");
+        assert_eq!(default_branch(Some("hotfix/x"), &s, &key, "t"), "hotfix/x");
+        assert_eq!(
+            default_branch(Some("  "), &s, &key, "Some title"),
+            "feature/PROJ-7-some-title"
+        );
+    }
+
+    #[test]
+    fn no_settings_means_feature_key() {
+        let key = TaskKey::new("PROJ-7");
+        let s = delilah_core::ProjectSettings::default();
+        assert_eq!(default_branch(None, &s, &key, "anything"), "feature/PROJ-7");
+    }
+
+    #[test]
+    fn every_selected_submodule_is_on_the_templated_branch() {
+        let dir = std::env::temp_dir().join(format!("delilah-run-ws-{}", uuid::Uuid::new_v4()));
+        let fixture = std::process::Command::new("bash")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../scripts/make-fixture-parent.sh"
+            ))
+            .arg(dir.join("env"))
+            .output()
+            .unwrap();
+        assert!(fixture.status.success());
+        let project = delilah_core::Project {
+            name: "parent".into(),
+            path: dir.join("env/parent"),
+            kind: ProjectKind::Parent,
+            workflow: "feature".into(),
+            settings: templated("feature/{ticket}-{slug}"),
+        };
+        let subs = vec!["svc-orders".to_string(), "svc-payments".to_string()];
+        let spec = workspace_spec(
+            dir.join("workspaces/PROJ-9"),
+            &project,
+            None,
+            &TaskKey::new("PROJ-9"),
+            "Add Retry",
+            &subs,
+        );
+        let opts = GitOptions {
+            allow_file_protocol: true,
+        };
+        let ws = delilah_git::create_workspace(&project.path, &spec, &opts).unwrap();
+        for sub in &subs {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(ws.path.join(sub))
+                .args(["branch", "--show-current"])
+                .output()
+                .unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                "feature/PROJ-9-add-retry",
+                "{sub}"
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     fn session(task: &str, label: &str) -> SessionRecord {
         SessionRecord {

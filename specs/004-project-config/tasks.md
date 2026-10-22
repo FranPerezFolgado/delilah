@@ -100,13 +100,13 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 - [X] T022 [P] [US2] Create `crates/delilah-core/tests/branch_names.json` with cases `{template, key, title, branch}`: default template; accents ("Paginación" → "paginacion"); punctuation and `/`; repeated and edge hyphens; 40-character cut at a hyphen; empty title with `{slug}`; free task key `LIBRE-3`
 - [X] T023 [P] [US2] Write a failing test in `crates/delilah-core/src/project.rs` that runs every case of `tests/branch_names.json` through `branch_name()`
 - [ ] T024 [P] [US2] Write a failing test in `app/src/branchName.test.ts` that runs the same JSON through `branchName()`
-- [ ] T025 [P] [US2] Write failing run tests in `crates/delilah-daemon/src/run.rs`: with a template, the workspace branch follows it; an explicit `branch` in the request wins; no settings → `feature/<key>`; on the fixture parent, every selected submodule is on the templated branch
+- [X] T025 [P] [US2] Write failing run tests in `crates/delilah-daemon/src/run.rs`: with a template, the workspace branch follows it; an explicit `branch` in the request wins; no settings → `feature/<key>`; on the fixture parent, every selected submodule is on the templated branch
 
 ### Implementation
 
 - [X] T026 [US2] Implement `slug()` and `branch_name()` in `crates/delilah-core/src/project.rs`
 - [ ] T027 [P] [US2] Implement `branchName()` in `app/src/branchName.ts`
-- [ ] T028 [US2] Use `branch_name(settings.branch, key, title)` as the default branch in `crates/delilah-daemon/src/run.rs` (replacing `format!("feature/{}", key)`)
+- [X] T028 [US2] Use `branch_name(settings.branch, key, title)` as the default branch in `crates/delilah-daemon/src/run.rs` (replacing `format!("feature/{}", key)`)
 - [ ] T029 [US2] Show "Rama: …" from `branchName()` under the title in `app/src/components/NewTaskDialog.tsx`, updating as the user types
 
 **Checkpoint**: US1 + US2 work on their own.
