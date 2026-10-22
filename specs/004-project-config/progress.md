@@ -19,10 +19,10 @@ Mode: format=markdown commits=yes
 | WP-12 | 4 | 4B | done | 1 | 8cb6fce | |
 | WP-13 | 5 | 5A | verified | 1 | 0647a04 | +S1-S3 symlink/.git guards |
 | WP-14 | 5 | 5A | verified | 1 | 91a288f | |
-| WP-15 | 5 | 5B | pending | 0 | | |
-| WP-16 | 5 | 5C | pending | 0 | | |
-| WP-17 | 5 | 5D | pending | 0 | | |
-| WP-18 | 5 | 5D | pending | 0 | | |
+| WP-15 | 5 | 5B | verified | 1 | 3c056ae | +kind arms in run/actions/store/terminal, lib.rs mod; launch.json for retry |
+| WP-16 | 5 | 5C | verified | 1 | 25aec7a | share notes in task_dir/workspace.log; setup routes return 202 + task |
+| WP-17 | 5 | 5D | verified | 1 | 29ea27f | |
+| WP-18 | 5 | 5D | verified | 1 | 25b53bc | +setup-kind arms in ProjectView/TaskView/Sidebar/TerminalPane/sessionLabels |
 | WP-19 | 6 | 6A | pending | 0 | | |
 | WP-20 | 6 | 6A | pending | 0 | | |
 | WP-21 | 7 | 7A | pending | 0 | | |
@@ -45,3 +45,4 @@ Phase 3 security ✅ (no exploitable). Carried into WP-13: canonicalise shared s
 Phase 3 (353a293..HEAD): spec ⚠️ gaps → fixed in WP-09F · contract ⚠️ needs care → fixed in WP-09F · security ✅ · UI ⚠️ partial (no browser; API/CLI pass, screen untested in a browser).
 Open LOW: no test for "Ajustes guardados" row confirmation; PATCH kind-change does two non-atomic writes; Spanish submodules.unknown message omits the path; CLI 422 output untested end-to-end.
 Phase 4 (21862f6..cd91b76): spec ⚠️ minor gaps (TS≡Rust on 41 inputs) → WP-10F: `/` as separator around an empty {slug}; free-origin preview uses LIBRE-?; shared cases for `{slug}` twice / non-ASCII template. UI not checked in a browser. Open LOW: ß/Æ become hyphens (per research.md).
+WP-15 notes for WP-16: call setup::recover_interrupted at daemon start before accepting runs; setup::cancel returns before the transition (API should return 202 or poll); retry with no setup configured → Unsupported (409). Known limit: kill reaches only the shell, not grandchildren (no process-group access without unsafe).
