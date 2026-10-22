@@ -13,7 +13,7 @@ use axum::extract::{Path as AxPath, State};
 use delilah_core::{Handoff, HandoffStage, Step, Task, TaskKey};
 use delilah_git::{GitOptions, Workspace};
 
-use crate::api::ApiError;
+use crate::api::{ActionReq, ApiError};
 use crate::autopilot;
 use crate::events::Topic;
 use crate::lang::Lang;
@@ -253,15 +253,9 @@ pub(crate) async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKe
     };
     let Some(found) = autopilot::shape(&task, boundary(&task, primary.step, &spec)) else {
         drop(guard);
-        // No boundary on autopilot is a stall, unless a handoff is under way.
-        if autopilot::is_running(&task)
-            && task
-                .handoff
-                .as_ref()
-                .is_none_or(|h| h.stage == HandoffStage::Skipped)
-        {
-            autopilot::stall(app, key, primary.step, &spec).await;
-        }
+        // No boundary on autopilot is a stall (which does nothing off autopilot or
+        // while a handoff is under way).
+        autopilot::stall(app, key, &task, primary.step, &spec).await;
         return;
     };
     match found {
@@ -567,11 +561,6 @@ pub(crate) async fn apply_saving_mode(
     app.emit(Topic::Inbox);
     app.emit(Topic::Tasks);
     task_of(app, key).await
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub(crate) struct ActionReq {
-    pub action: String,
 }
 
 /// `POST /api/v1/tasks/{key}/handoff`: confirm, decline or retry the handoff.
@@ -1581,7 +1570,8 @@ mod tests {
             assert_eq!(launched[0].0.step, Some(Step::Implement));
             let prompt = launched[0].1.as_deref().unwrap();
             assert!(prompt.starts_with("/orchestrate specs/proj-1-x"));
-            let note = autopilot::step_note(Lang::Es, Step::Implement, Path::new("")).unwrap();
+            let note =
+                autopilot::notes::step_note(Lang::Es, Step::Implement, Path::new("")).unwrap();
             assert!(prompt.ends_with(&note), "{prompt}");
         }
         assert!(handoff_of(&app, &key).await.is_none());
@@ -1881,8 +1871,8 @@ mod tests {
         on_turn_ended(&app, &key).await;
         let a = autopilot_state(&app, &key).await;
         assert_eq!(a.reason.as_deref(), Some("tasks.md no está escrito"));
-        assert!(autopilot::tests_nudge(Lang::Es).starts_with("Autopilot: sigue"));
-        assert!(autopilot::tests_nudge(Lang::En).contains("carry on without asking"));
+        assert!(autopilot::notes::nudge_text(Lang::Es).starts_with("Autopilot: sigue"));
+        assert!(autopilot::notes::nudge_text(Lang::En).contains("carry on without asking"));
     }
 
     #[tokio::test]

@@ -151,6 +151,18 @@ impl Drop for Pending<'_> {
     }
 }
 
+/// The hook's reply that lets AskUserQuestion go through with its answers filled in:
+/// the one shape for what autopilot answers and what the user answers.
+fn allow_reply(questions: &Value, answers: &Map<String, Value>) -> Value {
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": { "questions": questions, "answers": answers },
+        }
+    })
+}
+
 /// `POST /hooks/claude/ask?task=…&session=…`: AskUserQuestion's PreToolUse hook. Held
 /// until the question is answered or released; the reply is the hook's output.
 pub async fn hook(
@@ -158,24 +170,22 @@ pub async fn hook(
     Query(q): Query<HookQuery>,
     Json(hook): Json<Value>,
 ) -> Json<Value> {
+    // Only AskUserQuestion's hook is answered here: the reply carries `updatedInput`,
+    // which must never be handed to another tool.
+    if hook["tool_name"] != "AskUserQuestion" {
+        return Json(json!({}));
+    }
     let questions = hook["tool_input"]["questions"].clone();
     if !questions.as_array().is_some_and(|qs| !qs.is_empty()) {
         // Not something Delilah can show: let the terminal ask.
         return Json(json!({}));
     }
     if let Some(session) = &q.session
-        && crate::store_sessions::project_of(&q.task).is_none()
         && let Some(answers) =
             crate::autopilot::answer_question(&app, &TaskKey::new(&q.task), session, &questions)
                 .await
     {
-        return Json(json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "updatedInput": { "questions": questions, "answers": answers },
-            }
-        }));
+        return Json(allow_reply(&questions, &answers));
     }
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
@@ -222,13 +232,7 @@ pub async fn hook(
             if let Some(live) = &live {
                 live.set_state(LiveState::Working);
             }
-            Json(json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                    "updatedInput": { "questions": questions, "answers": answers },
-                }
-            }))
+            Json(allow_reply(&questions, &answers))
         }
         _ => {
             // Timed out (a release already marked its card): answered in the terminal.
@@ -824,7 +828,8 @@ pub(crate) mod tests {
                 .unwrap();
             let a = task.autopilot.unwrap();
             assert_eq!(a.state, delilah_core::AutopilotState::Paused);
-            assert_eq!(a.reason.as_deref(), Some("Q1"));
+            // The first question with no single recommended option, not the first.
+            assert_eq!(a.reason.as_deref(), Some("Q2"));
             hook.abort();
         }
     }
@@ -862,5 +867,49 @@ pub(crate) mod tests {
         });
         waiting_ask(&app).await;
         hook.abort();
+    }
+
+    #[tokio::test]
+    async fn only_ask_user_question_is_answered() {
+        let app = app().await;
+        autopilot_with_primary(&app, delilah_core::AutopilotState::Running).await;
+        for tool in [json!("Bash"), json!(null)] {
+            let mut body = recommended_questions(&["Uno (Recommended)", "Dos"], false);
+            body["tool_name"] = tool;
+            let (status, out) = call(&app, post(HOOK, body)).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(out, json!({}));
+        }
+        assert!(app.asks.list().is_empty());
+        let events = app.store.events(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert!(
+            events
+                .iter()
+                .all(|e| e.event.name() != "autopilot-answered")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_reply_has_the_same_shape_for_autopilot_and_for_the_user() {
+        // Autopilot's answer.
+        let auto_app = app().await;
+        autopilot_with_primary(&auto_app, delilah_core::AutopilotState::Running).await;
+        let body = recommended_questions(&["Uno (Recommended)", "Dos"], false);
+        let (_, auto) = call(&auto_app, post(HOOK, body.clone())).await;
+        // The user's answer to the same questions.
+        let app = app().await;
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, post("/hooks/claude/ask?task=PROJ-1", body)).await }
+        });
+        let item = waiting_ask(&app).await;
+        let id = item["ask"]["id"].as_str().unwrap();
+        let answers =
+            json!({ "answers": { "Q1": "Cursor (Recommended)", "Q2": "Uno (Recommended)" } });
+        call(&app, post(&format!("/api/v1/asks/{id}/answer"), answers)).await;
+        let (_, manual) = hook.await.unwrap();
+        assert_eq!(auto, manual);
+        assert_eq!(auto["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert!(auto["hookSpecificOutput"]["updatedInput"]["questions"].is_array());
     }
 }

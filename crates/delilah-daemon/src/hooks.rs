@@ -93,9 +93,7 @@ pub async fn claude_hook(
             Utc::now(),
             app.lang(),
         );
-        if crate::store_sessions::project_of(&q.task).is_none() {
-            inbox::pause_autopilot_on(&app, &TaskKey::new(&q.task), &change).await;
-        }
+        crate::autopilot::on_attention(&app, &TaskKey::new(&q.task), &change).await;
         let changes = match &change {
             Change::Keep => false,
             Change::Clear => current.is_some(),

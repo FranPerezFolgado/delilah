@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use chrono::{DateTime, Utc};
 use delilah_agents::claude::Signal;
-use delilah_core::{AutopilotState, HandoffStage, SpecPhase, Step, Task, TaskKey, TaskStatus};
+use delilah_core::{AutopilotState, HandoffStage, SpecPhase, Step, Task, TaskStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -104,18 +104,6 @@ pub fn attention_change(
             ),
         },
         _ => Change::Keep,
-    }
-}
-
-/// A permission prompt is something autopilot cannot answer: it pauses (a no-op when
-/// the task is not on autopilot). The usage limit never gets here: it clears attention.
-pub async fn pause_autopilot_on(app: &AppState, key: &TaskKey, change: &Change) {
-    if matches!(change, Change::Set(a) if a.kind == AttentionKind::Permission) {
-        let reason = app.lang().pick(
-            "La sesión espera un permiso.",
-            "The session is waiting for a permission.",
-        );
-        crate::autopilot::pause(app, key, reason).await;
     }
 }
 
@@ -522,6 +510,7 @@ pub async fn reply(
 
 #[cfg(test)]
 mod tests {
+    use delilah_core::TaskKey;
     use serde_json::json;
 
     use super::*;
@@ -960,7 +949,7 @@ mod tests {
     #[tokio::test]
     async fn a_permission_prompt_pauses_a_running_autopilot() {
         let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
-        pause_autopilot_on(&app, &key, &permission()).await;
+        crate::autopilot::on_attention(&app, &key, &permission()).await;
         let t = app.store.get_task(&key).await.unwrap().unwrap();
         let a = t.autopilot.unwrap();
         assert_eq!(a.state, AutopilotState::Paused);
@@ -975,8 +964,8 @@ mod tests {
             text: "?".into(),
             since: now(),
         });
-        pause_autopilot_on(&app, &key, &q).await;
-        pause_autopilot_on(&app, &key, &Change::Clear).await;
+        crate::autopilot::on_attention(&app, &key, &q).await;
+        crate::autopilot::on_attention(&app, &key, &Change::Clear).await;
         let t = app.store.get_task(&key).await.unwrap().unwrap();
         assert!(crate::autopilot::is_running(&t));
     }
@@ -1018,7 +1007,7 @@ mod tests {
         let hook = json!({ "hook_event_name": "Stop" });
         let change = attention_change(Signal::TurnEnded, &hook, true, None, now(), app.lang());
         assert_eq!(change, Change::Clear);
-        pause_autopilot_on(&app, &key, &change).await;
+        crate::autopilot::on_attention(&app, &key, &change).await;
         app.transition(&key, Event::ResetDue { now: resume_at })
             .await
             .unwrap();

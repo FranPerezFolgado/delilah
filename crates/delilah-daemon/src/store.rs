@@ -200,6 +200,48 @@ impl Store {
         Ok(())
     }
 
+    /// Changes a task's autopilot as a compare-and-set: `f` gets the stored value and
+    /// returns the new one (`Some(None)` clears it), or `None` to leave it alone. The
+    /// write only lands if the stored value is still the one `f` saw, else `f` runs
+    /// again on the fresh value, so a concurrent change is never overwritten with a
+    /// stale copy. `true` if something was written.
+    pub async fn update_autopilot<F>(&self, key: &TaskKey, mut f: F) -> Result<bool, StoreError>
+    where
+        F: FnMut(Option<Autopilot>) -> Option<Option<Autopilot>>,
+    {
+        for _ in 0..32 {
+            let row = sqlx::query("SELECT autopilot FROM tasks WHERE key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+            let stored: Option<String> = row.try_get("autopilot")?;
+            let current = stored
+                .as_deref()
+                .map(serde_json::from_str::<Autopilot>)
+                .transpose()?;
+            let Some(new) = f(current) else {
+                return Ok(false);
+            };
+            let json = new.as_ref().map(serde_json::to_string).transpose()?;
+            let updated = sqlx::query(
+                "UPDATE tasks SET autopilot = ?1, saving_mode = CASE WHEN ?1 IS NOT NULL THEN 1 ELSE saving_mode END, updated_at = ?2 WHERE key = ?3 AND autopilot IS ?4",
+            )
+            .bind(json)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .bind(stored)
+            .execute(&self.pool)
+            .await?;
+            if updated.rows_affected() == 1 {
+                return Ok(true);
+            }
+        }
+        Err(StoreError::Corrupt(format!(
+            "the autopilot of {key} keeps changing"
+        )))
+    }
+
     /// Records the handoff under way, or clears it.
     pub async fn set_handoff(
         &self,
@@ -487,6 +529,61 @@ mod tests {
             nudged: None,
             review_session: None,
         }
+    }
+
+    #[tokio::test]
+    async fn update_autopilot_is_a_conditional_write() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        // Nothing stored and nothing to write.
+        assert!(!store.update_autopilot(&key, |_| None).await.unwrap());
+        // The closure sees the stored value and its answer is written.
+        assert!(
+            store
+                .update_autopilot(&key, |cur| {
+                    assert!(cur.is_none());
+                    Some(Some(autopilot()))
+                })
+                .await
+                .unwrap()
+        );
+        let t = store.get_task(&key).await.unwrap().unwrap();
+        assert!(t.autopilot.is_some() && t.saving_mode);
+        assert!(
+            store
+                .update_autopilot(&key, |cur| cur.map(|mut a| {
+                    a.nudged = Some(delilah_core::Step::Plan);
+                    Some(a)
+                }))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .get_task(&key)
+                .await
+                .unwrap()
+                .unwrap()
+                .autopilot
+                .unwrap()
+                .nudged,
+            Some(delilah_core::Step::Plan)
+        );
+        // Cleared, a later update sees `None`.
+        assert!(store.update_autopilot(&key, |_| Some(None)).await.unwrap());
+        assert!(
+            !store
+                .update_autopilot(&key, |cur| cur.map(Some))
+                .await
+                .unwrap()
+        );
+        assert!(matches!(
+            store
+                .update_autopilot(&TaskKey::new("NOPE-1"), |_| None)
+                .await,
+            Err(StoreError::NotFound(_))
+        ));
     }
 
     #[tokio::test]

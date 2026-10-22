@@ -233,6 +233,12 @@ fn is_loopback_host(host: &str) -> bool {
             .is_ok_and(|ip| ip.is_loopback())
 }
 
+/// The body of the action endpoints (`handoff`, `autopilot`): `{ "action": "…" }`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ActionReq {
+    pub action: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Health {
     pub version: String,
