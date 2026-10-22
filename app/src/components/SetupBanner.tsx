@@ -10,6 +10,13 @@ interface Props {
   onChanged: () => void;
 }
 
+/** The daemon stores "cancelled"/"interrupted" as stable tokens; anything else is raw output. */
+function reasonText(reason: string): string {
+  if (reason === "cancelled") return t("Setup cancelado");
+  if (reason === "interrupted") return t("Setup interrumpido: el daemon se reinició");
+  return reason;
+}
+
 /** The project setup of a task: cancel while it runs, retry or skip once it failed. */
 export function SetupBanner({ task, running, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
@@ -53,7 +60,7 @@ export function SetupBanner({ task, running, onChanged }: Props) {
           </button>
         )}
       </div>
-      {s.type === "setup-failed" && s.reason && <pre className="setup-reason mono selectable">{s.reason}</pre>}
+      {s.type === "setup-failed" && s.reason && <pre className="setup-reason mono selectable">{reasonText(s.reason)}</pre>}
       {error && <div className="error selectable">{error}</div>}
     </div>
   );

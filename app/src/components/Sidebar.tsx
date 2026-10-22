@@ -31,7 +31,7 @@ interface Props {
 
 /** Most urgent first; finished tasks stay on the board, not here, and backlog ones
  *  (`queued`) sit in their own folded section: they are not pending work. */
-const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "failed"];
+const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "failed", "setup-failed"];
 
 const COLLAPSED_KEY = "delilah.collapsed-projects";
 /** Backlogs start folded: these are the ones the viewer opened. */

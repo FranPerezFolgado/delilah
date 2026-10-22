@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, ApiError, type Task } from "../api";
+import { api, ApiError, type Session, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { SetupBanner } from "./SetupBanner";
+import { canArchive } from "./TaskView";
+import { isSetupRunning } from "./sessionLabels";
 
 const task = (status: Task["status"]): Task => ({
   key: "PROJ-1",
@@ -49,6 +51,26 @@ describe("SetupBanner", () => {
     fireEvent.click(getByText("Cancelar setup"));
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("PROJ-1"));
     expect(await findByText(/no setup running/)).toBeTruthy();
+  });
+
+  it("translates the stable cancelled/interrupted reasons", () => {
+    const c = render(<SetupBanner task={task({ type: "setup-failed", reason: "cancelled" })} running={false} onChanged={() => {}} />);
+    expect(c.container.querySelector("pre")!.textContent).toBe("Setup cancelado");
+    cleanup();
+    const i = render(<SetupBanner task={task({ type: "setup-failed", reason: "interrupted" })} running={false} onChanged={() => {}} />);
+    expect(i.container.querySelector("pre")!.textContent).toBe("Setup interrumpido: el daemon se reinició");
+  });
+
+  it("canArchive covers done, failed and setup-failed only", () => {
+    expect(canArchive({ type: "setup-failed", reason: "x" })).toBe(true);
+    expect(canArchive({ type: "failed", reason: "x" } as Task["status"])).toBe(true);
+    expect(canArchive({ type: "running" })).toBe(false);
+  });
+
+  it("isSetupRunning needs a live setup session", () => {
+    const s = (kind: string, live: boolean) => ({ kind, live }) as Session;
+    expect(isSetupRunning([s("claude", true), s("setup", true)])).toBe(true);
+    expect(isSetupRunning([s("setup", false)])).toBe(false);
   });
 
   it("renders nothing otherwise", () => {

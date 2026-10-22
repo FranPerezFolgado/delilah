@@ -2,6 +2,8 @@
 export const EN: Record<string, string> = {
   "Setup fallido": "Setup failed",
   "Setup": "Setup",
+  "Setup cancelado": "Setup cancelled",
+  "Setup interrumpido: el daemon se reinició": "Setup interrupted: the daemon restarted",
   "Preparando el workspace: el setup del proyecto está corriendo.": "Preparing the workspace: the project setup is running.",
   "El setup del proyecto falló. Final de su salida:": "The project setup failed. End of its output:",
   "Cancelar setup": "Cancel setup",

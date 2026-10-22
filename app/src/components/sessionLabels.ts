@@ -20,3 +20,15 @@ export function sessionStatus(s: Session, task: Task | undefined): { label: stri
       return { label: t("Trabajando"), icon: "run", cls: "c-run" };
   }
 }
+
+/** A setup session is live: the workspace is being prepared. */
+export function isSetupRunning(sessions: Session[]): boolean {
+  return sessions.some((x) => x.kind === "setup" && x.live);
+}
+
+/** The kind of a session in words; `claude` is what a Claude session is called. */
+export function kindLabel(s: Session, claude = "Claude"): string {
+  if (s.kind === "shell") return t("terminal");
+  if (s.kind === "setup") return t("Setup");
+  return claude;
+}

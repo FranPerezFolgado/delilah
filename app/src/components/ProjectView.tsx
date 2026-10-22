@@ -1,7 +1,7 @@
 import type { Project, Session, SessionKind } from "../api";
 import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
-import { sessionStatus } from "./sessionLabels";
+import { kindLabel, sessionStatus } from "./sessionLabels";
 import { t } from "../i18n";
 
 interface Props {
@@ -50,7 +50,7 @@ export function ProjectView({ project, sessions, onOpenSession, onNewSession, on
                   <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Icon name={s.kind !== "claude" ? "console" : st.icon} className={st.cls} />
                     <b style={{ fontWeight: 600 }}>{s.label}</b>
-                    <span className="muted">{s.kind === "shell" ? t("terminal") : s.kind === "setup" ? t("Setup") : s.read_only ? t("Claude · solo lectura") : "Claude"}</span>
+                    <span className="muted">{kindLabel(s, s.read_only ? t("Claude · solo lectura") : "Claude")}</span>
                   </span>
                   <span className={`pill ${st.cls}`} style={{ height: 18, fontSize: 11 }}>{st.label}</span>
                   <button className="btn btn-ghost" onClick={() => onOpenSession(s.id)}>{t("Abrir")}</button>

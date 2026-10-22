@@ -14,7 +14,7 @@ import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
-import { sessionStatus } from "./sessionLabels";
+import { isSetupRunning, kindLabel, sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
@@ -478,7 +478,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
                   key={s.id}
                   id={sessionTab(s.id)}
                   label={s.label}
-                  title={`${s.label} · ${s.kind === "shell" ? t("terminal") : s.kind === "setup" ? t("Setup") : "Claude"} · ${st.label}`}
+                  title={`${s.label} · ${kindLabel(s)} · ${st.label}`}
                   icon={s.kind === "claude" ? st.icon : "console"}
                   iconClass={s.kind === "claude" ? st.cls : ""}
                   shown={shown}
@@ -546,7 +546,7 @@ export function TaskScreen({ owner, task, project, sessions, asks, askPosition, 
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
                   {s.kind === "setup" && s.live && task && (
-                    <SetupBanner task={task} running onChanged={onChanged} />
+                    <SetupBanner task={task} running={isSetupRunning(sessions)} onChanged={onChanged} />
                   )}
                   {s.read_only && s.kind === "claude" && s.live && (
                     <div className="ebar warn">
