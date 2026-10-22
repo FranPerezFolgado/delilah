@@ -224,7 +224,8 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
         &ws.path,
         Some(continue_prompt(app.lang())),
         true,
-    )
+    )?;
+    Ok(())
 }
 
 /// The bytes that type `text` into the TUI. Several lines go as a bracketed paste,

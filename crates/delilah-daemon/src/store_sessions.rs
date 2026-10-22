@@ -13,6 +13,9 @@ pub enum SessionKind {
     Claude,
     /// The user's login shell in the workspace folder.
     Shell,
+    /// A project's setup command running in a new worktree: read-only, no input
+    /// reaches it, and it closes when the command ends. Its log is the full output.
+    Setup,
 }
 
 impl SessionKind {
@@ -20,6 +23,7 @@ impl SessionKind {
         match self {
             Self::Claude => "claude",
             Self::Shell => "shell",
+            Self::Setup => "setup",
         }
     }
 
@@ -27,6 +31,7 @@ impl SessionKind {
         match s {
             "claude" => Some(Self::Claude),
             "shell" => Some(Self::Shell),
+            "setup" => Some(Self::Setup),
             _ => None,
         }
     }

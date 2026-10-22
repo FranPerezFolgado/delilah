@@ -39,6 +39,11 @@ pub struct Live {
 }
 
 impl Live {
+    /// Whether what a viewer types reaches the process: not for a setup's output.
+    pub fn accepts_input(&self) -> bool {
+        self.kind != SessionKind::Setup
+    }
+
     pub fn state(&self) -> LiveState {
         *self.state.lock().unwrap()
     }
@@ -81,10 +86,9 @@ impl Sessions {
             pty,
             started: Arc::new(Notify::new()),
             viewers: Arc::default(),
-            state: Arc::new(Mutex::new(if kind == SessionKind::Shell {
-                LiveState::Working
-            } else {
-                LiveState::Starting
+            state: Arc::new(Mutex::new(match kind {
+                SessionKind::Shell | SessionKind::Setup => LiveState::Working,
+                SessionKind::Claude => LiveState::Starting,
             })),
             events: self.events.clone(),
         };

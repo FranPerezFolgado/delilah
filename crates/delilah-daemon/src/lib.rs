@@ -22,6 +22,7 @@ pub mod scheduler;
 pub mod secrets;
 mod session_api;
 pub mod sessions;
+mod setup;
 pub mod specs;
 pub mod state;
 pub mod store;

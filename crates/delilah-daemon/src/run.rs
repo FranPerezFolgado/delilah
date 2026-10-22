@@ -279,8 +279,30 @@ pub async fn start_run(
     Ok((StatusCode::CREATED, Json(task)))
 }
 
+/// Why a session could not be started.
+#[derive(Debug, thiserror::Error)]
+pub enum LaunchError {
+    #[error(transparent)]
+    Store(#[from] crate::store::StoreError),
+    #[error("{0}")]
+    Start(String),
+    /// A kind of session that is not started this way.
+    #[error("{0}")]
+    Unsupported(&'static str),
+}
+
+impl From<LaunchError> for ApiError {
+    fn from(e: LaunchError) -> Self {
+        match e {
+            LaunchError::Store(e) => e.into(),
+            LaunchError::Start(message) => ApiError::internal(message),
+            LaunchError::Unsupported(message) => ApiError::conflict(message),
+        }
+    }
+}
+
 /// What `launch_agent` needs besides the task and its workspace.
-pub struct AgentLaunch {
+pub(crate) struct AgentLaunch {
     /// A task without a Jira ticket: nothing to fetch.
     pub free: bool,
     /// The prompt as resolved (the request's own, or the workflow's default).
@@ -295,12 +317,12 @@ pub struct AgentLaunch {
 /// Everything after the workspace is ready: the ticket and notes the agent is
 /// pointed at, then its primary session (an adopted one or a new one). Owns what it
 /// needs, so it can run from a background task as well as from the request.
-pub async fn launch_agent(
+pub(crate) async fn launch_agent(
     app: &AppState,
     key: &TaskKey,
     ws: &delilah_git::Workspace,
     launch: AgentLaunch,
-) -> Result<(), ApiError> {
+) -> Result<(), LaunchError> {
     let AgentLaunch {
         free,
         prompt,
@@ -378,12 +400,12 @@ pub fn launch_session(
     workspace: &std::path::Path,
     prompt: Option<&str>,
     resume: bool,
-) -> Result<(), ApiError> {
+) -> Result<(), LaunchError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume = resume && claude::has_conversation(workspace, &session.id);
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
-        .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
+        .map_err(|e| LaunchError::Start(format!("cannot create {}: {e}", task_dir.display())))?;
     let cmd = match session.kind {
         SessionKind::Claude => {
             let settings = claude::write_settings(
@@ -392,7 +414,7 @@ pub fn launch_session(
                 &session.task,
                 &session.id,
             )
-            .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
+            .map_err(|e| LaunchError::Start(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
             claude::command(&claude::Launch {
                 workspace,
@@ -406,10 +428,15 @@ pub fn launch_session(
             })
         }
         SessionKind::Shell => shell_command(workspace),
+        SessionKind::Setup => {
+            return Err(LaunchError::Unsupported(
+                "a setup session is started by the task and cannot be reopened",
+            ));
+        }
     };
     let log = task_dir.join(format!("{}-{}.log", session.kind.name(), session.id));
     let pty = PtySession::spawn(cmd, 120, 40, Some(log))
-        .map_err(|e| ApiError::internal(format!("cannot start the session: {e}")))?;
+        .map_err(|e| LaunchError::Start(format!("cannot start the session: {e}")))?;
     let live = app.sessions.insert(
         &session.id,
         &session.task,

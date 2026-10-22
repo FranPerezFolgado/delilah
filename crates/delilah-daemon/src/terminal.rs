@@ -52,12 +52,13 @@ pub async fn session_terminal(
 fn upgrade(ws: WebSocketUpgrade, live: Live) -> Response {
     ws.on_upgrade(move |socket| async move {
         live.viewers.fetch_add(1, Ordering::Relaxed);
-        pump(socket, live.pty).await;
+        let accepts_input = live.accepts_input();
+        pump(socket, Arc::clone(&live.pty), accepts_input).await;
         live.viewers.fetch_sub(1, Ordering::Relaxed);
     })
 }
 
-async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
+async fn pump(mut socket: WebSocket, pty: Arc<PtySession>, accepts_input: bool) {
     let (scrollback, mut output) = pty.attach();
     let mut sizes = pty.watch_size();
     // The size first, so the client draws the scrollback at the size it was made for.
@@ -82,7 +83,9 @@ async fn pump(mut socket: WebSocket, pty: Arc<PtySession>) {
             },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Binary(bytes))) => {
-                    let _ = pty.write(&bytes);
+                    if accepts_input {
+                        let _ = pty.write(&bytes);
+                    }
                 }
                 Some(Ok(Message::Text(text))) => match serde_json::from_str(text.as_str()) {
                     Ok(Control::Resize { cols, rows }) => {
