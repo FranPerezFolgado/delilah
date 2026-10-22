@@ -949,11 +949,19 @@ mod tests {
     #[tokio::test]
     async fn a_permission_prompt_pauses_a_running_autopilot() {
         let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
-        crate::autopilot::on_attention(&app, &key, &permission()).await;
+        crate::autopilot::on_attention(&app, &key, "plan-1", &permission()).await;
         let t = app.store.get_task(&key).await.unwrap().unwrap();
         let a = t.autopilot.unwrap();
         assert_eq!(a.state, AutopilotState::Paused);
         assert_eq!(a.reason.as_deref(), Some("La sesión espera un permiso."));
+    }
+
+    #[tokio::test]
+    async fn a_permission_prompt_of_another_session_leaves_autopilot_running() {
+        let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
+        crate::autopilot::on_attention(&app, &key, "side-terminal", &permission()).await;
+        let t = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(crate::autopilot::is_running(&t));
     }
 
     #[tokio::test]
@@ -964,8 +972,8 @@ mod tests {
             text: "?".into(),
             since: now(),
         });
-        crate::autopilot::on_attention(&app, &key, &q).await;
-        crate::autopilot::on_attention(&app, &key, &Change::Clear).await;
+        crate::autopilot::on_attention(&app, &key, "plan-1", &q).await;
+        crate::autopilot::on_attention(&app, &key, "plan-1", &Change::Clear).await;
         let t = app.store.get_task(&key).await.unwrap().unwrap();
         assert!(crate::autopilot::is_running(&t));
     }
@@ -1007,7 +1015,7 @@ mod tests {
         let hook = json!({ "hook_event_name": "Stop" });
         let change = attention_change(Signal::TurnEnded, &hook, true, None, now(), app.lang());
         assert_eq!(change, Change::Clear);
-        crate::autopilot::on_attention(&app, &key, &change).await;
+        crate::autopilot::on_attention(&app, &key, "plan-1", &change).await;
         app.transition(&key, Event::ResetDue { now: resume_at })
             .await
             .unwrap();

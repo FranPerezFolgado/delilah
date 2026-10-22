@@ -214,8 +214,8 @@ async fn create_from_proposal(
         proposal.brief
     );
     // Autopilot is for the spec workflow only: elsewhere the task is still created,
-    // without it, and the refusal goes back next to it.
-    let mut declined = None;
+    // without it, and the refusal (naming the task actually made) goes back next to it.
+    let mut declined = false;
     let new = |autopilot: bool| NewTask {
         key: String::new(),
         title: proposal.title.clone(),
@@ -234,8 +234,7 @@ async fn create_from_proposal(
     let task = loop {
         let task = match crate::api::build_task(app, new(autopilot)).await {
             Err(e) if autopilot && e.reason.as_deref() == Some("not-spec-workflow") => {
-                let key = e.message.split(' ').next().unwrap_or_default();
-                declined = Some(crate::autopilot::refusal(key, app.lang()));
+                declined = true;
                 autopilot = false;
                 continue;
             }
@@ -255,7 +254,8 @@ async fn create_from_proposal(
             }
         }
     };
-    Ok((task.key.to_string(), declined))
+    let refusal = declined.then(|| crate::autopilot::refusal(task.key.as_str(), app.lang()));
+    Ok((task.key.to_string(), refusal))
 }
 
 #[cfg(test)]
@@ -723,7 +723,12 @@ mod tests {
         sqlx_set_workflow(&app).await;
         let reply = crear_with(&app, Some("autopilot"), "Crear").await;
         let key = reply["task"].as_str().unwrap();
-        assert!(reply["error"].as_str().unwrap().contains("workflow de spec"));
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap()
+                .contains("workflow de spec")
+        );
         let task = app
             .store
             .get_task(&TaskKey::new(key))

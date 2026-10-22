@@ -60,10 +60,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
     let shutdown = app.clone();
-    axum::serve(listener, api::router(app))
+    let served = axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
-        .await?;
+        .await;
+    // Also when serving failed: no preview is left running behind the daemon.
     shutdown.shutdown_runtime().await;
+    served?;
     Ok(())
 }
 

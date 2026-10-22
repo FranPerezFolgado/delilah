@@ -180,6 +180,9 @@ impl Store {
 
     /// Records the autopilot of a task, or clears it. Turning it on also turns saving
     /// mode on, in the same statement; clearing it leaves saving mode as it is.
+    ///
+    /// Unconditional: only for creating or starting a task. Any later change is
+    /// [`Store::update_autopilot`], so it never overwrites a pause or an "off" (#44).
     pub async fn set_autopilot(
         &self,
         key: &TaskKey,

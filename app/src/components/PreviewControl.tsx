@@ -6,7 +6,8 @@ import { openExternal } from "../platform";
 
 interface Props {
   taskKey: string;
-  /** The task's project name; the control exists only when it has a preview command. */
+  /** The task's project name; the control exists only when it has a preview command
+   * (or a preview of the task is still up). */
   project: string | null;
   /** The task's status; a finished task (done or failed) cannot start a preview. */
   status?: TaskStatus;
@@ -31,7 +32,9 @@ export function PreviewControl({ taskKey, project, status }: Props) {
     return () => off.forEach((f) => f());
   }, [refresh]);
 
-  if (!hasCommand || status?.type === "done" || status?.type === "failed") return null;
+  // One still up stays stoppable after its command is cleared.
+  const active = preview?.state === "starting" || preview?.state === "running";
+  if ((!hasCommand && !active) || status?.type === "done" || status?.type === "failed") return null;
 
   const start = async () => {
     setBusy(true);

@@ -35,6 +35,13 @@ describe("PreviewControl", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("keeps Stop for a running preview after the command is cleared", async () => {
+    vi.spyOn(api, "projects").mockResolvedValue([proj(null)]);
+    vi.spyOn(api, "getPreview").mockResolvedValue(view({ url: "http://localhost:5173" }));
+    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
+    await findByText("Parar preview");
+  });
+
   it("starts a preview", async () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     vi.spyOn(api, "getPreview").mockResolvedValue(null);

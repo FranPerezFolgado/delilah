@@ -139,7 +139,7 @@ Only for tasks on the spec workflow. The implementation starts without asking, t
 review runs the project's checks, and when it reports the branch ready Delilah starts
 the project's preview (if it has one) and opens a draft PR with your `gh`. A step that
 stalls gets one nudge; questions that have an option marked "(Recommended)" are
-answered for you. Anything else (a permission prompt, a question without a
+answered for you. Anything else (a permission prompt in the task's session, a question without a
 recommendation, a blocked review, a failure) pauses it: the header shows "Autopiloto en
 pausa" with the reason, and the Bandeja offers "Reanudar autopiloto" or "Seguir a
 mano". On the idea card, "Crear y lanzar en autopiloto" creates the task and starts it.

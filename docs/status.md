@@ -2,7 +2,7 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-22
-(version 0.3.0, plus "Nueva tarea con Claude"; autopilot and task previews on `feature/LIBRE-9`).
+(version 0.5.0: autopilot and task previews, on `feature/LIBRE-9`).
 
 ## Built
 
@@ -59,7 +59,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 **Autopilot** (a task runs plan → implement → review → draft PR on its own; opt-in per task, spec workflow only, implies saving mode):
 - Option on new tasks, backlog items and running tasks (`--autopilot` / `--no-autopilot`, `delilah autopilot <KEY> on|off|resume`), a mark in the task header, and the chain's preview and PR steps.
 - The implementation starts without asking; a stalled step gets one nudge; questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into a Bandeja item (*Reanudar autopiloto* / *Seguir a mano*).
-- The review writes an outcome file; if ready, the project's preview starts and a draft PR opens per repo (title and body from the review, the preview URL appended). Interrupted finishes recover on the scheduler tick.
+- The review writes an outcome file; if ready, the project's preview starts and a draft PR opens per repo (title and body from the review, a loopback preview URL appended). Interrupted finishes recover on the scheduler tick.
 - "Crear y lanzar en autopiloto" on the idea card.
 - See [architecture.md](architecture.md) and decisions [#37](decisions.md) to [#47](decisions.md).
 

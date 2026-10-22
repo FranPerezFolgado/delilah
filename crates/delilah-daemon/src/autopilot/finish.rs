@@ -32,6 +32,8 @@ pub(crate) enum FinishStop {
     StateWrite(String),
     /// The review is ready but these repos have uncommitted changes.
     Uncommitted(Vec<String>),
+    /// Git cannot say whether the workspace has uncommitted changes.
+    GitStatus(String),
     /// Autopilot was turned off or paused, or another review took over, meanwhile: the
     /// finish stops quietly.
     Superseded,
@@ -42,7 +44,11 @@ impl FinishStop {
     pub(super) fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Blocked(_) | Self::NoCommits | Self::NoWorkspace | Self::Uncommitted(_)
+            Self::Blocked(_)
+                | Self::NoCommits
+                | Self::NoWorkspace
+                | Self::Uncommitted(_)
+                | Self::GitStatus(_)
         )
     }
 
@@ -70,6 +76,13 @@ impl FinishStop {
             Self::StateWrite(e) => format!(
                 "{}: {e}",
                 lang.pick("no puedo guardar el estado", "cannot record the state")
+            ),
+            Self::GitStatus(e) => format!(
+                "{}: {e}",
+                lang.pick(
+                    "git no puede leer el estado del workspace",
+                    "git cannot read the workspace's status"
+                )
             ),
             Self::Superseded => String::new(),
             Self::Uncommitted(repos) => {
@@ -125,10 +138,25 @@ pub(super) async fn finish_guarded(
     // A terminal stop, or a retryable one that keeps failing, pauses the autopilot: a
     // paused one is not taken up again by `recover`, and a resume re-runs the (idempotent)
     // opening from the stage it left.
-    if stop.is_terminal() || app.finishing.failed(key) >= MAX_ATTEMPTS {
+    if stop.is_terminal()
+        || app.finishing.failed(key) >= MAX_ATTEMPTS
+        || !recoverable(app, key).await
+    {
         app.finishing.forget(key);
         pause(app, key, reason).await;
     }
+}
+
+/// Whether `recover` takes the finish up again: only once a stage is recorded. A
+/// retryable stop before that (the first state write failing) would wait for nothing.
+async fn recoverable(app: &AppState, key: &TaskKey) -> bool {
+    matches!(
+        app.store.get_task(key).await,
+        Ok(Some(task)) if task.autopilot.as_ref().is_some_and(|a| matches!(
+            a.stage,
+            Some(AutopilotStage::OpeningPr | AutopilotStage::Preview)
+        ))
+    )
 }
 
 /// A resume found a finish running (it may be about to pause): waits for it to let go,
@@ -206,23 +234,24 @@ async fn still_ours(app: &AppState, key: &TaskKey, session: &str) -> bool {
             .is_none_or(|s| s == session)
 }
 
-/// The repos of the task's workspace with uncommitted changes; none when it cannot be
-/// read (the PR step reports a missing workspace itself).
-async fn uncommitted(app: &AppState, key: &TaskKey) -> Vec<String> {
+/// The repos of the task's workspace with uncommitted changes; none when there is no
+/// workspace (the PR step reports that itself). Git failing to read one stops the
+/// finish: what it holds might not be in the PR.
+async fn uncommitted(app: &AppState, key: &TaskKey) -> Result<Vec<String>, FinishStop> {
     let Ok(Some((_, ws))) = app.store.workspace(key).await else {
-        return vec![];
+        return Ok(vec![]);
     };
     if !ws.path.is_dir() {
-        return vec![];
+        return Ok(vec![]);
     }
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
-    tokio::task::spawn_blocking(move || ws.uncommitted(&opts))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .unwrap_or_default()
+    match tokio::task::spawn_blocking(move || ws.uncommitted(&opts)).await {
+        Ok(Ok(dirty)) => Ok(dirty),
+        Ok(Err(e)) => Err(FinishStop::GitStatus(e.to_string())),
+        Err(e) => Err(FinishStop::GitStatus(e.to_string())),
+    }
 }
 
 async fn run_finish(app: &AppState, key: &TaskKey, session: &str) -> Result<(), FinishStop> {
@@ -255,7 +284,7 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) -> Result<(), 
     if !reopening {
         // Before anything is pushed: what the agent left uncommitted would not be in
         // the PR.
-        let dirty = uncommitted(app, key).await;
+        let dirty = uncommitted(app, key).await?;
         if !dirty.is_empty() {
             return Err(FinishStop::Uncommitted(dirty));
         }
@@ -355,18 +384,26 @@ async fn linked_urls(app: &AppState, key: &TaskKey) -> Vec<String> {
         .collect()
 }
 
-/// A preview URL as it goes in a PR body: no credentials, query or fragment. Loopback
-/// hosts stay (the preview of this very repo is on localhost).
-fn public_url(url: &str) -> String {
+/// A preview URL as it goes in a PR body: no credentials, query or fragment, and only
+/// on a loopback host (the preview of this very repo is on localhost). A tunnel or LAN
+/// URL stays out of a possibly public PR: `None`.
+fn public_url(url: &str) -> Option<String> {
     let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
     let host = authority.rsplit('@').next().unwrap_or(authority);
+    let name = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(v6),
+        None => host.split(':').next().unwrap_or(host),
+    };
+    if !matches!(name, "localhost" | "127.0.0.1" | "::1") {
+        return None;
+    }
     let path = tail.split(['?', '#']).next().unwrap_or("");
-    match scheme {
+    Some(match scheme {
         "" => format!("{host}{path}"),
         _ => format!("{scheme}://{host}{path}"),
-    }
+    })
 }
 
 /// Opens a draft PR in each repo that has commits and no open PR, while autopilot
@@ -403,8 +440,8 @@ async fn open_prs(
             };
         let title = title.map_or(proposed_title, str::to_string);
         let mut body = body.map_or(proposed_body, str::to_string);
-        if let Some(url) = preview_url {
-            body = format!("{}\n\nPreview: {}\n", body.trim_end(), public_url(url));
+        if let Some(url) = preview_url.and_then(public_url) {
+            body = format!("{}\n\nPreview: {url}\n", body.trim_end());
         }
         crate::pr_api::open_for(app, key, Some(&repo), &title, &body, true)
             .await
@@ -819,16 +856,26 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_url_loses_credentials_query_and_fragment_but_keeps_loopback() {
+    fn the_preview_url_loses_credentials_query_and_fragment_and_only_loopback_stays() {
         assert_eq!(
-            public_url("http://user:pw@localhost:5173/app/?token=1#frag"),
-            "http://localhost:5173/app/"
+            public_url("http://user:pw@localhost:5173/app/?token=1#frag").as_deref(),
+            Some("http://localhost:5173/app/")
         );
         assert_eq!(
-            public_url("https://a:b@c@127.0.0.1:9?x=1"),
-            "https://127.0.0.1:9"
+            public_url("https://a:b@c@127.0.0.1:9?x=1").as_deref(),
+            Some("https://127.0.0.1:9")
         );
-        assert_eq!(public_url("http://127.0.0.1:9/x"), "http://127.0.0.1:9/x");
+        assert_eq!(
+            public_url("http://[::1]:3000/x").as_deref(),
+            Some("http://[::1]:3000/x")
+        );
+        for elsewhere in [
+            "https://abc.ngrok.io/secret",
+            "http://192.168.1.4:5173/",
+            "http://localhost.evil.com/",
+        ] {
+            assert_eq!(public_url(elsewhere), None, "{elsewhere}");
+        }
     }
 
     #[tokio::test]
@@ -871,6 +918,27 @@ mod tests {
             .output()
             .unwrap();
         assert!(!pushed.status.success(), "nothing was pushed");
+    }
+
+    #[tokio::test]
+    async fn a_workspace_git_cannot_read_pauses_instead_of_opening() {
+        let gh = gh("[]");
+        let (app, key, dir) = ready_task(gh.clone(), None).await;
+        std::fs::remove_dir_all(dir.path().join("ws/.git")).unwrap();
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        finish(&app, &key, "rev-1").await;
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert!(a.reason.unwrap().contains("git"));
+        assert!(creates(&gh).is_empty());
+    }
+
+    #[tokio::test]
+    async fn only_a_recorded_stage_is_recoverable() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        assert!(!recoverable(&app, &key).await);
+        let (app, key, _dir) = ready_task(gh("[]"), Some(AutopilotStage::Preview)).await;
+        assert!(recoverable(&app, &key).await);
     }
 
     #[tokio::test]

@@ -13,14 +13,19 @@ use crate::inbox::{AttentionKind, Change};
 use crate::specs::SpecSummary;
 use crate::state::AppState;
 
-/// A permission prompt is something autopilot cannot answer: it pauses (a no-op when
-/// the task is not on autopilot, or is a project's owner). The usage limit never gets
-/// here: it clears attention.
-pub(crate) async fn on_attention(app: &AppState, key: &TaskKey, change: &Change) {
+/// A permission prompt of the task's primary session is something autopilot cannot
+/// answer: it pauses (a no-op when the task is not on autopilot, is a project's owner,
+/// or the prompt comes from another session, which autopilot does not drive). The
+/// usage limit never gets here: it clears attention.
+pub(crate) async fn on_attention(app: &AppState, key: &TaskKey, session: &str, change: &Change) {
     if !is_task(key) {
         return;
     }
-    if matches!(change, Change::Set(a) if a.kind == AttentionKind::Permission) {
+    if !matches!(change, Change::Set(a) if a.kind == AttentionKind::Permission) {
+        return;
+    }
+    let primary = crate::handoff::primary_session(app, key).await;
+    if primary.is_some_and(|p| p.id == session) {
         let reason = app.lang().pick(
             "La sesión espera un permiso.",
             "The session is waiting for a permission.",

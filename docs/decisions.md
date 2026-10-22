@@ -285,12 +285,15 @@ re-detected first, so a restart never opens a second one.
 outlives its session with nobody to stop it. The daemon runs the project's
 `preview_command` in the task's workspace, stops it with the task (done, failed, archived,
 deleted) and at shutdown, and keeps it in memory only: a restart does not adopt it. It
-runs in a login shell because launchd's PATH lacks cargo and npm; agents keep their clean
-environment.
+runs in a login shell because launchd's PATH lacks cargo and npm, with the agents' clean
+environment, so the daemon's own variables (tokens) do not reach the dev server. The
+command is trusted user configuration: like an agent, it runs whatever it says, and what
+guards it is the API's Origin and loopback `Host` checks, not the route.
 
 **41. The PR body keeps loopback preview URLs, without userinfo, query or fragment
 (2026-10-22).** The spec wants the preview URL in the PR, and for this repo it is
-`localhost`. Credentials and tokens in a URL must not reach a possibly public PR.
+`localhost`. Credentials and tokens in a URL must not reach a possibly public PR, and
+neither must a tunnel or LAN URL: a non-loopback host leaves the line out.
 
 **42. The agent's own "(Recommended)" label is trusted; permission prompts are never
 answered (2026-10-22).** Automatic answers pick the option the agent marked. Accepted

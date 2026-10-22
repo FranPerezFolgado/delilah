@@ -162,7 +162,11 @@ impl Previews {
         {
             return Err(StartError::Running);
         }
+        // The agents' clean environment (with the login shell's PATH): the daemon's own
+        // variables, tokens included, are not the dev server's business.
         let mut child = Command::new("/bin/zsh")
+            .env_clear()
+            .envs(delilah_agents::env::agent_env())
             .arg("-lc")
             .arg(command)
             .current_dir(dir)
@@ -235,7 +239,8 @@ impl Previews {
                     armed = false;
                     let mins = self.url_timeout.as_secs_f64() / 60.0;
                     let why = format!("the preview command printed no URL in {mins:.1} minutes");
-                    if self.fail(task, id, &why, true) {
+                    // Only one that is still waiting for its URL: a running one stays.
+                    if self.fail(task, id, &why, true, true) {
                         break None;
                     }
                 }
@@ -257,6 +262,7 @@ impl Previews {
                     task,
                     id,
                     &format!("the preview command exited ({status})"),
+                    false,
                     false,
                 );
             }
@@ -318,14 +324,19 @@ impl Previews {
         }
     }
 
-    /// Marks it failed (if it was starting or running), and with `term` asks its group
-    /// to end. Whether it was.
-    fn fail(&self, task: &str, id: u64, why: &str, term: bool) -> bool {
+    /// Marks it failed (if it was starting, or running unless `only_starting`), and with
+    /// `term` asks its group to end. Whether it was.
+    fn fail(&self, task: &str, id: u64, why: &str, term: bool, only_starting: bool) -> bool {
         let mut entries = self.lock();
         let Some(e) = entries.get_mut(task).filter(|e| e.id == id) else {
             return false;
         };
-        if !matches!(e.view.state, PreviewState::Starting | PreviewState::Running) {
+        let failable = match e.view.state {
+            PreviewState::Starting => true,
+            PreviewState::Running => !only_starting,
+            _ => false,
+        };
+        if !failable {
             return false;
         }
         let from = e.output.len().saturating_sub(TAIL_LINES);
@@ -484,8 +495,9 @@ fn find_url(line: &str) -> Option<String> {
         .filter_map(|p| line.find(p))
         .min()?;
     let rest = &line[start..];
+    // A control character ends it too: a coloured line has an escape sequence after it.
     let end = rest
-        .find(|c: char| c.is_whitespace() || matches!(c, ')' | '\'' | '"'))
+        .find(|c: char| c.is_whitespace() || c.is_control() || matches!(c, ')' | '\'' | '"'))
         .unwrap_or(rest.len());
     let url = &rest[..end];
     let scheme = if url.starts_with("https://") { 8 } else { 7 };
@@ -563,6 +575,19 @@ mod tests {
         p.start("T-1", &dir(), "echo hello; sleep 30").unwrap();
         let v = until(&p, "T-1", |v| v.state == PreviewState::Failed).await;
         assert!(v.error.unwrap().contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn a_running_one_outlives_the_url_timeout() {
+        let p = previews(300);
+        p.start("T-1", &dir(), "echo http://localhost:1; sleep 30")
+            .unwrap();
+        until(&p, "T-1", running).await;
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let v = p.view("T-1").unwrap();
+        assert_eq!(v.state, PreviewState::Running);
+        assert_eq!(v.error, None);
+        p.stop("T-1");
     }
 
     #[tokio::test]
@@ -687,6 +712,10 @@ mod tests {
             Some("https://localhost:5173/a")
         );
         assert_eq!(find_url("nothing here"), None);
+        assert_eq!(
+            find_url("Local: \x1b[36mhttp://localhost:5173/\x1b[39m").as_deref(),
+            Some("http://localhost:5173/")
+        );
     }
 
     #[tokio::test]
