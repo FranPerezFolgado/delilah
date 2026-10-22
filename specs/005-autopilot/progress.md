@@ -19,9 +19,9 @@ Mode: format=markdown commits=yes
 | WP-10 | 5 | 5B | done | 1 | 798de49 | hook FAIL was the parallel package mid-edit; full suite green after |
 | WP-11 | 5 | 5B | done | 1 | e57e216 | +hooks.rs call site; hook FAIL from parallel run, green after |
 | WP-11F | 5 | 5F | done | 1 | 7264a0b | phase-5 review fixes; autopilot.rs split into autopilot/; TODO WP-20 decisions.md: agent-labelled (Recommended) is trusted |
-| WP-12 | 6 | 6A | implementing | 0 | | |
-| WP-13 | 6 | 6A | implementing | 0 | | |
-| WP-14 | 6 | 6A | implementing | 0 | | |
+| WP-12 | 6 | 6A | verified | 1 | 1dcc34f | +1-line literal fixes in proposals.rs, run.rs; rule: workflow == feature |
+| WP-13 | 6 | 6A | verified | 1 | df9be0b | hook FAIL from parallel run, green after |
+| WP-14 | 6 | 6A | verified | 1 | 54f6212 | +alerts.ts, InboxView KINDS, TaskView EVENT_LABELS; Task.autopilot optional in TS |
 | WP-15 | 6 | 6B | pending | 0 | | |
 | WP-16 | 6 | 6B | pending | 0 | | |
 | WP-17 | 7 | 7A | pending | 0 | | |
