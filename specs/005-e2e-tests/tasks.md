@@ -189,10 +189,10 @@
 
 **Independent test**: `cargo test -p delilah-e2e --features e2e` green in < 3 min after a build; no process left running.
 
-- [ ] T030 [P] [US2] `crates/delilah-e2e/tests/projects.rs`:
+- [X] T030 [P] [US2] `crates/delilah-e2e/tests/projects.rs`:
   - US2-1: register `repo` and `parent` through the CLI `project add` and check `projects` lists both with kinds `repo` and `parent`;
   - US2-11: create and start a task, drop only the daemon child (an `Env::restart_daemon()` helper that kills the child by handle and starts it again on the same home and port), then check the projects, the task and its session are still listed.
-- [ ] T031 [P] [US2] `crates/delilah-e2e/tests/tasks.rs`, flows US2-2, US2-3, US2-4 and US2-9:
+- [X] T031 [P] [US2] `crates/delilah-e2e/tests/tasks.rs`, flows US2-2, US2-3, US2-4 and US2-9:
   - US2-2: new task in worktree mode on `repo`, start it:
     - `git worktree list` in the fixture shows `<DELILAH_HOME>/workspaces/<KEY>` on `feature/<KEY>`;
     - the task is working;

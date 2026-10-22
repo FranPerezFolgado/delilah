@@ -259,8 +259,21 @@ impl Env {
             "{} not found: run `cargo build -p delilah-daemon -p delilah-e2e` first",
             bin.display()
         );
-        for attempt in 1..=START_ATTEMPTS {
-            self.port = free_port();
+        self.spawn_daemon_on(None);
+    }
+
+    /// Kills only the daemon child and starts it again on the same home and port
+    /// (retrying for a bounded time while the port is still held).
+    pub fn restart_daemon(&mut self) {
+        self.stop_daemon();
+        self.spawn_daemon_on(Some(self.port));
+    }
+
+    fn spawn_daemon_on(&mut self, fixed_port: Option<u16>) {
+        let bin = target_dir().join("delilahd");
+        let attempts = if fixed_port.is_some() { 20 } else { START_ATTEMPTS };
+        for attempt in 1..=attempts {
+            self.port = fixed_port.unwrap_or_else(free_port);
             self.api = format!("http://127.0.0.1:{}", self.port);
             let log = File::options()
                 .create(true)
@@ -282,7 +295,10 @@ impl Env {
                 Ready::Exited(status) => {
                     self.daemon = None;
                     let text = std::fs::read_to_string(&self.log).unwrap_or_default();
-                    if attempt < START_ATTEMPTS && text.to_lowercase().contains("in use") {
+                    if attempt < attempts && text.to_lowercase().contains("in use") {
+                        if fixed_port.is_some() {
+                            std::thread::sleep(Duration::from_millis(500));
+                        }
                         continue;
                     }
                     panic!(
