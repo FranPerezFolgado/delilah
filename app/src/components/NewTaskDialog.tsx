@@ -110,14 +110,16 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       stale = true;
       clearTimeout(timer);
     };
-  }, [projectName, key, title, origin, pickedKey, edited]);
+  }, [projectName, key, title, notes, origin, pickedKey, edited]);
 
   const editBranch = (value: string) => {
-    const v = value.trim().replace(/^feature\//, "");
-    editedRef.current = v !== "";
-    setEdited(v !== "");
+    // Raw value in state (a typed space must stay); trimmed only to decide and on submit.
+    const v = value.replace(/^feature\//, "");
+    const has = v.trim() !== "";
+    editedRef.current = has;
+    setEdited(has);
     setBranch(v);
-    if (v) setBranchHint(null);
+    if (has) setBranchHint(null);
   };
 
   // A quick read-only Claude pass over the parent's code picks the submodules.

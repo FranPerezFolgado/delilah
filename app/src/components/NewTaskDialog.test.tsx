@@ -100,6 +100,47 @@ describe("NewTaskDialog branch field", () => {
     expect(container.querySelector(".error")).toBeNull();
   });
 
+  it("keeps spaces typed character by character and submits them", async () => {
+    vi.spyOn(api, "proposeBranch").mockResolvedValue({ branch: null, source: "title" });
+    const run = vi.spyOn(api, "run").mockRejectedValue(new Error("x"));
+    const { field, title, getByText } = setup();
+    type(title(), "Algo");
+    let acc = "";
+    for (const ch of "Arreglo del login") {
+      acc += ch;
+      type(field(), acc);
+    }
+    expect(field().value).toBe("Arreglo del login");
+    fireEvent.click(getByText("Start", { selector: "button" }));
+    await wait(0);
+    expect(run.mock.calls[0][0].branch).toBe("feature/Arreglo del login");
+  });
+
+  it("proposes again when the notes change", async () => {
+    const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/one", "title"));
+    const { title, container } = setup();
+    type(title(), "One");
+    await wait(1100);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const notes = container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(notes, { target: { value: "more context" } });
+    await wait(900);
+    expect(spy).toHaveBeenCalledTimes(1);
+    await wait(200);
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[1][1]).toMatchObject({ notes: "more context" });
+  });
+
+  it("submits the shown proposal for a Jira draft", async () => {
+    vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/PROJ-12-retry-failed-payments"));
+    const run = vi.spyOn(api, "run").mockRejectedValue(new Error("x"));
+    const { getByText } = setup({ draft: { key: "PROJ-12", title: "Retry failed payments", components: [] } });
+    await wait(1100);
+    fireEvent.click(getByText("Start", { selector: "button" }));
+    await wait(0);
+    expect(run.mock.calls[0][0].branch).toBe("feature/PROJ-12-retry-failed-payments");
+  });
+
   it("shows the field for existing and fromSession", () => {
     vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/x"));
     const existing = { key: "LIBRE-3", title: "T", project: "app", in_checkout: true } as Task;
