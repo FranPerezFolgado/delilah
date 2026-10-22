@@ -19,7 +19,7 @@ Mode: format=markdown commits=yes
 | WP-12 | 4 | 4B | verified | 0 | | no change: CLI calls already in WP-09/10 (project add, new, ls, show, done, archive, rm) |
 | WP-13 | 5 | 5A | verified | 1 | f276089 | |
 | WP-14 | 5 | 5B | verified | 1 | 493dff7 | |
-| WP-15 | 5 | 5B | implementing | 1 | | |
+| WP-15 | 5 | 5B | verified | 1 | | |
 | WP-16 | 6 | 6A | pending | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |
 | WP-18 | 6 | 6B | pending | 0 | | manual parts (T049, T056) |

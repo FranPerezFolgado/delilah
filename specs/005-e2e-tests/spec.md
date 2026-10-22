@@ -121,7 +121,7 @@ passes headless on a clean checkout.
 3. **Given** a fake Claude that asks a question, **When** the user opens the inbox and answers the ask card, **Then** the card disappears and the task goes back to working.
 4. **Given** a project conversation, **When** the fake Claude proposes a task and the user confirms it, **Then** the new task opens.
 5. **Given** a task with a PR from the fake `gh`, **When** the user opens its PR view, **Then** the PR's state, checks and review comments are shown.
-6. **Given** several tasks, **When** the user opens quick open and types part of a key or title, **Then** the matching task is offered and opening it shows that task.
+6. **Given** a started task with workspace files, **When** the user opens quick open (in-page ⌘P) and types part of a file name, **Then** the matching file is the first result and Enter opens it.
 
 ---
 
