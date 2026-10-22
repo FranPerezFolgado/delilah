@@ -40,7 +40,7 @@ the fixtures use it already.
 
 Two layers drive a real `delilahd` against a **fake Claude** (and a fake `gh` and Jira):
 - **API/CLI** (`crates/delilah-e2e/tests/*.rs`, behind the `e2e` feature, so `cargo test --workspace` does not run them): 11 flows through HTTP and the `delilah` binary.
-- **UI** (`app/e2e/*.spec.ts`, Playwright, Chromium headless): 6 flows in the browser, against one daemon and one Vite per run, tests serial.
+- **UI** (`app/e2e/*.spec.ts`, Playwright, Chromium headless): 6 flows (plus a smoke check) in the browser, against one daemon and one Vite per run, tests serial.
 
 ```bash
 scripts/e2e.sh                  # both layers: API/CLI, then UI
@@ -59,15 +59,48 @@ It builds the daemon, the CLI and the harness first, and ends with `api: PASS (N
 **Adding an API flow.** A `#[test]` in `crates/delilah-e2e/tests/<area>.rs`:
 
 ```rust
+use std::time::Duration;
+use delilah_e2e::api::items;
+use delilah_e2e::{Env, EnvOptions};
+use serde_json::json;
+
+const T: Duration = Duration::from_secs(20);
+
 let env = Env::start(EnvOptions::default());
-env.scenario("asks", json!({"steps": [{"ask": {"question": "¿A o B?", "options": ["A", "B"]}}, {"stop": "ok"}]}));
-let key = env.api().new_task(&env.fixtures.repo_project(), "Add X [fake:asks]");
-let ask = env.wait_until("ask in inbox", || env.api().inbox().asks().first().cloned());
-env.api().answer(&ask.id, "A");
-env.wait_until("fake got the answer", || env.record_for(&key).answers.first().cloned());
+// An option is a string or {label, description?, preview?}; `header` is required.
+env.scenario("ask", &json!({"steps": [
+    {"ask": {"question": "Which colour?", "header": "Colour", "options": ["red", "blue"]}},
+    {"stop": "done"},
+]}));
+env.register_fixtures();
+env.api().start_run(json!({
+    "key": "E2E-1", "title": "Ask", "project": "signal", "prompt": "Ask [fake:ask]",
+}));
+let ask = env.wait_until("the ask in the inbox", T, || {
+    let inbox = env.api().inbox();
+    items(&inbox).iter().find(|i| i["ask"].is_object()).map(|i| i["ask"].clone())
+});
+env.api().answer_ask(ask["id"].as_str().unwrap(), json!({"Which colour?": "blue"}));
+env.wait_until("the fake got the answer", T, || {
+    env.record_for("E2E-1").map(|r| r.answers).filter(|a| !a.is_empty())
+});
 ```
 
-**Adding a UI flow.** A new `app/e2e/<flow>.spec.ts` using the `e2e` fixture (`api`, `fixture()`, `scenario()`) from `app/e2e/fixtures.ts`, as the existing specs do. Each test makes its own fixture copies and registers them as its own projects.
+`wait_until`/`wait_for` take `(what, timeout, f)`; `api().inbox()` is a JSON `Value` (`items()` gives its list); `record_for(key)` is an `Option<Record>`. See `crates/delilah-e2e/tests/states.rs` for the full version.
+
+**Adding a UI flow.** A new `app/e2e/<flow>.spec.ts` importing `test` and `expect` from `./fixtures` (not from Playwright), as the existing specs do. Besides `page`, the fixtures are `api`, `env`, `fixture()`, `scenario(name, {steps: [...]})` and `project("repo" | "parent")`, which copies a fixture repo and registers it as a project of its own (removed after the test). Specs pin the locale with `test.use({ locale: "en-GB" })`, because the UI text depends on it.
+
+```ts
+import { expect, test } from "./fixtures";
+
+test.use({ locale: "en-GB" });
+
+test("my flow", async ({ page, project, scenario }) => {
+  scenario("ask", { steps: [{ ask: { question: "Which colour?", header: "Colour", options: ["red", "blue"] } }, { stop: "done" }] });
+  const p = await project("repo");
+  // create a task whose title ends in [fake:ask] in project p.name, then drive the page
+});
+```
 
 **Scenarios.** `env.scenario(name, json)` writes `<root>/fake/scenarios/<name>.json`; a task picks one with `[fake:<name>]` in its prompt, else `<task>.json`, else `default.json` (stop, then wait for input). After the last step the fake waits for input like an idle Claude. What each fake session saw (args, hooks, answers, inputs) is in `<root>/fake/records/<session>.json` (`env.record_for`). An unknown step makes the fake run `StopFailure` and exit 2.
 

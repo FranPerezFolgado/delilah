@@ -57,7 +57,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
 
 **End-to-end tests:**
-- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`). Local only, no CI. See [development.md](development.md#end-to-end-tests).
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Local only, no CI. See [development.md](development.md#end-to-end-tests).
 
 ## Pending and known problems
 
