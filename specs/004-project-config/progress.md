@@ -25,8 +25,8 @@ Mode: format=markdown commits=yes
 | WP-18 | 5 | 5D | done | 1 | 25b53bc | +setup-kind arms in ProjectView/TaskView/Sidebar/TerminalPane/sessionLabels |
 | WP-19 | 6 | 6A | done | 1 | 27a45f2 | |
 | WP-20 | 6 | 6A | done | 1 | 6a1d630 | |
-| WP-21 | 7 | 7A | verified | 1 | 701f271 | |
-| WP-22 | 7 | 7A | verified | 1 | 2ee23cb | |
+| WP-21 | 7 | 7A | done | 1 | 701f271 | |
+| WP-22 | 7 | 7A | done | 1 | 2ee23cb | |
 | WP-23 | 8 | 8A | pending | 0 | | |
 | WP-24 | 8 | 8B | pending | 0 | | |
 | WP-09F | 3 | 3F | done | 1 | a8e72ce | review fixes: picker paths, unplaced errors, stale rules, save confirm, docs, CLI old-daemon msg |
@@ -34,6 +34,7 @@ Mode: format=markdown commits=yes
 | WP-15F | 5 | 5F | done | 1 | 67b0246 | review fixes (daemon): pgroup kill, single launch seam, launch persistence, cancel flag, recovery order, retry/skip rollback, can_archive, notify |
 | WP-18F | 5 | 5F | done | 1 | b4adc52 | review fixes (app): archive setup-failed, reason labels, setup-running helper, Jira/Sidebar status |
 | WP-19F | 6 | 6F | done | 1 | c0fd04c | review fix: settings pickers need never submodules (?all=true) |
+| WP-21F | 7 | 7F | done | 1 | ea2eeb5 | review fixes: CLI --checkout/--worktree, whereOf(null) → project default, real scenario-3 test +app/src/phases.test.ts |
 | WP-02F | 2 | 2F | done | 1 | dfcf408 | review fixes: pty exit outcome, FieldError.code in TS + api.md |
 
 ## Review notes
@@ -51,3 +52,4 @@ Phase 4 (21862f6..cd91b76): spec ⚠️ minor gaps (TS≡Rust on 41 inputs) → 
 WP-15 notes for WP-16: call setup::recover_interrupted at daemon start before accepting runs; setup::cancel returns before the transition (API should return 202 or poll); retry with no setup configured → Unsupported (409). Known limit: kill reaches only the shell, not grandchildren (no process-group access without unsafe).
 Phase 5 (cd91b76..4449dd7): spec ⚠️ gaps · security ✅ (MEDIUM pgroup kill) · architecture ✅ merge with fixes · contract ✅ compatible → WP-15F + WP-18F. UI not checked in a browser.
 Phase 6 (0148332..567cd13): spec ✅ compliant · contract ❌ breaking (ProjectSettings pickers lost never submodules) → WP-19F.
+Phase 7 (ab0754b..7394613): spec ⚠️ gaps (HIGH: CLI ignored project default) → WP-21F.
