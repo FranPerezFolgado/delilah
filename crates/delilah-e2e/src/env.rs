@@ -218,8 +218,29 @@ impl Env {
             log,
             opts,
         };
+        if env.opts.jira {
+            env.start_jira();
+        }
         env.spawn_daemon();
         env
+    }
+
+    /// Starts the fake Jira server (if not running); returns its URL.
+    pub fn start_jira(&mut self) -> String {
+        if self.jira.is_none() {
+            self.jira = Some(crate::jira_server::start());
+        }
+        self.jira.as_ref().expect("jira").url.clone()
+    }
+
+    /// A typed client for this Env's daemon.
+    pub fn api(&self) -> crate::Api {
+        crate::Api::new(&self.api)
+    }
+
+    /// The `delilah` CLI aimed at this Env's daemon.
+    pub fn cli(&self) -> crate::Cli {
+        crate::Cli::new(&self.home, &self.api)
     }
 
     /// (Re)starts `delilahd` with this Env's state; panics if it doesn't answer.

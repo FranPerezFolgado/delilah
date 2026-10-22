@@ -3,10 +3,15 @@
 use std::fmt::Debug;
 use std::time::{Duration, Instant};
 
+pub mod api;
+pub mod cli;
 pub mod env;
 pub mod fake;
 pub mod fixtures;
+pub mod jira_server;
 
+pub use api::Api;
+pub use cli::Cli;
 pub use env::{Env, EnvOptions};
 
 /// How often `wait_until` looks again.

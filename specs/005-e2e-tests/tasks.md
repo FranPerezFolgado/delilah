@@ -151,15 +151,15 @@
   - fields `repo` (`signal`), `parent` (`parent-env/parent`), `remotes`;
   - fake `gh` helpers that write the JSON shapes `scripts/fake-gh.sh` reads: `open_pr(n, branch)`, `set_checks(n, failing|passing)`, `add_review(n, body)`, `merge(n)`. Mirror the JSON in `specs/003-pr-loop/quickstart.md` and `crates/delilah-daemon/src/pr_testkit.rs`.
   - Test: two `make` calls give independent repos (a branch made in one doesn't exist in the other).
-- [ ] T023 [P] Write failing tests, then implement `crates/delilah-e2e/src/jira_server.rs`:
+- [X] T023 [P] Write failing tests, then implement `crates/delilah-e2e/src/jira_server.rs`:
   - an axum server on `127.0.0.1:0` in a background thread with its own tokio runtime, with a shutdown handle;
   - routes `/rest/api/3/myself`, `/rest/api/3/field`, `/rest/api/3/search/jql`, `/rest/api/3/issue/{key}`, answered from `crates/delilah-integrations/fixtures/jira-search.json` (data-model.md "Fixtures");
   - the test calls `delilah_integrations::jira` (dev-dependency) against it and gets the fixture's issues, so the shapes match the real client.
-- [ ] T024 [P] Write failing tests, then implement the typed API client `Api` in `crates/delilah-e2e/src/api.rs`:
+- [X] T024 [P] Write failing tests, then implement the typed API client `Api` in `crates/delilah-e2e/src/api.rs`:
   - blocking reqwest, base URL from `Env`;
   - one method per route the flows use, with request/response types taken from `crates/delilah-daemon/src/api.rs` and `app/src/api.ts`, deserialised as `serde_json::Value` plus small typed accessors where tests assert. Methods: `health`, `projects`, `add_project` (whatever the UI's "add project" calls, see `app/src/api.ts`), `inspect_project`, `new_task`, `start_run`, `tasks`, `task`, `set_phase`, `done`, `archive`, `delete_task`, `resume`, `inbox`, `answer_ask`, `release_ask`, `sessions`, `reply`, `prs`, `jira_configure`, `jira_issues`, `events` (SSE reader collecting topics for N ms, bounded).
   - Test against a real `Env`: `health` OK. Put this test behind `#[cfg(feature = "e2e")]`.
-- [ ] T025 [P] Write failing tests, then implement `Cli` in `crates/delilah-e2e/src/cli.rs`: runs `target/debug/delilah` with `env_clear()`, `HOME` = Env home, `PATH` = `/usr/bin:/bin`, `DELILAH_URL` = Env api. Returns `(status, stdout, stderr)`. Test: `delilah ls` on an empty Env exits 0 (behind `e2e`).
+- [X] T025 [P] Write failing tests, then implement `Cli` in `crates/delilah-e2e/src/cli.rs`: runs `target/debug/delilah` with `env_clear()`, `HOME` = Env home, `PATH` = `/usr/bin:/bin`, `DELILAH_URL` = Env api. Returns `(status, stdout, stderr)`. Test: `delilah ls` on an empty Env exits 0 (behind `e2e`).
 - [X] T026 Add `Env` helpers in `crates/delilah-e2e/src/env.rs`:
   - `scenario(name, json)` writes `fake/scenarios/<name>.json`;
   - `record(session)`, `record_for(task)` (via `fake::record`);

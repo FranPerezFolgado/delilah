@@ -9,8 +9,8 @@ Mode: format=markdown commits=yes
 | WP-02 | 2 | 2A | done | 1 | f813aca | runs with 1A |
 | WP-03 | 2 | 2B | done | 1 | de1f28e | |
 | WP-04 | 2 | 2C | done | 1 | 1f16da4 | |
-| WP-05 | 3 | 3A | verified | 1 | | |
-| WP-06 | 3 | 3B | pending | 0 | | |
+| WP-05 | 3 | 3A | verified | 1 | e83fa1a | |
+| WP-06 | 3 | 3B | verified | 1 | | |
 | WP-07 | 3 | 3C | pending | 0 | | |
 | WP-08 | 3 | 3D | pending | 0 | | |
 | WP-09 | 4 | 4A | pending | 0 | | Phase 4 ∥ Phase 5 |

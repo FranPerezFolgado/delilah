@@ -488,11 +488,13 @@ version = "0.4.0"
 dependencies = [
  "axum",
  "delilah-agents",
+ "delilah-integrations",
  "reqwest",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "tungstenite 0.26.2",
 ]
 
 [[package]]
