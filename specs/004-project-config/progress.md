@@ -27,8 +27,8 @@ Mode: format=markdown commits=yes
 | WP-20 | 6 | 6A | done | 1 | 6a1d630 | |
 | WP-21 | 7 | 7A | done | 1 | 701f271 | |
 | WP-22 | 7 | 7A | done | 1 | 2ee23cb | |
-| WP-23 | 8 | 8A | pending | 0 | | |
-| WP-24 | 8 | 8B | pending | 0 | | |
+| WP-23 | 8 | 8A | done | 1 | a286647 | +docs/decisions.md |
+| WP-24 | 8 | 8B | done | 1 | | run by the orchestrator: all checks pass; quickstart 1–7 pass via API/CLI, UI not checked (no browser) |
 | WP-09F | 3 | 3F | done | 1 | a8e72ce | review fixes: picker paths, unplaced errors, stale rules, save confirm, docs, CLI old-daemon msg |
 | WP-10F | 4 | 4F | done | 1 | e235a95 | review fixes: `/` separator around empty slug, free-origin preview |
 | WP-15F | 5 | 5F | done | 1 | 67b0246 | review fixes (daemon): pgroup kill, single launch seam, launch persistence, cancel flag, recovery order, retry/skip rollback, can_archive, notify |
@@ -53,3 +53,4 @@ WP-15 notes for WP-16: call setup::recover_interrupted at daemon start before ac
 Phase 5 (cd91b76..4449dd7): spec ⚠️ gaps · security ✅ (MEDIUM pgroup kill) · architecture ✅ merge with fixes · contract ✅ compatible → WP-15F + WP-18F. UI not checked in a browser.
 Phase 6 (0148332..567cd13): spec ✅ compliant · contract ❌ breaking (ProjectSettings pickers lost never submodules) → WP-19F.
 Phase 7 (ab0754b..7394613): spec ⚠️ gaps (HIGH: CLI ignored project default) → WP-21F.
+Phase 8: full checks pass (cargo test --workspace, app tsc + 110 vitest, src-tauri builds with a local sidecar; clippy: 1 field_reassign_with_default warning in a CLI test). Quickstart 1–7 pass through API/CLI/filesystem in a fresh preview; UI-only parts not checked (no browser).
