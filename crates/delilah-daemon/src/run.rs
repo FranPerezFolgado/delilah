@@ -1127,6 +1127,7 @@ mod tests {
                 notes: Some("brief original".into()),
                 in_checkout: None,
                 saving_mode: None,
+                autopilot: None,
                 workflow: None,
                 free: true,
             },

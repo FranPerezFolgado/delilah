@@ -46,6 +46,18 @@ pub(crate) fn is_running(task: &Task) -> bool {
     matches!(&task.autopilot, Some(a) if a.state == AutopilotState::Running)
 }
 
+/// A fresh autopilot: running, nothing nudged yet.
+pub(crate) fn fresh() -> Autopilot {
+    Autopilot {
+        state: AutopilotState::Running,
+        stage: None,
+        reason: None,
+        since: chrono::Utc::now(),
+        nudged: None,
+        review_session: None,
+    }
+}
+
 /// Whether `key` is a task (not a project's owner, which has no autopilot): the check
 /// the entry points make before looking at a task.
 fn is_task(key: &TaskKey) -> bool {

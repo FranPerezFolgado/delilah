@@ -154,6 +154,7 @@ async fn create_from_proposal(
         free: true,
         in_checkout: None,
         saving_mode: None,
+        autopilot: None,
         workflow: None,
     };
     // Another conversation may take the key between allocating it and storing the
