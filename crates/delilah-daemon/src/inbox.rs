@@ -592,6 +592,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
@@ -646,6 +649,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");
@@ -811,6 +817,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");

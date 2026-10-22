@@ -22,7 +22,7 @@
 
 **Purpose**: the four test-only env vars of contracts/daemon-env.md. They block everything else. Unset, nothing changes.
 
-- [ ] T001 Write failing unit tests in `crates/delilah-daemon/src/config.rs` (`#[cfg(test)]`, setting env vars through a helper that takes a closure over a `HashMap`, so tests don't race on the process env). If `from_env` reads `std::env` directly, first split it into `from_env()` → `from_vars(impl Fn(&str) -> Option<String>)`.
+- [X] T001 Write failing unit tests in `crates/delilah-daemon/src/config.rs` (`#[cfg(test)]`, setting env vars through a helper that takes a closure over a `HashMap`, so tests don't race on the process env). If `from_env` reads `std::env` directly, first split it into `from_env()` → `from_vars(impl Fn(&str) -> Option<String>)`.
   Cases:
   - (a) `DELILAH_AGENT_BIN` unset → `agent_program == None`;
   - (b) set to an absolute executable (a temp file with mode 0o755) → `Some(path)`;
@@ -32,16 +32,16 @@
   - (f) `DELILAH_SECRETS` unset → keychain; `memory` → memory; `other` → error `DELILAH_SECRETS must be "memory" or unset`;
   - (g) `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK` unset → false, `1` → true;
   - (h) `DELILAH_PR_POLL_SECS` unset → 30 s; `1` → 1 s; `0`, `-3`, `abc` → error.
-- [ ] T002 Implement T001 in `crates/delilah-daemon/src/config.rs`:
+- [X] T002 Implement T001 in `crates/delilah-daemon/src/config.rs`:
   - New `Config` fields `secrets_in_memory: bool`, `jira_http_loopback: bool`, `pr_poll: Duration`; fill `agent_program` from `DELILAH_AGENT_BIN`.
   - Update every `Config { … }` literal in the daemon's tests (grep `agent_program: None`) with the defaults (false, false, 30 s), e.g. via a `Config::for_tests(home)` helper if one doesn't exist. Keep the doc comment on `agent_program`, updated to name the env var.
-- [ ] T003 Write a failing test, then make `crates/delilah-daemon/src/state.rs` pick `Secrets::Memory` when `config.secrets_in_memory` (keep `cfg!(test)` → memory as today).
-- [ ] T004 Write failing tests in `crates/delilah-daemon/src/jira.rs` (next to its existing tests) for the site check at the `starts_with("https://")` branch (~line 73):
+- [X] T003 Write a failing test, then make `crates/delilah-daemon/src/state.rs` pick `Secrets::Memory` when `config.secrets_in_memory` (keep `cfg!(test)` → memory as today).
+- [X] T004 Write failing tests in `crates/delilah-daemon/src/jira.rs` (next to its existing tests) for the site check at the `starts_with("https://")` branch (~line 73):
   - `http://127.0.0.1:5000` and `http://localhost:5000` are rejected when `jira_http_loopback` is false and accepted when true;
   - `http://example.com` is rejected even when true.
   Then implement. Check `delilah_integrations::jira::site_root` keeps an `http://` root intact; fix it there with a unit test if not.
-- [ ] T005 Write a failing test, then make `crates/delilah-daemon/src/pr_loop/mod.rs` use `app.config.pr_poll` for the ticker instead of the `INTERVAL` const (keep the const as the default in config.rs; remove it here if unused). `NUDGE_DELAY` stays as is.
-- [ ] T006 In `crates/delilah-daemon/src/main.rs`, log at start (info) one line per override that is set: `agent program overridden` (with the path), `secrets in memory`, `jira over http on loopback allowed`, `pr poll every N s`. Config errors already exit non-zero; check the new ones do.
+- [X] T005 Write a failing test, then make `crates/delilah-daemon/src/pr_loop/mod.rs` use `app.config.pr_poll` for the ticker instead of the `INTERVAL` const (keep the const as the default in config.rs; remove it here if unused). `NUDGE_DELAY` stays as is.
+- [X] T006 In `crates/delilah-daemon/src/main.rs`, log at start (info) one line per override that is set: `agent program overridden` (with the path), `secrets in memory`, `jira over http on loopback allowed`, `pr poll every N s`. Config errors already exit non-zero; check the new ones do.
 
 **Checkpoint**: `cargo test -p delilah-daemon` green; a daemon started without the new vars behaves exactly as before.
 

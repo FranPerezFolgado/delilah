@@ -5,8 +5,8 @@ Mode: format=markdown commits=yes
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | implementing | 1 | | runs with 2A |
-| WP-02 | 2 | 2A | verified | 1 | | runs with 1A |
+| WP-01 | 1 | 1A | verified | 1 | | runs with 2A |
+| WP-02 | 2 | 2A | verified | 1 | f813aca | runs with 1A |
 | WP-03 | 2 | 2B | pending | 0 | | |
 | WP-04 | 2 | 2C | pending | 0 | | |
 | WP-05 | 3 | 3A | pending | 0 | | |

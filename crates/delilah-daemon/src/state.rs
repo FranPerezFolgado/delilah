@@ -67,6 +67,7 @@ impl AppState {
         } else {
             Notifier::Recorder(Arc::default())
         };
+        let secrets_in_memory = config.secrets_in_memory;
         let events = Events::default();
         Self {
             store,
@@ -75,7 +76,7 @@ impl AppState {
             usage: Arc::default(),
             notifier,
             // Unit tests must never touch the real Keychain.
-            secrets: if cfg!(test) {
+            secrets: if cfg!(test) || secrets_in_memory {
                 Secrets::Memory(Arc::default())
             } else {
                 Secrets::Keychain

@@ -319,6 +319,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let restarted = AppState::new(app.store.clone(), config)
             .with_gh(gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")));

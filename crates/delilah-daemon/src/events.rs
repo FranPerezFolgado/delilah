@@ -117,6 +117,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

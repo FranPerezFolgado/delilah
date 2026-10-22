@@ -572,6 +572,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -585,6 +588,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -950,6 +956,9 @@ mod cors_tests {
             notify: false,
             ui_origin: ui_origin.map(str::to_string),
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -998,6 +1007,9 @@ mod cors_tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

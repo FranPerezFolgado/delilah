@@ -28,6 +28,18 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
+    if let Some(program) = &config.agent_program {
+        tracing::info!(program = %program.display(), "agent program overridden");
+    }
+    if config.secrets_in_memory {
+        tracing::info!("secrets in memory");
+    }
+    if config.jira_http_loopback {
+        tracing::info!("jira over http on loopback allowed");
+    }
+    if config.pr_poll != delilah_daemon::config::DEFAULT_PR_POLL {
+        tracing::info!("pr poll every {} s", config.pr_poll.as_secs());
+    }
     match tokio::task::spawn_blocking(delilah_agents::env::init_login_path).await? {
         Some(path) => tracing::info!(%path, "agents get the login shell's PATH"),
         None => tracing::warn!("could not read the login shell's PATH; agents get the daemon's"),

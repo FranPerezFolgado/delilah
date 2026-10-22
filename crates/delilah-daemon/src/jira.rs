@@ -57,6 +57,19 @@ pub async fn status(State(app): State<AppState>) -> Result<Json<JiraStatus>, Api
 }
 
 /// Saves the connection after checking it against Jira.
+/// `https://` always; `http://` only on loopback and only when the test switch is on.
+fn site_allowed(site: &str, http_loopback: bool) -> bool {
+    if site.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = site.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    http_loopback && matches!(host, "127.0.0.1" | "localhost")
+}
+
 pub async fn connect(
     State(app): State<AppState>,
     Json(req): Json<Connect>,
@@ -71,7 +84,7 @@ pub async fn connect(
     // The token goes with every request: never in clear text.
     if req.mode != JiraMode::Sample
         && let Some(site) = &site
-        && !site.starts_with("https://")
+        && !site_allowed(site, app.config.jira_http_loopback)
     {
         return Err(ApiError::bad_request(format!(
             "the Jira site must be an https:// URL, got `{site}`"
@@ -262,6 +275,9 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: crate::config::DEFAULT_PR_POLL,
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }
@@ -386,6 +402,18 @@ mod tests {
         );
         assert!(md.contains("- Componentes: svc-payments, svc-orders"));
         assert!(md.contains("## Descripción"));
+    }
+
+    #[test]
+    fn plain_http_is_only_allowed_on_loopback_with_the_switch() {
+        use super::site_allowed;
+        for site in ["http://127.0.0.1:5000", "http://localhost:5000"] {
+            assert!(!site_allowed(site, false), "{site}");
+            assert!(site_allowed(site, true), "{site}");
+        }
+        assert!(!site_allowed("http://example.com", true));
+        assert!(!site_allowed("http://127.0.0.1.evil.com", true));
+        assert!(site_allowed("https://acme.atlassian.net", false));
     }
 
     #[tokio::test]
