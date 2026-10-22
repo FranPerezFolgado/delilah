@@ -101,8 +101,10 @@ fn marker(prompt: &str) -> Option<&str> {
     (!name.is_empty()).then_some(name)
 }
 
-/// A scenario name is a plain file stem: `[A-Za-z0-9._-]+`, no leading dot.
+/// A scenario name is a plain file stem: `[A-Za-z0-9._-]+`, no leading dot. One
+/// leading `@` is allowed: a project conversation's task is `@<project name>`.
 fn valid_name(name: &str) -> bool {
+    let name = name.strip_prefix('@').unwrap_or(name);
     !name.is_empty()
         && !name.starts_with('.')
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
@@ -145,6 +147,15 @@ pub fn select(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_leading_at_is_allowed_once_and_nothing_else_escapes() {
+        assert!(valid_name("@signal"));
+        assert!(valid_name("echo"));
+        for bad in ["@../x", "@/x", "@.x", "@", "@@x", "a/b", "a\\b", "..", ".x", ""] {
+            assert!(!valid_name(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn parses_every_step() {

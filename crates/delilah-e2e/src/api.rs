@@ -149,6 +149,24 @@ impl Api {
         self.post(&format!("/api/v1/sessions/{session}/reopen"), json!({}))
     }
 
+    /// Opens a Claude session in the project's checkout; `conversation` makes it an idea
+    /// conversation. Returns the `Session`.
+    pub fn open_project_session(&self, project: &str, conversation: bool) -> Value {
+        self.post(
+            &format!("/api/v1/projects/{project}/sessions"),
+            json!({"kind": "claude", "conversation": conversation}),
+        )
+    }
+
+    /// Writes a message into a conversation session.
+    pub fn send_message(&self, session: &str, text: &str) -> Value {
+        self.post(&format!("/api/v1/sessions/{session}/messages"), json!({"text": text}))
+    }
+
+    pub fn conversation(&self, session: &str) -> Value {
+        self.get(&format!("/api/v1/sessions/{session}/conversation"))
+    }
+
     pub fn prs(&self) -> Value {
         self.get("/api/v1/prs")
     }

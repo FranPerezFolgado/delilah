@@ -220,13 +220,13 @@
   - `add_review(1, …)`: the review is visible;
   - `merge(1)`: the task is archived and its local branch is deleted (as `archive.rs` does);
   - every wait ≤ 30 s.
-- [ ] T034 [P] [US2] `crates/delilah-e2e/tests/jira.rs`, flow US2-8, with `EnvOptions { jira: true }`:
+- [X] T034 [P] [US2] `crates/delilah-e2e/tests/jira.rs`, flow US2-8, with `EnvOptions { jira: true }`:
   - configure Jira through the API with the fake server URL, any email and token;
   - `jira_issues` lists `PROJ-1242` and the other fixture issues;
   - create a task from `PROJ-1242` the way the UI's Jira view does (see `app/src/components/JiraView.tsx` and `app/src/api.ts`);
   - the task has key `PROJ-1242` and the fixture's summary as title;
   - nothing was written to the Keychain: `secrets in memory` is in the log.
-- [ ] T035 [P] [US2] `crates/delilah-e2e/tests/conversation.rs`, flow US2-10:
+- [X] T035 [P] [US2] `crates/delilah-e2e/tests/conversation.rs`, flow US2-10:
   - open a project conversation ("task from an idea") through the API, as `app/src/components/ConversationView.tsx` / `NewTaskDialog.tsx` do;
   - its scenario `@<project>.json` is selected by task: an `ask` whose shape is the confirmation card of `specs/004-task-from-idea/contracts/api.md` (`header: "Nueva tarea"`, title as question, brief as the `Crear` option's `preview`);
   - answer `Crear`: a new backlog task exists with that title, and its prompt/brief is the preview text;
