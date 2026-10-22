@@ -14,11 +14,11 @@ Mode: format=markdown commits=yes
 | WP-07 | 3 | 3A | done | 1 | 4ff756f | +R1-R3 review follow-ups; cargo fmt of run.rs, store_projects.rs |
 | WP-08 | 3 | 3A | done | 1 | f446162 | |
 | WP-09 | 3 | 3A | done | 1 | 17cebbd | |
-| WP-10 | 4 | 4A | verified | 2 | c29d87f | |
-| WP-11 | 4 | 4B | verified | 1 | 1fcdaa7 | +app/tsconfig.json resolveJsonModule |
-| WP-12 | 4 | 4B | verified | 1 | 8cb6fce | |
-| WP-13 | 5 | 5A | pending | 0 | | |
-| WP-14 | 5 | 5A | pending | 0 | | |
+| WP-10 | 4 | 4A | done | 2 | c29d87f | |
+| WP-11 | 4 | 4B | done | 1 | 1fcdaa7 | +app/tsconfig.json resolveJsonModule |
+| WP-12 | 4 | 4B | done | 1 | 8cb6fce | |
+| WP-13 | 5 | 5A | verified | 1 | 0647a04 | +S1-S3 symlink/.git guards |
+| WP-14 | 5 | 5A | verified | 1 | 91a288f | |
 | WP-15 | 5 | 5B | pending | 0 | | |
 | WP-16 | 5 | 5C | pending | 0 | | |
 | WP-17 | 5 | 5D | pending | 0 | | |
@@ -30,6 +30,7 @@ Mode: format=markdown commits=yes
 | WP-23 | 8 | 8A | pending | 0 | | |
 | WP-24 | 8 | 8B | pending | 0 | | |
 | WP-09F | 3 | 3F | done | 1 | a8e72ce | review fixes: picker paths, unplaced errors, stale rules, save confirm, docs, CLI old-daemon msg |
+| WP-10F | 4 | 4F | done | 1 | e235a95 | review fixes: `/` separator around empty slug, free-origin preview |
 | WP-02F | 2 | 2F | done | 1 | dfcf408 | review fixes: pty exit outcome, FieldError.code in TS + api.md |
 
 ## Review notes
@@ -43,3 +44,4 @@ Open LOW (not fixed): migration test on pre-existing rows; SharedMode→ShareMod
 Phase 3 security ✅ (no exploitable). Carried into WP-13: canonicalise shared source under the project root, never write through an existing symlink in the worktree, reject a `.git` component (and `\`, NUL, leading `~` in validate if cheap); test the symlink case. Setup execution (WP-15) gets a second security look.
 Phase 3 (353a293..HEAD): spec ⚠️ gaps → fixed in WP-09F · contract ⚠️ needs care → fixed in WP-09F · security ✅ · UI ⚠️ partial (no browser; API/CLI pass, screen untested in a browser).
 Open LOW: no test for "Ajustes guardados" row confirmation; PATCH kind-change does two non-atomic writes; Spanish submodules.unknown message omits the path; CLI 422 output untested end-to-end.
+Phase 4 (21862f6..cd91b76): spec ⚠️ minor gaps (TS≡Rust on 41 inputs) → WP-10F: `/` as separator around an empty {slug}; free-origin preview uses LIBRE-?; shared cases for `{slug}` twice / non-ASCII template. UI not checked in a browser. Open LOW: ß/Æ become hyphens (per research.md).
