@@ -17,6 +17,7 @@ use delilah_core::{
     Autopilot, AutopilotStage, AutopilotState, Event, HandoffStage, Step, Task, TaskKey,
 };
 use delilah_git::GitOptions;
+use serde_json::{Map, Value};
 
 use crate::api::ApiError;
 use crate::events::Topic;
@@ -30,6 +31,62 @@ use crate::state::AppState;
 /// Whether the task is on autopilot and not paused or done.
 pub(crate) fn is_running(task: &Task) -> bool {
     matches!(&task.autopilot, Some(a) if a.state == AutopilotState::Running)
+}
+
+/// The answers autopilot gives to an AskUserQuestion: for every question, its one
+/// option marked "(Recommended)" / "(Recomendado)" (any case), by the label the agent
+/// wrote. Several or no marked options in any question: `None`, autopilot cannot choose.
+pub(crate) fn recommended(questions: &Value) -> Option<Map<String, Value>> {
+    let mut answers = Map::new();
+    for q in questions.as_array().filter(|qs| !qs.is_empty())? {
+        let text = q["question"].as_str()?;
+        let mut marked = q["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|o| o["label"].as_str())
+            .filter(|l| {
+                let l = l.trim().to_lowercase();
+                l.ends_with("(recommended)") || l.ends_with("(recomendado)")
+            });
+        let label = marked.next().filter(|_| marked.next().is_none())?;
+        answers.insert(text.to_string(), Value::String(label.to_string()));
+    }
+    Some(answers)
+}
+
+/// A question of the task's primary session while autopilot runs: the answers when
+/// every question has a recommended option (each one goes to the history), else the
+/// autopilot pauses with the first question as the reason and `None` lets it be asked.
+pub(crate) async fn answer_question(
+    app: &AppState,
+    key: &TaskKey,
+    session: &str,
+    questions: &Value,
+) -> Option<Map<String, Value>> {
+    let task = app.store.get_task(key).await.ok()??;
+    if !is_running(&task) {
+        return None;
+    }
+    let primary = crate::handoff::primary_session(app, key).await?;
+    if primary.id != session {
+        return None;
+    }
+    let Some(answers) = recommended(questions) else {
+        let reason = questions[0]["question"].as_str().unwrap_or_default();
+        pause(app, key, reason).await;
+        return None;
+    };
+    for (question, answer) in &answers {
+        let event = Event::AutopilotAnswered {
+            question: question.clone(),
+            answer: answer.as_str().unwrap_or_default().to_string(),
+        };
+        if let Err(e) = app.transition(key, event).await {
+            tracing::warn!(task = %key, "cannot record the autopilot's answer: {e}");
+        }
+    }
+    Some(answers)
 }
 
 /// What a boundary becomes on autopilot: the offer of the implementation is taken on

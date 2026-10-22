@@ -163,6 +163,20 @@ pub async fn hook(
         // Not something Delilah can show: let the terminal ask.
         return Json(json!({}));
     }
+    if let Some(session) = &q.session
+        && crate::store_sessions::project_of(&q.task).is_none()
+        && let Some(answers) =
+            crate::autopilot::answer_question(&app, &TaskKey::new(&q.task), session, &questions)
+                .await
+    {
+        return Json(json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": { "questions": questions, "answers": answers },
+            }
+        }));
+    }
     let id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = oneshot::channel();
     let ask = Ask {
@@ -717,5 +731,136 @@ pub(crate) mod tests {
         assert_eq!(asks.release_session("conv"), ["a"]);
         assert!(matches!(waiting[0].try_recv(), Ok(Outcome::Released)));
         assert_eq!(asks.list().len(), 1);
+    }
+
+    async fn autopilot_with_primary(app: &AppState, state: delilah_core::AutopilotState) {
+        app.store
+            .set_autopilot(
+                &TaskKey::new("PROJ-1"),
+                Some(&delilah_core::Autopilot {
+                    state,
+                    stage: None,
+                    reason: None,
+                    since: Utc::now(),
+                    nudged: None,
+                    review_session: None,
+                }),
+            )
+            .await
+            .unwrap();
+        for (id, primary) in [("s1", true), ("s2", false)] {
+            app.store
+                .create_session(&crate::store_sessions::SessionRecord {
+                    id: id.into(),
+                    task: "PROJ-1".into(),
+                    kind: crate::store_sessions::SessionKind::Claude,
+                    label: "s".into(),
+                    primary,
+                    closed: false,
+                    read_only: false,
+                    conversation: false,
+                    step: None,
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    fn recommended_questions(second: &[&str], multi: bool) -> Value {
+        let opts = |labels: &[&str]| -> Vec<Value> {
+            labels
+                .iter()
+                .map(|l| json!({ "label": l, "description": "d" }))
+                .collect()
+        };
+        json!({ "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": { "questions": [
+            { "question": "Q1", "header": "a", "multiSelect": false,
+              "options": opts(&["Cursor (Recommended)", "Offset"]) },
+            { "question": "Q2", "header": "b", "multiSelect": multi, "options": opts(second) },
+        ]}})
+    }
+
+    const HOOK: &str = "/hooks/claude/ask?task=PROJ-1&session=s1";
+
+    #[tokio::test]
+    async fn autopilot_answers_recommended_options_at_once() {
+        let app = app().await;
+        autopilot_with_primary(&app, delilah_core::AutopilotState::Running).await;
+        let body = recommended_questions(&["Uno", "Dos (recomendado)", "Tres"], true);
+        let (_, out) = call(&app, post(HOOK, body)).await;
+        let answers = &out["hookSpecificOutput"]["updatedInput"]["answers"];
+        assert_eq!(answers["Q1"], "Cursor (Recommended)");
+        assert_eq!(answers["Q2"], "Dos (recomendado)");
+        assert!(app.asks.list().is_empty());
+        let events = app.store.events(&TaskKey::new("PROJ-1")).await.unwrap();
+        let names: Vec<_> = events.iter().map(|e| e.event.name()).collect();
+        assert_eq!(
+            names.iter().filter(|n| **n == "autopilot-answered").count(),
+            2
+        );
+        assert!(!names.contains(&"agent-asked"));
+    }
+
+    #[tokio::test]
+    async fn autopilot_pauses_when_a_question_has_no_single_recommended_option() {
+        for second in [
+            &["Uno", "Dos"][..],
+            &["Uno (Recommended)", "Dos (RECOMMENDED)"][..],
+        ] {
+            let app = app().await;
+            autopilot_with_primary(&app, delilah_core::AutopilotState::Running).await;
+            let hook = tokio::spawn({
+                let app = app.clone();
+                let body = recommended_questions(second, false);
+                async move { call(&app, post(HOOK, body)).await }
+            });
+            let item = waiting_ask(&app).await;
+            assert_eq!(item["kind"], "question");
+            let task = app
+                .store
+                .get_task(&TaskKey::new("PROJ-1"))
+                .await
+                .unwrap()
+                .unwrap();
+            let a = task.autopilot.unwrap();
+            assert_eq!(a.state, delilah_core::AutopilotState::Paused);
+            assert_eq!(a.reason.as_deref(), Some("Q1"));
+            hook.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn autopilot_leaves_questions_alone_when_off_paused_or_not_primary() {
+        let cases = [
+            (delilah_core::AutopilotState::Paused, HOOK),
+            (
+                delilah_core::AutopilotState::Running,
+                "/hooks/claude/ask?task=PROJ-1&session=s2",
+            ),
+            (
+                delilah_core::AutopilotState::Running,
+                "/hooks/claude/ask?task=PROJ-1",
+            ),
+        ];
+        for (state, uri) in cases {
+            let app = app().await;
+            autopilot_with_primary(&app, state).await;
+            let hook = tokio::spawn({
+                let app = app.clone();
+                let body = recommended_questions(&["Uno (Recommended)", "Dos"], false);
+                async move { call(&app, post(uri, body)).await }
+            });
+            waiting_ask(&app).await;
+            hook.abort();
+        }
+        // No autopilot at all.
+        let app = app().await;
+        let hook = tokio::spawn({
+            let app = app.clone();
+            let body = recommended_questions(&["Uno (Recommended)", "Dos"], false);
+            async move { call(&app, post("/hooks/claude/ask?task=PROJ-1", body)).await }
+        });
+        waiting_ask(&app).await;
+        hook.abort();
     }
 }
