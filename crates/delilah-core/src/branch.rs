@@ -120,9 +120,29 @@ pub fn compose(key: Option<&str>, short: &str, free: bool) -> Option<String> {
 /// Branch name from user input: leading `feature/` stripped, the rest slugged.
 /// `None` when nothing usable is left.
 pub fn custom(input: &str) -> Option<String> {
+    custom_for(input, None, true)
+}
+
+/// Like `custom`, for a task with `key`. A Jira task (`!free`) whose input already starts
+/// with its key (any case, e.g. a proposal shown to the user) keeps the key in its real case
+/// and slugs only the rest; any other input is slugged whole, with no key added.
+pub fn custom_for(input: &str, key: Option<&str>, free: bool) -> Option<String> {
     let mut rest = input.trim();
     while let Some(r) = rest.strip_prefix(PREFIX) {
         rest = r;
+    }
+    if let Some(key) = key.filter(|_| !free).and_then(clean_key)
+        && let Some(head) = rest.get(..key.len())
+        && head.eq_ignore_ascii_case(&key)
+    {
+        let tail = &rest[key.len()..];
+        if tail
+            .chars()
+            .next()
+            .is_none_or(|c| c == '-' || c == '/' || c.is_whitespace())
+        {
+            return compose(Some(&key), tail, false);
+        }
     }
     let s = slug(rest, MAX_SHORT);
     (!s.is_empty()).then(|| format!("{PREFIX}{s}"))
@@ -236,6 +256,41 @@ mod tests {
         assert_eq!(custom("feature/feature/x").as_deref(), Some("feature/x"));
         assert_eq!(custom("fix/login").as_deref(), Some("feature/fix-login"));
         assert_eq!(custom("///"), None);
+    }
+
+    #[test]
+    fn custom_for_keeps_the_key_of_a_proposal() {
+        let c = |i, k, f| custom_for(i, k, f);
+        assert_eq!(
+            c("feature/PROJ-12-retry-payments", Some("PROJ-12"), false).as_deref(),
+            Some("feature/PROJ-12-retry-payments")
+        );
+        assert_eq!(
+            c("feature/proj-12 Retry", Some("PROJ-12"), false).as_deref(),
+            Some("feature/PROJ-12-retry")
+        );
+        assert_eq!(
+            c("Arreglo del login", Some("PROJ-12"), false).as_deref(),
+            Some("feature/arreglo-del-login")
+        );
+        assert_eq!(
+            c("feature/feature/x", None, true).as_deref(),
+            Some("feature/x")
+        );
+        assert_eq!(
+            c("PROJ-12", Some("PROJ-12"), false).as_deref(),
+            Some("feature/PROJ-12")
+        );
+        assert_eq!(
+            c("PROJ-123-x", Some("PROJ-12"), false).as_deref(),
+            Some("feature/proj-123-x")
+        );
+        assert_eq!(
+            c("proj-12-x", Some("PROJ-12"), true).as_deref(),
+            Some("feature/proj-12-x")
+        );
+        assert_eq!(c("///", Some("PROJ-12"), false), None);
+        assert_eq!(c("///", None, true), None);
     }
 
     #[test]

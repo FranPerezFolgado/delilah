@@ -21,9 +21,6 @@ use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 /// How long a new session may show the folder-trust dialog before we stop watching.
 const TRUST_WATCH: Duration = Duration::from_secs(60);
 
-/// How long Claude gets to name the branch of a starting task.
-const START_NAME_LIMIT: Duration = Duration::from_secs(5);
-
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
     pub key: String,
@@ -157,40 +154,21 @@ pub async fn start_run(
     };
 
     // Named before anything is created, so a refused name leaves a backlog task as it is.
-    let branch = match &req.branch {
-        Some(typed) => {
-            let base = delilah_core::branch::custom(typed)
-                .ok_or_else(|| ApiError::bad_request("the branch name has nothing usable"))?;
-            crate::branch_name::unique(&app, &project, &req.submodules, base).await?
-        }
-        None => {
-            let notes = req
-                .notes
-                .clone()
-                .or_else(|| existing.as_ref().and_then(|t| t.notes.clone()));
-            let proposal = crate::branch_name::propose(
-                &app,
-                &project,
-                Some(&req.key),
-                &req.title,
-                notes.as_deref(),
-                req.free,
-                &req.submodules,
-                START_NAME_LIMIT,
-            )
-            .await?;
-            match proposal.branch {
-                Some(branch) => branch,
-                None => {
-                    let base =
-                        delilah_core::branch::fallback(&req.key, req.free).ok_or_else(|| {
-                            ApiError::bad_request("the branch name has nothing usable")
-                        })?;
-                    crate::branch_name::unique(&app, &project, &req.submodules, base).await?
-                }
-            }
-        }
-    };
+    let notes = req
+        .notes
+        .clone()
+        .or_else(|| existing.as_ref().and_then(|t| t.notes.clone()));
+    let branch = crate::branch_name::for_start(
+        &app,
+        &project,
+        &req.key,
+        &req.title,
+        notes.as_deref(),
+        req.free,
+        &req.submodules,
+        req.branch.as_deref(),
+    )
+    .await?;
 
     if in_checkout {
         match app.store.checkout_user(&project.path).await? {
@@ -693,6 +671,15 @@ mod tests {
         req.title = "!!".into();
         req.free = true;
         assert_eq!(started(&app, req).await, "feature/libre-1");
+    }
+
+    #[tokio::test]
+    async fn a_proposal_sent_back_keeps_the_key_case() {
+        let (app, _) = repo_app("exit 1").await;
+        let mut req = run("PROJ-12");
+        req.title = "t".into();
+        req.branch = Some("feature/feature/PROJ-12-retry payments".into());
+        assert_eq!(started(&app, req).await, "feature/PROJ-12-retry-payments");
     }
 
     #[tokio::test]

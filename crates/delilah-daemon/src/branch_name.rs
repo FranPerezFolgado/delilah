@@ -2,7 +2,7 @@
 //! no session, no workspace), falls back to the title and then to the key, and makes the
 //! result unique across the repos the task will touch.
 
-use std::path::PathBuf;
+use std::path::{Component, Path as FsPath, PathBuf};
 use std::time::Duration;
 
 use axum::Json;
@@ -35,7 +35,16 @@ pub struct Proposal {
 fn dirs_of(project: &Project, submodules: &[String]) -> Vec<PathBuf> {
     match project.kind {
         ProjectKind::Repo => vec![project.path.clone()],
-        ProjectKind::Parent => submodules.iter().map(|s| project.path.join(s)).collect(),
+        // An entry that leaves the project (`..`, absolute) would make git read elsewhere.
+        ProjectKind::Parent => submodules
+            .iter()
+            .filter(|s| {
+                FsPath::new(s)
+                    .components()
+                    .all(|c| matches!(c, Component::Normal(_)))
+            })
+            .map(|s| project.path.join(s))
+            .collect(),
     }
 }
 
@@ -96,6 +105,25 @@ async fn ask_claude(
     }
 }
 
+/// Claude's text as a branch: its own `feature/` and the ticket key are not repeated.
+/// `None` when nothing but the key is left.
+fn claude_branch(name: &str, key: Option<&str>, free: bool) -> Option<String> {
+    let named = branch::custom_for(name, key, free)?;
+    let Some(keyed) = key
+        .filter(|_| !free)
+        .and_then(|k| branch::compose(Some(k), "", false))
+    else {
+        return Some(named);
+    };
+    if named == keyed {
+        return None;
+    }
+    if named.starts_with(&format!("{keyed}-")) {
+        return Some(named);
+    }
+    branch::compose(key, named.strip_prefix(branch::PREFIX)?, false)
+}
+
 /// The branch a starting task gets: Claude's name, else the title's, else the key's,
 /// made unique. Never fails because of Claude.
 #[allow(clippy::too_many_arguments)]
@@ -112,7 +140,7 @@ pub async fn propose(
     let from_claude = ask_claude(app, title, notes, limit)
         .await
         .filter(|name| !branch::slug(name, 40).is_empty())
-        .and_then(|name| branch::compose(key, &name, free));
+        .and_then(|name| claude_branch(&name, key, free));
     let title_short = branch::title_slug(title);
     let (base, source) = match from_claude {
         Some(name) => (Some(name), Source::Claude),
@@ -128,6 +156,43 @@ pub async fn propose(
     };
     tracing::info!(source = ?source, branch = ?branch, "named the branch");
     Ok(Proposal { branch, source })
+}
+
+/// How long Claude gets to name the branch of a starting task.
+const START_NAME_LIMIT: Duration = Duration::from_secs(5);
+
+/// The branch a task being started gets: the one the user typed (or accepted from a
+/// proposal), normalised; else a proposal, else the key's. Unique across its repos.
+#[allow(clippy::too_many_arguments)]
+pub async fn for_start(
+    app: &AppState,
+    project: &Project,
+    key: &str,
+    title: &str,
+    notes: Option<&str>,
+    free: bool,
+    submodules: &[String],
+    branch: Option<&str>,
+) -> Result<String, ApiError> {
+    let nothing = || ApiError::bad_request("the branch name has nothing usable");
+    let base = match branch {
+        Some(typed) => branch::custom_for(typed, Some(key), free).ok_or_else(nothing)?,
+        None => {
+            let proposal = propose(
+                app,
+                project,
+                Some(key),
+                title,
+                notes,
+                free,
+                submodules,
+                START_NAME_LIMIT,
+            )
+            .await?;
+            return proposal.branch.ok_or_else(nothing);
+        }
+    };
+    unique(app, project, submodules, base).await
 }
 
 /// How long Claude gets to name a branch the user is still typing the task for.
@@ -246,6 +311,44 @@ mod tests {
         );
         assert_eq!(p.source, Source::Claude);
         assert_eq!(serde_json::to_value(&p).unwrap()["source"], "claude");
+    }
+
+    #[tokio::test]
+    async fn claude_repeating_feature_or_the_key_is_not_doubled() {
+        let says =
+            |n: &str| format!(r#"echo '{{"is_error":false,"result":"{{\"name\":\"{n}\"}}"}}'"#);
+        for name in [
+            "feature/PROJ-12 retry payments",
+            "proj-12 retry payments",
+            "feature/retry payments",
+        ] {
+            let (p, ..) = ask(&says(name), Some("PROJ-12"), "x", false).await;
+            assert_eq!(
+                p.branch.as_deref(),
+                Some("feature/PROJ-12-retry-payments"),
+                "{name}"
+            );
+            assert_eq!(p.source, Source::Claude);
+        }
+        let (p, ..) = ask(&says("feature/retry payments"), None, "x", true).await;
+        assert_eq!(p.branch.as_deref(), Some("feature/retry-payments"));
+    }
+
+    #[test]
+    fn submodules_leaving_the_project_are_skipped() {
+        let project = Project {
+            name: "p".into(),
+            path: PathBuf::from("/p"),
+            kind: ProjectKind::Parent,
+            workflow: "feature".into(),
+        };
+        let subs: Vec<String> = ["a", "../../x", "/etc", "b/c", "a/../.."]
+            .map(String::from)
+            .into();
+        assert_eq!(
+            dirs_of(&project, &subs),
+            vec![PathBuf::from("/p/a"), PathBuf::from("/p/b/c")]
+        );
     }
 
     #[tokio::test]
