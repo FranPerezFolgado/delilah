@@ -83,7 +83,7 @@ that no next step starts, and that "Reanudar autopiloto" picks the chain up agai
 **Acceptance Scenarios**:
 
 1. **Given** an autopilot step's session asks the user a question, **When** Delilah receives it, **Then** Delilah answers with the option the agent marked as recommended and the session goes on; the question and the chosen answer are written to the task's history. If any question in it has no option (or more than one) marked as recommended, autopilot pauses with the question as its reason and it waits in the Bandeja as today (FR-013a).
-2. **Given** a step's session ends its turn without reaching its step's end (the plan without `tasks.md`, the implementation with unchecked tasks, the review with outcome *blocked* or no outcome, e.g. checks still failing after the agent's own retries), **When** Delilah sees it, **Then** autopilot pauses with that reason and nothing else starts.
+2. **Given** a step's session ends its turn without reaching its step's end, a second time after one automatic nudge (FR-013b) (the plan without `tasks.md`, the implementation with unchecked tasks, the review with outcome *blocked* or no outcome, e.g. checks still failing after the agent's own retries), **When** Delilah sees it, **Then** autopilot pauses with that reason and nothing else starts.
 3. **Given** a step's session fails or cannot be started, **When** the handoff fails, **Then** autopilot pauses with the failure as its reason (the existing handoff retry stays available).
 4. **Given** pushing the branch or opening the PR fails, **When** Delilah sees the error, **Then** autopilot pauses with the error, and "Abrir PR" stays available to the user as today.
 5. **Given** a paused autopilot task, **When** the user carries on by hand (confirms a handoff, opens the PR, types in the session), **Then** the task behaves exactly as a saving-mode task, and autopilot stays paused until the user resumes it.
@@ -204,6 +204,7 @@ is running with autopilot on, and its first session got the brief.
 **Pausing**
 
 - **FR-013**: Autopilot MUST pause (not stop the session, not change the task's phase) when: a step's turn ends without reaching its end (FR-008 *blocked* included); a step's session fails or cannot start; the session waits for the user for anything autopilot cannot answer (e.g. a permission prompt in the terminal); the review ends *ready* but the workspace has uncommitted changes; pushing or opening the PR fails; or the agent asks a question that autopilot cannot answer (FR-013a).
+- **FR-013b**: Before pausing because a step's turn ended without reaching its end, autopilot MUST nudge that step's session once (one typed instruction to carry on without asking, written to the history); a second such turn end in the same step pauses. The review's *blocked* outcome is never nudged.
 - **FR-013a**: A question is answered by autopilot only when every question in it has exactly one option whose label is marked as recommended ("(Recommended)" or "(Recomendado)", the convention the agent's skills use); that option is chosen (for multi-select, only it). Otherwise autopilot pauses and the question waits in the Bandeja as today. Each automatic answer is written to the history with the question and the option chosen.
 - **FR-014**: A pause MUST create one Bandeja item per pause with the reason and the actions "Reanudar autopiloto" and "Seguir a mano" (which turns autopilot off), and send one notification.
 - **FR-015**: While paused, every manual action of saving mode (confirm or decline the handoff, retry, open the PR) MUST work as for a saving-mode task.
@@ -213,7 +214,7 @@ is running with autopilot on, and its first session got the brief.
 **Preview**
 
 - **FR-018**: A project MAY define a preview command in its Delilah settings (empty by default, editable from the app and the API), which Delilah (not the agent) starts and owns, in the task's workspace; the command MUST print the URL it serves on its output; for this repo it is `scripts/preview.sh`, which MUST be able to run without a terminal (non-interactive, in the first free slot) and report the URL it serves.
-- **FR-018a**: Delilah MUST take the first `http://` or `https://` URL the command prints as the preview's URL; if the command exits, or prints no URL within 2 minutes, the preview failed, and the reason shown includes the last lines of its output.
+- **FR-018a**: Delilah MUST take the first `http://` or `https://` URL the command prints as the preview's URL; if the command exits, or prints no URL within 10 minutes (a first preview may build the project), the preview failed, and the reason shown includes the last lines of its output.
 - **FR-019**: The preview's URL MUST be shown on the task and included in the PR description when the preview started before the PR opened.
 - **FR-020**: A task's preview MUST be stopped when the task is done, archived or deleted, or when the user stops it from the task; a preview failure MUST NOT pause autopilot.
 - **FR-020a**: The user MUST be able to start and stop a task's preview by hand on any task of a project with a preview command; autopilot uses this same action.
@@ -248,7 +249,7 @@ is running with autopilot on, and its first session got the brief.
 
 - Autopilot builds on saving mode (specs/004-saving-mode): one session per step, the same handoff state, recovery and "save notes first" preference. It adds automatic confirmation, two final actions (preview, PR) and the pause.
 - The non-interactive behaviour of each step comes from the instruction the session is given (it tells the spec and orchestrate workflows to run without stops and pre-answers their setup questions); the user's global skills are not edited by this feature.
-- "Tests failing after N attempts" is detected through the step's outcome: the orchestration and review workflows already retry on their own, and a step that gives up ends without reaching its end, which pauses autopilot (FR-013). Delilah adds no retry loop of its own in this version.
+- "Tests failing after N attempts" is detected through the step's outcome: the orchestration and review workflows already retry on their own, and a step that gives up ends without reaching its end, which pauses autopilot (FR-013). Delilah adds no retry loop of its own beyond one nudge per step (FR-013b).
 - No time, token or retry limits of its own in this version: the usage limit already bounds spending, and a stuck step ends its turn (pause). A wall-clock or token cap can be added later if runs show a need.
 - Bumping the version and following the repo's other rules (CLAUDE.md) is the agent's job inside the steps, as in a manual run.
 - The PR description comes from the agent (the review session, e.g. with `pr-writer`); Delilah only reads it.
