@@ -141,8 +141,8 @@ None: no new dependencies (`tokio` already has `process`; check its features in 
 - [X] T051 [P] `docs/architecture.md`: an "Autopilot" subsection under saving mode (shape, stall/nudge, outcome file, finish, pause/resume, recovery) and a "Previews" section (process group, URL, lifecycle); hook→effect rows for AskUserQuestion and permission attention.
 - [X] T052 [P] `docs/decisions.md`: new decisions — autopilot as a policy over saving mode (and what was ruled out: a second engine, editing the global skills); one nudge per step and in-hook recommended answers (stretching #15/#33); autopilot pushes and opens a draft PR with the user's own `gh`; the daemon owns previews (vs the agent).
 - [X] T053 [P] `docs/status.md` (built; known limits: previews lost on restart, no time/token caps), `docs/development.md` (setting this repo's preview command to `scripts/preview.sh`), `README.md` (autopilot, previews, the idea card button).
-- [ ] T054 Bump the **minor** version from `main` in `Cargo.toml`, `app/src-tauri/Cargo.toml`, `app/package.json`, `app/src-tauri/tauri.conf.json` and the lockfiles (`cargo check --workspace`, `(cd app/src-tauri && cargo check)`, `(cd app && npm install --package-lock-only)`); commit `chore: bump version to X.Y.0`.
-- [ ] T055 Run every check (`cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`) and walk quickstart.md in a preview.
+- [X] T054 Bump the **minor** version from `main` in `Cargo.toml`, `app/src-tauri/Cargo.toml`, `app/package.json`, `app/src-tauri/tauri.conf.json` and the lockfiles (`cargo check --workspace`, `(cd app/src-tauri && cargo check)`, `(cd app && npm install --package-lock-only)`); commit `chore: bump version to X.Y.0`.
+- [X] T055 Run every check (`cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`) and walk quickstart.md in a preview.
 
 ---
 

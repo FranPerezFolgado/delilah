@@ -29,5 +29,5 @@ Mode: format=markdown commits=yes
 | WP-18 | 8 | 8A | done | 1 | 68423d8 | non-spec workflow → task + refusal |
 | WP-19 | 8 | 8B | done | 1 | 0967841 | |
 | WP-19F | 8 | 8F | done | 1 | 210912e | phases 7-8 review fixes; for_hook rejects closed sessions only (spec 004 FR-013 keeps terminals) |
-| WP-20 | 9 | 9A | implementing | 0 | | |
-| WP-21 | 9 | 9B | pending | 0 | | |
+| WP-20 | 9 | 9A | done | 1 | 7593b9d | decisions #37–#47 |
+| WP-21 | 9 | 9B | done | 1 | 34530d4 | minor (new feature); Tauri shell test blocked by missing sidecar (env) |
