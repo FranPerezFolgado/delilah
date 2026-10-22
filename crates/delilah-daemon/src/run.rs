@@ -48,7 +48,7 @@ pub struct RunRequest {
     #[serde(default)]
     pub free: bool,
     /// Work in the project's own checkout (a branch there) instead of a worktree.
-    /// Left out: what a backlog task chose, else a worktree.
+    /// Left out: what a backlog task chose, else the project's default workspace.
     #[serde(default)]
     pub in_checkout: Option<bool>,
     /// A Claude session of the project to carry on as the task's primary one, with
@@ -105,10 +105,6 @@ pub async fn start_run(
             req.project = task.project.clone().unwrap_or_default();
         }
     }
-    let in_checkout = req
-        .in_checkout
-        .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
-        .unwrap_or(false);
     if req.title.trim().is_empty() {
         return Err(ApiError::bad_request(match req.free {
             true => "say what the free task is about",
@@ -121,6 +117,11 @@ pub async fn start_run(
         ));
     }
     let project = app.store.project(&req.project).await?;
+    // The request wins, then what the backlog task chose, then the project's default.
+    let in_checkout = req
+        .in_checkout
+        .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
+        .unwrap_or(project.settings.workspace == delilah_core::WorkspaceMode::Checkout);
     let rules = &project.settings.submodules;
     if project.kind == ProjectKind::Parent && !(rules.always.is_empty() && rules.never.is_empty()) {
         let root = project.path.clone();
@@ -1381,5 +1382,80 @@ mod tests {
         );
         assert!(!repo.join("ran-setup").exists());
         assert_eq!(status_of(&app, "LIBRE-1").await, TaskStatus::Running);
+    }
+
+    fn without_choice(key: &str) -> RunRequest {
+        RunRequest {
+            in_checkout: None,
+            ..request(key, false)
+        }
+    }
+
+    fn worktree_default() -> delilah_core::ProjectSettings {
+        delilah_core::ProjectSettings {
+            workspace: delilah_core::WorkspaceMode::Worktree,
+            ..settings(None)
+        }
+    }
+
+    fn logged(app: &AppState, key: &str) -> bool {
+        app.config.task_dir(key).join("workspace.log").exists()
+    }
+
+    #[tokio::test]
+    async fn no_choice_takes_the_projects_worktree_default() {
+        let (app, _repo) = repo_app(worktree_default()).await;
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(logged(&app, "LIBRE-1"));
+    }
+
+    #[tokio::test]
+    async fn a_request_choice_wins_over_the_projects_default() {
+        let (app, _repo) = repo_app(worktree_default()).await;
+        let (_, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", true)))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(!logged(&app, "LIBRE-1"));
+    }
+
+    #[tokio::test]
+    async fn a_saved_backlog_choice_wins_over_the_projects_default() {
+        let (app, _repo) = repo_app(worktree_default()).await;
+        app.store
+            .create_task(&Task {
+                key: TaskKey::new("LIBRE-1"),
+                title: "T".into(),
+                project: Some("web".into()),
+                workflow: "feature".into(),
+                phase: None,
+                status: TaskStatus::Queued,
+                notes: None,
+                in_checkout: Some(true),
+            })
+            .await
+            .unwrap();
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(!logged(&app, "LIBRE-1"));
+    }
+
+    #[tokio::test]
+    async fn no_settings_and_no_choice_start_in_the_checkout() {
+        let (app, _repo) = repo_app(Default::default()).await;
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(!logged(&app, "LIBRE-1"));
     }
 }

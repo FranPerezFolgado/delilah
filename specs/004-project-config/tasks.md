@@ -171,12 +171,12 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 
 ### Tests first
 
-- [ ] T050 [P] [US5] Write failing run tests in `crates/delilah-daemon/src/run.rs`: no `in_checkout` in the request and none saved → the project's mode; request or backlog choice wins; no settings → checkout
+- [X] T050 [P] [US5] Write failing run tests in `crates/delilah-daemon/src/run.rs`: no `in_checkout` in the request and none saved → the project's mode; request or backlog choice wins; no settings → checkout
 - [X] T051 [P] [US5] Write a failing test that `app/src/components/NewTaskDialog.tsx` preselects the project's mode in WherePicker
 
 ### Implementation
 
-- [ ] T052 [US5] Default `in_checkout` from `settings.workspace` in `crates/delilah-daemon/src/run.rs` (after the request and the backlog choice)
+- [X] T052 [US5] Default `in_checkout` from `settings.workspace` in `crates/delilah-daemon/src/run.rs` (after the request and the backlog choice)
 - [X] T053 [US5] Initialise `where` from `project.settings.workspace` in `app/src/components/NewTaskDialog.tsx`
 
 ---
