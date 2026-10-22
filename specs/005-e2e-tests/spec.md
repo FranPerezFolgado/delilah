@@ -184,22 +184,24 @@ fixture repo, sees it start and stop through the hooks, and closes it.
 - **FR-001**: The daemon MUST accept, through its startup configuration, a program to launch instead of `claude` for every agent session; when it is not set, behaviour MUST be exactly as today.
 - **FR-002**: The project MUST provide a fake Claude program that accepts the same arguments the daemon passes to Claude Code (new session or resume, session id, settings file, added folders, prompt) and records what it received so tests can check it.
 - **FR-003**: The fake Claude MUST report its lifecycle to the daemon the same way the real one does, through the hooks in the settings file it is given, so the daemon cannot tell it apart.
-- **FR-004**: The fake Claude's behaviour MUST be chosen per test from a small set of scripted steps: print text, report working, ask a question and wait for the answer, stop (wait for the user), fail, exit, sleep. Tests MUST be able to choose a script per task or per session.
+- **FR-004**: The fake Claude's behaviour MUST be chosen per test from a small set of scripted steps: print text, report working, ask a question (including the confirmation card a task-from-idea conversation ends with) and wait for the answer, stop (wait for the user), fail, exit, sleep. Tests MUST be able to choose a script per task or per session.
 - **FR-005**: The fake Claude MUST read what is typed into its terminal (replies, answers) and make it available to the test.
 - **FR-006**: The fake Claude MUST NOT contact any network service, read the user's Claude configuration, or start the real Claude.
+- **FR-006a**: The suite MUST fail, naming the test, if anything it starts tries to run the real Claude outside the opt-in smoke test (this is how SC-002 is checked).
+- **FR-006b**: The fake Claude MAY skip the status-line hook (usage and context figures); usage display is not covered in this feature.
 - **FR-007**: The fake Claude MUST be able to emit the folder-trust dialog, so the daemon's automatic acceptance is also covered.
   Beyond that, its terminal output is plain recognisable text: it does not replay real Claude sessions.
 
 **Isolated environment**
 
-- **FR-008**: Every end-to-end test MUST run against a daemon in its own temporary home and on a free port that is never the installed daemon's (7420), and MUST stop only the processes it started, by their own handle.
+- **FR-008**: Every end-to-end test MUST run against a daemon in its own temporary home and on a free port that is never the installed daemon's (7420), and MUST stop only the processes it started, by their own handle. Two runs at the same time (two worktrees) MUST NOT interfere.
 - **FR-009**: Each test MUST get its own copies of the fixture repos (a plain repo and a parent with submodules), the fake `gh` data and the sample Jira data; nothing from the user's real repos, credentials or work machine is used.
 
 **API/CLI layer**
 
 - **FR-010**: The API/CLI layer MUST cover at least the 11 flows of Story 2 in its first batch, and each one MUST check both the daemon's answers and the resulting state on disk where there is one (worktrees, branches, task folders).
 - **FR-011**: Flows that have a CLI command MUST be exercised at least once through the CLI against the isolated daemon.
-- **FR-012**: Waiting for asynchronous changes (session state, PR polling, events) MUST use bounded waits that fail with the last observed state.
+- **FR-012**: Waiting for asynchronous changes (session state, PR polling, events) MUST use bounded waits (no single wait longer than 30 seconds) that fail with the last observed state; no test may rely on a fixed sleep to pass.
 
 **UI layer**
 
