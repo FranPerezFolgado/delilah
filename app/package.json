@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "e2e": "playwright test",
     "sidecar": "bash ../scripts/build-sidecar.sh release",
     "sidecar:dev": "bash ../scripts/build-sidecar.sh debug",
     "tauri": "tauri",
@@ -34,6 +35,7 @@
     "remark-gfm": "4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.0",
     "@tauri-apps/cli": "^2.12.3",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",

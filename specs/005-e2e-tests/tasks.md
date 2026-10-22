@@ -243,9 +243,9 @@
 
 **Independent test**: `cd app && npx playwright test` green headless in < 5 min.
 
-- [ ] T037 [US3] Add `@playwright/test` to `app/package.json` devDependencies (pin the version like the other deps), plus a script `"e2e": "playwright test"`, then `npm install`. Add `app/playwright-report/` and `app/test-results/` to `.gitignore`.
-- [ ] T038 [US3] Exclude `e2e/**` from vitest in `app/vite.config.ts`: `test: { exclude: [...configDefaults.exclude, "e2e/**"] }` with `configDefaults` from `vitest/config`, keeping whatever test config exists. Check `npx vitest run` still runs the same 15+ files and no `*.spec.ts` from `e2e/`.
-- [ ] T039 [US3] Write `app/e2e/setup.ts` (Playwright `globalSetup`/`globalTeardown`):
+- [X] T037 [US3] Add `@playwright/test` to `app/package.json` devDependencies (pin the version like the other deps), plus a script `"e2e": "playwright test"`, then `npm install`. Add `app/playwright-report/` and `app/test-results/` to `.gitignore`.
+- [X] T038 [US3] Exclude `e2e/**` from vitest in `app/vite.config.ts`: `test: { exclude: [...configDefaults.exclude, "e2e/**"] }` with `configDefaults` from `vitest/config`, keeping whatever test config exists. Check `npx vitest run` still runs the same 15+ files and no `*.spec.ts` from `e2e/`.
+- [X] T039 [US3] Write `app/e2e/setup.ts` (Playwright `globalSetup`/`globalTeardown`):
   - pick a free port P for Vite;
   - spawn `../target/debug/e2e-env start --jira --ui-origin http://localhost:P` (fail with a clear message if the binary is missing: "run cargo build -p delilah-e2e");
   - read its JSON line;
@@ -253,14 +253,14 @@
   - wait for both; write the JSON plus the UI URL to `app/test-results/e2e-env.json` for the tests;
   - teardown: kill Vite by its handle, close e2e-env's stdin and await it, then fail if it exited 3 (tripwire).
   Neither process is ever killed by name.
-- [ ] T040 [US3] Write `app/playwright.config.ts`:
+- [X] T040 [US3] Write `app/playwright.config.ts`:
   - `testDir: "e2e"`, `workers: 1`, `fullyParallel: false`;
   - Chromium only, headless;
   - `use.baseURL` from the env file;
   - `trace: "retain-on-failure"`, `screenshot: "only-on-failure"`;
   - `expect.timeout` 15 s, test timeout 60 s;
   - global setup and teardown from T039.
-- [ ] T041 [US3] Write `app/e2e/fixtures.ts`: a Playwright `test.extend` with:
+- [X] T041 [US3] Write `app/e2e/fixtures.ts`: a Playwright `test.extend` with:
   - `api` (fetch to the daemon);
   - `fixture()`, which runs `e2e-env fixture --into <tmp>` and returns paths;
   - `scenario(name, json)`, which writes into `fake_dir/scenarios`;
