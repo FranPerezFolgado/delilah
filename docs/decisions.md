@@ -204,3 +204,16 @@ the check covers every repo of the workspace. One without a PR blocks the archiv
 if it is dirty or has unpushed commits, and keeps its branch. A failed fetch blocks
 too, and the workspace is released without force. Deleting a branch compares it to
 the verified sha first, so a commit made after the check survives.
+
+**33. Task branches are named by Claude from the title, and never reused or renamed
+(2026-10-22).** A headless Claude (haiku, no tools, run in a temp dir so no project
+files load, `--setting-sources user` plus `disableAllHooks`, no session persistence)
+proposes 2-4 words. If it fails or is slow: a slug of the title, then the key. A Jira
+key stays in the name (`feature/PROJ-12-retry-payments`); a free task's `LIBRE-n` is
+dropped, since it says nothing. A taken name (local or remote-tracking refs, in every
+repo of the workspace, also in checkout mode) gets `-2`, `-3`…; this replaces the old
+switch-to-existing for an explicit `--branch`. The name is never changed after the
+task starts, because the PR, the worktree and the stored run depend on it. `--bare`
+was ruled out for the Claude call: it skips OAuth and keychain auth, so it would not
+use the user's login. The task's agent naming its own branch was ruled out too: the
+branch must exist before the agent starts.

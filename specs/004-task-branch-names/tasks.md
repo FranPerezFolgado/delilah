@@ -105,10 +105,10 @@
 
 ## Phase 6: Polish & docs
 
-- [ ] T023 [P] `docs/status.md`: task branch names built (Claude naming, fallbacks, unique suffix, dialog field, `Task.branch`); remove it from pending if listed
-- [ ] T024 [P] `README.md`: how a task's branch is named (`feature/<short-name>`, `feature/<KEY>-<short-name>` for Jira), the "Rama" field in the start dialog, `-2` for taken names, `--branch` normalisation
-- [ ] T025 [P] `docs/architecture.md`: the naming flow (`delilah-core::branch`, `delilah-agents::branch_name`, `delilah-git::free_branch`, `POST /projects/{name}/branch-name`, `start_run`), `Task.branch` from `workspaces.branch`, `DELILAH_CLAUDE_BIN`
-- [ ] T026 [P] `docs/decisions.md`: Claude (haiku, no tools, temp dir, user settings only) names branches with title-slug and key fallbacks; Jira key kept and `LIBRE-n` dropped; names are never reused (suffix, also in checkout mode, replacing the old switch-to-existing for `--branch`) and never renamed after start
+- [X] T023 [P] `docs/status.md`: task branch names built (Claude naming, fallbacks, unique suffix, dialog field, `Task.branch`); remove it from pending if listed
+- [X] T024 [P] `README.md`: how a task's branch is named (`feature/<short-name>`, `feature/<KEY>-<short-name>` for Jira), the "Rama" field in the start dialog, `-2` for taken names, `--branch` normalisation
+- [X] T025 [P] `docs/architecture.md`: the naming flow (`delilah-core::branch`, `delilah-agents::branch_name`, `delilah-git::free_branch`, `POST /projects/{name}/branch-name`, `start_run`), `Task.branch` from `workspaces.branch`, `DELILAH_CLAUDE_BIN`
+- [X] T026 [P] `docs/decisions.md`: Claude (haiku, no tools, temp dir, user settings only) names branches with title-slug and key fallbacks; Jira key kept and `LIBRE-n` dropped; names are never reused (suffix, also in checkout mode, replacing the old switch-to-existing for `--branch`) and never renamed after start
 - [ ] T027 Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, `cd app && npx tsc --noEmit && npx vitest run`, then quickstart in a preview (`scripts/preview.sh --fresh`)
 
 ---

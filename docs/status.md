@@ -43,6 +43,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - "Abrir PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
 - A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
 
+**Branch names:**
+- A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`, free tasks `feature/<short-name>`.
+- A taken name (local or remote, in any repo of the workspace) gets `-2`, `-3`…; a branch is never reused or renamed.
+- A "Rama" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
+- `Task.branch` (from the stored workspace) is shown on the task view.
+
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
 - Help › Ver logs.

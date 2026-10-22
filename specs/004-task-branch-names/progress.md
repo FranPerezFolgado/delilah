@@ -14,7 +14,7 @@ Mode: format=markdown commits=yes
 | WP-07 | 4 | 4A | verified | 1 | | run early (UI only, api mocked) |
 | WP-08 | 5 | 5A | verified | 1 | | run early alongside WP-05 (no shared files) |
 | WP-09 | 5 | 5A | verified | 1 | | |
-| WP-10 | 6 | 6A | pending | 0 | | |
+| WP-10 | 6 | 6A | verified | 1 | | decision 33 |
 | WP-11 | 6 | 6B | pending | 0 | | |
 | WP-02F | 2 | fix | done | 1 | | review fixes: disableAllHooks, shared one-shot helper, claude_bin in suggest, key slug, compose guard, decomposed accents, remotes with `/` |
 
