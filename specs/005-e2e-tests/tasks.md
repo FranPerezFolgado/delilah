@@ -78,7 +78,7 @@
   - a marker naming a missing file is an error, not a silent default;
   - with no prompt and no task file it uses `default.json`.
 - [X] T011 [US1] Implement `crates/delilah-e2e/src/fake/scenario.rs` (`Scenario { steps: Vec<Step> }`, `Step` enum with serde, `select(fake_dir, prompt, task) -> Result<(String, Scenario)>`) until T010 passes.
-- [ ] T012 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/hooks.rs`:
+- [X] T012 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/hooks.rs`:
   - Inputs: a settings JSON as produced by `delilah_agents::claude::settings(...)`. Add `delilah-agents` as a dev-dependency and call it with a fake URL. Replace the commands with `cat >> <tmp>/E.json` through a small helper that rewrites them.
   - Checks:
     - (a) `task` is extracted from the hook URL query (`?task=KEY&session=ID`);
@@ -87,12 +87,12 @@
     - (d) a hook that exits non-zero is recorded with its code, not an error;
     - (e) a hook past its timeout is killed and recorded as code `-1`;
     - (f) payload shapes per event match the table in contracts/fake-claude.md.
-- [ ] T013 [US1] Implement `crates/delilah-e2e/src/fake/hooks.rs` (`Hooks::load(settings_path)`, `task()`, `run(event, payload) -> HookRun { exit_code, stdout }`, payload builders) until T012 passes. Use `std::process::Command::new("sh").arg("-c")`, `cwd` = the process's cwd.
-- [ ] T014 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/record.rs`:
+- [X] T013 [US1] Implement `crates/delilah-e2e/src/fake/hooks.rs` (`Hooks::load(settings_path)`, `task()`, `run(event, payload) -> HookRun { exit_code, stdout }`, payload builders) until T012 passes. Use `std::process::Command::new("sh").arg("-c")`, `cwd` = the process's cwd.
+- [X] T014 [P] [US1] Write failing unit tests in `crates/delilah-e2e/src/fake/record.rs`:
   - `Record` serialises with every field of data-model.md "Record";
   - `save()` writes atomically (temp file + rename) to `<fake_dir>/records/<session>.json`;
   - `load(fake_dir, session)` and `for_task(fake_dir, task)` (latest by mtime) read it back.
-- [ ] T015 [US1] Implement `crates/delilah-e2e/src/fake/record.rs` until T014 passes.
+- [X] T015 [US1] Implement `crates/delilah-e2e/src/fake/record.rs` until T014 passes.
 - [ ] T016 [US1] Write failing unit tests for the step runner in `crates/delilah-e2e/src/fake/run.rs`. It is generic over `R: BufRead` (terminal input) and `W: Write` (terminal output) so tests drive it with in-memory pipes and a settings file whose hooks write to temp files.
   Cases:
   - `SessionStart` always first, with `source` `startup` or `resume`;
