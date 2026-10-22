@@ -15,8 +15,8 @@ Mode: format=markdown commits=yes
 | WP-08 | 3 | 3D | verified | 1 | 80edf04 | |
 | WP-09 | 4 | 4A | verified | 1 | 832ebdf | Phase 4 ∥ Phase 5 |
 | WP-10 | 4 | 4A | verified | 1 | ff652a3 | |
-| WP-11 | 4 | 4A | verified | 1 | | |
-| WP-12 | 4 | 4B | pending | 0 | | |
+| WP-11 | 4 | 4A | verified | 1 | 151cd84 | |
+| WP-12 | 4 | 4B | verified | 0 | | no change: CLI calls already in WP-09/10 (project add, new, ls, show, done, archive, rm) |
 | WP-13 | 5 | 5A | verified | 1 | f276089 | |
 | WP-14 | 5 | 5B | verified | 1 | 493dff7 | |
 | WP-15 | 5 | 5B | implementing | 1 | | |
@@ -26,3 +26,4 @@ Mode: format=markdown commits=yes
 | WP-19 | 6 | 6C | pending | 0 | | |
 | WP-01F | 1 | 1A-fix | done | 1 | 5bfff99 | Phase 1 review fixes |
 | WP-02F | 2 | 2-fix | done | 1 | ea390bd | Phase 2 review fixes |
+| WP-08F | 3 | 3-fix | implementing | 1 | | Phase 3 review fixes |

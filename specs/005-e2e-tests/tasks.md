@@ -231,7 +231,7 @@
   - its scenario `@<project>.json` is selected by task: an `ask` whose shape is the confirmation card of `specs/004-task-from-idea/contracts/api.md` (`header: "Nueva tarea"`, title as question, brief as the `Crear` option's `preview`);
   - answer `Crear`: a new backlog task exists with that title, and its prompt/brief is the preview text;
   - the record's `answers[0]` carries the new key, as decision 004 says.
-- [ ] T036 [US2] Make sure FR-011 holds: at least one CLI call each for project add, new, ls/show, done, archive and rm across T030–T035. Add the missing ones to the matching file.
+- [X] T036 [US2] Make sure FR-011 holds: at least one CLI call each for project add, new, ls/show, done, archive and rm across T030–T035. Add the missing ones to the matching file.
 
 **Checkpoint**: US2 done; 11 flows green; run the suite 3 times in a row with no failure.
 
