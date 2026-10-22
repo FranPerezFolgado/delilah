@@ -403,6 +403,7 @@ fn new_autopilot() -> delilah_core::Autopilot {
         reason: None,
         since: chrono::Utc::now(),
         nudged: None,
+        review_session: None,
     }
 }
 
@@ -424,7 +425,7 @@ fn first_session(
             match autopilot {
                 true => format!(
                     "{prompt} {}",
-                    crate::handoff::autopilot_plan_note(lang, task)
+                    crate::autopilot::autopilot_plan_note(lang, task)
                 ),
                 false => format!("{prompt} {}", crate::handoff::plan_note(lang)),
             },
@@ -846,7 +847,13 @@ mod tests {
         req.saving_mode = Some(false);
         let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
-        assert!(app.store.get_task(&TaskKey::new("PROJ-2")).await.unwrap().is_none());
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("PROJ-2"))
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         // Off by default.
         let mut req = run("PROJ-3");
@@ -859,15 +866,20 @@ mod tests {
         task.project = Some("web".into());
         task.saving_mode = true;
         task.autopilot = Some(new_autopilot());
+        let original = task.autopilot.clone();
         app.store.create_task(&task).await.unwrap();
         start_run(State(app.clone()), Json(run("PROJ-4")))
             .await
             .unwrap_err();
-        assert!(get("PROJ-4").await.autopilot.is_some(), "kept");
+        assert_eq!(get("PROJ-4").await.autopilot, original, "kept");
         let mut req = run("PROJ-4");
         req.autopilot = Some(false);
         start_run(State(app.clone()), Json(req)).await.unwrap_err();
-        assert!(get("PROJ-4").await.autopilot.is_some(), "put back as it was");
+        assert_eq!(
+            get("PROJ-4").await.autopilot,
+            original,
+            "put back as it was"
+        );
 
         // A backlog task gets it from the request.
         let key = backlog_task(&app, "PROJ-5").await;

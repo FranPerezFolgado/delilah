@@ -271,6 +271,10 @@ pub struct Autopilot {
     /// The step that already got its one nudge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nudged: Option<Step>,
+    /// The review session whose outcome file the finish reads; recorded when the
+    /// review starts, so a restart reads the right file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_session: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -688,6 +692,7 @@ mod tests {
             reason: Some("stalled".into()),
             since: at(10, 0),
             nudged: None,
+            review_session: None,
         };
         let json = serde_json::to_string(&a).unwrap();
         assert_eq!(
@@ -701,9 +706,11 @@ mod tests {
             reason: None,
             since: at(10, 0),
             nudged: Some(Step::Review),
+            review_session: Some("rev-1".into()),
         };
         let json = serde_json::to_string(&b).unwrap();
         assert!(json.contains(r#""stage":"opening_pr""#) && json.contains(r#""nudged":"review""#));
+        assert!(json.contains(r#""review_session":"rev-1""#));
         assert_eq!(serde_json::from_str::<Autopilot>(&json).unwrap(), b);
         assert_eq!(
             serde_json::to_string(&AutopilotStage::Preview).unwrap(),

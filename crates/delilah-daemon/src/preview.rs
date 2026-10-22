@@ -76,6 +76,8 @@ pub struct Previews {
     events: Events,
     url_timeout: Duration,
     next_id: AtomicU64,
+    /// Bumped on every change of any preview, for `wait_settled`.
+    changes: tokio::sync::watch::Sender<u64>,
     /// Waiter tasks alive, to check none lingers.
     #[cfg(test)]
     waiters: Arc<std::sync::atomic::AtomicUsize>,
@@ -92,6 +94,7 @@ impl Previews {
             events,
             url_timeout,
             next_id: AtomicU64::new(1),
+            changes: tokio::sync::watch::channel(0).0,
             #[cfg(test)]
             waiters: Arc::default(),
         }
@@ -99,6 +102,39 @@ impl Previews {
 
     pub fn view(&self, task: &str) -> Option<PreviewView> {
         self.lock().get(task).map(|e| e.view.clone())
+    }
+
+    /// Tells the clients and `wait_settled` that a preview changed.
+    fn changed(&self) {
+        self.changes.send_modify(|n| *n += 1);
+        self.events.emit(Topic::Tasks);
+    }
+
+    /// How long a caller should wait for a preview to settle: its URL timeout, which
+    /// fails it, plus a margin.
+    pub fn settle_timeout(&self) -> Duration {
+        self.url_timeout + Duration::from_secs(30)
+    }
+
+    /// The task's preview once it is no longer starting (running or failed), waiting
+    /// for it up to `timeout`; the view as it is then if it is still starting. `None`
+    /// if it has none (or it was stopped meanwhile).
+    pub async fn wait_settled(&self, task: &str, timeout: Duration) -> Option<PreviewView> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            // Subscribed before looking, so a change in between is not missed.
+            let mut changes = self.changes.subscribe();
+            let view = self.view(task)?;
+            if view.state != PreviewState::Starting {
+                return Some(view);
+            }
+            if tokio::time::timeout_at(deadline, changes.changed())
+                .await
+                .is_err()
+            {
+                return self.view(task);
+            }
+        }
     }
 
     #[cfg(test)]
@@ -174,7 +210,7 @@ impl Previews {
             let _alive = alive;
             this.watch(&key, id, child, cancelled, readers).await;
         });
-        self.events.emit(Topic::Tasks);
+        self.changed();
         Ok(view)
     }
 
@@ -278,7 +314,7 @@ impl Previews {
             e.view.state = PreviewState::Running;
             e.view.url = Some(url);
             drop(entries);
-            self.events.emit(Topic::Tasks);
+            self.changed();
         }
     }
 
@@ -305,7 +341,7 @@ impl Previews {
         if let Some(pid) = group {
             signal_group(pid, "TERM");
         }
-        self.events.emit(Topic::Tasks);
+        self.changed();
         true
     }
 
@@ -322,7 +358,7 @@ impl Previews {
             if let Some(cancel) = e.cancel.take() {
                 let _ = cancel.send(());
             }
-            self.events.emit(Topic::Tasks);
+            self.changed();
         }
     }
 
@@ -580,6 +616,52 @@ mod tests {
             StartError::Running
         );
         p.stop("T-1");
+    }
+
+    #[tokio::test]
+    async fn wait_settled_returns_when_the_url_shows_up_or_the_preview_fails() {
+        let p = previews(60_000);
+        assert!(
+            p.wait_settled("T-1", Duration::from_secs(1))
+                .await
+                .is_none()
+        );
+        p.start("T-1", &dir(), "sleep 1; echo http://x; sleep 30")
+            .unwrap();
+        let v = p
+            .wait_settled("T-1", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(v.state, PreviewState::Running);
+        p.stop("T-1");
+        p.start("T-1", &dir(), "echo oops; exit 3").unwrap();
+        let v = p
+            .wait_settled("T-1", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(v.state, PreviewState::Failed);
+        p.stop("T-1");
+    }
+
+    #[tokio::test]
+    async fn wait_settled_gives_up_at_its_timeout_and_ends_when_stopped() {
+        let p = previews(60_000);
+        p.start("T-1", &dir(), "sleep 30").unwrap();
+        let v = p
+            .wait_settled("T-1", Duration::from_millis(100))
+            .await
+            .unwrap();
+        assert_eq!(v.state, PreviewState::Starting);
+        let p2 = p.clone();
+        let waiter =
+            tokio::spawn(async move { p2.wait_settled("T-1", Duration::from_secs(30)).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        p.stop("T-1");
+        let ended = tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ended.is_none());
     }
 
     #[tokio::test]

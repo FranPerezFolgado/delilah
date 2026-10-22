@@ -485,6 +485,7 @@ mod tests {
             reason: None,
             since: Utc::now(),
             nudged: None,
+            review_session: None,
         }
     }
 

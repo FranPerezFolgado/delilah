@@ -11,6 +11,7 @@ pub struct Autopilot {
     #[serde(default)] pub reason: Option<String>,        // why it paused (user-facing, app language)
     pub since: DateTime<Utc>,           // when `state` last changed
     #[serde(default)] pub nudged: Option<Step>,          // the step that already got its one nudge
+    #[serde(default)] pub review_session: Option<String>, // the review session whose outcome file the finish reads (set when the review starts)
 }
 pub enum AutopilotState { Running, Paused, Done }
 pub enum AutopilotStage { Preview, OpeningPr }

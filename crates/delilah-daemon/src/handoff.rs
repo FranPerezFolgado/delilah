@@ -45,8 +45,6 @@ pub struct HandoffCoordinator {
     /// Tasks whose new session is being started right now, so a recovery tick never
     /// starts the same step a second time. Only changed while holding `guard`.
     starting: std::sync::Mutex<HashSet<String>>,
-    /// Tasks whose autopilot is finishing (opening the PRs) right now.
-    finishing: std::sync::Mutex<HashSet<String>>,
 }
 
 impl HandoffCoordinator {
@@ -64,17 +62,6 @@ impl HandoffCoordinator {
     fn unmark_starting(&self, key: &TaskKey) {
         let mut starting = self.starting.lock().unwrap_or_else(|e| e.into_inner());
         starting.remove(key.as_str());
-    }
-
-    /// Marks the task's autopilot as finishing; false if it already was.
-    pub(crate) fn mark_finishing(&self, key: &TaskKey) -> bool {
-        let mut finishing = self.finishing.lock().unwrap_or_else(|e| e.into_inner());
-        finishing.insert(key.to_string())
-    }
-
-    pub(crate) fn unmark_finishing(&self, key: &TaskKey) {
-        let mut finishing = self.finishing.lock().unwrap_or_else(|e| e.into_inner());
-        finishing.remove(key.as_str());
     }
 }
 
@@ -135,19 +122,6 @@ pub(crate) fn plan_note(lang: Lang) -> &'static str {
         "Modo ahorro: cuando `tasks.md` esté escrito, para y no implementes; Delilah seguirá en una sesión nueva.",
         "Saving mode: once `tasks.md` is written, stop and do not implement; Delilah will carry on in a new session.",
     )
-}
-
-/// What the first session of an autopilot task is told on top of its prompt: run the
-/// spec workflow end to end on its own, then stop once `tasks.md` is written.
-pub(crate) fn autopilot_plan_note(lang: Lang, key: &str) -> String {
-    match lang {
-        Lang::Es => format!(
-            "Autopilot ({key}): nadie va a responder ni aprobar nada. Contesta tú las preguntas de configuración del workflow: salida en markdown, usa la rama actual de la tarea, sin fase de clarificación y con tareas generadas, solo spec y plan sin implementar. Aprueba tú cada fase y no preguntes nada que tenga una opción recomendada; si tienes que preguntar, marca una como \"(Recomendado)\". Cuando `tasks.md` esté escrito, para: Delilah seguirá en una sesión nueva."
-        ),
-        Lang::En => format!(
-            "Autopilot ({key}): nobody will answer or approve anything. Answer the workflow's setup questions yourself: markdown output, keep the task's current branch, no clarification phase, and generate the tasks, spec and plan only with no implementation. Approve every phase yourself and do not ask anything that has a recommended option; if you must ask, mark one \"(Recommended)\". Once `tasks.md` is written, stop: Delilah will carry on in a new session."
-        ),
-    }
 }
 
 /// What a step's session is told to do. `dir` is the spec folder in the workspace.
@@ -290,7 +264,10 @@ async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: 
         }
         Boundary::Finish => {
             drop(guard);
-            autopilot::finish(app, key, &primary.id).await;
+            // Waits for a preview and opens PRs: not in the turn-end path, which goes
+            // on to the hint and must not be held up.
+            let (app, key, session) = (app.clone(), key.clone(), primary.id.clone());
+            tokio::spawn(async move { autopilot::finish(&app, &key, &session).await });
         }
     }
 }
@@ -477,7 +454,6 @@ pub(crate) async fn on_implement_chosen(app: &AppState, key: &TaskKey) {
 
 /// Finishes or re-offers a handoff a restart (or a failed start) left half done.
 pub(crate) async fn recover(app: &AppState, task: &Task) {
-    autopilot::recover(app, task).await;
     recover_with(app, task, &crate::run::launch_session).await;
 }
 
@@ -705,11 +681,7 @@ async fn try_start<L: Launcher>(
     }
     // On autopilot the session is also told how to work with nobody to answer, and
     // (the review) where to write its outcome: `new` is the session that runs.
-    let on_autopilot =
-        matches!(app.store.get_task(key).await, Ok(Some(t)) if autopilot::is_running(&t));
-    let prompt = match autopilot::step_note(lang, step, &autopilot::outcome_path(app, key, &new.id))
-        .filter(|_| on_autopilot)
-    {
+    let prompt = match autopilot::prepare_step(app, key, step, &new.id).await {
         Some(note) => format!("{prompt} {note}"),
         None => prompt,
     };
@@ -737,7 +709,7 @@ async fn try_start<L: Launcher>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::config::Config;
@@ -1563,6 +1535,7 @@ mod tests {
             reason: None,
             since: chrono::Utc::now(),
             nudged: None,
+            review_session: None,
         }
     }
 
@@ -1649,6 +1622,13 @@ mod tests {
         let path = autopilot::outcome_path(&app, &key, &session.id);
         assert!(prompt.contains(&path.display().to_string()), "{prompt}");
         assert!(prompt.contains("pr_title"));
+        // The folder exists before the session starts, and the session is recorded.
+        assert!(path.parent().unwrap().is_dir());
+        let recorded = app.store.get_task(&key).await.unwrap().unwrap().autopilot;
+        assert_eq!(
+            recorded.and_then(|a| a.review_session).as_deref(),
+            Some(session.id.as_str())
+        );
     }
 
     #[tokio::test]
@@ -1670,6 +1650,100 @@ mod tests {
         assert_eq!(
             boundary(&t, Some(Step::Review), &spec(5, 5)),
             Some(Boundary::Finish)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_whole_chain_runs_through_the_turn_ends_to_one_draft_pr() {
+        use crate::gh::fake::{FakeGh, PR_URL, REPO_VIEW, bare_snapshot};
+        use crate::pr_testkit::git_repo_with_origin;
+
+        let gh = Arc::new(
+            FakeGh::new()
+                .with_user("me")
+                .on(&["repo", "view"], Ok(REPO_VIEW))
+                .on(&["pr", "list"], Ok("[]"))
+                .on(&["pr", "create"], Ok(PR_URL))
+                .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false))),
+        );
+        let (app, key) = setup().await;
+        let app = app.with_gh(gh.clone());
+        no_save_notes(&app).await;
+        let ws = app.config.home.join("ws");
+        git_repo_with_origin(
+            &ws,
+            &app.config.home.join("origin"),
+            "feature/PROJ-1",
+            &["first"],
+        );
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        let launched = Launched::default();
+        let launch = ok_launcher(&launched);
+
+        // The plan turn ends with tasks.md written: the implementation starts.
+        on_turn_ended_with(&app, &key, &launch).await;
+        assert_eq!(
+            primary_session(&app, &key).await.unwrap().step,
+            Some(Step::Implement)
+        );
+
+        // Not all checked yet: nothing more starts.
+        on_turn_ended_with(&app, &key, &launch).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+
+        // Every task checked and the implementation's turn ends: the review starts.
+        check_all(&app);
+        on_turn_ended_with(&app, &key, &launch).await;
+        let review = primary_session(&app, &key).await.unwrap();
+        assert_eq!(review.step, Some(Step::Review));
+        let outcome = autopilot::outcome_path(&app, &key, &review.id);
+        assert!(
+            launched.lock().unwrap()[1]
+                .1
+                .as_deref()
+                .unwrap()
+                .contains(&outcome.display().to_string())
+        );
+        assert_eq!(launched.lock().unwrap().len(), 2);
+
+        // The review writes a ready outcome and its turn ends: one draft PR, done.
+        std::fs::write(
+            &outcome,
+            r#"{"outcome":"ready","pr_title":"feat: chain","pr_body":"body"}"#,
+        )
+        .unwrap();
+        on_turn_ended_with(&app, &key, &launch).await;
+        for _ in 0..400 {
+            let a = app.store.get_task(&key).await.unwrap().unwrap().autopilot;
+            if a.is_some_and(|a| a.state == delilah_core::AutopilotState::Done) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        let a = app
+            .store
+            .get_task(&key)
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot
+            .unwrap();
+        assert_eq!(a.state, delilah_core::AutopilotState::Done);
+        let creates: Vec<_> = gh
+            .calls()
+            .into_iter()
+            .filter(|c| c.starts_with(&["pr".to_string(), "create".to_string()]))
+            .collect();
+        assert_eq!(creates.len(), 1);
+        assert!(creates[0].contains(&"--draft".to_string()));
+        assert!(creates[0].contains(&"feat: chain".to_string()));
+        let events = app.store.events(&key).await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.event.name() == "autopilot-finished")
+                .count(),
+            1
         );
     }
 }

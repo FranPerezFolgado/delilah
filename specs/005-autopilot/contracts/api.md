@@ -11,12 +11,13 @@ autopilot: null | {
   reason?: string;
   since: string;          // RFC 3339
   nudged?: Step;
+  review_session?: string; // the review session whose outcome file the finish reads
 };
 ```
 
 ## Creating and starting
 
-- `RunRequest` gains `autopilot?: boolean`. `true` forces `saving_mode: true`; `autopilot: true` with `saving_mode: false` is `400`.
+- `RunRequest` gains `autopilot?: boolean`. `true` forces `saving_mode: true`; `autopilot: true` with `saving_mode: false` is `400`. An explicit `saving_mode: false` without `autopilot` clears an inherited autopilot.
 - `NewBacklogTask` and `BacklogChange` (`PATCH /api/v1/tasks/{key}`) gain `autopilot?: boolean`, same rule.
 
 ## `POST /api/v1/tasks/{key}/autopilot`

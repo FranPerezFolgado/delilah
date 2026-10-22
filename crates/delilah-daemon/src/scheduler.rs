@@ -24,6 +24,7 @@ pub async fn tick(app: &AppState) {
     };
     for task in tasks {
         resume_if_due(app, &task).await;
+        crate::autopilot::recover(app, &task);
         crate::handoff::recover(app, &task).await;
     }
 }
@@ -166,23 +167,49 @@ mod tests {
         assert_eq!(task.handoff.unwrap().stage, HandoffStage::Offered);
     }
 
-    #[tokio::test]
-    async fn recovery_on_tick_reopens_a_pr_of_an_autopilot_left_opening() {
+    /// A task on autopilot with a review session, a repo with one commit, and a `gh`
+    /// that lists `list` for `pr list` and sleeps `delay` on every call.
+    async fn finishing_app(
+        list: &str,
+        delay: Duration,
+    ) -> (
+        AppState,
+        TaskKey,
+        std::sync::Arc<crate::gh::fake::FakeGh>,
+        crate::pr_testkit::TempDir,
+    ) {
         use std::sync::Arc;
 
-        use crate::gh::fake::{FakeGh, PR_LIST, PR_URL, REPO_VIEW, bare_snapshot};
+        use crate::gh::fake::{FakeGh, PR_URL, REPO_VIEW, bare_snapshot};
         use crate::pr_testkit::{git_repo_with_origin, task_with_workspace};
-        use delilah_core::{Autopilot, AutopilotStage, AutopilotState};
 
-        let gh = Arc::new(
+        struct Slow(Arc<FakeGh>, Duration);
+        impl crate::gh::Gh for Slow {
+            fn run(
+                &self,
+                dir: Option<&std::path::Path>,
+                args: Vec<String>,
+                stdin: Option<String>,
+            ) -> futures_util::future::BoxFuture<'_, Result<String, crate::gh::GhError>>
+            {
+                let delay = self.1;
+                let inner = self.0.run(dir, args, stdin);
+                Box::pin(async move {
+                    tokio::time::sleep(delay).await;
+                    inner.await
+                })
+            }
+        }
+        let fake = Arc::new(
             FakeGh::new()
                 .with_user("me")
                 .on(&["repo", "view"], Ok(REPO_VIEW))
-                .on(&["pr", "list"], Ok(PR_LIST))
+                .on(&["pr", "list"], Ok(list))
                 .on(&["pr", "create"], Ok(PR_URL))
                 .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false))),
         );
-        let (app, key, dir) = task_with_workspace(gh.clone(), None).await;
+        let (app, key, dir) = task_with_workspace(fake.clone(), None).await;
+        let app = app.with_gh(Arc::new(Slow(fake.clone(), delay)));
         git_repo_with_origin(
             &dir.path().join("ws"),
             &dir.path().join("origin"),
@@ -203,32 +230,68 @@ mod tests {
             })
             .await
             .unwrap();
+        (app, key, fake, dir)
+    }
+
+    fn on_stage(stage: delilah_core::AutopilotStage) -> delilah_core::Autopilot {
+        delilah_core::Autopilot {
+            state: delilah_core::AutopilotState::Running,
+            stage: Some(stage),
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+            review_session: Some("rev-1".into()),
+        }
+    }
+
+    async fn autopilot_state(app: &AppState, key: &TaskKey) -> delilah_core::AutopilotState {
+        app.store
+            .get_task(key)
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot
+            .unwrap()
+            .state
+    }
+
+    async fn until_done(app: &AppState, key: &TaskKey) {
+        for _ in 0..200 {
+            if autopilot_state(app, key).await == delilah_core::AutopilotState::Done {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the autopilot never finished");
+    }
+
+    fn creates(gh: &crate::gh::fake::FakeGh) -> usize {
+        gh.calls()
+            .iter()
+            .filter(|c| c.starts_with(&["pr".to_string(), "create".to_string()]))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn recovery_on_tick_reopens_a_pr_of_an_autopilot_left_opening() {
+        use crate::gh::fake::PR_LIST;
+        use delilah_core::AutopilotStage;
+
+        let (app, key, gh, _dir) = finishing_app(PR_LIST, Duration::ZERO).await;
         // A second task with no autopilot is left alone.
         app.store
             .create_task(&Task::new(TaskKey::new("PROJ-2"), "other", "feature"))
             .await
             .unwrap();
-        let on = |stage| Autopilot {
-            state: AutopilotState::Running,
-            stage: Some(stage),
-            reason: None,
-            since: Utc::now(),
-            nudged: None,
-        };
-        // Preview stage with a lost process and no preview command: on to the PR.
+        // Preview stage with a lost process: on to the PR, linking the one gh has.
         app.store
-            .set_autopilot(&key, Some(&on(AutopilotStage::Preview)))
+            .set_autopilot(&key, Some(&on_stage(AutopilotStage::Preview)))
             .await
             .unwrap();
         tick(&app).await;
-        let task = app.store.get_task(&key).await.unwrap().unwrap();
-        assert_eq!(task.autopilot.unwrap().state, AutopilotState::Done);
+        until_done(&app, &key).await;
         assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 1);
-        assert!(
-            !gh.calls()
-                .iter()
-                .any(|c| c.starts_with(&["pr".to_string(), "create".to_string()]))
-        );
+        assert_eq!(creates(&gh), 0);
         let other = app
             .store
             .get_task(&TaskKey::new("PROJ-2"))
@@ -243,5 +306,48 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn recovery_on_tick_opens_the_pr_of_an_autopilot_at_opening_pr_once() {
+        use delilah_core::AutopilotStage;
+
+        let (app, key, gh, _dir) = finishing_app("[]", Duration::ZERO).await;
+        app.store
+            .set_autopilot(&key, Some(&on_stage(AutopilotStage::OpeningPr)))
+            .await
+            .unwrap();
+        tick(&app).await;
+        tick(&app).await;
+        until_done(&app, &key).await;
+        assert_eq!(creates(&gh), 1);
+        // Done: the next ticks leave it alone.
+        tick(&app).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(creates(&gh), 1);
+    }
+
+    #[tokio::test]
+    async fn a_slow_finish_does_not_hold_up_the_tick() {
+        use crate::gh::fake::PR_LIST;
+        use delilah_core::AutopilotStage;
+
+        let (app, key, _gh, _dir) = finishing_app(PR_LIST, Duration::from_millis(400)).await;
+        app.store
+            .set_autopilot(&key, Some(&on_stage(AutopilotStage::OpeningPr)))
+            .await
+            .unwrap();
+        let started = std::time::Instant::now();
+        tick(&app).await;
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "the tick waited for the finish: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            autopilot_state(&app, &key).await,
+            delilah_core::AutopilotState::Running
+        );
+        until_done(&app, &key).await;
     }
 }
