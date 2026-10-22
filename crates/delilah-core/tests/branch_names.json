@@ -16,5 +16,13 @@
   {"template": "{ticket}_{slug}", "key": "LIBRE-3", "title": "", "branch": "LIBRE-3"},
   {"template": "{slug}-{ticket}", "key": "LIBRE-3", "title": "", "branch": "LIBRE-3"},
   {"template": "{ticket}-{slug}-wip", "key": "LIBRE-3", "title": "", "branch": "LIBRE-3-wip"},
+  {"template": "{ticket}/{slug}", "key": "LIBRE-3", "title": "Привет мир", "branch": "LIBRE-3"},
+  {"template": "feature/{ticket}/{slug}", "key": "K", "title": "日本語", "branch": "feature/K"},
+  {"template": "{slug}/{ticket}", "key": "K", "title": "!!!", "branch": "K"},
+  {"template": "{slug}/{ticket}", "key": "K", "title": "Add it", "branch": "add-it/K"},
+  {"template": "{ticket}/{slug}/{slug}", "key": "K", "title": "Add it", "branch": "K/add-it/add-it"},
+  {"template": "{ticket}/{slug}/{slug}", "key": "K", "title": "!!!", "branch": "K"},
+  {"template": "équipe/{ticket}-{slug}", "key": "K", "title": "Café", "branch": "équipe/K-cafe"},
+  {"template": "équipe/{ticket}-{slug}", "key": "K", "title": "!!!", "branch": "équipe/K"},
   {"template": "task/{ticket}", "key": "LIBRE-3", "title": "Ignored title", "branch": "task/LIBRE-3"}
 ]

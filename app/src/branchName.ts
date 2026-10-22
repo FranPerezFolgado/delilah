@@ -25,9 +25,9 @@ export function branchName(template: string, key: string, title: string): string
   let t = template;
   if (s === "") {
     for (let i = t.indexOf("{slug}"); i !== -1; i = t.indexOf("{slug}")) {
-      const before = t.slice(0, i).replace(/[-_.]+$/, "").length;
+      const before = t.slice(0, i).replace(/[-_./]+$/, "").length;
       let after = i + "{slug}".length;
-      if (before === 0) after = t.length - t.slice(after).replace(/^[-_.]+/, "").length;
+      if (before === 0) after = t.length - t.slice(after).replace(/^[-_./]+/, "").length;
       t = t.slice(0, before) + t.slice(after);
     }
   } else {

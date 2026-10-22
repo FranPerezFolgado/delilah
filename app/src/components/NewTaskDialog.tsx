@@ -54,7 +54,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
   // Free tasks have no key until the daemon creates one.
-  const branchPreview = project ? branchName(project.settings.branch, key.trim() || "LIBRE-?", title) : null;
+  const previewKey = origin === "libre" && !existing ? "LIBRE-?" : key.trim() || "LIBRE-?";
+  const branchPreview = project ? branchName(project.settings.branch, previewKey, title) : null;
 
   useEffect(() => {
     setPicked([]);

@@ -262,12 +262,12 @@ pub fn slug(title: &str) -> String {
 }
 
 /// Expands a branch template: `{ticket}` is the task key verbatim, `{slug}` the
-/// slug of the title. With an empty slug the `-`, `_` or `.` run just before
+/// slug of the title. With an empty slug the `-`, `_`, `.` or `/` run just before
 /// `{slug}` goes too (or the one just after, if `{slug}` opens the template), so
 /// no separator is left dangling.
 pub fn branch_name(template: &str, key: &str, title: &str) -> String {
     let slug = slug(title);
-    let is_sep = |c: char| matches!(c, '-' | '_' | '.');
+    let is_sep = |c: char| matches!(c, '-' | '_' | '.' | '/');
     let mut t = template.to_string();
     if slug.is_empty() {
         while let Some(i) = t.find("{slug}") {
