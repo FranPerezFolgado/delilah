@@ -266,9 +266,9 @@
   - `scenario(name, json)`, which writes into `fake_dir/scenarios`;
   - `project(kind)`, which makes a fixture and registers it under a unique name.
   On failure it attaches the daemon log tail (from `log`) to the test report (FR-015).
-- [ ] T042 [P] [US3] `app/e2e/projects.spec.ts` (US3-1): add the fixture repo as a project through the UI's add-project flow (find it from `app/src/App.tsx`/the sidebar); it appears in the project list.
-- [ ] T043 [P] [US3] `app/e2e/board.spec.ts` (US3-2): in `NewTaskDialog`, create and start a task titled `… [fake:slow-stop]`. The scenario is `[{"sleep_ms": 1500}, {"stop": "ok"}]`. The card appears on `BoardView` in the working column, then moves to the waiting column.
-- [ ] T044 [P] [US3] `app/e2e/inbox.spec.ts` (US3-3): `ask` scenario. Open `InboxView`; the `AskCard` shows the question; choose an option. The card disappears and the task shows working again.
+- [X] T042 [P] [US3] `app/e2e/projects.spec.ts` (US3-1): add the fixture repo as a project through the UI's add-project flow (find it from `app/src/App.tsx`/the sidebar); it appears in the project list.
+- [X] T043 [P] [US3] `app/e2e/board.spec.ts` (US3-2): in `NewTaskDialog`, create and start a task titled `… [fake:slow-stop]`. The scenario is `[{"sleep_ms": 1500}, {"stop": "ok"}]`. The card appears on `BoardView` in the working column, then moves to the waiting column.
+- [X] T044 [P] [US3] `app/e2e/inbox.spec.ts` (US3-3): `ask` scenario. Open `InboxView`; the `AskCard` shows the question; choose an option. The card disappears and the task shows working again.
 - [ ] T045 [P] [US3] `app/e2e/conversation.spec.ts` (US3-4): start "Nueva tarea con Claude" on a project. The confirmation-card scenario (as T035) shows the card in `ConversationView`; click `Crear`. The new task opens.
 - [ ] T046 [P] [US3] `app/e2e/pr.spec.ts` (US3-5): start a task and write a fake PR with failing checks and one review comment (via `gh_dir`, mirroring T022's helpers in TS). Open the task's `PrView`: the PR state, the failing check and the comment are shown.
 - [ ] T047 [P] [US3] `app/e2e/quick-open.spec.ts` (US3-6): create three backlog tasks with distinct titles. Open quick open with its in-app shortcut (see `app/src/shortcuts.ts`; the in-page one, not the native global ⌘P), type part of one title; it's the first result, and Enter shows that task.

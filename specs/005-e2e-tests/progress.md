@@ -17,9 +17,9 @@ Mode: format=markdown commits=yes
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4A | pending | 0 | | |
 | WP-12 | 4 | 4B | pending | 0 | | |
-| WP-13 | 5 | 5A | verified | 1 | | |
-| WP-14 | 5 | 5B | pending | 0 | | |
-| WP-15 | 5 | 5B | pending | 0 | | |
+| WP-13 | 5 | 5A | verified | 1 | f276089 | |
+| WP-14 | 5 | 5B | verified | 1 | | |
+| WP-15 | 5 | 5B | implementing | 1 | | |
 | WP-16 | 6 | 6A | pending | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |
 | WP-18 | 6 | 6B | pending | 0 | | manual parts (T049, T056) |
