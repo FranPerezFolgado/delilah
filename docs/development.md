@@ -88,7 +88,7 @@ env.wait_until("the fake got the answer", T, || {
 
 `wait_until`/`wait_for` take `(what, timeout, f)`; `api().inbox()` is a JSON `Value` (`items()` gives its list); `record_for(key)` is an `Option<Record>`. See `crates/delilah-e2e/tests/states.rs` for the full version.
 
-**Adding a UI flow.** A new `app/e2e/<flow>.spec.ts` importing `test` and `expect` from `./fixtures` (not from Playwright), as the existing specs do. Besides `page`, the fixtures are `api`, `env`, `fixture()`, `scenario(name, {steps: [...]})` and `project("repo" | "parent")`, which copies a fixture repo and registers it as a project of its own (removed after the test). Specs pin the locale with `test.use({ locale: "en-GB" })`, because the UI text depends on it.
+**Adding a UI flow.** A new `app/e2e/<flow>.spec.ts` importing `test` and `expect` from `./fixtures` (not from Playwright), as the existing specs do. Besides `page`, the fixtures are `api`, `env`, `fixture()`, `scenario(name, {steps: [...]})` and `project("repo" | "parent")`, which copies a fixture repo and registers it as a project of its own (removed after the test). Each spec pins its locale with `test.use({ locale: … })` (for example `"en-GB"`), because the UI text follows the browser language.
 
 ```ts
 import { expect, test } from "./fixtures";

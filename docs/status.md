@@ -65,7 +65,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
   - the UI quick-open test covers the file quick open (the UI has no task switcher);
   - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
   - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
-  - final timing and flakiness numbers are pending (recorded by the verification step).
+  - measured: API layer 57 s (including the build), UI layer 30 s; 10 consecutive full `scripts/e2e.sh` runs all green (78–105 s each), no flaky tests; the installed Delilah stayed untouched (same PID, health OK) and an interrupted run (Ctrl-C) leaves no daemons behind.
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);
