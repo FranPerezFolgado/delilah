@@ -4,6 +4,7 @@ mod actions;
 pub mod api;
 mod archive;
 pub mod asks;
+mod autopilot;
 mod changes;
 pub mod config;
 mod conversation;

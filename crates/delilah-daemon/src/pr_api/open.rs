@@ -118,6 +118,26 @@ pub async fn proposal(
     Query(q): Query<ProposalQuery>,
 ) -> Result<Json<Proposal>, ApiError> {
     let key = known_task(&app, &key).await?;
+    Ok(Json(build_proposal(&app, &key, q.repo).await?))
+}
+
+/// The title and body a PR of `repo` (default `.`) would start from. Errors with reason
+/// `has-pr` or `no-commits` when there is nothing to open. Shared with the autopilot.
+pub(crate) async fn proposal_for(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+) -> Result<(String, String), ApiError> {
+    let p = build_proposal(app, key, repo.map(str::to_string)).await?;
+    Ok((p.title, p.body))
+}
+
+async fn build_proposal(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<String>,
+) -> Result<Proposal, ApiError> {
+    let q = ProposalQuery { repo };
     let rows = app.store.prs_of(&key).await?;
     let has_open = |label: &str| rows.iter().any(|r| r.repo == label && is_open(r));
     let mut candidates = vec![q.repo.clone().unwrap_or_else(|| ".".into())];
@@ -175,14 +195,14 @@ pub async fn proposal(
         .await?
         .map(|t| t.title)
         .unwrap_or_default();
-    Ok(Json(Proposal {
+    Ok(Proposal {
         repo,
         title,
         body: body.trim_end().to_string(),
         base: commits.base,
         needs_push: commits.needs_push,
         repos: labels.into_iter().filter(|l| !has_open(l)).collect(),
-    }))
+    })
 }
 
 /// Pushes `branch` from `dir` unless the remote has it already.

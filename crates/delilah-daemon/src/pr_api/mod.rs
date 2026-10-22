@@ -13,6 +13,7 @@ use delilah_core::TaskKey;
 use self::dto::{LinkRequest, PrView, Problem, TaskPrs};
 pub use self::forward::{dismiss, forward};
 pub use self::open::{open, proposal};
+pub(crate) use self::open::{open_for, proposal_for};
 use crate::api::ApiError;
 use crate::events::Topic;
 use crate::gh::{AccessProblem, classify};
