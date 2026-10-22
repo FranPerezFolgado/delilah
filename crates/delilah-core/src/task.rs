@@ -166,6 +166,9 @@ pub struct Task {
     /// checkout (`true`) or a worktree (`false`); `None` if not chosen yet.
     #[serde(default)]
     pub in_checkout: Option<bool>,
+    /// The branch the task works on, once it has a workspace (read from it; never set by the client).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 impl Task {
@@ -179,6 +182,7 @@ impl Task {
             status: TaskStatus::Queued,
             notes: None,
             in_checkout: None,
+            branch: None,
         }
     }
 

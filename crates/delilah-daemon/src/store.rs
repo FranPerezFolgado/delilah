@@ -99,7 +99,8 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks WHERE key = ?",
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, w.branch AS branch
+             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&self.pool)
@@ -109,7 +110,8 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks ORDER BY created_at, key",
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, w.branch AS branch
+             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -201,7 +203,8 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks WHERE key = ?",
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, w.branch AS branch
+             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&mut *tx)
@@ -274,6 +277,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         status: serde_json::from_str::<TaskStatus>(&status)?,
         notes: row.try_get("notes")?,
         in_checkout: row.try_get("in_checkout")?,
+        branch: row.try_get("branch")?,
     })
 }
 
@@ -367,6 +371,32 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, StoreError::NotFound(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_task_reports_the_branch_of_its_workspace() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().branch, None);
+        let ws = delilah_git::Workspace {
+            path: "/w/ws/PROJ-1".into(),
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        store
+            .save_workspace(&key, Path::new("/w/web"), &ws)
+            .await
+            .unwrap();
+        let want = Some("feature/PROJ-1".to_string());
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().branch, want);
+        assert_eq!(store.list_tasks().await.unwrap()[0].branch, want);
+        store.delete_workspace(&key).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().branch, None);
+        assert_eq!(store.list_tasks().await.unwrap()[0].branch, None);
+        let json = serde_json::to_value(task("PROJ-2")).unwrap();
+        assert!(json.get("branch").is_none());
     }
 
     #[tokio::test]
