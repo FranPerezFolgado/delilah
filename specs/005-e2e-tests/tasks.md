@@ -93,7 +93,7 @@
   - `save()` writes atomically (temp file + rename) to `<fake_dir>/records/<session>.json`;
   - `load(fake_dir, session)` and `for_task(fake_dir, task)` (latest by mtime) read it back.
 - [X] T015 [US1] Implement `crates/delilah-e2e/src/fake/record.rs` until T014 passes.
-- [ ] T016 [US1] Write failing unit tests for the step runner in `crates/delilah-e2e/src/fake/run.rs`. It is generic over `R: BufRead` (terminal input) and `W: Write` (terminal output) so tests drive it with in-memory pipes and a settings file whose hooks write to temp files.
+- [X] T016 [US1] Write failing unit tests for the step runner in `crates/delilah-e2e/src/fake/run.rs`. It is generic over `R: BufRead` (terminal input) and `W: Write` (terminal output) so tests drive it with in-memory pipes and a settings file whose hooks write to temp files.
   Cases:
   - `SessionStart` always first, with `source` `startup` or `resume`;
   - `print` writes the text;
@@ -109,8 +109,8 @@
   - after the last step: each typed line → recorded, `UserPromptSubmit` + `Stop`;
   - EOF → `SessionEnd` and exit 0;
   - the record is saved after each step.
-- [ ] T017 [US1] Implement `crates/delilah-e2e/src/fake/run.rs` until T016 passes.
-- [ ] T018 [US1] Implement `crates/delilah-e2e/src/bin/fake-claude.rs`:
+- [X] T017 [US1] Implement `crates/delilah-e2e/src/fake/run.rs` until T016 passes.
+- [X] T018 [US1] Implement `crates/delilah-e2e/src/bin/fake-claude.rs`:
   - Steps: parse args → load hooks → select scenario → record `args`, `env` (all of `std::env::vars()`), `cwd`, `scenario` → run on stdin/stdout.
   - SIGHUP: run `SessionEnd` and exit 0. Use the `signal-hook`-free approach: treat a read error or EOF on stdin as hang-up, since the PTY closing gives EOF.
   - Errors before the first step: print to stderr and exit 2. Errors with hooks already loaded run `StopFailure` first.

@@ -7,8 +7,8 @@ Mode: format=markdown commits=yes
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 17b3ef2 | runs with 2A |
 | WP-02 | 2 | 2A | verified | 1 | f813aca | runs with 1A |
-| WP-03 | 2 | 2B | verified | 1 | | |
-| WP-04 | 2 | 2C | pending | 0 | | |
+| WP-03 | 2 | 2B | verified | 1 | de1f28e | |
+| WP-04 | 2 | 2C | verified | 1 | | |
 | WP-05 | 3 | 3A | pending | 0 | | |
 | WP-06 | 3 | 3B | pending | 0 | | |
 | WP-07 | 3 | 3C | pending | 0 | | |
