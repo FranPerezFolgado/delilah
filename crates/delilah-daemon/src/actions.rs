@@ -66,7 +66,7 @@ pub async fn archive(
         .get_task(&key)
         .await?
         .ok_or(StoreError::NotFound(key.clone()))?;
-    if !task.status.is_terminal() {
+    if !task.status.is_terminal() && !matches!(task.status, TaskStatus::SetupFailed { .. }) {
         return Err(ApiError::conflict(format!(
             "{key} is {}; mark it done first (`delilah done {key}`)",
             task.status.name()

@@ -45,7 +45,7 @@ struct Pending {
 
 /// Tests must not start a real `claude`: record the launch as a session instead.
 #[cfg(test)]
-async fn launch_agent(
+pub(crate) async fn launch_agent(
     app: &AppState,
     key: &TaskKey,
     _ws: &delilah_git::Workspace,

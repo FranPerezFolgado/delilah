@@ -78,6 +78,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/resume", post(actions::resume))
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
+        .route("/api/v1/tasks/{key}/setup/retry", post(setup_retry))
+        .route("/api/v1/tasks/{key}/setup/skip", post(setup_skip))
+        .route("/api/v1/tasks/{key}/setup/cancel", post(setup_cancel))
         .route("/api/v1/usage", get(actions::usage))
         .route("/api/v1/events", get(events::stream))
         .route("/api/v1/logs", get(crate::logs::tail))
@@ -219,6 +222,46 @@ pub struct NewTask {
 
 fn default_workflow() -> String {
     "feature".into()
+}
+
+/// `POST /api/v1/tasks/{key}/setup/retry`: from `setup-failed`, runs the setup again.
+async fn setup_retry(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::retry(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+/// `POST /api/v1/tasks/{key}/setup/skip`: from `setup-failed`, launches the agent.
+async fn setup_skip(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::skip(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+/// `POST /api/v1/tasks/{key}/setup/cancel`: kills the running setup; the task ends
+/// in `setup-failed` ("cancelled") a moment later.
+async fn setup_cancel(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::cancel(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+async fn accepted(app: &AppState, key: &TaskKey) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
 }
 
 async fn health() -> Json<Health> {
@@ -715,6 +758,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(history[0]["event"], json!({"type": "start"}));
         assert_eq!(history.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn setup_actions_are_refused_from_the_wrong_status() {
+        let (app, state) = app_with_project().await;
+        let key = TaskKey::new("PROJ-1");
+        let mut task = Task::new(key.clone(), "T", "custom");
+        task.project = Some("web".into());
+        state.store.create_task(&task).await.unwrap();
+        state.transition(&key, Event::Start).await.unwrap();
+        for action in ["retry", "skip", "cancel"] {
+            let (status, _) = call(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/PROJ-1/setup/{action}"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{action}");
+        }
     }
 
     #[tokio::test]

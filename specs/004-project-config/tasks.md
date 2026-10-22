@@ -131,10 +131,10 @@ Try everything in a preview (`scripts/preview.sh`), never against the daemon on 
 - [X] T034 [US3] Add `TaskStatus::SetupFailed { reason }` (`setup-failed`) and the events `SetupFailed`, `RetrySetup`, `SkipSetup` with their transitions in `crates/delilah-core/src/task.rs`
 - [X] T035 [P] [US3] Add `SessionKind::Setup` (read-only, no input forwarded) in `crates/delilah-daemon/src/store_sessions.rs` and handle it where kinds are matched (`session_api.rs`, `sessions.rs`)
 - [X] T036 [US3] Implement `crates/delilah-daemon/src/setup.rs`: start a setup session (`$SHELL -lc <setup>`, worktree cwd, `agent_env()`, log in the task dir), 10-minute timeout, exit handling via `exit_code()`, `SetupFailed` with the output tail, and `cancel`, `retry`, `skip`; on success or skip apply `WorkspaceReady` and call `launch_agent`
-- [ ] T037 [US3] In `crates/delilah-daemon/src/run.rs`, for worktrees only: call `share_entries` (notes to the task's log), then `setup::start` when `settings.setup` is set and return `201` with the task in `preparing-workspace`; otherwise `launch_agent` as before
-- [ ] T038 [US3] Route `POST /api/v1/tasks/{key}/setup/retry|skip|cancel` in `crates/delilah-daemon/src/api.rs` (409 from the wrong status)
-- [ ] T039 [US3] At daemon start, mark tasks stuck in `PreparingWorkspace` with no live setup as `SetupFailed("interrupted")`, where sessions are restored (`crates/delilah-daemon/src/main.rs` or `sessions.rs`)
-- [ ] T040 [US3] Let archive and delete in `crates/delilah-daemon/src/actions.rs` treat `SetupFailed` like any task with a worktree (refusal during `PreparingWorkspace` stays)
+- [X] T037 [US3] In `crates/delilah-daemon/src/run.rs`, for worktrees only: call `share_entries` (notes to the task's log), then `setup::start` when `settings.setup` is set and return `201` with the task in `preparing-workspace`; otherwise `launch_agent` as before
+- [X] T038 [US3] Route `POST /api/v1/tasks/{key}/setup/retry|skip|cancel` in `crates/delilah-daemon/src/api.rs` (409 from the wrong status)
+- [X] T039 [US3] At daemon start, mark tasks stuck in `PreparingWorkspace` with no live setup as `SetupFailed("interrupted")`, where sessions are restored (`crates/delilah-daemon/src/main.rs` or `sessions.rs`)
+- [X] T040 [US3] Let archive and delete in `crates/delilah-daemon/src/actions.rs` treat `SetupFailed` like any task with a worktree (refusal during `PreparingWorkspace` stays)
 - [ ] T041 [P] [US3] Add `delilah setup retry|skip|cancel <KEY>` to `crates/delilah-cli/src/main.rs`
 - [ ] T042 [P] [US3] Add the `setup-failed` status, its label, and `api.setupRetry/Skip/Cancel` to `app/src/api.ts` and `app/src/status.ts`
 - [ ] T043 [US3] In `app/src/components/TaskScreen.tsx`: show the Setup session tab with "Cancelar setup" while preparing; on `setup-failed`, a banner with the reason and "Reintentar setup" / "Lanzar sin setup"; with tests in `app/src/components/TaskScreen.test.tsx` or a small extracted `SetupBanner.tsx` + test

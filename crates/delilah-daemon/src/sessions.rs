@@ -11,6 +11,14 @@ use tokio::sync::Notify;
 use crate::events::{Events, Topic};
 use crate::store_sessions::SessionKind;
 
+/// At daemon start: tasks stuck preparing their workspace (their setup died with the
+/// previous daemon) stop as `setup-failed` ("interrupted").
+pub async fn recover_interrupted_setups(app: &crate::state::AppState) -> Result<(), String> {
+    crate::setup::recover_interrupted(app)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// What a live session is doing, from its own hooks. The task's status follows the
 /// primary session; this is what an extra session shows next to its terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

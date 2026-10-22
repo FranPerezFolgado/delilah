@@ -255,21 +255,52 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
-    app.transition(&key, Event::WorkspaceReady).await?;
+    let launch = AgentLaunch {
+        free: req.free,
+        prompt,
+        custom_prompt: req.prompt.is_some(),
+        notes,
+        adopted,
+    };
 
-    launch_agent(
-        &app,
-        &key,
-        &ws,
-        AgentLaunch {
-            free: req.free,
-            prompt,
-            custom_prompt: req.prompt.is_some(),
-            notes,
-            adopted,
-        },
-    )
-    .await?;
+    // A new worktree gets the shared entries and then the setup; the project's own
+    // checkout gets neither.
+    let setup = match previous {
+        Some(_) => None,
+        None => {
+            let (checkout, worktree) = (project.path.clone(), ws.path.clone());
+            let shared = project.settings.shared.clone();
+            let notes = tokio::task::spawn_blocking(move || {
+                delilah_git::share_entries(&checkout, &worktree, &shared)
+            })
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+            log_share_notes(&app, &key, &notes);
+            project
+                .settings
+                .setup
+                .clone()
+                .filter(|c| !c.trim().is_empty())
+        }
+    };
+    if let Some(command) = setup {
+        // The task stays `preparing-workspace`: the setup's end makes it ready and
+        // launches the agent.
+        if let Err(e) = crate::setup::start(&app, &key, &command, launch).await {
+            let _ = app
+                .transition(
+                    &key,
+                    Event::Fail {
+                        reason: format!("setup: {e}"),
+                    },
+                )
+                .await;
+            return Err(e.into());
+        }
+    } else {
+        app.transition(&key, Event::WorkspaceReady).await?;
+        launch_now(&app, &key, &ws, launch).await?;
+    }
 
     let task = app
         .store
@@ -277,6 +308,41 @@ pub async fn start_run(
         .await?
         .expect("task was just created");
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// One line per shared entry in the task's `workspace.log` (only if there were any).
+fn log_share_notes(app: &AppState, key: &TaskKey, notes: &[delilah_git::ShareNote]) {
+    use std::io::Write;
+    if notes.is_empty() {
+        return;
+    }
+    for note in notes {
+        tracing::info!(task = %key, "shared entries: {note}");
+    }
+    let dir = app.config.task_dir(key.as_str());
+    let written = std::fs::create_dir_all(&dir).and_then(|_| {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("workspace.log"))?;
+        notes.iter().try_for_each(|n| writeln!(file, "{n}"))
+    });
+    if let Err(e) = written {
+        tracing::warn!(task = %key, "cannot write workspace.log: {e}");
+    }
+}
+
+/// `launch_agent`, except in tests, which must not start a real `claude`.
+async fn launch_now(
+    app: &AppState,
+    key: &TaskKey,
+    ws: &delilah_git::Workspace,
+    launch: AgentLaunch,
+) -> Result<(), LaunchError> {
+    #[cfg(test)]
+    return crate::setup::launch_agent(app, key, ws, launch).await;
+    #[cfg(not(test))]
+    launch_agent(app, key, ws, launch).await
 }
 
 /// Why a session could not be started.
@@ -317,6 +383,7 @@ pub(crate) struct AgentLaunch {
 /// Everything after the workspace is ready: the ticket and notes the agent is
 /// pointed at, then its primary session (an adopted one or a new one). Owns what it
 /// needs, so it can run from a background task as well as from the request.
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) async fn launch_agent(
     app: &AppState,
     key: &TaskKey,
@@ -889,5 +956,154 @@ mod tests {
             "PROJ-1 · Principal"
         );
         assert_eq!(remote_name(&session("@delilah", "Main")), "delilah · Main");
+    }
+
+    /// A repo project with one commit and an untracked `.env`, with these settings.
+    async fn repo_app(settings: delilah_core::ProjectSettings) -> (AppState, std::path::PathBuf) {
+        let home = std::env::temp_dir().join(format!("delilah-run-{}", uuid::Uuid::new_v4()));
+        let repo = home.join("web");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}: {out:?}");
+        };
+        git(&["init", "-b", "main"]);
+        std::fs::write(repo.join("README.md"), "hi").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-m", "init"]);
+        std::fs::write(repo.join(".git/info/exclude"), ".env\nran-setup\n").unwrap();
+        std::fs::write(repo.join(".env"), "SECRET=1").unwrap();
+        let config = crate::config::Config {
+            home,
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo.clone(),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings,
+            })
+            .await
+            .unwrap();
+        (app, repo)
+    }
+
+    fn settings(setup: Option<&str>) -> delilah_core::ProjectSettings {
+        let entry = |p: &str| delilah_core::SharedEntry {
+            path: p.into(),
+            mode: None,
+        };
+        delilah_core::ProjectSettings {
+            shared: vec![entry(".env"), entry("README.md")],
+            setup: setup.map(Into::into),
+            ..Default::default()
+        }
+    }
+
+    fn request(key: &str, in_checkout: bool) -> RunRequest {
+        RunRequest {
+            key: key.into(),
+            title: "T".into(),
+            project: "web".into(),
+            notes: None,
+            workflow: None,
+            submodules: vec![],
+            branch: None,
+            prompt: None,
+            free: true,
+            in_checkout: Some(in_checkout),
+            from_session: None,
+        }
+    }
+
+    async fn status_of(app: &AppState, key: &str) -> TaskStatus {
+        app.store
+            .get_task(&TaskKey::new(key))
+            .await
+            .unwrap()
+            .unwrap()
+            .status
+    }
+
+    #[tokio::test]
+    async fn a_worktree_with_a_setup_shares_then_waits_in_preparing_workspace() {
+        let (app, _repo) = repo_app(settings(Some("sleep 30"))).await;
+        let (code, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", false)))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(code, StatusCode::CREATED);
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        let (_, ws) = app.store.workspace(&task.key).await.unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(ws.path.join(".env")).unwrap(),
+            "SECRET=1"
+        );
+        let log =
+            std::fs::read_to_string(app.config.task_dir("LIBRE-1").join("workspace.log")).unwrap();
+        assert_eq!(log.lines().count(), 2, "{log}");
+        assert!(log.contains("README.md"), "{log}");
+        // The setup runs, and the agent has not started.
+        let live = app.sessions.of_task("LIBRE-1");
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].kind, SessionKind::Setup);
+        let _ = live[0].pty.kill();
+    }
+
+    #[tokio::test]
+    async fn a_worktree_without_a_setup_shares_and_launches() {
+        let (app, _repo) = repo_app(settings(None)).await;
+        let (code, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", false)))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(code, StatusCode::CREATED);
+        assert_eq!(task.status, TaskStatus::Running);
+        let (_, ws) = app.store.workspace(&task.key).await.unwrap().unwrap();
+        assert!(ws.path.join(".env").exists());
+        assert!(
+            app.config
+                .task_dir("LIBRE-1")
+                .join("workspace.log")
+                .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_checkout_never_runs_the_setup_nor_shares() {
+        let (app, repo) = repo_app(settings(Some("touch ran-setup"))).await;
+        let (code, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", true)))
+            .await
+            .map_err(|e| format!("{:?}", e.message))
+            .expect("the run starts");
+        assert_eq!(code, StatusCode::CREATED);
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(app.sessions.of_task("LIBRE-1").is_empty());
+        assert!(
+            !app.config
+                .task_dir("LIBRE-1")
+                .join("workspace.log")
+                .exists()
+        );
+        assert!(!repo.join("ran-setup").exists());
+        assert_eq!(status_of(&app, "LIBRE-1").await, TaskStatus::Running);
     }
 }
