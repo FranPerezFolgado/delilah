@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, type Project, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, type BranchProposal, type Project, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
 import { t } from "../i18n";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 
@@ -52,6 +52,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
+  // The branch name (after `feature/`): proposed while the developer hasn't touched it.
+  const [branch, setBranch] = useState("");
+  const [edited, setEdited] = useState(false);
+  const editedRef = useRef(false);
+  const [branchHint, setBranchHint] = useState<"loading" | BranchProposal["source"] | null>(null);
 
   useEffect(() => {
     setPicked([]);
@@ -72,6 +77,48 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Proposal for the branch, debounced 1 s; an answer to an older request is dropped.
+  const pickedKey = picked.join("\n");
+  useEffect(() => {
+    const ticket = existing ? existing.key : origin === "jira" ? key.trim() : "";
+    if (!projectName || !title.trim() || editedRef.current) {
+      setBranchHint(null);
+      return;
+    }
+    let stale = false;
+    setBranchHint("loading");
+    const timer = setTimeout(() => {
+      api
+        .proposeBranch(projectName, {
+          ...(ticket ? { key: ticket } : {}),
+          title: title.trim(),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+          free: origin === "libre",
+          submodules: picked,
+        })
+        .then((res) => {
+          if (stale || editedRef.current) return;
+          setBranch(res.branch ? res.branch.replace(/^feature\//, "") : "");
+          setBranchHint(res.branch ? res.source : null);
+        })
+        .catch(() => {
+          if (!stale) setBranchHint(null);
+        });
+    }, 1000);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [projectName, key, title, origin, pickedKey, edited]);
+
+  const editBranch = (value: string) => {
+    const v = value.trim().replace(/^feature\//, "");
+    editedRef.current = v !== "";
+    setEdited(v !== "");
+    setBranch(v);
+    if (v) setBranchHint(null);
+  };
 
   // A quick read-only Claude pass over the parent's code picks the submodules.
   const suggest = async () => {
@@ -111,6 +158,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: where === "checkout",
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
+        ...(branch.trim() ? { branch: "feature/" + branch.trim() } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
         // A custom prompt runs outside the /feature workflow.
         ...(prompt.trim() ? { workflow: "prompt", prompt: prompt.trim() } : {}),
@@ -231,6 +279,20 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 )}
               </div>
             )}
+            <label className="field">
+              <span>
+                {t("Rama")}
+                {branchHint && (
+                  <span className="muted" style={{ fontSize: 11.5, fontWeight: 400, marginLeft: 8 }}>
+                    {branchHint === "loading" ? t("Proponiendo…") : branchHint === "claude" ? t("propuesta por Claude") : branchHint === "title" ? t("a partir del título") : t("a partir de la clave")}
+                  </span>
+                )}
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className="mono muted">feature/</span>
+                <input className="input mono" style={{ flex: 1 }} aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={t("automática si la dejas vacía")} />
+              </span>
+            </label>
             {!fromSession && (
             <label className="field">
               <span>

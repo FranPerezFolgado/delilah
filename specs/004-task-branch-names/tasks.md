@@ -65,7 +65,7 @@
 ### Tests first
 
 - [ ] T013 [US2] HTTP tests for `POST /api/v1/projects/{name}/branch-name` in `crates/delilah-daemon/src/branch_name.rs` (`#[cfg(test)]`, `crate::api::router(app).oneshot(...)` as in `asks.rs`/`session_api.rs` tests): 200 `{branch, source}` with a fake Claude; 200 with source `title` when Claude fails; 400 for an empty title; 404 for an unknown project. Plus a `start_run` test: `branch: "Arreglo del login"` → `feature/arreglo-del-login`, `branch: "///"` → 400 and a backlog task stays in the backlog
-- [ ] T014 [P] [US2] Vitest in `app/src/components/NewTaskDialog.test.tsx` (mock `api` as other component tests do, fake timers):
+- [X] T014 [P] [US2] Vitest in `app/src/components/NewTaskDialog.test.tsx` (mock `api` as other component tests do, fake timers):
   - typing a title calls `api.proposeBranch` once after 1 s and fills the "Rama" field with the proposal and its source label
   - after the developer edits the field, a later proposal doesn't overwrite it; clearing the field lets proposals fill it again
   - submit sends `branch` when the field is non-empty and omits it when empty
@@ -75,9 +75,9 @@
 ### Implementation
 
 - [ ] T015 [US2] Add the handler `propose_branch` (request `{key?, title, notes?, free, submodules[]}`, 10 s limit, 400 for an empty title) to `crates/delilah-daemon/src/branch_name.rs`, and the route `POST /api/v1/projects/{name}/branch-name` in `crates/delilah-daemon/src/api.rs`
-- [ ] T016 [US2] In `app/src/api.ts`: `RunRequest.branch?: string`, `export interface BranchProposal { branch: string | null; source: "claude" | "title" | "key" }`, and `api.proposeBranch(project, { key?, title, notes?, free, submodules })` → `post<BranchProposal>(`/api/v1/projects/${project}/branch-name`, …)`
-- [ ] T017 [US2] In `app/src/components/NewTaskDialog.tsx`, add the "Rama" field: a fixed `feature/` prefix and an input with the part after it. Request the proposal debounced 1 s on (project, key, title, origin, picked submodules), keyed so stale answers are dropped. Show "Proponiendo…" while waiting and "propuesta por Claude" / "a partir del título" / "a partir de la clave" after. An `edited` flag stops proposals overwriting the developer's name, and clearing the field resets it. Send `branch: "feature/" + value` on submit when non-empty. Use `t()` for all strings
-- [ ] T018 [P] [US2] Add the dialog's new strings to `app/src/i18n/en.ts` ("Rama" → "Branch", "Proponiendo…" → "Proposing…", "propuesta por Claude" → "proposed by Claude", "a partir del título" → "from the title", "a partir de la clave" → "from the key", "automática si la dejas vacía" → "automatic if left empty")
+- [X] T016 [US2] In `app/src/api.ts`: `RunRequest.branch?: string`, `export interface BranchProposal { branch: string | null; source: "claude" | "title" | "key" }`, and `api.proposeBranch(project, { key?, title, notes?, free, submodules })` → `post<BranchProposal>(`/api/v1/projects/${project}/branch-name`, …)`
+- [X] T017 [US2] In `app/src/components/NewTaskDialog.tsx`, add the "Rama" field: a fixed `feature/` prefix and an input with the part after it. Request the proposal debounced 1 s on (project, key, title, origin, picked submodules), keyed so stale answers are dropped. Show "Proponiendo…" while waiting and "propuesta por Claude" / "a partir del título" / "a partir de la clave" after. An `edited` flag stops proposals overwriting the developer's name, and clearing the field resets it. Send `branch: "feature/" + value` on submit when non-empty. Use `t()` for all strings
+- [X] T018 [P] [US2] Add the dialog's new strings to `app/src/i18n/en.ts` ("Rama" → "Branch", "Proponiendo…" → "Proposing…", "propuesta por Claude" → "proposed by Claude", "a partir del título" → "from the title", "a partir de la clave" → "from the key", "automática si la dejas vacía" → "automatic if left empty")
 
 **Checkpoint**: `cargo test -p delilah-daemon`, `cd app && npx tsc --noEmit && npx vitest related --run src/components/NewTaskDialog.tsx` green.
 
