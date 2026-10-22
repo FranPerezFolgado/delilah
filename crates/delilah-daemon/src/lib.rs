@@ -3,6 +3,7 @@
 mod actions;
 pub mod api;
 mod archive;
+mod branch_name;
 pub mod asks;
 mod changes;
 pub mod config;

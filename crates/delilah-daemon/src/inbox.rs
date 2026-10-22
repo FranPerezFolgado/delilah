@@ -591,6 +591,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
@@ -645,6 +646,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
@@ -811,6 +813,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_bin: "claude".into(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");

@@ -36,9 +36,9 @@ done or pending is in [status.md](status.md).
 
 | Path | What it is |
 |---|---|
-| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds. Pure, no I/O. |
-| `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`). |
-| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
+| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds, branch-name rules (`branch.rs`: `slug`, `title_slug`, `compose`, `custom`, `fallback`). Pure, no I/O. |
+| `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`), the branch-name proposal (`branch_name.rs`) and the headless one-shot both share (`oneshot.rs`). |
+| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving, and branch names that are free (`branch_taken`, `free_branch`) (`workspace.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
@@ -53,7 +53,8 @@ done or pending is in [status.md](status.md).
 | Module | Role |
 |---|---|
 | `api.rs` | Router, origin/Host guard, CORS, task CRUD. |
-| `run.rs` | `POST /api/v1/runs`: creates or starts a task, builds the workspace, launches the primary session, accepts the folder-trust dialog. |
+| `branch_name.rs` | `POST /api/v1/projects/{name}/branch-name` and `propose`: Claude (10 s for the endpoint, 5 s when `start_run` asks), then the title slug, then the key; `unique` adds the `-N` suffix. It never creates anything. |
+| `run.rs` | `POST /api/v1/runs`: creates or starts a task, names its branch (`start_run`: the request's `branch` normalised, or `propose`, then `unique`), builds the workspace, launches the primary session, accepts the folder-trust dialog. |
 | `session_api.rs`, `sessions.rs`, `store_sessions.rs` | Extra Claude sessions and shells. Live sessions are kept in memory and their records in SQLite. Also project sessions (`@project`). |
 | `terminal.rs` | WebSocket terminal: scrollback first, then live bytes; text frames for `resize`. |
 | `hooks.rs` | `/hooks/claude` and `/hooks/claude/statusline`. Each hook is classified into a `Signal`, which sets the session's live state, the inbox attention, the task transition and the phase. |
@@ -70,6 +71,8 @@ done or pending is in [status.md](status.md).
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
 | `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), submodules, and the submodule suggestion. |
 | `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` swaps the binary. |
+
+`DELILAH_CLAUDE_BIN` (`Config.claude_bin`, default `claude`) swaps the binary of the headless Claude calls: the branch name and the submodule suggestion. Tests and previews point it at a fake script.
 | `pr_types.rs`, `prs.rs` | PR data types (snapshot, checks, reviews, comments) and the pure logic: `ci_outcome`, `pick`, `summary`, `diff`, back-off. |
 | `pr_loop/` | The I/O of the PR loop: `mod.rs` (the 30 s loop `spawn`, `nudge`, `check_task`, detection), `access.rs` (access problems, notified once per project), `notices.rs` (turns a snapshot diff into notices and notifications), `merge.rs` (`on_merged`, see Workspaces). |
 | `pr_api/`, `store_prs.rs` | The PR routes and the SQLite access for PRs and their notices. `mod.rs` (list, summaries, refresh, link, unlink, dismiss), `dto.rs` (the JSON types), `open.rs` (proposal and open; `open` links the new PR straight to its repo with `pr_loop::link_known`; a parent's proposal defaults to its first free submodule that has commits), `forward.rs` (sending feedback to the agent). |
@@ -212,8 +215,14 @@ becomes `primary`, the old one stays in the task as a finished, reopenable tab
 
 ## Workspaces
 
+- **Branch names:** `start_run` names the branch before the workspace exists.
+  - The name is the request's `branch` (normalised by `delilah_core::branch::custom`) or, when absent, `branch_name::propose`: Claude with a 5 s limit, else `title_slug`, else `fallback(key)`. `compose` gives `feature/<short-name>` or `feature/<KEY>-<short-name>` (the `LIBRE-n` of a free task is left out).
+  - `branch_name::unique` then calls `delilah_git::free_branch` over every repo of the workspace (the repo, or each chosen submodule): a name is taken if `refs/heads/<name>` or `refs/remotes/*/<name>` exists (`branch_taken`), and `-2`… is tried. It applies in worktree and checkout mode alike, so an explicit `--branch` no longer switches to an existing branch.
+  - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field.
+  - `Task.branch` is read from `workspaces.branch` by a `LEFT JOIN`; a task with no workspace (backlog, archived) has none.
+
 - **Worktree mode** (in `workspaces/<KEY>/`):
-  - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch `feature/<KEY>`.
+  - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch, named as in Branch names below.
   - **Repo projects:** a plain worktree.
   - Several tasks can run in parallel.
 - **Checkout mode** (the default for new tasks; `use_checkout` / `leave_checkout`):

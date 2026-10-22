@@ -68,7 +68,8 @@ pub struct RunRequest {
     /// `parent` projects only: the submodules the task touches.
     #[serde(default)]
     pub submodules: Vec<String>,
-    /// Defaults to `feature/<key>`.
+    /// Defaults to a name Claude proposes from the title, as `feature/…`; always
+    /// normalised and made unique.
     pub branch: Option<String>,
     /// Defaults to `/feature <key>` for the `feature` workflow (`/feature <title>`
     /// for a free task).
@@ -190,6 +191,23 @@ pub async fn start_run(
         }
     };
 
+    // Named before anything is created, so a refused name leaves a backlog task as it is.
+    let notes = req
+        .notes
+        .clone()
+        .or_else(|| existing.as_ref().and_then(|t| t.notes.clone()));
+    let branch = crate::branch_name::for_start(
+        &app,
+        &project,
+        &req.key,
+        &req.title,
+        notes.as_deref(),
+        req.free,
+        &req.submodules,
+        req.branch.as_deref(),
+    )
+    .await?;
+
     if in_checkout {
         match app.store.checkout_user(&project.path).await? {
             Some((other, false)) => {
@@ -237,10 +255,7 @@ pub async fn start_run(
 
     let spec = WorkspaceSpec {
         path: app.config.workspaces_dir().join(&req.key),
-        branch: req
-            .branch
-            .clone()
-            .unwrap_or_else(|| format!("feature/{}", req.key)),
+        branch,
         kind: project.kind,
         submodules: req.submodules.clone(),
     };
@@ -622,6 +637,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_bin: "claude".into(),
         };
         let mut conv = session("@web", "Idea");
         conv.conversation = true;
@@ -660,6 +676,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "/usr/bin/false".into(),
             agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
@@ -686,6 +703,142 @@ mod tests {
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         task.key
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A daemon with a real repo project `web` and a fake `claude` that runs `script`.
+    async fn repo_app(script: &str) -> (AppState, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let mut app = app().await;
+        let repo = app.config.home.join("web");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let bin = app.config.home.join("claude");
+        std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = app.config.as_ref().clone();
+        config.claude_bin = bin;
+        app = AppState::new(app.store.clone(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "repo".into(),
+                path: repo.clone(),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+        (app, repo)
+    }
+
+    /// Starts a task in `repo` and returns the branch it was given. The agent cannot
+    /// launch (its task folder is a file), which fails after the workspace is saved.
+    async fn started(app: &AppState, mut req: RunRequest) -> String {
+        req.project = "repo".into();
+        let key = if req.key.trim().is_empty() {
+            "LIBRE-1".to_string()
+        } else {
+            req.key.clone()
+        };
+        std::fs::create_dir_all(app.config.home.join("tasks")).unwrap();
+        std::fs::write(app.config.task_dir(&key), "").unwrap();
+        let _ = start_run(State(app.clone()), Json(req)).await;
+        app.store
+            .workspace(&TaskKey::new(&key))
+            .await
+            .unwrap()
+            .unwrap()
+            .1
+            .branch
+    }
+
+    const NAMES_IT: &str =
+        r#"echo '{"is_error":false,"result":"{\"name\":\"task branch names\"}"}'"#;
+
+    #[tokio::test]
+    async fn a_free_task_is_named_by_claude() {
+        let (app, _) = repo_app(NAMES_IT).await;
+        let mut req = run("");
+        req.title = "Nombres de rama".into();
+        req.free = true;
+        assert_eq!(started(&app, req).await, "feature/task-branch-names");
+        let (_, ws) = app
+            .store
+            .workspace(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            git(&ws.path, &["branch", "--show-current"]),
+            "feature/task-branch-names"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_jira_task_keeps_its_key_in_the_branch() {
+        let (app, _) = repo_app(NAMES_IT).await;
+        let mut req = run("PROJ-12");
+        req.title = "Nombres de rama".into();
+        assert_eq!(
+            started(&app, req).await,
+            "feature/PROJ-12-task-branch-names"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_claude_an_unusable_free_title_gives_the_key() {
+        let (app, _) = repo_app("exit 1").await;
+        let mut req = run("");
+        req.title = "!!".into();
+        req.free = true;
+        assert_eq!(started(&app, req).await, "feature/libre-1");
+    }
+
+    #[tokio::test]
+    async fn a_proposal_sent_back_keeps_the_key_case() {
+        let (app, _) = repo_app("exit 1").await;
+        let mut req = run("PROJ-12");
+        req.title = "t".into();
+        req.branch = Some("feature/feature/PROJ-12-retry payments".into());
+        assert_eq!(started(&app, req).await, "feature/PROJ-12-retry-payments");
+    }
+
+    #[tokio::test]
+    async fn a_typed_branch_is_normalised_and_unique_even_in_checkout_mode() {
+        let (app, repo) = repo_app("exit 1").await;
+        git(&repo, &["branch", "feature/x"]);
+        let mut req = run("PROJ-3");
+        req.title = "t".into();
+        req.branch = Some("X".into());
+        req.in_checkout = Some(true);
+        assert_eq!(started(&app, req).await, "feature/x-2");
+        assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/x-2");
+        assert!(git(&repo, &["branch", "--list", "feature/x"]).contains("feature/x"));
+    }
+
+    #[tokio::test]
+    async fn a_typed_branch_with_nothing_usable_is_refused_before_anything_changes() {
+        let (app, _) = repo_app("exit 1").await;
+        let key = backlog_task(&app, "PROJ-5").await;
+        let mut req = run("PROJ-5");
+        req.project = "repo".into();
+        req.branch = Some("///".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
     }
 
     #[tokio::test]
@@ -896,21 +1049,6 @@ mod tests {
         assert_eq!(bare, "/feature PROJ-1");
     }
 
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-
     #[tokio::test]
     async fn a_started_task_from_a_conversation_reads_the_edited_brief() {
         use tower::ServiceExt;
@@ -968,6 +1106,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: Some(fake),
+            claude_bin: "claude".into(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.store

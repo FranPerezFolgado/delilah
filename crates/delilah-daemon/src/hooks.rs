@@ -208,6 +208,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
@@ -388,6 +389,7 @@ mod limit_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);

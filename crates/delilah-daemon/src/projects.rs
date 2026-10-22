@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use delilah_agents::suggest;
+use delilah_agents::{oneshot, suggest};
 use delilah_core::{Project, ProjectKind};
 use serde::Deserialize;
 
@@ -202,9 +202,9 @@ pub async fn suggest_submodules(
         app.lang().name(),
     );
 
-    let mut cmd = tokio::process::Command::new("claude");
+    let mut cmd = tokio::process::Command::new(&app.config.claude_bin);
     cmd.env_clear()
-        .envs(suggest::env())
+        .envs(oneshot::env())
         .args(suggest::args(&prompt))
         .current_dir(&project.path)
         .stdin(std::process::Stdio::null())
@@ -312,6 +312,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));

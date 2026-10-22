@@ -161,6 +161,10 @@ pub fn router(state: AppState) -> Router {
             get(projects::submodules),
         )
         .route(
+            "/api/v1/projects/{name}/branch-name",
+            post(crate::branch_name::propose_branch),
+        )
+        .route(
             "/api/v1/projects/{name}/suggest-submodules",
             post(projects::suggest_submodules),
         )
@@ -571,6 +575,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
@@ -584,6 +589,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
@@ -949,6 +955,7 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: ui_origin.map(str::to_string),
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
@@ -997,6 +1004,7 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
