@@ -1,6 +1,4 @@
-use delilah_daemon::{
-    api, config::Config, scheduler, sessions, specs, state::AppState, store::Store,
-};
+use delilah_daemon::{api, config::Config, scheduler, specs, state::AppState, store::Store};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -45,11 +43,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = AppState::new(store, config);
     app.load_language().await;
     app.load_remote_control().await;
-    scheduler::spawn(app.clone());
-    specs::spawn(app.clone());
-    if let Err(e) = sessions::recover_interrupted_setups(&app).await {
+    // Before anything else acts on tasks: the setups that died with the previous
+    // daemon stop as failed.
+    if let Err(e) = delilah_daemon::recover_interrupted_setups(&app).await {
         tracing::warn!("cannot recover interrupted setups: {e}");
     }
+    scheduler::spawn(app.clone());
+    specs::spawn(app.clone());
     axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
         .await?;

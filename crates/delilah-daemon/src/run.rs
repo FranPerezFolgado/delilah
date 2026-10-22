@@ -299,7 +299,7 @@ pub async fn start_run(
         }
     } else {
         app.transition(&key, Event::WorkspaceReady).await?;
-        launch_now(&app, &key, &ws, launch).await?;
+        start_agent(&app, &key, &ws, launch).await?;
     }
 
     let task = app
@@ -332,15 +332,31 @@ fn log_share_notes(app: &AppState, key: &TaskKey, notes: &[delilah_git::ShareNot
     }
 }
 
-/// `launch_agent`, except in tests, which must not start a real `claude`.
-async fn launch_now(
+/// The one way a task's agent is started, from a request or when a setup ends. Tests
+/// swap it for a stub that only records the session: they must not start a real
+/// `claude`.
+pub(crate) async fn start_agent(
     app: &AppState,
     key: &TaskKey,
     ws: &delilah_git::Workspace,
     launch: AgentLaunch,
 ) -> Result<(), LaunchError> {
     #[cfg(test)]
-    return crate::setup::launch_agent(app, key, ws, launch).await;
+    {
+        let _ = (ws, launch);
+        app.store
+            .create_session(&SessionRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                task: key.to_string(),
+                kind: SessionKind::Claude,
+                label: "Main".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+            })
+            .await?;
+        Ok(())
+    }
     #[cfg(not(test))]
     launch_agent(app, key, ws, launch).await
 }
@@ -378,6 +394,78 @@ pub(crate) struct AgentLaunch {
     pub notes: Option<String>,
     /// A session of the project to carry on as the primary one.
     pub adopted: Option<SessionRecord>,
+}
+
+/// The launch as kept in the task dir (the session is stored by id only).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedLaunch {
+    free: bool,
+    prompt: String,
+    custom_prompt: bool,
+    notes: Option<String>,
+    /// Id of the project's Claude session being carried on, if any.
+    adopted: Option<String>,
+}
+
+impl From<&AgentLaunch> for SavedLaunch {
+    fn from(l: &AgentLaunch) -> Self {
+        Self {
+            free: l.free,
+            prompt: l.prompt.clone(),
+            custom_prompt: l.custom_prompt,
+            notes: l.notes.clone(),
+            adopted: l.adopted.as_ref().map(|s| s.id.clone()),
+        }
+    }
+}
+
+/// What the launch needs, kept so retry and skip work after a daemon restart (the
+/// prompt is not stored on the task).
+pub(crate) const LAUNCH_FILE: &str = "launch.json";
+
+/// Saves the launch while the task waits for its setup.
+pub(crate) fn save_launch(
+    app: &AppState,
+    key: &TaskKey,
+    launch: &AgentLaunch,
+) -> Result<(), LaunchError> {
+    let dir = app.config.task_dir(key.as_str());
+    std::fs::create_dir_all(&dir)
+        .and_then(|_| {
+            std::fs::write(
+                dir.join(LAUNCH_FILE),
+                serde_json::to_vec(&SavedLaunch::from(launch))?,
+            )
+        })
+        .map_err(|e| LaunchError::Start(format!("cannot save the launch: {e}")))
+}
+
+/// The saved launch. An adopted session that is gone is dropped: the agent then
+/// starts as a new primary session.
+pub(crate) async fn load_launch(app: &AppState, key: &TaskKey) -> Result<AgentLaunch, LaunchError> {
+    let path = app.config.task_dir(key.as_str()).join(LAUNCH_FILE);
+    let bytes = std::fs::read(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => LaunchError::Unsupported("the task has no saved launch"),
+        _ => LaunchError::Start(format!("cannot read the saved launch: {e}")),
+    })?;
+    let saved: SavedLaunch = serde_json::from_slice(&bytes)
+        .map_err(|e| LaunchError::Start(format!("cannot read the saved launch: {e}")))?;
+    let adopted = match &saved.adopted {
+        Some(id) => app.store.session(id).await?,
+        None => None,
+    };
+    Ok(AgentLaunch {
+        free: saved.free,
+        prompt: saved.prompt,
+        custom_prompt: saved.custom_prompt,
+        notes: saved.notes,
+        adopted,
+    })
+}
+
+/// Drops the saved launch (the agent started, or the task was archived).
+pub(crate) fn forget_launch(app: &AppState, key: &TaskKey) {
+    let _ = std::fs::remove_file(app.config.task_dir(key.as_str()).join(LAUNCH_FILE));
 }
 
 /// Everything after the workspace is ready: the ticket and notes the agent is

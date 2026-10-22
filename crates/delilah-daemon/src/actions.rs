@@ -66,7 +66,7 @@ pub async fn archive(
         .get_task(&key)
         .await?
         .ok_or(StoreError::NotFound(key.clone()))?;
-    if !task.status.is_terminal() && !matches!(task.status, TaskStatus::SetupFailed { .. }) {
+    if !task.status.can_archive() {
         return Err(ApiError::conflict(format!(
             "{key} is {}; mark it done first (`delilah done {key}`)",
             task.status.name()
@@ -74,6 +74,8 @@ pub async fn archive(
     }
     release_workspace(&app, &key, q.force).await?;
     app.store.delete_workspace(&key).await?;
+    // Nothing will launch from a saved launch any more.
+    crate::run::forget_launch(&app, &key);
     app.emit(Topic::Tasks);
     app.emit(Topic::Specs);
     Ok(Json(task))
@@ -395,6 +397,82 @@ mod tests {
             axum::extract::Query(DeleteQuery { force }),
         )
         .await
+    }
+
+    /// A task stopped in `setup-failed`, with a worktree and a saved launch.
+    async fn setup_failed(app: &AppState, repo: &FsPath, key: &str) -> delilah_git::Workspace {
+        let key = TaskKey::new(key);
+        app.store
+            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .await
+            .unwrap();
+        app.store
+            .apply_event(&key, Event::Start, chrono::Utc::now())
+            .await
+            .unwrap();
+        let spec = delilah_git::WorkspaceSpec {
+            path: app.config.workspaces_dir().join(key.as_str()),
+            branch: format!("feature/{key}"),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        let ws = delilah_git::create_workspace(repo, &spec, &GitOptions::default()).unwrap();
+        app.store.save_workspace(&key, repo, &ws).await.unwrap();
+        app.store
+            .apply_event(
+                &key,
+                Event::SetupFailed {
+                    reason: "boom".into(),
+                },
+                chrono::Utc::now(),
+            )
+            .await
+            .unwrap();
+        let dir = app.config.task_dir(key.as_str());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::run::LAUNCH_FILE), b"{}").unwrap();
+        ws
+    }
+
+    #[tokio::test]
+    async fn archives_a_setup_failed_task_and_drops_its_saved_launch() {
+        let (app, repo) = setup().await;
+        let ws = setup_failed(&app, &repo, "PROJ-1").await;
+        let res = archive(
+            State(app.clone()),
+            Path("PROJ-1".into()),
+            axum::extract::Query(ArchiveQuery { force: false }),
+        )
+        .await;
+        assert!(res.is_ok());
+        assert!(!ws.path.exists());
+        let key = TaskKey::new("PROJ-1");
+        assert!(app.store.workspace(&key).await.unwrap().is_none());
+        assert!(
+            !app.config
+                .task_dir("PROJ-1")
+                .join(crate::run::LAUNCH_FILE)
+                .exists()
+        );
+    }
+
+    #[tokio::test]
+    async fn deletes_a_setup_failed_task_and_releases_its_worktree() {
+        let (app, repo) = setup().await;
+        let ws = setup_failed(&app, &repo, "PROJ-1").await;
+        assert_eq!(
+            delete_task(&app, "PROJ-1", false).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert!(!ws.path.exists());
+        assert!(!app.config.task_dir("PROJ-1").exists());
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("PROJ-1"))
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

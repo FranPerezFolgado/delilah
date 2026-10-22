@@ -86,6 +86,12 @@ impl TaskStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Done | Self::Failed { .. })
     }
+
+    /// Whether its workspace may be archived: finished, or stopped for good on a
+    /// failed setup.
+    pub fn can_archive(&self) -> bool {
+        self.is_terminal() || matches!(self, Self::SetupFailed { .. })
+    }
 }
 
 /// Something that happened to a task, reported by the daemon, an agent hook or the user.
@@ -346,6 +352,16 @@ mod tests {
             t.apply(end).unwrap();
             assert!(t.status.is_terminal());
         }
+    }
+
+    #[test]
+    fn only_finished_or_setup_failed_tasks_can_be_archived() {
+        assert!(TaskStatus::Done.can_archive());
+        assert!(TaskStatus::Failed { reason: "x".into() }.can_archive());
+        assert!(TaskStatus::SetupFailed { reason: "x".into() }.can_archive());
+        assert!(!TaskStatus::Running.can_archive());
+        assert!(!TaskStatus::PreparingWorkspace.can_archive());
+        assert!(!TaskStatus::Queued.can_archive());
     }
 
     #[test]

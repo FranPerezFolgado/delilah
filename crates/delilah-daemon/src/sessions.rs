@@ -1,6 +1,6 @@
 //! Sessions alive in this daemon right now, by session id.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -10,14 +10,6 @@ use tokio::sync::Notify;
 
 use crate::events::{Events, Topic};
 use crate::store_sessions::SessionKind;
-
-/// At daemon start: tasks stuck preparing their workspace (their setup died with the
-/// previous daemon) stop as `setup-failed` ("interrupted").
-pub async fn recover_interrupted_setups(app: &crate::state::AppState) -> Result<(), String> {
-    crate::setup::recover_interrupted(app)
-        .await
-        .map_err(|e| e.to_string())
-}
 
 /// What a live session is doing, from its own hooks. The task's status follows the
 /// primary session; this is what an extra session shows next to its terminal.
@@ -67,6 +59,8 @@ impl Live {
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<String, Live>>,
+    /// Setup sessions the user cancelled, until their end is handled.
+    cancelled: Mutex<HashSet<String>>,
     events: Events,
 }
 
@@ -74,6 +68,7 @@ impl Sessions {
     pub fn new(events: Events) -> Self {
         Self {
             live: Mutex::default(),
+            cancelled: Mutex::default(),
             events,
         }
     }
@@ -106,6 +101,17 @@ impl Sessions {
             .insert(id.to_string(), live.clone());
         self.events.emit(Topic::Sessions);
         live
+    }
+
+    /// Notes that the user cancelled this (setup) session, so its end is told from a
+    /// failure.
+    pub fn mark_cancelled(&self, id: &str) {
+        self.cancelled.lock().unwrap().insert(id.to_string());
+    }
+
+    /// Whether it was cancelled; forgets the mark.
+    pub fn take_cancelled(&self, id: &str) -> bool {
+        self.cancelled.lock().unwrap().remove(id)
     }
 
     pub fn get(&self, id: &str) -> Option<Live> {

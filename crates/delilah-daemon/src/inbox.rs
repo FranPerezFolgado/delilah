@@ -248,6 +248,9 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             }
             TaskStatus::PausedByLimit { .. } => Some((ItemKind::Paused, None, "limit-reached")),
             TaskStatus::Failed { reason } => Some((ItemKind::Failed, Some(reason.clone()), "fail")),
+            TaskStatus::SetupFailed { reason } => {
+                Some((ItemKind::Failed, Some(reason.clone()), "setup-failed"))
+            }
             _ => None,
         };
         let review = in_review.map(|s| {

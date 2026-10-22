@@ -10,12 +10,9 @@ use std::time::Duration;
 
 use delilah_agents::pty::PtySession;
 use delilah_core::{Event, TaskKey, TaskStatus};
-use serde::{Deserialize, Serialize};
 
 use crate::events::Topic;
-#[cfg(not(test))]
-use crate::run::launch_agent;
-use crate::run::{AgentLaunch, LaunchError};
+use crate::run::{AgentLaunch, LaunchError, forget_launch, load_launch, save_launch, start_agent};
 use crate::state::AppState;
 use crate::store_sessions::{SessionKind, SessionRecord};
 
@@ -25,44 +22,32 @@ const TIMEOUT: Duration = Duration::from_secs(600);
 const TAIL_LINES: usize = 20;
 /// How much of the log's end is looked at to find those lines.
 const TAIL_BYTES: u64 = 256 * 1024;
-/// What the agent launch needs, kept in the task dir so retry and skip work after
-/// a daemon restart (the prompt is not stored on the task).
-const LAUNCH_FILE: &str = "launch.json";
-/// Written by `cancel` before it kills the setup, so the end is told from a failure.
-const CANCEL_FILE: &str = "setup-cancelled";
 /// After a kill, how long to wait for the output to drain before moving on.
 const KILL_GRACE: Duration = Duration::from_secs(5);
 
-#[derive(Serialize, Deserialize)]
-struct Pending {
-    free: bool,
-    prompt: String,
-    custom_prompt: bool,
-    notes: Option<String>,
-    /// Id of the project's Claude session being carried on, if any.
-    adopted: Option<String>,
-}
-
-/// Tests must not start a real `claude`: record the launch as a session instead.
-#[cfg(test)]
-pub(crate) async fn launch_agent(
-    app: &AppState,
-    key: &TaskKey,
-    _ws: &delilah_git::Workspace,
-    _launch: AgentLaunch,
-) -> Result<(), LaunchError> {
-    app.store
-        .create_session(&SessionRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            task: key.to_string(),
-            kind: SessionKind::Claude,
-            label: "Main".into(),
-            primary: true,
-            closed: false,
-            read_only: false,
-        })
-        .await?;
-    Ok(())
+/// Stops the setup and everything it started: the shell leads its own process group
+/// under the PTY, so the group gets TERM, then KILL after the grace, and the shell
+/// alone is killed if the group could not be signalled.
+async fn stop(pty: &PtySession) {
+    let Some(pgid) = pty.process_id() else {
+        let _ = pty.kill();
+        return;
+    };
+    let signal = |name: &str| {
+        std::process::Command::new("kill")
+            .args(["-s", name, "--", &format!("-{pgid}")])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let termed = signal("TERM");
+    let _ = tokio::time::timeout(KILL_GRACE, pty.wait()).await;
+    // The shell may be gone while a child ignores TERM: the group still goes.
+    let killed = signal("KILL");
+    if !termed && !killed {
+        let _ = pty.kill();
+    }
 }
 
 /// Starts the project's setup for a task in `preparing-workspace` whose worktree is
@@ -73,18 +58,29 @@ pub(crate) async fn start(
     command: &str,
     launch: AgentLaunch,
 ) -> Result<(), LaunchError> {
-    let pending = Pending {
-        free: launch.free,
-        prompt: launch.prompt,
-        custom_prompt: launch.custom_prompt,
-        notes: launch.notes,
-        adopted: launch.adopted.map(|s| s.id),
-    };
-    let dir = app.config.task_dir(key.as_str());
-    std::fs::create_dir_all(&dir)
-        .and_then(|_| std::fs::write(dir.join(LAUNCH_FILE), serde_json::to_vec(&pending)?))
-        .map_err(|e| LaunchError::Start(format!("cannot save the launch: {e}")))?;
+    save_launch(app, key, &launch)?;
     spawn_setup(app, key, command, TIMEOUT).await
+}
+
+/// The workspace to run in and the launch to make afterwards, or why the task cannot
+/// be retried or skipped: checked before it leaves `setup-failed`, so a refusal
+/// never strands it in `preparing-workspace`.
+async fn preflight(
+    app: &AppState,
+    key: &TaskKey,
+) -> Result<(delilah_git::Workspace, AgentLaunch), LaunchError> {
+    let (parent, ws) = app
+        .store
+        .workspace(key)
+        .await?
+        .ok_or(LaunchError::Unsupported("the task has no workspace"))?;
+    // The setup belongs in a new worktree, never in the project's own checkout.
+    if ws.path == parent {
+        return Err(LaunchError::Unsupported(
+            "the setup never runs in the project's checkout",
+        ));
+    }
+    Ok((ws, load_launch(app, key).await?))
 }
 
 /// "Reintentar setup": runs it again.
@@ -99,12 +95,19 @@ pub(crate) async fn retry(app: &AppState, key: &TaskKey) -> Result<(), LaunchErr
         None => None,
     }
     .ok_or(LaunchError::Unsupported("the project has no setup command"))?;
+    preflight(app, key).await?;
     app.transition(key, Event::RetrySetup).await?;
-    spawn_setup(app, key, &command, TIMEOUT).await
+    if let Err(e) = spawn_setup(app, key, &command, TIMEOUT).await {
+        let reason = format!("cannot start the setup: {e}");
+        app.transition(key, Event::SetupFailed { reason }).await?;
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// "Lanzar sin setup": launches the agent with the worktree as it is.
 pub(crate) async fn skip(app: &AppState, key: &TaskKey) -> Result<(), LaunchError> {
+    preflight(app, key).await?;
     app.transition(key, Event::SkipSetup).await?;
     ready_and_launch(app, key).await
 }
@@ -118,15 +121,14 @@ pub(crate) async fn cancel(app: &AppState, key: &TaskKey) -> Result<(), LaunchEr
         .into_iter()
         .find(|l| l.kind == SessionKind::Setup && !l.pty.has_exited())
         .ok_or(LaunchError::Unsupported("no setup is running"))?;
-    std::fs::write(app.config.task_dir(key.as_str()).join(CANCEL_FILE), b"")
-        .map_err(|e| LaunchError::Start(format!("cannot cancel: {e}")))?;
-    let _ = live.pty.kill();
+    app.sessions.mark_cancelled(&live.id);
+    stop(&live.pty).await;
     Ok(())
 }
 
 /// At daemon start: a task still preparing its workspace has no setup running (they
 /// died with the previous daemon), so it stops as `setup-failed` ("interrupted").
-pub(crate) async fn recover_interrupted(app: &AppState) -> Result<(), LaunchError> {
+pub async fn recover_interrupted(app: &AppState) -> Result<(), LaunchError> {
     for task in app.store.list_tasks().await? {
         if task.status != TaskStatus::PreparingWorkspace {
             continue;
@@ -176,7 +178,6 @@ async fn spawn_setup(
     let dir = app.config.task_dir(key.as_str());
     std::fs::create_dir_all(&dir)
         .map_err(|e| LaunchError::Start(format!("cannot create {}: {e}", dir.display())))?;
-    let _ = std::fs::remove_file(dir.join(CANCEL_FILE));
 
     let session = SessionRecord {
         id: uuid::Uuid::new_v4().to_string(),
@@ -245,16 +246,13 @@ async fn finish(
 ) -> Result<(), LaunchError> {
     let timed_out = tokio::time::timeout(timeout, pty.wait()).await.is_err();
     if timed_out {
-        let _ = pty.kill();
-        let _ = tokio::time::timeout(KILL_GRACE, pty.wait()).await;
+        stop(pty).await;
     }
     app.sessions.remove_if_same(session_id, pty);
     app.store.close_session(session_id).await?;
     app.emit(Topic::Sessions);
 
-    let cancel_file = app.config.task_dir(key.as_str()).join(CANCEL_FILE);
-    let cancelled = cancel_file.exists();
-    let _ = std::fs::remove_file(&cancel_file);
+    let cancelled = app.sessions.take_cancelled(session_id);
     let tail = output_tail(log);
     let failure = if cancelled {
         Some("cancelled".to_string())
@@ -281,39 +279,21 @@ async fn finish(
     }
 }
 
-/// The task is ready: it runs, and its agent starts from the saved launch.
+/// The task is ready: it runs, and its agent starts from the saved launch. If the
+/// inputs are gone the task stops in `setup-failed` rather than stay preparing.
 async fn ready_and_launch(app: &AppState, key: &TaskKey) -> Result<(), LaunchError> {
-    let (_, ws) = app
-        .store
-        .workspace(key)
-        .await?
-        .ok_or(LaunchError::Unsupported("the task has no workspace"))?;
-    let path = app.config.task_dir(key.as_str()).join(LAUNCH_FILE);
-    let pending: Pending = std::fs::read(&path)
-        .map_err(|e| e.to_string())
-        .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string()))
-        .map_err(|e| LaunchError::Start(format!("cannot read the saved launch: {e}")))?;
-    let adopted = match &pending.adopted {
-        Some(id) => app.store.session(id).await?,
-        None => None,
+    let (ws, launch) = match preflight(app, key).await {
+        Ok(inputs) => inputs,
+        Err(e) => {
+            let reason = format!("cannot launch the agent: {e}");
+            app.transition(key, Event::SetupFailed { reason }).await?;
+            return Err(e);
+        }
     };
     app.transition(key, Event::WorkspaceReady).await?;
-    let launched = launch_agent(
-        app,
-        key,
-        &ws,
-        AgentLaunch {
-            free: pending.free,
-            prompt: pending.prompt,
-            custom_prompt: pending.custom_prompt,
-            notes: pending.notes,
-            adopted,
-        },
-    )
-    .await;
-    match launched {
+    match start_agent(app, key, &ws, launch).await {
         Ok(()) => {
-            let _ = std::fs::remove_file(&path);
+            forget_launch(app, key);
             Ok(())
         }
         Err(e) => {
@@ -399,6 +379,7 @@ mod tests {
 
     use super::*;
     use crate::config::Config;
+    use crate::run::LAUNCH_FILE;
     use crate::store::Store;
 
     struct Env {
@@ -590,6 +571,59 @@ mod tests {
         assert_eq!(reason, "cancelled");
         assert_eq!(agent_sessions(&e).await, 0);
         assert!(cancel(&e.app, &e.key).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cancel_stops_what_the_setup_started() {
+        let script = "sleep 30 & echo $! > grandchild.pid; wait";
+        let e = env(script).await;
+        start(&e.app, &e.key, script, launch()).await.unwrap();
+        let pid_file = e.worktree.join("grandchild.pid");
+        for _ in 0..100 {
+            if std::fs::read_to_string(&pid_file).is_ok_and(|s| !s.trim().is_empty()) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let pid = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .to_string();
+        let alive = |pid: &str| {
+            std::process::Command::new("kill")
+                .args(["-0", pid])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(alive(&pid), "the grandchild runs before the cancel");
+        cancel(&e.app, &e.key).await.unwrap();
+        wait_for(&e, |s| matches!(s, TaskStatus::SetupFailed { .. })).await;
+        for _ in 0..40 {
+            if !alive(&pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the grandchild {pid} survived the cancel");
+    }
+
+    #[tokio::test]
+    async fn retry_without_a_saved_launch_is_refused_and_leaves_the_task_alone() {
+        let e = env("exit 3").await;
+        start(&e.app, &e.key, "exit 3", launch()).await.unwrap();
+        wait_for(&e, |s| matches!(s, TaskStatus::SetupFailed { .. })).await;
+        std::fs::remove_file(e.app.config.task_dir("PROJ-1").join(LAUNCH_FILE)).unwrap();
+        assert!(matches!(
+            retry(&e.app, &e.key).await,
+            Err(LaunchError::Unsupported(_))
+        ));
+        assert!(matches!(
+            skip(&e.app, &e.key).await,
+            Err(LaunchError::Unsupported(_))
+        ));
+        assert!(matches!(status(&e).await, TaskStatus::SetupFailed { .. }));
     }
 
     #[tokio::test]

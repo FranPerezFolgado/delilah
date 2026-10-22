@@ -38,8 +38,10 @@ next to its field (FR-004). Messages are localised by the daemon (`Lang::pick`).
 | | `SetupFailed` | `SkipSetup` | `PreparingWorkspace` (then `WorkspaceReady` → `Running`) |
 | | `SetupFailed` | `Fail { reason }`, `MarkDone` | `Failed`, `Done` |
 
-`SetupFailed` is not terminal. `reason` holds the last 20 lines of output or
-"cancelled" / "timed out" / "interrupted".
+`SetupFailed` is not terminal. `reason` holds the last 20 lines of output, or on a
+timeout a localised note ("the setup exceeded the time limit (10 min)") followed by
+that output tail. "cancelled" and "interrupted" are stable tokens, never localised
+by the daemon: the app translates them.
 
 ## Session kind addition (`store_sessions::SessionKind`)
 

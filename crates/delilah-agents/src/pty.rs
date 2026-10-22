@@ -173,6 +173,12 @@ impl PtySession {
         self.child.lock().unwrap().kill()
     }
 
+    /// The child's pid. Under a PTY the child leads its own session and process group
+    /// (the group's id is this pid), so it names everything the child started.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.lock().unwrap().process_id()
+    }
+
     pub fn has_exited(&self) -> bool {
         *self.exited.borrow()
     }
