@@ -230,6 +230,60 @@ pub fn validate(settings: &ProjectSettings, kind: ProjectKind) -> Vec<FieldError
     errors
 }
 
+/// Maximum length of the `{slug}` part of a branch name.
+const SLUG_MAX: usize = 40;
+
+/// Lower-case, hyphen-separated form of a task title for branch names: accents
+/// stripped, only `a-z`, `0-9` and `-`, at most 40 characters, cut at the last
+/// hyphen when it has to be shortened, never starting or ending with `-`.
+pub fn slug(title: &str) -> String {
+    use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+    let mut out = String::new();
+    for c in title.nfkd().filter(|c| !is_combining_mark(*c)) {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let mut out = out.trim_matches('-').to_string();
+    if out.len() > SLUG_MAX {
+        // All ASCII here, so byte indexes are char indexes.
+        let cut = if out.as_bytes()[SLUG_MAX] == b'-' {
+            SLUG_MAX
+        } else {
+            out[..SLUG_MAX].rfind('-').unwrap_or(SLUG_MAX)
+        };
+        out.truncate(cut);
+        out = out.trim_matches('-').to_string();
+    }
+    out
+}
+
+/// Expands a branch template: `{ticket}` is the task key verbatim, `{slug}` the
+/// slug of the title. With an empty slug the `-`, `_` or `.` run just before
+/// `{slug}` goes too (or the one just after, if `{slug}` opens the template), so
+/// no separator is left dangling.
+pub fn branch_name(template: &str, key: &str, title: &str) -> String {
+    let slug = slug(title);
+    let is_sep = |c: char| matches!(c, '-' | '_' | '.');
+    let mut t = template.to_string();
+    if slug.is_empty() {
+        while let Some(i) = t.find("{slug}") {
+            let before = t[..i].trim_end_matches(is_sep).len();
+            let mut after = i + "{slug}".len();
+            if before == 0 {
+                after = t.len() - t[after..].trim_start_matches(is_sep).len();
+            }
+            t.replace_range(before..after, "");
+        }
+    } else {
+        t = t.replace("{slug}", &slug);
+    }
+    t.replace("{ticket}", key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +413,20 @@ mod tests {
                 ("submodules.never[1]", "submodules.not_parent"),
             ]
         );
+    }
+
+    #[test]
+    fn branch_names_match_shared_cases() {
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../tests/branch_names.json")).unwrap();
+        assert!(cases.len() >= 12);
+        for c in cases {
+            let f = |k: &str| c[k].as_str().unwrap().to_string();
+            assert_eq!(
+                branch_name(&f("template"), &f("key"), &f("title")),
+                f("branch"),
+                "case {c}"
+            );
+        }
     }
 }

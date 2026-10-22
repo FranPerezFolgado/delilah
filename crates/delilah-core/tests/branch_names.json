@@ -1,0 +1,20 @@
+[
+  {"template": "feature/{ticket}", "key": "LIBRE-3", "title": "Anything", "branch": "feature/LIBRE-3"},
+  {"template": "feature/{ticket}-{slug}", "key": "PROJ-123", "title": "Add pagination to list", "branch": "feature/PROJ-123-add-pagination-to-list"},
+  {"template": "feature/{ticket}-{slug}", "key": "PROJ-123", "title": "Paginación y búsqueda", "branch": "feature/PROJ-123-paginacion-y-busqueda"},
+  {"template": "{ticket}/{slug}", "key": "LIBRE-3", "title": "Niño, über café ç", "branch": "LIBRE-3/nino-uber-cafe-c"},
+  {"template": "feature/{ticket}-{slug}", "key": "LIBRE-3", "title": "Fix: foo/bar (baz) & qux!", "branch": "feature/LIBRE-3-fix-foo-bar-baz-qux"},
+  {"template": "feature/{ticket}-{slug}", "key": "LIBRE-3", "title": "a   b---c___d", "branch": "feature/LIBRE-3-a-b-c-d"},
+  {"template": "feature/{ticket}-{slug}", "key": "LIBRE-3", "title": "--- Edge hyphens ---", "branch": "feature/LIBRE-3-edge-hyphens"},
+  {"template": "{slug}", "key": "LIBRE-3", "title": "UPPER Case 42", "branch": "upper-case-42"},
+  {"template": "feature/{ticket}-{slug}", "key": "LIBRE-3", "title": "one two three four five six seven eight nine ten", "branch": "feature/LIBRE-3-one-two-three-four-five-six-seven-eight"},
+  {"template": "{slug}", "key": "LIBRE-3", "title": "abcdefghij abcdefghij abcdefghij abcdefghi xyz", "branch": "abcdefghij-abcdefghij-abcdefghij"},
+  {"template": "{slug}", "key": "LIBRE-3", "title": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghij", "branch": "abcdefghijabcdefghijabcdefghijabcdefghij"},
+  {"template": "{slug}", "key": "LIBRE-3", "title": "abcdefghij abcdefghij abcdefghij abcdefg xyz", "branch": "abcdefghij-abcdefghij-abcdefghij-abcdefg"},
+  {"template": "feature/{ticket}-{slug}", "key": "LIBRE-3", "title": "", "branch": "feature/LIBRE-3"},
+  {"template": "feature/{ticket}-{slug}", "key": "LIBRE-3", "title": "!!! ???", "branch": "feature/LIBRE-3"},
+  {"template": "{ticket}_{slug}", "key": "LIBRE-3", "title": "", "branch": "LIBRE-3"},
+  {"template": "{slug}-{ticket}", "key": "LIBRE-3", "title": "", "branch": "LIBRE-3"},
+  {"template": "{ticket}-{slug}-wip", "key": "LIBRE-3", "title": "", "branch": "LIBRE-3-wip"},
+  {"template": "task/{ticket}", "key": "LIBRE-3", "title": "Ignored title", "branch": "task/LIBRE-3"}
+]
