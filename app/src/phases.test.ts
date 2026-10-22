@@ -25,10 +25,14 @@ describe("boardColumnOf", () => {
 });
 
 describe("whereOf", () => {
-  it("starts in a worktree unless the checkout was chosen, as the daemon does", () => {
+  const mode = (workspace: "checkout" | "worktree") => ({ settings: { workspace } }) as never;
+  it("a saved choice wins; without one, the project's default (checkout if none), as the daemon does", () => {
     expect(whereOf(true)).toBe("checkout");
     expect(whereOf(false)).toBe("worktree");
-    expect(whereOf(null)).toBe("worktree");
-    expect(whereOf(undefined)).toBe("worktree");
+    expect(whereOf(null)).toBe("checkout");
+    expect(whereOf(undefined)).toBe("checkout");
+    expect(whereOf(null, mode("worktree"))).toBe("worktree");
+    expect(whereOf(null, mode("checkout"))).toBe("checkout");
+    expect(whereOf(true, mode("worktree"))).toBe("checkout");
   });
 });

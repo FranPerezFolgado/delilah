@@ -52,9 +52,12 @@ enum Command {
         /// A task without a Jira ticket: Delilah names it LIBRE-<n>.
         #[arg(long)]
         free: bool,
-        /// Work in the project's checkout once started (by default, in a worktree).
-        #[arg(long)]
+        /// Work in the project's checkout once started (default: the project's setting).
+        #[arg(long, conflicts_with = "worktree")]
         checkout: bool,
+        /// Work in an isolated worktree once started (default: the project's setting).
+        #[arg(long)]
+        worktree: bool,
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
@@ -85,6 +88,13 @@ enum Command {
         /// First prompt; defaults to `/feature <KEY>`.
         #[arg(long)]
         prompt: Option<String>,
+        /// Work in the project's checkout (default: the backlog task's choice, else the
+        /// project's setting).
+        #[arg(long, conflicts_with = "worktree")]
+        checkout: bool,
+        /// Work in an isolated worktree (default: as with --checkout).
+        #[arg(long)]
+        worktree: bool,
         /// Attach to the agent's terminal right away.
         #[arg(long)]
         attach: bool,
@@ -465,6 +475,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             notes,
             free,
             checkout,
+            worktree,
             workflow,
         } => {
             if key.is_none() && !free {
@@ -472,10 +483,15 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             }
             let task: Task = api.post(
                 "/api/v1/tasks",
-                &json!({
-                    "key": key.unwrap_or_default(), "title": title, "project": project,
-                    "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
-                }),
+                &new_body(
+                    key.unwrap_or_default(),
+                    title,
+                    project,
+                    notes,
+                    free,
+                    choice(checkout, worktree),
+                    workflow,
+                ),
             )?;
             println!(
                 "Saved {} to {}'s backlog. Start it with `delilah run {}`.",
@@ -511,16 +527,17 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             workflow,
             branch,
             prompt,
+            checkout,
+            worktree,
             attach,
         } => {
-            let task: Task = api.post(
-                "/api/v1/runs",
-                &json!({
-                    "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
-                    "workflow": workflow,
-                    "submodules": submodules, "branch": branch, "prompt": prompt,
-                }),
-            )?;
+            let mut body = json!({
+                "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
+                "workflow": workflow,
+                "submodules": submodules, "branch": branch, "prompt": prompt,
+            });
+            with_choice(&mut body, choice(checkout, worktree));
+            let task: Task = api.post("/api/v1/runs", &body)?;
             println!(
                 "{} is {}: Claude is working on it.",
                 task.key,
@@ -795,9 +812,85 @@ impl Api {
     }
 }
 
+/// `--checkout` / `--worktree` as the request's `in_checkout`; none given means the
+/// daemon decides (the backlog task's choice, else the project's setting).
+fn choice(checkout: bool, worktree: bool) -> Option<bool> {
+    match (checkout, worktree) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
+    }
+}
+
+/// Sets `in_checkout` only when a choice was made; omitted, the daemon's default applies.
+fn with_choice(body: &mut serde_json::Value, in_checkout: Option<bool>) {
+    if let Some(c) = in_checkout {
+        body["in_checkout"] = json!(c);
+    }
+}
+
+fn new_body(
+    key: String,
+    title: String,
+    project: String,
+    notes: Option<String>,
+    free: bool,
+    in_checkout: Option<bool>,
+    workflow: Option<String>,
+) -> serde_json::Value {
+    let mut body = json!({
+        "key": key, "title": title, "project": project,
+        "notes": notes, "free": free, "workflow": workflow,
+    });
+    with_choice(&mut body, in_checkout);
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn flags(args: &[&str]) -> Result<Option<bool>, clap::Error> {
+        Ok(match Cli::try_parse_from(args)?.command {
+            Command::New {
+                checkout, worktree, ..
+            }
+            | Command::Run {
+                checkout, worktree, ..
+            } => choice(checkout, worktree),
+            _ => panic!("not new/run"),
+        })
+    }
+
+    #[test]
+    fn new_and_run_take_an_optional_workspace_choice() {
+        for (cmd, rest) in [
+            ("new", vec!["K-1", "--title", "t", "--project", "p"]),
+            ("run", vec!["K-1"]),
+        ] {
+            let with = |extra: &[&str]| {
+                let mut v = vec!["delilah", cmd];
+                v.extend(&rest);
+                v.extend(extra);
+                flags(&v)
+            };
+            assert_eq!(with(&[]).unwrap(), None, "{cmd}");
+            assert_eq!(with(&["--checkout"]).unwrap(), Some(true), "{cmd}");
+            assert_eq!(with(&["--worktree"]).unwrap(), Some(false), "{cmd}");
+            assert!(with(&["--checkout", "--worktree"]).is_err(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn the_request_omits_in_checkout_without_a_choice() {
+        let body = |c| new_body("K".into(), "t".into(), "p".into(), None, false, c, None);
+        assert!(body(None).get("in_checkout").is_none());
+        assert_eq!(body(Some(true))["in_checkout"], json!(true));
+        assert_eq!(body(Some(false))["in_checkout"], json!(false));
+        let mut run = json!({});
+        with_choice(&mut run, None);
+        assert!(run.get("in_checkout").is_none());
+    }
 
     fn parse(args: &[&str]) -> ProjectCommand {
         let mut v = vec!["delilah", "project"];

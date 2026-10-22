@@ -15,10 +15,11 @@ interface Props {
 
 /** A task saved to the backlog: what it is about, editable until it starts. */
 export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
+  const savedProject = projects.find((p) => p.name === task.project);
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes ?? "");
   const [project, setProject] = useState(task.project ?? "");
-  const [where, setWhere] = useState<Where>(whereOf(task.in_checkout));
+  const [where, setWhere] = useState<Where>(whereOf(task.in_checkout, savedProject));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,14 +28,14 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
     setTitle(task.title);
     setNotes(task.notes ?? "");
     setProject(task.project ?? "");
-    setWhere(whereOf(task.in_checkout));
-  }, [task.title, task.notes, task.project, task.in_checkout]);
+    setWhere(whereOf(task.in_checkout, savedProject));
+  }, [task.title, task.notes, task.project, task.in_checkout, savedProject?.settings.workspace]);
 
   const dirty =
     title.trim() !== task.title ||
     notes !== (task.notes ?? "") ||
     project !== (task.project ?? "") ||
-    where !== whereOf(task.in_checkout);
+    where !== whereOf(task.in_checkout, savedProject);
   const inCheckout = where === "checkout";
   const save = async () => {
     setBusy(true);

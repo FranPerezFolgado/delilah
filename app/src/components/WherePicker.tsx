@@ -3,8 +3,9 @@ import { t } from "../i18n";
 
 export type Where = "checkout" | "worktree";
 
-/** A backlog task's saved choice; without one, a worktree, as the daemon starts it. */
-export const whereOf = (inCheckout?: boolean | null): Where => (inCheckout === true ? "checkout" : "worktree");
+/** A backlog task's saved choice; without one, the project's default (checkout if none). */
+export const whereOf = (inCheckout?: boolean | null, project?: Project): Where =>
+  inCheckout === true ? "checkout" : inCheckout === false ? "worktree" : (project?.settings.workspace ?? "checkout");
 
 /** Where the agent works: a branch in the project's own checkout, or a worktree. */
 export function WherePicker({ value, onChange, project }: { value: Where; onChange: (w: Where) => void; project?: Project }) {

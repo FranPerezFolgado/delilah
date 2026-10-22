@@ -9,6 +9,8 @@ delilah project set <name> shared add <path> [--copy|--link]
 delilah project set <name> shared rm <path>
 delilah project set <name> submodules always|never add|rm <path>
 delilah project unset <name> <setting>         # back to the default
+delilah new <KEY> --title T --project P [--checkout | --worktree]   # neither: follows the project's workspace setting
+delilah run <KEY> [--checkout | --worktree]    # neither: the backlog task's choice, else the project's setting
 delilah setup retry <KEY>
 delilah setup skip <KEY>
 delilah setup cancel <KEY>

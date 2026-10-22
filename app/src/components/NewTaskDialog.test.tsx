@@ -89,6 +89,14 @@ describe("NewTaskDialog", () => {
       const { container } = open([withMode("a", "worktree")], { existing });
       expect(radio(container, "checkout").checked).toBe(true);
     });
+
+    it("a backlog task with no saved choice takes the project's default and follows project changes", () => {
+      const existing = { key: "LIBRE-1", title: "t", project: "a", in_checkout: null, notes: "" } as never;
+      const { container } = open([withMode("a", "worktree"), withMode("b", "checkout")], { existing });
+      expect(radio(container, "worktree").checked).toBe(true);
+      fireEvent.change(container.querySelector("select") as HTMLSelectElement, { target: { value: "b" } });
+      expect(radio(container, "checkout").checked).toBe(true);
+    });
   });
 
   describe("always/never submodules", () => {

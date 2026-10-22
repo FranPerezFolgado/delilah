@@ -1402,31 +1402,39 @@ mod tests {
         app.config.task_dir(key).join("workspace.log").exists()
     }
 
+    /// Whether the task works in the project's own checkout (not a worktree).
+    async fn in_checkout(app: &AppState, key: &str, repo: &std::path::Path) -> bool {
+        let (_, ws) = app.store.workspace(&TaskKey::new(key)).await.unwrap().unwrap();
+        ws.path == repo
+    }
+
     #[tokio::test]
     async fn no_choice_takes_the_projects_worktree_default() {
-        let (app, _repo) = repo_app(worktree_default()).await;
+        let (app, repo) = repo_app(worktree_default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()
             .expect("the run starts");
         assert_eq!(task.status, TaskStatus::Running);
         assert!(logged(&app, "LIBRE-1"));
+        assert!(!in_checkout(&app, "LIBRE-1", &repo).await);
     }
 
     #[tokio::test]
     async fn a_request_choice_wins_over_the_projects_default() {
-        let (app, _repo) = repo_app(worktree_default()).await;
+        let (app, repo) = repo_app(worktree_default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", true)))
             .await
             .ok()
             .expect("the run starts");
         assert_eq!(task.status, TaskStatus::Running);
         assert!(!logged(&app, "LIBRE-1"));
+        assert!(in_checkout(&app, "LIBRE-1", &repo).await);
     }
 
     #[tokio::test]
     async fn a_saved_backlog_choice_wins_over_the_projects_default() {
-        let (app, _repo) = repo_app(worktree_default()).await;
+        let (app, repo) = repo_app(worktree_default()).await;
         app.store
             .create_task(&Task {
                 key: TaskKey::new("LIBRE-1"),
@@ -1446,16 +1454,18 @@ mod tests {
             .expect("the run starts");
         assert_eq!(task.status, TaskStatus::Running);
         assert!(!logged(&app, "LIBRE-1"));
+        assert!(in_checkout(&app, "LIBRE-1", &repo).await);
     }
 
     #[tokio::test]
     async fn no_settings_and_no_choice_start_in_the_checkout() {
-        let (app, _repo) = repo_app(Default::default()).await;
+        let (app, repo) = repo_app(Default::default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()
             .expect("the run starts");
         assert_eq!(task.status, TaskStatus::Running);
         assert!(!logged(&app, "LIBRE-1"));
+        assert!(in_checkout(&app, "LIBRE-1", &repo).await);
     }
 }

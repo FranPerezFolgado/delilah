@@ -45,8 +45,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [projectName, setProjectName] = useState(preferred?.name ?? "");
   // In the project's checkout (a branch there), or isolated in a worktree: a backlog
   // task's saved choice, else the project's default until the user picks one.
-  const [where, setWhere] = useState<Where>(existing ? whereOf(existing.in_checkout) : (preferred?.settings.workspace ?? "checkout"));
-  const whereTouched = useRef(!!existing);
+  const [where, setWhere] = useState<Where>(whereOf(existing?.in_checkout, preferred));
+  const whereTouched = useRef(existing?.in_checkout != null);
   const [submodules, setSubmodules] = useState<Submodule[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -64,7 +64,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const branchPreview = project ? branchName(project.settings.branch, previewKey, title) : null;
 
   useEffect(() => {
-    if (!whereTouched.current && project) setWhere(project.settings.workspace);
+    if (!whereTouched.current && project) setWhere(whereOf(null, project));
   }, [project?.name]);
 
   useEffect(() => {
