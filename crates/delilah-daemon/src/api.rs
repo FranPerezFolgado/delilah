@@ -345,6 +345,9 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         .workflow
         .or_else(|| project.as_ref().map(|p| p.workflow.clone()))
         .unwrap_or_else(default_workflow);
+    if new.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+        return Err(crate::autopilot::not_spec_workflow(&key));
+    }
     let mut task = Task::new(key, new.title.trim(), workflow);
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
@@ -394,9 +397,16 @@ async fn update_task(
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
     }
     if let Some(on) = autopilot {
-        // On brings saving mode with it; off leaves it as it is.
+        if on && !crate::autopilot::allowed(&key, &task.workflow) {
+            return Err(crate::autopilot::not_spec_workflow(&key));
+        }
+        // On brings saving mode with it; off leaves it as it is. A paused or finished
+        // autopilot stays as it is (`resume` continues it), like `turn_on`.
         app.store
-            .update_autopilot(&key, |_| Some(on.then(crate::autopilot::fresh)))
+            .update_autopilot(&key, |current| match on {
+                true => current.is_none().then(|| Some(crate::autopilot::fresh())),
+                false => current.is_some().then_some(None),
+            })
             .await?;
         task = app.store.get_task(&key).await?.unwrap_or(task);
     }
@@ -956,7 +966,8 @@ mod tests {
     async fn a_backlog_task_takes_autopilot_and_it_forces_saving_mode() {
         let (app, _state) = app_with_project().await;
         let new = |extra: Value| {
-            let mut body = json!({"free": true, "title": "T", "project": "web"});
+            let mut body =
+                json!({"free": true, "title": "T", "project": "web", "workflow": "feature"});
             body.as_object_mut()
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
@@ -1004,6 +1015,63 @@ mod tests {
         assert!(task["autopilot"].is_object());
         let (_, task) = call(&app, "PATCH", &uri, Some(json!({"saving_mode": false}))).await;
         assert!(task["autopilot"].is_null(), "saving mode off clears it");
+    }
+
+    #[tokio::test]
+    async fn autopilot_is_for_the_spec_workflow_only() {
+        let (app, _state) = app_with_project().await;
+        let body = |extra: Value| {
+            let mut b = json!({"free": true, "title": "T", "project": "web"});
+            b.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            b
+        };
+        let (status, err) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(body(json!({"autopilot": true, "workflow": "prompt"}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(err["reason"], "not-spec-workflow");
+        let (_, plain) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(body(json!({"workflow": "prompt"}))),
+        )
+        .await;
+        let uri = format!("/api/v1/tasks/{}", plain["key"].as_str().unwrap());
+        let (status, err) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(err["reason"], "not-spec-workflow");
+        let (status, _) = call(&app, "PATCH", &uri, Some(json!({"autopilot": false}))).await;
+        assert_eq!(status, StatusCode::OK, "off is always fine");
+    }
+
+    #[tokio::test]
+    async fn patching_autopilot_on_keeps_a_paused_one() {
+        let (app, state) = app_with_project().await;
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "project": "web", "workflow": "feature", "autopilot": true})),
+        )
+        .await;
+        let key = TaskKey::new(task["key"].as_str().unwrap());
+        let mut paused = crate::autopilot::fresh();
+        paused.state = delilah_core::AutopilotState::Paused;
+        state
+            .store
+            .set_autopilot(&key, Some(&paused))
+            .await
+            .unwrap();
+        let uri = format!("/api/v1/tasks/{key}");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert_eq!(task["autopilot"]["state"], "paused");
     }
 
     #[tokio::test]

@@ -273,6 +273,16 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
       .then(onChanged)
       .catch((e) => setError((e as Error).message));
 
+  const [autopilotBusy, setAutopilotBusy] = useState(false);
+  const setAutopilotMode = (action: "on" | "off") => {
+    setAutopilotBusy(true);
+    api
+      .setAutopilot(owner, action)
+      .then(onChanged)
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setAutopilotBusy(false));
+  };
+
   const openChanges = () => {
     session.changesOpen = true;
     activate(CHANGES);
@@ -506,6 +516,11 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
+              {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
+                <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
+                  {t("Desactivar")}
+                </button>
+              )}
               {task.saving_mode && (
                 <span className="pill saving-pill">
                   {t("Modo ahorro")}
@@ -517,6 +532,11 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               <span className={`pill ${status.cls}`}>
                 <Icon name={status.icon} /> {statusLabel(task.status)}
               </span>
+              {task.workflow === "feature" && task.status.type !== "done" && !task.autopilot && (
+                <button className="btn btn-ghost saving-on" disabled={autopilotBusy} title={t("Activa el autopiloto: la cadena sigue sola hasta abrir las PRs")} onClick={() => setAutopilotMode("on")}>
+                  {t("Activar autopiloto")}
+                </button>
+              )}
               {!task.saving_mode && task.status.type !== "done" && (
                 <button className="btn btn-ghost saving-on" onClick={() => setSaving(true)}>
                   {t("Activar modo ahorro")}

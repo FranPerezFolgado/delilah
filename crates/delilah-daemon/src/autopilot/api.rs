@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use delilah_core::{HandoffStage, Task, TaskKey};
 
 use super::pause::resume;
-use super::{fresh, is_running, is_task, task_of};
+use super::{fresh, is_running, task_of};
 use crate::api::{ActionReq, ApiError};
 use crate::events::Topic;
 use crate::handoff::Launcher;
@@ -42,11 +42,8 @@ pub(crate) async fn act(
 /// as it is: `resume` continues it.
 async fn turn_on<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) -> Result<(), ApiError> {
     let task = task_of(app, key).await?;
-    if !is_task(key) || task.workflow != "feature" {
-        return Err(ApiError::conflict_reason(
-            format!("{key} cannot have saving mode, so neither autopilot"),
-            "not-spec-workflow",
-        ));
+    if !crate::autopilot::allowed(key, &task.workflow) {
+        return Err(crate::autopilot::not_spec_workflow(key));
     }
     let written = app
         .store

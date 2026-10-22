@@ -100,5 +100,11 @@ describe("chainOf", () => {
       const d = chainOf(ap({ state: "paused", reason: "no consigo avanzar" }), all)!;
       expect(d.find((x) => x.state === "waiting")).toMatchObject({ step: "review", error: "no consigo avanzar" });
     });
+
+    it("marks the last unfinished step waiting when paused with nothing active", () => {
+      const none = [sess("a", "plan", false), sess("b", "implement", false), sess("c", "review", false)];
+      const c = chainOf(ap({ state: "paused", reason: "parado" }), none)!;
+      expect(c.filter((x) => x.state === "waiting")).toEqual([expect.objectContaining({ step: "pr", error: "parado" })]);
+    });
   });
 });

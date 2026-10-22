@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Autopilot, type Handoff } from "../api";
+import { ago, api, type Autopilot, type Handoff } from "../api";
 import { t } from "../i18n";
 import { Icon } from "./Icon";
 
@@ -50,6 +50,7 @@ export function HandoffActions({ task, handoff, autopilot, onDone, hideError }: 
         <div className="autopilot-banner">
           <strong>{t("Autopiloto en pausa")}</strong>
           {autopilot.reason && <span className="selectable">{autopilot.reason}</span>}
+          {autopilot.since && <span className="muted">{t("en pausa desde {when}", { when: ago(autopilot.since) })}</span>}
           <button className="btn btn-p" disabled={busy} onClick={() => autopilotAct("resume")}>
             {t("Reanudar autopiloto")}
           </button>

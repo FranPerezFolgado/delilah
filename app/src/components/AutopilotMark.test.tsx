@@ -27,6 +27,11 @@ describe("AutopilotMark", () => {
     expect(container.querySelector(".autopilot-pill")!.getAttribute("title")).toContain("Fallaron los tests");
   });
 
+  it("says since when it is paused, in the tooltip", () => {
+    const { container } = render(<AutopilotMark autopilot={ap({ state: "paused", reason: "x", since: new Date(Date.now() - 5 * 60000).toISOString() })} />);
+    expect(container.querySelector(".autopilot-pill")!.getAttribute("title")).toContain("desde hace 5 min");
+  });
+
   it("shows the PR opened by autopilot when done", () => {
     render(<AutopilotMark autopilot={ap({ state: "done" })} />);
     expect(screen.getByText("PR abierta por autopiloto")).not.toBeNull();

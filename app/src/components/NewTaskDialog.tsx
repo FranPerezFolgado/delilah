@@ -60,6 +60,12 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
+  // Only the spec workflow has autopilot; a custom prompt runs outside it.
+  const workflow = prompt.trim() ? "prompt" : (existing?.workflow ?? project?.workflow);
+  const autopilotAllowed = workflow === "feature";
+  const autopilotOn = autopilot && autopilotAllowed;
+  // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
+  const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
 
   useEffect(() => {
     if (savingTouched.current) return;
@@ -135,8 +141,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode || autopilot,
-        ...(autopilot ? { autopilot: true } : {}),
+        saving_mode: savingMode || autopilotOn,
+        ...autopilotField,
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
@@ -162,8 +168,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode || autopilot,
-        ...(autopilot ? { autopilot: true } : {}),
+        saving_mode: savingMode || autopilotOn,
+        ...autopilotField,
       });
       onSaved(task);
     } catch (err) {
@@ -247,8 +253,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
                 <input
                   type="checkbox"
-                  checked={savingMode || autopilot}
-                  disabled={autopilot}
+                  checked={savingMode || autopilotOn}
+                  disabled={autopilotOn}
                   onChange={(e) => {
                     savingTouched.current = true;
                     setSavingMode(e.target.checked);
@@ -257,7 +263,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <span>{t("Modo ahorro")}</span>
               </label>
             )}
-            {origin !== "claude" && (
+            {origin !== "claude" && autopilotAllowed && (
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
                 <input
                   type="checkbox"

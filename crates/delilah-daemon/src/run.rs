@@ -196,6 +196,9 @@ pub async fn start_run(
         .clone()
         .or_else(|| existing.as_ref().map(|t| t.workflow.clone()))
         .unwrap_or_else(|| project.workflow.clone());
+    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+        return Err(crate::autopilot::not_spec_workflow(&key));
+    }
     let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
         (None, "feature") if req.free => format!("/feature {}", req.title.trim()),
@@ -854,6 +857,16 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+
+        // Only the spec workflow can have it.
+        let mut req = run("PROJ-9");
+        req.title = "x".into();
+        req.autopilot = Some(true);
+        req.workflow = Some("prompt".into());
+        req.prompt = Some("do it".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
 
         // Off by default.
         let mut req = run("PROJ-3");

@@ -51,4 +51,10 @@ describe("BacklogTaskView autopilot", () => {
     expect(saving.disabled).toBe(false);
     expect(saving.checked).toBe(true);
   });
+
+  it("is hidden for a task outside the spec workflow", () => {
+    const { queryByLabelText } = mount({ ...task, workflow: "prompt" });
+    expect(queryByLabelText("Autopiloto")).toBeNull();
+    expect(queryByLabelText("Modo ahorro")).not.toBeNull();
+  });
 });

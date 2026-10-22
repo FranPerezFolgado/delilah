@@ -19,6 +19,7 @@ autopilot: null | {
 
 - `RunRequest` gains `autopilot?: boolean`. `true` forces `saving_mode: true`; `autopilot: true` with `saving_mode: false` is `400`. An explicit `saving_mode: false` without `autopilot` clears an inherited autopilot.
 - `NewBacklogTask` and `BacklogChange` (`PATCH /api/v1/tasks/{key}`) gain `autopilot?: boolean`, same rule.
+- Autopilot is for the spec workflow (`feature`) only: `autopilot: true` on `RunRequest`, `POST /tasks` and `PATCH /tasks/{key}` for any other workflow is `409 reason "not-spec-workflow"`. In `RunRequest`, absent keeps the stored autopilot of a backlog task and `false` clears it. `PATCH` with `true` on a task whose autopilot is already paused or done leaves it as it is (`resume` continues it); `false` clears it.
 
 ## `POST /api/v1/tasks/{key}/autopilot`
 

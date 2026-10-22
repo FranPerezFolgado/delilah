@@ -68,7 +68,9 @@ export function chainOf(task: Task, sessions: Session[], opts: ChainOpts = {}): 
     const current =
       (ap.stage && steps.find((c) => c.step === (ap.stage === "preview" ? "preview" : "pr"))) ||
       steps.find((c) => c.state === "active") ||
-      steps.find((c) => c.state === "waiting");
+      steps.find((c) => c.state === "waiting") ||
+      // Nothing active, waiting or staged: the last unfinished step carries the banner.
+      [...steps].reverse().find((c) => c.state !== "done");
     if (current && current.state !== "done") {
       current.state = "waiting";
       current.error = ap.reason ?? current.error;

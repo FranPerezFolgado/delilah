@@ -42,11 +42,13 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
     savingMode !== task.saving_mode ||
     autopilot !== !!task.autopilot;
   const inCheckout = where === "checkout";
+  // Only the spec workflow has autopilot.
+  const autopilotAllowed = task.workflow === "feature";
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: inCheckout, saving_mode: savingMode || autopilot, autopilot });
+      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: inCheckout, saving_mode: savingMode || autopilot, autopilot: autopilot && autopilotAllowed });
       onChanged();
     } catch (e) {
       setError((e as Error).message);
@@ -86,7 +88,7 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
           <input type="checkbox" checked={savingMode || autopilot} disabled={autopilot} onChange={(e) => setSavingMode(e.target.checked)} />
           <span>{t("Modo ahorro")}</span>
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
+        {autopilotAllowed && <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
           <input
             type="checkbox"
             checked={autopilot}
@@ -96,7 +98,7 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
             }}
           />
           <span>{t("Autopiloto")}</span>
-        </label>
+        </label>}
         <label className="field">
           <span>{t("Notas (el agente las recibe al empezar)")}</span>
           <textarea className="input" rows={8} value={notes} onChange={(e) => setNotes(e.target.value)} />

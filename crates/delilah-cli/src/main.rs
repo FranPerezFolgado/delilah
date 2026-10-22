@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use delilah_core::{Event, Project, Task, TaskStatus};
+use delilah_core::{AutopilotState, Event, Project, Task, TaskStatus};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::json;
@@ -41,7 +41,7 @@ struct SavingModeFlags {
 }
 
 impl SavingModeFlags {
-    /// `None` when no flag was given: the daemon then reads the preference.
+    /// `None` when no flag was given: the daemon then keeps what the task has.
     fn choice(&self) -> Option<bool> {
         match (self.saving_mode, self.no_saving_mode) {
             (true, _) => Some(true),
@@ -59,20 +59,21 @@ fn with_saving_mode(mut body: serde_json::Value, choice: Option<bool>) -> serde_
     body
 }
 
-/// The autopilot choice for a task; neither flag leaves it to the user preference.
+/// The autopilot choice for a task; neither flag means off for a new task and kept
+/// for an existing one (a backlog task started with `run`).
 /// Autopilot implies saving mode, so `--autopilot` rules out `--no-saving-mode`.
 #[derive(Args)]
 struct AutopilotFlags {
     /// Let the agent answer its own questions with the recommended option and carry on to the PR (implies saving mode).
     #[arg(long, conflicts_with_all = ["no_autopilot", "no_saving_mode"])]
     autopilot: bool,
-    /// Run the task without autopilot, whatever the preference says.
+    /// Run the task without autopilot, also clearing one stored on a backlog task.
     #[arg(long)]
     no_autopilot: bool,
 }
 
 impl AutopilotFlags {
-    /// `None` when no flag was given: the daemon then reads the preference.
+    /// `None` when no flag was given: the daemon then keeps what the task has.
     fn choice(&self) -> Option<bool> {
         match (self.autopilot, self.no_autopilot) {
             (true, _) => Some(true),
@@ -408,12 +409,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 &format!("/api/v1/tasks/{key}/autopilot"),
                 &json!({ "action": action.name() }),
             )?;
-            let state = match action {
-                AutopilotAction::On => "on",
-                AutopilotAction::Off => "off",
-                AutopilotAction::Resume => "running",
-            };
-            println!("{}: autopilot {state}", task.key);
+            println!("{}: autopilot {}", task.key, autopilot_label(&task));
         }
         Command::Done { key } => {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/done"), &json!({}))?;
@@ -495,6 +491,19 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The autopilot of a task as the daemon reports it: "off", "on (running)", "paused: why"…
+fn autopilot_label(task: &Task) -> String {
+    let Some(a) = &task.autopilot else {
+        return "off".into();
+    };
+    match (a.state, &a.reason) {
+        (AutopilotState::Running, _) => "on (running)".into(),
+        (AutopilotState::Paused, Some(reason)) => format!("paused ({reason})"),
+        (AutopilotState::Paused, None) => "paused".into(),
+        (AutopilotState::Done, _) => "on (done)".into(),
+    }
 }
 
 fn status_label(status: &TaskStatus) -> String {
@@ -653,6 +662,29 @@ mod tests {
         assert!(with_autopilot(body(), None).get("autopilot").is_none());
         assert_eq!(with_autopilot(body(), Some(true))["autopilot"], true);
         assert_eq!(with_autopilot(body(), Some(false))["autopilot"], false);
+    }
+
+    #[test]
+    fn autopilot_label_reads_the_returned_state() {
+        use delilah_core::Autopilot;
+        let mut task = Task::new(delilah_core::TaskKey::new("K-1"), "t", "feature");
+        assert_eq!(autopilot_label(&task), "off");
+        let mut a = Autopilot {
+            state: AutopilotState::Running,
+            stage: None,
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+            review_session: None,
+        };
+        task.autopilot = Some(a.clone());
+        assert_eq!(autopilot_label(&task), "on (running)");
+        a.state = AutopilotState::Paused;
+        task.autopilot = Some(a.clone());
+        assert_eq!(autopilot_label(&task), "paused");
+        a.reason = Some("a question".into());
+        task.autopilot = Some(a);
+        assert_eq!(autopilot_label(&task), "paused (a question)");
     }
 
     #[test]

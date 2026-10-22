@@ -64,6 +64,20 @@ fn is_task(key: &TaskKey) -> bool {
     crate::store_sessions::project_of(key.as_str()).is_none()
 }
 
+/// Whether autopilot may be on in `key`: a task (not a project's owner) on the spec
+/// workflow.
+pub(crate) fn allowed(key: &TaskKey, workflow: &str) -> bool {
+    is_task(key) && workflow == "feature"
+}
+
+/// The 409 for autopilot asked for where it cannot be.
+pub(crate) fn not_spec_workflow(key: &TaskKey) -> crate::api::ApiError {
+    crate::api::ApiError::conflict_reason(
+        format!("{key} is not on the spec workflow, so it cannot have autopilot"),
+        "not-spec-workflow",
+    )
+}
+
 /// What a boundary becomes on autopilot: the offer of the implementation is taken on
 /// the user's behalf. Paused, done or off, the boundary is left as it is.
 pub(crate) fn shape(task: &Task, found: Option<Boundary>) -> Option<Boundary> {

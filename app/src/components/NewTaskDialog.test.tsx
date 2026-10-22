@@ -160,4 +160,25 @@ describe("NewTaskDialog autopilot", () => {
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0]).toMatchObject({ autopilot: true, saving_mode: true });
   });
+
+  it("unticking it on a backlog task that has it sends autopilot: false", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const existing = { ...started, autopilot: { state: "running" as const, since: "2026-10-21T10:00:00Z" } };
+    const { getByLabelText, container } = render(
+      <NewTaskDialog projects={projects} existing={existing} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    fireEvent.click(getByLabelText("Autopiloto"));
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].autopilot).toBe(false);
+  });
+
+  it("is hidden outside the spec workflow", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { queryByLabelText } = render(
+      <NewTaskDialog projects={[{ ...web, workflow: "custom" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(queryByLabelText("Autopiloto")).toBeNull();
+  });
 });
