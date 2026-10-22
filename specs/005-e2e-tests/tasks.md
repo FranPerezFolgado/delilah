@@ -124,11 +124,11 @@
 
 **Purpose**: `Env` and helpers of data-model.md, the fake Jira, `e2e-env`, and US1's acceptance against a real daemon.
 
-- [ ] T019 Write failing tests in `crates/delilah-e2e/src/env.rs` (unit, no daemon):
+- [X] T019 Write failing tests in `crates/delilah-e2e/src/env.rs` (unit, no daemon):
   - `free_port()` never returns 7420 or 7501–7509 (inject a fake picker that returns 7420 first);
   - `layout(root)` creates `home/` (with `.zshrc` prepending `<root>/tripwire` to PATH, `.gitconfig` with `user.name=Delilah E2E`, `user.email=e2e@delilah.invalid`, `protocol.file.allow=always`, an empty `.claude/`), `delilah/`, `bin/claude-fake` and `bin/gh-fake` (executable wrappers with absolute paths, contents as in contracts/fake-claude.md and research R3), `tripwire/claude` and `tripwire/gh` (append `"<name> $*"` to `<root>/tripwire.log`, exit 1), `fake/scenarios/default.json` (`[{"stop": "Fake Claude stopped."}]`), `fake/records/`, and `gh/` with `repo.json` and `user.json`;
   - `daemon_env(root, port, opts)` returns exactly the variables of research R3's table and nothing else (in particular no `DELILAH_URL`, no `CLAUDE*`, no `ANTHROPIC*`, and `HOME` = `<root>/home`).
-- [ ] T020 Implement `crates/delilah-e2e/src/env.rs` until T019 passes:
+- [X] T020 Implement `crates/delilah-e2e/src/env.rs` until T019 passes:
   - `Env::start(EnvOptions)`:
     - build the layout;
     - make fixtures (T022);
@@ -141,12 +141,12 @@
     - if `tripwire.log` exists and not `real_claude`, panic with its contents ("the real claude/gh was run"), but not while already panicking: print it instead;
     - keep `root` when `DELILAH_E2E_KEEP=1` and the thread is panicking, printing its path.
   - `EnvOptions` as in data-model.md.
-- [ ] T021 [P] Write failing tests, then implement `wait_until(what, timeout, f)` in `crates/delilah-e2e/src/lib.rs`:
+- [X] T021 [P] Write failing tests, then implement `wait_until(what, timeout, f)` in `crates/delilah-e2e/src/lib.rs`:
   - polls every 100 ms;
   - default 15 s; any timeout above 30 s is clamped to 30 s;
   - on timeout it panics with `what`, the last `Debug` value seen and, through an optional `&Env`, the last 40 lines of the daemon log.
   Also `Env::wait_until` as the method form.
-- [ ] T022 [P] Write failing tests, then implement `crates/delilah-e2e/src/fixtures.rs`:
+- [X] T022 [P] Write failing tests, then implement `crates/delilah-e2e/src/fixtures.rs`:
   - `Fixtures::make(into)` runs `scripts/make-fixture-parent.sh <into>/parent-env` (path from `CARGO_MANIFEST_DIR`) and `git -c protocol.file.allow=always clone -q <into>/parent-env/remotes/svc-orders.git <into>/signal`, as `scripts/preview.sh` lines ~45–46 do, with `HOME` set to the Env's home so the user's git config isn't read;
   - fields `repo` (`signal`), `parent` (`parent-env/parent`), `remotes`;
   - fake `gh` helpers that write the JSON shapes `scripts/fake-gh.sh` reads: `open_pr(n, branch)`, `set_checks(n, failing|passing)`, `add_review(n, body)`, `merge(n)`. Mirror the JSON in `specs/003-pr-loop/quickstart.md` and `crates/delilah-daemon/src/pr_testkit.rs`.
@@ -160,7 +160,7 @@
   - one method per route the flows use, with request/response types taken from `crates/delilah-daemon/src/api.rs` and `app/src/api.ts`, deserialised as `serde_json::Value` plus small typed accessors where tests assert. Methods: `health`, `projects`, `add_project` (whatever the UI's "add project" calls, see `app/src/api.ts`), `inspect_project`, `new_task`, `start_run`, `tasks`, `task`, `set_phase`, `done`, `archive`, `delete_task`, `resume`, `inbox`, `answer_ask`, `release_ask`, `sessions`, `reply`, `prs`, `jira_configure`, `jira_issues`, `events` (SSE reader collecting topics for N ms, bounded).
   - Test against a real `Env`: `health` OK. Put this test behind `#[cfg(feature = "e2e")]`.
 - [ ] T025 [P] Write failing tests, then implement `Cli` in `crates/delilah-e2e/src/cli.rs`: runs `target/debug/delilah` with `env_clear()`, `HOME` = Env home, `PATH` = `/usr/bin:/bin`, `DELILAH_URL` = Env api. Returns `(status, stdout, stderr)`. Test: `delilah ls` on an empty Env exits 0 (behind `e2e`).
-- [ ] T026 Add `Env` helpers in `crates/delilah-e2e/src/env.rs`:
+- [X] T026 Add `Env` helpers in `crates/delilah-e2e/src/env.rs`:
   - `scenario(name, json)` writes `fake/scenarios/<name>.json`;
   - `record(session)`, `record_for(task)` (via `fake::record`);
   - `register_fixtures()` adds `repo` as a repo project and `parent` as a parent project and returns their names;

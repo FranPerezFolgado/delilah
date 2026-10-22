@@ -6,10 +6,10 @@ Mode: format=markdown commits=yes
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 17b3ef2 | runs with 2A |
-| WP-02 | 2 | 2A | verified | 1 | f813aca | runs with 1A |
-| WP-03 | 2 | 2B | verified | 1 | de1f28e | |
-| WP-04 | 2 | 2C | verified | 1 | 1f16da4 | |
-| WP-05 | 3 | 3A | pending | 0 | | |
+| WP-02 | 2 | 2A | done | 1 | f813aca | runs with 1A |
+| WP-03 | 2 | 2B | done | 1 | de1f28e | |
+| WP-04 | 2 | 2C | done | 1 | 1f16da4 | |
+| WP-05 | 3 | 3A | verified | 1 | | |
 | WP-06 | 3 | 3B | pending | 0 | | |
 | WP-07 | 3 | 3C | pending | 0 | | |
 | WP-08 | 3 | 3D | pending | 0 | | |
@@ -25,4 +25,4 @@ Mode: format=markdown commits=yes
 | WP-18 | 6 | 6B | pending | 0 | | manual parts (T049, T056) |
 | WP-19 | 6 | 6C | pending | 0 | | |
 | WP-01F | 1 | 1A-fix | done | 1 | 5bfff99 | Phase 1 review fixes |
-| WP-02F | 2 | 2-fix | verified | 1 | | Phase 2 review fixes |
+| WP-02F | 2 | 2-fix | done | 1 | ea390bd | Phase 2 review fixes |
