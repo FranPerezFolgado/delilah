@@ -54,6 +54,10 @@ tripwire, user's HOME), `jira: bool`.
   { "sleep_ms": 200 },
   { "ask": { "question": "¿Pagino con cursor u offset?", "header": "Paginación",
              "options": ["Cursor", "Offset"] } },
+  // an option may be an object; `Nueva tarea` + `Crear` with a `preview` is the
+  // task-from-idea card the daemon turns into a proposal
+  { "ask": { "question": "Añadir búsqueda", "header": "Nueva tarea",
+             "options": [{ "label": "Crear", "description": "…", "preview": "brief" }, "Descartar"] } },
   { "stop": "Listo, he terminado." },
   { "wait_input": true },
   { "fail": "boom" },

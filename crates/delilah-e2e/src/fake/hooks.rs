@@ -4,7 +4,9 @@
 
 use std::io::{Read, Write};
 use std::path::Path;
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -101,11 +103,17 @@ fn query_param(text: &str, name: &str) -> Option<String> {
     })
 }
 
+/// How long output is still collected after the hook's shell has exited: a
+/// backgrounded grandchild may keep the pipe open, and must not hold us up.
+const DRAIN_GRACE: Duration = Duration::from_millis(300);
+
 fn run_command(command: &str, stdin: &str, timeout_secs: u64) -> HookRun {
     let failed = HookRun { exit_code: -1, stdout: String::new() };
+    // Own process group, so a timeout can take the grandchildren down with the shell.
     let Ok(mut child) = Command::new("sh")
         .arg("-c")
         .arg(command)
+        .process_group(0)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -113,39 +121,54 @@ fn run_command(command: &str, stdin: &str, timeout_secs: u64) -> HookRun {
     else {
         return failed;
     };
+    let pid = child.id();
     // Feed stdin and drain stdout on threads so a slow hook can't block us.
     let mut input = child.stdin.take();
     let body = stdin.to_string();
-    let writer = std::thread::spawn(move || {
+    let _writer = std::thread::spawn(move || {
         if let Some(mut i) = input.take() {
             let _ = i.write_all(body.as_bytes());
         }
     });
     let mut out = child.stdout.take();
-    let reader = std::thread::spawn(move || {
-        let mut s = String::new();
-        if let Some(o) = out.as_mut() {
-            let _ = o.read_to_string(&mut s);
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let _reader = std::thread::spawn(move || {
+        let Some(o) = out.as_mut() else { return };
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = o.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                break;
+            }
         }
-        s
     });
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     let code = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status.code().unwrap_or(-1),
             Ok(None) if Instant::now() >= deadline => {
+                // Not `unsafe { killpg }`: the workspace forbids it.
+                let _ = Command::new("kill")
+                    .args(["-KILL", &format!("-{pid}")])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
                 let _ = child.kill();
                 let _ = child.wait();
-                break -1;
+                return failed;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(_) => return failed,
         }
     };
-    let _ = writer.join();
-    // A killed shell may leave a grandchild holding the pipe; don't wait for it.
-    let stdout = if code == -1 { String::new() } else { reader.join().unwrap_or_default() };
-    HookRun { exit_code: code, stdout }
+    let mut bytes = Vec::new();
+    let end = Instant::now() + DRAIN_GRACE;
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        match rx.recv_timeout(left) {
+            Ok(chunk) => bytes.extend(chunk),
+            Err(_) => break,
+        }
+    }
+    HookRun { exit_code: code, stdout: String::from_utf8_lossy(&bytes).into_owned() }
 }
 
 /// Payload builders, one per event (shapes in contracts/fake-claude.md).
@@ -180,10 +203,22 @@ pub mod payload {
         header: &str,
         options: &[(&str, &str)],
     ) -> Value {
-        let options: Vec<Value> = options
+        let options = options
             .iter()
             .map(|(l, d)| json!({"label": l, "description": d}))
             .collect();
+        pre_tool_use_ask_with(session, cwd, question, header, options)
+    }
+
+    /// Like [`pre_tool_use_ask`] with the options already as JSON objects (they
+    /// may carry a `preview`).
+    pub fn pre_tool_use_ask_with(
+        session: &str,
+        cwd: &str,
+        question: &str,
+        header: &str,
+        options: Vec<Value>,
+    ) -> Value {
         with(
             base("PreToolUse", session, cwd),
             json!({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{
@@ -327,6 +362,46 @@ mod tests {
         let t = Instant::now();
         assert_eq!(hooks.run("Stop", &json!({}))[0].exit_code, -1);
         assert!(t.elapsed() < Duration::from_secs(10));
+    }
+
+    fn alive(pid: &str) -> bool {
+        Command::new("kill")
+            .args(["-0", pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn backgrounded_grandchild_holding_stdout_does_not_hang() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let cmd = format!("sleep 30 & echo $! > {}; echo hi", pidfile.display());
+        let hooks = with_command(dir.path(), &cmd, Some(5));
+        let t = Instant::now();
+        let r = hooks.run("Stop", &json!({}));
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+        assert_eq!((r[0].exit_code, r[0].stdout.trim()), (0, "hi"));
+        let _ = Command::new("kill").arg(std::fs::read_to_string(&pidfile).unwrap().trim()).status();
+    }
+
+    #[test]
+    fn timeout_kills_the_whole_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let cmd = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
+        let hooks = with_command(dir.path(), &cmd, Some(1));
+        let t = Instant::now();
+        assert_eq!(hooks.run("Stop", &json!({}))[0].exit_code, -1);
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+        let end = Instant::now() + Duration::from_secs(3);
+        while alive(&pid) && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(&pid), "grandchild {pid} survived the timeout");
     }
 
     #[test]

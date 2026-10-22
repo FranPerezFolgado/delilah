@@ -2,6 +2,8 @@
 //! step so the test can read it (data-model.md "Record").
 
 use std::collections::BTreeMap;
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -42,11 +44,24 @@ impl Record {
     /// Writes the record atomically (temp file + rename) and returns its path.
     pub fn save(&self, fake_dir: &Path) -> Result<PathBuf, String> {
         let dir = records_dir(fake_dir);
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = dir.join(format!("{}.json", self.session_id));
         let tmp = dir.join(format!(".{}.json.tmp", self.session_id));
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        let write = || -> std::io::Result<()> {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            f.write_all(text.as_bytes())
+        };
+        write().map_err(|e| format!("{}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(path)
     }
@@ -130,6 +145,16 @@ mod tests {
         let names: Vec<_> = std::fs::read_dir(dir.path().join("records")).unwrap().flatten().collect();
         assert_eq!(names.len(), 1, "no temp file left behind");
         assert_eq!(Record::load(dir.path(), "s1").unwrap(), r);
+    }
+
+    #[test]
+    fn records_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = sample("s1", "K-1").save(dir.path()).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(&dir.path().join("records")), 0o700);
     }
 
     #[test]

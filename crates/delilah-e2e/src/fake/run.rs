@@ -56,13 +56,27 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         let _ = self.out.flush();
     }
 
-    /// One line from the terminal; `None` on EOF or a read error (hang-up).
+    /// One line from the terminal, ended by `\n` or a bare `\r` (a terminal in raw
+    /// mode sends Enter as `\r`); `None` on EOF or a read error (hang-up).
     fn read_line(&mut self) -> Option<String> {
-        let mut line = String::new();
-        match self.input.read_line(&mut line) {
-            Ok(0) | Err(_) => None,
-            Ok(_) => Some(line.trim_end_matches(['\r', '\n']).to_string()),
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match self.input.read(&mut byte) {
+                Ok(0) | Err(_) if line.is_empty() => return None,
+                Ok(0) | Err(_) => break,
+                Ok(_) if byte[0] == b'\n' => break,
+                Ok(_) if byte[0] == b'\r' => {
+                    // `\r\n` is one line end.
+                    if self.input.fill_buf().is_ok_and(|b| b.first() == Some(&b'\n')) {
+                        self.input.consume(1);
+                    }
+                    break;
+                }
+                Ok(_) => line.push(byte[0]),
+            }
         }
+        Some(String::from_utf8_lossy(&line).into_owned())
     }
 
     fn end(&mut self, reason: &str, code: i32) -> i32 {
@@ -117,8 +131,9 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
 
     fn ask(&mut self, ask: &Ask) -> Flow {
         let (session, cwd) = (self.record.session_id.clone(), self.record.cwd.clone());
-        let options: Vec<(&str, &str)> = ask.options.iter().map(|o| (o.as_str(), "")).collect();
-        let pre = payload::pre_tool_use_ask(&session, &cwd, &ask.question, &ask.header, &options);
+        let options = ask.options.iter().map(|o| o.to_json()).collect();
+        let pre =
+            payload::pre_tool_use_ask_with(&session, &cwd, &ask.question, &ask.header, options);
         let tool_input = pre["tool_input"].clone();
         let runs = self.hook("PreToolUse", &pre);
         let answers = runs.iter().find_map(|r| {
@@ -136,7 +151,7 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 self.record.answers.push(Value::Null);
                 let mut text = format!("{}\n{}\n", ask.header, ask.question);
                 for (i, o) in ask.options.iter().enumerate() {
-                    text.push_str(&format!("  {}. {o}\n", i + 1));
+                    text.push_str(&format!("  {}. {}\n", i + 1, o.label()));
                 }
                 self.print(&text);
                 match self.read_line() {
@@ -287,6 +302,59 @@ mod tests {
         assert_eq!(o.text, want);
         assert_eq!(trust_dialog_selection(o.text.as_bytes()), Some(true));
         assert_eq!(o.code, 0);
+    }
+
+    #[test]
+    fn bare_carriage_return_is_yes_and_crlf_is_one_line() {
+        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "\r", None);
+        assert!(o.text.ends_with("in\n"), "{}", o.text);
+        let o = play("new", r#"[{"wait_input":true},{"wait_input":true}]"#, "a\r\nb\rc", None);
+        assert_eq!(o.record.inputs, vec!["a", "b", "c"]);
+        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "2\r", None);
+        assert_eq!(o.code, 1);
+    }
+
+    #[test]
+    fn ask_with_task_card_matches_the_daemon_proposal_shape() {
+        let steps = r#"[{"ask":{"question":"Add search","header":"Nueva tarea","options":[
+            {"label":"Crear","description":"create it","preview":"the brief"},
+            "Descartar"]}}]"#;
+        let o = play("new", steps, "x\n", None);
+        let pre = &logged(o.dir.path(), "PreToolUse")[0];
+        let q = &pre["tool_input"]["questions"][0];
+        assert_eq!(q["header"], "Nueva tarea");
+        assert_eq!(q["question"], "Add search");
+        let crear = q["options"].as_array().unwrap().iter().find(|o| o["label"] == "Crear").unwrap();
+        assert_eq!(crear["preview"], "the brief");
+        assert_eq!(crear["description"], "create it");
+        assert_eq!(q["options"][1], json!({"label":"Descartar","description":""}));
+    }
+
+    #[test]
+    fn record_is_saved_after_each_step() {
+        // Each hook copies the record file as it is at that moment.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = tempfile::tempdir().unwrap();
+        let rec = fake.path().join("records/s1.json");
+        let cmd = format!("cat >/dev/null; cp {} {}/snap.$(date +%s%N)", rec.display(), dir.path().display());
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            json!({"hooks": {"Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": cmd}]}]}}).to_string(),
+        )
+        .unwrap();
+        let hooks = Hooks::load(&path).unwrap();
+        let scenario = Scenario::parse(r#"{"steps":[{"print":"a"},{"stop":"1"},{"stop":"2"}]}"#).unwrap();
+        let mut r = record("new");
+        run(&mut r, &scenario, &hooks, Some(fake.path()), &mut Cursor::new(Vec::new()), &mut Vec::new());
+        let mut snaps: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("snap.")).map(|e| e.path()).collect();
+        snaps.sort();
+        let steps: Vec<usize> = snaps.iter()
+            .map(|p| serde_json::from_str::<Record>(&std::fs::read_to_string(p).unwrap()).unwrap().steps_done)
+            .collect();
+        // The first stop runs after step 1 was saved; the second after step 2.
+        assert_eq!(steps, vec![1, 2]);
     }
 
     #[test]

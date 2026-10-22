@@ -30,7 +30,53 @@ pub enum Step {
 pub struct Ask {
     pub question: String,
     pub header: String,
-    pub options: Vec<String>,
+    pub options: Vec<AskOption>,
+}
+
+/// An option of an `ask`: a plain label, or an object with the fields Claude's
+/// `AskUserQuestion` accepts (`preview` carries the brief of a task proposal).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum AskOption {
+    Plain(String),
+    Full {
+        label: String,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        preview: Option<String>,
+    },
+}
+
+impl AskOption {
+    pub fn label(&self) -> &str {
+        match self {
+            AskOption::Plain(l) | AskOption::Full { label: l, .. } => l,
+        }
+    }
+
+    /// The option as it goes in `tool_input.questions[].options`.
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            AskOption::Plain(l) => serde_json::json!({"label": l, "description": ""}),
+            AskOption::Full { label, description, preview } => {
+                let mut v = serde_json::json!({
+                    "label": label,
+                    "description": description.as_deref().unwrap_or(""),
+                });
+                if let Some(p) = preview {
+                    v["preview"] = serde_json::json!(p);
+                }
+                v
+            }
+        }
+    }
+}
+
+impl From<&str> for AskOption {
+    fn from(s: &str) -> Self {
+        AskOption::Plain(s.to_string())
+    }
 }
 
 impl Scenario {
@@ -55,6 +101,13 @@ fn marker(prompt: &str) -> Option<&str> {
     (!name.is_empty()).then_some(name)
 }
 
+/// A scenario name is a plain file stem: `[A-Za-z0-9._-]+`, no leading dot.
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 /// Picks the scenario: `[fake:<name>]` in the prompt, else `<task>.json`,
 /// else `default.json`. Returns the name chosen and the scenario.
 pub fn select(
@@ -64,6 +117,9 @@ pub fn select(
 ) -> Result<(String, Scenario), String> {
     let dir = fake_dir.join("scenarios");
     let load = |name: &str| -> Result<Option<Scenario>, String> {
+        if !valid_name(name) {
+            return Err(format!("invalid scenario name `{name}`"));
+        }
         let path = dir.join(format!("{name}.json"));
         match std::fs::read_to_string(&path) {
             Ok(text) => Scenario::parse(&text)
@@ -94,7 +150,7 @@ mod tests {
     fn parses_every_step() {
         let s = Scenario::parse(
             r#"{"steps":[{"trust_dialog":true},{"print":"hi"},{"hook":"UserPromptSubmit"},
-            {"sleep_ms":200},{"ask":{"question":"q","header":"h","options":["a","b"]}},
+            {"sleep_ms":200},{"ask":{"question":"q","header":"h","options":["a",{"label":"c","description":"d","preview":"p"}]}},
             {"stop":"done"},{"wait_input":true},{"fail":"boom"},{"exit":3}]}"#,
         )
         .unwrap();
@@ -105,7 +161,10 @@ mod tests {
                 Step::Print("hi".into()),
                 Step::Hook("UserPromptSubmit".into()),
                 Step::SleepMs(200),
-                Step::Ask(Ask { question: "q".into(), header: "h".into(), options: vec!["a".into(), "b".into()] }),
+                Step::Ask(Ask { question: "q".into(), header: "h".into(), options: vec![
+                    "a".into(),
+                    AskOption::Full { label: "c".into(), description: Some("d".into()), preview: Some("p".into()) },
+                ] }),
                 Step::Stop("done".into()),
                 Step::WaitInput(true),
                 Step::Fail("boom".into()),
@@ -162,5 +221,17 @@ mod tests {
         let d = dir(&[("default", A)]);
         let (n, _) = select(d.path(), None, None).unwrap();
         assert_eq!(n, "default");
+    }
+
+    #[test]
+    fn unsafe_names_are_rejected() {
+        let d = dir(&[("default", A)]);
+        for bad in ["../x", "/etc/x", ".hidden", "a/b"] {
+            let e = select(d.path(), Some(&format!("[fake:{bad}]")), None).unwrap_err();
+            assert!(e.contains("invalid scenario name"), "{bad}: {e}");
+            let e = select(d.path(), None, Some(bad)).unwrap_err();
+            assert!(e.contains("invalid scenario name"), "{bad}: {e}");
+        }
+        select(d.path(), Some("[fake:default]"), Some("PROJ-1.x_y")).unwrap();
     }
 }

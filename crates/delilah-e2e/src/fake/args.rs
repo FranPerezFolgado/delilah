@@ -82,6 +82,9 @@ impl FakeArgs {
             }
             (None, None) => return Err("one of --session-id or --resume is required".into()),
         };
+        if session_id.is_empty() || !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(format!("invalid session id `{session_id}`"));
+        }
         let settings = settings.ok_or("--settings is required")?;
         Ok(FakeArgs {
             fake_dir,
@@ -201,5 +204,16 @@ mod tests {
         assert!(both.unwrap_err().contains("mutually exclusive"));
         assert!(parse(&["--settings", "/s"]).unwrap_err().contains("--session-id"));
         assert!(parse(&["--session-id"]).unwrap_err().contains("needs a value"));
+    }
+
+    #[test]
+    fn session_id_must_be_a_plain_token() {
+        for bad in ["../x", "a/b", "", ".x", "a b"] {
+            for flag in ["--session-id", "--resume"] {
+                let e = parse(&[flag, bad, "--settings", "/s"]).unwrap_err();
+                assert!(e.contains("invalid session id"), "{bad}: {e}");
+            }
+        }
+        parse(&["--session-id", "0a1b-2C", "--settings", "/s"]).unwrap();
     }
 }
