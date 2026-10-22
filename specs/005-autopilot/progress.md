@@ -12,8 +12,8 @@ Mode: format=markdown commits=yes
 | WP-05 | 3 | 3B | done | 1 | e650aa4 | |
 | WP-05F | 3 | 3F | done | 1 | fc7e456 | phase-3 review fixes |
 | WP-06 | 4 | 4A | verified | 2 | 13520d9 | RunRequest lives in run.rs; Spanish marker (Recomendado) |
-| WP-07 | 4 | 4B | verified | 2 | | +pr_api/mod.rs re-export, proposal_for extracted; TODO(WP-09) seams |
-| WP-08 | 4 | 4C | pending | 0 | | |
+| WP-07 | 4 | 4B | verified | 2 | d16dd66 | +pr_api/mod.rs re-export, proposal_for extracted; TODO(WP-09) seams |
+| WP-08 | 4 | 4C | verified | 1 | | scheduler.rs test only (tick already recovers) |
 | WP-09 | 5 | 5A | pending | 0 | | |
 | WP-10 | 5 | 5B | pending | 0 | | |
 | WP-11 | 5 | 5B | pending | 0 | | |

@@ -15,6 +15,7 @@ use crate::events::Topic;
 use crate::handoff::Boundary;
 use crate::lang::Lang;
 use crate::pr_types::PrState;
+use crate::preview::PreviewState;
 use crate::state::AppState;
 
 /// Whether the task is on autopilot and not paused or done.
@@ -152,7 +153,8 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) {
     let Some(mut autopilot) = task.autopilot.clone().filter(|_| is_running(&task)) else {
         return;
     };
-    let reopening = autopilot.stage == Some(AutopilotStage::OpeningPr);
+    let opening = autopilot.stage == Some(AutopilotStage::OpeningPr);
+    let reopening = opening || autopilot.stage == Some(AutopilotStage::Preview);
     let (mut title, mut body) = (None, None);
     match read_outcome(app.lang(), &outcome_path(app, key, session)) {
         Outcome::Ready { pr_title, pr_body } => (title, body) = (pr_title, pr_body),
@@ -165,8 +167,17 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) {
             return;
         }
     }
-    // WP-08 seam: the preview stage goes here, before `opening_pr`.
-    if !reopening {
+    // A preview that failed never stops the PR. A restart at `opening_pr` skips the
+    // step, taking the URL from the preview if it is still up.
+    if !opening && !preview_step(app, key, &mut autopilot).await {
+        return;
+    }
+    let preview_url = app
+        .previews
+        .view(key.as_str())
+        .filter(|v| v.state == PreviewState::Running)
+        .and_then(|v| v.url);
+    if !opening {
         autopilot.stage = Some(AutopilotStage::OpeningPr);
         if !write_state(app, key, &autopilot).await {
             return;
@@ -175,7 +186,15 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) {
     // Links a PR that exists already (a restart in the middle of opening, or one made
     // by hand), so none is opened twice.
     crate::pr_loop::check_task(app, key, true).await;
-    if let Err(e) = open_prs(app, key, title.as_deref(), body.as_deref()).await {
+    if let Err(e) = open_prs(
+        app,
+        key,
+        title.as_deref(),
+        body.as_deref(),
+        preview_url.as_deref(),
+    )
+    .await
+    {
         // TODO(WP-09): pause the autopilot with this reason.
         tracing::warn!(task = %key, "autopilot cannot open the PR: {}", e.message());
         return;
@@ -200,6 +219,53 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) {
     }
 }
 
+/// The longest the finish waits for a preview to print its URL: a little more than the
+/// preview's own timeout, which fails it, so this is only a safety net.
+const PREVIEW_WAIT: std::time::Duration = std::time::Duration::from_secs(11 * 60);
+
+/// Starts the project's preview, if it has a command, and waits until it runs or
+/// fails. `false` only if the state cannot be recorded.
+async fn preview_step(app: &AppState, key: &TaskKey, autopilot: &mut Autopilot) -> bool {
+    let command = match app.store.get_task(key).await {
+        Ok(Some(task)) => match &task.project {
+            Some(name) => app
+                .store
+                .project(name)
+                .await
+                .ok()
+                .and_then(|p| p.preview_command),
+            None => None,
+        },
+        _ => None,
+    };
+    if command.is_none() {
+        return true;
+    }
+    autopilot.stage = Some(AutopilotStage::Preview);
+    if !write_state(app, key, autopilot).await {
+        return false;
+    }
+    match crate::preview::start_for(app, key).await {
+        Ok(_) => {}
+        // Already up (the user started it): use it.
+        Err(e) if e.reason.as_deref() == Some("running") => {}
+        Err(e) => {
+            tracing::warn!(task = %key, "autopilot cannot start the preview: {}", e.message());
+            return true;
+        }
+    }
+    let deadline = tokio::time::Instant::now() + PREVIEW_WAIT;
+    while tokio::time::Instant::now() < deadline {
+        match app.previews.view(key.as_str()) {
+            Some(v) if v.state == PreviewState::Starting => {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            _ => break,
+        }
+    }
+    true
+}
+
 fn is_open(row: &crate::store_prs::PrRow) -> bool {
     row.snapshot
         .as_ref()
@@ -221,6 +287,7 @@ async fn open_prs(
     key: &TaskKey,
     title: Option<&str>,
     body: Option<&str>,
+    preview_url: Option<&str>,
 ) -> Result<(), ApiError> {
     let Some((_, ws)) = app.store.workspace(key).await? else {
         return Err(ApiError::conflict(format!("{key} has no workspace")));
@@ -239,19 +306,31 @@ async fn open_prs(
                 Err(e) => return Err(e),
             };
         let title = title.map_or(proposed_title, str::to_string);
-        let body = body.map_or(proposed_body, str::to_string);
+        let mut body = body.map_or(proposed_body, str::to_string);
+        if let Some(url) = preview_url {
+            body = format!("{}\n\nPreview: {url}\n", body.trim_end());
+        }
         crate::pr_api::open_for(app, key, Some(&repo), &title, &body, true).await?;
     }
     Ok(())
 }
 
-/// Finishes what a restart left half done: PRs being opened.
+/// Finishes what a restart left half done: a preview being started or PRs being opened.
 pub(crate) async fn recover(app: &AppState, task: &Task) {
-    let opening = matches!(
+    let pending = matches!(
         &task.autopilot,
-        Some(a) if a.state == AutopilotState::Running && a.stage == Some(AutopilotStage::OpeningPr)
+        Some(a) if a.state == AutopilotState::Running
+            && matches!(a.stage, Some(AutopilotStage::OpeningPr | AutopilotStage::Preview))
     );
-    if !opening {
+    if !pending {
+        return;
+    }
+    // A preview still starting is being waited on by a finish that is alive.
+    let starting = app
+        .previews
+        .view(task.key.as_str())
+        .is_some_and(|v| v.state == PreviewState::Starting);
+    if starting && matches!(&task.autopilot, Some(a) if a.stage == Some(AutopilotStage::Preview)) {
         return;
     }
     if let Some(primary) = crate::handoff::primary_session(app, &task.key).await {
@@ -578,6 +657,101 @@ mod tests {
         assert!(creates(&gh).is_empty());
         let prs = app.store.prs_of(&key).await.unwrap();
         assert_eq!(prs.len(), 1);
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Done);
+    }
+
+    async fn with_preview(app: &mut AppState, command: &str, timeout_ms: u64) {
+        app.store
+            .set_preview_command("proj", Some(command))
+            .await
+            .unwrap();
+        app.previews = Arc::new(crate::preview::Previews::with_timeout(
+            crate::events::Events::default(),
+            std::time::Duration::from_millis(timeout_ms),
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_preview_that_runs_puts_its_url_in_the_pr_body() {
+        let gh = gh("[]");
+        let (mut app, key, _dir) = ready_task(gh.clone(), None).await;
+        with_preview(&mut app, "echo http://127.0.0.1:9/x; sleep 30", 5000).await;
+        write_outcome(&app, &key, r#"{"outcome":"ready","pr_body":"agent body"}"#);
+        finish(&app, &key, "rev-1").await;
+        assert_eq!(creates(&gh).len(), 1);
+        assert!(
+            gh.stdins()
+                .iter()
+                .flatten()
+                .any(|s| s.contains("agent body") && s.contains("Preview: http://127.0.0.1:9/x")),
+            "{:?}",
+            gh.stdins()
+        );
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Done);
+        app.previews.stop(key.as_str());
+    }
+
+    #[tokio::test]
+    async fn a_failed_preview_still_opens_the_pr_and_does_not_pause() {
+        let gh = gh("[]");
+        let (mut app, key, _dir) = ready_task(gh.clone(), None).await;
+        with_preview(&mut app, "echo oops; exit 3", 5000).await;
+        write_outcome(&app, &key, r#"{"outcome":"ready","pr_body":"agent body"}"#);
+        finish(&app, &key, "rev-1").await;
+        assert_eq!(creates(&gh).len(), 1);
+        assert!(!gh.stdins().iter().flatten().any(|s| s.contains("Preview:")));
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Done);
+    }
+
+    #[tokio::test]
+    async fn a_preview_that_prints_no_url_times_out_and_the_pr_opens() {
+        let gh = gh("[]");
+        let (mut app, key, _dir) = ready_task(gh.clone(), None).await;
+        with_preview(&mut app, "sleep 30", 300).await;
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        finish(&app, &key, "rev-1").await;
+        assert_eq!(creates(&gh).len(), 1);
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Done);
+        app.previews.stop(key.as_str());
+    }
+
+    #[tokio::test]
+    async fn the_stage_is_preview_while_the_preview_starts() {
+        let gh = gh("[]");
+        let (mut app, key, _dir) = ready_task(gh.clone(), None).await;
+        with_preview(&mut app, "sleep 30", 60_000).await;
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        let a2 = app.clone();
+        let k2 = key.clone();
+        let handle = tokio::spawn(async move { finish(&a2, &k2, "rev-1").await });
+        for _ in 0..100 {
+            if autopilot_of(&app, &key).await.stage == Some(AutopilotStage::Preview) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(
+            autopilot_of(&app, &key).await.stage,
+            Some(AutopilotStage::Preview)
+        );
+        assert!(creates(&gh).is_empty());
+        // Recovery leaves it alone while the preview is starting.
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        recover(&app, &task).await;
+        assert!(creates(&gh).is_empty());
+        handle.abort();
+        app.previews.stop(key.as_str());
+    }
+
+    #[tokio::test]
+    async fn recovery_of_a_lost_preview_goes_on_to_the_pr() {
+        let gh = gh("[]");
+        let (mut app, key, _dir) = ready_task(gh.clone(), Some(AutopilotStage::Preview)).await;
+        with_preview(&mut app, "echo oops; exit 3", 5000).await;
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        recover(&app, &task).await;
+        assert_eq!(creates(&gh).len(), 1);
         assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Done);
     }
 }

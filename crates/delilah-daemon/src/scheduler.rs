@@ -165,4 +165,83 @@ mod tests {
         let task = app.store.get_task(&key).await.unwrap().unwrap();
         assert_eq!(task.handoff.unwrap().stage, HandoffStage::Offered);
     }
+
+    #[tokio::test]
+    async fn recovery_on_tick_reopens_a_pr_of_an_autopilot_left_opening() {
+        use std::sync::Arc;
+
+        use crate::gh::fake::{FakeGh, PR_LIST, PR_URL, REPO_VIEW, bare_snapshot};
+        use crate::pr_testkit::{git_repo_with_origin, task_with_workspace};
+        use delilah_core::{Autopilot, AutopilotStage, AutopilotState};
+
+        let gh = Arc::new(
+            FakeGh::new()
+                .with_user("me")
+                .on(&["repo", "view"], Ok(REPO_VIEW))
+                .on(&["pr", "list"], Ok(PR_LIST))
+                .on(&["pr", "create"], Ok(PR_URL))
+                .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false))),
+        );
+        let (app, key, dir) = task_with_workspace(gh.clone(), None).await;
+        git_repo_with_origin(
+            &dir.path().join("ws"),
+            &dir.path().join("origin"),
+            "feature/PROJ-1",
+            &["first"],
+        );
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "rev-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Revisión".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(delilah_core::Step::Review),
+            })
+            .await
+            .unwrap();
+        // A second task with no autopilot is left alone.
+        app.store
+            .create_task(&Task::new(TaskKey::new("PROJ-2"), "other", "feature"))
+            .await
+            .unwrap();
+        let on = |stage| Autopilot {
+            state: AutopilotState::Running,
+            stage: Some(stage),
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+        };
+        // Preview stage with a lost process and no preview command: on to the PR.
+        app.store
+            .set_autopilot(&key, Some(&on(AutopilotStage::Preview)))
+            .await
+            .unwrap();
+        tick(&app).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.autopilot.unwrap().state, AutopilotState::Done);
+        assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 1);
+        assert!(
+            !gh.calls()
+                .iter()
+                .any(|c| c.starts_with(&["pr".to_string(), "create".to_string()]))
+        );
+        let other = app
+            .store
+            .get_task(&TaskKey::new("PROJ-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(other.autopilot.is_none());
+        assert!(
+            app.store
+                .prs_of(&TaskKey::new("PROJ-2"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }
