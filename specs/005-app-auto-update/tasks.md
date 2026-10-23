@@ -242,7 +242,7 @@
 
 **Independent test**: vitest for the Settings section. By hand, the menu in a release build (shell).
 
-- [ ] T032 [US4] In `app/src-tauri/src/main.rs`:
+- [X] T032 [US4] In `app/src-tauri/src/main.rs`:
   - add `const CHECK_UPDATES: &str = "check-updates";` and a menu item `l("Buscar actualizaciones…", "Check for updates…")` in the app menu next to the daemon items;
   - on click, `app.emit_to("main", "check-updates", ())`.
   - The item exists in debug builds too; the UI answers it (T034).

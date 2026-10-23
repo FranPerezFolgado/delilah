@@ -6,12 +6,13 @@
 mod daemon;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 const RESTART_DAEMON: &str = "daemon-restart";
 const STOP_DAEMON: &str = "daemon-stop";
 const SHOW_LOGS: &str = "show-logs";
+const CHECK_UPDATES: &str = "check-updates";
 
 fn main() {
     let builder = tauri::Builder::default()
@@ -37,6 +38,15 @@ fn main() {
                     let _ = window.set_focus();
                     let _ = window.eval("window.dispatchEvent(new Event('delilah:show-logs'))");
                 }
+                return;
+            }
+            if id == CHECK_UPDATES {
+                // The UI owns the update flow (app/src/useUpdates.ts): bring the window and tell it.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+                let _ = app.emit_to("main", CHECK_UPDATES, ());
                 return;
             }
             if id != RESTART_DAEMON && id != STOP_DAEMON {
@@ -114,6 +124,7 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         &[
             &PredefinedMenuItem::about(app, Some(l("Acerca de Delilah", "About Delilah")), None)?,
             &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, CHECK_UPDATES, l("Buscar actualizaciones…", "Check for updates…"), true, None::<&str>)?,
             &MenuItem::with_id(app, RESTART_DAEMON, l("Reiniciar el daemon", "Restart the daemon"), true, None::<&str>)?,
             &MenuItem::with_id(app, STOP_DAEMON, l("Detener el daemon", "Stop the daemon"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
