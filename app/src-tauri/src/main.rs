@@ -14,13 +14,19 @@ const STOP_DAEMON: &str = "daemon-stop";
 const SHOW_LOGS: &str = "show-logs";
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Native folder picker, e.g. to add a project.
         .plugin(tauri_plugin_dialog::init())
         // Native notifications for what waits on you (see app/src/platform.ts).
         .plugin(tauri_plugin_notification::init())
         // Links in Markdown previews open in the default browser, not in the window.
         .plugin(tauri_plugin_opener::init())
+        // Relaunch after installing an update.
+        .plugin(tauri_plugin_process::init());
+    // Dev and unpackaged builds never check for or install updates.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .menu(menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();

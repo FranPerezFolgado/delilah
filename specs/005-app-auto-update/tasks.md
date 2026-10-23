@@ -120,7 +120,7 @@
   - with `canUpdate=false`, nothing is called.
   - (It may be written before T014 and fail first.)
 - [ ] T016 [US1] Mount it in `app/src/App.tsx`: call `useUpdates()` once at the top level and render `<UpdateNotice state dispatch />` above the routed views.
-- [ ] T017 [US1] Register the plugins in `app/src-tauri/src/main.rs`:
+- [X] T017 [US1] Register the plugins in `app/src-tauri/src/main.rs`:
   - `.plugin(tauri_plugin_process::init())` always;
   - `tauri_plugin_updater::Builder::new().build()` only under `#[cfg(not(debug_assertions))]` (R12).
   - Run `cargo check` in debug and `--release` on the shell.
