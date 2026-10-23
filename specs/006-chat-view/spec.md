@@ -32,6 +32,8 @@ reasons are recorded. The chat view (US1, US2) does not depend on the spike.
 ### Session 2026-10-23
 
 - Q: How do approvals work in chat mode? → A: Option C: an "¿Permitir?" card in the conversation and the Bandeja, backed by Claude's permission prompt tool, with an allow list as the fallback if the spike shows the prompt tool does not work.
+- Q: What does the "¿Permitir?" card offer in chat mode? → A: "Permitir una vez", "Permitir siempre en esta tarea" (that tool, remembered for all the task's sessions), and "Denegar" with an optional reason sent to Claude.
+- Q: Which view opens first for a session? → A: A per-task setting ("Chat" or "Terminal", "Chat" for new tasks) decides which view a task's sessions open in. The one-click switch is always available, so both views can be used on any task.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -71,7 +73,11 @@ entries appear without reloading. "Terminal" shows the live terminal, and "Chat"
 5. **Given** a tool Delilah has no specific card for (including MCP tools), **When** it
    appears, **Then** it shows as a generic card with the tool name, its input and its result.
 6. **Given** the conversation view, **When** the user clicks "Terminal", **Then** they get
-   the live terminal of the same session. The choice is remembered for that session.
+   the live terminal of the same session, and "Chat" brings the conversation back.
+9. **Given** a task whose view setting is "Terminal", **When** the user opens any of its
+   sessions, **Then** the terminal shows first and the chat is one click away. **Given**
+   the setting is "Chat" (the default for new tasks), **Then** the chat shows first.
+   Changing the setting on the task applies to all its sessions.
 7. **Given** a session that is waiting for a permission prompt or another dialog that only
    the terminal can answer, **When** the user looks at the conversation, **Then** a notice
    says Claude is waiting in the terminal, with a button that opens it.
@@ -247,6 +253,11 @@ version used, and the plan for US3/US4 follows from it.
   exits), and the user can resume it in either mode.
 - **Folder trust in chat mode**: a new workspace must not leave a chat-mode task stuck on a
   dialog nobody can see (the spike finds out how print mode behaves).
+- **"Permitir siempre" for shell commands**: it covers that command (as Claude's own
+  "don't ask again" does), not every shell command.
+- **A "¿Permitir?" card nobody answers**: the task waits, like a PTY task at a permission
+  prompt, and its Bandeja item stays open. Switching to the terminal is refused until the
+  turn ends or is stopped.
 - **Remote Control** on a chat-mode task: unavailable or working as documented by the
   spike, never silently broken.
 
@@ -276,8 +287,11 @@ version used, and the plan for US3/US4 follows from it.
 - **FR-006**: The conversation MUST survive daemon restarts, `--resume` and app restarts,
   and MUST cover sessions that existed before this feature when Claude's record of them
   is still on disk.
-- **FR-007**: Each session MUST offer a one-click switch between "Chat" and "Terminal",
-  remembered per session. The chat is the default for Claude sessions.
+- **FR-007**: Each task MUST have a view setting, "Chat" or "Terminal" ("Chat" for new
+  tasks, and also for existing tasks), that decides which view its Claude sessions open in.
+  The setting MUST be changeable from the task (and chosen in the new-task dialog). Every
+  session MUST also offer a one-click switch between the two views at any time. Project
+  sessions open in "Chat", with the same switch.
 - **FR-008**: When the session waits for something only the terminal can answer (a
   permission prompt, a dialog), the conversation MUST say so and offer to open the terminal.
 - **FR-009**: The conversation view MUST have the composer the idea conversation has:
@@ -314,8 +328,10 @@ version used, and the plan for US3/US4 follows from it.
 - **FR-019**: In chat mode, the terminal view and `delilah attach` MUST be unavailable. The
   app MUST show why, and the CLI and API MUST refuse with a clear message naming chat mode.
 - **FR-020**: In chat mode, a tool that needs the user's approval MUST NOT leave the task
-  silently stuck. It MUST raise an "¿Permitir?" card in the conversation and the Bandeja
-  (allow once / deny). The answer reaches the agent, and the card and the Bandeja item stay
+  silently stuck. It MUST raise an "¿Permitir?" card in the conversation and the Bandeja,
+  showing the tool and its input, with three answers: allow once, allow that tool for the
+  rest of the task (remembered for all its sessions, including after restarts), or deny
+  with an optional reason that is passed to Claude. The answer reaches the agent, and the card and the Bandeja item stay
   in sync. Fallback, only if the spike shows this cannot work: an allow list, with refused
   tools shown in the conversation and the switch to the terminal offered.
 - **FR-021**: A chat-mode task MUST be switchable to the terminal between turns, and back,
@@ -346,6 +362,8 @@ version used, and the plan for US3/US4 follows from it.
   input, the result, and whether it failed.
 - **Session runtime**: how a session's Claude runs, either a terminal (today) or chat
   mode. It decides which actions are available (terminal, attach, live text).
+- **Task view setting**: the per-task choice of which view ("Chat" or "Terminal") its
+  sessions open in. It only affects display, not how the agent runs.
 - **Task chat-mode flag**: the per-task choice of runtime for its Claude sessions. It
   persists, and it changes when the user switches between turns.
 - **Live text**: the partial text of the message Claude is writing in chat mode. Shown
@@ -377,9 +395,8 @@ version used, and the plan for US3/US4 follows from it.
 
 - Claude Code keeps writing a per-session transcript, and hooks keep giving its path. The
   format is not a contract, which is why FR-005 exists.
-- The chat view is the default for Claude sessions. Users who prefer the terminal switch
-  once per session (FR-007). A global "always open the terminal" preference is not part of
-  this feature.
+- New and existing tasks open in "Chat". A task set to "Terminal" opens in the terminal
+  (FR-007). A global preference is not part of this feature.
 - Messages typed directly in the terminal show up in the conversation as user messages,
   because they reach Claude's record too.
 - Thinking is not shown. Delilah's own instructions to Claude (system prompt additions,
