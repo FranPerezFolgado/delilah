@@ -17,6 +17,13 @@ produces one for its spec folder (`005-task-name-from-spec`). That is the moment
 to name the task and to create its branch. The worktree folder can keep any
 name: only the branch is seen in git, the PR and the remote.
 
+## Clarifications
+
+### Session 2026-10-23
+
+- Q: In projects where specify doesn't create the branch (no Spec Kit git extension, or its hook off), what happens? → A: Delilah creates the branch itself, named after the new spec folder, as soon as the folder appears and the workspace has no branch yet.
+- Q: Which text becomes the new title? → A: The spec's title exactly as written (its `# Feature Specification: <name>` heading), whatever its language; the user can edit or restore it.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - The task takes its name from the analysis (Priority: P1)
@@ -90,11 +97,12 @@ archive it.
 
 - **FR-001**: Starting a free task MUST NOT create a branch for it; its workspace (checkout or worktree) starts on the project's base branch commit. The worktree folder's name is not constrained.
 - **FR-002**: The task's branch MUST be created by the first analysis (specify), and Delilah MUST detect it and the analysis from the repo itself (spec folder and git state), in both checkout and worktree mode, for repo and parent projects.
+- **FR-002a**: When the first spec folder appears and the workspace still has no branch (the project has no branch hook, or it is off), Delilah MUST create the branch itself with the spec folder's name, carrying over the uncommitted spec files.
 - **FR-003**: On that detection, Delilah MUST set the task's title to the feature name of the analysis, keep the previous title, and show the change on every view of the task without a restart.
 - **FR-004**: The user MUST be able to restore the previous title, and to edit the title of a running task by hand.
 - **FR-005**: The automatic rename MUST happen at most once per task, and never after the user has edited the title by hand following it.
 - **FR-006**: After the analysis, every repo of the task MUST be on a branch named like the analysis' spec folder (`NNN-short-name`), and the task's workspace record MUST name that branch. The task's key MUST NOT appear in it.
-- **FR-007**: Before a descriptive branch exists, no change of the task MUST be committed to the project's base branch; if work begins without an analysis, Delilah MUST give the task a branch named from its current title first.
+- **FR-007**: Before a descriptive branch exists, no change of the task MUST be committed to the project's base branch; if work begins without an analysis (the session's first edit of a file outside `specs/`), Delilah MUST give the task a branch named from its current title first.
 - **FR-008**: Once the task has a branch, it MUST NOT change: later analyses don't create or rename branches for it.
 - **FR-009**: The running session MUST NOT be interrupted or moved: the branch appears inside the workspace it is already working in.
 - **FR-010**: Name collisions with existing branches MUST be resolved with a free variant, never by reusing or overwriting.
@@ -124,7 +132,7 @@ archive it.
 ## Assumptions
 
 - Only free tasks (`LIBRE-N`) change; Jira keys are meaningful and Jira tools link branches by key.
-- The feature name is the title of the analysis' spec, as written there (it may be in English while the original title was in Spanish); the user can edit or restore it.
+- The feature name is the title of the analysis' spec, as written there (it may be in English while the original title was in Spanish); no translation; the user can edit or restore it.
 - Delilah follows the repo, as it does for phases (decision 17): Spec Kit's own branch hook (`before_specify`) creates the branch inside the workspace, and Delilah reads what it left; it doesn't drive Spec Kit.
 - The worktree folder name doesn't matter to the user (decided 2026-10-23): it stays as today and never moves, so sessions are never disturbed.
 - The `NNN` prefix is the spec folder's sequential number in that repo.
