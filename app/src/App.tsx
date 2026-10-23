@@ -5,7 +5,8 @@ import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
 import { setLanguage, t, type LangSetting } from "./i18n";
-import { CHANGES, persist, sessionFor, sessionTab } from "./editor/session";
+import { CHANGES, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
+import { ideaToOpen } from "./components/ideas";
 import { BoardView } from "./components/BoardView";
 import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
@@ -171,6 +172,8 @@ export function App() {
     refresh();
     openTask(`@${name}`, s.id);
   };
+  /** The project's screen on one of its ideas: see `ideaToOpen`. */
+  const openIdeas = (owner: string, ideas: Session[]) => openTask(owner, ideaToOpen(ideas, sessionOf(sessionFor(owner).active)).id);
   const openChanges = (key: string) => {
     const ts = sessionFor(key);
     ts.changesOpen = true;
@@ -289,7 +292,7 @@ export function App() {
               .then((s) => openConversation(name, s))
               .catch((e) => setToast((e as Error).message))
           }
-          onOpenIdeas={(owner, ideas) => openTask(owner, ideas[ideas.length - 1].id)}
+          onOpenIdeas={openIdeas}
           onNewTask={() => setNewTask(true)}
           onDelete={setDeleting}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}

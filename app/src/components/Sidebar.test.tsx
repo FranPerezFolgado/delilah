@@ -111,14 +111,18 @@ describe("Sidebar ideas", () => {
   });
 
   it("collapses many ideas into one first row, leaving other sessions alone", () => {
-    const { container, getByRole, onOpenIdeas } = setup([], [ro, idea("a"), idea("b"), idea("c")]);
+    const { container } = setup([], [ro, idea("a"), idea("b"), idea("c")]);
     const rows = [...container.querySelectorAll(".srow")];
     expect(rows[0].classList.contains("ideas")).toBe(true);
     expect(rows[0].querySelector(".pcount")!.textContent).toBe("3");
     expect(rows.length).toBe(2);
     expect(rows[1].textContent).toContain("Ask");
-    const btn = getByRole("button", { name: "Ideas de web (3)" });
-    fireEvent.click(btn);
+  });
+
+  it("opens the project's ideas, only the ideas and in list order", () => {
+    const { getByRole, onOpenIdeas } = setup([], [idea("a"), ro, idea("b"), idea("c")]);
+    fireEvent.click(getByRole("button", { name: "Ideas de web (3)" }));
+    expect(onOpenIdeas).toHaveBeenCalledTimes(1);
     expect(onOpenIdeas).toHaveBeenCalledWith("@web", [idea("a"), idea("b"), idea("c")]);
   });
 

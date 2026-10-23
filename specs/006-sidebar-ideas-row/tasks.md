@@ -48,9 +48,9 @@ None: no new dependency or config.
 
 **Independent Test**: click "Ideas" with one waiting idea → the project's screen opens on it.
 
-- [ ] T007 [US2] Add a failing test to the "Sidebar ideas" describe in `app/src/components/Sidebar.test.tsx`: with ideas `a, b, c` and a read-only session, clicking `.srow.ideas` calls `onOpenIdeas("@web", [a, b, c])` (ideas only, list order).
-- [ ] T008 [US2] Make T007 pass in `app/src/components/Sidebar.tsx` if T004 did not already (the row passes exactly the filtered `ideas`).
-- [ ] T009 [US2] In `app/src/App.tsx`, replace T006's handler with `const openIdeas = (owner: string, ideas: Session[]) => openTask(owner, ideaToOpen(ideas, sessionOf(sessionFor(owner).active)).id);` next to `openConversation` (doc comment: "The project's screen on one of its ideas: see `ideaToOpen`."), importing `ideaToOpen` from `./components/ideas` and `sessionOf` from `./editor/session` (already imports `sessionFor`, `persist`, `sessionTab`, `CHANGES`); pass `onOpenIdeas={openIdeas}`. `npx tsc --noEmit` green.
+- [X] T007 [US2] Add a failing test to the "Sidebar ideas" describe in `app/src/components/Sidebar.test.tsx`: with ideas `a, b, c` and a read-only session, clicking `.srow.ideas` calls `onOpenIdeas("@web", [a, b, c])` (ideas only, list order).
+- [X] T008 [US2] Make T007 pass in `app/src/components/Sidebar.tsx` if T004 did not already (the row passes exactly the filtered `ideas`).
+- [X] T009 [US2] In `app/src/App.tsx`, replace T006's handler with `const openIdeas = (owner: string, ideas: Session[]) => openTask(owner, ideaToOpen(ideas, sessionOf(sessionFor(owner).active)).id);` next to `openConversation` (doc comment: "The project's screen on one of its ideas: see `ideaToOpen`."), importing `ideaToOpen` from `./components/ideas` and `sessionOf` from `./editor/session` (already imports `sessionFor`, `persist`, `sessionTab`, `CHANGES`); pass `onOpenIdeas={openIdeas}`. `npx tsc --noEmit` green.
 
 **Checkpoint**: US1 + US2 = the feature.
 
