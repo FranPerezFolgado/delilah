@@ -95,7 +95,7 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     env.scenario(
         "ask",
         &json!({"steps": [{"ask": {"question": "Which colour?", "header": "Colour",
-            "options": ["red", "blue"]}}, {"sleep_ms": 6000}, {"stop": "done"}]}),
+            "options": ["red", "blue"]}}, {"sleep_ms": 5000}, {"stop": "done"}]}),
     );
     start(&env, "E2E-21", "[fake:ask]");
     let ask = env.wait_for("the ask in the inbox", T, || {
@@ -114,7 +114,7 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     assert!(heard.iter().any(|t| t == "inbox"), "no inbox event: {heard:?}");
 
     agree(&env, "E2E-21", None, "running");
-    // The scenario sleeps 6 s after the answer (room to see it running even on a
+    // The scenario sleeps 5 s (the cap) after the answer (room to see it running even on a
     // loaded machine), so the stop happens inside this window.
     let mut rec = None;
     let heard = events_during(&env, 10_000, || {
