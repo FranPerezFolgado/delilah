@@ -46,15 +46,15 @@
 
 **Purpose**: the pure update state machine and the platform boundary.
 
-- [ ] T006 Write `app/src/updates.test.ts` covering every transition in data-model.md "Update state", including:
+- [X] T006 Write `app/src/updates.test.ts` covering every transition in data-model.md "Update state", including:
   - automatic vs manual check outcomes;
   - "Más tarde" sets `dismissed` and an automatic re-check of the same version stays `idle`, but a manual one shows it;
   - an automatic check is ignored while `downloading` / `waiting` / `installing`;
   - an error keeps `version`, and "Reintentar" goes to `downloading`;
   - `meta.lastCheck` / `lastResult` are updated.
   - Fails first.
-- [ ] T007 Implement `app/src/updates.ts`: the `UpdateState`, `UpdateMeta` and `UpdateEvent` types and a pure `reduce(state, meta, event, now) → {state, meta}`, exactly per data-model.md. No imports from Tauri or `api.ts`. T006 passes.
-- [ ] T008 [P] Extend `app/src/platform.ts` per contracts §2 (dynamic imports, like the existing helpers):
+- [X] T007 Implement `app/src/updates.ts`: the `UpdateState`, `UpdateMeta` and `UpdateEvent` types and a pure `reduce(state, meta, event, now) → {state, meta}`, exactly per data-model.md. No imports from Tauri or `api.ts`. T006 passes.
+- [X] T008 [P] Extend `app/src/platform.ts` per contracts §2 (dynamic imports, like the existing helpers):
   - `canUpdate` (`isDesktop && !import.meta.env.DEV`);
   - `appVersion()` (`@tauri-apps/api/app` `getVersion`, null outside desktop);
   - `checkForUpdate()`, which returns `{version, notes, install(onProgress)}` or null; `install` uses `downloadAndInstall` and maps `Started`/`Progress` events to `(received, total)`;
