@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { api, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { api, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
@@ -24,6 +24,7 @@ export function App() {
   const [view, setView] = useState<View>("board");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [specs, setSpecs] = useState<Record<string, SpecSummary>>({});
+  const [prs, setPrs] = useState<PrSummary[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -56,7 +57,7 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, p, u, s, sp, ib] = await Promise.all([
+      const [t, p, u, s, sp, ib, pr] = await Promise.all([
         api.tasks(),
         api.projects(),
         api.usage(),
@@ -64,10 +65,13 @@ export function App() {
         // An older daemon has no specs: the board still works, without phases.
         api.specs().catch(() => ({})),
         api.inbox().catch(() => []),
+        // An older daemon has no PRs: no badges.
+        api.prSummaries().catch(() => []),
       ]);
       setTasks(t);
       setSpecs(sp);
       setInbox(ib);
+      setPrs(pr);
       setSessions(s);
       setProjects(p);
       setUsage(u);
@@ -87,6 +91,9 @@ export function App() {
       specs: () => api.specs().then(setSpecs),
       usage: () => api.usage().then(setUsage),
       projects: () => api.projects().then(setProjects),
+      prs: () => api.prSummaries().then(setPrs),
+      // The open conversation view subscribes to this topic itself.
+      conversations: () => Promise.resolve(),
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
@@ -159,6 +166,11 @@ export function App() {
     setSelected(key);
     setView("tasks");
   };
+  /** Shows a new idea conversation, a session of the project's own screen. */
+  const openConversation = (name: string, s: Session) => {
+    refresh();
+    openTask(`@${name}`, s.id);
+  };
   const openChanges = (key: string) => {
     const ts = sessionFor(key);
     ts.changesOpen = true;
@@ -174,7 +186,7 @@ export function App() {
     const primary = sessions.find((s) => s.task === item.task && s.primary);
     openTask(item.task, item.session?.id ?? (item.kind === "waiting" ? primary?.id : undefined));
   };
-  useDesktopAlerts(inbox, tasks, openItem);
+  useDesktopAlerts(inbox, tasks, prs, openItem);
 
   const run = (action: ActionId) => {
     switch (action) {
@@ -253,6 +265,7 @@ export function App() {
           view={view}
           onView={setView}
           tasks={tasks}
+          prs={prs}
           projects={projects}
           sessions={sessions}
           selected={selected}
@@ -268,6 +281,12 @@ export function App() {
                 refresh();
                 openTask(`@${name}`, s.id);
               })
+              .catch((e) => setToast((e as Error).message))
+          }
+          onIdea={(name) =>
+            api
+              .openProjectSession(name, { kind: "claude", conversation: true })
+              .then((s) => openConversation(name, s))
               .catch((e) => setToast((e as Error).message))
           }
           onNewTask={() => setNewTask(true)}
@@ -296,6 +315,7 @@ export function App() {
           {view === "board" && (
             <BoardView
               tasks={tasks}
+              prs={prs}
               specs={specs}
               onOpen={(key) => {
                 setSelected(key);
@@ -323,12 +343,14 @@ export function App() {
                   key={owner}
                   owner={owner}
                   task={task}
+                  spec={specs[owner]}
                   project={project}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
                   askPosition={askPosition}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
+                  onOpenTask={(key) => openTask(key)}
                   onConvert={(s) => {
                     setConvertFrom(s);
                     setNewTask(true);
@@ -401,6 +423,11 @@ export function App() {
             setStarting(null);
             refresh();
             openTask(t.key);
+          }}
+          onConversation={(name, s) => {
+            setNewTask(false);
+            setDraft(undefined);
+            openConversation(name, s);
           }}
           onSaved={(saved) => {
             setNewTask(false);

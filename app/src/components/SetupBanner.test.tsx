@@ -14,6 +14,8 @@ const task = (status: Task["status"]): Task => ({
   workflow: "feature",
   phase: null,
   status,
+  saving_mode: false,
+  handoff: null,
 });
 const failed = task({ type: "setup-failed", reason: "npm ERR!\nline 2" });
 

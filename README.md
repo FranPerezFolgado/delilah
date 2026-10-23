@@ -120,12 +120,50 @@ and the `tasks.md` checklist with the item the agent is on. Phase changes go to
 the task's history. Delilah only reads these files; the repo stays the source of
 truth.
 
+The task screen's header shows the task's phase (step number and name) next to its status, with the progress ("Implementación · 4/12") while implementing.
+
 Without SpecKit the phase comes from what the agent does: its first edit to code
 (outside `specs/` and `.specify/`) means Implementación, and `gh pr create` or
 `git push` means Revisión. When the agent stops with commits on its branch, the
 Bandeja asks "¿Pasar a revisión?". These signals and the spec files only move a
 task forward; you move it anywhere by clicking a phase in the task's phase bar,
 and asking for a review ("Revisar cambios") moves it to Revisión.
+
+**Saving mode.** Every turn of a Claude session re-reads the whole conversation, so
+long tasks get expensive. With "Modo ahorro" on (a checkbox when creating a task or
+saving it to the backlog, a toggle on a running task, `--saving-mode` /
+`--no-saving-mode` in `delilah run` and `new`), each phase runs in a fresh session.
+The first one ("Spec y plan") stops once `tasks.md` is written; the Bandeja and the
+task screen then offer "Implementar en sesión nueva" (which also approves the
+tasks) or "Seguir aquí" to carry on in the same session without saving mode. The
+implementation session ("Implementación") starts from the spec files; when every
+item is checked, a "Revisión" session starts on its own, reviews the branch and
+commits (it never pushes). The task screen shows the chain of sessions, with the
+earlier ones finished and reopenable; the newest is the main one. Before each
+change the outgoing session saves its notes with `/save-session`. If a handoff
+fails, the Bandeja shows it with "Reintentar"; after a restart Delilah finishes or
+re-offers it. In Settings: "Modo ahorro por defecto" (new tasks) and "Guardar notas
+antes de cambiar de sesión" (on by default). Needs the spec files: without a
+`specs/` folder there are no handoffs.
+
+**Autopilot.** A task can run on its own up to the PR: "Autopiloto" (next to "Modo
+ahorro", which it turns on; a toggle on a running task, `--autopilot` /
+`--no-autopilot` in `delilah run` and `new`, `delilah autopilot <KEY> on|off|resume`).
+Only for tasks on the spec workflow. The implementation starts without asking, the
+review runs the project's checks, and when it reports the branch ready Delilah starts
+the project's preview (if it has one) and opens a draft PR with your `gh`. A step that
+stalls gets one nudge; questions that have an option marked "(Recommended)" are
+answered for you. Anything else (a permission prompt in the task's session, a question without a
+recommendation, a blocked review, a failure) pauses it: the header shows "Autopiloto en
+pausa" with the reason, and the Bandeja offers "Reanudar autopiloto" or "Seguir a
+mano". On the idea card, "Crear y lanzar en autopiloto" creates the task and starts it.
+Delilah pushes and opens the PR without asking again, so turn it on only where that is
+what you want. It never merges.
+
+**Task previews.** A project can have a preview command (field in the project view;
+for Delilah itself, `scripts/preview.sh`). "Lanzar" in a task's header runs it in the
+task's workspace, shows the URL it prints and "Parar" stops it; it also stops when the
+task ends. A restart of the daemon does not bring a preview back.
 
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
@@ -134,6 +172,37 @@ tasks ready for review, paused by the usage limit (with "Reanudar ahora") or fai
 Each item opens the task on the right tab. The sidebar counts what blocks an
 agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
+
+**Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
+token) and checks every 30 s. When the task's branch has a PR, it links it, per
+submodule for a parent, and moves the task to Revisión. You can also paste a PR's URL
+("Vincular por URL") or "Desvincular" one. Pointing `DELILAH_GH_BIN` at another
+binary swaps `gh` (previews use a fake one).
+
+- **The "PR" tab** (next to Cambios) shows the title, number and link, draft, open,
+  merged or closed, each CI check, the review state and the comment count, the
+  account `gh` uses and when it was last checked. "Actualizar" checks at once. If `gh`
+  is missing, signed out or has no access to the repo, the tab says so.
+- **The PR badge** on the board cards and the sidebar shows the same state at a glance;
+  for a parent with several PRs it shows the worst one.
+- **Bandeja items:** CI failed, changes requested and new comments on the PR, from
+  anyone but you. Each opens the PR, or "Pedir al agente que lo arregle" sends it to
+  the task's agent as comments to consider (never on its own), or "Descartar" it.
+  They count on the Dock badge. A new failing commit raises a new item; the same one
+  never twice.
+- **"Abrir PR"** (in the PR tab, once the branch has commits, and while some repo of the task has no open PR) shows a title and
+  description to edit (the Jira link and the commit subjects), "Borrador", and for a
+  parent a "Submódulo" picker, on the first free submodule with commits. It pushes the branch and opens the PR against the
+  default branch; if anything fails, nothing is linked and the error is shown.
+- **Archive on merge.** When all of a task's PRs are merged, Delilah marks it done and
+  archives it without asking: back to your previous branches in checkout mode, the
+  worktree removed otherwise, and the local task branches deleted (never the parent's
+  and never on GitHub). Every repo counts, also one without a PR: if any has uncommitted changes or
+  commits the PR does not contain (or, without a PR, unpushed ones), or cannot be
+  fetched, nothing is removed and the Bandeja says why, with "Archivar igualmente". A PR
+  closed without merging only notifies. You get one notification per merge, "mergeada y archivada" or "mergeada, sin
+  archivar". If branches are left, the Bandeja lists them (also once the task is
+  archived) and archiving by hand finishes it.
 
 **Questions with options.** When the agent asks with Claude Code's
 `AskUserQuestion` (as the `feature` workflow does), Delilah shows the question and
@@ -160,7 +229,8 @@ Claude in **solo lectura** (`--permission-mode plan`). It reads, searches and
 explains, but does not edit, and nothing is created. "Permitir cambios en esta
 sesión" restarts it in normal mode on the same conversation. "Convertir en tarea" turns
 that Claude into a free task's primary session, keeping its conversation: the task
-works in your checkout, the folder the conversation belongs to.
+works in your checkout, the folder the conversation belongs to. A project session can
+also propose tasks (see "Nueva tarea con Claude" below).
 
 **Project settings.** In Proyectos, "Ajustes" on a project opens its settings.
 They are personal to your Delilah (stored by the daemon, nothing is written in the
@@ -171,11 +241,15 @@ Whatever is not set keeps its default, which `show` marks.
   checkout. A task started without saying where follows it; the new task form
   preselects it, and a backlog task keeps the choice you saved on it.
   `--checkout` / `--worktree` on `delilah new` and `delilah run` override it.
-- **Rama** (branch template): the branch a task gets, e.g. `feature/{ticket}-{slug}`.
-  `{ticket}` is the key and `{slug}` is the title made safe for a branch name (lower
-  case, no accents, hyphens, at most 40 characters). If the slug comes out empty
-  the `/`, `-`, `_` and `.` around it are dropped. The new task form shows the
-  resulting branch while you type the title.
+- **Rama** (branch template, optional): empty by default, and then Delilah proposes a
+  descriptive name for each task (`feature/PROJ-12-retry-payments`). With a template,
+  e.g. `fix/{ticket}-{slug}`, the template decides the format: `{ticket}` is the key
+  and `{slug}` is Claude's short proposal (the title made safe for a branch name if
+  Claude fails: lower case, no accents, hyphens, at most 40 characters). If the slug
+  comes out empty the `/`, `-`, `_` and `.` around it are dropped. The "Rama" field of
+  the new task form shows the branch the task will get and you can edit it; what you
+  type wins over the template. `delilah project unset <name> branch` goes back to the
+  proposal.
 - **Archivos compartidos**: files or folders of the checkout that a **worktree**
   needs but git does not carry (`.env`, `node_modules`). Each is copied or linked
   (a symlink to the original); "Automático" links folders and copies files. What
@@ -206,6 +280,30 @@ parent; one task at a time, with the checkout clean; archiving goes back to the
 branch you were on and keeps the task's branch; files left uncommitted stay in your
 folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
+
+**The task's branch.** Delilah names it from the title: Claude proposes a short name
+and the branch is `feature/<short-name>`, or `feature/<KEY>-<short-name>` for a Jira
+ticket (a free task's `LIBRE-n` is left out). If Claude does not answer in time, the
+name comes from the title, and failing that from the key. The start dialog has a
+"Rama" field that fills in the proposal about a second after you stop typing the
+title; type your own name there and it is kept, or empty it to let Delilah choose.
+A name already used (as a local branch or on a remote, in any repo of the task) gets
+`-2`, `-3`…: a branch is never reused. `delilah run --branch <name>` is cleaned up
+the same way (`feature/` added once, spaces and accents turned into `-`/letters). The
+branch shows on the task's screen and stays the same for the whole task.
+
+**Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
+and Libre (after choosing the project), and on the project's screen and its "+".
+Instead of a form you tell Claude your idea in a conversation view, without a
+terminal: its replies, its questions as cards (like the Bandeja's) and a text field.
+You can write while it works (the message waits for the end of its turn) or press
+"Detener". Claude reads the code (read-only, it cannot edit) and ends with a
+`Nueva tarea` card with a title and a brief (the idea, a summary, affected areas and
+open questions). "Crear" puts the task in the project's **backlog** with that brief as
+its notes, and its history says "Creada desde la conversación «name»"; you review or
+edit it and start it as any other. The conversation stays open and keeps its history,
+also after restarting Delilah. Project sessions ("Preguntar a Claude") can create
+tasks the same way; a task's own sessions cannot.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself

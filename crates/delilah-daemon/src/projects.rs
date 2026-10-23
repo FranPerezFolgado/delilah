@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use delilah_agents::suggest;
+use delilah_agents::{oneshot, suggest};
 use delilah_core::{FieldError, Project, ProjectKind, ProjectSettings};
 use serde::Deserialize;
 
@@ -49,6 +49,7 @@ pub async fn add_project(
         kind: new.kind,
         workflow: new.workflow,
         settings: Default::default(),
+        preview_command: None,
     };
     app.store.create_project(&project).await?;
     app.emit(crate::events::Topic::Projects);
@@ -62,6 +63,17 @@ pub struct ProjectChange {
     pub path: Option<PathBuf>,
     pub kind: Option<ProjectKind>,
     pub workflow: Option<String>,
+    /// Absent keeps the command; `null` or `""` clears it; text sets it.
+    #[serde(default, deserialize_with = "present")]
+    pub preview_command: Option<Option<String>>,
+}
+
+/// Tells a field that is absent (`None`) from one that is `null` (`Some(None)`).
+fn present<'de, D>(de: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Option<String> as Deserialize>::deserialize(de).map(Some)
 }
 
 /// `PATCH /api/v1/projects/{name}`
@@ -109,6 +121,13 @@ pub async fn update_project(
         app.store
             .set_project_settings(&project.name, &project.settings)
             .await?;
+    }
+    if let Some(command) = &change.preview_command {
+        let command = command.as_deref().map(str::trim).filter(|c| !c.is_empty());
+        app.store
+            .set_preview_command(&project.name, command)
+            .await?;
+        project.preview_command = command.map(str::to_string);
     }
     app.emit(crate::events::Topic::Projects);
     app.emit(crate::events::Topic::Tasks);
@@ -362,9 +381,9 @@ pub async fn suggest_submodules(
         app.lang().name(),
     );
 
-    let mut cmd = tokio::process::Command::new("claude");
+    let mut cmd = tokio::process::Command::new(&app.config.claude_bin);
     cmd.env_clear()
-        .envs(suggest::env())
+        .envs(oneshot::env())
         .args(suggest::args(&prompt))
         .current_dir(&project.path)
         .stdin(std::process::Stdio::null())
@@ -478,6 +497,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::post("/api/v1/projects/inspect")
@@ -572,6 +593,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            agent_program: None,
+            claude_bin: "claude".into(),
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
         for (path, kind) in [("parent", "parent"), ("parent/svc-orders", "repo")] {
@@ -621,7 +644,7 @@ mod tests {
     async fn list_reports_default_settings() {
         let env = env().await;
         let p = project(&env, "parent").await;
-        assert_eq!(p["settings"]["branch"], "feature/{ticket}");
+        assert_eq!(p["settings"]["branch"], Value::Null);
         assert_eq!(p["settings"]["workspace"], "checkout");
         assert!(p["settings"]["shared"].as_array().unwrap().is_empty());
         std::fs::remove_dir_all(&env.dir).unwrap();
@@ -649,7 +672,7 @@ mod tests {
         assert_eq!(saved["settings"]["submodules"]["always"][0], "svc-orders");
         // Missing fields are defaults: a PUT replaces.
         let (_, body) = put(&env, "parent", json!({ "setup": "   " })).await;
-        assert_eq!(body["settings"]["branch"], "feature/{ticket}");
+        assert_eq!(body["settings"]["branch"], Value::Null);
         assert!(body["settings"]["setup"].is_null());
         std::fs::remove_dir_all(&env.dir).unwrap();
     }
@@ -678,7 +701,7 @@ mod tests {
         );
         assert!(body["error"].as_str().unwrap().contains("branch"));
         let saved = project(&env, "parent").await;
-        assert_eq!(saved["settings"]["branch"], "feature/{ticket}");
+        assert_eq!(saved["settings"]["branch"], Value::Null);
         std::fs::remove_dir_all(&env.dir).unwrap();
     }
 
@@ -808,5 +831,68 @@ mod tests {
                 .is_empty()
         );
         std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn patch_sets_keeps_and_clears_the_preview_command() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        let config = Config {
+            home: std::env::temp_dir(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+            claude_bin: "claude".into(),
+        };
+        let app = crate::api::router(AppState::new(store, config));
+        let send = |method: &'static str, uri: &'static str, body: Option<Value>| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.map(|b| b.to_string()).unwrap_or_default()))
+                    .unwrap();
+                let res = app.oneshot(req).await.unwrap();
+                let bytes = http_body_util::BodyExt::collect(res.into_body())
+                    .await
+                    .unwrap()
+                    .to_bytes();
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null)
+            }
+        };
+        let patch = |body: Value| send("PATCH", "/api/v1/projects/web", Some(body));
+
+        let set = patch(json!({ "preview_command": "npm run dev" })).await;
+        assert_eq!(set["preview_command"], "npm run dev");
+        let listed = send("GET", "/api/v1/projects", None).await;
+        assert_eq!(listed[0]["preview_command"], "npm run dev");
+
+        // Absent keeps it.
+        let kept = patch(json!({ "workflow": "custom" })).await;
+        assert_eq!(kept["preview_command"], "npm run dev");
+        let listed = send("GET", "/api/v1/projects", None).await;
+        assert_eq!(listed[0]["preview_command"], "npm run dev");
+
+        let cleared = patch(json!({ "preview_command": "" })).await;
+        assert_eq!(cleared["preview_command"], Value::Null);
+        patch(json!({ "preview_command": "x" })).await;
+        let cleared = patch(json!({ "preview_command": null })).await;
+        assert_eq!(cleared["preview_command"], Value::Null);
+        let listed = send("GET", "/api/v1/projects", None).await;
+        assert_eq!(listed[0]["preview_command"], Value::Null);
     }
 }

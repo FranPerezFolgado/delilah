@@ -67,6 +67,9 @@ svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-widt
 .c-err { color: var(--err); } .c-done { color: var(--done); } .c-mut { color: var(--tx3); }
 .pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px;
   font-weight: 500; border: 1px solid var(--bd2); white-space: nowrap; }
+.phase-pill { border-color: var(--acc); background: var(--accbg); color: var(--tx); padding-left: 2px; }
+.phase-pill .dot-step { width: 16px; height: 16px; font-size: 10px; border-color: var(--acc); background: var(--acc); color: var(--acctx); }
+.head-pills { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
 
 /* Views */
 .view-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px 12px; border-bottom: 1px solid var(--bd); }
@@ -446,3 +449,73 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .dialog.settings { width: 640px; }
 .settings .shared-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
 .settings .picks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+
+/* Questions with a preview / proposal, and the idea conversation */
+.ask-preview { max-height: 60vh; overflow: auto; border: 1px solid var(--bd); border-radius: 6px; padding: 8px 12px; background: var(--panel); }
+.ask-proposal h3 { margin: 0 0 8px; font-size: 14px; }
+.ask-created a { color: var(--acc); }
+.conv { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.conv-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
+.conv-msg { max-width: 80%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--bd); background: var(--panel); white-space: pre-wrap; }
+.conv-user { align-self: flex-end; background: var(--accbg); border-color: var(--acc); }
+.conv-claude { align-self: flex-start; white-space: normal; }
+.conv-card { align-self: stretch; border: 1px solid var(--bd); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
+.conv-meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.conv-activity, .conv-notice { padding: 4px 16px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.conv-compose { flex: none; display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--bd); }
+.conv-compose textarea { flex: 1; resize: none; min-height: 40px; }
+
+/* Saving mode: the chain of sessions above the tabs, and the header marker. */
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: none; padding: 6px 14px; background: var(--panel); border-bottom: 1px solid var(--bd); font-size: 12.5px; }
+.chain-step { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; color: var(--tx3); }
+.chain-arrow { color: var(--tx3); }
+.chain-name { font-weight: 600; }
+.chain-step.is-done { color: var(--done); }
+.chain-step.is-active { color: var(--tx); }
+.chain-step.is-active .chain-mark { color: var(--run); }
+.chain-step.is-waiting { color: var(--acc); }
+.chain-step .btn { height: 22px; padding: 0 8px; font-size: 12px; }
+.chain .error { flex-basis: 100%; }
+.saving-pill { border-color: var(--acc); color: var(--tx); }
+.saving-off, .saving-on { border: 0; background: transparent; color: var(--tx3); font-size: 11px; cursor: pointer; padding: 0 0 0 4px; }
+.saving-off:hover, .saving-on:hover { color: var(--tx); text-decoration: underline; }
+.saving-on { height: auto; }
+
+/* Pull requests: the badge of a task and the PR tab. */
+.pr-badge { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; }
+.pr-badge svg.i { width: 12px; height: 12px; }
+.pr-badge.pr-open { color: var(--done); } .pr-badge.pr-merged { color: var(--acctx); } .pr-badge.pr-closed { color: var(--err); }
+.pr-badge.pr-draft { color: var(--tx3); }
+.pr-count { font-size: 10px; color: var(--tx2); }
+.pr-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--tx3); }
+.pr-ci-pending { background: var(--pause); } .pr-ci-success { background: var(--done); } .pr-ci-failure { background: var(--err); }
+.pr-view { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow: auto; flex: 1; }
+.pr-head, .pr-link { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pr-link .input { flex: 1; }
+.pr-card { border: 1px solid var(--bd); border-radius: 8px; background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.pr-card-top { display: flex; align-items: center; gap: 8px; }
+.pr-title { color: var(--tx); font-weight: 600; text-decoration: none; cursor: pointer; }
+.pr-title:hover { text-decoration: underline; }
+.pr-chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--bd2); color: var(--tx2); }
+.pr-chip.pr-open { color: var(--done); } .pr-chip.pr-merged { color: var(--acctx); } .pr-chip.pr-closed { color: var(--err); }
+.pr-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.pr-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.pr-checks li { display: flex; align-items: center; gap: 8px; }
+.pr-checks a { color: var(--tx); cursor: pointer; }
+.pr-open { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; }
+.pr-open-body { min-height: 140px; resize: vertical; font-family: inherit; }
+
+.pr-group { display: flex; flex-direction: column; gap: 8px; }
+.pr-group-title { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
+
+/* Autopilot: the mark in the header and on the card, and the paused banner. */
+.autopilot-pill { border-color: var(--acc); color: var(--tx); }
+.autopilot-pill svg.i { width: 12px; height: 12px; }
+.autopilot-pill.autopilot-paused { border-color: var(--pause); color: var(--pause); }
+.autopilot-pill.autopilot-done { border-color: var(--done); color: var(--done); }
+.autopilot-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-basis: 100%; padding: 6px 10px;
+  border: 1px solid var(--pause); border-radius: 6px; font-size: 12.5px; }
+
+.preview-ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.preview-ctl .preview-err { color: var(--tx3); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-setting { display: flex; flex-direction: column; gap: 4px; font-size: 12px; max-width: 520px; }

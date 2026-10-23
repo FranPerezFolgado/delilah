@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { DEFAULT_PROJECT_SETTINGS, type Project, type Task, type TaskStatus } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, type Project, type Session, type Task, type TaskStatus } from "../api";
 import { Sidebar } from "./Sidebar";
+import { setLanguage } from "../i18n";
 
 const web: Project = {
   name: "web",
@@ -17,29 +18,33 @@ const task = (key: string, status: TaskStatus): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
+  saving_mode: false,
+  handoff: null,
   status,
 });
 
-function setup(tasks: Task[]) {
+function setup(tasks: Task[], sessions: Session[] = []) {
   const onDelete = vi.fn();
+  const onIdea = vi.fn();
   const view = render(
     <Sidebar
       view="tasks"
       onView={() => {}}
       tasks={tasks}
       projects={[web]}
-      sessions={[]}
+      sessions={sessions}
       selected={null}
       onSelect={() => {}}
       onOpenSession={() => {}}
       onAsk={() => {}}
+      onIdea={onIdea}
       onNewTask={() => {}}
       onDelete={onDelete}
       waiting={0}
     />,
   );
   const keys = () => [...view.container.querySelectorAll(".srow .key")].map((k) => k.textContent);
-  return { ...view, keys, onDelete };
+  return { ...view, keys, onDelete, onIdea };
 }
 
 afterEach(() => {
@@ -76,5 +81,21 @@ describe("Sidebar backlog", () => {
     fireEvent.contextMenu(container.querySelector(".srow")!);
     fireEvent.click(container.querySelector(".menu.ctx button")!);
     expect(onDelete).toHaveBeenCalledWith(tasks[0]);
+  });
+});
+
+describe("Sidebar ideas", () => {
+  beforeEach(() => setLanguage("es"));
+  afterEach(() => setLanguage("en"));
+  it("starts an idea conversation from the project's second button", () => {
+    const { getByLabelText, onIdea } = setup([]);
+    fireEvent.click(getByLabelText("Nueva tarea con Claude en web"));
+    expect(onIdea).toHaveBeenCalledWith("web");
+  });
+
+  it("lists a conversation session with the idea icon", () => {
+    const s = { id: "s1", task: "@web", kind: "claude", label: "Idea", primary: false, closed: false, live: true, read_only: false, state: "waiting", conversation: true } as Session;
+    const { container } = setup([], [s]);
+    expect(container.querySelector(".srow svg.idea")).not.toBeNull();
   });
 });

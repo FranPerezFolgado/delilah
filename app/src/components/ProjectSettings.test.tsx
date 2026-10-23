@@ -44,6 +44,17 @@ describe("ProjectSettings", () => {
     await waitFor(() => expect(b.container.querySelectorAll(".picks input").length).toBe(2));
   });
 
+  it("an empty branch template is saved as null (Delilah proposes the name)", async () => {
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
+    const onSaved = vi.fn();
+    const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
+    fireEvent.change(branch(container), { target: { value: "" } });
+    expect(branch(container).placeholder).toBeTruthy();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(put).toHaveBeenCalledWith("web", { ...repo.settings, branch: null });
+  });
+
   it("saves the whole settings", async () => {
     const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
     const onSaved = vi.fn();
@@ -56,7 +67,7 @@ describe("ProjectSettings", () => {
 
   it("shows 422 field errors under their fields", async () => {
     vi.spyOn(api, "updateProjectSettings").mockRejectedValue(
-      new ApiError("invalid", 422, false, [
+      new ApiError("invalid", 422, false, undefined, undefined, [
         { field: "branch", code: "x", message: "falta {ticket}" },
         { field: "shared[0].path", code: "y", message: "fuera del proyecto" },
       ]),
@@ -134,7 +145,7 @@ describe("ProjectSettings", () => {
 
   it("shows field errors it cannot place in the general banner", async () => {
     vi.spyOn(api, "updateProjectSettings").mockRejectedValue(
-      new ApiError("invalid", 422, false, [
+      new ApiError("invalid", 422, false, undefined, undefined, [
         { field: "", code: "settings.invalid", message: "cuerpo inválido" },
         { field: "submodules.unknown_key", code: "settings.invalid", message: "clave rara" },
       ]),

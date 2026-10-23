@@ -3,9 +3,10 @@ use std::process::Command;
 
 use delilah_core::ProjectKind;
 use delilah_git::{
-    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, changes,
-    check_workspace, create_workspace, file_diff, leave_checkout, list_submodules,
-    remove_workspace, repo_root, use_checkout,
+    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, branch_taken,
+    branch_tip, changes, check_merged, check_repos, check_workspace, commit_subjects,
+    create_workspace, delete_branch, fetch, file_diff, free_branch, leave_checkout,
+    list_submodules, needs_push, push_branch, remove_workspace, repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -381,4 +382,346 @@ fn the_checkout_is_not_used_with_uncommitted_changes() {
         use_checkout(&repo, &spec, &opts()),
         Err(GitError::Dirty { .. })
     ));
+}
+
+// --- PR helpers: commit_subjects, needs_push, push_branch ---
+
+fn run(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn pr_repo() -> (TempDir, PathBuf, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let remote = tmp.path().join("remote.git");
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    run(
+        tmp.path(),
+        &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+    );
+    run(&repo, &["init", "-b", "main"]);
+    run(&repo, &["config", "user.name", "T"]);
+    run(&repo, &["config", "user.email", "t@example.com"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "base"]);
+    run(
+        &repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    run(&repo, &["push", "-u", "origin", "main"]);
+    (tmp, repo, remote)
+}
+
+#[test]
+fn pr_helpers_subjects_and_push() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    run(&repo, &["checkout", "-b", "feature/x"]);
+    assert!(
+        commit_subjects(&repo, "main", "feature/x", &opts)
+            .unwrap()
+            .is_empty()
+    );
+    run(&repo, &["commit", "--allow-empty", "-m", "first"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "second"]);
+    assert_eq!(
+        commit_subjects(&repo, "main", "feature/x", &opts).unwrap(),
+        vec!["first", "second"]
+    );
+    assert!(needs_push(&repo, "feature/x", &opts).unwrap());
+    push_branch(&repo, "feature/x", &opts).unwrap();
+    assert!(!needs_push(&repo, "feature/x", &opts).unwrap());
+    let heads = Command::new("git")
+        .arg("-C")
+        .arg(&remote)
+        .args(["branch", "--list", "feature/x"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&heads.stdout).contains("feature/x"));
+    run(&repo, &["commit", "--allow-empty", "-m", "third"]);
+    assert!(needs_push(&repo, "feature/x", &opts).unwrap());
+}
+
+#[test]
+fn pr_helpers_reject_dash_branch() {
+    let (_tmp, repo, _remote) = pr_repo();
+    let opts = GitOptions::default();
+    assert!(matches!(
+        push_branch(&repo, "-x", &opts),
+        Err(GitError::InvalidBranch(_))
+    ));
+    assert!(matches!(
+        needs_push(&repo, "-x", &opts),
+        Err(GitError::InvalidBranch(_))
+    ));
+    assert!(matches!(
+        commit_subjects(&repo, "main", "-x", &opts),
+        Err(GitError::InvalidBranch(_))
+    ));
+}
+
+// --- merge check and branch deletion ---
+
+fn head(dir: &Path) -> String {
+    git(dir, &["rev-parse", "HEAD"])
+}
+
+/// A plain repo whose `feature/x` is pushed, and a squash commit lands on the
+/// remote's main. Returns the workspace and the PR head.
+fn merged_repo() -> (TempDir, Workspace, String, PathBuf) {
+    let (tmp, repo, remote) = pr_repo();
+    run(&repo, &["checkout", "-b", "feature/x"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "work"]);
+    run(&repo, &["push", "-u", "origin", "feature/x"]);
+    let pr_head = head(&repo);
+    run(&repo, &["checkout", "main"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "squash of work"]);
+    run(&repo, &["push", "origin", "main"]);
+    run(&repo, &["checkout", "feature/x"]);
+    let ws = Workspace {
+        path: repo,
+        branch: "feature/x".into(),
+        kind: ProjectKind::Repo,
+        submodules: vec![],
+    };
+    (tmp, ws, pr_head, remote)
+}
+
+fn heads(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn check_merged_passes_a_squash_merged_branch() {
+    let (_tmp, ws, pr_head, _remote) = merged_repo();
+    let o = GitOptions::default();
+    check_merged(&ws, &heads(&[(".", &pr_head)]), &o).unwrap();
+}
+
+#[test]
+fn check_merged_refuses_local_commits_after_the_pr_head() {
+    let (_tmp, ws, pr_head, _remote) = merged_repo();
+    run(&ws.path, &["commit", "--allow-empty", "-m", "extra"]);
+    let err = check_merged(&ws, &heads(&[(".", &pr_head)]), &GitOptions::default()).unwrap_err();
+    assert!(matches!(err, GitError::NotMerged { .. }), "{err}");
+    assert!(err.to_string().contains("not in the merged PR"));
+}
+
+#[test]
+fn check_merged_refuses_uncommitted_files() {
+    let (_tmp, ws, pr_head, _remote) = merged_repo();
+    std::fs::write(ws.path.join("wip.txt"), "x\n").unwrap();
+    let err = check_merged(&ws, &heads(&[(".", &pr_head)]), &GitOptions::default()).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+}
+
+#[test]
+fn check_merged_fetches_when_the_pr_head_is_unknown_locally() {
+    let (tmp, ws, _pr_head, remote) = merged_repo();
+    let other = tmp.path().join("other");
+    run(
+        tmp.path(),
+        &["clone", "-q", remote.to_str().unwrap(), "other"],
+    );
+    run(&other, &["config", "user.name", "T"]);
+    run(&other, &["config", "user.email", "t@example.com"]);
+    run(&other, &["checkout", "feature/x"]);
+    run(&other, &["commit", "--allow-empty", "-m", "late"]);
+    run(&other, &["push", "origin", "feature/x"]);
+    let new_head = head(&other);
+    let o = GitOptions::default();
+    check_merged(&ws, &heads(&[(".", &new_head)]), &o).unwrap();
+
+    let bogus = "0123456789012345678901234567890123456789";
+    let err = check_merged(&ws, &heads(&[(".", bogus)]), &o).unwrap_err();
+    assert!(matches!(err, GitError::Command { .. }), "{err}");
+}
+
+#[test]
+fn check_merged_ignores_repos_without_a_head_and_missing_workspaces() {
+    let (_tmp, mut ws, _pr_head, _remote) = merged_repo();
+    run(&ws.path, &["commit", "--allow-empty", "-m", "extra"]);
+    let o = GitOptions::default();
+    check_merged(&ws, &heads(&[]), &o).unwrap();
+    ws.path = ws.path.join("gone");
+    check_merged(&ws, &heads(&[(".", "abc")]), &o).unwrap();
+}
+
+#[test]
+fn check_merged_in_a_parent_refuses_a_dirty_parent_but_not_a_moved_pointer() {
+    let fx = Fixture::new();
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    commit_change(&ws, "svc-payments");
+    let sub = ws.path.join("svc-payments");
+    git(&sub, &["push", "-q", "origin", BRANCH]);
+    let hs = heads(&[("svc-payments", &head(&sub))]);
+
+    // The submodule pointer differs from the parent's commit: not a change.
+    check_merged(&ws, &hs, &opts()).unwrap();
+
+    std::fs::write(ws.path.join("notes.txt"), "x\n").unwrap();
+    let err = check_merged(&ws, &hs, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+    assert!(err.to_string().contains("the parent"), "{err}");
+}
+
+#[test]
+fn fetch_updates_the_remote_refs() {
+    let (tmp, repo, remote) = pr_repo();
+    let other = tmp.path().join("other");
+    run(
+        tmp.path(),
+        &["clone", "-q", remote.to_str().unwrap(), "other"],
+    );
+    run(&other, &["config", "user.name", "T"]);
+    run(&other, &["config", "user.email", "t@example.com"]);
+    run(&other, &["commit", "--allow-empty", "-m", "more"]);
+    run(&other, &["push", "origin", "main"]);
+    fetch(&repo, &GitOptions::default()).unwrap();
+    assert_eq!(git(&repo, &["rev-parse", "origin/main"]), head(&other));
+}
+
+#[test]
+fn delete_branch_removes_it_and_tolerates_missing_or_refuses_current() {
+    let (_tmp, repo, _remote) = pr_repo();
+    let o = GitOptions::default();
+    run(&repo, &["branch", "feature/y"]);
+    delete_branch(&repo, "feature/y", None, &o).unwrap();
+    assert!(
+        git(&repo, &["branch", "--list", "feature/y"]).is_empty(),
+        "branch still there"
+    );
+    delete_branch(&repo, "feature/y", None, &o).unwrap();
+    assert!(delete_branch(&repo, "main", None, &o).is_err());
+    assert!(matches!(
+        delete_branch(&repo, "-x", None, &o),
+        Err(GitError::InvalidBranch(_))
+    ));
+}
+
+#[test]
+fn delete_branch_with_an_expected_tip_deletes_only_that_tip() {
+    let (_tmp, repo, _remote) = pr_repo();
+    let o = GitOptions::default();
+    run(&repo, &["branch", "feature/y"]);
+    let tip = branch_tip(&repo, "feature/y", &o).unwrap().unwrap();
+    assert_eq!(tip, git(&repo, &["rev-parse", "feature/y"]));
+    assert_eq!(branch_tip(&repo, "feature/none", &o).unwrap(), None);
+
+    // The branch moved on since the tip was read: it stays.
+    run(&repo, &["checkout", "-q", "feature/y"]);
+    run(&repo, &["commit", "--allow-empty", "-m", "later"]);
+    run(&repo, &["checkout", "-q", "main"]);
+    assert!(delete_branch(&repo, "feature/y", Some(&tip), &o).is_err());
+    assert!(!git(&repo, &["branch", "--list", "feature/y"]).is_empty());
+
+    let tip = branch_tip(&repo, "feature/y", &o).unwrap().unwrap();
+    delete_branch(&repo, "feature/y", Some(&tip), &o).unwrap();
+    assert!(git(&repo, &["branch", "--list", "feature/y"]).is_empty());
+    // Gone is fine; something that is not a commit id never reaches git.
+    delete_branch(&repo, "feature/y", Some(&tip), &o).unwrap();
+    run(&repo, &["branch", "feature/z"]);
+    assert!(delete_branch(&repo, "feature/z", Some("--stdin"), &o).is_err());
+}
+
+#[test]
+fn check_repos_checks_only_the_labelled_repos() {
+    let f = Fixture::new();
+    let o = GitOptions {
+        allow_file_protocol: true,
+    };
+    let ws = create_workspace(&f.parent(), &f.spec(&["svc-payments", "svc-orders"]), &o).unwrap();
+    std::fs::write(ws.path.join("svc-orders/wip.txt"), "x").unwrap();
+    let only = |l: &str| vec![l.to_string()];
+
+    check_repos(&ws, &only("svc-payments"), &o).unwrap();
+    let err = check_repos(&ws, &only("svc-orders"), &o).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+
+    git(&ws.path.join("svc-orders"), &["add", "."]);
+    git(&ws.path.join("svc-orders"), &["commit", "-q", "-m", "wip"]);
+    let err = check_repos(&ws, &only("svc-orders"), &o).unwrap_err();
+    assert!(matches!(err, GitError::Unpushed { .. }), "{err}");
+}
+
+#[test]
+fn home_of_is_the_repo_under_the_root_and_nothing_outside_it() {
+    let f = Fixture::new();
+    let root = f.parent();
+    let canonical = root.canonicalize().unwrap();
+    assert_eq!(Workspace::home_of(&root, "."), Some(canonical.clone()));
+    assert_eq!(
+        Workspace::home_of(&root, "svc-orders"),
+        Some(canonical.join("svc-orders"))
+    );
+    // Not initialised, missing, or leading out of the root.
+    std::fs::create_dir_all(root.join("plain")).unwrap();
+    assert_eq!(Workspace::home_of(&root, "plain"), None);
+    assert_eq!(Workspace::home_of(&root, "nope"), None);
+    assert_eq!(Workspace::home_of(&root, ".."), None);
+    assert_eq!(
+        Workspace::home_of(&root, "../env/remotes/svc-orders.git"),
+        None
+    );
+}
+
+#[test]
+fn branch_taken_sees_local_and_remote_branches() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    assert!(!branch_taken(&repo, "feature/x", &opts).unwrap());
+    run(&repo, &["branch", "feature/x"]);
+    assert!(branch_taken(&repo, "feature/x", &opts).unwrap());
+    assert!(!branch_taken(&repo, "feature", &opts).unwrap());
+
+    // Only on the remote, after a fetch.
+    run(&repo, &["push", "origin", "feature/x:feature/y"]);
+    run(&repo, &["fetch", "origin"]);
+    assert!(branch_taken(&repo, "feature/y", &opts).unwrap());
+    let _ = remote;
+}
+
+#[test]
+fn branch_taken_handles_remote_names_with_a_slash() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    run(
+        &repo,
+        &["remote", "add", "team/origin", remote.to_str().unwrap()],
+    );
+    run(&repo, &["push", "team/origin", "main:feature/z"]);
+    run(&repo, &["fetch", "team/origin"]);
+    assert!(branch_taken(&repo, "feature/z", &opts).unwrap());
+    assert!(!branch_taken(&repo, "origin/feature/z", &opts).unwrap());
+}
+
+#[test]
+fn free_branch_suffixes_until_free_in_every_dir() {
+    let (_t1, a, _r1) = pr_repo();
+    let (_t2, b, _r2) = pr_repo();
+    let opts = GitOptions::default();
+    let dirs = vec![a.clone(), b.clone()];
+    assert_eq!(free_branch(&dirs, "feature/x", &opts).unwrap(), "feature/x");
+    run(&b, &["branch", "feature/x"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-2"
+    );
+    run(&a, &["branch", "feature/x-2"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-3"
+    );
 }

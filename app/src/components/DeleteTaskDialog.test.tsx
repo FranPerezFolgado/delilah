@@ -11,6 +11,8 @@ const running: Task = {
   workflow: "feature",
   phase: null,
   status: { type: "running" },
+  saving_mode: false,
+  handoff: null,
 };
 
 afterEach(() => {

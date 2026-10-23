@@ -16,6 +16,19 @@ pub struct Config {
     /// One more browser origin allowed to call the API (`DELILAH_UI_ORIGIN`): the UI
     /// of a preview (`scripts/preview.sh`), served on its own port.
     pub ui_origin: Option<String>,
+    /// The `claude` binary for one-shot calls (`DELILAH_CLAUDE_BIN`, default `claude`);
+    /// tests point it at a fake script.
+    pub claude_bin: PathBuf,
+    /// Program to run instead of `claude`; only tests set it.
+    pub agent_program: Option<PathBuf>,
+}
+
+/// The binary named by `DELILAH_CLAUDE_BIN`, or `claude` when unset or empty.
+fn claude_bin_from(value: Option<std::ffi::OsString>) -> PathBuf {
+    match value {
+        Some(v) if !v.is_empty() => PathBuf::from(v),
+        _ => PathBuf::from("claude"),
+    }
 }
 
 impl Config {
@@ -44,12 +57,15 @@ impl Config {
         let ui_origin = std::env::var("DELILAH_UI_ORIGIN")
             .ok()
             .filter(|o| !o.is_empty());
+        let claude_bin = claude_bin_from(std::env::var_os("DELILAH_CLAUDE_BIN"));
         Ok(Self {
             home,
             addr,
             allow_file_protocol,
             notify,
             ui_origin,
+            claude_bin,
+            agent_program: None,
         })
     }
 
@@ -66,7 +82,43 @@ impl Config {
         self.home.join("tasks").join(key)
     }
 
+    /// The Claude Code plugin Delilah writes at start-up (the idea-conversation skill).
+    pub fn plugin_dir(&self) -> PathBuf {
+        self.home.join("plugins/delilah")
+    }
+
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_bin_defaults_to_claude() {
+        assert_eq!(claude_bin_from(None), PathBuf::from("claude"));
+        assert_eq!(claude_bin_from(Some("".into())), PathBuf::from("claude"));
+    }
+
+    #[test]
+    fn claude_bin_reads_the_given_path() {
+        assert_eq!(
+            claude_bin_from(Some("/tmp/fake-claude".into())),
+            PathBuf::from("/tmp/fake-claude")
+        );
+    }
+
+    #[test]
+    fn plugin_dir_is_under_home() {
+        let config = Config {
+            home: PathBuf::from("/tmp/delilah-home"),
+            ..Config::from_env().unwrap()
+        };
+        assert_eq!(
+            config.plugin_dir(),
+            PathBuf::from("/tmp/delilah-home/plugins/delilah")
+        );
     }
 }

@@ -23,7 +23,7 @@ sin setup". Nothing is written into the repo (decision 26). See [research.md](re
 **Primary Dependencies**: axum, sqlx (SQLite), serde/serde_json, portable-pty, tokio,
 clap (CLI); `unicode-normalization` (new, for the slug); React, Vite, vitest + Testing Library
 
-**Storage**: SQLite: `projects.settings` (JSON text), migration `0011_project_settings.sql`
+**Storage**: SQLite: `projects.settings` (JSON text), migration `0016_project_settings.sql`
 
 **Testing**: `cargo test -p delilah-core -p delilah-git -p delilah-agents -p delilah-daemon -p delilah-cli`;
 `cd app && npx tsc --noEmit && npx vitest run`
@@ -53,7 +53,7 @@ ground rules (`CLAUDE.md`) serve as gates instead:
 | Agent hooks/settings outside the repo, clean env | ✅ the setup runs with `agent_env()`; nothing is written into the worktree but the shared entries the user chose |
 | Try changes only in a preview, never 7420 / pkill | ✅ quickstart uses `scripts/preview.sh` |
 | No remote operations without confirming the account | ✅ none |
-| Migrations never edited once shipped | ✅ a new `0011` |
+| Migrations never edited once shipped | ✅ a new `0016` |
 | Contracts (`api.rs` ↔ `api.ts`) | ⚠️ changed, additively: `Project.settings`, a new status, new routes ([contracts/api.md](contracts/api.md)); review with contract-reviewer |
 
 Post-design re-check: no change.
@@ -81,7 +81,7 @@ crates/delilah-core/src/task.rs              # TaskStatus::SetupFailed; events S
 crates/delilah-core/tests/branch_names.json  # shared cases (Rust + TS)
 crates/delilah-git/src/share.rs              # new: share_entries(checkout, worktree, &[SharedEntry]) -> report
 crates/delilah-agents/src/pty.rs             # keep the exit status: exit_code()
-crates/delilah-daemon/migrations/0011_project_settings.sql
+crates/delilah-daemon/migrations/0016_project_settings.sql
 crates/delilah-daemon/src/store_projects.rs  # read/write settings
 crates/delilah-daemon/src/projects.rs        # PUT settings, submodule checks, never filtered out of list/suggest
 crates/delilah-daemon/src/run.rs             # defaults from settings; share; setup or launch; launch path split out
@@ -116,7 +116,7 @@ setup run's lifecycle).
 
 ### 2. Storage and API
 
-- `0011`: `settings TEXT NOT NULL DEFAULT '{}'`. `store_projects` reads it into
+- `0016`: `settings TEXT NOT NULL DEFAULT '{}'`. `store_projects` reads it into
   `Project.settings` (a parse error logs and falls back to defaults) and writes it with
   `set_project_settings(name, &settings)`.
 - `PUT /api/v1/projects/{name}/settings`: validate (core + submodules) → 422 with

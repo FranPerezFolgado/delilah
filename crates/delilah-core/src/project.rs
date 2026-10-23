@@ -40,6 +40,9 @@ pub struct Project {
     /// Per-project settings kept by Delilah (never written into the repo).
     #[serde(default)]
     pub settings: ProjectSettings,
+    /// Command that starts the app for a preview (run in the task's workspace).
+    #[serde(default)]
+    pub preview_command: Option<String>,
 }
 
 /// How a task's workspace is made for a plain-repo project.
@@ -85,21 +88,20 @@ pub struct SubmoduleRules {
 #[serde(default, deny_unknown_fields)]
 pub struct ProjectSettings {
     pub workspace: WorkspaceMode,
-    /// Branch template; `{ticket}` is required, `{slug}` optional.
-    pub branch: String,
+    /// Branch template; `{ticket}` is required, `{slug}` optional. `None` (the
+    /// default) leaves the name to Delilah's proposal (`feature/<descriptive>`).
+    pub branch: Option<String>,
     pub shared: Vec<SharedEntry>,
     /// Command run in a new workspace; `None` (or blank) means none.
     pub setup: Option<String>,
     pub submodules: SubmoduleRules,
 }
 
-pub const DEFAULT_BRANCH_TEMPLATE: &str = "feature/{ticket}";
-
 impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
             workspace: WorkspaceMode::Checkout,
-            branch: DEFAULT_BRANCH_TEMPLATE.to_string(),
+            branch: None,
             shared: Vec::new(),
             setup: None,
             submodules: SubmoduleRules::default(),
@@ -132,43 +134,46 @@ fn err(field: impl Into<String>, code: &str, message: impl Into<String>) -> Fiel
 pub fn validate(settings: &ProjectSettings, kind: ProjectKind) -> Vec<FieldError> {
     let mut errors = Vec::new();
 
-    let branch = settings.branch.trim();
-    if branch.is_empty() {
-        errors.push(err(
-            "branch",
-            "branch.empty",
-            "The branch template is empty.",
-        ));
-    } else {
-        let mut has_ticket = false;
-        let mut rest = branch;
-        while let Some(open) = rest.find('{') {
-            let after = &rest[open + 1..];
-            let Some(close) = after.find('}') else {
-                errors.push(err(
-                    "branch",
-                    "branch.unknown_placeholder",
-                    "Unclosed `{` in the branch template.",
-                ));
-                break;
-            };
-            match &after[..close] {
-                "ticket" => has_ticket = true,
-                "slug" => {}
-                other => errors.push(err(
-                    "branch",
-                    "branch.unknown_placeholder",
-                    format!("Unknown placeholder `{{{other}}}`; use `{{ticket}}` or `{{slug}}`."),
-                )),
-            }
-            rest = &after[close + 1..];
-        }
-        if !has_ticket {
+    if let Some(branch) = settings.branch.as_deref().map(str::trim) {
+        if branch.is_empty() {
             errors.push(err(
                 "branch",
-                "branch.missing_ticket",
-                "The branch template must contain `{ticket}`.",
+                "branch.empty",
+                "The branch template is empty.",
             ));
+        } else {
+            let mut has_ticket = false;
+            let mut rest = branch;
+            while let Some(open) = rest.find('{') {
+                let after = &rest[open + 1..];
+                let Some(close) = after.find('}') else {
+                    errors.push(err(
+                        "branch",
+                        "branch.unknown_placeholder",
+                        "Unclosed `{` in the branch template.",
+                    ));
+                    break;
+                };
+                match &after[..close] {
+                    "ticket" => has_ticket = true,
+                    "slug" => {}
+                    other => errors.push(err(
+                        "branch",
+                        "branch.unknown_placeholder",
+                        format!(
+                            "Unknown placeholder `{{{other}}}`; use `{{ticket}}` or `{{slug}}`."
+                        ),
+                    )),
+                }
+                rest = &after[close + 1..];
+            }
+            if !has_ticket {
+                errors.push(err(
+                    "branch",
+                    "branch.missing_ticket",
+                    "The branch template must contain `{ticket}`.",
+                ));
+            }
         }
     }
 
@@ -310,7 +315,7 @@ mod tests {
     fn default_is_todays_behaviour() {
         let s = ProjectSettings::default();
         assert_eq!(s.workspace, WorkspaceMode::Checkout);
-        assert_eq!(s.branch, "feature/{ticket}");
+        assert_eq!(s.branch, None);
         assert!(s.shared.is_empty());
         assert_eq!(s.setup, None);
         assert!(s.submodules.always.is_empty() && s.submodules.never.is_empty());
@@ -334,11 +339,17 @@ mod tests {
     }
 
     #[test]
+    fn old_settings_without_a_branch_read_as_none() {
+        let s: ProjectSettings = serde_json::from_str(r#"{"workspace":"worktree"}"#).unwrap();
+        assert_eq!(s.branch, None);
+    }
+
+    #[test]
     fn serialises_every_field() {
         let json = serde_json::to_string(&ProjectSettings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"workspace":"checkout","branch":"feature/{ticket}","shared":[],"setup":null,"submodules":{"always":[],"never":[]}}"#
+            r#"{"workspace":"checkout","branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]}}"#
         );
     }
 
@@ -354,22 +365,24 @@ mod tests {
     #[test]
     fn branch_rules() {
         let mut s = settings();
-        s.branch = "feature/x".into();
+        s.branch = Some("feature/x".into());
         assert_eq!(
             fields(&validate(&s, ProjectKind::Repo)),
             [("branch", "branch.missing_ticket")]
         );
-        s.branch = "{ticket}/{foo}".into();
+        s.branch = Some("{ticket}/{foo}".into());
         assert_eq!(
             fields(&validate(&s, ProjectKind::Repo)),
             [("branch", "branch.unknown_placeholder")]
         );
-        s.branch = "  ".into();
+        s.branch = Some("  ".into());
         assert_eq!(
             fields(&validate(&s, ProjectKind::Repo)),
             [("branch", "branch.empty")]
         );
-        s.branch = "{ticket}-{slug}".into();
+        s.branch = Some("{ticket}-{slug}".into());
+        assert!(validate(&s, ProjectKind::Repo).is_empty());
+        s.branch = None;
         assert!(validate(&s, ProjectKind::Repo).is_empty());
     }
 
@@ -428,5 +441,12 @@ mod tests {
                 "case {c}"
             );
         }
+    }
+
+    #[test]
+    fn old_projects_load_without_a_preview_command() {
+        let json = r#"{"name":"p","path":"/tmp/p","kind":"repo","workflow":"feature"}"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert_eq!(project.preview_command, None);
     }
 }

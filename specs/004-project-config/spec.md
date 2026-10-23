@@ -74,7 +74,7 @@ on the branch the template gives.
 
 1. **Given** the template `feature/{ticket}-{slug}`, **When** a task for PROJ-1243
    starts, **Then** its branch is `feature/PROJ-1243-<slug of the title>`.
-2. **Given** no template set, **When** a task starts, **Then** its branch is
+2. **Given** no template set, **When** a task starts, **Then** (amended: no template is the default and means Delilah's proposed name, see FR-007) its branch is
    `feature/<key>`, as today.
 3. **Given** a task started with an explicit branch, **When** it starts, **Then** the
    explicit branch wins over the template.
@@ -207,10 +207,14 @@ worktree option is preselected; start without changing it; the task gets a workt
   to go back to the default), with the same validation as the screen.
 - **FR-006**: The settings MUST include the default workspace mode (checkout or
   worktree); a choice made for one task MUST win over it.
-- **FR-007**: The settings MUST include a branch template with the placeholders
-  `{ticket}` (required; the task key) and `{slug}` (optional; the title, lower-case,
-  letters, digits and hyphens, at most 40 characters); any other placeholder is
-  invalid; an explicit branch for one task MUST win over it.
+- **FR-007**: The settings MAY include a branch template with the placeholders
+  `{ticket}` (required; the task key) and `{slug}` (optional; Claude's short proposal,
+  or the title, lower-case, letters, digits and hyphens, at most 40 characters, when
+  Claude gives none); any other placeholder is invalid; an explicit branch for one task
+  MUST win over it. *Note (after merging task branch names, spec 004-task-branch-names):*
+  the template is optional and `null` by default; with none, the branch is the one
+  Delilah proposes (Claude's descriptive name, `feature/` prefix, `-2`/`-3` when taken).
+  Precedence: typed branch, then template, then proposal. See decision 49.
 - **FR-008**: The settings MUST include shared entries (files or folders relative to the
   project root, never outside it), each copied or linked into a new worktree; linking
   MUST be the default for folders and copying for files. An entry that already exists

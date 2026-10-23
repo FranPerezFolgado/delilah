@@ -1,7 +1,7 @@
 //! Sessions alive in this daemon right now, by session id.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use delilah_agents::pty::PtySession;
@@ -23,6 +23,15 @@ pub enum LiveState {
     Paused,
 }
 
+/// What a conversation's view shows of the turn in progress.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConvoState {
+    /// What the agent is doing right now.
+    pub activity: Option<String>,
+    /// Claude waits on something only its terminal can answer (a permission prompt).
+    pub needs_terminal: bool,
+}
+
 #[derive(Clone)]
 pub struct Live {
     pub id: String,
@@ -35,6 +44,10 @@ pub struct Live {
     /// Clients attached to the terminal right now.
     pub viewers: Arc<AtomicUsize>,
     pub state: Arc<Mutex<LiveState>>,
+    /// An idea conversation (cached from its record, so a hook needs no store read).
+    pub conversation: Arc<AtomicBool>,
+    /// What a conversation's view shows of the turn in progress.
+    pub convo: Arc<Mutex<ConvoState>>,
     events: Events,
 }
 
@@ -53,6 +66,45 @@ impl Live {
         if changed {
             self.events.emit(Topic::Sessions);
         }
+    }
+
+    pub fn is_conversation(&self) -> bool {
+        self.conversation.load(Ordering::Relaxed)
+    }
+
+    pub fn set_conversation(&self, conversation: bool) {
+        self.conversation.store(conversation, Ordering::Relaxed);
+    }
+
+    pub fn activity(&self) -> Option<String> {
+        self.convo.lock().unwrap().activity.clone()
+    }
+
+    pub fn needs_terminal(&self) -> bool {
+        self.convo.lock().unwrap().needs_terminal
+    }
+
+    /// The one way to change the conversation state: tells the view once, and only
+    /// when something changed.
+    pub fn update_convo(&self, change: impl FnOnce(&mut ConvoState)) {
+        let changed = {
+            let mut convo = self.convo.lock().unwrap();
+            let before = convo.clone();
+            change(&mut convo);
+            *convo != before
+        };
+        if changed {
+            self.events.emit(Topic::Conversations);
+        }
+    }
+
+    pub fn set_activity(&self, activity: Option<String>) {
+        self.update_convo(|c| c.activity = activity);
+    }
+
+    /// A turn starts or ends: nothing is being done, nothing waits on the terminal.
+    pub fn reset_turn_state(&self) {
+        self.update_convo(|c| *c = ConvoState::default());
     }
 }
 
@@ -93,6 +145,8 @@ impl Sessions {
                 SessionKind::Shell | SessionKind::Setup => LiveState::Working,
                 SessionKind::Claude => LiveState::Starting,
             })),
+            conversation: Arc::default(),
+            convo: Arc::default(),
             events: self.events.clone(),
         };
         self.live

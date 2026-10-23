@@ -35,7 +35,7 @@ Source: specs/004-project-config/tasks.md · 57 pending tasks · 24 packages
 ## WP-04 Settings storage and migration
 - Phase: 2 Foundational
 - Tasks: T005, T008, T009
-- Files: crates/delilah-daemon/migrations/0011_project_settings.sql, crates/delilah-daemon/src/store_projects.rs
+- Files: crates/delilah-daemon/migrations/0016_project_settings.sql, crates/delilah-daemon/src/store_projects.rs
 - Depends on: WP-02
 - Parallel group: 2B
 - Acceptance: FR-001, FR-002, FR-017 — projects read back with default settings, `set_project_settings` round-trips, bad stored value reads as defaults

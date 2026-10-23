@@ -187,6 +187,8 @@ async fn spawn_setup(
         primary: false,
         closed: false,
         read_only: true,
+        conversation: false,
+        step: None,
     };
     app.store.create_session(&session).await?;
     let log = dir.join(format!("{}-{}.log", session.kind.name(), session.id));
@@ -400,6 +402,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let settings = delilah_core::ProjectSettings {
@@ -412,6 +416,7 @@ mod tests {
                 path: parent.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
                 settings,
             })
             .await
@@ -444,6 +449,8 @@ mod tests {
             custom_prompt: false,
             notes: None,
             adopted: None,
+            saving_mode: false,
+            autopilot: false,
         }
     }
 

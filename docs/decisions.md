@@ -94,6 +94,46 @@ a "carry on" prompt. Because the subscription is shared, a limit hit by any
 session pauses the task. The real `StopFailure` payload for a limit has not been
 observed yet (see the spike).
 
+**34. The idea conversation runs with `dontAsk` and an explicit allow list.**
+`--permission-mode dontAsk` plus `permissions.allow`/`deny` in the session's
+settings file lets Claude read code without a terminal prompt. Allowed: `Read(./**)`
+(the checkout) plus `Read(//<dir>/**)` for each `--add-dir`, AskUserQuestion,
+`Skill(delilah:task-from-idea)`, TodoWrite, `git status` and `ls`, each Bash rule also
+in its RTK form (`rtk git status:*`, ...): user-level PreToolUse hooks such as RTK
+rewrite commands and allow rules match the rewritten command. Denied: Edit,
+MultiEdit, Write, NotebookEdit and reading secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+`~/.config/gh`, `.env` files), so a prompt injection in the repo cannot copy them
+into a brief. `--setting-sources user` drops the repo's `.claude/settings*.json`, so
+a cloned repo cannot widen the list; the user's own settings and hooks stay, so
+broad allow rules in `~/.claude/settings.json` still apply. `--strict-mcp-config`
+keeps project and user MCP servers out. `rg` and `git log/show/diff` were dropped:
+`rg --pre` runs programs and `--output` writes files. Checked against claude 2.1.292
+(which has no separate Grep/Glob tools). Every session's prompt goes after `--`, so
+a prompt starting with `-` is never read as an option.
+
+**35. Tasks from ideas: the daemon creates them on the confirmation card.**
+Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card
+(title and brief in the `Crear` option's preview); when the user answers `Crear`, the
+daemon creates the backlog task and then returns the answer, with the key, to Claude.
+So a task exists only after a click, and the same code serves the idea
+conversation and project sessions. Rejected: Claude calling the `delilah` CLI or
+`curl` (needs Bash permissions, and nothing stops it from creating tasks unasked)
+and a Delilah MCP tool (a new server to run and configure, for what the existing
+ask hook already does). The brief is written by Claude, so it can be edited before
+the task starts.
+
+**36. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
+of plan mode; a plugin passed to project-owned sessions.**
+- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY.
+- **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#34](decisions.md) for the allow list.
+- **A session-only plugin.** The `task-from-idea` skill ships in `<home>/plugins/delilah`, passed with `--plugin-dir` to project-owned sessions only (task sessions never get it), so nothing is installed in the user's Claude.
+- **Spike findings** (`specs/004-task-from-idea/research.md`, claude 2.1.292):
+  - Edit and Write in `deny` are removed from the session, and `npm install` is refused without a prompt;
+  - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #34;
+  - AskUserQuestion reaches PreToolUse in `dontAsk`, with the preview intact, and the answer returns verbatim (accents and dashes included);
+  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
+  - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
+
 ## Workflows and tasks
 
 **15. SpecKit is the first workflow, through the user's `/feature` wrapper.**
@@ -130,20 +170,18 @@ is kept by the daemon and edited from a settings screen and the CLI. A
 Sharing settings through the repo can come later, as a base the stored settings
 override. See `specs/004-project-config`.
 
-Also ruled out: a preview endpoint for branch names (the UI has a TypeScript
-mirror of the slug rules instead, checked against the same test cases), and hard
-links for shared folders (they do not work across volumes or for folders).
+Also ruled out: hard links for shared folders (they do not work across volumes or for folders).
 
 **27. A field error has a stable `code`; the daemon writes the message.** Settings
 validation returns `FieldError { field, code, message }`. The app and CLI can
 rely on the code, and the message comes from the daemon in the user's language.
 
-**28. Settings are JSON in `projects.settings`.** Migration 0011 adds the column.
+**28. Settings are JSON in `projects.settings`.** Migration 0016 adds the column.
 Unknown keys are rejected (`deny_unknown_fields`, a 422 with the fields), so a typo
 does not pass silently. A stored value that cannot be read gives the defaults and
 a warning instead of breaking the project.
 
-**29. The branch template's slug.** The title goes through NFKD, loses its marks,
+**29. The branch template's slug** (when the project has a template; see 49). The title goes through NFKD, loses its marks,
 becomes ASCII lower case with `-`, and is cut to 40 characters at a hyphen.
 Around an empty `{slug}` the `/`, `-`, `_` and `.` next to it are dropped. Rust
 and TypeScript implement it twice and share
@@ -204,3 +242,164 @@ repos is ever referenced or copied. Development uses
 (FranPerezFolgado). The machine also has work credentials, so confirm the account
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
+
+## Pull requests
+
+**26. GitHub through the user's `gh`, with no token in the daemon (2026-10-20).**
+Delilah runs the `gh` the user already has, on the login shell's PATH, behind a
+`Gh` trait so tests and previews can swap it (`DELILAH_GH_BIN`). `gh` already
+holds the tokens, honours `gh repo set-default` and talks to Enterprise hosts
+like the agent's own `gh pr create`. Storing a GitHub token in the daemon
+(Keychain or settings) and calling the API with `reqwest` or octocrab was ruled
+out: it copies a credential and adds a client. When `gh` is missing, signed out
+or without access, the PR tab says so and the Bandeja notifies once.
+
+**27. PRs are polled every 30 s, not pushed by webhooks (2026-10-20).** The daemon
+is on loopback behind no public address, so GitHub cannot reach it; a tunnel or
+a GitHub App would be new infrastructure and a new credential. One GraphQL call
+per open PR every 30 s is far under the rate limit, with back-off after a
+failure and an immediate check when a task is opened or the agent pushes.
+
+**28. PR notices are rows, not derived state (2026-10-20).** The inbox items for
+CI, reviews and a blocked archive live in `pr_notices`, unique per cause and
+resolved rather than deleted. Unlike session attention they cannot be recomputed
+from the snapshot: one already sent to the agent or dismissed must stay gone
+after a restart.
+
+**29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
+A failed CI or a review only reaches the Bandeja; "Pedir al agente que lo
+arregle" sends it, as comments to consider, not as instructions from the user.
+Auto-forwarding was ruled out: it would spend the subscription and let a
+reviewer's text steer the agent unseen.
+
+**30. Notify for comments from anyone but the signed-in account (2026-10-20).**
+Other people and bots count; only the user's own comments are skipped. Filtering
+bots was ruled out, since a CI bot's review is often the thing to read.
+
+**31. A merged task archives without asking, unless that would lose work
+(2026-10-21).** When every linked PR is merged the task is marked done and
+archived at once. Asking first was ruled out: the merge is the confirmation. The
+guard stays: every repo with a PR must be clean and its local branch contained
+in the PR's head (so squash and rebase merges pass), else an `archive-blocked`
+item offers a forced archive. The task's local branches are deleted at the
+verified sha, never the parent's and never a remote one. A branch left behind
+raises `archive-partial`, and archiving by hand finishes it. This overrides decision 18's "a checkout never refuses" for the
+merge archive only.
+
+**32. Repos without a PR never lose work; the merge archive checks every repo
+(2026-10-21).** A merge in one repo must not archive away another that has no PR:
+the check covers every repo of the workspace. One without a PR blocks the archive
+if it is dirty or has unpushed commits, and keeps its branch. A failed fetch blocks
+too, and the workspace is released without force. Deleting a branch compares it to
+the verified sha first, so a commit made after the check survives.
+
+**37. Task branches are named by Claude from the title, and never reused or renamed
+(2026-10-22).** A headless Claude (haiku, no tools, run in a temp dir so no project
+files load, `--setting-sources user` plus `disableAllHooks`, no session persistence)
+proposes 2-4 words. If it fails or is slow: a slug of the title, then the key. A Jira
+key stays in the name (`feature/PROJ-12-retry-payments`); a free task's `LIBRE-n` is
+dropped, since it says nothing. A taken name (local or remote-tracking refs, in every
+repo of the workspace, also in checkout mode) gets `-2`, `-3`…; this replaces the old
+switch-to-existing for an explicit `--branch`. The name is never changed after the
+task starts, because the PR, the worktree and the stored run depend on it. `--bare`
+was ruled out for the Claude call: it skips OAuth and keychain auth, so it would not
+use the user's login. The task's agent naming its own branch was ruled out too: the
+branch must exist before the agent starts.
+
+## Saving mode
+
+**33. Saving mode: a fresh session per phase.** It relaxes decision 15, which said
+Delilah never drives SpecKit's phases: Delilah still never drives what happens inside a
+phase, it only starts a new session between phases. With the option on, each phase (spec and
+plan, implementation, review) runs in its own Claude session, started from the spec
+files and git, which already hold everything the next phase needs.
+- **Why:** every turn re-reads the whole conversation. On LIBRE-3 (153 turns) the context grew from ~44k tokens to ~364k, ~33M re-read against 130k written. Estimated saving by cuts: ~37 % with one (planning → implementation), ~49 % with two (+ before the review), ~60 % cutting between implementation phases too. Each session pays its own base (~45-60k), so the returns diminish. Measure it per task from the sessions' transcripts (research R8, [quickstart](../specs/004-saving-mode/quickstart.md)); target: 30 % fewer tokens.
+- **Opt-in per task**, default from a preference: on a high usage limit it only adds handoffs.
+- **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
+- **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
+
+## Autopilot
+
+**38. Autopilot is a policy over saving mode, not a second engine (2026-10-22).** A task
+with autopilot runs plan → implement → review → draft PR by itself. `handoff.rs` keeps
+owning the step sessions, the persisted handoff and recovery; `autopilot/` only changes
+who confirms a handoff (`shape`), what each session is told, and what happens after the
+review. State is one nullable JSON column, `tasks.autopilot`, written before each side
+effect, so a restart repeats nothing; it implies saving mode.
+- **Ruled out:** a parallel state machine on the same hooks (two owners of the primary session, double starts); editing the user's global skills with an `--autopilot` argument (outside this repo; the session prompt already overrides their stops, and the skills can learn it later).
+
+**39. One nudge per step, and recommended answers inside the hook (2026-10-22).** This
+stretches #15 and #33 (Delilah never acts inside a phase): after a turn end that reaches
+no boundary, the primary session gets one typed nudge per step, and a second stall pauses.
+The workflow's approval stops are plain text, so without it nearly every plan step would
+pause; unlimited nudges could loop. A question whose every item has exactly one option
+labelled "(Recommended)" is answered in the AskUserQuestion hook (no inbox item, history
+`autopilot-answered`); any other question pauses. Delilah still never drives the
+workflow's own phases.
+
+**40. Autopilot pushes and opens a draft PR with the user's own `gh` (2026-10-22).** It
+does so without asking at that moment, like "Abrir PR" (#26): the user opted in per task,
+the PR is a draft, and nothing is merged. The stage `opening_pr` is persisted and PRs are
+re-detected first, so a restart never opens a second one.
+
+**41. The daemon owns previews, not the agent (2026-10-22).** A preview an agent starts
+outlives its session with nobody to stop it. The daemon runs the project's
+`preview_command` in the task's workspace, stops it with the task (done, failed, archived,
+deleted) and at shutdown, and keeps it in memory only: a restart does not adopt it. It
+runs in a login shell because launchd's PATH lacks cargo and npm, with the agents' clean
+environment, so the daemon's own variables (tokens) do not reach the dev server. The
+command is trusted user configuration: like an agent, it runs whatever it says, and what
+guards it is the API's Origin and loopback `Host` checks, not the route.
+
+**42. The PR body keeps loopback preview URLs, without userinfo, query or fragment
+(2026-10-22).** The spec wants the preview URL in the PR, and for this repo it is
+`localhost`. Credentials and tokens in a URL must not reach a possibly public PR, and
+neither must a tunnel or LAN URL: a non-loopback host leaves the line out.
+
+**43. The agent's own "(Recommended)" label is trusted; permission prompts are never
+answered (2026-10-22).** Automatic answers pick the option the agent marked. Accepted
+risk: a destructive option the agent marks as recommended would be picked. A permission
+prompt always pauses the autopilot instead.
+
+**44. Process groups are signalled with `/bin/kill -- -<pgid>` (2026-10-22).** The
+workspace forbids `unsafe`, so no `libc::killpg`. The waiter task owns the child; a
+delayed KILL is sent only if the leader has not been reaped, so a reused pid is never
+hit. Accepted cost: a child that ignores SIGTERM after its leader has exited is not
+killed.
+
+**45. Autopilot state changes are compare-and-set (2026-10-22).** `Store::update_autopilot`
+writes only if the stored value is still the one the closure saw, so a pause or "off"
+that came in during a finish (a preview wait takes minutes) is never overwritten. The
+finish's writes also check they still belong to the same review session.
+
+**46. "Can have autopilot" means a task on the `feature` (spec) workflow (2026-10-22).**
+Not a project session, not another workflow: without spec files there are no handoffs.
+Enforced on every entry point (task create, backlog, `PATCH`, the autopilot endpoint, the
+proposal card) with a 409 `not-spec-workflow`.
+
+**47. Recovering an interrupted finish needs `Autopilot.review_session` (2026-10-22).** It
+names the outcome file to read. Autopilots stored before the field existed do not
+auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
+
+**48. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
+project sessions create tasks, so a card is not tied to an idea conversation; only a
+closed session's card is refused.
+
+**49. The branch template is optional and sits between a typed name and Claude's proposal
+(2026-10-23).** Two features named branches: per-project settings (a `{ticket}`/`{slug}`
+template) and task branch names (Claude proposes a descriptive `feature/…` name, 37). They
+are combined, not chosen between. `ProjectSettings.branch` is `null` by default, which is
+exactly 37's behaviour. With a template, the template decides the format: `{ticket}` is the
+key (a free task's `LIBRE-n`), `{slug}` is Claude's short proposal, or the title's `slug()`
+when Claude fails or is slow (the call is skipped when the template has no `{slug}`).
+Precedence at a start: a branch typed in the request, then the template, then 37's
+proposal; every path goes through the `-2`, `-3` free-name logic. A typed branch is
+normalised by 37's `custom_for` when there is no template; with a template it is kept as
+typed (case, `/`, `.`, `_`) and only made safe for git (`sanitize_typed`), because the
+dialog fills the field with the template's full branch and slugging that again would turn
+`fix/PROJ-1-x` into `feature/fix-proj-1-x`. `POST …/branch-name` returns the
+template-expanded branch when there is a template, so the "Rama" field shows what will be
+used; the dialog shows the TypeScript mirror's guess until it answers and sends the field
+only if the answer arrived or the user typed. A blank template is not saved: the screen
+and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
+`branch.empty`.

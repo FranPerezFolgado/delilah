@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
-use delilah_core::{Event, ProjectKind, Task, TaskKey, TaskStatus};
+use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -20,6 +20,35 @@ use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 
 /// How long a new session may show the folder-trust dialog before we stop watching.
 const TRUST_WATCH: Duration = Duration::from_secs(60);
+
+/// Added to the system prompt of an idea conversation.
+const IDEA_PROMPT: &str = "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode.";
+
+/// How a Claude session is launched, by what it is: a conversation never asks
+/// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
+/// the plugin (which can create tasks) goes only to project sessions, never to a
+/// task's agents.
+fn launch_flags(
+    session: &SessionRecord,
+    config: &crate::config::Config,
+) -> (
+    claude::Permission,
+    Option<std::path::PathBuf>,
+    Option<&'static str>,
+) {
+    let permission = if session.conversation {
+        claude::Permission::DontAsk
+    } else if session.read_only {
+        claude::Permission::Plan
+    } else {
+        claude::Permission::Default
+    };
+    let plugin_dir = project_of(&session.task)
+        .is_some()
+        .then(|| config.plugin_dir());
+    let prompt = session.conversation.then_some(IDEA_PROMPT);
+    (permission, plugin_dir, prompt)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
@@ -39,7 +68,8 @@ pub struct RunRequest {
     /// `parent` projects only: the submodules the task touches.
     #[serde(default)]
     pub submodules: Vec<String>,
-    /// Defaults to `feature/<key>`.
+    /// Defaults to the project's branch template if it has one, else to a name Claude
+    /// proposes from the title, as `feature/…`; always normalised and made unique.
     pub branch: Option<String>,
     /// Defaults to `/feature <key>` for the `feature` workflow (`/feature <title>`
     /// for a free task).
@@ -51,6 +81,14 @@ pub struct RunRequest {
     /// Left out: what a backlog task chose, else the project's default workspace.
     #[serde(default)]
     pub in_checkout: Option<bool>,
+    /// Saving mode: each phase runs in a fresh session. Left out: what a backlog
+    /// task chose, else the `saving-mode` preference.
+    #[serde(default)]
+    pub saving_mode: Option<bool>,
+    /// Autopilot: the chain runs by itself until the PRs are open. Implies saving
+    /// mode. Left out: what a backlog task chose, else off.
+    #[serde(default)]
+    pub autopilot: Option<bool>,
     /// A Claude session of the project to carry on as the task's primary one, with
     /// its conversation ("Convertir en tarea"). Implies a free task in the checkout.
     pub from_session: Option<String>,
@@ -105,6 +143,24 @@ pub async fn start_run(
             req.project = task.project.clone().unwrap_or_default();
         }
     }
+    let saving_mode = match (req.saving_mode, &existing) {
+        (Some(on), _) => on,
+        (None, Some(task)) => task.saving_mode,
+        (None, None) => saving_mode_preference(&app).await,
+    };
+    if req.autopilot == Some(true) && req.saving_mode == Some(false) {
+        return Err(ApiError::bad_request(
+            "autopilot needs saving mode: it cannot run with saving mode off",
+        ));
+    }
+    // Autopilot on implies saving mode; saving mode off turns an inherited one off.
+    let saving_mode = saving_mode || req.autopilot == Some(true);
+    let autopilot = saving_mode
+        && match (req.autopilot, &existing) {
+            (Some(on), _) => on,
+            (None, Some(task)) => task.autopilot.is_some(),
+            (None, None) => false,
+        };
     if req.title.trim().is_empty() {
         return Err(ApiError::bad_request(match req.free {
             true => "say what the free task is about",
@@ -165,6 +221,9 @@ pub async fn start_run(
         .clone()
         .or_else(|| existing.as_ref().map(|t| t.workflow.clone()))
         .unwrap_or_else(|| project.workflow.clone());
+    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+        return Err(crate::autopilot::not_spec_workflow(&key));
+    }
     let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
         (None, "feature") if req.free => format!("/feature {}", req.title.trim()),
@@ -175,6 +234,23 @@ pub async fn start_run(
             )));
         }
     };
+
+    // Named before anything is created, so a refused name leaves a backlog task as it is.
+    let notes = req
+        .notes
+        .clone()
+        .or_else(|| existing.as_ref().and_then(|t| t.notes.clone()));
+    let branch = crate::branch_name::for_start(
+        &app,
+        &project,
+        &req.key,
+        &req.title,
+        notes.as_deref(),
+        req.free,
+        &req.submodules,
+        req.branch.as_deref(),
+    )
+    .await?;
 
     if in_checkout {
         match app.store.checkout_user(&project.path).await? {
@@ -204,11 +280,21 @@ pub async fn start_run(
                 notes: req.notes.clone(),
                 in_checkout: Some(in_checkout),
             };
-            app.store.update_backlog_task(&key, &change).await?.notes
+            let updated = app.store.update_backlog_task(&key, &change).await?;
+            if updated.saving_mode != saving_mode {
+                app.store.set_saving_mode(&key, saving_mode).await?;
+            }
+            if updated.autopilot.is_some() != autopilot {
+                let value = autopilot.then(new_autopilot);
+                app.store.set_autopilot(&key, value.as_ref()).await?;
+            }
+            updated.notes
         }
         None => {
             let mut task = Task::new(key.clone(), req.title.trim(), &workflow);
             task.project = Some(project.name.clone());
+            task.saving_mode = saving_mode;
+            task.autopilot = autopilot.then(new_autopilot);
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
             app.store.create_task(&task).await?;
             task.notes
@@ -216,14 +302,12 @@ pub async fn start_run(
     };
     app.transition(&key, Event::Start).await?;
 
-    let spec = workspace_spec(
-        app.config.workspaces_dir().join(&req.key),
-        &project,
-        req.branch.as_deref(),
-        &key,
-        &req.title,
-        &req.submodules,
-    );
+    let spec = WorkspaceSpec {
+        path: app.config.workspaces_dir().join(&req.key),
+        branch,
+        kind: project.kind,
+        submodules: req.submodules.clone(),
+    };
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
@@ -261,6 +345,12 @@ pub async fn start_run(
                     if let Err(e) = app.store.update_backlog_task(&key, &undo).await {
                         tracing::warn!(task = %key, "cannot put it back as it was: {e}");
                     }
+                    if let Err(e) = app.store.set_saving_mode(&key, task.saving_mode).await {
+                        tracing::warn!(task = %key, "cannot put saving mode back: {e}");
+                    }
+                    if let Err(e) = app.store.set_autopilot(&key, task.autopilot.as_ref()).await {
+                        tracing::warn!(task = %key, "cannot put autopilot back: {e}");
+                    }
                 }
                 None => {
                     app.transition(
@@ -285,6 +375,8 @@ pub async fn start_run(
         custom_prompt: req.prompt.is_some(),
         notes,
         adopted,
+        saving_mode,
+        autopilot,
     };
 
     // A new worktree gets the shared entries and then the setup; the project's own
@@ -365,8 +457,9 @@ pub(crate) async fn start_agent(
     ws: &delilah_git::Workspace,
     launch: AgentLaunch,
 ) -> Result<(), LaunchError> {
+    // A test that names an `agent_program` (a fake `claude`) wants the real launch.
     #[cfg(test)]
-    {
+    if app.config.agent_program.is_none() {
         let _ = (ws, launch);
         app.store
             .create_session(&SessionRecord {
@@ -377,11 +470,12 @@ pub(crate) async fn start_agent(
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
+                step: None,
             })
             .await?;
-        Ok(())
+        return Ok(());
     }
-    #[cfg(not(test))]
     launch_agent(app, key, ws, launch).await
 }
 
@@ -418,6 +512,10 @@ pub(crate) struct AgentLaunch {
     pub notes: Option<String>,
     /// A session of the project to carry on as the primary one.
     pub adopted: Option<SessionRecord>,
+    /// Saving mode: the first session is the plan step.
+    pub saving_mode: bool,
+    /// Autopilot answers the workflow's questions itself.
+    pub autopilot: bool,
 }
 
 /// The launch as kept in the task dir (the session is stored by id only).
@@ -429,6 +527,10 @@ struct SavedLaunch {
     notes: Option<String>,
     /// Id of the project's Claude session being carried on, if any.
     adopted: Option<String>,
+    #[serde(default)]
+    saving_mode: bool,
+    #[serde(default)]
+    autopilot: bool,
 }
 
 impl From<&AgentLaunch> for SavedLaunch {
@@ -439,6 +541,8 @@ impl From<&AgentLaunch> for SavedLaunch {
             custom_prompt: l.custom_prompt,
             notes: l.notes.clone(),
             adopted: l.adopted.as_ref().map(|s| s.id.clone()),
+            saving_mode: l.saving_mode,
+            autopilot: l.autopilot,
         }
     }
 }
@@ -484,6 +588,8 @@ pub(crate) async fn load_launch(app: &AppState, key: &TaskKey) -> Result<AgentLa
         custom_prompt: saved.custom_prompt,
         notes: saved.notes,
         adopted,
+        saving_mode: saved.saving_mode,
+        autopilot: saved.autopilot,
     })
 }
 
@@ -495,7 +601,6 @@ pub(crate) fn forget_launch(app: &AppState, key: &TaskKey) {
 /// Everything after the workspace is ready: the ticket and notes the agent is
 /// pointed at, then its primary session (an adopted one or a new one). Owns what it
 /// needs, so it can run from a background task as well as from the request.
-#[cfg_attr(test, allow(dead_code))]
 pub(crate) async fn launch_agent(
     app: &AppState,
     key: &TaskKey,
@@ -508,6 +613,8 @@ pub(crate) async fn launch_agent(
         custom_prompt,
         notes,
         adopted,
+        saving_mode,
+        autopilot,
     } = launch;
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
@@ -556,19 +663,83 @@ pub(crate) async fn launch_agent(
         launch_session(app, &session, &ws.path, None, true)?;
         app.emit(crate::events::Topic::Sessions);
     } else {
-        let session = SessionRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            task: key.to_string(),
-            kind: SessionKind::Claude,
-            label: app.lang().pick("Principal", "Main").into(),
-            primary: true,
-            closed: false,
-            read_only: false,
-        };
+        let (session, prompt) = first_session(app, key.as_str(), saving_mode, autopilot, prompt);
         app.store.create_session(&session).await?;
         launch_session(app, &session, &ws.path, Some(&prompt), false)?;
     }
     Ok(())
+}
+
+/// The `saving-mode` preference: off unless the user turned it on.
+async fn saving_mode_preference(app: &AppState) -> bool {
+    let value: Option<serde_json::Value> =
+        app.store.setting("pref:saving-mode").await.ok().flatten();
+    value
+        .as_ref()
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// A fresh autopilot: running, nothing nudged yet.
+fn new_autopilot() -> delilah_core::Autopilot {
+    delilah_core::Autopilot {
+        state: delilah_core::AutopilotState::Running,
+        stage: None,
+        reason: None,
+        since: chrono::Utc::now(),
+        nudged: None,
+        review_session: None,
+    }
+}
+
+/// A task's first (main) session and the prompt it starts with. In saving mode it is
+/// the plan step, told to stop once the tasks are written; with autopilot it is also
+/// told to answer the workflow's questions itself.
+fn first_session(
+    app: &AppState,
+    task: &str,
+    saving_mode: bool,
+    autopilot: bool,
+    prompt: String,
+) -> (SessionRecord, String) {
+    let lang = app.lang();
+    let (label, step, prompt) = match saving_mode {
+        true => (
+            crate::handoff::step_label(lang, Step::Plan).to_string(),
+            Some(Step::Plan),
+            match autopilot {
+                true => format!(
+                    "{prompt} {}",
+                    crate::autopilot::autopilot_plan_note(lang, task)
+                ),
+                false => format!("{prompt} {}", crate::handoff::plan_note(lang)),
+            },
+        ),
+        false => (lang.pick("Principal", "Main").to_string(), None, prompt),
+    };
+    let session = SessionRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        task: task.to_string(),
+        kind: SessionKind::Claude,
+        label,
+        primary: true,
+        closed: false,
+        read_only: false,
+        conversation: false,
+        step,
+    };
+    (session, prompt)
+}
+
+/// `launch_session` for the handoff and autopilot code, which speaks `ApiError`.
+pub fn launch_session_api(
+    app: &AppState,
+    session: &SessionRecord,
+    workspace: &std::path::Path,
+    prompt: Option<&str>,
+    resume: bool,
+) -> Result<(), ApiError> {
+    launch_session(app, session, workspace, prompt, resume).map_err(Into::into)
 }
 
 /// Starts a session in a daemon-owned PTY: Claude (new, or resumed with `--resume`
@@ -582,16 +753,22 @@ pub fn launch_session(
 ) -> Result<(), LaunchError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume = resume && claude::has_conversation(workspace, &session.id);
+    // No control character reaches the agent's command line.
+    let prompt = prompt.map(crate::actions::sanitize_prompt);
+    let prompt = prompt.as_deref();
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
         .map_err(|e| LaunchError::Start(format!("cannot create {}: {e}", task_dir.display())))?;
     let cmd = match session.kind {
         SessionKind::Claude => {
+            let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
             let settings = claude::write_settings(
                 &task_dir.join(format!("claude-{}.json", session.id)),
                 &app.config.url(),
                 &session.task,
                 &session.id,
+                permission,
+                &[task_dir.as_path()],
             )
             .map_err(|e| LaunchError::Start(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
@@ -602,8 +779,11 @@ pub fn launch_session(
                 prompt,
                 resume,
                 extra_dirs: &[task_dir.as_path()],
-                read_only: session.read_only && session.kind == SessionKind::Claude,
+                permission,
+                plugin_dir: plugin_dir.as_deref(),
+                append_system_prompt,
                 remote_control: remote_name.as_deref(),
+                program: app.config.agent_program.as_deref(),
             })
         }
         SessionKind::Shell => shell_command(workspace),
@@ -623,6 +803,7 @@ pub fn launch_session(
         session.primary,
         Arc::clone(&pty),
     );
+    live.set_conversation(session.conversation);
     let remote_control = session.kind == SessionKind::Claude && app.remote_control();
     tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
 
@@ -743,6 +924,20 @@ fn point_to_notes(app: &AppState, key: &TaskKey, prompt: String, notes: Option<&
 /// The setting that holds the last free task's number handed out.
 const FREE_KEY_LAST: &str = "free_key_last";
 
+/// The key the next free task will get, without handing it out.
+pub(crate) async fn peek_free_key(app: &AppState) -> Result<String, ApiError> {
+    let existing = app
+        .store
+        .list_tasks()
+        .await?
+        .iter()
+        .filter_map(|t| t.key.as_str().strip_prefix("LIBRE-")?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    let last: u32 = app.store.setting(FREE_KEY_LAST).await?.unwrap_or(0);
+    Ok(format!("LIBRE-{}", last.max(existing) + 1))
+}
+
 /// The next free task's key: `LIBRE-1`, `LIBRE-2`… A number is never handed out
 /// twice, not even after its task is deleted (its `feature/LIBRE-n` branch may live
 /// on) or to two tasks created at once.
@@ -758,19 +953,6 @@ pub(crate) async fn next_free_key(app: &AppState) -> Result<String, ApiError> {
         .unwrap_or(0);
     let n = app.store.next_counter(FREE_KEY_LAST, existing).await?;
     Ok(format!("LIBRE-{n}"))
-}
-
-/// The branch a task works on: the one asked for, else the project's branch template.
-fn default_branch(
-    explicit: Option<&str>,
-    settings: &delilah_core::ProjectSettings,
-    key: &TaskKey,
-    title: &str,
-) -> String {
-    match explicit.map(str::trim).filter(|b| !b.is_empty()) {
-        Some(branch) => branch.to_string(),
-        None => delilah_core::branch_name(&settings.branch, key.as_str(), title.trim()),
-    }
 }
 
 /// The submodules a parent task gets: the request's, then the `always` ones not yet in it.
@@ -829,64 +1011,12 @@ fn effective_submodules(
     Ok(merged)
 }
 
-/// What to build for a task: its branch (see [`default_branch`]) in every repo.
-fn workspace_spec(
-    path: std::path::PathBuf,
-    project: &delilah_core::Project,
-    explicit_branch: Option<&str>,
-    key: &TaskKey,
-    title: &str,
-    submodules: &[String],
-) -> WorkspaceSpec {
-    WorkspaceSpec {
-        path,
-        branch: default_branch(explicit_branch, &project.settings, key, title),
-        kind: project.kind,
-        submodules: submodules.to_vec(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn templated(template: &str) -> delilah_core::ProjectSettings {
-        delilah_core::ProjectSettings {
-            branch: template.into(),
-            ..Default::default()
-        }
-    }
-
     #[test]
-    fn branch_follows_the_template() {
-        let key = TaskKey::new("PROJ-7");
-        let s = templated("feature/{ticket}-{slug}");
-        assert_eq!(
-            default_branch(None, &s, &key, "Fix the Login bug"),
-            "feature/PROJ-7-fix-the-login-bug"
-        );
-    }
-
-    #[test]
-    fn explicit_branch_wins_over_the_template() {
-        let key = TaskKey::new("PROJ-7");
-        let s = templated("feature/{ticket}-{slug}");
-        assert_eq!(default_branch(Some("hotfix/x"), &s, &key, "t"), "hotfix/x");
-        assert_eq!(
-            default_branch(Some("  "), &s, &key, "Some title"),
-            "feature/PROJ-7-some-title"
-        );
-    }
-
-    #[test]
-    fn no_settings_means_feature_key() {
-        let key = TaskKey::new("PROJ-7");
-        let s = delilah_core::ProjectSettings::default();
-        assert_eq!(default_branch(None, &s, &key, "anything"), "feature/PROJ-7");
-    }
-
-    #[test]
-    fn every_selected_submodule_is_on_the_templated_branch() {
+    fn every_selected_submodule_is_on_the_task_branch() {
         let dir = std::env::temp_dir().join(format!("delilah-run-ws-{}", uuid::Uuid::new_v4()));
         let fixture = std::process::Command::new("bash")
             .arg(concat!(
@@ -902,17 +1032,16 @@ mod tests {
             path: dir.join("env/parent"),
             kind: ProjectKind::Parent,
             workflow: "feature".into(),
-            settings: templated("feature/{ticket}-{slug}"),
+            settings: Default::default(),
+            preview_command: None,
         };
         let subs = vec!["svc-orders".to_string(), "svc-payments".to_string()];
-        let spec = workspace_spec(
-            dir.join("workspaces/PROJ-9"),
-            &project,
-            None,
-            &TaskKey::new("PROJ-9"),
-            "Add Retry",
-            &subs,
-        );
+        let spec = WorkspaceSpec {
+            path: dir.join("workspaces/PROJ-9"),
+            branch: "feature/PROJ-9-add-retry".into(),
+            kind: project.kind,
+            submodules: subs.clone(),
+        };
         let opts = GitOptions {
             allow_file_protocol: true,
         };
@@ -942,7 +1071,50 @@ mod tests {
             primary: true,
             closed: false,
             read_only: false,
+            conversation: false,
+            step: None,
         }
+    }
+
+    #[test]
+    fn the_launch_table() {
+        let config = crate::config::Config {
+            home: "/h".into(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+            claude_bin: "claude".into(),
+        };
+        let mut conv = session("@web", "Idea");
+        conv.conversation = true;
+        let (p, dir, prompt) = launch_flags(&conv, &config);
+        assert_eq!(p, claude::Permission::DontAsk);
+        assert_eq!(dir, Some(config.plugin_dir()));
+        assert_eq!(prompt, Some(IDEA_PROMPT));
+
+        let mut ro = session("@web", "Claude 1");
+        ro.read_only = true;
+        let (p, dir, prompt) = launch_flags(&ro, &config);
+        assert_eq!(p, claude::Permission::Plan);
+        assert!(dir.is_some());
+        assert_eq!(prompt, None);
+
+        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config);
+        assert_eq!(p, claude::Permission::Default);
+        assert_eq!((dir, prompt), (None, None));
+
+        // An extra session of a task is no different: it never gets the plugin.
+        let mut extra = session("PROJ-1", "Claude 2");
+        extra.primary = false;
+        let (p, dir, prompt) = launch_flags(&extra, &config);
+        assert_eq!(p, claude::Permission::Default);
+        assert_eq!((dir, prompt), (None, None));
+        extra.read_only = true;
+        let (p, dir, prompt) = launch_flags(&extra, &config);
+        assert_eq!(p, claude::Permission::Plan);
+        assert_eq!((dir, prompt), (None, None));
     }
 
     async fn app() -> AppState {
@@ -952,6 +1124,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "/usr/bin/false".into(),
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.
@@ -962,6 +1136,7 @@ mod tests {
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
                 settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -978,6 +1153,311 @@ mod tests {
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         task.key
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A daemon with a real repo project `web` and a fake `claude` that runs `script`.
+    async fn repo_app(script: &str) -> (AppState, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let mut app = app().await;
+        let repo = app.config.home.join("web");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let bin = app.config.home.join("claude");
+        std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = app.config.as_ref().clone();
+        config.claude_bin = bin;
+        app = AppState::new(app.store.clone(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "repo".into(),
+                path: repo.clone(),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        (app, repo)
+    }
+
+    /// Starts a task in `repo` and returns the branch it was given. The agent cannot
+    /// launch (its task folder is a file), which fails after the workspace is saved.
+    async fn started(app: &AppState, mut req: RunRequest) -> String {
+        req.project = "repo".into();
+        let key = if req.key.trim().is_empty() {
+            "LIBRE-1".to_string()
+        } else {
+            req.key.clone()
+        };
+        std::fs::create_dir_all(app.config.home.join("tasks")).unwrap();
+        std::fs::write(app.config.task_dir(&key), "").unwrap();
+        let _ = start_run(State(app.clone()), Json(req)).await;
+        app.store
+            .workspace(&TaskKey::new(&key))
+            .await
+            .unwrap()
+            .unwrap()
+            .1
+            .branch
+    }
+
+    const NAMES_IT: &str =
+        r#"echo '{"is_error":false,"result":"{\"name\":\"task branch names\"}"}'"#;
+
+    #[tokio::test]
+    async fn a_free_task_is_named_by_claude() {
+        let (app, _) = repo_app(NAMES_IT).await;
+        let mut req = run("");
+        req.title = "Nombres de rama".into();
+        req.free = true;
+        assert_eq!(started(&app, req).await, "feature/task-branch-names");
+        let (_, ws) = app
+            .store
+            .workspace(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            git(&ws.path, &["branch", "--show-current"]),
+            "feature/task-branch-names"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_jira_task_keeps_its_key_in_the_branch() {
+        let (app, _) = repo_app(NAMES_IT).await;
+        let mut req = run("PROJ-12");
+        req.title = "Nombres de rama".into();
+        assert_eq!(
+            started(&app, req).await,
+            "feature/PROJ-12-task-branch-names"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_claude_an_unusable_free_title_gives_the_key() {
+        let (app, _) = repo_app("exit 1").await;
+        let mut req = run("");
+        req.title = "!!".into();
+        req.free = true;
+        assert_eq!(started(&app, req).await, "feature/libre-1");
+    }
+
+    #[tokio::test]
+    async fn a_proposal_sent_back_keeps_the_key_case() {
+        let (app, _) = repo_app("exit 1").await;
+        let mut req = run("PROJ-12");
+        req.title = "t".into();
+        req.branch = Some("feature/feature/PROJ-12-retry payments".into());
+        assert_eq!(started(&app, req).await, "feature/PROJ-12-retry-payments");
+    }
+
+    #[tokio::test]
+    async fn a_typed_branch_is_normalised_and_unique_even_in_checkout_mode() {
+        let (app, repo) = repo_app("exit 1").await;
+        git(&repo, &["branch", "feature/x"]);
+        let mut req = run("PROJ-3");
+        req.title = "t".into();
+        req.branch = Some("X".into());
+        req.in_checkout = Some(true);
+        assert_eq!(started(&app, req).await, "feature/x-2");
+        assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/x-2");
+        assert!(git(&repo, &["branch", "--list", "feature/x"]).contains("feature/x"));
+    }
+
+    #[tokio::test]
+    async fn a_typed_branch_with_nothing_usable_is_refused_before_anything_changes() {
+        let (app, _) = repo_app("exit 1").await;
+        let key = backlog_task(&app, "PROJ-5").await;
+        let mut req = run("PROJ-5");
+        req.project = "repo".into();
+        req.branch = Some("///".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn saving_mode_gives_the_first_session_the_plan_step_and_a_note() {
+        let app = app().await;
+        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
+        assert_eq!(s.step, Some(Step::Plan));
+        assert_eq!(s.label, "Spec y plan");
+        assert!(s.primary);
+        assert!(prompt.starts_with("/feature PROJ-1 "), "{prompt}");
+        assert!(
+            prompt.ends_with("Delilah seguirá en una sesión nueva."),
+            "{prompt}"
+        );
+
+        app.lang.set(crate::lang::Lang::En);
+        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
+        assert_eq!(s.label, "Spec and plan");
+        assert!(prompt.contains("tasks.md"), "{prompt}");
+        assert!(!prompt.ends_with("nueva."), "{prompt}");
+
+        let (s, prompt) = first_session(&app, "PROJ-1", false, false, "/feature PROJ-1".into());
+        assert_eq!((s.label.as_str(), s.step), ("Main", None));
+        assert_eq!(prompt, "/feature PROJ-1");
+        app.lang.set(crate::lang::Lang::Es);
+        let (s, _) = first_session(&app, "PROJ-1", false, false, String::new());
+        assert_eq!(s.label, "Principal");
+    }
+
+    #[tokio::test]
+    async fn saving_mode_comes_from_the_request_else_the_preference() {
+        let app = app().await;
+        // The start fails (no folder), but the task keeps what it was started with.
+        let saving = |app: &AppState, key: &str| {
+            let key = TaskKey::new(key);
+            let store = app.store.clone();
+            async move { store.get_task(&key).await.unwrap().unwrap().saving_mode }
+        };
+        let mut req = run("PROJ-1");
+        req.title = "a".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!saving(&app, "PROJ-1").await, "off by default");
+
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = run("PROJ-2");
+        req.title = "b".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(saving(&app, "PROJ-2").await, "the preference");
+
+        let mut req = run("PROJ-3");
+        req.title = "c".into();
+        req.saving_mode = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!saving(&app, "PROJ-3").await, "the request wins");
+
+        // A backlog task keeps its own choice, and goes back to it if the start fails.
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        task.project = Some("web".into());
+        task.saving_mode = true;
+        app.store.create_task(&task).await.unwrap();
+        start_run(State(app.clone()), Json(run("PROJ-4")))
+            .await
+            .unwrap_err();
+        assert!(saving(&app, "PROJ-4").await);
+        let mut req = run("PROJ-4");
+        req.saving_mode = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(saving(&app, "PROJ-4").await, "put back as it was");
+    }
+
+    #[tokio::test]
+    async fn autopilot_replaces_the_saving_mode_note_in_both_languages() {
+        let app = app().await;
+        let (s, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        assert_eq!(s.step, Some(Step::Plan));
+        assert!(prompt.starts_with("/feature PROJ-1 "), "{prompt}");
+        assert!(prompt.contains("Autopilot"), "{prompt}");
+        assert!(prompt.contains("tasks.md"), "{prompt}");
+        assert!(!prompt.contains("Modo ahorro:"), "{prompt}");
+        assert!(prompt.contains("(Recomendado)"), "{prompt}");
+        app.lang.set(crate::lang::Lang::En);
+        let (_, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        assert!(prompt.contains("Autopilot"), "{prompt}");
+        assert!(prompt.contains("(Recommended)"), "{prompt}");
+        assert!(!prompt.contains("Saving mode:"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn autopilot_comes_from_the_request_and_implies_saving_mode() {
+        let app = app().await;
+        let get = |key: &str| {
+            let key = TaskKey::new(key);
+            let store = app.store.clone();
+            async move { store.get_task(&key).await.unwrap().unwrap() }
+        };
+        let mut req = run("PROJ-1");
+        req.title = "a".into();
+        req.autopilot = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        let task = get("PROJ-1").await;
+        assert!(task.saving_mode);
+        assert_eq!(
+            task.autopilot.map(|a| a.state),
+            Some(delilah_core::AutopilotState::Running)
+        );
+
+        let mut req = run("PROJ-2");
+        req.title = "b".into();
+        req.autopilot = Some(true);
+        req.saving_mode = Some(false);
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("PROJ-2"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // Only the spec workflow can have it.
+        let mut req = run("PROJ-9");
+        req.title = "x".into();
+        req.autopilot = Some(true);
+        req.workflow = Some("prompt".into());
+        req.prompt = Some("do it".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
+
+        // Off by default.
+        let mut req = run("PROJ-3");
+        req.title = "c".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(get("PROJ-3").await.autopilot.is_none());
+
+        // A backlog task keeps its autopilot, and it goes back if the start fails.
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        task.project = Some("web".into());
+        task.saving_mode = true;
+        task.autopilot = Some(new_autopilot());
+        let original = task.autopilot.clone();
+        app.store.create_task(&task).await.unwrap();
+        start_run(State(app.clone()), Json(run("PROJ-4")))
+            .await
+            .unwrap_err();
+        assert_eq!(get("PROJ-4").await.autopilot, original, "kept");
+        let mut req = run("PROJ-4");
+        req.autopilot = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(
+            get("PROJ-4").await.autopilot,
+            original,
+            "put back as it was"
+        );
+
+        // A backlog task gets it from the request.
+        let key = backlog_task(&app, "PROJ-5").await;
+        let mut req = run("PROJ-5");
+        req.autopilot = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        // Failing start restores the original (no autopilot, saving mode off).
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(task.autopilot.is_none() && !task.saving_mode);
     }
 
     #[tokio::test]
@@ -1117,6 +1597,148 @@ mod tests {
         assert_eq!(bare, "/feature PROJ-1");
     }
 
+    #[tokio::test]
+    async fn a_started_task_from_a_conversation_reads_the_edited_brief() {
+        use tower::ServiceExt;
+        let call = |app: &AppState, req: axum::http::Request<axum::body::Body>| {
+            let router = crate::api::router(app.clone());
+            async move {
+                let res = router.oneshot(req).await.unwrap();
+                let status = res.status();
+                let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                (
+                    status,
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default(),
+                )
+            }
+        };
+        let json_req = |method: &str, path: &str, body: serde_json::Value| {
+            axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap()
+        };
+
+        // A real repo to work in, and a conversation of the project.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let repo = home.join("web");
+        // Stands in for `claude`: records the arguments it got, then goes away.
+        let fake = home.join("fake-claude.sh");
+        let seen = home.join("args.txt");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 1\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("README.md"), "web\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        let config = crate::config::Config {
+            home: home.clone(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: Some(fake),
+            claude_bin: "claude".into(),
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        let mut conv = session("@web", "Idea");
+        conv.id = "conv".into();
+        conv.primary = false;
+        conv.conversation = true;
+        app.store.create_session(&conv).await.unwrap();
+
+        let task = crate::api::build_task(
+            &app,
+            crate::api::NewTask {
+                key: String::new(),
+                title: "Reintentos".into(),
+                project: Some("web".into()),
+                notes: Some("brief original".into()),
+                in_checkout: None,
+                saving_mode: None,
+                autopilot: None,
+                workflow: None,
+                free: true,
+            },
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        app.store
+            .create_task_from_conversation(&task, "conv", "Idea", chrono::Utc::now())
+            .await
+            .unwrap();
+        let key = task.key.to_string();
+
+        let (status, edited) = call(
+            &app,
+            json_req(
+                "PATCH",
+                &format!("/api/v1/tasks/{key}"),
+                serde_json::json!({ "notes": "brief editado" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
+
+        let (status, started) = call(
+            &app,
+            json_req(
+                "POST",
+                "/api/v1/runs",
+                serde_json::json!({ "key": key, "title": "", "project": "web" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{started}");
+
+        let path = app.config.task_dir(&key).join("notes.md");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "brief editado");
+        // What the program received, not what we would have built.
+        let mut args = String::new();
+        for _ in 0..100 {
+            args = std::fs::read_to_string(&seen).unwrap_or_default();
+            if !args.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        for live in app.sessions.of_task(&key) {
+            let _ = live.pty.kill();
+        }
+        assert!(
+            args.contains(&format!("{})", path.display())),
+            "the prompt does not point to notes.md: {args}"
+        );
+    }
+
     #[test]
     fn remote_names_show_the_task_or_project_and_the_label() {
         assert_eq!(
@@ -1127,7 +1749,9 @@ mod tests {
     }
 
     /// A repo project with one commit and an untracked `.env`, with these settings.
-    async fn repo_app(settings: delilah_core::ProjectSettings) -> (AppState, std::path::PathBuf) {
+    async fn settings_app(
+        settings: delilah_core::ProjectSettings,
+    ) -> (AppState, std::path::PathBuf) {
         let home = std::env::temp_dir().join(format!("delilah-run-{}", uuid::Uuid::new_v4()));
         let repo = home.join("web");
         std::fs::create_dir_all(&repo).unwrap();
@@ -1159,6 +1783,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.store
@@ -1167,6 +1793,7 @@ mod tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
                 settings,
             })
             .await
@@ -1198,6 +1825,8 @@ mod tests {
             prompt: None,
             free: true,
             in_checkout: Some(in_checkout),
+            saving_mode: None,
+            autopilot: None,
             from_session: None,
         }
     }
@@ -1286,6 +1915,8 @@ mod tests {
             allow_file_protocol: true,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let mut project = delilah_core::Project {
@@ -1293,6 +1924,7 @@ mod tests {
             path: dir.join("env/parent"),
             kind: ProjectKind::Parent,
             workflow: "feature".into(),
+            preview_command: None,
             settings: Default::default(),
         };
         project.settings.submodules = rules(&[], &["common-lib"]);
@@ -1322,7 +1954,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_worktree_with_a_setup_shares_then_waits_in_preparing_workspace() {
-        let (app, _repo) = repo_app(settings(Some("sleep 30"))).await;
+        let (app, _repo) = settings_app(settings(Some("sleep 30"))).await;
         let (code, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", false)))
             .await
             .ok()
@@ -1347,7 +1979,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_worktree_without_a_setup_shares_and_launches() {
-        let (app, _repo) = repo_app(settings(None)).await;
+        let (app, _repo) = settings_app(settings(None)).await;
         let (code, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", false)))
             .await
             .ok()
@@ -1366,7 +1998,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_checkout_never_runs_the_setup_nor_shares() {
-        let (app, repo) = repo_app(settings(Some("touch ran-setup"))).await;
+        let (app, repo) = settings_app(settings(Some("touch ran-setup"))).await;
         let (code, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", true)))
             .await
             .map_err(|e| format!("{:?}", e.message))
@@ -1404,13 +2036,18 @@ mod tests {
 
     /// Whether the task works in the project's own checkout (not a worktree).
     async fn in_checkout(app: &AppState, key: &str, repo: &std::path::Path) -> bool {
-        let (_, ws) = app.store.workspace(&TaskKey::new(key)).await.unwrap().unwrap();
+        let (_, ws) = app
+            .store
+            .workspace(&TaskKey::new(key))
+            .await
+            .unwrap()
+            .unwrap();
         ws.path == repo
     }
 
     #[tokio::test]
     async fn no_choice_takes_the_projects_worktree_default() {
-        let (app, repo) = repo_app(worktree_default()).await;
+        let (app, repo) = settings_app(worktree_default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()
@@ -1422,7 +2059,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_request_choice_wins_over_the_projects_default() {
-        let (app, repo) = repo_app(worktree_default()).await;
+        let (app, repo) = settings_app(worktree_default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(request("LIBRE-1", true)))
             .await
             .ok()
@@ -1434,17 +2071,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_saved_backlog_choice_wins_over_the_projects_default() {
-        let (app, repo) = repo_app(worktree_default()).await;
+        let (app, repo) = settings_app(worktree_default()).await;
         app.store
-            .create_task(&Task {
-                key: TaskKey::new("LIBRE-1"),
-                title: "T".into(),
-                project: Some("web".into()),
-                workflow: "feature".into(),
-                phase: None,
-                status: TaskStatus::Queued,
-                notes: None,
-                in_checkout: Some(true),
+            .create_task(&{
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                t.project = Some("web".into());
+                t.status = TaskStatus::Queued;
+                t.in_checkout = Some(true);
+                t
             })
             .await
             .unwrap();
@@ -1459,7 +2093,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_settings_and_no_choice_start_in_the_checkout() {
-        let (app, repo) = repo_app(Default::default()).await;
+        let (app, repo) = settings_app(Default::default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()

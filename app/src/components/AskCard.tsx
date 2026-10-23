@@ -1,16 +1,25 @@
 import { useState } from "react";
 import { api, type AskQuestion } from "../api";
 import { t } from "../i18n";
+import { Markdown } from "./Markdown";
+import { ProposalCard } from "./ProposalCard";
 
 interface Props {
-  ask: { id: string; questions: AskQuestion[] };
+  ask: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
+  /** Opens the task a proposal created. */
+  onOpenTask?: (key: string) => void;
   /** Called once answered or sent back to the terminal. */
   onDone?: () => void;
 }
 
 /** A question the agent asked with options (AskUserQuestion): pick and the agent goes
  *  on, as if chosen in its terminal. A single question answers on the first click. */
-export function AskCard({ ask, onDone }: Props) {
+export function AskCard({ ask, onDone, onOpenTask }: Props) {
+  if (ask.proposal) return <ProposalCard ask={{ ...ask, proposal: ask.proposal }} onDone={onDone} onOpenTask={onOpenTask} />;
+  return <QuestionCard ask={ask} onDone={onDone} />;
+}
+
+function QuestionCard({ ask, onDone }: Pick<Props, "ask" | "onDone">) {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [own, setOwn] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -31,7 +40,11 @@ export function AskCard({ ask, onDone }: Props) {
 
   const answerOf = (q: AskQuestion) => own[q.question]?.trim() || (picked[q.question] ?? []).join(", ");
   const complete = ask.questions.every((q) => answerOf(q));
-  const send = (answers: Record<string, string>) => act(() => api.answerAsk(ask.id, answers));
+  const send = (answers: Record<string, string>) =>
+    act(async () => {
+      const res = await api.answerAsk(ask.id, answers);
+      if (res?.error) throw new Error(res.error);
+    });
 
   const choose = (q: AskQuestion, label: string) => {
     if (instant) return send({ [q.question]: label });
@@ -62,6 +75,17 @@ export function AskCard({ ask, onDone }: Props) {
               );
             })}
           </div>
+          {(() => {
+            const shown = (picked[q.question] ?? [])[0] ?? q.options[0]?.label;
+            const preview = q.options.find((o) => o.label === shown)?.preview;
+            return (
+              preview && (
+                <div className="ask-preview">
+                  <Markdown text={preview} remoteImages="click" />
+                </div>
+              )
+            );
+          })()}
           <input
             className="input"
             placeholder={t("O escribe tu propia respuesta…")}

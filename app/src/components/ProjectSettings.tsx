@@ -99,8 +99,9 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
         </div>
 
         <label className="field">
-          <span>{t("Rama (usa {ticket})", { ticket: "{ticket}" })}</span>
-          <input className="input mono" name="branch" value={s.branch} onChange={(e) => setS({ ...s, branch: e.target.value })} />
+          <span>{t("Plantilla de rama (opcional; usa {ticket})", { ticket: "{ticket}" })}</span>
+          <input className="input mono" name="branch" value={s.branch ?? ""} placeholder={t("Delilah propone un nombre descriptivo (por defecto)")}
+            onChange={(e) => setS({ ...s, branch: e.target.value.trim() === "" ? null : e.target.value })} />
           <Err field="branch" />
         </label>
 

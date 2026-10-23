@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { Project, Session, Task } from "../api";
+import type { Project, PrSummary, Session, Task } from "../api";
 import { sessionStatus } from "./sessionLabels";
 import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
+import { PrBadge } from "./PrBadge";
 import { statusIcon } from "./status";
 import { t, tn } from "../i18n";
 
@@ -13,6 +14,8 @@ interface Props {
   view: View;
   onView: (v: View) => void;
   tasks: Task[];
+  /** Each task's PR summary, for its badge. */
+  prs?: PrSummary[];
   projects: Project[];
   sessions: Session[];
   /** A task's key or `@<project>`. */
@@ -22,6 +25,8 @@ interface Props {
   onOpenSession: (owner: string, sessionId: string) => void;
   /** Starts a read-only Claude in the project's checkout. */
   onAsk: (project: string) => void;
+  /** Starts an idea conversation in the project. */
+  onIdea: (project: string) => void;
   onNewTask: () => void;
   /** Asks to confirm deleting a task (right-click on its row). */
   onDelete: (task: Task) => void;
@@ -61,7 +66,7 @@ function useRememberedSet(key: string) {
   return [set, toggle] as const;
 }
 
-export function Sidebar({ view, onView, tasks, projects, sessions, selected, onSelect, onOpenSession, onAsk, onNewTask, onDelete, waiting }: Props) {
+export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, selected, onSelect, onOpenSession, onAsk, onIdea, onNewTask, onDelete, waiting }: Props) {
   // Folded projects, remembered per viewer: a project with many sessions and tasks
   // would otherwise take the whole sidebar.
   const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
@@ -79,6 +84,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
       window.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+  const prOf = new Map(prs.map((p) => [p.task, p]));
   const taskRow = (task: Task) => {
     const { icon, cls } = statusIcon(task.status);
     return (
@@ -95,6 +101,7 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
         <Icon name={icon} className={cls} />
         <span className="key mono">{task.key}</span>
         <span className="trunc">{task.title}</span>
+        {prOf.get(task.key) && <PrBadge pr={prOf.get(task.key)!} />}
       </button>
     );
   };
@@ -172,6 +179,9 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
               <button className="btn btn-ghost icon-btn" onClick={() => onAsk(g.project!.name)} title={t("Preguntar a Claude sobre el proyecto")} aria-label={t("Preguntar a Claude sobre {name}", { name: g.project.name })}>
                 <Icon name="plus" />
               </button>
+              <button className="btn btn-ghost icon-btn" onClick={() => onIdea(g.project!.name)} title={t("Nueva tarea con Claude")} aria-label={t("Nueva tarea con Claude en {name}", { name: g.project.name })}>
+                <Icon name="idea" />
+              </button>
             </div>
           ) : (
             <div className="phead">
@@ -186,7 +196,11 @@ export function Sidebar({ view, onView, tasks, projects, sessions, selected, onS
             const st = sessionStatus(s, undefined);
             return (
               <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? t("Claude en solo lectura") : s.label}>
-                <Icon name={s.kind !== "claude" ? "console" : st.icon} className={s.kind !== "claude" ? "c-mut" : st.cls} />
+                {s.conversation ? (
+                  <Icon name="idea" className={`idea ${st.cls}`} />
+                ) : (
+                  <Icon name={s.kind !== "claude" ? "console" : st.icon} className={s.kind !== "claude" ? "c-mut" : st.cls} />
+                )}
                 <span className="trunc" style={{ flex: 1 }}>{s.label}</span>
                 {s.read_only && <Icon name="lock" className="c-mut" />}
               </button>

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use delilah_core::{Event, Task, TaskKey, TaskStatus, TransitionError};
+use delilah_core::{Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TransitionError};
 use serde::Serialize;
 use sqlx::Row;
 use sqlx::sqlite::{
@@ -72,34 +72,38 @@ impl Store {
     }
 
     pub async fn create_task(&self, task: &Task) -> Result<(), StoreError> {
-        let now = Utc::now().to_rfc3339();
-        let result = sqlx::query(
-            "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(task.key.as_str())
-        .bind(&task.title)
-        .bind(&task.project)
-        .bind(&task.workflow)
-        .bind(&task.phase)
-        .bind(serde_json::to_string(&task.status)?)
-        .bind(&task.notes)
-        .bind(task.in_checkout)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await;
-        match result {
-            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-                Err(StoreError::AlreadyExists(task.key.clone()))
-            }
-            other => other.map(|_| ()).map_err(Into::into),
-        }
+        insert_task(&self.pool, task).await
+    }
+
+    /// Creates a task and records, in the same transaction, that it came from a
+    /// conversation: either both exist or neither does.
+    pub async fn create_task_from_conversation(
+        &self,
+        task: &Task,
+        session: &str,
+        label: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        insert_task(&mut *tx, task).await?;
+        let event = Event::CreatedFromConversation {
+            session: session.to_string(),
+            label: label.to_string(),
+        };
+        sqlx::query("INSERT INTO task_events (task_key, at, event) VALUES (?, ?, ?)")
+            .bind(task.key.as_str())
+            .bind(at.to_rfc3339())
+            .bind(serde_json::to_string(&event)?)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks WHERE key = ?",
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, w.branch AS branch
+             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&self.pool)
@@ -109,7 +113,8 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks ORDER BY created_at, key",
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, w.branch AS branch
+             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -158,6 +163,109 @@ impl Store {
         Ok(self.get_task(key).await?.expect("task was just updated"))
     }
 
+    /// Turns saving mode on or off for a task, whatever state it is in. Turning it
+    /// off also turns autopilot off, which needs it.
+    pub async fn set_saving_mode(&self, key: &TaskKey, on: bool) -> Result<(), StoreError> {
+        let updated = sqlx::query(
+            "UPDATE tasks SET saving_mode = ?1, autopilot = CASE WHEN ?1 THEN autopilot END, updated_at = ?2 WHERE key = ?3",
+        )
+            .bind(on)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
+    /// Records the autopilot of a task, or clears it. Turning it on also turns saving
+    /// mode on, in the same statement; clearing it leaves saving mode as it is.
+    ///
+    /// Unconditional: only for creating or starting a task. Any later change is
+    /// [`Store::update_autopilot`], so it never overwrites a pause or an "off" (#45).
+    pub async fn set_autopilot(
+        &self,
+        key: &TaskKey,
+        autopilot: Option<&Autopilot>,
+    ) -> Result<(), StoreError> {
+        let json = autopilot.map(serde_json::to_string).transpose()?;
+        let updated = sqlx::query(
+            "UPDATE tasks SET autopilot = ?1, saving_mode = CASE WHEN ?1 IS NOT NULL THEN 1 ELSE saving_mode END, updated_at = ?2 WHERE key = ?3",
+        )
+        .bind(json)
+        .bind(Utc::now().to_rfc3339())
+        .bind(key.as_str())
+        .execute(&self.pool)
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
+    /// Changes a task's autopilot as a compare-and-set: `f` gets the stored value and
+    /// returns the new one (`Some(None)` clears it), or `None` to leave it alone. The
+    /// write only lands if the stored value is still the one `f` saw, else `f` runs
+    /// again on the fresh value, so a concurrent change is never overwritten with a
+    /// stale copy. `true` if something was written.
+    pub async fn update_autopilot<F>(&self, key: &TaskKey, mut f: F) -> Result<bool, StoreError>
+    where
+        F: FnMut(Option<Autopilot>) -> Option<Option<Autopilot>>,
+    {
+        for _ in 0..32 {
+            let row = sqlx::query("SELECT autopilot FROM tasks WHERE key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+            let stored: Option<String> = row.try_get("autopilot")?;
+            let current = stored
+                .as_deref()
+                .map(serde_json::from_str::<Autopilot>)
+                .transpose()?;
+            let Some(new) = f(current) else {
+                return Ok(false);
+            };
+            let json = new.as_ref().map(serde_json::to_string).transpose()?;
+            let updated = sqlx::query(
+                "UPDATE tasks SET autopilot = ?1, saving_mode = CASE WHEN ?1 IS NOT NULL THEN 1 ELSE saving_mode END, updated_at = ?2 WHERE key = ?3 AND autopilot IS ?4",
+            )
+            .bind(json)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .bind(stored)
+            .execute(&self.pool)
+            .await?;
+            if updated.rows_affected() == 1 {
+                return Ok(true);
+            }
+        }
+        Err(StoreError::Corrupt(format!(
+            "the autopilot of {key} keeps changing"
+        )))
+    }
+
+    /// Records the handoff under way, or clears it.
+    pub async fn set_handoff(
+        &self,
+        key: &TaskKey,
+        handoff: Option<&Handoff>,
+    ) -> Result<(), StoreError> {
+        let json = handoff.map(serde_json::to_string).transpose()?;
+        let updated = sqlx::query("UPDATE tasks SET handoff = ?, updated_at = ? WHERE key = ?")
+            .bind(json)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
     /// Removes a task for good. Its events, workspace record and sessions go with it
     /// (`ON DELETE CASCADE`), in the same statement: it is either all there or all gone.
     pub async fn delete_task(&self, key: &TaskKey) -> Result<(), StoreError> {
@@ -201,7 +309,8 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout FROM tasks WHERE key = ?",
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, w.branch AS branch
+             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&mut *tx)
@@ -251,6 +360,38 @@ impl Store {
     }
 }
 
+async fn insert_task<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    task: &Task,
+) -> Result<(), StoreError> {
+    let now = Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(task.key.as_str())
+    .bind(&task.title)
+    .bind(&task.project)
+    .bind(&task.workflow)
+    .bind(&task.phase)
+    .bind(serde_json::to_string(&task.status)?)
+    .bind(&task.notes)
+    .bind(task.in_checkout)
+    .bind(task.saving_mode)
+    .bind(task.handoff.as_ref().map(serde_json::to_string).transpose()?)
+    .bind(task.autopilot.as_ref().map(serde_json::to_string).transpose()?)
+    .bind(&now)
+    .bind(&now)
+    .execute(executor)
+    .await;
+    match result {
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+            Err(StoreError::AlreadyExists(task.key.clone()))
+        }
+        other => other.map(|_| ()).map_err(Into::into),
+    }
+}
+
 /// What `PATCH /api/v1/tasks/{key}` may change in a backlog task.
 #[derive(Debug, Default, serde::Deserialize)]
 pub struct BacklogChange {
@@ -274,6 +415,16 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         status: serde_json::from_str::<TaskStatus>(&status)?,
         notes: row.try_get("notes")?,
         in_checkout: row.try_get("in_checkout")?,
+        branch: row.try_get("branch")?,
+        saving_mode: row.try_get("saving_mode")?,
+        handoff: row
+            .try_get::<Option<String>, _>("handoff")?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?,
+        autopilot: row
+            .try_get::<Option<String>, _>("autopilot")?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?,
     })
 }
 
@@ -305,6 +456,226 @@ mod tests {
             .map(|t| t.key)
             .collect();
         assert_eq!(keys, [TaskKey::new("PROJ-1"), TaskKey::new("PROJ-2")]);
+    }
+
+    #[tokio::test]
+    async fn saving_mode_and_handoff_persist() {
+        use delilah_core::{HandoffStage, Step};
+
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut saving = task("PROJ-1");
+        saving.saving_mode = true;
+        store.create_task(&saving).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap(), Some(saving));
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        let plain = store
+            .get_task(&TaskKey::new("PROJ-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!plain.saving_mode && plain.handoff.is_none());
+
+        store.set_saving_mode(&key, false).await.unwrap();
+        assert!(!store.get_task(&key).await.unwrap().unwrap().saving_mode);
+        store.set_saving_mode(&key, true).await.unwrap();
+        assert!(store.get_task(&key).await.unwrap().unwrap().saving_mode);
+
+        let handoff = Handoff {
+            to: Step::Implement,
+            stage: HandoffStage::Offered,
+            error: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&handoff).unwrap(),
+            r#"{"to":"implement","stage":"offered"}"#
+        );
+        store.set_handoff(&key, Some(&handoff)).await.unwrap();
+        assert_eq!(
+            store.get_task(&key).await.unwrap().unwrap().handoff,
+            Some(handoff)
+        );
+        store.set_handoff(&key, None).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().handoff, None);
+
+        let missing = TaskKey::new("PROJ-404");
+        assert!(matches!(
+            store.set_saving_mode(&missing, true).await,
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn step_started_is_listed_in_the_history_and_keeps_the_status() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        store
+            .apply_event(&key, Event::Start, Utc::now())
+            .await
+            .unwrap();
+        let event = Event::StepStarted {
+            step: delilah_core::Step::Implement,
+            session: "s-2".into(),
+        };
+        let task = store
+            .apply_event(&key, event.clone(), Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        let last = store.events(&key).await.unwrap().pop().unwrap();
+        assert_eq!(last.event, event);
+    }
+
+    fn autopilot() -> Autopilot {
+        Autopilot {
+            state: delilah_core::AutopilotState::Running,
+            stage: None,
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+            review_session: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn update_autopilot_is_a_conditional_write() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        // Nothing stored and nothing to write.
+        assert!(!store.update_autopilot(&key, |_| None).await.unwrap());
+        // The closure sees the stored value and its answer is written.
+        assert!(
+            store
+                .update_autopilot(&key, |cur| {
+                    assert!(cur.is_none());
+                    Some(Some(autopilot()))
+                })
+                .await
+                .unwrap()
+        );
+        let t = store.get_task(&key).await.unwrap().unwrap();
+        assert!(t.autopilot.is_some() && t.saving_mode);
+        assert!(
+            store
+                .update_autopilot(&key, |cur| cur.map(|mut a| {
+                    a.nudged = Some(delilah_core::Step::Plan);
+                    Some(a)
+                }))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .get_task(&key)
+                .await
+                .unwrap()
+                .unwrap()
+                .autopilot
+                .unwrap()
+                .nudged,
+            Some(delilah_core::Step::Plan)
+        );
+        // Cleared, a later update sees `None`.
+        assert!(store.update_autopilot(&key, |_| Some(None)).await.unwrap());
+        assert!(
+            !store
+                .update_autopilot(&key, |cur| cur.map(Some))
+                .await
+                .unwrap()
+        );
+        assert!(matches!(
+            store
+                .update_autopilot(&TaskKey::new("NOPE-1"), |_| None)
+                .await,
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn autopilot_is_stored_with_the_task_and_implies_saving_mode() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut created = task("PROJ-1");
+        created.autopilot = Some(autopilot());
+        store.create_task(&created).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap(), Some(created));
+
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        let key2 = TaskKey::new("PROJ-2");
+        let a = autopilot();
+        store.set_autopilot(&key2, Some(&a)).await.unwrap();
+        let t = store.get_task(&key2).await.unwrap().unwrap();
+        assert_eq!(t.autopilot, Some(a));
+        assert!(t.saving_mode);
+        assert_eq!(store.list_tasks().await.unwrap()[1].autopilot, t.autopilot);
+
+        store.set_autopilot(&key2, None).await.unwrap();
+        let t = store.get_task(&key2).await.unwrap().unwrap();
+        assert_eq!(t.autopilot, None);
+        assert!(t.saving_mode);
+
+        store
+            .set_autopilot(&key2, Some(&autopilot()))
+            .await
+            .unwrap();
+        store.set_saving_mode(&key2, true).await.unwrap();
+        assert!(
+            store
+                .get_task(&key2)
+                .await
+                .unwrap()
+                .unwrap()
+                .autopilot
+                .is_some()
+        );
+        store.set_saving_mode(&key2, false).await.unwrap();
+        let t = store.get_task(&key2).await.unwrap().unwrap();
+        assert_eq!(t.autopilot, None);
+        assert!(!t.saving_mode);
+
+        assert!(matches!(
+            store.set_autopilot(&TaskKey::new("NOPE-1"), None).await,
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn autopilot_events_appear_in_the_history() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        let events = vec![
+            Event::AutopilotPaused {
+                reason: "tests fail".into(),
+            },
+            Event::AutopilotResumed,
+            Event::AutopilotAnswered {
+                question: "q".into(),
+                answer: "a".into(),
+            },
+            Event::AutopilotNudged {
+                step: delilah_core::Step::Plan,
+            },
+            Event::AutopilotFinished {
+                prs: vec!["https://x/pr/1".into()],
+            },
+        ];
+        for e in &events {
+            store
+                .apply_event(&key, e.clone(), Utc::now())
+                .await
+                .unwrap();
+        }
+        let history: Vec<_> = store
+            .events(&key)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.event)
+            .collect();
+        assert_eq!(history, events);
     }
 
     #[tokio::test]
@@ -370,6 +741,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_task_reports_the_branch_of_its_workspace() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().branch, None);
+        let ws = delilah_git::Workspace {
+            path: "/w/ws/PROJ-1".into(),
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        store
+            .save_workspace(&key, Path::new("/w/web"), &ws)
+            .await
+            .unwrap();
+        let want = Some("feature/PROJ-1".to_string());
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().branch, want);
+        assert_eq!(store.list_tasks().await.unwrap()[0].branch, want);
+        store.delete_workspace(&key).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().branch, None);
+        assert_eq!(store.list_tasks().await.unwrap()[0].branch, None);
+        let json = serde_json::to_value(task("PROJ-2")).unwrap();
+        assert!(json.get("branch").is_none());
+    }
+
+    #[tokio::test]
     async fn a_deleted_task_takes_its_history_workspace_and_sessions() {
         let store = Store::in_memory().await.unwrap();
         let key = TaskKey::new("PROJ-1");
@@ -397,6 +794,8 @@ mod tests {
                 primary: true,
                 closed: false,
                 read_only: false,
+                conversation: false,
+                step: None,
             })
             .await
             .unwrap();
@@ -449,6 +848,7 @@ mod tests {
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
                 settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -491,5 +891,43 @@ mod tests {
             .unwrap();
         let err = store.update_backlog_task(&key, &change).await.unwrap_err();
         assert!(matches!(err, StoreError::NotInBacklog(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn creates_a_task_from_a_conversation_in_one_step() {
+        let store = Store::in_memory().await.unwrap();
+        let at = Utc::now();
+        store
+            .create_task_from_conversation(&task("PROJ-1"), "s-1", "Idea", at)
+            .await
+            .unwrap();
+        let key = TaskKey::new("PROJ-1");
+        assert!(store.get_task(&key).await.unwrap().is_some());
+        let events = store.events(&key).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].event,
+            Event::CreatedFromConversation {
+                session: "s-1".into(),
+                label: "Idea".into()
+            }
+        );
+        let json: String = sqlx::query_scalar("SELECT event FROM task_events WHERE task_key = ?")
+            .bind("PROJ-1")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "created-from-conversation", "session": "s-1", "label": "Idea"})
+        );
+
+        let err = store
+            .create_task_from_conversation(&task("PROJ-1"), "s-2", "Otra", at)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::AlreadyExists(_)), "{err}");
+        assert_eq!(store.events(&key).await.unwrap().len(), 1, "no stray event");
     }
 }

@@ -29,6 +29,10 @@ pub enum Topic {
     Usage,
     /// `/projects`
     Projects,
+    /// `/prs`: a task's PRs or their summaries changed.
+    Prs,
+    /// `/conversations`: an idea conversation opened, changed or ended.
+    Conversations,
     /// The client missed messages: fetch everything.
     Resync,
 }
@@ -112,6 +116,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -130,6 +136,14 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(msg, WsMessage::Text(r#"{"type":"tasks"}"#.into()));
+    }
+
+    #[test]
+    fn prs_topic_serializes_as_prs() {
+        assert_eq!(
+            serde_json::to_string(&Topic::Prs).unwrap(),
+            r#"{"type":"prs"}"#
+        );
     }
 
     /// A bare HTTP POST to /api/v1/tasks, to keep test dependencies down.

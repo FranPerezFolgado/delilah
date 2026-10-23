@@ -133,6 +133,35 @@ pub enum Event {
     RetrySetup,
     /// The user launches the agent without running the setup.
     SkipSetup,
+    /// The task was created from a conversation with an agent; nothing else changes.
+    CreatedFromConversation {
+        session: String,
+        label: String,
+    },
+    /// A saving-mode handoff started the session of a step; the status does not change.
+    StepStarted {
+        step: Step,
+        session: String,
+    },
+    /// Autopilot paused itself; the status does not change.
+    AutopilotPaused {
+        reason: String,
+    },
+    /// The user resumed autopilot; the status does not change.
+    AutopilotResumed,
+    /// Autopilot answered a question with its recommended option.
+    AutopilotAnswered {
+        question: String,
+        answer: String,
+    },
+    /// Autopilot nudged a stalled step (once per step).
+    AutopilotNudged {
+        step: Step,
+    },
+    /// Autopilot opened the PRs (URLs) and is done.
+    AutopilotFinished {
+        prs: Vec<String>,
+    },
 }
 
 impl Event {
@@ -153,6 +182,13 @@ impl Event {
             Self::SetupFailed { .. } => "setup-failed",
             Self::RetrySetup => "retry-setup",
             Self::SkipSetup => "skip-setup",
+            Self::CreatedFromConversation { .. } => "created-from-conversation",
+            Self::StepStarted { .. } => "step-started",
+            Self::AutopilotPaused { .. } => "autopilot-paused",
+            Self::AutopilotResumed => "autopilot-resumed",
+            Self::AutopilotAnswered { .. } => "autopilot-answered",
+            Self::AutopilotNudged { .. } => "autopilot-nudged",
+            Self::AutopilotFinished { .. } => "autopilot-finished",
         }
     }
 }
@@ -169,6 +205,99 @@ pub enum TransitionError {
         resume_at: DateTime<Utc>,
         now: DateTime<Utc>,
     },
+}
+
+/// A step of the saving-mode chain; each one runs in its own Claude session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Step {
+    Plan,
+    Implement,
+    Review,
+}
+
+impl Step {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Plan => "plan",
+            Self::Implement => "implement",
+            Self::Review => "review",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "plan" => Some(Self::Plan),
+            "implement" => Some(Self::Implement),
+            "review" => Some(Self::Review),
+            _ => None,
+        }
+    }
+
+    /// The step after this one; `None` after the last.
+    pub fn next(self) -> Option<Self> {
+        match self {
+            Self::Plan => Some(Self::Implement),
+            Self::Implement => Some(Self::Review),
+            Self::Review => None,
+        }
+    }
+}
+
+/// How far a handoff to the next step has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HandoffStage {
+    Offered,
+    Saving,
+    Starting,
+    Failed,
+    Skipped,
+}
+
+/// The handoff under way: the step it goes to and where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Handoff {
+    pub to: Step,
+    pub stage: HandoffStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutopilotState {
+    Running,
+    Paused,
+    Done,
+}
+
+/// Where autopilot's final actions are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutopilotStage {
+    Preview,
+    OpeningPr,
+}
+
+/// Autopilot of a task: the chain runs by itself until the PRs are open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Autopilot {
+    pub state: AutopilotState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<AutopilotStage>,
+    /// Why it paused (user-facing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// When `state` last changed.
+    pub since: DateTime<Utc>,
+    /// The step that already got its one nudge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudged: Option<Step>,
+    /// The review session whose outcome file the finish reads; recorded when the
+    /// review starts, so a restart reads the right file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_session: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,6 +318,18 @@ pub struct Task {
     /// checkout (`true`) or a worktree (`false`); `None` if not chosen yet.
     #[serde(default)]
     pub in_checkout: Option<bool>,
+    /// The branch the task works on, once it has a workspace (read from it; never set by the client).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Saving mode: each phase runs in a fresh Claude session.
+    #[serde(default)]
+    pub saving_mode: bool,
+    /// The handoff to the next step under way, if any.
+    #[serde(default)]
+    pub handoff: Option<Handoff>,
+    /// Autopilot, if on (`None` = off).
+    #[serde(default)]
+    pub autopilot: Option<Autopilot>,
 }
 
 impl Task {
@@ -202,6 +343,10 @@ impl Task {
             status: TaskStatus::Queued,
             notes: None,
             in_checkout: None,
+            branch: None,
+            saving_mode: false,
+            handoff: None,
+            autopilot: None,
         }
     }
 
@@ -216,6 +361,17 @@ impl Task {
                 return Err(self.invalid("phase-reached"));
             }
             self.phase = Some(phase);
+            return Ok(());
+        }
+        if matches!(
+            event,
+            Event::StepStarted { .. }
+                | Event::AutopilotPaused { .. }
+                | Event::AutopilotResumed
+                | Event::AutopilotAnswered { .. }
+                | Event::AutopilotNudged { .. }
+                | Event::AutopilotFinished { .. }
+        ) {
             return Ok(());
         }
         self.status = next_status(&self.status, event)?;
@@ -265,6 +421,7 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         (S::SetupFailed { .. }, Event::RetrySetup | Event::SkipSetup) => Ok(S::PreparingWorkspace),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
         (S::PreparingWorkspace, Event::StartAborted { .. }) => Ok(S::Queued),
+        (S::Queued, Event::CreatedFromConversation { .. }) => Ok(S::Queued),
         _ => Err(invalid),
     }
 }
@@ -293,6 +450,23 @@ mod tests {
         task.apply(Event::Start).unwrap();
         task.apply(Event::WorkspaceReady).unwrap();
         task
+    }
+
+    #[test]
+    fn created_from_conversation_is_recorded_on_a_queued_task_only() {
+        let event = Event::CreatedFromConversation {
+            session: "s1".into(),
+            label: "Idea chat".into(),
+        };
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Card retries", "feature");
+        let before = task.clone();
+        task.apply(event.clone()).unwrap();
+        assert_eq!(task, before);
+        assert_eq!(event.name(), "created-from-conversation");
+
+        let mut running = running_task();
+        assert!(running.apply(event.clone()).is_err());
+        assert_eq!(running.status, TaskStatus::Running);
     }
 
     #[test]
@@ -537,5 +711,183 @@ mod tests {
 
         assert!(task.apply(Event::AgentFinished).is_err());
         assert_eq!(task, before);
+    }
+
+    #[test]
+    fn steps_chain_plan_implement_review() {
+        assert_eq!(Step::Plan.next(), Some(Step::Implement));
+        assert_eq!(Step::Implement.next(), Some(Step::Review));
+        assert_eq!(Step::Review.next(), None);
+        assert_eq!(Step::parse("implement"), Some(Step::Implement));
+        assert_eq!(Step::parse("nope"), None);
+    }
+
+    #[test]
+    fn steps_and_stages_serialise_lowercase() {
+        assert_eq!(serde_json::to_string(&Step::Review).unwrap(), "\"review\"");
+        assert_eq!(
+            serde_json::to_string(&HandoffStage::Saving).unwrap(),
+            "\"saving\""
+        );
+    }
+
+    #[test]
+    fn a_handoff_round_trips_without_an_empty_error() {
+        let handoff = Handoff {
+            to: Step::Implement,
+            stage: HandoffStage::Offered,
+            error: None,
+        };
+        let json = serde_json::to_string(&handoff).unwrap();
+        assert_eq!(json, r#"{"to":"implement","stage":"offered"}"#);
+        assert_eq!(serde_json::from_str::<Handoff>(&json).unwrap(), handoff);
+    }
+
+    #[test]
+    fn old_tasks_load_without_saving_mode_or_handoff() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,
+            "status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(!task.saving_mode);
+        assert_eq!(task.handoff, None);
+    }
+
+    #[test]
+    fn a_started_step_serialises_with_its_name() {
+        let event = Event::StepStarted {
+            step: Step::Implement,
+            session: "s-2".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            r#"{"type":"step-started","step":"implement","session":"s-2"}"#
+        );
+    }
+
+    #[test]
+    fn starting_a_step_keeps_every_status() {
+        let event = Event::StepStarted {
+            step: Step::Implement,
+            session: "s-2".into(),
+        };
+        let mut paused = running_task();
+        paused
+            .apply(Event::LimitReached {
+                resume_at: at(15, 0),
+            })
+            .unwrap();
+        for mut task in [
+            running_task(),
+            paused,
+            Task::new(TaskKey::new("PROJ-5"), "t", "feature"),
+        ] {
+            let before = task.clone();
+            task.apply(event.clone()).unwrap();
+            assert_eq!(task, before);
+        }
+    }
+
+    #[test]
+    fn autopilot_round_trips() {
+        let a = Autopilot {
+            state: AutopilotState::Paused,
+            stage: None,
+            reason: Some("stalled".into()),
+            since: at(10, 0),
+            nudged: None,
+            review_session: None,
+        };
+        let json = serde_json::to_string(&a).unwrap();
+        assert_eq!(
+            json,
+            r#"{"state":"paused","reason":"stalled","since":"2026-10-19T10:00:00Z"}"#
+        );
+        assert_eq!(serde_json::from_str::<Autopilot>(&json).unwrap(), a);
+        let b = Autopilot {
+            state: AutopilotState::Running,
+            stage: Some(AutopilotStage::OpeningPr),
+            reason: None,
+            since: at(10, 0),
+            nudged: Some(Step::Review),
+            review_session: Some("rev-1".into()),
+        };
+        let json = serde_json::to_string(&b).unwrap();
+        assert!(json.contains(r#""stage":"opening_pr""#) && json.contains(r#""nudged":"review""#));
+        assert!(json.contains(r#""review_session":"rev-1""#));
+        assert_eq!(serde_json::from_str::<Autopilot>(&json).unwrap(), b);
+        assert_eq!(
+            serde_json::to_string(&AutopilotStage::Preview).unwrap(),
+            "\"preview\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AutopilotState::Done).unwrap(),
+            "\"done\""
+        );
+    }
+
+    #[test]
+    fn old_tasks_load_without_autopilot() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,
+            "status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.autopilot, None);
+    }
+
+    fn autopilot_events() -> Vec<(Event, &'static str)> {
+        vec![
+            (
+                Event::AutopilotPaused { reason: "r".into() },
+                "autopilot-paused",
+            ),
+            (Event::AutopilotResumed, "autopilot-resumed"),
+            (
+                Event::AutopilotAnswered {
+                    question: "q".into(),
+                    answer: "a".into(),
+                },
+                "autopilot-answered",
+            ),
+            (
+                Event::AutopilotNudged { step: Step::Plan },
+                "autopilot-nudged",
+            ),
+            (
+                Event::AutopilotFinished {
+                    prs: vec!["u".into()],
+                },
+                "autopilot-finished",
+            ),
+        ]
+    }
+
+    #[test]
+    fn autopilot_events_serialise_kebab_case() {
+        for (event, name) in autopilot_events() {
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["type"], name);
+            assert_eq!(event.name(), name);
+            assert_eq!(serde_json::from_value::<Event>(json).unwrap(), event);
+        }
+    }
+
+    #[test]
+    fn autopilot_events_keep_every_status() {
+        let mut paused = running_task();
+        paused
+            .apply(Event::LimitReached {
+                resume_at: at(15, 0),
+            })
+            .unwrap();
+        for (event, _) in autopilot_events() {
+            for mut task in [
+                running_task(),
+                paused.clone(),
+                Task::new(TaskKey::new("PROJ-5"), "t", "feature"),
+            ] {
+                let before = task.clone();
+                task.apply(event.clone()).unwrap();
+                assert_eq!(task, before);
+            }
+        }
     }
 }

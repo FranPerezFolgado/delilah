@@ -27,6 +27,23 @@ Read these before changing anything; keep them true when you change behaviour:
 When a feature lands, update `docs/status.md` (and the README for user-facing
 behaviour); when a decision is taken, add it to `docs/decisions.md`.
 
+## Versioning: every Spec Kit task bumps the version
+
+Every feature or fix done with Spec Kit (`/feature`, `/orchestrate`,
+`/speckit-implement`) ends with a version bump on its branch, before the PR.
+Decide the level yourself from what the change does (semver):
+
+- **major**: breaks something already in use — HTTP API or CLI changes that old
+  clients can't handle, data/state that needs manual migration, removed features.
+- **minor**: a new user-facing feature or capability, backwards compatible.
+- **patch**: fixes, docs, internal refactors with no new behaviour.
+
+Bump from the version on `main` (re-check it if `main` moved before merging),
+in the four places listed in [docs/development.md](docs/development.md#releasing)
+plus the lockfiles, as its own commit `chore: bump version to X.Y.Z`, and say
+in the PR which level you picked and why. Tagging and building stay as in the
+release steps.
+
 ## Ground rules
 
 - Developed on a personal Mac, tested on the work Mac. Never reference or copy

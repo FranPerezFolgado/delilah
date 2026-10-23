@@ -1,18 +1,21 @@
-import { statusLabel, type SpecSummary, type Task } from "../api";
+import { statusLabel, type PrSummary, type SpecSummary, type Task } from "../api";
 import { BOARD_COLUMNS, boardColumnOf } from "../phases";
 import { Icon } from "./Icon";
+import { AutopilotMark } from "./AutopilotMark";
+import { PrBadge } from "./PrBadge";
 import { statusIcon } from "./status";
 import { t } from "../i18n";
 
 interface Props {
   tasks: Task[];
+  prs?: PrSummary[];
   specs: Record<string, SpecSummary>;
   onOpen: (key: string) => void;
   onNewTask: () => void;
 }
 
 /** Every task on one board, in the column of its SpecKit phase. */
-export function BoardView({ tasks, specs, onOpen, onNewTask }: Props) {
+export function BoardView({ tasks, prs = [], specs, onOpen, onNewTask }: Props) {
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
@@ -43,7 +46,7 @@ export function BoardView({ tasks, specs, onOpen, onNewTask }: Props) {
                 </div>
                 <div className="col-body">
                   {cards.map((t) => (
-                    <Card key={t.key} task={t} spec={specs[t.key]} onOpen={onOpen} />
+                    <Card key={t.key} task={t} spec={specs[t.key]} pr={prs.find((p) => p.task === t.key)} onOpen={onOpen} />
                   ))}
                 </div>
               </section>
@@ -55,7 +58,7 @@ export function BoardView({ tasks, specs, onOpen, onNewTask }: Props) {
   );
 }
 
-function Card({ task, spec, onOpen }: { task: Task; spec?: SpecSummary; onOpen: (key: string) => void }) {
+function Card({ task, spec, pr, onOpen }: { task: Task; spec?: SpecSummary; pr?: PrSummary; onOpen: (key: string) => void }) {
   const { icon, cls } = statusIcon(task.status);
   const showProgress = spec && spec.total > 0;
   const showCurrent = spec?.current && task.status.type !== "done" && spec.phase === "implement";
@@ -63,6 +66,8 @@ function Card({ task, spec, onOpen }: { task: Task; spec?: SpecSummary; onOpen: 
     <button className="kcard" onClick={() => onOpen(task.key)}>
       <span className="kcard-top">
         <span className="mono muted">{task.key}</span>
+        {pr && <PrBadge pr={pr} />}
+        <AutopilotMark autopilot={task.autopilot} />
         <span className={`kcard-status ${cls}`} title={statusLabel(task.status)}>
           <Icon name={icon} />
           {task.status.type !== "done" && task.status.type !== "running" && <span>{statusLabel(task.status)}</span>}

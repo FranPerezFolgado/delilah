@@ -3,7 +3,7 @@
 // Dock), the last item notified opens. Tauri's notifications report no clicks on
 // desktop, so coming back is the signal.
 import { useEffect, useRef } from "react";
-import { BLOCKING, type InboxItem, type InboxKind, type Task } from "./api";
+import { BLOCKING, type InboxItem, type InboxKind, type PrSummary, type Task } from "./api";
 import { notify, setBadge } from "./platform";
 import { t } from "./i18n";
 
@@ -13,9 +13,14 @@ const SAYS: Record<InboxKind, string> = {
   error: "error en el turno",
   waiting: "te espera",
   review: "lista para revisar",
+  handoff: "pasa a una sesión nueva",
   "suggest-review": "¿pasar a revisión?",
   paused: "pausada por límite",
   failed: "ha fallado",
+  "pr-failed": "CI falló",
+  "pr-review": "comentarios en la PR",
+  "pr-blocked": "no se pudo archivar",
+  autopilot: "autopiloto en pausa",
 };
 
 /** Coming back later than this does not jump anywhere: it is no longer "the" news. */
@@ -31,9 +36,10 @@ function gist(text: string | null, fallback: string): string {
   return plain.length > 160 ? `${plain.slice(0, 157)}…` : plain;
 }
 
-export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], open: (item: InboxItem) => void) {
+export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], prs: PrSummary[], open: (item: InboxItem) => void) {
   const seen = useRef<Set<string> | null>(null);
   const statuses = useRef<Map<string, string> | null>(null);
+  const prStates = useRef<Map<string, { approved: boolean; closed: boolean; merged: boolean }> | null>(null);
   const pending = useRef<{ item: InboxItem; at: number } | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -66,6 +72,21 @@ export function useDesktopAlerts(inbox: InboxItem[], tasks: Task[], open: (item:
     }
     statuses.current = now;
   }, [tasks]);
+
+  // An approved or closed PR is news too (merged too; the daemon sends its own notification when it archives).
+  useEffect(() => {
+    const now = new Map(prs.map((p) => [p.task, { approved: p.review_decision === "approved", closed: p.state === "closed", merged: p.state === "merged" }]));
+    if (prStates.current && !document.hasFocus()) {
+      for (const p of prs) {
+        const before = prStates.current.get(p.task);
+        const cur = now.get(p.task)!;
+        if (before && !before.approved && cur.approved) notify(`${p.task} ${t("aprobada")}`, "").catch(() => {});
+        if (before && !before.closed && cur.closed) notify(`${p.task} ${t("PR cerrada")}`, "").catch(() => {});
+        if (before && !before.merged && cur.merged) notify(`${p.task} ${t("PR mergeada")}`, "").catch(() => {});
+      }
+    }
+    prStates.current = now;
+  }, [prs]);
 
   useEffect(() => {
     const onFocus = () => {

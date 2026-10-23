@@ -3,7 +3,7 @@
 ## Where the settings are stored
 
 - **Decision**: one `settings` column on `projects` (JSON text, default `'{}'`), added by
-  migration `0011_project_settings.sql`. Missing keys mean "default".
+  migration `0016_project_settings.sql`. Missing keys mean "default".
 - **Rationale**: renames and deletes already handle the `projects` row, so the settings
   follow for free (spec edge cases). JSON leaves room for `pr` later (FR-014) without
   another migration. Nothing is written into the repo (decision 26).

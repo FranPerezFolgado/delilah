@@ -5,7 +5,7 @@
 | Field | Type | Default | Rules |
 |---|---|---|---|
 | `workspace` | `"checkout" \| "worktree"` | `"checkout"` | |
-| `branch` | string | `"feature/{ticket}"` | must contain `{ticket}`; only `{ticket}` and `{slug}` as placeholders; non-empty |
+| `branch` | string or null | `null` | optional template; when set it must contain `{ticket}`; only `{ticket}` and `{slug}` as placeholders; non-blank (`""` is `branch.empty`; clients send `null` for none). `null` = Delilah proposes a descriptive name (task branch names) |
 | `shared` | list of `SharedEntry` | `[]` | paths unique |
 | `setup` | string or null | null | trimmed; empty means none |
 | `submodules.always` | list of submodule paths | `[]` | parent projects only; each must exist in the parent |
@@ -48,7 +48,7 @@ by the daemon: the app translates them.
 `Setup`: one per setup run, in the task's worktree, read-only for the user (no input
 forwarded), closed when the command ends. Its log file is the setup's full output.
 
-## Migration `0011_project_settings.sql`
+## Migration `0016_project_settings.sql`
 
 ```sql
 -- What the user set for the project in Delilah (JSON); '{}' = every default.
