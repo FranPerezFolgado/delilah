@@ -20,10 +20,10 @@ Mode: format=markdown commits=yes
 | WP-13 | 5 | 5A | done | 1 | f276089 | |
 | WP-14 | 5 | 5B | done | 1 | 493dff7 | |
 | WP-15 | 5 | 5B | done | 1 | 453beb1 | |
-| WP-16 | 6 | 6A | verified | 1 | ac6020c | |
-| WP-17 | 6 | 6A | verified | 1 | 15b33c5 | |
-| WP-18 | 6 | 6B | verified | 1 | | manual parts (T049, T056) |
-| WP-19 | 6 | 6C | pending | 0 | | |
+| WP-16 | 6 | 6A | done | 1 | ac6020c | |
+| WP-17 | 6 | 6A | done | 1 | 15b33c5 | |
+| WP-18 | 6 | 6B | done | 1 | f92e3b1 | manual parts (T049, T056) |
+| WP-19 | 6 | 6C | done | 1 | b46d1aa | |
 | WP-01F | 1 | 1A-fix | done | 1 | 5bfff99 | Phase 1 review fixes |
 | WP-02F | 2 | 2-fix | done | 1 | ea390bd | Phase 2 review fixes |
 | WP-08F | 3 | 3-fix | done | 1 | eb8cdcb | Phase 3 review fixes |
