@@ -13,7 +13,7 @@
 
 **Purpose**: test helpers shared by every story. No new dependencies.
 
-- [ ] T001 Add helpers to the test fixture in `crates/delilah-git/tests/workspace.rs` (or a shared `crates/delilah-git/tests/common/mod.rs` used by both test files): `advance_remote(remote: &Path, file, msg) -> String` (clones the bare remote into a temp dir, commits, pushes `main`, returns the new sha); `remote_head(remote) -> String` (`git -C <bare> rev-parse main`); `upstream_of(dir, branch) -> Option<String>` (`git rev-parse --abbrev-ref <branch>@{u}`, `None` on failure). Use the existing `git()` helper and `Fixture` (bare remotes in `env/remotes/*.git`).
+- [X] T001 Add helpers to the test fixture in `crates/delilah-git/tests/workspace.rs` (or a shared `crates/delilah-git/tests/common/mod.rs` used by both test files): `advance_remote(remote: &Path, file, msg) -> String` (clones the bare remote into a temp dir, commits, pushes `main`, returns the new sha); `remote_head(remote) -> String` (`git -C <bare> rev-parse main`); `upstream_of(dir, branch) -> Option<String>` (`git rev-parse --abbrev-ref <branch>@{u}`, `None` on failure). Use the existing `git()` helper and `Fixture` (bare remotes in `env/remotes/*.git`).
 
 ---
 
@@ -89,12 +89,12 @@
 
 ### UI
 
-- [ ] T021 [P] [US4] Write failing tests in `app/src/components/InboxView.test.tsx`: a `base-stale` item shows the label "Rama posiblemente atrasada" and its text, and "Descartar" calls `api.dismissNotice(item.notice)`; it offers no PR actions.
-- [ ] T022 [P] [US4] Write failing tests in `app/src/components/TaskScreen.test.tsx`: with `notices` containing a `base-stale` item, a banner shows its text; "Descartar" calls `api.dismissNotice` and `onChanged`; with no notices there is no banner.
-- [ ] T023 [US4] Implement the contract in `app/src/api.ts`: `InboxKind` += `"base-stale"`, `InboxItem.notice?: number`; not added to `BLOCKING`. Add `"base-stale": "rama posiblemente atrasada"` to `SAYS` in `app/src/alerts.ts`.
-- [ ] T024 [US4] Implement T021 in `app/src/components/InboxView.tsx`: the `KIND` entry (`label: "Rama posiblemente atrasada"`, the existing warning icon/class used elsewhere in the file, else `icon: "failed", cls: "c-warn"` or the closest existing class) and a "Descartar" button for `base-stale` items with `item.notice`, calling `api.dismissNotice`.
-- [ ] T025 [US4] Implement T022 in `app/src/components/TaskScreen.tsx` (new prop `notices: InboxItem[]`, a banner above the tabs) and pass the selected task's `base-stale` items from `app/src/App.tsx` (filter the inbox by `task` and `kind`).
-- [ ] T026 [P] [US4] Add the English strings for every new `t("…")` in `app/src/i18n/en.ts` ("Rama posiblemente atrasada" → "Branch may be behind", "Descartar" if not already there).
+- [X] T021 [P] [US4] Write failing tests in `app/src/components/InboxView.test.tsx`: a `base-stale` item shows the label "Rama posiblemente atrasada" and its text, and "Descartar" calls `api.dismissNotice(item.notice)`; it offers no PR actions.
+- [X] T022 [P] [US4] Write failing tests in `app/src/components/TaskScreen.test.tsx`: with `notices` containing a `base-stale` item, a banner shows its text; "Descartar" calls `api.dismissNotice` and `onChanged`; with no notices there is no banner.
+- [X] T023 [US4] Implement the contract in `app/src/api.ts`: `InboxKind` += `"base-stale"`, `InboxItem.notice?: number`; not added to `BLOCKING`. Add `"base-stale": "rama posiblemente atrasada"` to `SAYS` in `app/src/alerts.ts`.
+- [X] T024 [US4] Implement T021 in `app/src/components/InboxView.tsx`: the `KIND` entry (`label: "Rama posiblemente atrasada"`, the existing warning icon/class used elsewhere in the file, else `icon: "failed", cls: "c-warn"` or the closest existing class) and a "Descartar" button for `base-stale` items with `item.notice`, calling `api.dismissNotice`.
+- [X] T025 [US4] Implement T022 in `app/src/components/TaskScreen.tsx` (new prop `notices: InboxItem[]`, a banner above the tabs) and pass the selected task's `base-stale` items from `app/src/App.tsx` (filter the inbox by `task` and `kind`).
+- [X] T026 [P] [US4] Add the English strings for every new `t("…")` in `app/src/i18n/en.ts` ("Rama posiblemente atrasada" → "Branch may be behind", "Descartar" if not already there).
 
 **Checkpoint**: all stories green; `cd app && npx tsc --noEmit && npx vitest run` green.
 
