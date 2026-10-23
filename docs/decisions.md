@@ -195,6 +195,21 @@ repos is ever referenced or copied. Development uses
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
 
+**49. The installed app is guarded by a hook, not only by CLAUDE.md (2026-10-23).** A
+`PreToolUse` hook in the committed `.claude/settings.json` blocks agent commands that would
+stop or change the installed Delilah (decision 22), so the rule also holds in agents' worktrees.
+`.claude/launch.json` lost its `daemon`/`ui` entries, which bound 7420. Matching is textual and
+per statement, skipping heredoc bodies; a commit message quoting such a command is still
+blocked, and rewording it is cheaper than a shell parser.
+
+**50. Machines check code, the user checks specs and plans (2026-10-23).** fmt, clippy with
+`-D warnings` and tests gate each implementer (`.claude/verify.sh`) and each PR (GitHub Actions,
+no LLM review in CI: `/orchestrate` already reviews each phase). `/feature` has an
+`architecture-reviewer` look at the plan before the user does, and `/orchestrate` runs without
+stops between phases (at most 2 fix rounds, MEDIUM/LOW findings logged in `progress.md`). The
+version bump is a script, `scripts/bump-version.sh`. Rust CI runs on macOS because the daemon has
+macOS-only dependencies; that costs more runner minutes than Linux.
+
 ## Pull requests
 
 **26. GitHub through the user's `gh`, with no token in the daemon (2026-10-20).**

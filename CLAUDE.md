@@ -40,7 +40,8 @@ Decide the level yourself from what the change does (semver):
 
 Bump from the version on `main` (re-check it if `main` moved before merging),
 in the four places listed in [docs/development.md](docs/development.md#releasing)
-plus the lockfiles, as its own commit `chore: bump version to X.Y.Z`, and say
+plus the lockfiles (`scripts/bump-version.sh <level> --commit` does both), as its own commit
+`chore: bump version to X.Y.Z`, and say
 in the PR which level you picked and why. Tagging and building stay as in the
 release steps.
 
@@ -87,5 +88,7 @@ with its own state in `fixtures/preview-home-N` and the fixture repos to registe
 as projects. Open the UI in a browser (or the browser pane) to try the feature;
 use `DELILAH_URL=<API> target/debug/delilah …` or curl for the API. Run it in the
 background and stop it with Ctrl-C (or by stopping that process), never by name.
+A `PreToolUse` hook (`.claude/hooks/guard-installed-daemon.sh`) blocks the commands that would
+touch the installed app; if it blocks you, use a preview or ask the user.
 Only what is native to macOS (notifications, menu, Dock badge, global ⌘P) needs
 the Tauri app; say so instead of trying it.
