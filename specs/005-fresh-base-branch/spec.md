@@ -123,7 +123,8 @@ the base it used) is visible on the task.
    there is none, from the local default branch), and a warning visible on the task
    says which repo could not be updated and which base was used.
 2. **Given** the remote does not answer, **When** a task starts, **Then** the start
-   is held up by at most the time limit (see SC-003) before falling back.
+   is held up by at most 30 seconds in total, however many repos are involved,
+   before falling back.
 3. **Given** a parent project where one chosen submodule fails to update and the
    others succeed, **When** the task starts, **Then** only that submodule falls
    back, and the warning names only it.
@@ -138,8 +139,9 @@ the base it used) is visible on the task.
 - **The remote does not say which branch is its default**: use the first of
   `main`, then `master` that exists on the remote; if neither does, fall back as
   when offline, with a warning.
-- **Task branch already exists**: never moved or rewritten (see US2-2); the same
-  applies to an existing branch in a chosen submodule.
+- **Task branch already exists**: in checkout mode it is never moved or rewritten
+  (see US2-2), judged per repo, submodules included; in worktree mode the start
+  fails as it does today.
 - **Project folder has uncommitted changes**: worktree mode does not touch the
   folder, so it is unaffected; checkout mode keeps refusing to start, as today.
 - **Updating the remote view needs credentials that would prompt**: never wait for
@@ -158,8 +160,10 @@ the base it used) is visible on the task.
 ### Functional Requirements
 
 - **FR-001**: Before creating a new task branch, Delilah MUST update its view of
-  the remote of every repo where the branch will be created: the repo for a repo
-  project; the parent and each chosen submodule for a parent project.
+  the remote (`origin`) of every repo whose state the task starts from: the repo,
+  for a repo project; the parent and each chosen submodule, for a parent worktree
+  task; each chosen submodule (not the parent folder, which gets no branch), for a
+  parent checkout task.
 - **FR-002**: A new task branch MUST start from the remote's default branch as just
   updated. The default branch is the one the remote declares; if it declares none,
   `main`, then `master`, whichever exists on the remote.
@@ -169,21 +173,33 @@ the base it used) is visible on the task.
 - **FR-004**: For a parent worktree task, the parent's worktree MUST be based on
   the parent's remote default branch, and each chosen submodule's branch on that
   submodule's own remote default branch.
-- **FR-005**: An existing task branch MUST be used as it is; Delilah MUST NOT
-  reset, rebase, merge or otherwise move it.
-- **FR-006**: Delilah MUST NOT change the project folder's local branches (including
-  the local default branch) or, in worktree mode, its checked-out branch or files.
+- **FR-004a**: A chosen submodule with no remote, or whose update fails, follows
+  FR-007 and FR-009 on its own, without affecting the other submodules.
+- **FR-005**: In checkout mode, a task branch that already exists in a repo MUST
+  be used as it is in that repo; Delilah MUST NOT reset, rebase, merge or otherwise
+  move it (repos are judged one by one: a submodule that already has the branch
+  keeps it, one that does not gets a fresh one). In worktree mode, an existing
+  branch keeps failing the start as it does today (FR-011).
+- **FR-006**: Delilah MUST NOT move or create any local branch other than the task's
+  own (in particular, the local default branch stays where it is). In worktree mode
+  the project folder's checked-out branch and files MUST NOT change; in checkout
+  mode the only change is switching to the task's branch, as today.
 - **FR-007**: If updating a repo's view of the remote fails or times out, the task
   MUST still start, using the last known remote default branch, else the local
-  default branch, else the current commit, and Delilah MUST show a warning on the
-  task naming the repo, the reason, and the base used.
+  default branch, else the current commit, and Delilah MUST show a warning naming
+  the repo, the reason, and the base used. The warning is an item of the task in
+  the Bandeja, also shown on the task's screen, and stays until the user dismisses
+  it; it never blocks or pauses the task.
 - **FR-008**: Updating MUST NOT wait for interactive input (passwords, host-key
-  prompts) and MUST give up after a bounded time.
+  prompts) and MUST give up after at most 30 seconds for the whole start (all repos
+  together; independent repos may be updated at the same time).
 - **FR-009**: A repo with no remote MUST start the branch as today, without a warning.
 - **FR-010**: The base a task branch started from (ref name and commit) MUST be
   recorded in the daemon's log for each repo, so a wrong base can be diagnosed.
 - **FR-011**: Failures unrelated to the update (invalid branch name, existing
   workspace folder, dirty checkout) MUST behave exactly as today.
+- **FR-012**: Two tasks of the same project started at the same time MUST both get
+  a fresh base; an update running for one MUST NOT make the other's start fail.
 
 ### Key Entities
 
@@ -202,7 +218,8 @@ the base it used) is visible on the task.
 - **SC-002**: A task started right after a PR is merged on the remote opens its
   own PR with no rebase needed, unless the two touch the same lines.
 - **SC-003**: With the remote unreachable, starting a task takes at most 30 seconds
-  longer than today, and the task always starts.
+  longer than today in total, whatever the number of repos, and the task always
+  starts.
 - **SC-004**: With the remote reachable, starting a task takes at most the time of
   one update of the remote per repo involved (typically a few seconds) longer
   than today.
