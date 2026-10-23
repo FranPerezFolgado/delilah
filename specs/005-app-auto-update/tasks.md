@@ -143,15 +143,15 @@
 
 ### Tests first
 
-- [ ] T019 [P] [US2] `scripts/release/versions.test.mjs`, against a temp copy of the four files:
+- [X] T019 [P] [US2] `scripts/release/versions.test.mjs`, against a temp copy of the four files:
   - `readVersions(root)` returns `{ "Cargo.toml": "0.4.0", "app/src-tauri/Cargo.toml": …, "app/package.json": …, "app/src-tauri/tauri.conf.json": … }`. It reads only the workspace `[workspace.package]` / `[package]` version, not dependency versions;
   - `mismatches(v, "0.5.0")` lists each file that differs;
   - `writeVersions(root, "0.5.0")` changes only those version fields: the diff is exactly 4 lines and JSON formatting is preserved.
-- [ ] T020 [P] [US2] `scripts/release/notes.test.mjs`:
+- [X] T020 [P] [US2] `scripts/release/notes.test.mjs`:
   - `releaseNotes(subjects)` groups `feat(x): a` under "## Novedades" and `fix: b` under "## Correcciones", strips the scope prefixes, drops `docs`/`chore`/`test`/`refactor`/merge subjects, keeps the order, and returns "Mantenimiento interno." when nothing is left;
   - `pickNotes(tagMessage, subjects)` prefers a non-empty tag message (trimmed; the git default "vX.Y.Z" alone counts as empty).
-- [ ] T021 [P] [US2] `scripts/release/manifest.test.mjs`: `manifest({version:"0.5.0", notes, pubDate, signature, repo:"FranPerezFolgado/delilah"})` equals the contracts §1 JSON, with `url` `…/releases/download/v0.5.0/Delilah.app.tar.gz`, and a version with a leading `v` is rejected.
-- [ ] T022 [P] [US2] `scripts/release/check.test.mjs`. The pure `problems({versions, expected, env, publishedTags, pubkey})` returns one string per failure for:
+- [X] T021 [P] [US2] `scripts/release/manifest.test.mjs`: `manifest({version:"0.5.0", notes, pubDate, signature, repo:"FranPerezFolgado/delilah"})` equals the contracts §1 JSON, with `url` `…/releases/download/v0.5.0/Delilah.app.tar.gz`, and a version with a leading `v` is rejected.
+- [X] T022 [P] [US2] `scripts/release/check.test.mjs`. The pure `problems({versions, expected, env, publishedTags, pubkey})` returns one string per failure for:
   - a version mismatch;
   - a non-semver version;
   - a missing `TAURI_SIGNING_PRIVATE_KEY` or `_PASSWORD` (only when `requireSecrets`);
@@ -164,7 +164,7 @@
 
 ### Implementation
 
-- [ ] T024 [US2] Implement `scripts/release/versions.mjs`, `notes.mjs`, `manifest.mjs` and `check.mjs` as ESM with only `node:` imports. `check.mjs` exports `problems` and, when run as `node scripts/release/check.mjs X.Y.Z [--require-secrets]`:
+- [X] T024 [US2] Implement `scripts/release/versions.mjs`, `notes.mjs`, `manifest.mjs` and `check.mjs` as ESM with only `node:` imports. `check.mjs` exports `problems` and, when run as `node scripts/release/check.mjs X.Y.Z [--require-secrets]`:
   - reads the versions and the pubkey from `tauri.conf.json`;
   - reads published tags with `gh release list --json tagName,isDraft` when `gh` is available (skip with a note otherwise);
   - prints the problems and exits 1 if any.

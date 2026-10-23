@@ -6,11 +6,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 5f9c2d1 | hook log empty; implementer checks pass |
-| WP-02 | 2 | 2A | verified | 1 | | event names + open transitions decided by implementer |
+| WP-02 | 2 | 2A | verified | 1 | 3af5f13 | event names + open transitions decided by implementer |
 | WP-03 | 3 | 3A | pending | 0 | | |
 | WP-04 | 3 | 3A | pending | 0 | | |
 | WP-05 | 3 | 3A | pending | 0 | | |
-| WP-06 | 4 | 4A | implementing | 0 | | can start after WP-01 |
+| WP-06 | 4 | 4A | verified | 1 | | run tests with `node --test scripts/release/*.test.mjs` |
 | WP-07 | 4 | 4B | pending | 0 | | |
 | WP-08 | 4 | 4B | pending | 0 | | |
 | WP-09 | 5 | 5A | pending | 0 | | |
