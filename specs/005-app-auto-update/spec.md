@@ -25,6 +25,7 @@ Things the product already does and this feature relies on:
 - Q: Where are releases and the manifest hosted? → A: GitHub Releases on the public repo FranPerezFolgado/delilah; no credentials in the app.
 - Q: What can the user choose when sessions are running? → A: "Actualizar ahora", "Cuando terminen" (update as soon as no session is live) or "Cancelar".
 - Q: Where do the release notes come from? → A: Generated from the conventional commits since the previous tag (features and fixes grouped); an annotated tag's message, when present, replaces them.
+- Q: How does the maintainer cut a release by hand? → A: One `make release` command on `main` bumps the version (or takes the one already there), commits, tags `vX.Y.Z` and pushes `main` and the tag, which starts the pipeline.
 - Q: What triggers a release? → A: Pushing a tag `vX.Y.Z` to GitHub; a pipeline on GitHub checks, builds, signs and publishes it with no further step (supersedes the earlier "manual release script" assumption).
 - Database copies kept by FR-014: the last 3; older ones are deleted (default, not asked).
 
@@ -50,7 +51,7 @@ The user has Delilah open. A newer release has been published. Without leaving t
 
 ### User Story 2 - Publish a release that installed apps pick up (Priority: P1)
 
-The maintainer has bumped the version and merged to main. They create the tag for that version and push it; nothing else. GitHub builds the release, signs it, and publishes the disk image, the update package and the manifest that tells installed apps which version is the latest. Installed apps see the new version on their next check.
+The maintainer runs one command on `main` (`make release`, optionally saying which part of the version to raise). It bumps the version where needed, commits, creates the tag and pushes both; nothing else. GitHub builds the release, signs it, and publishes the disk image, the update package and the manifest that tells installed apps which version is the latest. Installed apps see the new version on their next check.
 
 **Why this priority**: Without a published, signed release there is nothing for Story 1 to install; both are needed for the first useful slice.
 
@@ -62,7 +63,10 @@ The maintainer has bumped the version and merged to main. They create the tag fo
 2. **Given** the signing key secret is missing, **When** the pipeline runs, **Then** it fails before publishing anything and its log says which secret is missing.
 3. **Given** the tag's version differs from the version in any of the places the version lives, **When** the pipeline runs, **Then** it fails before building and lists the mismatch.
 4. **Given** the tag is annotated with a message, **When** the pipeline publishes, **Then** that message is the release notes; otherwise the notes are generated from the commits.
-5. **Given** the maintainer wants to try a release without publishing, **When** they run the local dry run, **Then** it does the same checks and build on their Mac and publishes nothing.
+5. **Given** `main` is on 0.4.0, **When** the maintainer runs `make release BUMP=minor`, **Then** the version becomes 0.5.0 in every place it lives, a commit `chore: release 0.5.0` and tag `v0.5.0` are created, the command shows what it will push and asks for confirmation, and after a yes pushes `main` and the tag.
+6. **Given** the version on `main` was already bumped on the feature branch and has no tag yet, **When** the maintainer runs `make release`, **Then** it only creates and pushes the tag for that version.
+7. **Given** the checkout is not `main`, has uncommitted changes, is behind the remote, or the version already has a tag, **When** `make release` runs, **Then** it stops before changing anything and says why.
+8. **Given** the maintainer wants to try a release without publishing, **When** they run the local dry run, **Then** it does the same checks and build on their Mac and publishes nothing.
 4. **Given** a release has been published, **When** an app on an older version checks, **Then** it is offered exactly that version.
 
 ---
@@ -149,6 +153,7 @@ The user wants to know which version they run, or has heard a release is out and
 
 - **FR-016**: Pushing a tag `vX.Y.Z` to the public repository FranPerezFolgado/delilah MUST, with no other step, build the release, sign the update package, generate the manifest and publish the disk image, the update package, its signature and the manifest as GitHub Release `vX.Y.Z`, where installed apps read the manifest of the latest release without credentials.
 - **FR-017**: The release pipeline MUST fail before building when the tag's version is not the same in every place the version lives, when the signing key or its password is not available, or when release `vX.Y.Z` is already published. A local dry run MUST perform the same checks and the build without publishing, and also refuse when the repository is not public.
+- **FR-025**: A single `make release` command MUST, on a clean `main` that is up to date with the remote: take the version from `VERSION=X.Y.Z`, from `BUMP=major|minor|patch` applied to the current one, or, with neither, the current version if it has no tag yet; write it in every place the version lives and refresh the lockfiles; commit `chore: release X.Y.Z` (only when something changed); create tag `vX.Y.Z`; show the commit and tag and ask for confirmation (skipped with `YES=1`); then push `main` and the tag. It MUST refuse a version that is not greater than the latest tag, and push nothing if any step fails. `make release-dry-run` MUST run the local dry run.
 - **FR-018**: The release notes MUST be the annotated tag's message when it has one, and otherwise generated from the conventional commits since the previous tag (features and fixes grouped, other types left out); they MUST be published with the release and the app MUST show them.
 - **FR-019**: The signing key and its password MUST live outside the repository (as encrypted secrets of the GitHub repository, plus the maintainer's own backup); only the public key ships with the app. The pipeline MUST never print them.
 
@@ -177,12 +182,13 @@ The user wants to know which version they run, or has heard a release is out and
 - **SC-003**: After an update, 100% of projects, tasks and settings are present, and the app, daemon and plugin all report the new version.
 - **SC-004**: An update package with a wrong or missing signature is never installed: 0 accepted across the three tamper cases (signature from another key, signature missing, package altered after signing).
 - **SC-005**: No agent session is stopped by an update without the user having been told, beforehand, how many would be stopped.
-- **SC-006**: Publishing a release takes no step after pushing the tag, down from the current five manual steps per Mac; a release is available to installed apps within 30 minutes of the push.
+- **SC-006**: Publishing a release is one command (`make release`) and no step after it, down from the current five manual steps per Mac; a release is available to installed apps within 30 minutes of the push.
 
 ## Assumptions
 
 - **User-confirmed, not silent**: updates are always offered and applied on the user's choice; there is no silent auto-install (agents may be running).
 - **Check frequency**: at launch and every 6 hours while open, plus on demand. Not configurable in this version.
+- **`make release` pushes to `main` directly**: the repository has no branch protection that forbids it; the git and gh credentials used are the personal account's.
 - **Release on tag push**: a GitHub pipeline on an Apple Silicon runner does the release; the repo being public keeps those runs free. The local script remains only as a dry run.
 - **No Apple code signing or notarisation**: Delilah is for personal use on two Macs. Updates are verified with the updater's own signature; installing an update does not bring back the quarantine flag. Apple signing can be added later without changing this flow.
 - **Apple Silicon only**, as today's builds.

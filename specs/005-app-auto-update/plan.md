@@ -11,7 +11,7 @@ Installed Delilah apps update themselves from GitHub Releases, with the user's c
 - The shell registers the updater and process plugins (in release builds only) and adds a "Buscar actualizaciones…" menu item.
 - The web UI drives the flow: it checks at start-up, every 6 h and on demand, and shows a notice with the version and notes. Before installing it warns about live sessions and offers "Actualizar ahora", "Cuando terminen" or "Cancelar". Then it downloads with progress, verifies, installs and relaunches.
 - After the relaunch, the existing code restarts the daemon, rewrites the plugin and runs the migrations. The daemon adds a pre-upgrade database copy.
-- Releasing becomes: bump, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. A GitHub Actions workflow (`.github/workflows/release.yml`, macOS Apple Silicon runner) then:
+- Releasing becomes one command on `main`: `make release [BUMP=…|VERSION=…]` bumps the four version files and the lockfiles if needed, commits `chore: release X.Y.Z`, creates the annotated tag `vX.Y.Z` with the notes, asks for confirmation and pushes `main` and the tag atomically. Pushing the tag `vX.Y.Z` (by hand or via make) A GitHub Actions workflow (`.github/workflows/release.yml`, macOS Apple Silicon runner) then:
   1. checks the tag against the four version files and that the release isn't already published;
   2. builds notes from the annotated tag message or the conventional commits;
   3. builds and signs with `tauri-action` (key from repository secrets), uploads the files and `latest.json` to a draft, and publishes it last.
@@ -58,6 +58,7 @@ The Tauri glue is checked with `cargo check --manifest-path app/src-tauri/Cargo.
 | Confirm the account before remote operations | ✅ implementation does no remote operations. Setting the secrets, making the repo public and pushing the tag are the maintainer's steps, done as `FranPerezFolgado` (quickstart) |
 | Migrations never edit a shipped one | ✅ no migration |
 | Contracts (`api.rs` ↔ `api.ts`) | ✅ unchanged; new contracts are the manifest, shell events and release CLI ([contracts/update-contracts.md](contracts/update-contracts.md)) |
+| Remote operations as the personal account | ✅ `make release` refuses unless `gh` is `FranPerezFolgado`; implementation tests it only against a local bare remote |
 | Every Spec Kit task bumps the version | ✅ **minor** (new user-facing feature, backwards compatible): 0.4.0 → 0.5.0, re-checked against `main` before the PR |
 
 Post-design re-check: no change. One cost has to be accepted: `npm run dist` without the signing key now fails, because `createUpdaterArtifacts` needs the key. Releases run in the tag workflow, and local builds use `scripts/release.sh --dry-run`.
@@ -107,10 +108,13 @@ crates/delilah-daemon/src/
 .github/workflows/
 └── release.yml                 # new: on tag v*.*.* → check → notes → tauri-action (draft) → publish
 
+Makefile                        # new: release, release-dry-run
+
 scripts/
 ├── release.sh                  # new: --dry-run only (checks, signed build, local latest.json)
 └── release/
-    ├── check.mjs                # shared checks (CI + dry run)
+    ├── check.mjs                # shared checks (CI + dry run + make release)
+    ├── cut.mjs (+ .test.mjs)    # make release: preflight, pick version, bump, commit, tag, confirm, push
     ├── versions.mjs (+ .test.mjs)
     ├── notes.mjs    (+ .test.mjs)
     └── manifest.mjs (+ .test.mjs)
@@ -129,7 +133,8 @@ docs/  development.md (Releasing rewritten, key setup/backup, bootstrap), archit
 4. **Daemon copy.** `upgrade::before_open(home, db_path, current)` runs before `Store::open`, and `upgrade::after_open(home, current)` runs after it succeeds. A failed copy is logged, never fatal. A copy that already exists is never overwritten.
 5. **Release safety.** `tauri-action` uploads to a draft, and the last workflow step publishes it only if everything before it passed. `releases/latest` never resolves to a draft. The workflow's `concurrency` is per tag. A rerun reuses the draft. A published `vX.Y.Z` fails the check.
 6. **Bootstrap.** 0.5.0 is the first version with the updater. Its dmg comes from the release the workflow publishes. Each Mac installs it by hand once, and later versions come through the app.
-7. **Workflow tests.** The workflow itself only runs on a real tag. Its logic lives in `check.mjs`/`notes.mjs` (unit-tested), and the YAML is checked with `actionlint` if it is installed, otherwise by review. The first real run is quickstart step 3.
+7. **`make release`.** It is the manual entry point (R16). It works whether the feature branch already bumped the version (CLAUDE.md rule: then it only tags) or not (then it bumps on `main`). It pushes `main` and the tag with `--atomic`, and undoes its own local commit and tag if anything fails before the push. It is tested in a throwaway clone with a local bare remote, never against GitHub.
+8. **Workflow tests.** The workflow itself only runs on a real tag. Its logic lives in `check.mjs`/`notes.mjs` (unit-tested), and the YAML is checked with `actionlint` if it is installed, otherwise by review. The first real run is quickstart step 3.
 
 ## Risks
 

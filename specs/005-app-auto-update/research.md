@@ -40,7 +40,7 @@
 
 ## R7. Release notes
 
-- **Decision**: A pure Node module `scripts/release/notes.mjs` builds the notes. If the tag is annotated with a non-empty message, the message is used as is. Otherwise it turns `git log --format=%s <prev-tag>..<tag>` into Markdown: a "Novedades" section for `feat` and a "Correcciones" section for `fix`, with scope prefixes stripped and merges and other types dropped. The workflow writes the result to a file that is used for both the release body and `latest.json`'s `notes`.
+- **Decision**: A pure Node module `scripts/release/notes.mjs` builds the notes. If the tag is annotated with a non-empty message, the message is used as is. `make release` always annotates the tag with the generated notes, or with `MESSAGE`. Otherwise it turns `git log --format=%s <prev-tag>..<tag>` into Markdown: a "Novedades" section for `feat` and a "Correcciones" section for `fix`, with scope prefixes stripped and merges and other types dropped. The workflow writes the result to a file that is used for both the release body and `latest.json`'s `notes`.
 - **Rationale**: The commit-based notes were chosen in clarify. Since nobody edits notes in CI, an annotated tag is the way to write them by hand. Node is on the runner, and `node --test` needs no new dependencies.
 - **Alternatives**: `--generate-notes` (it groups by PRs and labels, not conventional commits), or a CHANGELOG file (ruled out in clarify).
 
@@ -88,6 +88,23 @@
 - release `vX.Y.Z` is not already published (looked up with `gh release view`). An existing draft is fine: it is reused, so re-runs are safe.
 
 The dry run also checks, on the Mac, that the tree is clean and that `gh repo view --json visibility` is `PUBLIC`.
+
+## R16. `make release` (manual entry point)
+
+- **Decision**: A root `Makefile` with two thin targets that call Node scripts:
+  - `release` runs `node scripts/release/cut.mjs` with `VERSION`, `BUMP` and `YES`.
+  - `release-dry-run` runs `scripts/release.sh "$(VERSION)" --dry-run`.
+- **`cut.mjs` steps** (stops at the first failure, before anything is pushed):
+  1. **Preflight**: the branch is `main`, the tree is clean, `git fetch` succeeds and `main` equals `origin/main` (it never merges by itself), and `gh api user -q .login` is `FranPerezFolgado`, because the machine also has work credentials (CLAUDE.md).
+  2. **Pick the version**: `VERSION`, or `bump(current, BUMP)`, or the current version. It must be strictly greater than the latest `v*` tag, and that tag must not exist yet.
+  3. If the version changes, it writes it to the four files (`versions.mjs` `writeVersions`), runs `cargo check --workspace`, `cargo check --manifest-path app/src-tauri/Cargo.toml` and `npm install --package-lock-only` in `app/`, then commits `chore: release X.Y.Z` with the four files and three lockfiles.
+  4. `node scripts/release/check.mjs X.Y.Z` (the same checks as CI, minus the secrets).
+  5. Creates the annotated tag `vX.Y.Z`. Its message comes from `MESSAGE`, else the generated notes, so the notes CI publishes are exactly what the maintainer saw.
+  6. Prints `git log origin/main..HEAD` and the tag and asks `¿Publicar vX.Y.Z? [s/N]`, unless `YES=1`.
+  7. Runs `git push --atomic origin main vX.Y.Z`. With `--atomic` both refs move or neither does.
+  - **On failure after a local commit or tag but before the push**: it undoes its own commit and tag (`git tag -d`, `git reset --hard ORIG`, which is safe because the tree was clean at the start) and says so.
+- **Rationale**: The user wants the manual path to be one command. Make is the conventional entry point. The logic is in Node (pure helpers `bump` and `writeVersions`, tested with `node --test`) rather than Make or Bash, so it is testable. It works whether the version was bumped on the feature branch (per CLAUDE.md, the target just tags) or not (the target bumps on `main`).
+- **Alternatives**: A Bash script only (harder to test), `cargo release` or `npm version` (each knows only its own files, not the four), or a GitHub "workflow_dispatch" that bumps (it would commit as the bot, not the maintainer).
 
 ## R15. Release pipeline (tag push)
 

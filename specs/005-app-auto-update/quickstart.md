@@ -19,12 +19,14 @@ cd app && npx vitest run src/updates.test.ts src/components/UpdateNotice.test.ts
 node --test scripts/release/
 ```
 
+`make release` against a throwaway clone: `git clone` the repo into the scratchpad, point `origin` at a local bare repo (`git init --bare`), then run `make release BUMP=patch YES=1`. The bare repo gets the commit and tag, and nothing reaches GitHub. Refusals: run it dirty, off `main`, and with an existing tag.
+
 ## End to end (needs the Tauri app; the maintainer does this once)
 
 1. **Key**: run `cd app && npx tauri signer generate -w ~/.tauri/delilah.key` and paste the public key into `tauri.conf.json`. Store the secrets with `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/delilah.key` and `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (as `FranPerezFolgado`). Back up the key file and password. Optionally store the password with `security add-generic-password -s delilah-updater -a "$USER" -w` for the dry run.
-2. **Dry run**: run `scripts/release.sh 0.5.0 --dry-run` to check and build locally, with nothing published.
-3. **Bootstrap**: after merging, run `git tag v0.5.0 && git push origin v0.5.0`. When the Actions run is green, download the dmg from the release and install it by hand as today, once per Mac.
-4. **Next release**: with 0.5.0 installed, tag and push v0.5.1. When the run is green, open the app:
+2. **Dry run**: run `make release-dry-run VERSION=0.5.0` to check and build locally, with nothing published.
+3. **Bootstrap**: after merging, on `main` run `make release` (the branch already bumped to 0.5.0, so it only tags and pushes; from a 0.4.0 `main`, `make release BUMP=minor`). When the Actions run is green, download the dmg from the release and install it by hand as today, once per Mac.
+4. **Next release**: with 0.5.0 installed, run `make release BUMP=patch`. When the run is green, open the app:
    - within about 10 s the notice shows 0.5.1 with the notes;
    - with a task running, "Actualizar" shows the session warning, and "Cuando terminen" waits;
    - after the relaunch, the menu shows 0.5.1, `curl -s 127.0.0.1:7420/api/v1/health` reports `"version":"0.5.1"`, `~/.delilah/plugins/delilah` shows 0.5.1, `~/.delilah/backups/delilah-0.5.0.db` exists, and `xattr /Applications/Delilah.app` has no quarantine.

@@ -61,6 +61,26 @@ export function onCheckUpdatesMenu(cb: () => void): Promise<() => void>; // unli
 - `scripts/release/manifest.mjs`: `manifest({version, notes, pubDate, signature, repo}) → object` (used by the dry run).
 - `scripts/release/check.mjs`: a CLI entry `node scripts/release/check.mjs X.Y.Z` that exits non-zero with one line per problem.
 
+## 3b. `make release` (maintainer entry point)
+
+```
+make release [BUMP=major|minor|patch | VERSION=X.Y.Z] [MESSAGE="notes"] [YES=1]
+make release-dry-run VERSION=X.Y.Z
+```
+
+| Input | Result |
+|---|---|
+| none, current version untagged | tag + push only |
+| none, current version already tagged | exit 1: "vX.Y.Z ya existe; usa BUMP= o VERSION=" |
+| `BUMP=minor` on 0.4.0 | 0.5.0 written, committed, tagged, pushed |
+| `VERSION` ≤ latest tag | exit 1 |
+| not on `main` / dirty / behind or ahead of `origin/main` / `gh` not `FranPerezFolgado` | exit 1, nothing changed |
+| answer other than `s`/`y` at the prompt | exit 1, local commit and tag undone |
+
+**Pure helpers** (tested with `node --test`):
+- `versions.mjs`: `writeVersions(root, v)` rewrites only the version field of each of the four files.
+- `cut.mjs`: `bump(v, level)` and `pickVersion({current, latestTag, VERSION, BUMP}) → {version, needsBump} | {error}`.
+
 ## 4. Daemon start-up files
 
 `$DELILAH_HOME/version` and `$DELILAH_HOME/backups/delilah-<prev>.db`; see [data-model.md](../data-model.md). Nothing else reads them. They are documented in `docs/architecture.md` (data section).
