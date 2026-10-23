@@ -83,15 +83,24 @@ jobs:
           releaseName: Delilah ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
-          includeUpdaterJson: true
+          # tauri-action would write draft-time (untagged-*) asset URLs; we build
+          # latest.json ourselves in the next step.
+          includeUpdaterJson: false
 
-      - name: Validate latest.json
+      - name: Build and upload latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p "$RUNNER_TEMP/manifest"
-          gh release download "$GITHUB_REF_NAME" -p latest.json -D "$RUNNER_TEMP/manifest" --clobber
-          node scripts/release/manifest.mjs --validate "$RUNNER_TEMP/manifest/latest.json" "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY"
+          sig="app/src-tauri/target/release/bundle/macos/Delilah.app.tar.gz.sig"
+          test -f "$sig" || { echo "missing $sig; did the build sign the app?" >&2; exit 1; }
+          out="$RUNNER_TEMP/latest.json"
+          node scripts/release/manifest.mjs --write "$out" "$GITHUB_REF_NAME" "$sig" notes.md "$GITHUB_REPOSITORY"
+          # gh falls back to draft releases by tag.
+          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -qx 'Delilah.app.tar.gz' || {
+            echo "release $GITHUB_REF_NAME has no asset named Delilah.app.tar.gz" >&2
+            exit 1
+          }
+          gh release upload "$GITHUB_REF_NAME" "$out" --clobber
 
       - name: Publish release
         env:

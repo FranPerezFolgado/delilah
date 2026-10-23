@@ -59,19 +59,10 @@ if [[ ! -f "$SIG_FILE" ]]; then
   echo "missing $SIG_FILE; did the build sign the app?" >&2
   exit 1
 fi
-NOTES="$NOTES" SIG_FILE="$SIG_FILE" VERSION="$VERSION" REPO="$REPO" \
-  node --input-type=module -e '
-import { readFileSync, writeFileSync } from "node:fs";
-import { manifest } from "./scripts/release/manifest.mjs";
-const m = manifest({
-  version: process.env.VERSION,
-  notes: process.env.NOTES,
-  pubDate: new Date().toISOString(),
-  signature: readFileSync(process.env.SIG_FILE, "utf8").trim(),
-  repo: process.env.REPO,
-});
-writeFileSync(process.argv[1], JSON.stringify(m, null, 2) + "\n");
-' "$BUNDLE/latest.json"
+NOTES_FILE="$(mktemp)"
+trap 'rm -f "$NOTES_FILE"' EXIT
+printf '%s\n' "$NOTES" > "$NOTES_FILE"
+node scripts/release/manifest.mjs --write "$BUNDLE/latest.json" "v$VERSION" "$SIG_FILE" "$NOTES_FILE" "$REPO"
 
 # 5. What was produced.
 echo "dry run for v$VERSION done; nothing was uploaded. Artefacts:"

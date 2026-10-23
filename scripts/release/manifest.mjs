@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Builds the update manifest (latest.json) the installed apps read.
@@ -31,8 +31,41 @@ export function validateManifest(json, { tag, repo }) {
   return problems;
 }
 
+// Builds and validates the manifest for a tag from the raw inputs; throws listing
+// the problems. Shared by the release workflow and scripts/release.sh.
+export function buildChecked({ tag, signature, notes, repo, pubDate = new Date().toISOString() }) {
+  const m = manifest({ version: tag.replace(/^v/, ""), notes, pubDate, signature: signature.trim(), repo });
+  const problems = validateManifest(m, { tag, repo });
+  if (problems.length) throw new Error(problems.map((p) => `latest.json: ${p}`).join("\n"));
+  return m;
+}
+
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+
+// node scripts/release/manifest.mjs --write <out> <tag> <sigfile> <notesfile> [owner/repo]
+if (isMain && process.argv[2] === "--write") {
+  const [, , , out, tag, sigFile, notesFile, repo = process.env.GITHUB_REPOSITORY] = process.argv;
+  if (!out || !tag || !sigFile || !notesFile || !repo) {
+    console.error("usage: node scripts/release/manifest.mjs --write <out> <tag> <sigfile> <notesfile> [owner/repo]");
+    process.exit(2);
+  }
+  try {
+    const m = buildChecked({
+      tag,
+      signature: readFileSync(sigFile, "utf8"),
+      notes: readFileSync(notesFile, "utf8").trimEnd(),
+      repo,
+    });
+    writeFileSync(out, JSON.stringify(m, null, 2) + "\n");
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 // node scripts/release/manifest.mjs --validate <file> <tag> [repo]
-if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === "--validate") {
+if (isMain && process.argv[2] === "--validate") {
   const [, , , file, tag, repo] = process.argv;
   if (!file || !tag) {
     console.error("usage: node scripts/release/manifest.mjs --validate <file> <tag> [owner/repo]");
