@@ -315,6 +315,19 @@ limit hit by any of them pauses the task; after the reset the primary and the
 paused ones carry on. A session that stopped (the daemon restarted, the process
 ended) can be reopened: Claude picks its conversation back up with `--resume`.
 
+## Actualizaciones
+
+Delilah se actualiza sola desde las versiones publicadas en GitHub. Un aviso dice que
+hay una versión nueva y cuántas sesiones abiertas (terminales incluidas) se
+interrumpirían al reiniciar. Nunca instala sin que lo confirmes: "Actualizar" lo hace
+ya, "Más tarde" oculta esa versión hasta la próxima comprobación manual o el próximo
+arranque, y "Cuando terminen" espera a que no quede ninguna sesión abierta. Comprueba
+a los 10 s de arrancar y cada 6 h; también desde el menú (Buscar actualizaciones…) y
+desde Ajustes › Actualizaciones (Buscar ahora). Las versiones de desarrollo (`tauri dev`,
+previews) no se actualizan. Antes de migrar tras un cambio de versión se guarda una copia
+de la base de datos en `~/.delilah/backups/`. Cómo publicar una versión:
+[docs/development.md](docs/development.md#releasing).
+
 ## Design
 
 - [docs/architecture.md](docs/architecture.md): how it is built.

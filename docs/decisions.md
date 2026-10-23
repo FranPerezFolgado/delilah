@@ -257,3 +257,33 @@ files and git, which already hold everything the next phase needs.
 - **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
 - **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
 
+
+## Updates
+
+**37. Updates through the Tauri updater and GitHub Releases on the public repo (2026-10-24).**
+The app checks the latest release's `latest.json` and verifies the signature against
+a key baked into the build. The repo is public so no token ships in the app.
+- **Ruled out:** Sparkle (a second updater beside Tauri's, for the same job); a private repo with a token in the app (it would have to be embedded in every install).
+
+**38. Updates need the user's confirmation, with a session warning (2026-10-24).**
+The notice says how many sessions are open and offers "Más tarde" and "Cuando
+terminen" (polls every 10 s). The count includes shell terminals on purpose: the
+relaunch restarts the daemon and stops them too.
+- **Ruled out:** a silent update, which would kill running agents without warning.
+
+**39. A release is a tag pushed to GitHub Actions; `make release` is the manual entry point (2026-10-24).**
+The signing key lives in repository secrets, so a build never needs it on a Mac.
+`make release` bumps if needed, tags and pushes. The workflow builds as a draft and
+builds `latest.json` itself from the local `.sig`: tauri-action's own would carry
+temporary `untagged-*` draft URLs. It publishes only after the asset is checked, so a
+failure leaves at most a draft.
+- **Ruled out:** a local-only release script (the key on the Mac, uploads by hand, nothing to re-run).
+
+**40. No Apple signing or notarisation for now (2026-10-24).**
+Updates are authenticated by the Tauri key alone. The first install still clears the
+quarantine flag by hand. Revisit if Delilah is installed on Macs beyond the owner's.
+
+**41. A best-effort copy of the database before migrating (2026-10-24).**
+When the version changes, the daemon copies the database to `backups/delilah-<prev>.db`
+(keeps 3) before the migrations run, because they cannot be undone. A failed copy only
+warns: it must not stop Delilah from starting. A downgrade is treated like an upgrade.

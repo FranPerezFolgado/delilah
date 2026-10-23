@@ -57,21 +57,76 @@ the fixtures use it already.
 
 ## Releasing
 
-1. Check what is merged into `main` since the last tag (`git log vX.Y.Z..HEAD`).
-2. Bump the version in **four** places and refresh the lockfiles:
+A release is a tag `vX.Y.Z` on `main`; the GitHub Actions workflow
+(`.github/workflows/release.yml`) builds, signs and publishes it, and the installed
+apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
+
+1. **On the feature branch**, bump the version as CLAUDE.md says (its own commit
+   `chore: bump version to X.Y.Z`) in **four** places and refresh the lockfiles:
    - `Cargo.toml` (workspace)
    - `app/src-tauri/Cargo.toml`
    - `app/package.json`
    - `app/src-tauri/tauri.conf.json`
+2. Merge the PR into `main`, then `git switch main && git pull`.
+3. `make release` on `main`. The version comes from `BUMP=major|minor|patch` or `VERSION=X.Y.Z`; notes (`MESSAGE="…"`; `YES=1` skips the confirmation). It
+   checks that you are on `main`, level with `origin/main` and clean, bumps the
+   four files only if they are not already at that version (refreshing the
+   lockfiles with `cargo metadata` and `npm install --package-lock-only`), commits
+   `chore: release X.Y.Z`, creates the annotated tag `vX.Y.Z` (its message is the
+   release notes) and pushes `main` and the tag together.
+   Variables are exported to `scripts/release/cut.mjs`, never interpolated.
+   Its logic is tested with `node --test scripts/release/*.test.mjs` (the bare
+   directory form does not work on Node 22).
+4. **What the workflow does** on a `v*.*.*` tag: checks the commit is on `main`,
+   fetches the annotated tag (`git fetch --force --tags`), runs
+   `scripts/release/check.mjs --require-secrets` (versions agree, the public key is
+   not the `REPLACE_WITH_UPDATER_PUBKEY` placeholder, the secrets exist), writes the
+   notes (the tag message, else the `feat`/`fix` subjects since the last tag),
+   builds with tauri-action and uploads a **draft** release (`includeUpdaterJson:
+   false`), builds `latest.json` itself with `manifest.mjs --write` from the local
+   `.sig`, checks the `Delilah.app.tar.gz` asset, uploads with `--clobber` and only
+   then publishes it (`gh release edit --draft=false --latest`). A failed run leaves
+   at most a draft; re-running the same tag is safe. tauri-action's own
+   `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 39).
+5. Installed apps check for it within 6 h (or at once with "Buscar actualizaciones…").
 
-   Then run `cargo check --workspace`, `(cd app/src-tauri && cargo check)` and `(cd app && npm install --package-lock-only)`.
-3. Commit `chore: release X.Y.Z` and tag `vX.Y.Z`.
-4. Build: `cd app && npm run dist` (`CI=true tauri build`, which also builds the
-   bundled `delilahd`). The output is
-   `app/src-tauri/target/release/bundle/dmg/Delilah_X.Y.Z_aarch64.dmg`.
-5. Install: copy `Delilah.app` to `/Applications`, then run
-   `xattr -dr com.apple.quarantine /Applications/Delilah.app` (it is not signed).
-   Opening it restarts the daemon with the new binary.
+**Rehearsal:** `make release-dry-run VERSION=X.Y.Z` (`scripts/release.sh`) runs the
+checks, builds and signs the app and writes `latest.json` locally. It never uploads.
+To try `make release` itself against a local bare remote, set
+`DELILAH_RELEASE_SKIP_GH=1` and `DELILAH_RELEASE_SKIP_LOCK=1` (skip the `gh` checks
+and the lockfile refresh; for tests only).
+
+**One-time setup:**
+1. Make sure the repo is public (the updater downloads from the release without a token).
+2. Generate the key: `cd app && npx tauri signer generate -w ~/.tauri/delilah.key`,
+   and paste the public key into `plugins.updater.pubkey` in `tauri.conf.json`
+   (until then it holds `REPLACE_WITH_UPDATER_PUBKEY` and `check.mjs` refuses to release).
+3. As `FranPerezFolgado`: `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/delilah.key`
+   and `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+4. **Back up the key file and its password** somewhere outside this Mac. An app only
+   accepts updates signed with the key whose public half it shipped with: if the key
+   is lost, no installed Delilah can ever update again and each Mac needs a manual
+   reinstall with a new key.
+
+**Bootstrap:** the updater only exists from the first release with it. Install that
+release (0.5.0) by hand, once per Mac: download the `.dmg` from the GitHub release,
+copy `Delilah.app` to `/Applications` and run
+`xattr -dr com.apple.quarantine /Applications/Delilah.app` (it is not signed with an
+Apple identity). From then on it updates itself.
+
+**Local builds:** `cd app && npm run dist` (`CI=true tauri build`, which also builds
+the bundled `delilahd`) now needs the signing env, because the bundle config creates
+update artefacts: export `TAURI_SIGNING_PRIVATE_KEY` (the key's contents or path) and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` first. The output is
+`app/src-tauri/target/release/bundle/dmg/Delilah_X.Y.Z_aarch64.dmg`.
+
+**Backups and restoring:** when the daemon starts on a different version than
+`$DELILAH_HOME/version` says (and the database exists), it copies the database to
+`$DELILAH_HOME/backups/delilah-<previous version>.db` before migrating (`VACUUM INTO`;
+never overwrites; keeps the 3 newest; a failure only logs a warning). To go back:
+quit Delilah (Delilah → Detener el daemon), move `delilah.db` (and any `-wal`/`-shm`)
+aside, copy the backup to `$DELILAH_HOME/delilah.db`, install the older version and
+open it. A downgrade also makes a copy, named after the version in the marker.
 
 ## Gotchas
 
@@ -81,6 +136,7 @@ the fixtures use it already.
 - **Fixture submodules over `file://`** need `DELILAH_ALLOW_FILE_PROTOCOL=1`. The dev and preview scripts set it; the installed daemon does not.
 - **Notifications in dev builds** are sent as Terminal, and clicking one does not bring the app forward (Tauri reports no clicks).
 - **Hot reload:** after changing the shell, restart `tauri dev`. A stale dev app once made ⌘P look broken.
+- **No updater in dev builds:** it runs only in release builds (`cfg(not(debug_assertions))` in the shell, `!import.meta.env.DEV` in the UI), so `tauri dev` and previews never check for or offer updates.
 - **Jira:** the site field wants the site root, not a board URL; `site_root()` normalises it, and HTML answers are reported as errors.
 - **SpecKit:** it rewrites its block in CLAUDE.md on each plan, which dirties the checkout.
 

@@ -44,6 +44,7 @@ done or pending is in [status.md](status.md).
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
 | `app/` | React + TypeScript UI (Vite), CodeMirror 6 editor, xterm.js terminals. |
 | `app/src-tauri` | The Tauri 2 shell (outside the Cargo workspace): `main.rs` (window, menu), `daemon.rs` (LaunchAgent). |
+| `.github/workflows/release.yml`, `Makefile` | The release: the workflow that builds, signs and publishes a `v*.*.*` tag, and `make release` / `make release-dry-run`, which run `scripts/release/*.mjs` and `scripts/release.sh`. |
 | `scripts/` | Test fixtures (`make-fixture-parent.sh`), the dev daemon (`dev-daemon.sh`), previews (`preview.sh`), the bundled daemon build (`build-sidecar.sh`). |
 | `specs/`, `.specify/` | SpecKit's setup and the specs of features built with it. |
 | `docs/` | These docs, spikes (`docs/spikes/`), and local-only session notes (`docs/sessions/`, git-excluded). |
@@ -74,6 +75,7 @@ done or pending is in [status.md](status.md).
 | `pr_loop/` | The I/O of the PR loop: `mod.rs` (the 30 s loop `spawn`, `nudge`, `check_task`, detection), `access.rs` (access problems, notified once per project), `notices.rs` (turns a snapshot diff into notices and notifications), `merge.rs` (`on_merged`, see Workspaces). |
 | `pr_api/`, `store_prs.rs` | The PR routes and the SQLite access for PRs and their notices. `mod.rs` (list, summaries, refresh, link, unlink, dismiss), `dto.rs` (the JSON types), `open.rs` (proposal and open; `open` links the new PR straight to its repo with `pr_loop::link_known`; a parent's proposal defaults to its first free submodule that has commits), `forward.rs` (sending feedback to the agent). |
 | `jira.rs`, `secrets.rs` | The Jira connection. The token lives in the Keychain; tests keep it in memory. |
+| `upgrade.rs` | Before `Store::open`: if `version` differs from the running version and the DB exists, `VACUUM INTO backups/delilah-<prev>.db` (`unknown` with no marker; never overwrites; keeps 3 by mtime; failures only warn), then writes the marker after the open. |
 | `events.rs` | `GET /api/v1/events`: a WebSocket that only announces topics. |
 | `preferences.rs`, `store_settings.rs`, `lang.rs` | Preferences (`pref:<key>`), settings, and the language the daemon writes in. |
 | `notify.rs`, `logs.rs`, `owners.rs`, `config.rs`, `state.rs`, `store*.rs` | Notifications (osascript), the in-memory log tail, owner resolution, environment config, `AppState`, SQLite access. |
@@ -88,6 +90,8 @@ and a preview uses `fixtures/preview-home-N`.
 | `delilah.db` | SQLite (sqlx). The migrations are in `crates/delilah-daemon/migrations/NNNN_*.sql`, and a shipped one is never edited. |
 | `workspaces/<KEY>/` | Worktree-mode workspaces. Checkout-mode tasks work in the project's own folder. |
 | `plugins/delilah/` | The session-only plugin (`skills/task-from-idea/SKILL.md`), rewritten at every daemon start and passed with `--plugin-dir`. Never installed in the user's Claude. |
+| `version` | The version of the daemon that last opened the database. Written after the open succeeds; the next start compares it with its own. |
+| `backups/` | `delilah-<version>.db`: a copy of the database made before migrating after a version change (3 newest kept). |
 | `tasks/<KEY>/` | Per-task files kept out of the repo: the Claude settings file with Delilah's hooks, the status line script, `ticket.md`, `hooks.jsonl` (raw hook log), and session logs. `tasks/@<project>/` holds the same for project sessions. |
 
 **Tables:**
@@ -242,6 +246,28 @@ The UI does not poll:
 - `GET /api/v1/events` sends topics only: `tasks`, `sessions`, `inbox`, `specs`, `usage`, `projects`, `prs` (a task's PRs or their summaries changed), `conversations`, or `resync`.
 - The UI refetches that one endpoint (`app/src/live.ts`).
 - On reconnect it refetches everything, and a full refresh runs every 30 s as a safety net.
+
+## Updates
+
+Only release builds update themselves (`cfg(not(debug_assertions))` in
+`app/src-tauri/src/main.rs`, `canUpdate = isDesktop && !DEV` in `app/src/platform.ts`).
+The Tauri updater plugin reads `latest.json` from the latest GitHub release of the
+public repo and verifies the download against the public key in `tauri.conf.json`.
+
+**Who checks.** The UI (`app/src/updates.ts`): 10 s after start, then every 6 h; the
+menu item "Buscar actualizaciones…" and Ajustes › Actualizaciones › "Buscar ahora"
+check on demand. Nothing installs by itself.
+
+**State machine** (`updates.ts`): idle, available, downloading, ready, relaunch,
+each step after the user's confirmation. "Más tarde" hides that version until a
+manual check or a relaunch. The notice counts the live, open sessions from
+`api.sessions()`, shell terminals included, because the relaunch restarts the daemon
+and stops them too. "Cuando terminen" polls every 10 s and updates once none is left.
+
+**The relaunch.** The app replaces itself and restarts; opening the new version
+restarts the existing daemon with the new binary (as in any install), which rewrites
+`plugins/delilah/`, copies the database to `backups/` if the version changed
+(`upgrade.rs`) and runs the migrations.
 
 ## The UI (`app/src`)
 

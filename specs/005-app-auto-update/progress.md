@@ -15,8 +15,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-08 | 4 | 4B | done | 1 | bc81cfb | lockfiles via cargo metadata (sidecar-free); bare-remote trial OK |
 | WP-09 | 5 | 5A | done | 1 | ecd1ee8 | + phase 3 MEDIUM fixes; i18n option 2 (refresh buttons → "Refrescar", since "Recargar" = Reload exists) |
 | WP-10 | 6 | 6A | verified | 1 | c9865fc | also shows+focuses main window before emit |
-| WP-11 | 6 | 6A | verified | 1 | | + phase 5 P1/P2 (sessionsFailed, unavailable events) |
-| WP-12 | 7 | 7A | implementing | 0 | | |
+| WP-11 | 6 | 6A | verified | 1 | 5a85020 | + phase 5 P1/P2 (sessionsFailed, unavailable events) |
+| WP-12 | 7 | 7A | verified | 1 | | restore-by-hand wording to check |
 | WP-08F | 4 | fix | done | 1 | 0751083 | phase 4 HIGH fixes + F5–F7; --target skipped |
 | WP-08F2 | 4 | fix | done | 1 | 768623e | tauri-action draft writes untagged-* URLs → own latest.json |
 | WP-13 | 7 | 7B | pending | 0 | | |
