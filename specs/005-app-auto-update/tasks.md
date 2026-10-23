@@ -84,7 +84,7 @@
   - `error` shows the reason and "Reintentar" / "Cerrar";
   - `idle` renders nothing.
   - Each button dispatches the right event.
-- [ ] T010 [P] [US1] Write tests in a new `crates/delilah-daemon/src/upgrade.rs` (`#[cfg(test)] mod tests`, temp dirs, a real SQLite file created with sqlx). They cover:
+- [X] T010 [P] [US1] Write tests in a new `crates/delilah-daemon/src/upgrade.rs` (`#[cfg(test)] mod tests`, temp dirs, a real SQLite file created with sqlx). They cover:
   - with no marker and an existing DB, `before_open` writes `backups/delilah-unknown.db`, a valid SQLite copy containing the source rows;
   - with marker `0.4.0` and current `0.5.0`, it writes `backups/delilah-0.4.0.db`;
   - when the marker equals current, there is no copy;
@@ -96,11 +96,11 @@
 
 ### Implementation
 
-- [ ] T011 [US1] Implement `crates/delilah-daemon/src/upgrade.rs` (R10):
+- [X] T011 [US1] Implement `crates/delilah-daemon/src/upgrade.rs` (R10):
   - `pub async fn before_open(home: &Path, db: &Path, current: &str)`: read `home/version`; if it differs and `db` exists, run `VACUUM INTO` through a one-off read-only `SqliteConnectOptions` to `home/backups/delilah-<prev>.db`, creating the dir 0700, never overwriting; then prune to 3. Warn on errors and never fail.
   - `pub fn after_open(home: &Path, current: &str) -> std::io::Result<()>`.
   - Register `mod upgrade;` in `crates/delilah-daemon/src/main.rs` (or `lib.rs` if the crate has one; follow where the other modules live). T010 passes.
-- [ ] T012 [US1] Wire it in `crates/delilah-daemon/src/main.rs` `run()`:
+- [X] T012 [US1] Wire it in `crates/delilah-daemon/src/main.rs` `run()`:
   - call `upgrade::before_open(&config.home, &config.database_path(), env!("CARGO_PKG_VERSION")).await` right before `Store::open`;
   - call `upgrade::after_open(...)` right after it succeeds, logging a warning on error.
   - Add one `tracing::info!` when a copy is made.
