@@ -158,7 +158,7 @@
   - an already published tag;
   - the pubkey still `REPLACE_WITH_UPDATER_PUBKEY`.
   - It returns `[]` when all are fine.
-- [ ] T023 [P] [US2] `scripts/release/cut.test.mjs`:
+- [X] T023 [P] [US2] `scripts/release/cut.test.mjs`:
   - `bump("0.4.0","minor")` is "0.5.0", with patch, major and invalid levels covered;
   - `pickVersion({current, latestTag, VERSION, BUMP})` handles each row of contracts §3b: tag-only when current is untagged, an error when it is already tagged without BUMP/VERSION, an error when VERSION ≤ latest tag, and an error when both VERSION and BUMP are given.
 
@@ -183,7 +183,7 @@
     4. writes `app/src-tauri/target/release/bundle/latest.json` via `manifest.mjs` from the `.sig` file;
     5. prints the artefact paths.
   - Without `--dry-run`, it exits 2 and prints `make release` / the tag commands. It never uploads.
-- [ ] T027 [US2] Implement `scripts/release/cut.mjs` (exports `bump` and `pickVersion`; CLI with env `VERSION`, `BUMP`, `MESSAGE`, `YES`), following R16 steps 1–7:
+- [X] T027 [US2] Implement `scripts/release/cut.mjs` (exports `bump` and `pickVersion`; CLI with env `VERSION`, `BUMP`, `MESSAGE`, `YES`), following R16 steps 1–7:
   - **Preflight**: branch `main`, clean, `git fetch origin`, `HEAD == origin/main`, and `gh api user -q .login` is `FranPerezFolgado`. The `gh` check is skipped only if `DELILAH_RELEASE_SKIP_GH=1`, which is for the local bare-remote test.
   - **Pick the version**.
   - **Bump if needed**: `writeVersions`, the three lockfile refreshes, and `git commit -m "chore: release X.Y.Z"` over exactly the four files and three lockfiles.
@@ -193,7 +193,7 @@
   - **Push**: `git push --atomic origin main vX.Y.Z`.
   - **On any failure after the commit or tag**: delete the tag, `git reset --hard <start sha>`, say so, and exit 1.
   - T023 passes.
-- [ ] T028 [US2] Create the root `Makefile`:
+- [X] T028 [US2] Create the root `Makefile`:
   - `.PHONY: release release-dry-run`;
   - `release:` → `node scripts/release/cut.mjs`, passing `VERSION`, `BUMP`, `MESSAGE` and `YES` through the environment;
   - `release-dry-run:` → `scripts/release.sh "$(VERSION)" --dry-run`, failing with usage when `VERSION` is empty.

@@ -7,12 +7,12 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 5f9c2d1 | hook log empty; implementer checks pass |
 | WP-02 | 2 | 2A | done | 1 | 3af5f13 | event names + open transitions decided by implementer |
-| WP-03 | 3 | 3A | verified | 1 | | marker sanitised to plain token |
+| WP-03 | 3 | 3A | verified | 1 | 250d869 | marker sanitised to plain token |
 | WP-04 | 3 | 3A | verified | 1 | c7f4f28 | "Actualizar" already = "Refresh" in en.ts (open question) |
 | WP-05 | 3 | 3A | verified | 1 | 064cff2 | |
 | WP-06 | 4 | 4A | verified | 1 | eb234eb | run tests with `node --test scripts/release/*.test.mjs` |
 | WP-07 | 4 | 4B | verified | 1 | 6f180c0 | actionlint/shellcheck not installed; workflow + dist build untried |
-| WP-08 | 4 | 4B | implementing | 0 | | |
+| WP-08 | 4 | 4B | verified | 1 | | lockfiles via cargo metadata (sidecar-free); bare-remote trial OK |
 | WP-09 | 5 | 5A | pending | 0 | | |
 | WP-10 | 6 | 6A | verified | 1 | c9865fc | also shows+focuses main window before emit |
 | WP-11 | 6 | 6A | pending | 0 | | |
