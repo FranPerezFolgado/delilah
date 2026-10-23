@@ -22,19 +22,36 @@ export function pickNotes(tagMessage, subjects) {
   return releaseNotes(subjects);
 }
 
-const git = (...args) => execFileSync("git", args, { encoding: "utf8" });
+const gitIn = (cwd) => (...args) => execFileSync("git", args, { encoding: "utf8", cwd });
+
+// Notes for `tag`. The tag may not exist yet (local dry run): then the commits
+// since the newest v* tag up to HEAD are used and there is no tag message.
+export function notesFor(tag, cwd = process.cwd()) {
+  const git = gitIn(cwd);
+  const tags = git("tag", "-l", "v*", "--sort=-v:refname").split("\n").filter(Boolean);
+  const exists = tags.includes(tag);
+  let message = "";
+  let range;
+  if (exists) {
+    // Only an annotated tag carries its own message; for a lightweight one
+    // %(contents) is the commit message.
+    const [type, ...rest] = git("tag", "-l", "--format=%(objecttype)%0a%(contents)", tag).split("\n");
+    if (type === "tag") message = rest.join("\n");
+    const previous = tags[tags.indexOf(tag) + 1];
+    range = previous ? `${previous}..${tag}` : tag;
+  } else {
+    range = tags[0] ? `${tags[0]}..HEAD` : "HEAD";
+  }
+  const subjects = git("log", "--format=%s", range).split("\n").filter(Boolean);
+  return pickNotes(message, subjects);
+}
 
 function main(tag) {
   if (!tag) {
     console.error("usage: node scripts/release/notes.mjs vX.Y.Z");
     process.exit(2);
   }
-  const message = git("tag", "-l", "--format=%(contents)", tag);
-  const tags = git("tag", "-l", "v*", "--sort=-v:refname").split("\n").filter(Boolean);
-  const previous = tags[tags.indexOf(tag) + 1];
-  const range = previous ? `${previous}..${tag}` : tag;
-  const subjects = git("log", "--format=%s", range).split("\n").filter(Boolean);
-  console.log(pickNotes(message, subjects));
+  console.log(notesFor(tag));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main(process.argv[2]);

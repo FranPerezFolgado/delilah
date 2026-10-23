@@ -27,8 +27,8 @@ test("falls back when nothing is left", () => {
 });
 
 test("pickNotes prefers a non-empty tag message", () => {
-  assert.equal(pickNotes("  Hola\n\n", ["feat: a"], "v0.5.0"), "Hola");
+  assert.equal(pickNotes("  Hola\n\n", ["feat: a"]), "Hola");
   assert.equal(pickNotes("", ["feat: a"]), "## Novedades\n- a");
-  assert.equal(pickNotes("v0.5.0\n", ["fix: b"], "v0.5.0"), "## Correcciones\n- b");
+  assert.equal(pickNotes("v0.5.0\n", ["fix: b"]), "## Correcciones\n- b");
   assert.equal(pickNotes("v0.5.0", ["fix: b"]), "## Correcciones\n- b");
 });

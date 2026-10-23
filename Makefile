@@ -1,8 +1,10 @@
 .PHONY: release release-dry-run
 
 # make release [BUMP=major|minor|patch | VERSION=X.Y.Z] [MESSAGE="notes"] [YES=1]
+export VERSION BUMP MESSAGE YES
+
 release:
-	VERSION="$(VERSION)" BUMP="$(BUMP)" MESSAGE="$(MESSAGE)" YES="$(YES)" node scripts/release/cut.mjs
+	@node scripts/release/cut.mjs
 
 # make release-dry-run VERSION=X.Y.Z
 release-dry-run:
