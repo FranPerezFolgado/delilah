@@ -258,6 +258,9 @@ version used, and the plan for US3/US4 follows from it.
 - **A "¿Permitir?" card nobody answers**: the task waits, like a PTY task at a permission
   prompt, and its Bandeja item stays open. Switching to the terminal is refused until the
   turn ends or is stopped.
+- **Autopilot in chat mode**: a "¿Permitir?" card has no recommended answer, so an
+  autopilot task pauses into the Bandeja on one, as it does today on a question with no
+  recommended option.
 - **Remote Control** on a chat-mode task: unavailable or working as documented by the
   spike, never silently broken.
 
