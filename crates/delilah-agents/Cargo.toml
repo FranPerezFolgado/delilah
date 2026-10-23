@@ -11,6 +11,7 @@ delilah-core.workspace = true
 portable-pty = "0.9"
 serde.workspace = true
 serde_json = "1"
+similar = "2"
 tokio = { version = "1", features = ["sync"] }
 uuid = { version = "1", features = ["v4"] }
 

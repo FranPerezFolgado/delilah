@@ -5,8 +5,8 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | pending | 0 | | |
-| WP-02 | 2 | 2A | pending | 0 | | spike, gates 6–9 |
+| WP-01 | 1 | 1A | verified | 1 | | |
+| WP-02 | 2 | 2A | implementing | 0 | | spike, gates 6–9 |
 | WP-03 | 3 | 3A | pending | 0 | | |
 | WP-04 | 3 | 3A | pending | 0 | | |
 | WP-05 | 4 | 4A | pending | 0 | | |

@@ -15,7 +15,7 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `similar` (latest 2.x) to `crates/delilah-agents/Cargo.toml` and check it builds (`cargo build -p delilah-agents`).
+- [X] T001 Add `similar` (latest 2.x) to `crates/delilah-agents/Cargo.toml` and check it builds (`cargo build -p delilah-agents`).
 
 ---
 
