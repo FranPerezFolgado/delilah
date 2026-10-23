@@ -111,7 +111,7 @@ export function PrView({ owner }: { owner: string }) {
           </button>
         )}
         <button className="btn" disabled={busy} onClick={() => run(() => api.refreshPrs(owner))}>
-          {t("Actualizar")}
+          {t("Refrescar")}
         </button>
       </div>
 

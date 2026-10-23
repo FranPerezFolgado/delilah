@@ -779,7 +779,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>
                 {keyOf("quick-open")}
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Actualizar")} aria-label={t("Actualizar el árbol")}>
+              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Refrescar")} aria-label={t("Actualizar el árbol")}>
                 <Icon name="refresh" />
               </button>
               <button className="btn btn-ghost icon-btn" onClick={toggleTree} title={t("Ocultar ({key})", { key: keyOf("toggle-tree") })} aria-label={t("Ocultar el árbol")}>

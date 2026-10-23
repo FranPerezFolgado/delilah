@@ -216,18 +216,18 @@
 
 **Independent test**: vitest with a fake `api.sessions()` and a fake platform. By hand, in the installed app, at the first real update.
 
-- [ ] T029 [US3] Extend `app/src/updates.test.ts` (if T006 didn't already cover them) and add to `app/src/useUpdates.test.ts`:
+- [X] T029 [US3] Extend `app/src/updates.test.ts` (if T006 didn't already cover them) and add to `app/src/useUpdates.test.ts`:
   - with 2 live sessions, `update` reaches `confirmSessions{running:2}`;
   - `now` reaches `downloading`;
   - `whenIdle` reaches `waiting`, and polling `api.sessions()` (10 s fake timer) updates `running`; when 0, `install` is called;
   - `cancel` returns to `available`;
   - closed or non-live sessions are not counted;
   - a failing `api.sessions()` keeps waiting and doesn't install.
-- [ ] T030 [US3] Implement it in `app/src/useUpdates.ts`:
+- [X] T030 [US3] Implement it in `app/src/useUpdates.ts`:
   - on `update`, call `api.sessions()` and count `live && !closed` before dispatching;
   - while `waiting`, poll every 10 s (and on the app's existing live refresh if one is easy to hook into), clearing the poll when leaving `waiting`.
   - T029 passes.
-- [ ] T031 [US3] Render `confirmSessions` and `waiting` in `app/src/components/UpdateNotice.tsx`:
+- [X] T031 [US3] Render `confirmSessions` and `waiting` in `app/src/components/UpdateNotice.tsx`:
   - `confirmSessions`: "Hay {n} sesiones en marcha; se detendrán al actualizar", with `tn` for the singular, and the buttons "Actualizar ahora", "Cuando terminen" and "Cancelar";
   - `waiting`: "Se actualizará cuando terminen {n} sesiones", with "Actualizar ahora" and "Cancelar".
   - Add the cases to `UpdateNotice.test.tsx` and the strings to `app/src/i18n/en.ts`.

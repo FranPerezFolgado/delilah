@@ -26,7 +26,7 @@ describe("UpdateNotice", () => {
     fireEvent.click(screen.getByText("Ver novedades"));
     expect(screen.getByText("Nuevo").tagName).toBe("STRONG");
     fireEvent.click(screen.getByText("Actualizar"));
-    expect(dispatch).toHaveBeenCalledWith({ type: "update", running: 0 });
+    expect(dispatch).toHaveBeenCalledWith({ type: "requestUpdate" });
     fireEvent.click(screen.getByText("Más tarde"));
     expect(dispatch).toHaveBeenCalledWith({ type: "later" });
   });
@@ -51,5 +51,38 @@ describe("UpdateNotice", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "retry" });
     fireEvent.click(screen.getByText("Cerrar"));
     expect(dispatch).toHaveBeenCalledWith({ type: "close" });
+  });
+
+  it("confirms before stopping sessions", () => {
+    const { dispatch } = setup({ kind: "confirmSessions", version: "1.2.0", notes: "", running: 2 });
+    expect(screen.getByText("Hay 2 sesiones en marcha; se detendrán al actualizar")).toBeTruthy();
+    fireEvent.click(screen.getByText("Actualizar ahora"));
+    expect(dispatch).toHaveBeenCalledWith({ type: "now" });
+    fireEvent.click(screen.getByText("Cuando terminen"));
+    expect(dispatch).toHaveBeenCalledWith({ type: "whenIdle" });
+    fireEvent.click(screen.getByText("Cancelar"));
+    expect(dispatch).toHaveBeenCalledWith({ type: "cancel" });
+  });
+
+  it("uses the singular for one session", () => {
+    setup({ kind: "confirmSessions", version: "1.2.0", notes: "", running: 1 });
+    expect(screen.getByText("Hay 1 sesión en marcha; se detendrá al actualizar")).toBeTruthy();
+  });
+
+  it("shows the wait for sessions to finish", () => {
+    const { dispatch } = setup({ kind: "waiting", version: "1.2.0", notes: "", running: 3 });
+    expect(screen.getByText("Se actualizará cuando terminen 3 sesiones")).toBeTruthy();
+    fireEvent.click(screen.getByText("Actualizar ahora"));
+    expect(dispatch).toHaveBeenCalledWith({ type: "now" });
+    fireEvent.click(screen.getByText("Cancelar"));
+    expect(dispatch).toHaveBeenCalledWith({ type: "cancel" });
+  });
+
+  it("shows the reason of a failed check, and a verification failure apart", () => {
+    const { view } = setup({ kind: "error", reason: "sin red", manual: true });
+    expect(screen.getByText("No se pudo buscar actualizaciones: sin red")).toBeTruthy();
+    view.unmount();
+    setup({ kind: "error", reason: "x", manual: true, version: "1.2.0" });
+    expect(screen.queryByText("No se pudo buscar actualizaciones: x")).toBeNull();
   });
 });

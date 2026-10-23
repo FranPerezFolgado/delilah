@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { t } from "../i18n";
-import type { UpdateEvent, UpdateState } from "../updates";
+import { t, tn } from "../i18n";
+import type { UpdateIntent, UpdateState } from "../updates";
 import { Markdown } from "./Markdown";
 
 interface Props {
   state: UpdateState;
-  dispatch: (event: UpdateEvent) => void;
+  dispatch: (event: UpdateIntent) => void;
 }
 
 /** A slim, non-blocking banner for the update flow; nothing when idle. */
@@ -36,7 +36,7 @@ export function UpdateNotice({ state, dispatch }: Props) {
                 <button className="btn btn-ghost" onClick={() => setNotesOpen((o) => !o)}>{t("Ver novedades")}</button>
               )}
               <span className="grow" />
-              <button className="btn btn-p" onClick={() => dispatch({ type: "update", running: 0 })}>{t("Actualizar")}</button>
+              <button className="btn btn-p" onClick={() => dispatch({ type: "requestUpdate" })}>{t("Actualizar")}</button>
               <button className="btn btn-ghost" onClick={() => dispatch({ type: "later" })}>{t("Más tarde")}</button>
             </div>
             {notesOpen && state.notes && (
@@ -60,14 +60,30 @@ export function UpdateNotice({ state, dispatch }: Props) {
       return (
         <div className="notice update-notice" style={{ borderColor: "var(--err)" }}>
           <span className="c-err">●</span>
-          <span>{state.version ? t("No se pudo actualizar: {reason}", { reason: state.reason }) : t("No se pudo verificar la actualización")}</span>
+          <span>{state.version ? t("No se pudo actualizar: {reason}", { reason: state.reason }) : t("No se pudo buscar actualizaciones: {reason}", { reason: state.reason })}</span>
           <span className="grow" />
           {state.version && <button className="btn btn-p" onClick={() => dispatch({ type: "retry" })}>{t("Reintentar")}</button>}
           <button className="btn btn-ghost" onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</button>
         </div>
       );
-    default:
-      // confirmSessions / waiting: the session-aware flow comes with US3.
-      return null;
+    case "confirmSessions":
+      return (
+        <div className="notice update-notice wait">
+          <span>{tn(state.running, "Hay {n} sesión en marcha; se detendrá al actualizar", "Hay {n} sesiones en marcha; se detendrán al actualizar")}</span>
+          <span className="grow" />
+          <button className="btn btn-p" onClick={() => dispatch({ type: "now" })}>{t("Actualizar ahora")}</button>
+          <button className="btn btn-ghost" onClick={() => dispatch({ type: "whenIdle" })}>{t("Cuando terminen")}</button>
+          <button className="btn btn-ghost" onClick={() => dispatch({ type: "cancel" })}>{t("Cancelar")}</button>
+        </div>
+      );
+    case "waiting":
+      return (
+        <div className="notice update-notice wait">
+          <span>{tn(state.running, "Se actualizará cuando termine {n} sesión", "Se actualizará cuando terminen {n} sesiones")}</span>
+          <span className="grow" />
+          <button className="btn btn-p" onClick={() => dispatch({ type: "now" })}>{t("Actualizar ahora")}</button>
+          <button className="btn btn-ghost" onClick={() => dispatch({ type: "cancel" })}>{t("Cancelar")}</button>
+        </div>
+      );
   }
 }

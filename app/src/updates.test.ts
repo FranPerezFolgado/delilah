@@ -155,3 +155,11 @@ describe("close", () => {
     expect(run({ kind: "error", reason: "x", manual: true }, { type: "close" }).state).toEqual({ kind: "idle" });
   });
 });
+
+describe("installed", () => {
+  it("records the installed version without touching the state", () => {
+    const r = run(avail, { type: "installed", version: "0.4.1" });
+    expect(r.state).toBe(avail);
+    expect(r.meta.installed).toBe("0.4.1");
+  });
+});

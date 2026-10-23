@@ -34,7 +34,11 @@ export type UpdateEvent =
   | { type: "progress"; received: number; total: number | null }
   | { type: "done" }
   | { type: "retry" }
-  | { type: "close" };
+  | { type: "close" }
+  | { type: "installed"; version: string };
+
+/** What the UI can ask for: the hook turns `requestUpdate` into `update` with the live session count. */
+export type UpdateIntent = UpdateEvent | { type: "requestUpdate" };
 
 export interface Reduced {
   state: UpdateState;
@@ -121,6 +125,9 @@ export function reduce(state: UpdateState, meta: UpdateMeta, event: UpdateEvent,
     case "retry":
       if (state.kind !== "error" || !state.version) return same;
       return to(downloading(state.version));
+
+    case "installed":
+      return to(state, { ...meta, installed: event.version });
 
     case "close":
       if (state.kind !== "upToDate" && state.kind !== "error") return same;

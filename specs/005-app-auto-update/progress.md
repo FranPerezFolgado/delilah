@@ -13,11 +13,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 4 | 4A | verified | 1 | eb234eb | run tests with `node --test scripts/release/*.test.mjs` |
 | WP-07 | 4 | 4B | verified | 1 | 6f180c0 | actionlint/shellcheck not installed; workflow + dist build untried |
 | WP-08 | 4 | 4B | verified | 1 | bc81cfb | lockfiles via cargo metadata (sidecar-free); bare-remote trial OK |
-| WP-09 | 5 | 5A | implementing | 0 | | + phase 3 MEDIUM fixes, i18n option 1 |
+| WP-09 | 5 | 5A | verified | 1 | | + phase 3 MEDIUM fixes; i18n option 2 (refresh buttons → "Refrescar", since "Recargar" = Reload exists) |
 | WP-10 | 6 | 6A | verified | 1 | c9865fc | also shows+focuses main window before emit |
 | WP-11 | 6 | 6A | pending | 0 | | |
 | WP-12 | 7 | 7A | pending | 0 | | |
-| WP-08F | 4 | fix | verified | 1 | | phase 4 HIGH fixes + F5–F7; --target skipped |
+| WP-08F | 4 | fix | verified | 1 | 0751083 | phase 4 HIGH fixes + F5–F7; --target skipped |
 | WP-13 | 7 | 7B | pending | 0 | | |
 
 T005 (updater key + secrets) is maintainer-only: left to the user.
