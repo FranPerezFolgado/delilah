@@ -20,8 +20,8 @@ None: no new dependency or config.
 
 **Purpose**: the pure choice used by US2; the Sidebar row (US1) does not depend on it.
 
-- [ ] T001 [P] Write failing tests in `app/src/components/ideas.test.ts` for `ideaToOpen(ideas: Session[], lastShown: string | null): Session` (contract table in `contracts/sidebar-ideas-row.md`): a single idea → it; `a, b(waiting), c(waiting)` with lastShown `a` → `b` (first waiting wins over last shown); `a, b, c` with lastShown `a` → `a`; lastShown `"x"` (not in list, e.g. a closed idea or a read-only session) → `c`; lastShown `null` → `c`. Build sessions as in `Sidebar.test.tsx` (`{ id, task: "@web", kind: "claude", label: "Idea", primary: false, closed: false, live: true, read_only: false, state, conversation: true, step: null } as Session`).
-- [ ] T002 Implement `ideaToOpen` in `app/src/components/ideas.ts` (new file): `ideas.find(s => s.state === "waiting") ?? ideas.find(s => s.id === lastShown) ?? ideas[ideas.length - 1]`, with a doc comment saying "newest" is the last listed because the daemon lists sessions in creation order. T001 passes.
+- [X] T001 [P] Write failing tests in `app/src/components/ideas.test.ts` for `ideaToOpen(ideas: Session[], lastShown: string | null): Session` (contract table in `contracts/sidebar-ideas-row.md`): a single idea → it; `a, b(waiting), c(waiting)` with lastShown `a` → `b` (first waiting wins over last shown); `a, b, c` with lastShown `a` → `a`; lastShown `"x"` (not in list, e.g. a closed idea or a read-only session) → `c`; lastShown `null` → `c`. Build sessions as in `Sidebar.test.tsx` (`{ id, task: "@web", kind: "claude", label: "Idea", primary: false, closed: false, live: true, read_only: false, state, conversation: true, step: null } as Session`).
+- [X] T002 Implement `ideaToOpen` in `app/src/components/ideas.ts` (new file): `ideas.find(s => s.state === "waiting") ?? ideas.find(s => s.id === lastShown) ?? ideas[ideas.length - 1]`, with a doc comment saying "newest" is the last listed because the daemon lists sessions in creation order. T001 passes.
 
 **Checkpoint**: `npx vitest related --run src/components/ideas.ts` green.
 
