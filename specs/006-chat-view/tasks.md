@@ -25,7 +25,7 @@
 
 **Independent Test**: `docs/spikes/2026-10-2x-claude-stream.md` answers a–h with yes/no or the observed behaviour, and the Claude version; `docs/decisions.md` has the verdict.
 
-- [ ] T002 [US5] Write `crates/delilah-agents/examples/claude_stream_spike.rs`. It should:
+- [X] T002 [US5] Write `crates/delilah-agents/examples/claude_stream_spike.rs`. It should:
   - create a temp workspace from `scripts/make-fixture-parent.sh` (or a plain `git init` dir);
   - start a tiny HTTP listener on a free port that appends every hook body to a JSONL file;
   - write a settings file shaped like `claude::settings` (all `HOOK_EVENTS` posting to the listener, and the status line command writing its stdin to a file);
