@@ -53,6 +53,8 @@ export interface Task {
   notes?: string | null;
   /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
   in_checkout?: boolean | null;
+  /** The branch of the task's workspace; absent without a workspace (read-only). */
+  branch?: string | null;
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
   /** Autopilot: null when off. */
@@ -138,6 +140,13 @@ export interface RunRequest {
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
   from_session?: string;
+  /** Full branch name (`feature/...`); empty or absent lets the daemon choose. */
+  branch?: string;
+}
+
+export interface BranchProposal {
+  branch: string | null;
+  source: "claude" | "title" | "key";
 }
 
 export type JiraMode = "sample" | "cloud" | "data-center";
@@ -443,6 +452,10 @@ export const api = {
   submodules: (project: string) => request<Submodule[]>(`/api/v1/projects/${project}/submodules`),
   suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
+  proposeBranch: (
+    project: string,
+    t: { key?: string; title: string; notes?: string; free: boolean; submodules: string[] },
+  ) => post<BranchProposal>(`/api/v1/projects/${project}/branch-name`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
   updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string; preview_command?: string | null }) =>

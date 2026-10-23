@@ -104,6 +104,11 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
         <div className="muted" style={{ fontSize: 12 }}>
           {task.project ?? t("sin proyecto")} · workflow <span className="mono">{task.workflow}</span>
         </div>
+        {task.branch && (
+          <div className="muted" style={{ fontSize: 12 }} data-testid="task-branch">
+            {t("Rama")}: <span className="mono selectable">{task.branch}</span>
+          </div>
+        )}
 
         {s.type === "paused-by-limit" && (
           <div className="notice pause">

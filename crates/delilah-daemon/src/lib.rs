@@ -5,6 +5,7 @@ pub mod api;
 mod archive;
 pub mod asks;
 mod autopilot;
+mod branch_name;
 mod changes;
 pub mod config;
 mod conversation;

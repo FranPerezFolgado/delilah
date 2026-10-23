@@ -226,6 +226,17 @@ branch you were on and keeps the task's branch; files left uncommitted stay in y
 folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
 
+**The task's branch.** Delilah names it from the title: Claude proposes a short name
+and the branch is `feature/<short-name>`, or `feature/<KEY>-<short-name>` for a Jira
+ticket (a free task's `LIBRE-n` is left out). If Claude does not answer in time, the
+name comes from the title, and failing that from the key. The start dialog has a
+"Rama" field that fills in the proposal about a second after you stop typing the
+title; type your own name there and it is kept, or empty it to let Delilah choose.
+A name already used (as a local branch or on a remote, in any repo of the task) gets
+`-2`, `-3`…: a branch is never reused. `delilah run --branch <name>` is cleaned up
+the same way (`feature/` added once, spaces and accents turned into `-`/letters). The
+branch shows on the task's screen and stays the same for the whole task.
+
 **Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
 and Libre (after choosing the project), and on the project's screen and its "+".
 Instead of a form you tell Claude your idea in a conversation view, without a

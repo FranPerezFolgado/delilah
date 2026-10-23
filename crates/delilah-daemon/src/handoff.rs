@@ -207,15 +207,16 @@ async fn enter<L: Launcher>(
     entered: impl FnOnce(),
 ) {
     if save_notes_preference(app).await
-        && let Some(live) = app.sessions.primary(key.as_str()) {
-            set(app, key, to, HandoffStage::Saving, None).await;
-            match crate::actions::type_prompt(&live, "/save-session").await {
-                Ok(()) => return entered(),
-                Err(e) => {
-                    tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
-                }
+        && let Some(live) = app.sessions.primary(key.as_str())
+    {
+        set(app, key, to, HandoffStage::Saving, None).await;
+        match crate::actions::type_prompt(&live, "/save-session").await {
+            Ok(()) => return entered(),
+            Err(e) => {
+                tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
             }
         }
+    }
     if !app.handoffs.mark_starting(key) {
         return;
     }
@@ -598,10 +599,9 @@ async fn start_with<L: Launcher>(app: &AppState, key: &TaskKey, step: Step, laun
     );
     match result {
         Ok(()) => {
-            if still_starting
-                && let Err(e) = app.store.set_handoff(key, None).await {
-                    tracing::warn!(task = %key, "cannot clear the handoff: {e}");
-                }
+            if still_starting && let Err(e) = app.store.set_handoff(key, None).await {
+                tracing::warn!(task = %key, "cannot clear the handoff: {e}");
+            }
             tracing::info!(task = %key, step = step.name(), "handoff done");
         }
         Err(message) => {
@@ -705,10 +705,10 @@ async fn try_start<L: Launcher>(
         let _ = tokio::time::timeout(KILL_WAIT, live.pty.wait()).await;
     }
     if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false) {
-        if !relaunch
-            && let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await {
-                tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
-            }
+        if !relaunch && let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await
+        {
+            tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
+        }
         return Err(e.message().to_string());
     }
     Ok(())
@@ -816,6 +816,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_bin: "claude".into(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

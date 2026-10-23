@@ -812,6 +812,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: Some(fake),
+            claude_bin: "claude".into(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         project_and_conversation(&app).await;
