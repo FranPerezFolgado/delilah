@@ -31,7 +31,7 @@ How to use a preview:
 | Rust (workspace) | `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace` |
 | One crate | `cargo test -p delilah-daemon <filter>` |
 | Desktop shell | `cargo test --manifest-path app/src-tauri/Cargo.toml` (it is outside the workspace) |
-| UI | `cd app && npx tsc --noEmit && npx vitest run` |
+| UI | `cd app && npx tsc --noEmit && npx tsc --noEmit -p e2e && npx vitest run` (the second `tsc` checks the Playwright specs) |
 
 The git tests build throwaway repos and need `git -c protocol.file.allow=always`;
 the fixtures use it already.
