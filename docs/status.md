@@ -75,6 +75,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - "Crear y lanzar en autopiloto" on the idea card.
 - See [architecture.md](architecture.md) and decisions [#38](decisions.md) to [#48](decisions.md).
 
+**Dev workflow** (for working on this repo, not a product feature): CI on every PR (`.github/workflows/`), fmt/clippy/tests gating each implementer (`.claude/verify.sh`), a hook guarding the installed app, `scripts/bump-version.sh`. Decisions [#49](decisions.md) and [#50](decisions.md).
+
 **Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
 
 ## Pending and known problems

@@ -359,6 +359,49 @@ any text without a translation.
 **Help.** Ayuda › Ver logs (⌘⇧L) shows the daemon's last lines live, to see what is
 going on while testing.
 
+## Resource usage
+
+Delilah adds little on top of the agents themselves: a small Rust daemon and a Tauri
+window that uses the system WebKit, with no bundled Chromium. Measured on 2026-10-23 on
+an M4 Pro (12 cores, 24 GB, macOS 26.3.1) with Claude Code 2.1.292. RSS and CPU come
+from `ps`, sampled every 5 s and summed over each process tree (100% CPU = one core).
+The script is [scripts/sample-resources.py](scripts/sample-resources.py).
+
+**Delilah with 12 agents running** (2 min, app window open, live updates flowing):
+
+| Process | Processes | RSS avg | RSS max | CPU avg | CPU p95 |
+|---|---:|---:|---:|---:|---:|
+| `delilahd` (daemon) | 1 | 18 MB | 23 MB | 1.1% | 1.8% |
+| `delilah-app` + its WebKit processes | 4 | 177 MB | 278 MB | 8.0% | 16.2% |
+| **Delilah's own overhead** | 5 | **~195 MB** | | **~9%** | |
+| The 12 agents (Claude Code + MCP servers, builds, tools) | 111 | 2.55 GB | 3.2 GB | 54% | 104% |
+
+The agents account for over 90% of the memory, about 210 MB each. That is the same
+`claude` binary every client runs, so what changes from one client to another is the
+shell around it.
+
+**Other clients' shells**, each opened on this repo and sampled for 60 s:
+
+| Client | Engine | RSS avg | CPU avg | App size | Measured |
+|---|---|---:|---:|---:|---|
+| **Delilah** (daemon + app) | Rust + system WebKit | **~195 MB** | **~9%** | **26 MB** | with 12 agents running |
+| Zed | Rust, native GPU UI | 180 MB | 1.6% | 175 MB | idle, no agent session |
+| Orca 1.4 | Electron | ~600 MB | 1.9% | 642 MB | idle (a restored `claude` left out) |
+| Claude desktop | Electron | 829 MB | 35% | 615 MB | with 4 Claude Code sessions |
+| VS Code | Electron | 914 MB | 12% | 1.4 GB | idle, no Claude extension |
+| Cursor | Electron | 1.29 GB | 64% | 1.0 GB | idle; indexing just after opening |
+
+Delilah was measured under load and the others mostly idle, so this is unfavourable
+to Delilah. Only Zed is in the same range, and Zed is an editor, not an orchestrator. In
+Zed and VS Code an agent session adds its adapter or extension on top. Orca keeps a
+background daemon (~22 MB) after you quit it, as `delilahd` does.
+
+**Disk.** Most of the disk goes to the workspaces, not to Delilah: each task is a full
+worktree with its own build output. With six Rust workspaces `~/.delilah` took 32 GB,
+almost all of it `target/` dirs (4.7 to 17 GB each). Task files take 147 MB and the
+database under 5 MB. Any client that isolates tasks in worktrees pays this cost;
+archiving a finished task (`delilah archive`) removes its workspace and frees it.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use

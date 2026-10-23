@@ -29,10 +29,18 @@ How to use a preview:
 
 | Area | Command |
 |---|---|
-| Rust (workspace) | `cargo fmt --all && cargo clippy --workspace --all-targets && cargo test --workspace` |
+| Rust (workspace) | `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` |
 | One crate | `cargo test -p delilah-daemon <filter>` |
-| Desktop shell | `cargo test --manifest-path app/src-tauri/Cargo.toml` (it is outside the workspace) |
+| Desktop shell | `cargo fmt`, `cargo clippy … -- -D warnings` and `cargo test`, each with `--manifest-path app/src-tauri/Cargo.toml` (it is outside the workspace) |
 | UI | `cd app && npx tsc --noEmit && npx vitest run` |
+
+Clippy warnings are errors: the same checks run in three places.
+
+- **Implementers** (`/orchestrate`): `.claude/verify.sh` runs them for the files an agent changed
+  (only the touched crates; `vitest related` for the UI) and sends the agent back while they fail.
+- **CI** (`.github/workflows/`): `ci.yml` (Rust workspace on macOS, web UI on Linux) on every PR
+  and push to `main`; `desktop-shell.yml` only when `app/src-tauri/` changes.
+- **You**: the table above.
 
 The git tests build throwaway repos and need `git -c protocol.file.allow=always`;
 the fixtures use it already.
@@ -59,13 +67,11 @@ the fixtures use it already.
 ## Releasing
 
 1. Check what is merged into `main` since the last tag (`git log vX.Y.Z..HEAD`).
-2. Bump the version in **four** places and refresh the lockfiles:
-   - `Cargo.toml` (workspace)
-   - `app/src-tauri/Cargo.toml`
-   - `app/package.json`
-   - `app/src-tauri/tauri.conf.json`
-
-   Then run `cargo check --workspace`, `(cd app/src-tauri && cargo check)` and `(cd app && npm install --package-lock-only)`.
+2. Bump the version: `scripts/bump-version.sh <major|minor|patch|X.Y.Z> [--commit]`. It starts
+   from the version on `origin/main`, writes the **four** places (`Cargo.toml` workspace,
+   `app/src-tauri/Cargo.toml`, `app/package.json`, `app/src-tauri/tauri.conf.json`) and the
+   three lockfiles (only their own version lines), and with `--commit` commits
+   `chore: bump version to X.Y.Z`.
 3. Commit `chore: release X.Y.Z` and tag `vX.Y.Z`.
 4. Build: `cd app && npm run dist` (`CI=true tauri build`, which also builds the
    bundled `delilahd`). The output is
@@ -90,4 +96,8 @@ the fixtures use it already.
 - **QMD:** `delilah` (docs/) and `delilah-specs` (specs/). After adding docs, run `qmd update && qmd embed`.
 - **Codegraph:** the code index, in `.codegraph/`, which is git-ignored.
 - **SpecKit:** set up in `.specify/`, with its skills in `.claude/skills/` (excluded locally). `/feature` runs `specify → clarify → plan → tasks`.
-- **`.claude/launch.json`:** `daemon`, `ui` and `preview` (slot 8) for the desktop app's preview tools.
+- **`.claude/launch.json`:** only `preview` (slot 8) for the desktop app's preview tools; nothing that binds 7420.
+- **`.claude/settings.json`:** a `PreToolUse` hook (`.claude/hooks/guard-installed-daemon.sh`) that blocks agent
+  commands against the installed app: killing or unloading `delilahd`, `scripts/dev-daemon.sh`, writes to the 7420 API,
+  the CLI without `DELILAH_URL`, deleting `~/.delilah`. Run those yourself when you really mean it.
+- **`.claude/verify.sh`:** the checks the `implementer` agent's stop hook runs (see Checks).

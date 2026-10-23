@@ -1,0 +1,42 @@
+# The desktop shell (app/src-tauri, outside the workspace), only when it changes:
+# it is macOS-only and slow to build.
+name: Desktop shell
+
+on:
+  pull_request:
+    paths: ["app/src-tauri/**"]
+  push:
+    branches: [main]
+    paths: ["app/src-tauri/**"]
+
+concurrency:
+  group: desktop-shell-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tauri:
+    name: Tauri crate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # Tauri's build script wants frontendDist and the sidecar (externalBin) to exist;
+      # an empty placeholder stands in for delilahd, which the bundle step would build.
+      - name: Web UI build and sidecar placeholder
+        run: |
+          (cd app && npm ci && npm run build)
+          mkdir -p app/src-tauri/binaries
+          touch "app/src-tauri/binaries/delilahd-$(rustc -vV | sed -n 's/^host: //p')"
+      - run: cargo fmt --manifest-path app/src-tauri/Cargo.toml --check
+      - run: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path app/src-tauri/Cargo.toml
