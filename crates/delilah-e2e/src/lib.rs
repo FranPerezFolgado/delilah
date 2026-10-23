@@ -118,7 +118,10 @@ mod tests {
     fn a_long_timeout_is_clamped_to_thirty_seconds() {
         // A closure that is ready at once returns immediately whatever the timeout; the
         // clamp is checked through the constant the panic path uses.
-        assert_eq!(Duration::from_secs(300).min(MAX_TIMEOUT), Duration::from_secs(30));
+        assert_eq!(
+            Duration::from_secs(300).min(MAX_TIMEOUT),
+            Duration::from_secs(30)
+        );
         assert_eq!(wait_until("now", Duration::from_secs(300), || Some(1)), 1);
     }
 }

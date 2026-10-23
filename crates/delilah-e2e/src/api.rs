@@ -15,7 +15,8 @@ pub struct Api {
 
 /// Panics unless `v` is an array; returns its items.
 pub fn items(v: &Value) -> &[Value] {
-    v.as_array().unwrap_or_else(|| panic!("expected a JSON array, got {v}"))
+    v.as_array()
+        .unwrap_or_else(|| panic!("expected a JSON array, got {v}"))
 }
 
 /// `task["status"]["type"]` (the status is an object); a plain string also works.
@@ -33,17 +34,24 @@ impl Api {
     pub fn new(base: &str) -> Api {
         Api {
             base: base.trim_end_matches('/').to_string(),
-            http: Client::builder().timeout(Duration::from_secs(20)).build().expect("http client"),
+            http: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .expect("http client"),
         }
     }
 
     /// Sends the request; returns (status code, body as JSON or Null).
     pub fn raw(&self, method: Method, path: &str, body: Option<Value>) -> (u16, Value) {
-        let mut req = self.http.request(method.clone(), format!("{}{path}", self.base));
+        let mut req = self
+            .http
+            .request(method.clone(), format!("{}{path}", self.base));
         if let Some(b) = body {
             req = req.json(&b);
         }
-        let res = req.send().unwrap_or_else(|e| panic!("{method} {path}: {e}"));
+        let res = req
+            .send()
+            .unwrap_or_else(|e| panic!("{method} {path}: {e}"));
         let code = res.status().as_u16();
         let text = res.text().unwrap_or_default();
         let v = serde_json::from_str(&text).unwrap_or(if text.is_empty() {
@@ -57,7 +65,10 @@ impl Api {
     /// Like `raw`, but panics unless the answer is 2xx.
     fn ok(&self, method: Method, path: &str, body: Option<Value>) -> Value {
         let (code, v) = self.raw(method.clone(), path, body);
-        assert!((200..300).contains(&code), "{method} {path}: HTTP {code} {v}");
+        assert!(
+            (200..300).contains(&code),
+            "{method} {path}: HTTP {code} {v}"
+        );
         v
     }
 
@@ -79,7 +90,10 @@ impl Api {
 
     /// `kind` is "repo" or "parent".
     pub fn add_project(&self, path: &str, kind: &str, name: Option<&str>) -> Value {
-        self.post("/api/v1/projects", json!({"path": path, "kind": kind, "name": name}))
+        self.post(
+            "/api/v1/projects",
+            json!({"path": path, "kind": kind, "name": name}),
+        )
     }
 
     pub fn inspect_project(&self, path: &str) -> Value {
@@ -105,7 +119,10 @@ impl Api {
     }
 
     pub fn set_phase(&self, key: &str, phase: &str) -> Value {
-        self.post(&format!("/api/v1/tasks/{key}/phase"), json!({"phase": phase}))
+        self.post(
+            &format!("/api/v1/tasks/{key}/phase"),
+            json!({"phase": phase}),
+        )
     }
 
     pub fn done(&self, key: &str) -> Value {
@@ -130,7 +147,10 @@ impl Api {
 
     /// `answers`: question text → chosen label (or own words).
     pub fn answer_ask(&self, id: &str, answers: Value) -> Value {
-        self.post(&format!("/api/v1/asks/{id}/answer"), json!({"answers": answers}))
+        self.post(
+            &format!("/api/v1/asks/{id}/answer"),
+            json!({"answers": answers}),
+        )
     }
 
     pub fn release_ask(&self, id: &str) -> Value {
@@ -142,7 +162,10 @@ impl Api {
     }
 
     pub fn reply(&self, session: &str, text: &str) -> Value {
-        self.post(&format!("/api/v1/sessions/{session}/reply"), json!({"text": text}))
+        self.post(
+            &format!("/api/v1/sessions/{session}/reply"),
+            json!({"text": text}),
+        )
     }
 
     /// Starts an ended session again (Claude with `--resume`).
@@ -166,7 +189,10 @@ impl Api {
 
     /// Writes a message into a conversation session.
     pub fn send_message(&self, session: &str, text: &str) -> Value {
-        self.post(&format!("/api/v1/sessions/{session}/messages"), json!({"text": text}))
+        self.post(
+            &format!("/api/v1/sessions/{session}/messages"),
+            json!({"text": text}),
+        )
     }
 
     pub fn conversation(&self, session: &str) -> Value {
@@ -182,14 +208,18 @@ impl Api {
         self.ok(
             Method::PUT,
             "/api/v1/jira",
-            Some(json!({"mode": "cloud", "site": site, "email": "e2e@example.invalid",
-                "token": "not-a-token", "jql": ""})),
+            Some(
+                json!({"mode": "cloud", "site": site, "email": "e2e@example.invalid",
+                "token": "not-a-token", "jql": ""}),
+            ),
         )
     }
 
     /// `who`: assigned|reported|query; `progress`: open|done; `sprint`: all|current.
     pub fn jira_issues(&self, who: &str, progress: &str, sprint: &str) -> Value {
-        self.get(&format!("/api/v1/jira/issues?who={who}&progress={progress}&sprint={sprint}"))
+        self.get(&format!(
+            "/api/v1/jira/issues?who={who}&progress={progress}&sprint={sprint}"
+        ))
     }
 
     /// Listens on the `/api/v1/events` WebSocket for `ms` milliseconds and returns the
@@ -204,8 +234,8 @@ impl Api {
         let addr = self.base.trim_start_matches("http://");
         let stream = TcpStream::connect(addr).unwrap_or_else(|e| panic!("events {addr}: {e}"));
         let url = format!("ws://{addr}/api/v1/events");
-        let (mut ws, _) = tungstenite::client(url, stream)
-            .unwrap_or_else(|e| panic!("events handshake: {e}"));
+        let (mut ws, _) =
+            tungstenite::client(url, stream).unwrap_or_else(|e| panic!("events handshake: {e}"));
         connected();
         let deadline = Instant::now() + Duration::from_millis(ms);
         let mut topics = Vec::new();
@@ -214,7 +244,9 @@ impl Api {
             if left.is_zero() {
                 break;
             }
-            ws.get_ref().set_read_timeout(Some(left.max(Duration::from_millis(1)))).ok();
+            ws.get_ref()
+                .set_read_timeout(Some(left.max(Duration::from_millis(1))))
+                .ok();
             match ws.read() {
                 Ok(tungstenite::Message::Text(t)) => {
                     if let Ok(v) = serde_json::from_str::<Value>(t.as_str())
@@ -244,7 +276,10 @@ mod unit_tests {
 
     #[test]
     fn status_of_reads_the_type_of_the_status_object() {
-        assert_eq!(status_of(&json!({"status": {"type": "running"}})), "running");
+        assert_eq!(
+            status_of(&json!({"status": {"type": "running"}})),
+            "running"
+        );
         assert_eq!(status_of(&json!({"status": "done"})), "done");
         assert_eq!(status_of(&json!({})), "");
     }
@@ -264,7 +299,10 @@ mod tests {
 
     #[test]
     fn events_report_a_change_and_jira_issues_come_from_the_fake() {
-        let mut env = Env::start(EnvOptions { jira: true, ..Default::default() });
+        let mut env = Env::start(EnvOptions {
+            jira: true,
+            ..Default::default()
+        });
         let url = env.start_jira();
         let api = env.api();
         env.register_fixtures();
@@ -278,7 +316,8 @@ mod tests {
                 let _ = tx.send(());
             })
         });
-        rx.recv_timeout(Duration::from_secs(10)).expect("the events socket to connect");
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("the events socket to connect");
         api.new_task(json!({"key": "E2E-1", "title": "t", "free": true}));
         let topics = t.join().unwrap();
         assert!(topics.iter().any(|t| t == "tasks"), "{topics:?}");

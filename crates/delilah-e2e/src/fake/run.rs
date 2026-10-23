@@ -6,9 +6,9 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use super::hooks::{payload, HookRun, Hooks};
+use super::hooks::{HookRun, Hooks, payload};
 use super::record::{HookResult, Record};
 use super::scenario::{Ask, Scenario, Step};
 
@@ -48,9 +48,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     fn hook(&mut self, event: &str, payload: &Value) -> Vec<HookRun> {
         let runs = self.hooks.run(event, payload);
         for r in &runs {
-            self.record
-                .hooks
-                .push(HookResult { event: event.to_string(), exit_code: r.exit_code });
+            self.record.hooks.push(HookResult {
+                event: event.to_string(),
+                exit_code: r.exit_code,
+            });
         }
         runs
     }
@@ -120,13 +121,19 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
             Step::WaitInput(_) => match self.read_line() {
                 None => return Flow::Exit(self.end("hangup", 0)),
                 Some(line) => {
-                    self.hook("UserPromptSubmit", &payload::user_prompt_submit(&session, &cwd, &line));
+                    self.hook(
+                        "UserPromptSubmit",
+                        &payload::user_prompt_submit(&session, &cwd, &line),
+                    );
                     self.record.inputs.push(line);
                 }
             },
             Step::Fail(message) => {
                 self.print(&format!("{message}\n"));
-                self.hook("StopFailure", &payload::stop_failure(&session, &cwd, message));
+                self.hook(
+                    "StopFailure",
+                    &payload::stop_failure(&session, &cwd, message),
+                );
                 return Flow::Idle;
             }
             Step::Exit(code) => return Flow::Exit(self.end("exit", *code)),
@@ -185,7 +192,9 @@ fn env_home(fake_dir: &Path) -> Option<std::path::PathBuf> {
 /// is the Env's own temp home (`<fake_dir>/../home`), so the fake can never touch a
 /// real home; otherwise nothing is written.
 fn write_transcript(record: &Record, fake_dir: Option<&Path>) {
-    let (Some(home), Some(fake_dir)) = (record.env.get("HOME"), fake_dir) else { return };
+    let (Some(home), Some(fake_dir)) = (record.env.get("HOME"), fake_dir) else {
+        return;
+    };
     let home = Path::new(home);
     let id = &record.session_id;
     if !home.is_absolute()
@@ -196,7 +205,9 @@ fn write_transcript(record: &Record, fake_dir: Option<&Path>) {
     {
         return;
     }
-    let (Ok(got), Some(want)) = (home.canonicalize(), env_home(fake_dir)) else { return };
+    let (Ok(got), Some(want)) = (home.canonicalize(), env_home(fake_dir)) else {
+        return;
+    };
     if want.canonicalize().ok().as_ref() != Some(&got) {
         return;
     }
@@ -226,7 +237,14 @@ pub fn run<R: BufRead, W: Write>(
     input: &mut R,
     out: &mut W,
 ) -> i32 {
-    let mut r = Runner { record, hooks, fake_dir, input, out, after_cr: false };
+    let mut r = Runner {
+        record,
+        hooks,
+        fake_dir,
+        input,
+        out,
+        after_cr: false,
+    };
     write_transcript(r.record, fake_dir);
     let mut steps = scenario.steps.iter();
     // Real Claude shows the folder-trust dialog before the session starts.
@@ -239,7 +257,11 @@ pub fn run<R: BufRead, W: Write>(
             return code;
         }
     }
-    let source = if r.record.mode == "resume" { "resume" } else { "startup" };
+    let source = if r.record.mode == "resume" {
+        "resume"
+    } else {
+        "startup"
+    };
     let start = payload::session_start(&r.record.session_id, &r.record.cwd, source);
     r.hook("SessionStart", &start);
     r.save();
@@ -262,8 +284,14 @@ pub fn run<R: BufRead, W: Write>(
         }
         let (session, cwd) = (r.record.session_id.clone(), r.record.cwd.clone());
         r.record.inputs.push(line.clone());
-        r.hook("UserPromptSubmit", &payload::user_prompt_submit(&session, &cwd, &line));
-        r.hook("Stop", &payload::stop(&session, &cwd, &format!("Echo: {line}")));
+        r.hook(
+            "UserPromptSubmit",
+            &payload::user_prompt_submit(&session, &cwd, &line),
+        );
+        r.hook(
+            "Stop",
+            &payload::stop(&session, &cwd, &format!("Echo: {line}")),
+        );
         r.save();
     }
     r.end("hangup", 0)
@@ -277,8 +305,14 @@ mod tests {
     use std::io::Cursor;
 
     const EVENTS: [&str; 8] = [
-        "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
-        "StopFailure", "Notification", "SessionEnd",
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+        "StopFailure",
+        "Notification",
+        "SessionEnd",
     ];
 
     /// Settings whose hooks append their stdin (one line each) to `<dir>/<Event>.log`;
@@ -286,10 +320,21 @@ mod tests {
     fn settings(dir: &Path) -> Hooks {
         let mut hooks = serde_json::Map::new();
         for ev in EVENTS {
-            let extra = if ev == "PreToolUse" { format!("; cat {}/answer 2>/dev/null; true", dir.display()) } else { String::new() };
+            let extra = if ev == "PreToolUse" {
+                format!("; cat {}/answer 2>/dev/null; true", dir.display())
+            } else {
+                String::new()
+            };
             let command = format!("{{ cat; echo; }} >> {}/{ev}.log{extra}", dir.display());
-            let matcher = if ev == "PreToolUse" { "AskUserQuestion" } else { "*" };
-            hooks.insert(ev.into(), json!([{"matcher": matcher, "hooks": [{"type": "command", "command": command}]}]));
+            let matcher = if ev == "PreToolUse" {
+                "AskUserQuestion"
+            } else {
+                "*"
+            };
+            hooks.insert(
+                ev.into(),
+                json!([{"matcher": matcher, "hooks": [{"type": "command", "command": command}]}]),
+            );
         }
         let path = dir.join("settings.json");
         std::fs::write(&path, json!({"hooks": hooks}).to_string()).unwrap();
@@ -306,10 +351,20 @@ mod tests {
 
     fn record(mode: &str) -> Record {
         Record {
-            args: vec![], mode: mode.into(), session_id: "s1".into(), task: None,
-            cwd: "/w".into(), env: BTreeMap::new(), settings: "s".into(), prompt: None,
-            scenario: "t".into(), steps_done: 0, hooks: vec![], answers: vec![],
-            inputs: vec![], exited: None,
+            args: vec![],
+            mode: mode.into(),
+            session_id: "s1".into(),
+            task: None,
+            cwd: "/w".into(),
+            env: BTreeMap::new(),
+            settings: "s".into(),
+            prompt: None,
+            scenario: "t".into(),
+            steps_done: 0,
+            hooks: vec![],
+            answers: vec![],
+            inputs: vec![],
+            exited: None,
         }
     }
 
@@ -330,10 +385,22 @@ mod tests {
         let scenario = Scenario::parse(&format!(r#"{{"steps":{steps}}}"#)).unwrap();
         let mut rec = record(mode);
         let mut out = Vec::new();
-        let code = run(&mut rec, &scenario, &hooks, Some(fake.path()), &mut Cursor::new(input.as_bytes().to_vec()), &mut out);
+        let code = run(
+            &mut rec,
+            &scenario,
+            &hooks,
+            Some(fake.path()),
+            &mut Cursor::new(input.as_bytes().to_vec()),
+            &mut out,
+        );
         let saved = Record::load(fake.path(), "s1").unwrap();
         assert_eq!(saved, rec, "record saved");
-        Out { code, text: String::from_utf8(out).unwrap(), record: rec, dir }
+        Out {
+            code,
+            text: String::from_utf8(out).unwrap(),
+            record: rec,
+            dir,
+        }
     }
 
     fn events(o: &Out) -> Vec<&str> {
@@ -351,12 +418,22 @@ mod tests {
 
     #[test]
     fn trust_dialog_comes_before_session_start() {
-        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "\n", None);
+        let o = play(
+            "new",
+            r#"[{"trust_dialog":true},{"print":"in"}]"#,
+            "\n",
+            None,
+        );
         assert_eq!(events(&o), ["SessionStart", "SessionEnd"]);
         assert!(o.text.starts_with("Do you trust"), "{}", o.text);
         assert_eq!(o.record.steps_done, 2);
         // Declining ends the session before it ever started.
-        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "2\n", None);
+        let o = play(
+            "new",
+            r#"[{"trust_dialog":true},{"print":"in"}]"#,
+            "2\n",
+            None,
+        );
         assert_eq!(events(&o), ["SessionEnd"]);
     }
 
@@ -369,7 +446,11 @@ mod tests {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
             .collect();
-        let want = root.path().join("home/.claude/projects").join(folder).join("s1.jsonl");
+        let want = root
+            .path()
+            .join("home/.claude/projects")
+            .join(folder)
+            .join("s1.jsonl");
         assert!(want.is_file());
         assert_eq!(rec.session_id, "s1");
     }
@@ -388,18 +469,38 @@ mod tests {
         let mut rec = record("new");
         rec.session_id = session.into();
         rec.cwd = dir.path().display().to_string();
-        rec.env.insert("HOME".into(), home_of(&root.path().join("home")));
+        rec.env
+            .insert("HOME".into(), home_of(&root.path().join("home")));
         let fake = root.path().join("fake");
-        run(&mut rec, &Scenario { steps: vec![] }, &hooks, Some(&fake), &mut Cursor::new(vec![]), &mut Vec::new());
+        run(
+            &mut rec,
+            &Scenario { steps: vec![] },
+            &hooks,
+            Some(&fake),
+            &mut Cursor::new(vec![]),
+            &mut Vec::new(),
+        );
         (dir, root, rec)
     }
 
     fn jsonl_count(home: &Path) -> usize {
         fn walk(p: &Path) -> usize {
-            std::fs::read_dir(p).map(|d| d.flatten().map(|e| {
-                let p = e.path();
-                if p.is_dir() { walk(&p) } else if p.extension().is_some_and(|x| x == "jsonl") { 1 } else { 0 }
-            }).sum()).unwrap_or(0)
+            std::fs::read_dir(p)
+                .map(|d| {
+                    d.flatten()
+                        .map(|e| {
+                            let p = e.path();
+                            if p.is_dir() {
+                                walk(&p)
+                            } else if p.extension().is_some_and(|x| x == "jsonl") {
+                                1
+                            } else {
+                                0
+                            }
+                        })
+                        .sum()
+                })
+                .unwrap_or(0)
         }
         walk(home)
     }
@@ -434,8 +535,14 @@ mod tests {
 
     #[test]
     fn trust_dialog_is_recognised_and_enter_continues() {
-        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "\n", None);
-        let want = "Do you trust the files in this folder?\n/w\n❯ 1. Yes, proceed\n  2. No, exit\nin\n";
+        let o = play(
+            "new",
+            r#"[{"trust_dialog":true},{"print":"in"}]"#,
+            "\n",
+            None,
+        );
+        let want =
+            "Do you trust the files in this folder?\n/w\n❯ 1. Yes, proceed\n  2. No, exit\nin\n";
         assert_eq!(o.text, want);
         assert_eq!(trust_dialog_selection(o.text.as_bytes()), Some(true));
         assert_eq!(o.code, 0);
@@ -443,11 +550,26 @@ mod tests {
 
     #[test]
     fn bare_carriage_return_is_yes_and_crlf_is_one_line() {
-        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "\r", None);
+        let o = play(
+            "new",
+            r#"[{"trust_dialog":true},{"print":"in"}]"#,
+            "\r",
+            None,
+        );
         assert!(o.text.ends_with("in\n"), "{}", o.text);
-        let o = play("new", r#"[{"wait_input":true},{"wait_input":true}]"#, "a\r\nb\rc", None);
+        let o = play(
+            "new",
+            r#"[{"wait_input":true},{"wait_input":true}]"#,
+            "a\r\nb\rc",
+            None,
+        );
         assert_eq!(o.record.inputs, vec!["a", "b", "c"]);
-        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "2\r", None);
+        let o = play(
+            "new",
+            r#"[{"trust_dialog":true},{"print":"in"}]"#,
+            "2\r",
+            None,
+        );
         assert_eq!(o.code, 1);
     }
 
@@ -461,10 +583,18 @@ mod tests {
         let q = &pre["tool_input"]["questions"][0];
         assert_eq!(q["header"], "Nueva tarea");
         assert_eq!(q["question"], "Add search");
-        let crear = q["options"].as_array().unwrap().iter().find(|o| o["label"] == "Crear").unwrap();
+        let crear = q["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["label"] == "Crear")
+            .unwrap();
         assert_eq!(crear["preview"], "the brief");
         assert_eq!(crear["description"], "create it");
-        assert_eq!(q["options"][1], json!({"label":"Descartar","description":""}));
+        assert_eq!(
+            q["options"][1],
+            json!({"label":"Descartar","description":""})
+        );
     }
 
     #[test]
@@ -473,7 +603,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = tempfile::tempdir().unwrap();
         let rec = fake.path().join("records/s1.json");
-        let cmd = format!("cat >/dev/null; cp {} {}/snap.$(date +%s%N)", rec.display(), dir.path().display());
+        let cmd = format!(
+            "cat >/dev/null; cp {} {}/snap.$(date +%s%N)",
+            rec.display(),
+            dir.path().display()
+        );
         let path = dir.path().join("settings.json");
         std::fs::write(
             &path,
@@ -481,14 +615,31 @@ mod tests {
         )
         .unwrap();
         let hooks = Hooks::load(&path).unwrap();
-        let scenario = Scenario::parse(r#"{"steps":[{"print":"a"},{"stop":"1"},{"stop":"2"}]}"#).unwrap();
+        let scenario =
+            Scenario::parse(r#"{"steps":[{"print":"a"},{"stop":"1"},{"stop":"2"}]}"#).unwrap();
         let mut r = record("new");
-        run(&mut r, &scenario, &hooks, Some(fake.path()), &mut Cursor::new(Vec::new()), &mut Vec::new());
-        let mut snaps: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("snap.")).map(|e| e.path()).collect();
+        run(
+            &mut r,
+            &scenario,
+            &hooks,
+            Some(fake.path()),
+            &mut Cursor::new(Vec::new()),
+            &mut Vec::new(),
+        );
+        let mut snaps: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("snap."))
+            .map(|e| e.path())
+            .collect();
         snaps.sort();
-        let steps: Vec<usize> = snaps.iter()
-            .map(|p| serde_json::from_str::<Record>(&std::fs::read_to_string(p).unwrap()).unwrap().steps_done)
+        let steps: Vec<usize> = snaps
+            .iter()
+            .map(|p| {
+                serde_json::from_str::<Record>(&std::fs::read_to_string(p).unwrap())
+                    .unwrap()
+                    .steps_done
+            })
             .collect();
         // The first stop runs after step 1 was saved; the second after step 2.
         assert_eq!(steps, vec![1, 2]);
@@ -496,7 +647,12 @@ mod tests {
 
     #[test]
     fn trust_dialog_no_exits_1() {
-        let o = play("new", r#"[{"trust_dialog":true},{"print":"in"}]"#, "2\n", None);
+        let o = play(
+            "new",
+            r#"[{"trust_dialog":true},{"print":"in"}]"#,
+            "2\n",
+            None,
+        );
         assert_eq!(o.code, 1);
         assert!(!o.text.contains("in\n"));
         assert_eq!(o.record.exited, Some(1));
@@ -506,43 +662,79 @@ mod tests {
     #[test]
     fn ask_answered_by_hook() {
         let ans = r#"{"hookSpecificOutput":{"updatedInput":{"answers":{"q":"A"}}}}"#;
-        let o = play("new", r#"[{"ask":{"question":"q","header":"h","options":["A","B"]}}]"#, "", Some(ans));
+        let o = play(
+            "new",
+            r#"[{"ask":{"question":"q","header":"h","options":["A","B"]}}]"#,
+            "",
+            Some(ans),
+        );
         assert_eq!(o.record.answers, vec![json!({"q": "A"})]);
-        assert_eq!(events(&o), ["SessionStart", "PreToolUse", "PostToolUse", "SessionEnd"]);
+        assert_eq!(
+            events(&o),
+            ["SessionStart", "PreToolUse", "PostToolUse", "SessionEnd"]
+        );
         let pre = &logged(o.dir.path(), "PreToolUse")[0];
         assert_eq!(pre["tool_input"]["questions"][0]["question"], "q");
     }
 
     #[test]
     fn ask_released_reads_a_line() {
-        let o = play("new", r#"[{"ask":{"question":"q","header":"h","options":["A","B"]}}]"#, "B\n", None);
+        let o = play(
+            "new",
+            r#"[{"ask":{"question":"q","header":"h","options":["A","B"]}}]"#,
+            "B\n",
+            None,
+        );
         assert_eq!(o.record.answers, vec![Value::Null]);
         assert_eq!(o.record.inputs, vec!["B"]);
         assert!(o.text.contains("q"));
-        assert_eq!(events(&o), ["SessionStart", "PreToolUse", "PostToolUse", "SessionEnd"]);
+        assert_eq!(
+            events(&o),
+            ["SessionStart", "PreToolUse", "PostToolUse", "SessionEnd"]
+        );
     }
 
     #[test]
     fn stop_runs_stop_hook() {
         let o = play("new", r#"[{"stop":"done"}]"#, "", None);
-        assert_eq!(logged(o.dir.path(), "Stop")[0]["last_assistant_message"], "done");
+        assert_eq!(
+            logged(o.dir.path(), "Stop")[0]["last_assistant_message"],
+            "done"
+        );
     }
 
     #[test]
     fn wait_input_records_and_submits() {
         let o = play("new", r#"[{"wait_input":true}]"#, "do it\n", None);
         assert_eq!(o.record.inputs, vec!["do it"]);
-        assert_eq!(logged(o.dir.path(), "UserPromptSubmit")[0]["prompt"], "do it");
+        assert_eq!(
+            logged(o.dir.path(), "UserPromptSubmit")[0]["prompt"],
+            "do it"
+        );
     }
 
     #[test]
     fn fail_runs_stop_failure_and_stays_alive_until_eof() {
-        let o = play("new", r#"[{"fail":"boom"},{"print":"never"}]"#, "again\n", None);
+        let o = play(
+            "new",
+            r#"[{"fail":"boom"},{"print":"never"}]"#,
+            "again\n",
+            None,
+        );
         assert_eq!(logged(o.dir.path(), "StopFailure")[0]["error"], "boom");
         assert!(!o.text.contains("never"));
         // Like Claude after a failed turn: still reading input, SessionEnd only at EOF.
         assert_eq!(o.record.inputs, vec!["again"]);
-        assert_eq!(events(&o), ["SessionStart", "StopFailure", "UserPromptSubmit", "Stop", "SessionEnd"]);
+        assert_eq!(
+            events(&o),
+            [
+                "SessionStart",
+                "StopFailure",
+                "UserPromptSubmit",
+                "Stop",
+                "SessionEnd"
+            ]
+        );
         assert_eq!(o.code, 0);
     }
 

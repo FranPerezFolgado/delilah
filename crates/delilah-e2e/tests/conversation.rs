@@ -38,7 +38,10 @@ fn confirming_the_proposal_card_creates_a_backlog_task_with_the_brief() {
 
     let card = env.wait_for("the proposal card", T, || {
         let conv = api.conversation(&id);
-        match items(&conv["entries"]).iter().find(|e| e["kind"] == "card" && e["outcome"] == "pending") {
+        match items(&conv["entries"])
+            .iter()
+            .find(|e| e["kind"] == "card" && e["outcome"] == "pending")
+        {
             Some(c) => Ok(c.clone()),
             None => Err(conv),
         }
@@ -50,7 +53,10 @@ fn confirming_the_proposal_card_creates_a_backlog_task_with_the_brief() {
 
     let done = env.wait_for("the card answered with a task", T, || {
         let conv = api.conversation(&id);
-        match items(&conv["entries"]).iter().find(|e| e["kind"] == "card" && e["task"].is_string()) {
+        match items(&conv["entries"])
+            .iter()
+            .find(|e| e["kind"] == "card" && e["task"].is_string())
+        {
             Some(c) => Ok(c.clone()),
             None => Err(conv),
         }
@@ -59,5 +65,8 @@ fn confirming_the_proposal_card_creates_a_backlog_task_with_the_brief() {
     assert_eq!(task["status"]["type"], "queued", "{task}");
     assert_eq!(task["title"], title, "{task}");
     assert_eq!(task["project"], "signal", "{task}");
-    assert!(task["notes"].as_str().unwrap_or("").contains(brief), "{task}");
+    assert!(
+        task["notes"].as_str().unwrap_or("").contains(brief),
+        "{task}"
+    );
 }

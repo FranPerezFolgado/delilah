@@ -22,7 +22,10 @@ fn start(env: &Env, key: &str, marker: &str) {
 /// What `delilah show <key>` prints for `phase:` and `status:`.
 fn cli_state(env: &Env, key: &str) -> (String, String) {
     let (status, out, err) = env.cli().run(&["show", key]);
-    assert!(status.success(), "delilah show failed: {status}\n{out}\n{err}");
+    assert!(
+        status.success(),
+        "delilah show failed: {status}\n{out}\n{err}"
+    );
     let field = |name: &str| {
         out.lines()
             .find_map(|l| l.trim().strip_prefix(name))
@@ -36,8 +39,15 @@ fn cli_state(env: &Env, key: &str) -> (String, String) {
 /// The API's (phase, status) for a task; `-` when it has no phase, as the CLI prints it.
 fn api_state(env: &Env, key: &str) -> (String, String) {
     let t = env.api().task(key);
-    let phase = if phase_of(&t).is_empty() { "-" } else { phase_of(&t) };
-    (phase.to_string(), t["status"]["type"].as_str().unwrap_or("").to_string())
+    let phase = if phase_of(&t).is_empty() {
+        "-"
+    } else {
+        phase_of(&t)
+    };
+    (
+        phase.to_string(),
+        t["status"]["type"].as_str().unwrap_or("").to_string(),
+    )
 }
 
 /// Waits until the API reports `(phase, status)` (`None` = any phase), then checks the CLI
@@ -46,7 +56,11 @@ fn agree(env: &Env, key: &str, phase: Option<&str>, status: &str) {
     let want = phase.map(str::to_string);
     let seen = env.wait_for(&format!("{key} at {phase:?}/{status}"), T, || {
         let s = api_state(env, key);
-        if s.1 == status && want.as_ref().is_none_or(|p| *p == s.0) { Ok(s) } else { Err(s) }
+        if s.1 == status && want.as_ref().is_none_or(|p| *p == s.0) {
+            Ok(s)
+        } else {
+            Err(s)
+        }
     });
     assert_eq!(cli_state(env, key), seen, "CLI and API disagree");
 }
@@ -74,16 +88,33 @@ fn api_cli_and_events_agree_through_a_tasks_life() {
     let heard = events_during(&env, 2500, || {
         env.api().set_phase("E2E-20", "plan");
     });
-    assert!(heard.iter().any(|t| t == "tasks"), "no tasks event: {heard:?}");
-    assert_eq!(api_state(&env, "E2E-20").0, "plan", "the event came but the phase did not change");
+    assert!(
+        heard.iter().any(|t| t == "tasks"),
+        "no tasks event: {heard:?}"
+    );
+    assert_eq!(
+        api_state(&env, "E2E-20").0,
+        "plan",
+        "the event came but the phase did not change"
+    );
     agree(&env, "E2E-20", Some("plan"), "waiting-for-user");
 
     let heard = events_during(&env, 2500, || {
         let (status, out, err) = env.cli().run(&["done", "E2E-20"]);
-        assert!(status.success(), "delilah done failed: {status}\n{out}\n{err}");
+        assert!(
+            status.success(),
+            "delilah done failed: {status}\n{out}\n{err}"
+        );
     });
-    assert!(heard.iter().any(|t| t == "tasks"), "no tasks event: {heard:?}");
-    assert_eq!(api_state(&env, "E2E-20").1, "done", "the event came but the task is not done");
+    assert!(
+        heard.iter().any(|t| t == "tasks"),
+        "no tasks event: {heard:?}"
+    );
+    assert_eq!(
+        api_state(&env, "E2E-20").1,
+        "done",
+        "the event came but the task is not done"
+    );
     agree(&env, "E2E-20", Some("plan"), "done");
     let (_, out, _) = env.cli().run(&["ls"]);
     assert!(out.contains("E2E-20"), "{out}");
@@ -100,7 +131,10 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     start(&env, "E2E-21", "[fake:ask]");
     let ask = env.wait_for("the ask in the inbox", T, || {
         let inbox = env.api().inbox();
-        match items(&inbox).iter().find(|i| i["task"] == "E2E-21" && i["ask"].is_object()) {
+        match items(&inbox)
+            .iter()
+            .find(|i| i["task"] == "E2E-21" && i["ask"].is_object())
+        {
             Some(i) => Ok(i["ask"].clone()),
             None => Err(inbox),
         }
@@ -111,7 +145,10 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     let heard = events_during(&env, 1000, || {
         env.api().answer_ask(&id, json!({"Which colour?": "blue"}));
     });
-    assert!(heard.iter().any(|t| t == "inbox"), "no inbox event: {heard:?}");
+    assert!(
+        heard.iter().any(|t| t == "inbox"),
+        "no inbox event: {heard:?}"
+    );
 
     agree(&env, "E2E-21", None, "running");
     // The scenario sleeps 5 s (the cap) after the answer (room to see it running even on a
@@ -120,12 +157,20 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     let heard = events_during(&env, 10_000, || {
         env.wait_for("the ask left the inbox", T, || {
             let inbox = env.api().inbox();
-            if items(&inbox).iter().any(|i| i["ask"]["id"] == id.as_str()) { Err(inbox) } else { Ok(()) }
+            if items(&inbox).iter().any(|i| i["ask"]["id"] == id.as_str()) {
+                Err(inbox)
+            } else {
+                Ok(())
+            }
         });
-        rec = Some(env.wait_for("the answer in the record", T, || match env.record_for("E2E-21") {
-            Some(r) if !r.answers.is_empty() => Ok(r),
-            other => Err(other.map(|r| r.answers)),
-        }));
+        rec = Some(env.wait_for(
+            "the answer in the record",
+            T,
+            || match env.record_for("E2E-21") {
+                Some(r) if !r.answers.is_empty() => Ok(r),
+                other => Err(other.map(|r| r.answers)),
+            },
+        ));
         // Past the ask the scenario stops: the task is waiting for the user again.
         agree(&env, "E2E-21", None, "waiting-for-user");
     });
@@ -134,5 +179,9 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
         "no tasks/sessions event for the stop: {heard:?}"
     );
     let rec = rec.unwrap();
-    assert!(rec.answers[0].to_string().contains("blue"), "{:?}", rec.answers);
+    assert!(
+        rec.answers[0].to_string().contains("blue"),
+        "{:?}",
+        rec.answers
+    );
 }

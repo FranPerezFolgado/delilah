@@ -12,7 +12,10 @@ pub struct Cli {
 
 impl Cli {
     pub fn new(home: &Path, api: &str) -> Cli {
-        Cli { home: home.to_path_buf(), api: api.to_string() }
+        Cli {
+            home: home.to_path_buf(),
+            api: api.to_string(),
+        }
     }
 
     /// Runs `delilah <args>`; returns (status, stdout, stderr).

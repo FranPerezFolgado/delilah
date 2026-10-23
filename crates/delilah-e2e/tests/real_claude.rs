@@ -15,14 +15,23 @@ fn live_session(env: &Env, key: &str) -> Option<(String, String)> {
     items(&all)
         .iter()
         .find(|s| s["task"] == key && s["primary"] == true && s["live"] == true)
-        .map(|s| (s["id"].as_str().unwrap().to_string(), s["state"].as_str().unwrap_or("").to_string()))
+        .map(|s| {
+            (
+                s["id"].as_str().unwrap().to_string(),
+                s["state"].as_str().unwrap_or("").to_string(),
+            )
+        })
 }
 
 fn wait_state(env: &Env, key: &str, want: &str) -> String {
-    env.wait_for(&format!("{key} live state {want}"), T, || match live_session(env, key) {
-        Some((id, s)) if s == want => Ok(id),
-        other => Err(other),
-    })
+    env.wait_for(
+        &format!("{key} live state {want}"),
+        T,
+        || match live_session(env, key) {
+            Some((id, s)) if s == want => Ok(id),
+            other => Err(other),
+        },
+    )
 }
 
 #[test]
@@ -32,7 +41,10 @@ fn real_claude_goes_working_then_waiting() {
         eprintln!("skipped: set DELILAH_E2E_REAL_CLAUDE=1 to run the real Claude");
         return;
     }
-    let env = Env::start(EnvOptions { real_claude: true, ..Default::default() });
+    let env = Env::start(EnvOptions {
+        real_claude: true,
+        ..Default::default()
+    });
     env.register_fixtures();
     env.api().start_run(json!({
         "key": "E2E-REAL", "title": "Reply OK and stop.", "project": "signal",

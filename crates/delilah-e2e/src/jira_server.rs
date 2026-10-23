@@ -19,7 +19,10 @@ fn issues() -> Vec<Value> {
 
 fn router() -> Router {
     Router::new()
-        .route("/rest/api/3/myself", get(|| async { Json(json!({"displayName": "Fran"})) }))
+        .route(
+            "/rest/api/3/myself",
+            get(|| async { Json(json!({"displayName": "Fran"})) }),
+        )
         .route(
             "/rest/api/3/field",
             get(|| async {
@@ -54,9 +57,13 @@ pub fn start() -> JiraHandle {
             .build()
             .expect("jira runtime");
         rt.block_on(async {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
             let port = listener.local_addr().expect("addr").port();
-            tx_url.send(format!("http://127.0.0.1:{port}")).expect("url");
+            tx_url
+                .send(format!("http://127.0.0.1:{port}"))
+                .expect("url");
             let _ = axum::serve(listener, router())
                 .with_graceful_shutdown(async {
                     let _ = rx_stop.await;
@@ -83,7 +90,10 @@ mod tests {
     fn the_real_client_reads_the_fixture_issues() {
         let mut jira = start();
         let url = jira.url.clone();
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let client = JiraClient::cloud(&url, "e2e@example.invalid", "not-a-token");
         let (me, listed, one) = rt.block_on(async {
             (

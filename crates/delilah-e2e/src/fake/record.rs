@@ -85,7 +85,10 @@ impl Record {
             if record.task.as_deref() != Some(task) {
                 continue;
             }
-            let mtime = entry.metadata().and_then(|m| m.modified()).map_err(|e| e.to_string())?;
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .map_err(|e| e.to_string())?;
             if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
                 best = Some((mtime, record));
             }
@@ -116,7 +119,10 @@ mod tests {
             prompt: Some("hi".into()),
             scenario: "default".into(),
             steps_done: 2,
-            hooks: vec![HookResult { event: "Stop".into(), exit_code: 0 }],
+            hooks: vec![HookResult {
+                event: "Stop".into(),
+                exit_code: 0,
+            }],
             answers: vec![json!({"q": "a"})],
             inputs: vec!["line".into()],
             exited: None,
@@ -127,8 +133,20 @@ mod tests {
     fn serialises_every_field() {
         let v = serde_json::to_value(sample("s1", "K-1")).unwrap();
         for f in [
-            "args", "mode", "session_id", "task", "cwd", "env", "settings", "prompt",
-            "scenario", "steps_done", "hooks", "answers", "inputs", "exited",
+            "args",
+            "mode",
+            "session_id",
+            "task",
+            "cwd",
+            "env",
+            "settings",
+            "prompt",
+            "scenario",
+            "steps_done",
+            "hooks",
+            "answers",
+            "inputs",
+            "exited",
         ] {
             assert!(v.get(f).is_some(), "missing {f}");
         }
@@ -142,7 +160,10 @@ mod tests {
         let r = sample("s1", "K-1");
         let path = r.save(dir.path()).unwrap();
         assert_eq!(path, dir.path().join("records/s1.json"));
-        let names: Vec<_> = std::fs::read_dir(dir.path().join("records")).unwrap().flatten().collect();
+        let names: Vec<_> = std::fs::read_dir(dir.path().join("records"))
+            .unwrap()
+            .flatten()
+            .collect();
         assert_eq!(names.len(), 1, "no temp file left behind");
         assert_eq!(Record::load(dir.path(), "s1").unwrap(), r);
     }
@@ -166,7 +187,13 @@ mod tests {
         let mut newer = sample("new", "K-1");
         newer.steps_done = 9;
         newer.save(dir.path()).unwrap();
-        assert_eq!(Record::for_task(dir.path(), "K-1").unwrap().unwrap().session_id, "new");
+        assert_eq!(
+            Record::for_task(dir.path(), "K-1")
+                .unwrap()
+                .unwrap()
+                .session_id,
+            "new"
+        );
         assert!(Record::for_task(dir.path(), "K-3").unwrap().is_none());
     }
 }

@@ -3,13 +3,13 @@
 //! the fake from the real thing.
 
 use std::io::{Read, Write};
-use std::path::Path;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Timeout (seconds) when a hook declares none.
 const DEFAULT_TIMEOUT: u64 = 60;
@@ -69,7 +69,9 @@ impl Hooks {
 
     /// The task key, taken from the `task` query parameter of a hook URL.
     pub fn task(&self) -> Option<String> {
-        self.entries.iter().find_map(|e| query_param(&e.command, "task"))
+        self.entries
+            .iter()
+            .find_map(|e| query_param(&e.command, "task"))
     }
 
     /// Runs every command of `event` whose matcher applies (`*`, or
@@ -108,7 +110,10 @@ fn query_param(text: &str, name: &str) -> Option<String> {
 const DRAIN_GRACE: Duration = Duration::from_millis(300);
 
 fn run_command(command: &str, stdin: &str, timeout_secs: u64) -> HookRun {
-    let failed = HookRun { exit_code: -1, stdout: String::new() };
+    let failed = HookRun {
+        exit_code: -1,
+        stdout: String::new(),
+    };
     // Own process group, so a timeout can take the grandchildren down with the shell.
     let Ok(mut child) = Command::new("sh")
         .arg("-c")
@@ -168,7 +173,10 @@ fn run_command(command: &str, stdin: &str, timeout_secs: u64) -> HookRun {
             Err(_) => break,
         }
     }
-    HookRun { exit_code: code, stdout: String::from_utf8_lossy(&bytes).into_owned() }
+    HookRun {
+        exit_code: code,
+        stdout: String::from_utf8_lossy(&bytes).into_owned(),
+    }
 }
 
 /// Payload builders, one per event (shapes in contracts/fake-claude.md).
@@ -188,11 +196,17 @@ pub mod payload {
 
     /// `source` is `startup` or `resume`.
     pub fn session_start(session: &str, cwd: &str, source: &str) -> Value {
-        with(base("SessionStart", session, cwd), json!({"source": source}))
+        with(
+            base("SessionStart", session, cwd),
+            json!({"source": source}),
+        )
     }
 
     pub fn user_prompt_submit(session: &str, cwd: &str, prompt: &str) -> Value {
-        with(base("UserPromptSubmit", session, cwd), json!({"prompt": prompt}))
+        with(
+            base("UserPromptSubmit", session, cwd),
+            json!({"prompt": prompt}),
+        )
     }
 
     /// `options` are `(label, description)` pairs.
@@ -267,7 +281,7 @@ pub mod payload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use delilah_agents::claude::{settings, Permission};
+    use delilah_agents::claude::{Permission, settings};
 
     /// Settings as the daemon writes them, with every command replaced by one that
     /// appends its stdin to `<dir>/<Event>.json` (PreToolUse also prints `ANSWER`).
@@ -284,9 +298,12 @@ mod tests {
         for (event, groups) in s["hooks"].as_object_mut().unwrap() {
             for g in groups.as_array_mut().unwrap() {
                 for h in g["hooks"].as_array_mut().unwrap() {
-                    let extra = if event == "PreToolUse" { "; echo ANSWER" } else { "" };
-                    h["command"] =
-                        json!(format!("cat >> {}/{event}.json{extra}", dir.display()));
+                    let extra = if event == "PreToolUse" {
+                        "; echo ANSWER"
+                    } else {
+                        ""
+                    };
+                    h["command"] = json!(format!("cat >> {}/{event}.json{extra}", dir.display()));
                 }
             }
         }
@@ -310,8 +327,13 @@ mod tests {
     fn task_comes_from_hook_url() {
         let dir = tempfile::tempdir().unwrap();
         let s = settings(
-            "http://127.0.0.1:1", "KEY-1", "sess-1", Path::new("/bin/true"),
-            None, Permission::Default, &[],
+            "http://127.0.0.1:1",
+            "KEY-1",
+            "sess-1",
+            Path::new("/bin/true"),
+            None,
+            Permission::Default,
+            &[],
         );
         let p = dir.path().join("s.json");
         std::fs::write(&p, s.to_string()).unwrap();
@@ -384,7 +406,9 @@ mod tests {
         let r = hooks.run("Stop", &json!({}));
         assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
         assert_eq!((r[0].exit_code, r[0].stdout.trim()), (0, "hi"));
-        let _ = Command::new("kill").arg(std::fs::read_to_string(&pidfile).unwrap().trim()).status();
+        let _ = Command::new("kill")
+            .arg(std::fs::read_to_string(&pidfile).unwrap().trim())
+            .status();
     }
 
     #[test]
@@ -396,7 +420,10 @@ mod tests {
         let t = Instant::now();
         assert_eq!(hooks.run("Stop", &json!({}))[0].exit_code, -1);
         assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
-        let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+        let pid = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .to_string();
         let end = Instant::now() + Duration::from_secs(3);
         while alive(&pid) && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(20));
@@ -407,7 +434,10 @@ mod tests {
     #[test]
     fn payload_shapes() {
         let p = payload::session_start("s", "/w", "resume");
-        assert_eq!(p, json!({"hook_event_name":"SessionStart","session_id":"s","cwd":"/w","source":"resume"}));
+        assert_eq!(
+            p,
+            json!({"hook_event_name":"SessionStart","session_id":"s","cwd":"/w","source":"resume"})
+        );
         assert_eq!(payload::user_prompt_submit("s", "/w", "hi")["prompt"], "hi");
         let q = payload::pre_tool_use_ask("s", "/w", "Q?", "H", &[("a", "A")]);
         assert_eq!(q["tool_name"], "AskUserQuestion");
@@ -415,7 +445,10 @@ mod tests {
         assert_eq!(question["question"], "Q?");
         assert_eq!(question["header"], "H");
         assert_eq!(question["multiSelect"], false);
-        assert_eq!(question["options"][0], json!({"label":"a","description":"A"}));
+        assert_eq!(
+            question["options"][0],
+            json!({"label":"a","description":"A"})
+        );
         let post = payload::post_tool_use("s", "/w", "Bash", json!({"c":1}), json!({"r":2}));
         assert_eq!(post["tool_name"], "Bash");
         assert_eq!(post["tool_input"], json!({"c":1}));

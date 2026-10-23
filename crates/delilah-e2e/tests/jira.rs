@@ -8,7 +8,9 @@ use serde_json::json;
 
 /// Every regular file under `dir` that contains `needle`.
 fn files_with(dir: &Path, needle: &str, out: &mut Vec<String>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
         let Ok(ft) = e.file_type() else { continue };
@@ -25,7 +27,10 @@ fn files_with(dir: &Path, needle: &str, out: &mut Vec<String>) {
 
 #[test]
 fn jira_issues_become_tasks_and_the_token_stays_in_memory() {
-    let mut env = Env::start(EnvOptions { jira: true, ..Default::default() });
+    let mut env = Env::start(EnvOptions {
+        jira: true,
+        ..Default::default()
+    });
     let site = env.start_jira();
     env.register_fixtures();
     let api = env.api();
@@ -39,7 +44,9 @@ fn jira_issues_become_tasks_and_the_token_stays_in_memory() {
         .find(|i| i["key"].as_str().is_some_and(|k| k.starts_with("PROJ-")))
         .unwrap_or_else(|| panic!("no PROJ issue in {issues}"));
     let key = issue["key"].as_str().unwrap();
-    let title = issue["summary"].as_str().unwrap_or_else(|| panic!("no summary in {issue}"));
+    let title = issue["summary"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no summary in {issue}"));
 
     let created = api.new_task(json!({"key": key, "title": title, "project": "signal"}));
     assert_eq!(created["key"], key, "{created}");

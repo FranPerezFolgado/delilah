@@ -5,7 +5,7 @@ use std::io::{BufReader, Write};
 use std::process::exit;
 
 use delilah_e2e::fake::args::{FakeArgs, Mode};
-use delilah_e2e::fake::hooks::{payload, Hooks};
+use delilah_e2e::fake::hooks::{Hooks, payload};
 use delilah_e2e::fake::record::Record;
 use delilah_e2e::fake::{run, scenario};
 
@@ -22,16 +22,22 @@ fn main() {
         Ok(h) => h,
         Err(e) => die(&e),
     };
-    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
     let task = hooks.task();
-    let (name, scenario) = match scenario::select(&fake_dir, args.prompt.as_deref(), task.as_deref()) {
-        Ok(s) => s,
-        Err(e) => {
-            // Hooks are loaded: let the daemon see a failed session, not a hang.
-            hooks.run("StopFailure", &payload::stop_failure(&args.session_id, &cwd, &e));
-            die(&e)
-        }
-    };
+    let (name, scenario) =
+        match scenario::select(&fake_dir, args.prompt.as_deref(), task.as_deref()) {
+            Ok(s) => s,
+            Err(e) => {
+                // Hooks are loaded: let the daemon see a failed session, not a hang.
+                hooks.run(
+                    "StopFailure",
+                    &payload::stop_failure(&args.session_id, &cwd, &e),
+                );
+                die(&e)
+            }
+        };
     let mut record = Record {
         args: argv,
         mode: match args.mode {
@@ -54,7 +60,14 @@ fn main() {
     };
     let mut input = BufReader::new(std::io::stdin());
     let mut out = std::io::stdout();
-    let code = run::run(&mut record, &scenario, &hooks, Some(&fake_dir), &mut input, &mut out);
+    let code = run::run(
+        &mut record,
+        &scenario,
+        &hooks,
+        Some(&fake_dir),
+        &mut input,
+        &mut out,
+    );
     let _ = out.flush();
     exit(code);
 }

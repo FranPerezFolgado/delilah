@@ -24,7 +24,11 @@ fn branches(env: &Env) -> String {
 /// The inbox items of the task whose kind is `kind`.
 fn notices(env: &Env, key: &str, kind: &str) -> Vec<Value> {
     let inbox = env.api().inbox();
-    items(&inbox).iter().filter(|i| i["task"] == key && i["kind"] == kind).cloned().collect()
+    items(&inbox)
+        .iter()
+        .filter(|i| i["task"] == key && i["kind"] == kind)
+        .cloned()
+        .collect()
 }
 
 #[test]
@@ -36,12 +40,19 @@ fn failing_checks_a_review_and_the_merge() {
     }));
     env.wait_for("a workspace and its branch", T, || {
         let b = branches(&env);
-        if b.contains("feature/E2E-10") { Ok(()) } else { Err(b) }
+        if b.contains("feature/E2E-10") {
+            Ok(())
+        } else {
+            Err(b)
+        }
     });
 
     // The daemon names the branch (key and title); the PR's head must be that branch.
     let task = env.api().task("E2E-10");
-    let branch = task["branch"].as_str().unwrap_or_else(|| panic!("no branch: {task}")).to_string();
+    let branch = task["branch"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no branch: {task}"))
+        .to_string();
     assert!(branch.starts_with("feature/E2E-10"), "{branch}");
 
     // The loop only looks for a branch's PR once the task is in review.
@@ -54,7 +65,8 @@ fn failing_checks_a_review_and_the_merge() {
         .args(["rev-parse", &branch])
         .output()
         .expect("git rev-parse");
-    env.gh.set_head(1, String::from_utf8_lossy(&tip.stdout).trim());
+    env.gh
+        .set_head(1, String::from_utf8_lossy(&tip.stdout).trim());
     let pr = env.wait_for("PR 1 linked to E2E-10", T, || {
         let all = env.api().prs();
         match items(&all).iter().find(|p| p["task"] == "E2E-10") {
@@ -62,23 +74,42 @@ fn failing_checks_a_review_and_the_merge() {
             None => Err(all),
         }
     });
-    assert_eq!((pr["count"].as_i64(), pr["state"].as_str()), (Some(1), Some("open")), "{pr}");
+    assert_eq!(
+        (pr["count"].as_i64(), pr["state"].as_str()),
+        (Some(1), Some("open")),
+        "{pr}"
+    );
     let (code, detail) = env.api().raw(Method::GET, "/api/v1/tasks/E2E-10/prs", None);
-    assert!(code == 200 && detail.to_string().contains(&FakeGh::pr_url(1)), "{code} {detail}");
+    assert!(
+        code == 200 && detail.to_string().contains(&FakeGh::pr_url(1)),
+        "{code} {detail}"
+    );
 
     env.gh.set_checks(1, Checks::Failing);
     let failed = env.wait_for("a pr-failed notice", T, || {
         let n = notices(&env, "E2E-10", "pr-failed");
-        if n.is_empty() { Err(env.api().inbox()) } else { Ok(n) }
+        if n.is_empty() {
+            Err(env.api().inbox())
+        } else {
+            Ok(n)
+        }
     });
     assert!(failed[0].to_string().contains("build"), "{}", failed[0]);
 
     env.gh.add_review(1, "please rename this");
     let review = env.wait_for("a pr-review notice", T, || {
         let n = notices(&env, "E2E-10", "pr-review");
-        if n.is_empty() { Err(env.api().inbox()) } else { Ok(n) }
+        if n.is_empty() {
+            Err(env.api().inbox())
+        } else {
+            Ok(n)
+        }
     });
-    assert!(review[0].to_string().contains("reviewer requested changes"), "{}", review[0]);
+    assert!(
+        review[0].to_string().contains("reviewer requested changes"),
+        "{}",
+        review[0]
+    );
 
     env.gh.merge(1);
     env.wait_for("E2E-10 archived", T, || {

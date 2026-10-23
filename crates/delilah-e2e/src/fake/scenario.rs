@@ -59,7 +59,11 @@ impl AskOption {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             AskOption::Plain(l) => serde_json::json!({"label": l, "description": ""}),
-            AskOption::Full { label, description, preview } => {
+            AskOption::Full {
+                label,
+                description,
+                preview,
+            } => {
                 let mut v = serde_json::json!({
                     "label": label,
                     "description": description.as_deref().unwrap_or(""),
@@ -107,7 +111,9 @@ pub fn valid_name(name: &str) -> bool {
     let name = name.strip_prefix('@').unwrap_or(name);
     !name.is_empty()
         && !name.starts_with('.')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Picks the scenario: `[fake:<name>]` in the prompt, else `<task>.json`,
@@ -132,7 +138,8 @@ pub fn select(
         }
     };
     if let Some(name) = prompt.and_then(marker) {
-        let s = load(name)?.ok_or_else(|| format!("scenario `{name}` not found in {}", dir.display()))?;
+        let s = load(name)?
+            .ok_or_else(|| format!("scenario `{name}` not found in {}", dir.display()))?;
         return Ok((name.to_string(), s));
     }
     if let Some(task) = task
@@ -152,7 +159,9 @@ mod tests {
     fn a_leading_at_is_allowed_once_and_nothing_else_escapes() {
         assert!(valid_name("@signal"));
         assert!(valid_name("echo"));
-        for bad in ["@../x", "@/x", "@.x", "@", "@@x", "a/b", "a\\b", "..", ".x", ""] {
+        for bad in [
+            "@../x", "@/x", "@.x", "@", "@@x", "a/b", "a\\b", "..", ".x", "",
+        ] {
             assert!(!valid_name(bad), "{bad}");
         }
     }
@@ -172,10 +181,18 @@ mod tests {
                 Step::Print("hi".into()),
                 Step::Hook("UserPromptSubmit".into()),
                 Step::SleepMs(200),
-                Step::Ask(Ask { question: "q".into(), header: "h".into(), options: vec![
-                    "a".into(),
-                    AskOption::Full { label: "c".into(), description: Some("d".into()), preview: Some("p".into()) },
-                ] }),
+                Step::Ask(Ask {
+                    question: "q".into(),
+                    header: "h".into(),
+                    options: vec![
+                        "a".into(),
+                        AskOption::Full {
+                            label: "c".into(),
+                            description: Some("d".into()),
+                            preview: Some("p".into())
+                        },
+                    ]
+                }),
                 Step::Stop("done".into()),
                 Step::WaitInput(true),
                 Step::Fail("boom".into()),
@@ -200,7 +217,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir(d.path().join("scenarios")).unwrap();
         for (name, body) in files {
-            std::fs::write(d.path().join("scenarios").join(format!("{name}.json")), body).unwrap();
+            std::fs::write(
+                d.path().join("scenarios").join(format!("{name}.json")),
+                body,
+            )
+            .unwrap();
         }
         d
     }
@@ -213,7 +234,10 @@ mod tests {
     fn marker_beats_task_beats_default() {
         let d = dir(&[("default", A), ("T-1", B), ("pick", C)]);
         let (n, s) = select(d.path(), Some("/feature [fake:pick] T-1"), Some("T-1")).unwrap();
-        assert_eq!((n.as_str(), s.steps), ("pick", vec![Step::Print("c".into())]));
+        assert_eq!(
+            (n.as_str(), s.steps),
+            ("pick", vec![Step::Print("c".into())])
+        );
         let (n, _) = select(d.path(), Some("/feature T-1"), Some("T-1")).unwrap();
         assert_eq!(n, "T-1");
         let (n, _) = select(d.path(), Some("x"), Some("T-9")).unwrap();

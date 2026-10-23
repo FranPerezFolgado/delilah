@@ -15,7 +15,9 @@ fn spawn(args: &[&str]) -> (std::process::Child, Value) {
         .spawn()
         .expect("spawn e2e-env");
     let mut line = String::new();
-    BufReader::new(child.stdout.as_mut().unwrap()).read_line(&mut line).unwrap();
+    BufReader::new(child.stdout.as_mut().unwrap())
+        .read_line(&mut line)
+        .unwrap();
     let info: Value = serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line:?}"));
     (child, info)
 }
@@ -26,7 +28,10 @@ fn wait_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
         if let Some(st) = child.try_wait().unwrap() {
             return st;
         }
-        assert!(start.elapsed() < Duration::from_secs(20), "e2e-env did not exit");
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "e2e-env did not exit"
+        );
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -75,8 +80,16 @@ fn keep_leaves_the_root_and_fixture_makes_a_set() {
         .arg(d.path())
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert!(std::path::Path::new(v["repo"].as_str().unwrap()).join(".git").exists());
+    assert!(
+        std::path::Path::new(v["repo"].as_str().unwrap())
+            .join(".git")
+            .exists()
+    );
     assert!(std::path::Path::new(v["parent"].as_str().unwrap()).is_dir());
 }

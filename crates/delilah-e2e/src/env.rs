@@ -125,7 +125,13 @@ pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
     ] {
         std::fs::create_dir_all(root.join(d))?;
     }
-    std::fs::write(home.join(".zshrc"), format!("export PATH={}\":$PATH\"\n", sh_quote(format!("{r}/tripwire"))))?;
+    std::fs::write(
+        home.join(".zshrc"),
+        format!(
+            "export PATH={}\":$PATH\"\n",
+            sh_quote(format!("{r}/tripwire"))
+        ),
+    )?;
     std::fs::write(
         home.join(".gitconfig"),
         "[user]\n\tname = Delilah E2E\n\temail = e2e@delilah.invalid\n\
@@ -156,7 +162,11 @@ pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
             sh_quote(format!("{r}/oneshot.log"))
         ),
     )?;
-    for (dir, name) in [("tripwire", "claude"), ("tripwire", "gh"), ("tripwire-gh", "gh")] {
+    for (dir, name) in [
+        ("tripwire", "claude"),
+        ("tripwire", "gh"),
+        ("tripwire-gh", "gh"),
+    ] {
         write_exec(
             &root.join(dir).join(name),
             &format!(
@@ -215,7 +225,13 @@ fn daemon_env_from(
         let home = host("HOME").unwrap_or_default();
         set("HOME", home);
         // Only claude is real: gh is the fake, and a gh tripwire comes first on PATH.
-        set("PATH", format!("{r}/tripwire-gh:{}", std::env::var("PATH").unwrap_or_default()));
+        set(
+            "PATH",
+            format!(
+                "{r}/tripwire-gh:{}",
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
         set("DELILAH_GH_BIN", format!("{r}/bin/gh-fake"));
     } else {
         set("HOME", format!("{r}/home"));
@@ -249,7 +265,9 @@ impl Env {
         let home = root.join("home");
         let fixtures = Fixtures::make(&root.join("fixtures"), &home)
             .unwrap_or_else(|e| panic!("fixtures: {e}"));
-        let gh = FakeGh { dir: root.join("gh") };
+        let gh = FakeGh {
+            dir: root.join("gh"),
+        };
         let log = root.join("delilahd.log");
         let mut env = Env {
             dir: Some(dir),
@@ -310,7 +328,11 @@ impl Env {
 
     fn spawn_daemon_on(&mut self, fixed_port: Option<u16>) {
         let bin = target_dir().join("delilahd");
-        let attempts = if fixed_port.is_some() { 20 } else { START_ATTEMPTS };
+        let attempts = if fixed_port.is_some() {
+            20
+        } else {
+            START_ATTEMPTS
+        };
         for attempt in 1..=attempts {
             self.port = fixed_port.unwrap_or_else(free_port);
             self.api = format!("http://127.0.0.1:{}", self.port);
@@ -334,7 +356,10 @@ impl Env {
             match self.wait_ready() {
                 Ready::Yes => {
                     // Another daemon may have answered on a raced port: ours must be alive.
-                    let alive = self.daemon.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None)));
+                    let alive = self
+                        .daemon
+                        .as_mut()
+                        .is_some_and(|c| matches!(c.try_wait(), Ok(None)));
                     if alive {
                         return;
                     }
@@ -374,16 +399,21 @@ impl Env {
         let url = format!("{}/api/v1/health", self.api);
         let log = self.log.clone();
         let child = self.daemon.as_mut().expect("daemon");
-        wait_for("the daemon's /api/v1/health", DEFAULT_TIMEOUT, Some(&log), || {
-            if let Ok(Some(status)) = child.try_wait() {
-                return Ok(Ready::Exited(status.to_string()));
-            }
-            match client.get(&url).send() {
-                Ok(r) if r.status().is_success() => Ok(Ready::Yes),
-                Ok(r) => Err(format!("HTTP {}", r.status())),
-                Err(e) => Err(e.to_string()),
-            }
-        })
+        wait_for(
+            "the daemon's /api/v1/health",
+            DEFAULT_TIMEOUT,
+            Some(&log),
+            || {
+                if let Ok(Some(status)) = child.try_wait() {
+                    return Ok(Ready::Exited(status.to_string()));
+                }
+                match client.get(&url).send() {
+                    Ok(r) if r.status().is_success() => Ok(Ready::Yes),
+                    Ok(r) => Err(format!("HTTP {}", r.status())),
+                    Err(e) => Err(e.to_string()),
+                }
+            },
+        )
     }
 
     /// Stops the daemon by its handle (leaves everything else as it is).
@@ -420,8 +450,14 @@ impl Env {
 
     /// Writes `fake/scenarios/<name>.json` (`name` is a session title marker or a task key).
     pub fn scenario(&self, name: &str, json: &Value) {
-        assert!(crate::fake::scenario::valid_name(name), "bad scenario name {name:?}");
-        let path = self.fake_dir().join("scenarios").join(format!("{name}.json"));
+        assert!(
+            crate::fake::scenario::valid_name(name),
+            "bad scenario name {name:?}"
+        );
+        let path = self
+            .fake_dir()
+            .join("scenarios")
+            .join(format!("{name}.json"));
         std::fs::write(&path, json.to_string())
             .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     }
@@ -473,7 +509,10 @@ impl Env {
     pub fn finish(mut self) -> bool {
         let fired = self.tripwire_log().is_some();
         if fired {
-            eprintln!("the real claude/gh was run (tripwire.log):\n{}", self.tripwire_log().unwrap_or_default());
+            eprintln!(
+                "the real claude/gh was run (tripwire.log):\n{}",
+                self.tripwire_log().unwrap_or_default()
+            );
         }
         self.tripwire_reported = true;
         fired
@@ -543,24 +582,41 @@ mod tests {
         let zshrc = std::fs::read_to_string(root.join("home/.zshrc")).unwrap();
         assert!(zshrc.contains(&format!("{r}/tripwire")) && zshrc.contains("PATH"));
         let gitconfig = std::fs::read_to_string(root.join("home/.gitconfig")).unwrap();
-        for want in ["name = Delilah E2E", "email = e2e@delilah.invalid", "allow = always"] {
+        for want in [
+            "name = Delilah E2E",
+            "email = e2e@delilah.invalid",
+            "allow = always",
+        ] {
             assert!(gitconfig.contains(want), "{gitconfig}");
         }
         assert!(root.join("home/.claude").is_dir() && root.join("delilah").is_dir());
         assert!(root.join("fake/records").is_dir() && root.join("fixtures").is_dir());
 
-        let exec = |p: &str| std::fs::metadata(root.join(p)).unwrap().permissions().mode() & 0o111 != 0;
-        for p in ["bin/claude-fake", "bin/gh-fake", "tripwire/claude", "tripwire/gh"] {
+        let exec = |p: &str| {
+            std::fs::metadata(root.join(p))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111
+                != 0
+        };
+        for p in [
+            "bin/claude-fake",
+            "bin/gh-fake",
+            "tripwire/claude",
+            "tripwire/gh",
+        ] {
             assert!(exec(p), "{p} is not executable");
         }
         let claude = std::fs::read_to_string(root.join("bin/claude-fake")).unwrap();
-        assert!(claude.contains("fake-claude") && claude.contains(&format!("--fake-dir '{r}/fake'")));
+        assert!(
+            claude.contains("fake-claude") && claude.contains(&format!("--fake-dir '{r}/fake'"))
+        );
         assert!(claude.contains("\"$@\""));
         let gh = std::fs::read_to_string(root.join("bin/gh-fake")).unwrap();
         assert!(gh.contains(&format!("FAKE_GH_DIR='{r}/gh'")) && gh.contains("scripts/fake-gh.sh"));
 
-        let scenario =
-            std::fs::read_to_string(root.join("fake/scenarios/default.json")).unwrap();
+        let scenario = std::fs::read_to_string(root.join("fake/scenarios/default.json")).unwrap();
         let parsed = crate::fake::scenario::Scenario::parse(&scenario).unwrap();
         assert_eq!(parsed.steps.len(), 1);
         assert!(root.join("gh/repo.json").is_file() && root.join("gh/user.json").is_file());
@@ -587,9 +643,18 @@ mod tests {
         assert_eq!(
             keys,
             [
-                "DELILAH_ADDR", "DELILAH_AGENT_BIN", "DELILAH_ALLOW_FILE_PROTOCOL",
-                "DELILAH_CLAUDE_BIN", "DELILAH_GH_BIN", "DELILAH_HOME", "DELILAH_JIRA_ALLOW_HTTP_LOOPBACK",
-                "DELILAH_NOTIFY", "DELILAH_PR_POLL_SECS", "DELILAH_SECRETS", "HOME", "PATH",
+                "DELILAH_ADDR",
+                "DELILAH_AGENT_BIN",
+                "DELILAH_ALLOW_FILE_PROTOCOL",
+                "DELILAH_CLAUDE_BIN",
+                "DELILAH_GH_BIN",
+                "DELILAH_HOME",
+                "DELILAH_JIRA_ALLOW_HTTP_LOOPBACK",
+                "DELILAH_NOTIFY",
+                "DELILAH_PR_POLL_SECS",
+                "DELILAH_SECRETS",
+                "HOME",
+                "PATH",
                 "SHELL"
             ]
         );
@@ -606,12 +671,19 @@ mod tests {
         assert_eq!(env["DELILAH_ALLOW_FILE_PROTOCOL"], "1");
         assert_eq!(env["DELILAH_NOTIFY"], "0");
         assert_eq!(env["DELILAH_PR_POLL_SECS"], "1");
-        assert!(!env.keys().any(|k| k == "DELILAH_URL" || k.starts_with("CLAUDE") || k.starts_with("ANTHROPIC")));
+        assert!(
+            !env.keys().any(|k| k == "DELILAH_URL"
+                || k.starts_with("CLAUDE")
+                || k.starts_with("ANTHROPIC"))
+        );
     }
 
     #[test]
     fn real_claude_needs_the_opt_in_and_keeps_gh_fake_and_tripwired() {
-        let opts = EnvOptions { real_claude: true, ..Default::default() };
+        let opts = EnvOptions {
+            real_claude: true,
+            ..Default::default()
+        };
         let root = Path::new("/tmp/x");
         let without = |k: &str| (k == "PATH").then(|| "/usr/bin".to_string());
         let r = std::panic::catch_unwind(|| daemon_env_from(root, 9999, &opts, &without));
@@ -625,7 +697,11 @@ mod tests {
         let env = daemon_env_from(root, 9999, &opts, &with);
         assert_eq!(env["HOME"], "/Users/me");
         assert_eq!(env["DELILAH_GH_BIN"], "/tmp/x/bin/gh-fake");
-        assert!(env["PATH"].starts_with("/tmp/x/tripwire-gh:"), "{}", env["PATH"]);
+        assert!(
+            env["PATH"].starts_with("/tmp/x/tripwire-gh:"),
+            "{}",
+            env["PATH"]
+        );
         assert!(!env.contains_key("DELILAH_AGENT_BIN"));
     }
 
@@ -637,9 +713,15 @@ mod tests {
         let root = d.path().join("it's here");
         std::fs::create_dir_all(&root).unwrap();
         layout(&root, &EnvOptions::default()).unwrap();
-        let st = Command::new(root.join("tripwire/claude")).arg("x").status().unwrap();
+        let st = Command::new(root.join("tripwire/claude"))
+            .arg("x")
+            .status()
+            .unwrap();
         assert!(!st.success());
-        assert_eq!(std::fs::read_to_string(root.join("tripwire.log")).unwrap(), "claude x\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("tripwire.log")).unwrap(),
+            "claude x\n"
+        );
     }
 
     #[test]
@@ -650,7 +732,10 @@ mod tests {
 
     #[test]
     fn daemon_env_adds_the_ui_origin_only_when_asked() {
-        let opts = EnvOptions { ui_origin: Some("http://localhost:1500".into()), ..Default::default() };
+        let opts = EnvOptions {
+            ui_origin: Some("http://localhost:1500".into()),
+            ..Default::default()
+        };
         let env = daemon_env(Path::new("/tmp/x"), 9999, &opts);
         assert_eq!(env["DELILAH_UI_ORIGIN"], "http://localhost:1500");
     }
@@ -688,7 +773,10 @@ mod e2e_tests {
 
     #[test]
     fn two_envs_at_once_do_not_interfere() {
-        let (a, b) = (Env::start(EnvOptions::default()), Env::start(EnvOptions::default()));
+        let (a, b) = (
+            Env::start(EnvOptions::default()),
+            Env::start(EnvOptions::default()),
+        );
         assert_ne!(a.port, b.port);
         assert_ne!(a.root, b.root);
         assert!(health(&a).is_object() && health(&b).is_object());
@@ -705,4 +793,3 @@ mod e2e_tests {
         assert!(msg.contains("the real claude/gh was run"), "{msg}");
     }
 }
-

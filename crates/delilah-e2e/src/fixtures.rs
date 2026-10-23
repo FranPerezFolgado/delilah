@@ -38,7 +38,11 @@ impl Fixtures {
                 .arg(&repo),
             home,
         )?;
-        Ok(Fixtures { repo, parent: parent_env.join("parent"), remotes })
+        Ok(Fixtures {
+            repo,
+            parent: parent_env.join("parent"),
+            remotes,
+        })
     }
 }
 
@@ -82,7 +86,9 @@ impl FakeGh {
     /// Creates `dir` with `repo.json` and `user.json` and no PRs.
     pub fn init(dir: &Path) -> Result<FakeGh, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let gh = FakeGh { dir: dir.to_path_buf() };
+        let gh = FakeGh {
+            dir: dir.to_path_buf(),
+        };
         gh.write(
             "repo.json",
             &json!({"nameWithOwner": "o/r", "url": REPO_URL,
@@ -150,7 +156,11 @@ impl FakeGh {
 
     /// Sets the PR's one check (`build`) to passing or failing.
     pub fn set_checks(&self, n: i64, checks: Checks) {
-        let conclusion = if checks == Checks::Passing { "SUCCESS" } else { "FAILURE" };
+        let conclusion = if checks == Checks::Passing {
+            "SUCCESS"
+        } else {
+            "FAILURE"
+        };
         self.edit(n, |pr| {
             pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = json!({"contexts": {"nodes": [
                 {"__typename": "CheckRun", "name": "build", "status": "COMPLETED",
@@ -251,7 +261,8 @@ mod tests {
 
         gh.set_checks(7, Checks::Failing);
         let pr = &gh.read("pr-7.json")["data"]["repository"]["pullRequest"];
-        let node = &pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0];
+        let node =
+            &pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0];
         assert_eq!(node["conclusion"], "FAILURE");
         gh.set_checks(7, Checks::Passing);
         let pr = &gh.read("pr-7.json")["data"]["repository"]["pullRequest"];
@@ -267,7 +278,10 @@ mod tests {
 
         gh.merge(7);
         let pr = &gh.read("pr-7.json")["data"]["repository"]["pullRequest"];
-        assert_eq!((pr["state"].as_str(), pr["merged"].as_bool()), (Some("MERGED"), Some(true)));
+        assert_eq!(
+            (pr["state"].as_str(), pr["merged"].as_bool()),
+            (Some("MERGED"), Some(true))
+        );
         assert_eq!(gh.read("pr-list.json")[0]["state"], "MERGED");
     }
 }

@@ -82,7 +82,11 @@ impl FakeArgs {
             }
             (None, None) => return Err("one of --session-id or --resume is required".into()),
         };
-        if session_id.is_empty() || !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        if session_id.is_empty()
+            || !session_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
             return Err(format!("invalid session id `{session_id}`"));
         }
         let settings = settings.ok_or("--settings is required")?;
@@ -114,8 +118,15 @@ mod tests {
 
     #[test]
     fn new_session() {
-        let a = parse(&["--session-id", "abc", "--settings", "/tmp/s.json", "--", "/feature PROJ-1"])
-            .unwrap();
+        let a = parse(&[
+            "--session-id",
+            "abc",
+            "--settings",
+            "/tmp/s.json",
+            "--",
+            "/feature PROJ-1",
+        ])
+        .unwrap();
         assert_eq!(a.mode, Mode::New);
         assert_eq!(a.session_id, "abc");
         assert_eq!(a.settings, PathBuf::from("/tmp/s.json"));
@@ -125,7 +136,15 @@ mod tests {
 
     #[test]
     fn resume_session() {
-        let a = parse(&["--resume", "abc", "--settings", "/tmp/s.json", "--", "continúa"]).unwrap();
+        let a = parse(&[
+            "--resume",
+            "abc",
+            "--settings",
+            "/tmp/s.json",
+            "--",
+            "continúa",
+        ])
+        .unwrap();
         assert_eq!(a.mode, Mode::Resume);
         assert_eq!(a.session_id, "abc");
         assert_eq!(a.prompt.as_deref(), Some("continúa"));
@@ -134,8 +153,18 @@ mod tests {
     #[test]
     fn fake_dir_first_and_remote_control() {
         let a = parse(&[
-            "--fake-dir", "/r/fake", "--session-id", "abc", "--remote-control", "PROJ-1 · Principal",
-            "--settings", "/tmp/s.json", "--permission-mode", "plan", "--", "/feature PROJ-1",
+            "--fake-dir",
+            "/r/fake",
+            "--session-id",
+            "abc",
+            "--remote-control",
+            "PROJ-1 · Principal",
+            "--settings",
+            "/tmp/s.json",
+            "--permission-mode",
+            "plan",
+            "--",
+            "/feature PROJ-1",
         ])
         .unwrap();
         assert_eq!(a.fake_dir, Some(PathBuf::from("/r/fake")));
@@ -146,18 +175,38 @@ mod tests {
     #[test]
     fn repeated_add_dir() {
         let a = parse(&[
-            "--session-id", "abc", "--add-dir", "/tmp/tasks/PROJ-1", "--add-dir", "/b",
-            "--settings", "/tmp/s.json", "--", "/feature PROJ-1",
+            "--session-id",
+            "abc",
+            "--add-dir",
+            "/tmp/tasks/PROJ-1",
+            "--add-dir",
+            "/b",
+            "--settings",
+            "/tmp/s.json",
+            "--",
+            "/feature PROJ-1",
         ])
         .unwrap();
-        assert_eq!(a.add_dirs, [PathBuf::from("/tmp/tasks/PROJ-1"), PathBuf::from("/b")]);
+        assert_eq!(
+            a.add_dirs,
+            [PathBuf::from("/tmp/tasks/PROJ-1"), PathBuf::from("/b")]
+        );
     }
 
     #[test]
     fn dont_ask_flags() {
         let a = parse(&[
-            "--session-id", "abc", "--settings", "/s", "--permission-mode", "dontAsk",
-            "--setting-sources", "user", "--strict-mcp-config", "--", "x",
+            "--session-id",
+            "abc",
+            "--settings",
+            "/s",
+            "--permission-mode",
+            "dontAsk",
+            "--setting-sources",
+            "user",
+            "--strict-mcp-config",
+            "--",
+            "x",
         ])
         .unwrap();
         assert_eq!(a.permission_mode.as_deref(), Some("dontAsk"));
@@ -168,8 +217,16 @@ mod tests {
     #[test]
     fn plugin_dir_and_system_prompt() {
         let a = parse(&[
-            "--session-id", "abc", "--settings", "/s", "--plugin-dir", "/tmp/plugin",
-            "--append-system-prompt", "be brief", "--", "idea",
+            "--session-id",
+            "abc",
+            "--settings",
+            "/s",
+            "--plugin-dir",
+            "/tmp/plugin",
+            "--append-system-prompt",
+            "be brief",
+            "--",
+            "idea",
         ])
         .unwrap();
         assert_eq!(a.plugin_dir, Some(PathBuf::from("/tmp/plugin")));
@@ -193,17 +250,38 @@ mod tests {
 
     #[test]
     fn unknown_option_is_recorded() {
-        let a = parse(&["--session-id", "abc", "--new-flag", "--settings", "/s", "--", "x"]).unwrap();
+        let a = parse(&[
+            "--session-id",
+            "abc",
+            "--new-flag",
+            "--settings",
+            "/s",
+            "--",
+            "x",
+        ])
+        .unwrap();
         assert_eq!(a.unknown, ["--new-flag"]);
     }
 
     #[test]
     fn errors() {
-        assert!(parse(&["--session-id", "abc", "--", "x"]).unwrap_err().contains("--settings"));
+        assert!(
+            parse(&["--session-id", "abc", "--", "x"])
+                .unwrap_err()
+                .contains("--settings")
+        );
         let both = parse(&["--session-id", "a", "--resume", "a", "--settings", "/s"]);
         assert!(both.unwrap_err().contains("mutually exclusive"));
-        assert!(parse(&["--settings", "/s"]).unwrap_err().contains("--session-id"));
-        assert!(parse(&["--session-id"]).unwrap_err().contains("needs a value"));
+        assert!(
+            parse(&["--settings", "/s"])
+                .unwrap_err()
+                .contains("--session-id")
+        );
+        assert!(
+            parse(&["--session-id"])
+                .unwrap_err()
+                .contains("needs a value")
+        );
     }
 
     #[test]

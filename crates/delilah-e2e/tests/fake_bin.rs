@@ -30,13 +30,24 @@ fn runs_a_scenario_and_records_it() {
     .unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_fake-claude"))
-        .args(["--fake-dir", fake.to_str().unwrap(), "--session-id", "sess-1", "--settings"])
+        .args([
+            "--fake-dir",
+            fake.to_str().unwrap(),
+            "--session-id",
+            "sess-1",
+            "--settings",
+        ])
         .arg(&settings)
         .args(["--bogus", "--", "do the thing"])
         .stdin(Stdio::null())
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout), "hi\n");
 
     let r = Record::load(&fake, "sess-1").unwrap();
@@ -47,7 +58,10 @@ fn runs_a_scenario_and_records_it() {
     assert_eq!(r.exited, Some(0));
     assert!(r.args.contains(&"--bogus".to_string()));
     assert!(r.env.contains_key("PATH"));
-    assert_eq!(r.cwd, std::env::current_dir().unwrap().display().to_string());
+    assert_eq!(
+        r.cwd,
+        std::env::current_dir().unwrap().display().to_string()
+    );
     let events: Vec<_> = r.hooks.iter().map(|h| h.event.as_str()).collect();
     assert_eq!(events, ["SessionStart", "Stop", "SessionEnd"]);
 }
@@ -77,7 +91,13 @@ fn scenario_selection_failure_runs_stop_failure_and_exits_2() {
     )
     .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_fake-claude"))
-        .args(["--fake-dir", fake.to_str().unwrap(), "--session-id", "sess-2", "--settings"])
+        .args([
+            "--fake-dir",
+            fake.to_str().unwrap(),
+            "--session-id",
+            "sess-2",
+            "--settings",
+        ])
         .arg(&settings)
         .args(["--", "[fake:nope]"])
         .stdin(Stdio::null())
