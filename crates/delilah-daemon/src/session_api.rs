@@ -85,6 +85,11 @@ async fn open_for(
     key: String,
     req: OpenSession,
 ) -> Result<(StatusCode, Json<SessionView>), ApiError> {
+    if req.kind == SessionKind::Setup {
+        return Err(ApiError::bad_request(
+            "a setup session is started by the task, not opened",
+        ));
+    }
     let conversation = req.conversation.unwrap_or(false);
     if conversation && req.kind != SessionKind::Claude {
         return Err(ApiError::bad_request("a conversation is a Claude session"));
@@ -127,6 +132,7 @@ async fn open_for(
             let same = existing.iter().filter(|s| s.kind == req.kind).count() + 1;
             match req.kind {
                 SessionKind::Claude => format!("Claude {same}"),
+                SessionKind::Setup => "Setup".into(),
                 SessionKind::Shell => {
                     if same == 1 {
                         "Terminal".into()
@@ -535,6 +541,7 @@ mod project_tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await
@@ -584,13 +591,21 @@ mod project_tests {
         let home = std::env::temp_dir().join(format!("delilah-conv-{}", uuid::Uuid::new_v4()));
         let repo = home.join("plataforma");
         std::fs::create_dir_all(&repo).unwrap();
+        // Stands in for `claude`, which CI doesn't have: stays up until the test kills it.
+        let fake = home.join("fake-claude.sh");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 30\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let config = Config {
             home: home.clone(),
             addr: "127.0.0.1:7420".parse().unwrap(),
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
-            agent_program: None,
+            agent_program: Some(fake),
+            claude_bin: "claude".into(),
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
@@ -600,6 +615,7 @@ mod project_tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await

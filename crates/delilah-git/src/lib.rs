@@ -2,10 +2,12 @@
 
 mod changes;
 mod command;
+mod share;
 mod workspace;
 
 pub use changes::{ChangeKind, Changes, FileChange, base_commit, changes, file_diff, repo_files};
 pub use command::{GitError, GitOptions};
+pub use share::{ShareNote, share_entries};
 pub use workspace::{
     Submodule, Workspace, WorkspaceSpec, archive_workspace, branch_taken, branch_tip,
     changed_paths, check_merged, check_repos, check_workspace, commit_subjects, create_workspace,

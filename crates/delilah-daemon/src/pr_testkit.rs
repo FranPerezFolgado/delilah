@@ -53,6 +53,7 @@ pub(crate) async fn task_with_workspace(
             path: "/parent".into(),
             kind: ProjectKind::Repo,
             workflow: "feature".into(),
+            settings: Default::default(),
             preview_command: None,
         })
         .await

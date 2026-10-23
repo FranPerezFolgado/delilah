@@ -39,6 +39,20 @@ delilah new SIGNAL-13 --project signal --title "Feed cache" --notes "Look at the
 delilah new --free --project signal --title "Try a lighter JSON parser"   # named LIBRE-n
 delilah run SIGNAL-13     # starts the backlog task in its project; its notes reach the agent
 
+delilah new SIGNAL-14 --project signal --title "Feed cache" --worktree   # --checkout or --worktree; neither: the project's setting
+delilah run SIGNAL-13 --checkout   # same flags; neither: the backlog task's choice, else the project's setting
+
+# Per-project settings (see "Project settings" below)
+delilah project show signal                          # effective settings, defaults marked
+delilah project set signal workspace worktree        # checkout | worktree
+delilah project set signal branch 'feature/{ticket}-{slug}'
+delilah project set signal setup 'npm ci'
+delilah project set signal shared add .env --copy    # --copy | --link; neither: automatic
+delilah project set signal shared rm .env
+delilah project set signal submodules always add svc-common   # always|never add|rm <path>
+delilah project unset signal setup                   # back to the default
+delilah setup retry|skip|cancel SIGNAL-13            # when a task's setup failed or is running
+
 delilah ls                 # tasks and their state
 delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
@@ -220,6 +234,50 @@ that Claude into a free task's primary session, keeping its conversation: the ta
 works in your checkout, the folder the conversation belongs to. A project session can
 also propose tasks (see "Nueva tarea con Claude" below).
 
+**Project settings.** In Proyectos, "Ajustes" on a project opens its settings.
+They are personal to your Delilah (stored by the daemon, nothing is written in the
+repo) and the same ones can be edited with `delilah project show|set|unset`.
+Whatever is not set keeps its default, which `show` marks.
+
+- **Dónde trabaja** (workspace mode): checkout or worktree, for new tasks. Unset by
+  default, and then tasks run in a worktree (as before this feature). A task started
+  without saying where follows it (CLI, ideas, "Crear y lanzar en autopiloto"); the
+  new task form preselects it, or the checkout when the project has none, and a
+  backlog task keeps the choice you saved on it. `delilah project show` prints
+  `worktree (default)` when unset.
+  `--checkout` / `--worktree` on `delilah new` and `delilah run` override it.
+- **Rama** (branch template, optional): empty by default, and then Delilah proposes a
+  descriptive name for each task (`feature/PROJ-12-retry-payments`). With a template,
+  e.g. `fix/{ticket}-{slug}`, the template decides the format: `{ticket}` is the key
+  and `{slug}` is Claude's short proposal (the title made safe for a branch name if
+  Claude fails: lower case, no accents, hyphens, at most 40 characters). If the slug
+  comes out empty the `/`, `-`, `_` and `.` around it are dropped. The "Rama" field of
+  the new task form shows the branch the task will get and you can edit it; what you
+  type wins over the template. `delilah project unset <name> branch` goes back to the
+  proposal.
+- **Archivos compartidos**: files or folders of the checkout that a **worktree**
+  needs but git does not carry (`.env`, `node_modules`). Each is copied or linked
+  (a symlink to the original); "Automático" links folders and copies files. What
+  already exists in the worktree is left alone, and a missing source or an unsafe
+  path (outside the project, or inside `.git`) is skipped and noted in the task's
+  `workspace.log` without stopping the task.
+- **Comando de preparación** (setup): a command (e.g. `npm ci`) that runs once in a
+  new worktree, after the shared entries and before the agent starts. It runs in
+  your login shell with a 10 minute limit, as a read-only "Setup" tab of the task
+  with its full output (also in `tasks/<KEY>/`). If it succeeds the agent starts.
+  If it fails, times out or is cancelled, the task stops as `setup-failed` with the
+  end of the output, and offers "Reintentar setup", "Lanzar sin setup" and "Cancelar setup" (a
+  running setup can be cancelled too; the whole process group is stopped). The same
+  from the terminal: `delilah setup retry|skip|cancel <KEY>`. If the daemon restarts
+  during a setup, the task shows it as interrupted and can be retried. A failed
+  setup task can be archived. Checkout tasks do not run the setup.
+- **Submódulos siempre / nunca incluidos** (parents): "always" ones are added to
+  every run; "never" ones are not offered in the new task form's picker. A rule
+  that names a submodule that no longer exists is rejected with an error pointing
+  at the settings.
+
+Errors in the form appear next to the field (and as `field: message` in the CLI).
+
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
 and starts `/feature <what you want to do>`). The agent works either **in your
 checkout** (default: a branch in your folder, or in the chosen submodules of a
@@ -302,6 +360,49 @@ any text without a translation.
 
 **Help.** Ayuda › Ver logs (⌘⇧L) shows the daemon's last lines live, to see what is
 going on while testing.
+
+## Resource usage
+
+Delilah adds little on top of the agents themselves: a small Rust daemon and a Tauri
+window that uses the system WebKit, with no bundled Chromium. Measured on 2026-10-23 on
+an M4 Pro (12 cores, 24 GB, macOS 26.3.1) with Claude Code 2.1.292. RSS and CPU come
+from `ps`, sampled every 5 s and summed over each process tree (100% CPU = one core).
+The script is [scripts/sample-resources.py](scripts/sample-resources.py).
+
+**Delilah with 12 agents running** (2 min, app window open, live updates flowing):
+
+| Process | Processes | RSS avg | RSS max | CPU avg | CPU p95 |
+|---|---:|---:|---:|---:|---:|
+| `delilahd` (daemon) | 1 | 18 MB | 23 MB | 1.1% | 1.8% |
+| `delilah-app` + its WebKit processes | 4 | 177 MB | 278 MB | 8.0% | 16.2% |
+| **Delilah's own overhead** | 5 | **~195 MB** | | **~9%** | |
+| The 12 agents (Claude Code + MCP servers, builds, tools) | 111 | 2.55 GB | 3.2 GB | 54% | 104% |
+
+The agents account for over 90% of the memory, about 210 MB each. That is the same
+`claude` binary every client runs, so what changes from one client to another is the
+shell around it.
+
+**Other clients' shells**, each opened on this repo and sampled for 60 s:
+
+| Client | Engine | RSS avg | CPU avg | App size | Measured |
+|---|---|---:|---:|---:|---|
+| **Delilah** (daemon + app) | Rust + system WebKit | **~195 MB** | **~9%** | **26 MB** | with 12 agents running |
+| Zed | Rust, native GPU UI | 180 MB | 1.6% | 175 MB | idle, no agent session |
+| Orca 1.4 | Electron | ~600 MB | 1.9% | 642 MB | idle (a restored `claude` left out) |
+| Claude desktop | Electron | 829 MB | 35% | 615 MB | with 4 Claude Code sessions |
+| VS Code | Electron | 914 MB | 12% | 1.4 GB | idle, no Claude extension |
+| Cursor | Electron | 1.29 GB | 64% | 1.0 GB | idle; indexing just after opening |
+
+Delilah was measured under load and the others mostly idle, so this is unfavourable
+to Delilah. Only Zed is in the same range, and Zed is an editor, not an orchestrator. In
+Zed and VS Code an agent session adds its adapter or extension on top. Orca keeps a
+background daemon (~22 MB) after you quit it, as `delilahd` does.
+
+**Disk.** Most of the disk goes to the workspaces, not to Delilah: each task is a full
+worktree with its own build output. With six Rust workspaces `~/.delilah` took 32 GB,
+almost all of it `target/` dirs (4.7 to 17 GB each). Task files take 147 MB and the
+database under 5 MB. Any client that isolates tasks in worktrees pays this cost;
+archiving a finished task (`delilah archive`) removes its workspace and frees it.
 
 ## Installing on another Mac
 

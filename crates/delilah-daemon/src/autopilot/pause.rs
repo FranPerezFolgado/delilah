@@ -165,7 +165,7 @@ pub(crate) async fn stall(
 /// Resumes a paused autopilot: running again, the nudge forgotten, and the chain
 /// re-evaluated from the current state (`advance_with`).
 pub(crate) async fn resume(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
-    resume_with(app, key, &crate::run::launch_session).await
+    resume_with(app, key, &crate::run::launch_session_api).await
 }
 
 pub(crate) async fn resume_with<L: Launcher>(

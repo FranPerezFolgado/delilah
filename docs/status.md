@@ -2,7 +2,7 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-22
-(version 0.5.0: autopilot and task previews, on `feature/LIBRE-9`).
+(version 0.5.0: autopilot and task previews, on `feature/LIBRE-9`; per-project settings, on `feature/LIBRE-2`).
 
 ## Built
 
@@ -50,6 +50,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - A "Rama" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
 - `Task.branch` (from the stored workspace) is shown on the task view.
 
+**Project settings** (spec `004-project-config`, personal to the install, in `projects.settings`):
+- A settings screen (Proyectos › Ajustes) and `delilah project show|set|unset`: default workspace mode, optional branch template, shared entries, setup command, always/never submodules.
+- A project's optional branch template (null by default, then the proposal above applies) decides the branch format; the "Rama" field of the new task form shows the template's branch at once and then the daemon's answer (decision 49); `delilah new|run` take `--checkout` / `--worktree`.
+- Shared entries are copied or linked into new worktrees.
+- A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
+
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
 - Help › Ver logs.
@@ -68,6 +74,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - The review writes an outcome file; if ready, the project's preview starts and a draft PR opens per repo (title and body from the review, a loopback preview URL appended). Interrupted finishes recover on the scheduler tick.
 - "Crear y lanzar en autopiloto" on the idea card.
 - See [architecture.md](architecture.md) and decisions [#38](decisions.md) to [#48](decisions.md).
+
+**Dev workflow** (for working on this repo, not a product feature): CI on every PR (`.github/workflows/`), fmt/clippy/tests gating each implementer (`.claude/verify.sh`), a hook guarding the installed app, `scripts/bump-version.sh`. Decisions [#49](decisions.md) and [#50](decisions.md).
 
 **Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
 
@@ -111,6 +119,9 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - **Optional next steps for previews:**
   - a "Delilah Preview" Tauri build (another identifier and port) for native-only features;
   - a browser MCP so the agent inside a task can see the preview UI.
+- **Project settings, open items:**
+  - the settings screen, the setup banner and the new task form were never checked in a browser during that feature's reviews (API and CLI were);
+  - low: no test for the "Ajustes guardados" confirmation; a PATCH that changes a project's kind does two non-atomic writes; the Spanish "unknown submodule" message omits the path; the CLI's 422 output is untested end to end; no migration test over pre-existing rows; `ß`/`Æ` become hyphens in branch slugs;
 - **PR loop follow-ups:**
   - cross-linked PRs of a changeset (each PR names the others);
   - saving lessons to QMD when a task merges;

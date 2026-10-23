@@ -29,7 +29,7 @@ pub(crate) async fn act(
             app.emit(Topic::Inbox);
             app.emit(Topic::Tasks);
         }
-        "on" => turn_on(&app, &key, &crate::run::launch_session).await?,
+        "on" => turn_on(&app, &key, &crate::run::launch_session_api).await?,
         other => {
             return Err(ApiError::bad_request(format!("unknown action `{other}`")));
         }

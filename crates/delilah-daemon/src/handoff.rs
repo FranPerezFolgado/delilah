@@ -229,7 +229,7 @@ async fn enter<L: Launcher>(
 /// The primary session finished a turn (not on the usage limit): see whether its step
 /// is over. Offers the next step or starts it, as `boundary` says.
 pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
-    on_turn_ended_with(app, key, &crate::run::launch_session).await;
+    on_turn_ended_with(app, key, &crate::run::launch_session_api).await;
 }
 
 pub(crate) async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
@@ -351,7 +351,7 @@ pub(crate) async fn on_turn_failed(app: &AppState, key: &TaskKey) {
 
 /// The user accepts the offered step (which also approves the tasks).
 pub(crate) async fn confirm(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
-    confirm_with(app, key, &crate::run::launch_session).await
+    confirm_with(app, key, &crate::run::launch_session_api).await
 }
 
 pub(crate) async fn confirm_with<L: Launcher>(
@@ -391,7 +391,7 @@ pub(crate) async fn decline(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
 
 /// Tries again a handoff whose new session could not start.
 pub(crate) async fn retry(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
-    retry_with(app, key, &crate::run::launch_session).await
+    retry_with(app, key, &crate::run::launch_session_api).await
 }
 
 pub(crate) async fn retry_with<L: Launcher>(
@@ -466,7 +466,7 @@ pub(crate) async fn on_implement_chosen(app: &AppState, key: &TaskKey) {
 
 /// Finishes or re-offers a handoff a restart (or a failed start) left half done.
 pub(crate) async fn recover(app: &AppState, task: &Task) {
-    recover_with(app, task, &crate::run::launch_session).await;
+    recover_with(app, task, &crate::run::launch_session_api).await;
 }
 
 async fn recover_with<L: Launcher>(app: &AppState, task: &Task, launch: &L) {

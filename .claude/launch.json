@@ -2,25 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "daemon",
-      "runtimeExecutable": "bash",
-      "runtimeArgs": [
-        "scripts/dev-daemon.sh"
-      ],
-      "port": 7420
-    },
-    {
-      "name": "ui",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "--prefix",
-        "app",
-        "run",
-        "dev"
-      ],
-      "port": 1420
-    },
-    {
       "name": "preview",
       "runtimeExecutable": "bash",
       "runtimeArgs": [

@@ -11,7 +11,9 @@ export type TaskStatus =
   | { type: "waiting-for-user" }
   | { type: "paused-by-limit"; resume_at: string }
   | { type: "done" }
-  | { type: "failed"; reason: string };
+  | { type: "failed"; reason: string }
+  // The workspace setup failed, was cancelled or interrupted; reason is the end of its output.
+  | { type: "setup-failed"; reason: string };
 
 /** The steps of a saving-mode task, each in its own session. */
 export type Step = "plan" | "implement" | "review";
@@ -69,11 +71,47 @@ export interface EventRecord {
 
 export type ProjectKind = "parent" | "repo";
 
+export type WorkspaceMode = "checkout" | "worktree";
+export type SharedMode = "copy" | "link";
+
+export interface SharedEntry {
+  path: string;
+  /** null: decided by the kind of entry when it is used. */
+  mode: SharedMode | null;
+}
+
+export interface ProjectSettings {
+  /** null: not chosen, so a worktree. */
+  workspace: WorkspaceMode | null;
+  /** Branch template (needs {ticket}); null: Delilah proposes a descriptive name. */
+  branch: string | null;
+  shared: SharedEntry[];
+  setup: string | null;
+  submodules: { always: string[]; never: string[] };
+}
+
+/** Body of a 422 from the settings endpoint: one message per invalid field. */
+export interface SettingsError {
+  error: string;
+  fields: { field: string; code: string; message: string }[];
+}
+
+/** The effective settings of a project with nothing configured. */
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  workspace: null,
+  branch: null,
+  shared: [],
+  setup: null,
+  submodules: { always: [], never: [] },
+};
+
 export interface Project {
   name: string;
   path: string;
   kind: ProjectKind;
   workflow: string;
+  /** Effective settings, defaults included. */
+  settings: ProjectSettings;
   /** Command that serves a task's workspace as a preview; null or absent: none. */
   preview_command?: string | null;
 }
@@ -218,7 +256,7 @@ export interface SubmoduleSuggestion {
   reason: string;
 }
 
-export type SessionKind = "claude" | "shell";
+export type SessionKind = "claude" | "shell" | "setup";
 export type SessionState = "starting" | "working" | "waiting" | "paused";
 
 /** A terminal in a task's workspace: its primary Claude, extra Claudes or shells. */
@@ -420,6 +458,8 @@ export class ApiError extends Error {
     readonly reason?: string,
     /** When a paused task resumes (a 409 that is a pause, not any other conflict). */
     readonly resumeAt?: string,
+    /** A 422 from the settings endpoint: one message per invalid field. */
+    readonly fields: SettingsError["fields"] = [],
   ) {
     super(message);
   }
@@ -438,7 +478,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at);
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at, Array.isArray(data?.fields) ? data.fields : []);
   return data as T;
 }
 
@@ -449,7 +489,9 @@ export const api = {
   tasks: () => request<Task[]>("/api/v1/tasks"),
   events: (key: string) => request<EventRecord[]>(`/api/v1/tasks/${key}/events`),
   projects: () => request<Project[]>("/api/v1/projects"),
-  submodules: (project: string) => request<Submodule[]>(`/api/v1/projects/${project}/submodules`),
+  /** `all` includes the `never` submodules (the settings screen edits the rules). */
+  submodules: (project: string, opts: { all?: boolean } = {}) =>
+    request<Submodule[]>(`/api/v1/projects/${project}/submodules${opts.all ? "?all=true" : ""}`),
   suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
   proposeBranch: (
@@ -460,6 +502,9 @@ export const api = {
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
   updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string; preview_command?: string | null }) =>
     request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
+  /** Saves the whole settings; a 422 throws an ApiError with `fields`. */
+  updateProjectSettings: (name: string, settings: ProjectSettings) =>
+    request<Project>(`/api/v1/projects/${name}/settings`, { method: "PUT", body: JSON.stringify(settings) }),
   deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   createTask: (task: NewBacklogTask) => post<Task>("/api/v1/tasks", task),
@@ -469,6 +514,9 @@ export const api = {
   deleteTask: (key: string, force = false) =>
     request<null>(`/api/v1/tasks/${key}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
+  setupRetry: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/retry`),
+  setupSkip: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/skip`),
+  setupCancel: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/cancel`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
@@ -595,6 +643,8 @@ export const statusLabel = (s: TaskStatus): string => {
       return t("Hecha");
     case "failed":
       return t("Fallida");
+    case "setup-failed":
+      return t("Setup fallido");
   }
 };
 

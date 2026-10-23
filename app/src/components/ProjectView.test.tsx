@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { setLanguage } from "../i18n";
-import { api, type Project } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, api, type Project } from "../api";
 import { ProjectView } from "./ProjectView";
 
 beforeEach(() => setLanguage("es"));
@@ -11,7 +11,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const project: Project = { name: "app", path: "/x", kind: "repo", workflow: "feature", preview_command: "npm run dev" };
+const project: Project = { name: "app", path: "/x", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS, preview_command: "npm run dev" };
 const view = (p: Project = project) => render(<ProjectView project={p} sessions={[]} onOpenSession={() => {}} onNewSession={async () => {}} />);
 
 describe("ProjectView preview command", () => {
