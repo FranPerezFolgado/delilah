@@ -11,7 +11,7 @@ task's workspace: the default workspace mode, the branch template, shared files 
 folders for worktrees, a setup script run before the agent starts, and submodules to
 always include or exclude. PR options are out of scope for now." Refined with the user:
 the config is edited from a project settings screen and kept by Delilah, not in a
-`delilah.toml` inside the repo (decision 26).
+`delilah.toml` inside the repo (decision 50).
 
 ## Clarifications
 
@@ -41,8 +41,8 @@ new or changed files.
 **Acceptance Scenarios**:
 
 1. **Given** a project with no settings, **When** the user opens its settings, **Then**
-   every field shows today's behaviour as its default (checkout, `feature/{ticket}`, no
-   shared entries, no setup, no submodule rules).
+   every field shows today's behaviour as its default (workspace unset, which means a
+   worktree; no branch template, so Delilah proposes the name; no shared entries, no setup, no submodule rules).
 2. **Given** the settings screen, **When** the user saves valid changes, **Then** they
    apply to the next task started for that project, and the screen confirms the save.
 3. **Given** an invalid value (a shared path outside the project, a branch template
@@ -74,8 +74,8 @@ on the branch the template gives.
 
 1. **Given** the template `feature/{ticket}-{slug}`, **When** a task for PROJ-1243
    starts, **Then** its branch is `feature/PROJ-1243-<slug of the title>`.
-2. **Given** no template set, **When** a task starts, **Then** (amended: no template is the default and means Delilah's proposed name, see FR-007) its branch is
-   `feature/<key>`, as today.
+2. **Given** no template set, **When** a task starts, **Then** its branch is Delilah's
+   proposed name (as before this feature; no template is the default, see FR-007).
 3. **Given** a task started with an explicit branch, **When** it starts, **Then** the
    explicit branch wins over the template.
 4. **Given** a parent project, **When** a task starts, **Then** every selected submodule
@@ -161,8 +161,10 @@ worktree option is preselected; start without changing it; the task gets a workt
    **Then** the task runs in a worktree.
 2. **Given** the same project, **When** the user chooses the checkout for one task,
    **Then** that task runs in the checkout.
-3. **Given** no default set, **When** a task starts without choosing, **Then** it runs
-   in the checkout, as today.
+3. **Given** no default set (unset, `null`), **When** a task starts without choosing
+   (the CLI without a flag, an idea proposal, "Crear y lanzar en autopiloto"), **Then**
+   it runs in a worktree, as before this feature. The new-task form still preselects the
+   checkout, as before, when the project has no default.
 
 ---
 
@@ -196,7 +198,10 @@ worktree option is preselected; start without changing it; the task gets a workt
 
 - **FR-001**: Each project MUST have settings kept by Delilah, never written into the
   project's repo or checkout.
-- **FR-002**: A project with no settings saved MUST start tasks exactly as today.
+- **FR-002**: A project with no settings saved MUST start tasks exactly as today. In
+  particular `workspace` is optional (`null`): when neither the request, the backlog
+  task nor the project chooses, the task runs in a worktree. The new-task form keeps
+  preselecting the checkout for a project with no default.
 - **FR-003**: The app MUST offer a settings screen per project, reached from Projects,
   showing every setting with its current value or default.
 - **FR-004**: The settings screen MUST validate before saving and show each problem next
@@ -205,8 +210,8 @@ worktree option is preselected; start without changing it; the task gets a workt
 - **FR-005**: The CLI MUST show a project's settings (`delilah project show <name>`)
   and change each of them (`delilah project set <name> <setting> <value>`, and `unset`
   to go back to the default), with the same validation as the screen.
-- **FR-006**: The settings MUST include the default workspace mode (checkout or
-  worktree); a choice made for one task MUST win over it.
+- **FR-006**: The settings MAY include the default workspace mode (checkout or
+  worktree; unset means worktree); a choice made for one task MUST win over it.
 - **FR-007**: The settings MAY include a branch template with the placeholders
   `{ticket}` (required; the task key) and `{slug}` (optional; Claude's short proposal,
   or the title, lower-case, letters, digits and hyphens, at most 40 characters, when
@@ -234,7 +239,7 @@ worktree option is preselected; start without changing it; the task gets a workt
   include and to never include; "always" is added to every selection and "never" is
   removed from what is offered and suggested, and refused when requested. A submodule
   MUST NOT be in both lists.
-- **FR-013**: The new-task form MUST preselect the project's default workspace mode and
+- **FR-013**: The new-task form MUST preselect the project's default workspace mode (the checkout when it has none) and
   its "always" submodules, hide its "never" submodules, and show the branch name the
   task will get.
 - **FR-014**: The settings MUST leave room for PR options, to be added with the PR
@@ -275,7 +280,7 @@ worktree option is preselected; start without changing it; the task gets a workt
 ## Assumptions
 
 - The settings are personal to this Delilah install; sharing them with other people
-  (for example through a file in the repo) is not needed now (decision 26).
+  (for example through a file in the repo) is not needed now (decision 50).
 - The setup command is trusted like the rest of the project's code: the user typed it,
   and the agent already runs commands in the project.
 - The slug length (40) and the setup limit (10 minutes) are fixed in this feature.

@@ -173,11 +173,16 @@ pub async fn start_run(
         ));
     }
     let project = app.store.project(&req.project).await?;
-    // The request wins, then what the backlog task chose, then the project's default.
+    // The request wins, then what the backlog task chose, then the project's setting;
+    // with none of them, a worktree.
     let in_checkout = req
         .in_checkout
         .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
-        .unwrap_or(project.settings.workspace == delilah_core::WorkspaceMode::Checkout);
+        .or(project
+            .settings
+            .workspace
+            .map(|m| m == delilah_core::WorkspaceMode::Checkout))
+        .unwrap_or(false);
     let rules = &project.settings.submodules;
     if project.kind == ProjectKind::Parent && !(rules.always.is_empty() && rules.never.is_empty()) {
         let root = project.path.clone();
@@ -2025,7 +2030,7 @@ mod tests {
 
     fn worktree_default() -> delilah_core::ProjectSettings {
         delilah_core::ProjectSettings {
-            workspace: delilah_core::WorkspaceMode::Worktree,
+            workspace: Some(delilah_core::WorkspaceMode::Worktree),
             ..settings(None)
         }
     }
@@ -2092,8 +2097,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_settings_and_no_choice_start_in_the_checkout() {
-        let (app, repo) = settings_app(Default::default()).await;
+    async fn no_workspace_setting_and_no_choice_start_in_a_worktree() {
+        let (app, repo) = settings_app(settings(None)).await;
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(logged(&app, "LIBRE-1"));
+        assert!(!in_checkout(&app, "LIBRE-1", &repo).await);
+    }
+
+    #[tokio::test]
+    async fn a_checkout_setting_and_no_choice_start_in_the_checkout() {
+        let (app, repo) = settings_app(delilah_core::ProjectSettings {
+            workspace: Some(delilah_core::WorkspaceMode::Checkout),
+            ..settings(None)
+        })
+        .await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()

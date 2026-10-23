@@ -35,6 +35,32 @@ describe("ProjectSettings", () => {
     expect(container.querySelector<HTMLInputElement>("input[type=radio][name=where]:checked")).not.toBeNull();
   });
 
+  it("an unset workspace shows the default option and is saved as null untouched", async () => {
+    const unset: Project = { ...repo, settings: { ...repo.settings, workspace: null } };
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(unset);
+    const onSaved = vi.fn();
+    const onClose = vi.fn();
+    const { container } = render(<ProjectSettings project={unset} onClose={onClose} onSaved={onSaved} />);
+    const radios = Array.from(container.querySelectorAll<HTMLInputElement>("input[type=radio][name=where]"));
+    expect(radios.length).toBe(3);
+    expect(radios[0].checked).toBe(true);
+    expect(container.querySelector("[role=alertdialog]")).toBeNull();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(put).toHaveBeenCalledWith("web", unset.settings);
+    expect(put.mock.calls[0][1].workspace).toBeNull();
+  });
+
+  it("picking a workspace sets it; the default option goes back to null", () => {
+    const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    const radios = () => Array.from(container.querySelectorAll<HTMLInputElement>("input[type=radio][name=where]"));
+    expect(radios()[2].checked).toBe(true);
+    fireEvent.click(radios()[1]);
+    expect(radios()[1].checked).toBe(true);
+    fireEvent.click(radios()[0]);
+    expect(radios()[0].checked).toBe(true);
+  });
+
   it("hides the submodule settings for a repo project, shows them for a parent", async () => {
     vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "api" }]);
     const a = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);

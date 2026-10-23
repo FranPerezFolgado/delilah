@@ -84,10 +84,12 @@ pub struct SubmoduleRules {
 }
 
 /// Per-project settings. The default is how tasks started before they existed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProjectSettings {
-    pub workspace: WorkspaceMode,
+    /// Where the project's tasks work when neither the task nor the request says:
+    /// `None` (the default, JSON `null`) is a worktree, as before settings existed.
+    pub workspace: Option<WorkspaceMode>,
     /// Branch template; `{ticket}` is required, `{slug}` optional. `None` (the
     /// default) leaves the name to Delilah's proposal (`feature/<descriptive>`).
     pub branch: Option<String>,
@@ -95,18 +97,6 @@ pub struct ProjectSettings {
     /// Command run in a new workspace; `None` (or blank) means none.
     pub setup: Option<String>,
     pub submodules: SubmoduleRules,
-}
-
-impl Default for ProjectSettings {
-    fn default() -> Self {
-        Self {
-            workspace: WorkspaceMode::Checkout,
-            branch: None,
-            shared: Vec::new(),
-            setup: None,
-            submodules: SubmoduleRules::default(),
-        }
-    }
 }
 
 /// One problem found by [`validate`], tied to the field that has it.
@@ -314,12 +304,24 @@ mod tests {
     #[test]
     fn default_is_todays_behaviour() {
         let s = ProjectSettings::default();
-        assert_eq!(s.workspace, WorkspaceMode::Checkout);
+        assert_eq!(s.workspace, None);
         assert_eq!(s.branch, None);
         assert!(s.shared.is_empty());
         assert_eq!(s.setup, None);
         assert!(s.submodules.always.is_empty() && s.submodules.never.is_empty());
         assert!(validate(&s, ProjectKind::Repo).is_empty());
+    }
+
+    #[test]
+    fn workspace_is_null_when_unset_and_always_serialised() {
+        let s: ProjectSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.workspace, None);
+        let json = serde_json::to_value(&s).unwrap();
+        assert!(json["workspace"].is_null());
+        let n: ProjectSettings = serde_json::from_str(r#"{"workspace":null}"#).unwrap();
+        assert_eq!(n.workspace, None);
+        let c: ProjectSettings = serde_json::from_str(r#"{"workspace":"checkout"}"#).unwrap();
+        assert_eq!(c.workspace, Some(WorkspaceMode::Checkout));
     }
 
     #[test]
@@ -332,7 +334,7 @@ mod tests {
     fn full_settings_round_trip() {
         let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]}}"#;
         let s: ProjectSettings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.workspace, WorkspaceMode::Worktree);
+        assert_eq!(s.workspace, Some(WorkspaceMode::Worktree));
         assert_eq!(s.shared[0].mode, Some(ShareMode::Copy));
         assert_eq!(s.shared[1].mode, None);
         assert_eq!(serde_json::to_string(&s).unwrap(), json);
@@ -349,7 +351,7 @@ mod tests {
         let json = serde_json::to_string(&ProjectSettings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"workspace":"checkout","branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]}}"#
+            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]}}"#
         );
     }
 

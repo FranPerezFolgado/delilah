@@ -14,7 +14,7 @@ settings. In a new worktree it brings in the shared entries (`cp -cR` clones or
 symlinks). If there is a setup command, it runs it as a `setup` session in a PTY, with
 live output, and launches the agent only after it succeeds. A failed setup leaves the
 task in a new non-terminal status, `SetupFailed`, with "Reintentar setup" and "Lanzar
-sin setup". Nothing is written into the repo (decision 26). See [research.md](research.md).
+sin setup". Nothing is written into the repo (decision 50). See [research.md](research.md).
 
 ## Technical Context
 

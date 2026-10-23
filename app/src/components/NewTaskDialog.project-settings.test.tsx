@@ -83,7 +83,7 @@ describe("NewTaskDialog", () => {
   });
 
   describe("default workspace mode", () => {
-    const withMode = (name: string, workspace: "checkout" | "worktree") =>
+    const withMode = (name: string, workspace: "checkout" | "worktree" | null) =>
       ({ name, kind: "repo", settings: { ...DEFAULT_PROJECT_SETTINGS, workspace } }) as unknown as Project;
     const radio = (c: HTMLElement, v: string) =>
       Array.from(c.querySelectorAll('input[name="where"]'))[v === "checkout" ? 0 : 1] as HTMLInputElement;
@@ -99,6 +99,17 @@ describe("NewTaskDialog", () => {
     it("preselects checkout when the project defaults to it", () => {
       const { container } = open([withMode("a", "checkout")]);
       expect(radio(container, "checkout").checked).toBe(true);
+    });
+
+    it("preselects checkout (as before) when the project has no default", () => {
+      const { container } = open([withMode("a", null)]);
+      expect(radio(container, "checkout").checked).toBe(true);
+    });
+
+    it("a backlog task with no saved choice and no project default shows a worktree (what the daemon does)", () => {
+      const existing = { key: "LIBRE-1", title: "t", project: "a", in_checkout: null, notes: "" } as never;
+      const { container } = open([withMode("a", null)], { existing });
+      expect(radio(container, "worktree").checked).toBe(true);
     });
 
     it("re-applies the default when the project changes and the picker is untouched", () => {

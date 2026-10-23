@@ -51,7 +51,7 @@ Phase detection would be by artifacts by default, or reported by the skill
 tracked (see `phases.rs`), not driven.
 
 **Per-project settings (mostly built).** Not a `delilah.toml`: they are stored by
-the daemon and edited from the app and the CLI (see decision 26 and
+the daemon and edited from the app and the CLI (see decision 50 and
 `specs/004-project-config`). Built: the workspace mode, the branch template, shared
 folders, a setup command, and submodules to always or never include. Still pending:
 - PR options (link the PRs of a changeset to each other and to Jira);

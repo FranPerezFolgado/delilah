@@ -87,13 +87,19 @@ describe("headerPhaseOf", () => {
 
 describe("whereOf", () => {
   const mode = (workspace: "checkout" | "worktree") => ({ settings: { workspace } }) as never;
-  it("a saved choice wins; without one, the project's default (checkout if none), as the daemon does", () => {
+  it("a saved choice wins; without one, the project's setting; without that, a worktree, as the daemon does", () => {
     expect(whereOf(true)).toBe("checkout");
     expect(whereOf(false)).toBe("worktree");
-    expect(whereOf(null)).toBe("checkout");
-    expect(whereOf(undefined)).toBe("checkout");
+    expect(whereOf(null)).toBe("worktree");
+    expect(whereOf(undefined)).toBe("worktree");
+    expect(whereOf(null, { settings: { workspace: null } } as never)).toBe("worktree");
     expect(whereOf(null, mode("worktree"))).toBe("worktree");
     expect(whereOf(null, mode("checkout"))).toBe("checkout");
     expect(whereOf(true, mode("worktree"))).toBe("checkout");
+  });
+  it("the new-task form passes its own fallback (checkout) for a project with no setting", () => {
+    expect(whereOf(null, { settings: { workspace: null } } as never, "checkout")).toBe("checkout");
+    expect(whereOf(null, mode("worktree"), "checkout")).toBe("worktree");
+    expect(whereOf(false, undefined, "checkout")).toBe("worktree");
   });
 });

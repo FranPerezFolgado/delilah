@@ -237,9 +237,12 @@ They are personal to your Delilah (stored by the daemon, nothing is written in t
 repo) and the same ones can be edited with `delilah project show|set|unset`.
 Whatever is not set keeps its default, which `show` marks.
 
-- **Dónde trabaja** (workspace mode): checkout or worktree, for new tasks. The default is
-  checkout. A task started without saying where follows it; the new task form
-  preselects it, and a backlog task keeps the choice you saved on it.
+- **Dónde trabaja** (workspace mode): checkout or worktree, for new tasks. Unset by
+  default, and then tasks run in a worktree (as before this feature). A task started
+  without saying where follows it (CLI, ideas, "Crear y lanzar en autopiloto"); the
+  new task form preselects it, or the checkout when the project has none, and a
+  backlog task keeps the choice you saved on it. `delilah project show` prints
+  `worktree (default)` when unset.
   `--checkout` / `--worktree` on `delilah new` and `delilah run` override it.
 - **Rama** (branch template, optional): empty by default, and then Delilah proposes a
   descriptive name for each task (`feature/PROJ-12-retry-payments`). With a template,

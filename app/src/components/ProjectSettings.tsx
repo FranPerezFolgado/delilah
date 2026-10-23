@@ -94,7 +94,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
         <h2>{t("Ajustes de {name}", { name: project.name })}</h2>
 
         <div>
-          <WherePicker value={s.workspace} onChange={(workspace) => setS({ ...s, workspace })} project={project} />
+          <WherePicker withDefault value={s.workspace} onChange={(workspace) => setS({ ...s, workspace })} project={project} />
           <Err field="workspace" />
         </div>
 

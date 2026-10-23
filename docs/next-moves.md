@@ -43,7 +43,7 @@ FEAT-9 hit the archive refusal that status.md lists as a known problem.
    the FEAT-11 task. Rebase over LIBRE-1 if it lands first.
 3. **C, triage FEAT-4 / FEAT-5** alongside, in a few minutes: diff FEAT-4
    against main and decide.
-4. **D, per-project settings** (decided: kept in Delilah with a settings screen, not a `delilah.toml`; decision 26), as the next real feature once LIBRE-1 is merged, so
+4. **D, per-project settings** (decided: kept in Delilah with a settings screen, not a `delilah.toml`; decision 50), as the next real feature once LIBRE-1 is merged, so
    the PR options go straight into it.
 
 After that, E or F depending on how many tasks run in parallel day to day.

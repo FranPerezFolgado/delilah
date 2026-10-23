@@ -843,8 +843,8 @@ mod tests {
         assert_eq!(task.status, delilah_core::TaskStatus::Running);
         assert!(task.autopilot.is_some());
         assert!(task.saving_mode);
-        // The project's default work mode: its checkout unless its settings say worktree.
-        assert_eq!(task.in_checkout, Some(true));
+        // The default work mode: a worktree, not the project's checkout.
+        assert_eq!(task.in_checkout, Some(false));
         // The brief reaches the first session: it is in the notes file the prompt points to.
         let notes = std::fs::read_to_string(app.config.task_dir(&key).join("notes.md")).unwrap();
         assert!(notes.ends_with("\n\n## Idea\nreintentar"), "{notes}");

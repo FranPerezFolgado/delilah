@@ -81,7 +81,8 @@ export interface SharedEntry {
 }
 
 export interface ProjectSettings {
-  workspace: WorkspaceMode;
+  /** null: not chosen, so a worktree. */
+  workspace: WorkspaceMode | null;
   /** Branch template (needs {ticket}); null: Delilah proposes a descriptive name. */
   branch: string | null;
   shared: SharedEntry[];
@@ -97,7 +98,7 @@ export interface SettingsError {
 
 /** The effective settings of a project with nothing configured. */
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
-  workspace: "checkout",
+  workspace: null,
   branch: null,
   shared: [],
   setup: null,

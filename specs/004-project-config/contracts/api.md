@@ -8,7 +8,7 @@ Daemon `crates/delilah-daemon/src/api.rs` ↔ client `app/src/api.ts`.
 {
   "name": "plataforma", "path": "/…", "kind": "parent", "workflow": "feature",
   "settings": {                       // new; always present, defaults filled in
-    "workspace": "checkout",
+    "workspace": null,               // "checkout" | "worktree" | null; null: a worktree (unset)
     "branch": null,                  // optional template (needs {ticket}); null: Delilah proposes the name
     "shared": [{ "path": ".env", "mode": "copy" }, { "path": "node_modules", "mode": null }],
     "setup": null,
@@ -46,7 +46,7 @@ a plain repo has no submodules.
 ## `POST /api/v1/runs` (unchanged shape, new defaults)
 
 When `in_checkout` is absent and the task has no choice saved, it comes from
-`settings.workspace`. When `branch` is absent (or blank), from `settings.branch` if the project has a template, else from Delilah's proposal (task branch names); a typed branch is kept as typed with a template and normalised by `custom_for` without one. `POST /api/v1/projects/{name}/branch-name` returns the template-expanded branch when the project has one. `submodules` is
+`settings.workspace`, and with that unset (`null`) it is a worktree. When `branch` is absent (or blank), from `settings.branch` if the project has a template, else from Delilah's proposal (task branch names); a typed branch is kept as typed with a template and normalised by `custom_for` without one. `POST /api/v1/projects/{name}/branch-name` returns the template-expanded branch when the project has one. `submodules` is
 merged: `+ always` (request order first, no duplicates; an empty selection is valid when
 `always` is not), and a request naming a `never` submodule gets `422` naming it, with the
 `{error, fields}` shape: field `submodules[i]`, code `submodules.never`. A rule naming a

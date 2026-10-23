@@ -284,6 +284,8 @@ export const EN: Record<string, string> = {
   " (en los submódulos elegidos)": " (in the chosen submodules)",
   " y trabaja ahí. Instantáneo; ves los cambios en tu IDE. Una tarea a la vez, con el checkout limpio.": " and works there. Instant; you see the changes in your IDE. One task at a time, with a clean checkout.",
   "Aislada (worktree)": "Isolated (worktree)",
+  "Por defecto (aislada)": "Default (isolated)",
+  "Sin elegir: cada tarea trabaja en un worktree, salvo que se elija otra cosa para ella.": "Not chosen: each task works in a worktree unless something else is chosen for it.",
   "Copia aparte. Varias tareas en paralelo sin tocar tu carpeta; la primera vez clona los submódulos.": "A separate copy. Several tasks in parallel without touching your folder; the first time it clones the submodules.",
   "Submódulos que toca la tarea": "Submodules the task touches",
   "Claude está mirando el código…": "Claude is looking at the code…",

@@ -84,7 +84,7 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
             ))}
           </select>
         </label>
-        <WherePicker value={where} onChange={setWhere} project={projects.find((p) => p.name === project)} />
+        <WherePicker value={where} onChange={(w) => setWhere(w ?? "worktree")} project={projects.find((p) => p.name === project)} />
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
           <input type="checkbox" checked={savingMode || autopilot} disabled={autopilot} onChange={(e) => setSavingMode(e.target.checked)} />
           <span>{t("Modo ahorro")}</span>

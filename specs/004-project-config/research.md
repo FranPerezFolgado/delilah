@@ -6,10 +6,10 @@
   migration `0016_project_settings.sql`. Missing keys mean "default".
 - **Rationale**: renames and deletes already handle the `projects` row, so the settings
   follow for free (spec edge cases). JSON leaves room for `pr` later (FR-014) without
-  another migration. Nothing is written into the repo (decision 26).
+  another migration. Nothing is written into the repo (decision 50).
 - **Alternatives**: a `project_settings` table with one column per setting (a migration
   per new setting, and rename/delete to keep in step); a `delilah.toml` in the repo
-  (ruled out by the user, decision 26).
+  (ruled out by the user, decision 50).
 
 ## Types and validation
 

@@ -34,7 +34,7 @@
 - The placeholders (`{ticket}`, `{slug}`) are the feature's user-facing surface, not
   implementation details.
 - Revised after the user chose option B: settings kept by Delilah and edited from a
-  project settings screen, not a `delilah.toml` in the repo (decision 26).
+  project settings screen, not a `delilah.toml` in the repo (decision 50).
 - Clarified 2026-10-20: setup only in new worktrees; a failed setup keeps the worktree
   with "Reintentar setup" and "Lanzar sin setup".
 - Defaults taken instead of clarifications: folders

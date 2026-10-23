@@ -4,7 +4,7 @@
 
 | Field | Type | Default | Rules |
 |---|---|---|---|
-| `workspace` | `"checkout" \| "worktree"` | `"checkout"` | |
+| `workspace` | `"checkout" \| "worktree"` or null | `null` | optional; `null` (unset, also a stored `{}`) = a worktree, as before this feature; always serialised |
 | `branch` | string or null | `null` | optional template; when set it must contain `{ticket}`; only `{ticket}` and `{slug}` as placeholders; non-blank (`""` is `branch.empty`; clients send `null` for none). `null` = Delilah proposes a descriptive name (task branch names) |
 | `shared` | list of `SharedEntry` | `[]` | paths unique |
 | `setup` | string or null | null | trimmed; empty means none |

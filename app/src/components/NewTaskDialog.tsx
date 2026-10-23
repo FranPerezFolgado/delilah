@@ -46,8 +46,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     projects[0];
   const [projectName, setProjectName] = useState(preferred?.name ?? "");
   // In the project's checkout (a branch there), or isolated in a worktree: a backlog
-  // task's saved choice, else the project's default until the user picks one.
-  const [where, setWhere] = useState<Where>(whereOf(existing?.in_checkout, preferred));
+  // task's saved choice, else the project's default (a worktree for a saved task, the
+  // checkout for a new one when it has none) until the user picks one.
+  const unsetWhere: Where = existing ? "worktree" : "checkout";
+  const [where, setWhere] = useState<Where>(whereOf(existing?.in_checkout, preferred, unsetWhere));
   const whereTouched = useRef(existing?.in_checkout != null);
   const [submodules, setSubmodules] = useState<Submodule[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -69,7 +71,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const withRules = (paths: string[]) => [...always, ...paths.filter((p) => !always.includes(p) && !never.includes(p))];
 
   useEffect(() => {
-    if (!whereTouched.current && project) setWhere(whereOf(null, project));
+    if (!whereTouched.current && project) setWhere(whereOf(null, project, unsetWhere));
   }, [project?.name]);
 
   // Only the spec workflow has autopilot; a custom prompt runs outside it.
@@ -326,7 +328,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
               </label>
             )}
-            {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w); }} project={project} />}
+            {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
             {origin !== "claude" && (
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
                 <input

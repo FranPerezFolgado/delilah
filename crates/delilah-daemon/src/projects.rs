@@ -645,7 +645,7 @@ mod tests {
         let env = env().await;
         let p = project(&env, "parent").await;
         assert_eq!(p["settings"]["branch"], Value::Null);
-        assert_eq!(p["settings"]["workspace"], "checkout");
+        assert_eq!(p["settings"]["workspace"], Value::Null);
         assert!(p["settings"]["shared"].as_array().unwrap().is_empty());
         std::fs::remove_dir_all(&env.dir).unwrap();
     }

@@ -136,10 +136,10 @@ enum Command {
         /// A task without a Jira ticket: Delilah names it LIBRE-<n>.
         #[arg(long)]
         free: bool,
-        /// Work in the project's checkout once started (default: the project's setting).
+        /// Work in the project's checkout once started (default: the project's setting, else a worktree).
         #[arg(long, conflicts_with = "worktree")]
         checkout: bool,
-        /// Work in an isolated worktree once started (default: the project's setting).
+        /// Work in an isolated worktree once started (default: the project's setting, else a worktree).
         #[arg(long)]
         worktree: bool,
         /// Defaults to the project's workflow.
@@ -178,7 +178,7 @@ enum Command {
         #[arg(long)]
         prompt: Option<String>,
         /// Work in the project's checkout (default: the backlog task's choice, else the
-        /// project's setting).
+        /// project's setting, else a worktree).
         #[arg(long, conflicts_with = "worktree")]
         checkout: bool,
         /// Work in an isolated worktree (default: as with --checkout).
@@ -269,7 +269,7 @@ enum ProjectCommand {
 
 #[derive(Subcommand)]
 enum SetCommand {
-    /// Where tasks work: `checkout` or `worktree`.
+    /// Where tasks work: `checkout` or `worktree` (unset: worktree).
     Workspace { mode: WorkspaceArg },
     /// Branch template, e.g. 'feature/{ticket}-{slug}' (unset it to let Delilah propose a name).
     Branch { template: String },
@@ -377,10 +377,10 @@ fn apply_change(mut s: ProjectSettings, change: Change) -> Result<ProjectSetting
     let defaults = ProjectSettings::default();
     match change {
         Change::Workspace(m) => {
-            s.workspace = match m {
+            s.workspace = Some(match m {
                 WorkspaceArg::Checkout => WorkspaceMode::Checkout,
                 WorkspaceArg::Worktree => WorkspaceMode::Worktree,
-            }
+            })
         }
         Change::Branch(t) => s.branch = Some(t),
         Change::Setup(c) => s.setup = Some(c),
@@ -442,8 +442,8 @@ fn settings_lines(s: &ProjectSettings) -> Vec<String> {
         format!(
             "workspace:  {}{}",
             match s.workspace {
-                WorkspaceMode::Checkout => "checkout",
-                WorkspaceMode::Worktree => "worktree",
+                Some(WorkspaceMode::Checkout) => "checkout",
+                Some(WorkspaceMode::Worktree) | None => "worktree",
             },
             mark(s.workspace == d.workspace)
         ),
@@ -1213,7 +1213,7 @@ mod tests {
     fn applies_changes() {
         let d = ProjectSettings::default();
         let s = apply_change(d.clone(), Change::Workspace(WorkspaceArg::Worktree)).unwrap();
-        assert_eq!(s.workspace, WorkspaceMode::Worktree);
+        assert_eq!(s.workspace, Some(WorkspaceMode::Worktree));
         let s = apply_change(s, Change::SharedAdd(".env".into(), Some(ShareMode::Copy))).unwrap();
         let s = apply_change(s, Change::SharedAdd(".env".into(), Some(ShareMode::Link))).unwrap();
         assert_eq!(s.shared.len(), 1);
@@ -1232,7 +1232,7 @@ mod tests {
     #[test]
     fn unset_returns_to_default() {
         let mut s = ProjectSettings {
-            workspace: WorkspaceMode::Worktree,
+            workspace: Some(WorkspaceMode::Worktree),
             branch: Some("x/{ticket}".into()),
             setup: Some("make".into()),
             ..Default::default()
@@ -1266,7 +1266,11 @@ mod tests {
     fn show_marks_defaults() {
         let mut s = ProjectSettings::default();
         assert!(settings_lines(&s)[0].ends_with("(default)"));
-        s.workspace = WorkspaceMode::Worktree;
+        assert!(settings_lines(&s)[0].starts_with("workspace:  worktree"));
+        s.workspace = Some(WorkspaceMode::Worktree);
+        assert!(!settings_lines(&s)[0].contains("(default)"));
+        s.workspace = Some(WorkspaceMode::Checkout);
+        assert!(settings_lines(&s)[0].contains("checkout"));
         assert!(!settings_lines(&s)[0].contains("(default)"));
     }
 
