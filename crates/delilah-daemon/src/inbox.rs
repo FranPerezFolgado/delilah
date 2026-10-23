@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use chrono::{DateTime, Utc};
 use delilah_agents::claude::Signal;
-use delilah_core::{HandoffStage, SpecPhase, Step, Task, TaskStatus};
+use delilah_core::{AutopilotState, HandoffStage, SpecPhase, Step, Task, TaskStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -136,6 +136,8 @@ pub enum ItemKind {
     Review,
     /// A saving-mode step is over: the next session is offered, being prepared, or failed.
     Handoff,
+    /// Autopilot paused: the reason, and the app offers to resume or go by hand.
+    Autopilot,
     /// The agent stopped with commits on its branch: maybe it is ready for review.
     SuggestReview,
     /// Archiving the task left a PR behind (blocked or partial).
@@ -361,6 +363,30 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         });
     }
 
+    for t in tasks.iter().filter(|t| !t.status.is_terminal()) {
+        let Some(a) = t
+            .autopilot
+            .as_ref()
+            .filter(|a| a.state == AutopilotState::Paused)
+        else {
+            continue;
+        };
+        items.push(InboxItem {
+            kind: ItemKind::Autopilot,
+            task: t.key.to_string(),
+            title: t.title.clone(),
+            session: None,
+            text: Some(a.reason.clone().unwrap_or_else(|| {
+                app.lang()
+                    .pick("El autopiloto está en pausa.", "Autopilot is paused.")
+                    .to_string()
+            })),
+            since: Some(a.since),
+            ask: None,
+            pr: None,
+        });
+    }
+
     let hints = app.review_hints.lock().unwrap().clone();
     for t in tasks
         .iter()
@@ -484,6 +510,7 @@ pub async fn reply(
 
 #[cfg(test)]
 mod tests {
+    use delilah_core::TaskKey;
     use serde_json::json;
 
     use super::*;
@@ -591,6 +618,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
             ..crate::config::Config::test_defaults()
         };
@@ -646,6 +674,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
             ..crate::config::Config::test_defaults()
         };
@@ -897,5 +926,112 @@ mod tests {
         assert!(
             ItemKind::Review < ItemKind::Handoff && ItemKind::Handoff < ItemKind::SuggestReview
         );
+    }
+
+    async fn app_with_autopilot(state: Option<AutopilotState>) -> (AppState, TaskKey) {
+        let app = app_with_handoff(None).await;
+        let key = TaskKey::new("PROJ-1");
+        let a = state.map(|state| delilah_core::Autopilot {
+            state,
+            stage: None,
+            reason: (state == AutopilotState::Paused).then(|| "motivo".to_string()),
+            since: now(),
+            nudged: None,
+            review_session: None,
+        });
+        app.store.set_autopilot(&key, a.as_ref()).await.unwrap();
+        (app, key)
+    }
+
+    fn permission() -> Change {
+        Change::Set(Attention {
+            kind: AttentionKind::Permission,
+            text: "ok?".into(),
+            since: now(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_permission_prompt_pauses_a_running_autopilot() {
+        let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
+        crate::autopilot::on_attention(&app, &key, "plan-1", &permission()).await;
+        let t = app.store.get_task(&key).await.unwrap().unwrap();
+        let a = t.autopilot.unwrap();
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("La sesión espera un permiso."));
+    }
+
+    #[tokio::test]
+    async fn a_permission_prompt_of_another_session_leaves_autopilot_running() {
+        let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
+        crate::autopilot::on_attention(&app, &key, "side-terminal", &permission()).await;
+        let t = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(crate::autopilot::is_running(&t));
+    }
+
+    #[tokio::test]
+    async fn other_attentions_do_not_pause_autopilot() {
+        let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
+        let q = Change::Set(Attention {
+            kind: AttentionKind::Question,
+            text: "?".into(),
+            since: now(),
+        });
+        crate::autopilot::on_attention(&app, &key, "plan-1", &q).await;
+        crate::autopilot::on_attention(&app, &key, "plan-1", &Change::Clear).await;
+        let t = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(crate::autopilot::is_running(&t));
+    }
+
+    #[tokio::test]
+    async fn a_paused_autopilot_lists_one_item_with_the_reason() {
+        let (app, _) = app_with_autopilot(Some(AutopilotState::Paused)).await;
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, ItemKind::Autopilot);
+        assert_eq!(items[0].text.as_deref(), Some("motivo"));
+        assert_eq!(
+            serde_json::to_value(items[0].kind).unwrap(),
+            json!("autopilot")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_running_or_done_autopilot_lists_nothing() {
+        for state in [AutopilotState::Running, AutopilotState::Done] {
+            let (app, _) = app_with_autopilot(Some(state)).await;
+            let Json(items) = list(State(app)).await.ok().unwrap();
+            assert!(items.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn the_usage_limit_leaves_autopilot_running() {
+        use delilah_core::Event;
+        let (app, key) = app_with_autopilot(Some(AutopilotState::Running)).await;
+        for e in [Event::Start, Event::WorkspaceReady] {
+            app.transition(&key, e).await.unwrap();
+        }
+        let resume_at = now() + chrono::Duration::hours(1);
+        app.transition(&key, Event::LimitReached { resume_at })
+            .await
+            .unwrap();
+        // The limit itself clears attention: nothing to pause on.
+        let hook = json!({ "hook_event_name": "Stop" });
+        let change = attention_change(Signal::TurnEnded, &hook, true, None, now(), app.lang());
+        assert_eq!(change, Change::Clear);
+        crate::autopilot::on_attention(&app, &key, "plan-1", &change).await;
+        app.transition(&key, Event::ResetDue { now: resume_at })
+            .await
+            .unwrap();
+        let t = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(crate::autopilot::is_running(&t));
+        let found = Some(crate::handoff::Boundary::Offer(Step::Implement));
+        assert!(matches!(
+            crate::autopilot::shape(&t, found),
+            Some(crate::handoff::Boundary::Start(Step::Implement))
+        ));
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert!(items.iter().all(|i| i.kind != ItemKind::Autopilot));
     }
 }

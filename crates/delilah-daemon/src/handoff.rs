@@ -13,7 +13,8 @@ use axum::extract::{Path as AxPath, State};
 use delilah_core::{Handoff, HandoffStage, Step, Task, TaskKey};
 use delilah_git::{GitOptions, Workspace};
 
-use crate::api::ApiError;
+use crate::api::{ActionReq, ApiError};
+use crate::autopilot;
 use crate::events::Topic;
 use crate::lang::Lang;
 use crate::specs::SpecSummary;
@@ -71,6 +72,8 @@ pub(crate) enum Boundary {
     Offer(Step),
     /// Move to the step on its own.
     Start(Step),
+    /// The review is over: autopilot opens the PRs.
+    Finish,
 }
 
 /// Whether the step the primary session runs has reached a boundary: the spec is
@@ -98,6 +101,7 @@ pub(crate) fn boundary(
             Some(Boundary::Offer(Step::Implement))
         }
         Step::Implement if all_done => Some(Boundary::Start(Step::Review)),
+        Step::Review if autopilot::is_running(task) => Some(Boundary::Finish),
         _ => None,
     }
 }
@@ -152,7 +156,7 @@ async fn read_spec(app: &AppState, key: &TaskKey) -> Option<SpecSummary> {
 }
 
 /// The task's main session, if it is a Claude one.
-async fn primary_session(app: &AppState, key: &TaskKey) -> Option<SessionRecord> {
+pub(crate) async fn primary_session(app: &AppState, key: &TaskKey) -> Option<SessionRecord> {
     let sessions = app.store.open_sessions(Some(key.as_str())).await.ok()?;
     sessions
         .into_iter()
@@ -202,14 +206,14 @@ async fn enter<L: Launcher>(
     launch: &L,
     entered: impl FnOnce(),
 ) {
-    if save_notes_preference(app).await {
-        if let Some(live) = app.sessions.primary(key.as_str()) {
-            set(app, key, to, HandoffStage::Saving, None).await;
-            match crate::actions::type_prompt(&live, "/save-session").await {
-                Ok(()) => return entered(),
-                Err(e) => {
-                    tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
-                }
+    if save_notes_preference(app).await
+        && let Some(live) = app.sessions.primary(key.as_str())
+    {
+        set(app, key, to, HandoffStage::Saving, None).await;
+        match crate::actions::type_prompt(&live, "/save-session").await {
+            Ok(()) => return entered(),
+            Err(e) => {
+                tracing::warn!(task = %key, "cannot ask for the notes: {}", e.message());
             }
         }
     }
@@ -228,7 +232,7 @@ pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
     on_turn_ended_with(app, key, &crate::run::launch_session).await;
 }
 
-async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
+pub(crate) async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
     // The stage is read under the guard: a save turn that ends right after the
     // prompt was typed finds `saving` already written.
     let guard = app.handoffs.guard.lock().await;
@@ -247,7 +251,11 @@ async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: 
     let Some(spec) = read_spec(app, key).await else {
         return;
     };
-    let Some(found) = boundary(&task, primary.step, &spec) else {
+    let Some(found) = autopilot::shape(&task, boundary(&task, primary.step, &spec)) else {
+        drop(guard);
+        // No boundary on autopilot is a stall (which does nothing off autopilot or
+        // while a handoff is under way).
+        autopilot::stall(app, key, &task, primary.step, &spec).await;
         return;
     };
     match found {
@@ -257,6 +265,13 @@ async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: 
                 announce(app, key, &task, to)
             })
             .await;
+        }
+        Boundary::Finish => {
+            drop(guard);
+            // Waits for a preview and opens PRs: not in the turn-end path, which goes
+            // on to the hint and must not be held up.
+            let (app, key, session) = (app.clone(), key.clone(), primary.id.clone());
+            tokio::spawn(async move { autopilot::finish(&app, &key, &session).await });
         }
     }
 }
@@ -271,7 +286,11 @@ fn announce(app: &AppState, key: &TaskKey, task: &Task, to: Step) {
     app.notifier.send(
         format!(
             "{key} {}",
-            lang.pick("pasa a la revisión", "moves on to the review")
+            match to {
+                Step::Implement =>
+                    lang.pick("pasa a la implementación", "moves on to the implementation"),
+                _ => lang.pick("pasa a la revisión", "moves on to the review"),
+            }
         ),
         format!("{}: {}", step_label(lang, to), task.title),
     );
@@ -306,19 +325,27 @@ pub(crate) async fn on_turn_failed(app: &AppState, key: &TaskKey) {
     let Ok(task) = task_of(app, key).await else {
         return;
     };
+    let lang = app.lang();
+    let mut reason = lang
+        .pick("la sesión falló", "the session failed")
+        .to_string();
     if let Some(h) = task
         .handoff
         .as_ref()
         .filter(|h| task.saving_mode && h.stage == HandoffStage::Saving)
     {
-        let message = app
-            .lang()
+        let message = lang
             .pick(
                 "la sesión no pudo guardar las notas",
                 "the session could not save its notes",
             )
             .to_string();
-        set(app, key, h.to, HandoffStage::Failed, Some(message)).await;
+        set(app, key, h.to, HandoffStage::Failed, Some(message.clone())).await;
+        reason = message;
+    }
+    // A step's session that fails pauses the autopilot (the task keeps its phase).
+    if autopilot::is_running(&task) {
+        autopilot::pause(app, key, reason).await;
     }
 }
 
@@ -327,7 +354,7 @@ pub(crate) async fn confirm(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
     confirm_with(app, key, &crate::run::launch_session).await
 }
 
-async fn confirm_with<L: Launcher>(
+pub(crate) async fn confirm_with<L: Launcher>(
     app: &AppState,
     key: &TaskKey,
     launch: &L,
@@ -367,7 +394,7 @@ pub(crate) async fn retry(app: &AppState, key: &TaskKey) -> Result<(), ApiError>
     retry_with(app, key, &crate::run::launch_session).await
 }
 
-async fn retry_with<L: Launcher>(
+pub(crate) async fn retry_with<L: Launcher>(
     app: &AppState,
     key: &TaskKey,
     launch: &L,
@@ -536,11 +563,6 @@ pub(crate) async fn apply_saving_mode(
     task_of(app, key).await
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub(crate) struct ActionReq {
-    pub action: String,
-}
-
 /// `POST /api/v1/tasks/{key}/handoff`: confirm, decline or retry the handoff.
 pub(crate) async fn act(
     State(app): State<AppState>,
@@ -577,17 +599,18 @@ async fn start_with<L: Launcher>(app: &AppState, key: &TaskKey, step: Step, laun
     );
     match result {
         Ok(()) => {
-            if still_starting {
-                if let Err(e) = app.store.set_handoff(key, None).await {
-                    tracing::warn!(task = %key, "cannot clear the handoff: {e}");
-                }
+            if still_starting && let Err(e) = app.store.set_handoff(key, None).await {
+                tracing::warn!(task = %key, "cannot clear the handoff: {e}");
             }
             tracing::info!(task = %key, step = step.name(), "handoff done");
         }
         Err(message) => {
             tracing::warn!(task = %key, step = step.name(), "handoff failed: {message}");
             if still_starting {
-                set(app, key, step, HandoffStage::Failed, Some(message)).await;
+                set(app, key, step, HandoffStage::Failed, Some(message.clone())).await;
+                if current.as_ref().is_some_and(autopilot::is_running) {
+                    autopilot::pause(app, key, message).await;
+                }
             }
         }
     }
@@ -664,6 +687,12 @@ async fn try_start<L: Launcher>(
     if app.sessions.get(&new.id).is_some() {
         return Ok(());
     }
+    // On autopilot the session is also told how to work with nobody to answer, and
+    // (the review) where to write its outcome: `new` is the session that runs.
+    let prompt = match autopilot::prepare_step(app, key, step, &new.id).await {
+        Some(note) => format!("{prompt} {note}"),
+        None => prompt,
+    };
     // The step's session was already the main one (a restart between recording it and
     // launching it): there is no other session to stop, or to go back to.
     let relaunch = old.as_ref().is_some_and(|s| s.id == new.id);
@@ -676,10 +705,9 @@ async fn try_start<L: Launcher>(
         let _ = tokio::time::timeout(KILL_WAIT, live.pty.wait()).await;
     }
     if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false) {
-        if !relaunch {
-            if let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await {
-                tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
-            }
+        if !relaunch && let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await
+        {
+            tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
         }
         return Err(e.message().to_string());
     }
@@ -688,7 +716,7 @@ async fn try_start<L: Launcher>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::config::Config;
@@ -897,7 +925,7 @@ mod tests {
         );
 
         on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
-        let launched = launched.lock().unwrap();
+        let launched = launched.lock().unwrap().clone();
         assert_eq!(launched.len(), 1);
         assert_eq!(launched[0].0.step, Some(Step::Implement));
         assert!(handoff_of(&app, &key).await.is_none());
@@ -989,7 +1017,7 @@ mod tests {
             .ok()
             .unwrap();
 
-        let launched = launched.lock().unwrap();
+        let launched = launched.lock().unwrap().clone();
         assert_eq!(launched.len(), 1);
         let (session, prompt) = &launched[0];
         assert_eq!(session.step, Some(Step::Implement));
@@ -1506,5 +1534,454 @@ mod tests {
         assert_eq!(launched.lock().unwrap().len(), 1);
         assert_eq!(launched.lock().unwrap()[0].0.step, Some(Step::Implement));
         let _ = pty.kill();
+    }
+
+    fn running_autopilot() -> delilah_core::Autopilot {
+        delilah_core::Autopilot {
+            state: delilah_core::AutopilotState::Running,
+            stage: None,
+            reason: None,
+            since: chrono::Utc::now(),
+            nudged: None,
+            review_session: None,
+        }
+    }
+
+    async fn set_autopilot(app: &AppState, key: &TaskKey, state: delilah_core::AutopilotState) {
+        let a = delilah_core::Autopilot {
+            state,
+            ..running_autopilot()
+        };
+        app.store.set_autopilot(key, Some(&a)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn on_autopilot_the_plan_turn_end_starts_the_implementation_with_no_offer() {
+        let (app, key) = setup().await;
+        no_save_notes(&app).await;
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        {
+            let launched = launched.lock().unwrap();
+            assert_eq!(launched.len(), 1);
+            assert_eq!(launched[0].0.step, Some(Step::Implement));
+            let prompt = launched[0].1.as_deref().unwrap();
+            assert!(prompt.starts_with("/orchestrate specs/proj-1-x"));
+            let note =
+                autopilot::notes::step_note(Lang::Es, Step::Implement, Path::new("")).unwrap();
+            assert!(prompt.ends_with(&note), "{prompt}");
+        }
+        assert!(handoff_of(&app, &key).await.is_none());
+        let axum::Json(items) = crate::inbox::list(State(app.clone())).await.ok().unwrap();
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.kind == crate::inbox::ItemKind::Handoff),
+            "{items:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_autopilot_the_handoff_never_passes_through_offered() {
+        let (app, key) = setup().await;
+        // Saving the notes first: the stage goes saving, then starting, never offered.
+        let cmd = portable_pty::CommandBuilder::new("cat");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert("plan-1", "PROJ-1", SessionKind::Claude, true, pty.clone());
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Saving));
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        let _ = pty.kill();
+    }
+
+    #[tokio::test]
+    async fn a_paused_or_finished_autopilot_still_offers_the_implementation() {
+        for state in [
+            delilah_core::AutopilotState::Paused,
+            delilah_core::AutopilotState::Done,
+        ] {
+            let (app, key) = setup().await;
+            set_autopilot(&app, &key, state).await;
+            on_turn_ended(&app, &key).await;
+            let h = handoff_of(&app, &key).await.unwrap();
+            assert_eq!((h.to, h.stage), (Step::Implement, HandoffStage::Offered));
+        }
+    }
+
+    #[tokio::test]
+    async fn on_autopilot_the_review_prompt_carries_its_outcome_path() {
+        let (app, key) = setup().await;
+        no_save_notes(&app).await;
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        check_all(&app);
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let launched = launched.lock().unwrap().clone();
+        assert_eq!(launched.len(), 1);
+        let (session, prompt) = &launched[0];
+        assert_eq!(session.step, Some(Step::Review));
+        let prompt = prompt.as_deref().unwrap();
+        assert!(prompt.starts_with("/review"));
+        let path = autopilot::outcome_path(&app, &key, &session.id);
+        assert!(prompt.contains(&path.display().to_string()), "{prompt}");
+        assert!(prompt.contains("pr_title"));
+        // The folder exists before the session starts, and the session is recorded.
+        assert!(path.parent().unwrap().is_dir());
+        let recorded = app.store.get_task(&key).await.unwrap().unwrap().autopilot;
+        assert_eq!(
+            recorded.and_then(|a| a.review_session).as_deref(),
+            Some(session.id.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn without_autopilot_the_prompts_carry_no_autopilot_note() {
+        let (app, key) = setup().await;
+        no_save_notes(&app).await;
+        check_all(&app);
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        let launched = launched.lock().unwrap();
+        assert!(!launched[0].1.as_deref().unwrap().contains("Autopilot"));
+    }
+
+    #[test]
+    fn a_review_turn_end_finishes_only_on_autopilot() {
+        let mut t = task(true, None);
+        assert_eq!(boundary(&t, Some(Step::Review), &spec(5, 5)), None);
+        t.autopilot = Some(running_autopilot());
+        assert_eq!(
+            boundary(&t, Some(Step::Review), &spec(5, 5)),
+            Some(Boundary::Finish)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_whole_chain_runs_through_the_turn_ends_to_one_draft_pr() {
+        use crate::gh::fake::{FakeGh, PR_URL, REPO_VIEW, bare_snapshot};
+        use crate::pr_testkit::git_repo_with_origin;
+
+        let gh = Arc::new(
+            FakeGh::new()
+                .with_user("me")
+                .on(&["repo", "view"], Ok(REPO_VIEW))
+                .on(&["pr", "list"], Ok("[]"))
+                .on(&["pr", "create"], Ok(PR_URL))
+                .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false))),
+        );
+        let (app, key) = setup().await;
+        let app = app.with_gh(gh.clone());
+        no_save_notes(&app).await;
+        let ws = app.config.home.join("ws");
+        git_repo_with_origin(
+            &ws,
+            &app.config.home.join("origin"),
+            "feature/PROJ-1",
+            &["first"],
+        );
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        let launched = Launched::default();
+        let launch = ok_launcher(&launched);
+
+        // The plan turn ends with tasks.md written: the implementation starts.
+        on_turn_ended_with(&app, &key, &launch).await;
+        assert_eq!(
+            primary_session(&app, &key).await.unwrap().step,
+            Some(Step::Implement)
+        );
+
+        // Not all checked yet: a stall, answered with the one nudge; nothing more starts.
+        let implement = primary_session(&app, &key).await.unwrap();
+        live(&app, &implement.id);
+        on_turn_ended_with(&app, &key, &launch).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert_eq!(
+            autopilot_state(&app, &key).await.nudged,
+            Some(Step::Implement)
+        );
+
+        // Every task checked and the implementation's turn ends: the review starts.
+        check_all(&app);
+        on_turn_ended_with(&app, &key, &launch).await;
+        let review = primary_session(&app, &key).await.unwrap();
+        assert_eq!(review.step, Some(Step::Review));
+        let outcome = autopilot::outcome_path(&app, &key, &review.id);
+        assert!(
+            launched.lock().unwrap()[1]
+                .1
+                .as_deref()
+                .unwrap()
+                .contains(&outcome.display().to_string())
+        );
+        assert_eq!(launched.lock().unwrap().len(), 2);
+
+        // The review writes a ready outcome and its turn ends: one draft PR, done.
+        std::fs::write(
+            &outcome,
+            r#"{"outcome":"ready","pr_title":"feat: chain","pr_body":"body"}"#,
+        )
+        .unwrap();
+        // The review committed everything (the spec files included).
+        for args in [&["add", "."][..], &["commit", "-m", "review"][..]] {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(&ws)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        }
+        on_turn_ended_with(&app, &key, &launch).await;
+        for _ in 0..400 {
+            let a = app.store.get_task(&key).await.unwrap().unwrap().autopilot;
+            if a.is_some_and(|a| a.state == delilah_core::AutopilotState::Done) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        let a = app
+            .store
+            .get_task(&key)
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot
+            .unwrap();
+        assert_eq!(a.state, delilah_core::AutopilotState::Done);
+        let creates: Vec<_> = gh
+            .calls()
+            .into_iter()
+            .filter(|c| c.starts_with(&["pr".to_string(), "create".to_string()]))
+            .collect();
+        assert_eq!(creates.len(), 1);
+        assert!(creates[0].contains(&"--draft".to_string()));
+        assert!(creates[0].contains(&"feat: chain".to_string()));
+        let events = app.store.events(&key).await.unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.event.name() == "autopilot-finished")
+                .count(),
+            1
+        );
+    }
+
+    // ---- Stalls, the nudge and failure pauses (WP-09) ----
+
+    async fn autopilot_state(app: &AppState, key: &TaskKey) -> delilah_core::Autopilot {
+        app.store
+            .get_task(key)
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot
+            .unwrap()
+    }
+
+    async fn event_names(app: &AppState, key: &TaskKey) -> Vec<&'static str> {
+        let events = app.store.events(key).await.unwrap();
+        events.iter().map(|e| e.event.name()).collect()
+    }
+
+    fn live(app: &AppState, id: &str) {
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        app.sessions
+            .insert(id, "PROJ-1", SessionKind::Claude, true, pty);
+    }
+
+    /// Makes `id` the primary session, of `step`.
+    async fn switch_primary(app: &AppState, key: &TaskKey, id: &str, step: Step) {
+        let new = SessionRecord {
+            id: id.into(),
+            task: "PROJ-1".into(),
+            kind: SessionKind::Claude,
+            label: "s".into(),
+            primary: true,
+            closed: false,
+            read_only: false,
+            conversation: false,
+            step: Some(step),
+        };
+        app.store
+            .hand_over(key.as_str(), "plan-1", &new)
+            .await
+            .unwrap();
+    }
+
+    fn tasks_md(app: &AppState, content: Option<&str>) {
+        let file = app.config.home.join("ws/specs/proj-1-x/tasks.md");
+        match content {
+            Some(c) => std::fs::write(file, c).unwrap(),
+            None => std::fs::remove_file(file).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_plan_turn_end_without_tasks_nudges_once_then_pauses() {
+        let (app, key) = setup().await;
+        app.lang.set(Lang::En);
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        tasks_md(&app, None);
+        live(&app, "plan-1");
+
+        on_turn_ended(&app, &key).await;
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.state, delilah_core::AutopilotState::Running);
+        assert_eq!(a.nudged, Some(Step::Plan));
+        assert_eq!(event_names(&app, &key).await, vec!["autopilot-nudged"]);
+        assert_eq!(
+            app.sessions.get("plan-1").unwrap().state(),
+            crate::sessions::LiveState::Working,
+            "the nudge was typed"
+        );
+
+        on_turn_ended(&app, &key).await;
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.state, delilah_core::AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("tasks.md not written"));
+        assert_eq!(app.notifier.recorded().len(), 1);
+        assert_eq!(
+            event_names(&app, &key)
+                .await
+                .iter()
+                .filter(|n| **n == "autopilot-nudged")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn the_stall_reason_and_nudge_follow_the_app_language() {
+        let (app, key) = setup().await;
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        tasks_md(&app, None);
+        live(&app, "plan-1");
+        on_turn_ended(&app, &key).await;
+        on_turn_ended(&app, &key).await;
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.reason.as_deref(), Some("tasks.md no está escrito"));
+        assert!(autopilot::notes::nudge_text(Lang::Es).starts_with("Autopilot: sigue"));
+        assert!(autopilot::notes::nudge_text(Lang::En).contains("carry on without asking"));
+    }
+
+    #[tokio::test]
+    async fn implement_with_unchecked_tasks_nudges_then_pauses_with_the_count() {
+        let (app, key) = setup().await;
+        app.lang.set(Lang::En);
+        switch_primary(&app, &key, "impl-1", Step::Implement).await;
+        tasks_md(
+            &app,
+            Some("- [x] T001 One\n- [ ] T002 Two\n- [ ] T003 Three\n"),
+        );
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        live(&app, "impl-1");
+        on_turn_ended(&app, &key).await;
+        assert_eq!(
+            autopilot_state(&app, &key).await.nudged,
+            Some(Step::Implement)
+        );
+        on_turn_ended(&app, &key).await;
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.state, delilah_core::AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("2 tasks unchecked"));
+    }
+
+    #[tokio::test]
+    async fn a_blocked_review_pauses_with_its_reason_and_no_nudge() {
+        let (app, key) = setup().await;
+        switch_primary(&app, &key, "rev-1", Step::Review).await;
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        let path = autopilot::outcome_path(&app, &key, "rev-1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"outcome":"blocked","reason":"tests fail"}"#).unwrap();
+        live(&app, "rev-1");
+        on_turn_ended(&app, &key).await;
+        for _ in 0..200 {
+            if autopilot_state(&app, &key).await.state == delilah_core::AutopilotState::Paused {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.state, delilah_core::AutopilotState::Paused);
+        assert!(a.reason.unwrap().contains("tests fail"));
+        assert_eq!(a.nudged, None);
+        assert!(!event_names(&app, &key).await.contains(&"autopilot-nudged"));
+    }
+
+    #[tokio::test]
+    async fn reaching_a_boundary_after_a_nudge_goes_on_normally() {
+        let (app, key) = setup().await;
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        tasks_md(&app, None);
+        live(&app, "plan-1");
+        on_turn_ended(&app, &key).await;
+        assert_eq!(autopilot_state(&app, &key).await.nudged, Some(Step::Plan));
+        // The nudged session wrote the tasks.
+        tasks_md(&app, Some("- [ ] T001 One\n"));
+        no_save_notes(&app).await;
+        let launched = Launched::default();
+        on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
+        assert_eq!(launched.lock().unwrap().len(), 1);
+        assert_eq!(
+            autopilot_state(&app, &key).await.state,
+            delilah_core::AutopilotState::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stall_while_not_on_autopilot_does_nothing() {
+        let (app, key) = setup().await;
+        tasks_md(&app, None);
+        live(&app, "plan-1");
+        on_turn_ended(&app, &key).await;
+        assert!(event_names(&app, &key).await.is_empty());
+        assert!(app.notifier.recorded().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_handoff_that_fails_to_launch_pauses_the_autopilot_with_the_error() {
+        let (app, key) = setup().await;
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        no_save_notes(&app).await;
+        let failing = |_: &AppState,
+                       _: &SessionRecord,
+                       _: &Path,
+                       _: Option<&str>,
+                       _: bool|
+         -> Result<(), ApiError> { Err(ApiError::internal("no claude")) };
+        on_turn_ended_with(&app, &key, &failing).await;
+        let h = handoff_of(&app, &key).await.unwrap();
+        assert_eq!(h.stage, HandoffStage::Failed);
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.state, delilah_core::AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("no claude"));
+        // The step's announcement and the pause's notification.
+        let sent = app.notifier.recorded();
+        assert_eq!(
+            sent.iter().filter(|n| n.body.contains("no claude")).count(),
+            1
+        );
+        assert!(event_names(&app, &key).await.contains(&"autopilot-paused"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_turn_of_the_primary_pauses_a_running_autopilot() {
+        let (app, key) = setup().await;
+        app.lang.set(Lang::En);
+        set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
+        on_turn_failed(&app, &key).await;
+        let a = autopilot_state(&app, &key).await;
+        assert_eq!(a.state, delilah_core::AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("the session failed"));
     }
 }

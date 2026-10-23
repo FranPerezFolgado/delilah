@@ -24,6 +24,24 @@ export interface Handoff {
   error?: string;
 }
 
+/** Autopilot on a task: where it is, and why it stopped if paused. */
+export interface Autopilot {
+  state: "running" | "paused" | "done";
+  stage?: "preview" | "opening_pr";
+  reason?: string;
+  since: string;
+  nudged?: Step;
+  review_session?: string;
+}
+
+/** A task's preview process (the project's preview command). */
+export interface PreviewView {
+  state: "starting" | "running" | "failed";
+  url?: string;
+  error?: string;
+  started_at: string;
+}
+
 export interface Task {
   key: string;
   title: string;
@@ -35,8 +53,12 @@ export interface Task {
   notes?: string | null;
   /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
   in_checkout?: boolean | null;
+  /** The branch of the task's workspace; absent without a workspace (read-only). */
+  branch?: string | null;
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
+  /** Autopilot: null when off. */
+  autopilot?: Autopilot | null;
   handoff: Handoff | null;
 }
 
@@ -52,6 +74,8 @@ export interface Project {
   path: string;
   kind: ProjectKind;
   workflow: string;
+  /** Command that serves a task's workspace as a preview; null or absent: none. */
+  preview_command?: string | null;
 }
 
 export interface Submodule {
@@ -81,6 +105,8 @@ export interface NewBacklogTask {
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -91,6 +117,8 @@ export interface BacklogChange {
   project?: string;
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
 }
 
 export interface RunRequest {
@@ -106,10 +134,19 @@ export interface RunRequest {
   in_checkout?: boolean;
   /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
   from_session?: string;
+  /** Full branch name (`feature/...`); empty or absent lets the daemon choose. */
+  branch?: string;
+}
+
+export interface BranchProposal {
+  branch: string | null;
+  source: "claude" | "title" | "key";
 }
 
 export type JiraMode = "sample" | "cloud" | "data-center";
@@ -269,7 +306,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "autopilot";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -415,9 +452,13 @@ export const api = {
   submodules: (project: string) => request<Submodule[]>(`/api/v1/projects/${project}/submodules`),
   suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
+  proposeBranch: (
+    project: string,
+    t: { key?: string; title: string; notes?: string; free: boolean; submodules: string[] },
+  ) => post<BranchProposal>(`/api/v1/projects/${project}/branch-name`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
-  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string }) =>
+  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string; preview_command?: string | null }) =>
     request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
   deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
@@ -432,7 +473,13 @@ export const api = {
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  /** The task's preview, or null when it has none. */
+  getPreview: (key: string) => request<PreviewView | null>(`/api/v1/tasks/${key}/preview`),
+  /** Starts it. 409 `no-preview-command` / `no-workspace` / `running`; 422 when it can't be spawned. */
+  startPreview: (key: string) => post<PreviewView>(`/api/v1/tasks/${key}/preview`),
+  stopPreview: (key: string) => request<null>(`/api/v1/tasks/${key}/preview`, { method: "DELETE" }),
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
   dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),
@@ -467,7 +514,8 @@ export const api = {
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
-  answerAsk: (id: string, answers: Record<string, string>) => post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, { answers }),
+  answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
+    post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, launch ? { answers, launch } : { answers }),
   conversation: (id: string) => request<Conversation>(`/api/v1/sessions/${id}/conversation`),
   sendMessage: (id: string, text: string) => post<ConversationEntry>(`/api/v1/sessions/${id}/messages`, { text }),
   removeMessage: (id: string, entry: number) =>

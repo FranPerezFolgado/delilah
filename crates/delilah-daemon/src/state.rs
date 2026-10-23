@@ -47,6 +47,8 @@ pub struct AppState {
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
     /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
     pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
+    /// The autopilot finishes running now, and their retries (see `autopilot/finish.rs`).
+    pub(crate) finishing: Arc<crate::autopilot::Finishing>,
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
@@ -58,6 +60,8 @@ pub struct AppState {
     pub(crate) pr_checking: Arc<Mutex<HashSet<String>>>,
     /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
+    /// The previews the daemon runs, one per task at most (see `preview.rs`).
+    pub(crate) previews: Arc<crate::preview::Previews>,
 }
 
 /// Unit tests must never touch the real Keychain; `DELILAH_SECRETS=memory` also asks for it.
@@ -78,6 +82,7 @@ impl AppState {
         Self {
             store,
             config: Arc::new(config),
+            previews: Arc::new(crate::preview::Previews::new(events.clone())),
             sessions: Arc::new(Sessions::new(events.clone())),
             usage: Arc::default(),
             notifier,
@@ -93,6 +98,7 @@ impl AppState {
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             handoffs: Arc::default(),
+            finishing: Arc::default(),
             remote_control: Arc::default(),
             gh: Arc::new(GhClient::new(Arc::new(CliGh {
                 program: gh_program,

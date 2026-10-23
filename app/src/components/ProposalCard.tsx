@@ -21,15 +21,16 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
   const [failed, setFailed] = useState(false);
   const q = ask.questions[0]?.question ?? "";
 
-  const send = async (answer: string) => {
+  const send = async (answer: string, launch?: "autopilot") => {
     setBusy(true);
     setError(null);
     try {
-      const res = await api.answerAsk(ask.id, { [q]: answer });
+      const res = launch ? await api.answerAsk(ask.id, { [q]: answer }, launch) : await api.answerAsk(ask.id, { [q]: answer });
       if (res?.error) {
         setError(res.error);
         setFailed(true);
-      } else if (res?.task) setCreated(res.task);
+      }
+      if (res?.task) setCreated(res.task);
       onDone?.();
     } catch (e) {
       setError((e as Error).message);
@@ -61,6 +62,9 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
           <div className="ask-actions">
             <button className="btn btn-p" disabled={busy} onClick={() => send("Crear")}>
               {t("Crear")}
+            </button>
+            <button className="btn" disabled={busy} onClick={() => send("Crear", "autopilot")}>
+              {t("Crear y lanzar en autopiloto")}
             </button>
             <button className="btn" disabled={busy} onClick={() => send("Cambiar algo")}>
               {t("Cambiar algo")}

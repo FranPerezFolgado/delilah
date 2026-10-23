@@ -36,9 +36,9 @@ done or pending is in [status.md](status.md).
 
 | Path | What it is |
 |---|---|
-| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds. Pure, no I/O. |
-| `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`). |
-| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
+| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds, branch-name rules (`branch.rs`: `slug`, `title_slug`, `compose`, `custom`, `fallback`). Pure, no I/O. |
+| `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`), the branch-name proposal (`branch_name.rs`) and the headless one-shot both share (`oneshot.rs`). |
+| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving, and branch names that are free (`branch_taken`, `free_branch`) (`workspace.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
@@ -54,13 +54,16 @@ done or pending is in [status.md](status.md).
 | Module | Role |
 |---|---|
 | `api.rs` | Router, origin/Host guard, CORS, task CRUD. |
-| `run.rs` | `POST /api/v1/runs`: creates or starts a task, builds the workspace, launches the primary session, accepts the folder-trust dialog. |
+| `branch_name.rs` | `POST /api/v1/projects/{name}/branch-name` and `propose`: Claude (10 s for the endpoint, 5 s when `start_run` asks), then the title slug, then the key; `unique` adds the `-N` suffix. It never creates anything. |
+| `run.rs` | `POST /api/v1/runs`: creates or starts a task, names its branch (`start_run`: the request's `branch` normalised, or `propose`, then `unique`), builds the workspace, launches the primary session, accepts the folder-trust dialog. |
 | `session_api.rs`, `sessions.rs`, `store_sessions.rs` | Extra Claude sessions and shells. Live sessions are kept in memory and their records in SQLite. Also project sessions (`@project`). |
 | `terminal.rs` | WebSocket terminal: scrollback first, then live bytes; text frames for `resize`. |
 | `hooks.rs` | `/hooks/claude` and `/hooks/claude/statusline`. Each hook is classified into a `Signal`, which sets the session's live state, the inbox attention, the task transition and the phase. |
 | `asks.rs` | AskUserQuestion: the PreToolUse hook posts here and waits up to a day. The answer goes back as `updatedInput.answers`. |
 | `proposals.rs` | A card headed `Nueva tarea` in a project's conversation is a task proposal: answering `Crear` creates the backlog task (brief as notes, `CreatedFromConversation` event) before Claude is told. Owns the protocol strings. Called by `asks::answer` through `on_answer`. |
 | `conversation.rs` | An idea conversation's history (`conversation_entries`, one row per message or card): your messages (sent now, or queued while Claude works and flushed when its turn ends), Claude's closing messages, and cards (`Card`, outcome pending / answered / terminal / withdrawn). Endpoints `GET /sessions/{id}/conversation`, `POST /sessions/{id}/messages`, `DELETE /sessions/{id}/messages/{entry}`, `POST /sessions/{id}/stop`. The live activity and "needs the terminal" flag sit on `Live` (`ConvoState`) and emit the `conversations` topic once per change. |
+| `autopilot/` | The policy over saving mode ([#38](decisions.md)): `mod.rs` (`shape`, the state helpers, `update` as a compare-and-set, `Finishing`), `notes.rs` (what each session is told, the outcome path), `outcome.rs` (reads the review's file), `pause.rs` (pause, stall and nudge, resume, advance), `ask.rs` (recommended answers), `finish.rs` (preview, draft PRs, recovery), `api.rs` (`POST /tasks/{key}/autopilot`). |
+| `preview.rs`, `preview_api.rs` | A task's preview process, owned by the daemon, and its routes (`GET`/`POST`/`DELETE /tasks/{key}/preview`). |
 | `inbox.rs` | `GET /api/v1/inbox` (everything that waits on the user) and replies typed into a session. |
 | `phases.rs` | The phase: set by the user, moved forward by spec files and agent signals, and review hints. |
 | `specs.rs` | A watcher (every 5 s) that reads each task's `specs/<feature>/` and records phase changes. |
@@ -71,6 +74,8 @@ done or pending is in [status.md](status.md).
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
 | `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), submodules, and the submodule suggestion. |
 | `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` (absolute path, checked in `Config` at start) swaps the binary. |
+
+`DELILAH_CLAUDE_BIN` (`Config.claude_bin`, default `claude`) swaps the binary of the headless Claude calls: the branch name and the submodule suggestion. Tests and previews point it at a fake script.
 | `pr_types.rs`, `prs.rs` | PR data types (snapshot, checks, reviews, comments) and the pure logic: `ci_outcome`, `pick`, `summary`, `diff`, back-off. |
 | `pr_loop/` | The I/O of the PR loop: `mod.rs` (the 30 s loop `spawn`, `nudge`, `check_task`, detection), `access.rs` (access problems, notified once per project), `notices.rs` (turns a snapshot diff into notices and notifications), `merge.rs` (`on_merged`, see Workspaces). |
 | `pr_api/`, `store_prs.rs` | The PR routes and the SQLite access for PRs and their notices. `mod.rs` (list, summaries, refresh, link, unlink, dismiss), `dto.rs` (the JSON types), `open.rs` (proposal and open; `open` links the new PR straight to its repo with `pr_loop::link_known`; a parent's proposal defaults to its first free submodule that has commits), `forward.rs` (sending feedback to the agent). |
@@ -169,7 +174,7 @@ and only changes while the task is under way (see `phases.rs`):
 - **Hooks.** They live only in that settings file, never in the repo or
   `~/.claude`:
   - `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop`, `StopFailure` and `SessionEnd` each `curl` their JSON to `/hooks/claude?task=…&session=…`;
-  - a `PreToolUse` hook on AskUserQuestion waits on `/hooks/claude/ask`.
+  - a `PreToolUse` hook on AskUserQuestion waits on `/hooks/claude/ask` (on autopilot it may be answered inside the hook, see below).
 - **Status line.** The user's own status line from `~/.claude/settings.json`
   still draws: Delilah's script forwards Claude's JSON to `/hooks/claude/statusline`
   (which reads the usage windows) and then runs the user's command.
@@ -188,8 +193,9 @@ and only changes while the task is under way (see `phases.rs`):
 | Signal (hook) | Effect |
 |---|---|
 | `PromptSubmitted` (UserPromptSubmit), `Working` (PostToolUse) | session working; primary → `UserAnswered`; drops the review hint; phase signals |
-| `NeedsUser` (Notification) | inbox attention (permission or idle); primary → `AgentAsked` |
-| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint; in saving mode, a phase boundary offers or starts the next session, and a `saving` handoff goes on to `starting` |
+| `NeedsUser` (Notification) | inbox attention (permission or idle); primary → `AgentAsked`; a permission prompt of the primary session pauses a running autopilot (`autopilot::on_attention`) |
+| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint; in saving mode, a phase boundary offers or starts the next session, and a `saving` handoff goes on to `starting`; on autopilot, see below |
+| AskUserQuestion (PreToolUse, `/hooks/claude/ask`) | the card or inbox question and `AgentAsked`; on a running autopilot, from its primary step session, every question with exactly one "(Recommended)" option is answered at once (history `autopilot-answered`, no inbox item), else autopilot pauses with the question's text and the ask goes on as usual |
 | `TurnFailed` (StopFailure) | inbox error, or a usage limit |
 | a turn ending while a usage window is at 100 % | `LimitReached` (any session: the subscription is shared) |
 
@@ -217,10 +223,39 @@ becomes `primary`, the old one stays in the task as a finished, reopenable tab
 - **API:** `POST /api/v1/tasks/{key}/handoff` (`confirm`, `decline`, `retry`), and `saving_mode` on task create, backlog create and `PATCH` (also while running). The preferences `saving-mode` (default for new tasks) and `save-notes` are in Settings.
 - **UI:** `chain.ts` and `SessionChain.tsx` draw the chain; `HandoffActions.tsx` is shared by the task screen and the Bandeja item (kind `handoff`: offered, saving, starting, failed). The automatic review is announced like a finished turn: quiet when the app is listening.
 
+### Autopilot (`autopilot/`)
+
+A task with `tasks.autopilot` (nullable JSON: `state` running/paused/done, `stage`, `reason`, `since`, `nudged`, `review_session`) runs plan → implement → review → draft PR on its own ([#38](decisions.md)). It implies saving mode (turning saving mode off clears it) and rides on its handoffs: only a task on the `feature` (spec) workflow can have it, enforced on every entry point (409 `not-spec-workflow`). Every change of the state is `Store::update_autopilot`, a compare-and-set, so a pause or "off" is never overwritten by a finish in flight ([#45](decisions.md)). The task's status and phase are untouched by pause or resume; the history gets `autopilot-paused`, `-resumed`, `-answered`, `-nudged` and `-finished`.
+
+- **Shape** (`shape`): while running, the planning → implementation `Offer` becomes a `Start`; paused, done or off, boundaries are left as saving mode has them. Each step's session gets an autopilot note on top of its prompt (`notes.rs`, in the app's language): nobody will answer, pick the recommended option, stop at `tasks.md` / at every task checked / at the outcome file.
+- **Stall and nudge** (`stall`, from `handoff::on_turn_ended`): a turn end of the primary plan or implement session with no boundary reached gets one typed nudge per step (`Autopilot.nudged`, taken atomically); a second stall in the same step pauses ("tasks.md not written", "N tasks unchecked"). The review never stalls: its end is its outcome file ([#39](decisions.md)).
+- **Outcome file:** the review is told to write `~/.delilah/tasks/<KEY>/autopilot/review-<session-id>.json` (`outcome` `ready`/`blocked`, `reason`, `pr_title`, `pr_body`), outside the repo. It is read only if it is a regular file under 256 KiB; missing or invalid means blocked. The session id is recorded in `Autopilot.review_session`, so an old file is never read for a newer review.
+- **Finish** (`finish`, spawned at the review's turn end; one per task, `Finishing` guard): read the outcome (blocked pauses with its reason); refuse uncommitted changes in any repo (git failing to tell pauses too); start the project's preview if it has a command and wait until it runs or fails (a failed preview does not stop the PR); write `stage = opening_pr`; `pr_loop::check_task` to link a PR that exists already; for each repo with commits and no open PR, `pr_api::open_for(..., draft = true)` with the agent's title and body (else the proposal's), plus a "Preview:" line with the URL minus userinfo, query and fragment, only when its host is loopback ([#42](decisions.md)). Then `state = done` and `autopilot-finished` with the PR URLs. Every write only lands while autopilot still runs on that review (`Superseded` otherwise). A retryable failure (`gh`, network) is retried with a doubling back-off, three attempts, then pauses; one before any stage is recorded (which `recover` would never pick up) pauses at once.
+- **Questions and permissions:** see the hook table. Permission prompts are never answered ([#43](decisions.md)).
+- **Pause and resume** (`pause`, `resume`): a pause records reason and time, emits the inbox and sends one notification (none if the app is listening). The inbox derives an `autopilot` item from the paused state, with "Reanudar autopiloto" (`POST /tasks/{key}/autopilot` `resume`) and "Seguir a mano" (`off`, saving mode stays). Resume goes to `advance_with`: re-run an interrupted finish, leave a working session alone, retry or confirm a failed or offered handoff; an idle review whose outcome file still says blocked is typed a re-check (recorded as its nudge) instead of finishing into the same pause; else look at the turn as at a turn end.
+- **Recovery** (`finish::recover`, on each scheduler tick): a running autopilot at stage `preview` or `opening_pr` with a `review_session` re-runs the (idempotent) finish. Autopilots stored without `review_session` are not recovered ([#47](decisions.md)).
+- **API:** `POST /api/v1/tasks/{key}/autopilot` (`on`, `resume`, `off`); `autopilot` on task create and backlog create/`PATCH`; `launch: "autopilot"` on `POST /asks/{id}/answer` with `Crear` on a proposal (`proposals.rs` creates the task, starts it on autopilot, and tells Claude; if the start fails the task stays in the backlog). The CLI has `--autopilot` / `--no-autopilot` on `run` and `new`, and `delilah autopilot <KEY> on|off|resume`.
+- **UI:** `AutopilotMark` (running/paused/done, the reason as tooltip), the option next to saving mode, the chain's preview and PR steps (`chain.ts`), the inbox item, and "Crear y lanzar en autopiloto" on `ProposalCard`.
+
+### Previews (`preview.rs`)
+
+A project's `preview_command` (project field, `PATCH /projects/{name}`) is run by the daemon, not the agent ([#41](decisions.md)). Any task with a workspace can start it by hand (`PreviewControl` in the task header, `POST /tasks/{key}/preview`); autopilot starts it at the finish.
+
+- **Process:** `/bin/zsh -lc "<command>"` (a login shell: launchd's environment lacks the user's PATH) with the agents' clean environment (`delilah_agents::env::agent_env`, not the daemon's variables) in the task's workspace root, in its own process group, stdin null, stdout and stderr read into a ring of the last 200 lines (4 KiB per line).
+- **URL:** the first `http(s)://` URL it prints (cut at whitespace, control characters, quotes and parentheses) becomes `url` and the state `running`. Exit, or no URL in 10 minutes, is `failed` with the last lines; once it runs, the timeout no longer applies. States: `starting`, `running`, `failed`. 409 `no-preview-command`, `no-workspace`, `running`.
+- **Lifecycle:** memory only, one per task, announced on the `tasks` topic. Stopped by `DELETE`, when the task ends (done, failed, archived, deleted: `end_task_runtime`) and at daemon shutdown (`stop_all`); a restart does not adopt it, so it shows none. A stop sends SIGTERM to the group with `/bin/kill -- -<pgid>` (the workspace forbids `unsafe`), and the waiter, which owns the child, sends SIGKILL after 5 s only if the leader is not reaped yet, so a reused pid is never signalled ([#44](decisions.md)).
+- **This repo:** `scripts/preview.sh` prints the UI URL first, so it is the one detected.
+
 ## Workspaces
 
+- **Branch names:** `start_run` names the branch before the workspace exists.
+  - The name is the request's `branch` (normalised by `delilah_core::branch::custom`) or, when absent, `branch_name::propose`: Claude with a 5 s limit, else `title_slug`, else `fallback(key)`. `compose` gives `feature/<short-name>` or `feature/<KEY>-<short-name>` (the `LIBRE-n` of a free task is left out).
+  - `branch_name::unique` then calls `delilah_git::free_branch` over every repo of the workspace (the repo, or each chosen submodule): a name is taken if `refs/heads/<name>` or `refs/remotes/*/<name>` exists (`branch_taken`), and `-2`… is tried. It applies in worktree and checkout mode alike, so an explicit `--branch` no longer switches to an existing branch.
+  - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field.
+  - `Task.branch` is read from `workspaces.branch` by a `LEFT JOIN`; a task with no workspace (backlog, archived) has none.
+
 - **Worktree mode** (in `workspaces/<KEY>/`):
-  - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch `feature/<KEY>`.
+  - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch, named as in Branch names below.
   - **Repo projects:** a plain worktree.
   - Several tasks can run in parallel.
 - **Checkout mode** (the default for new tasks; `use_checkout` / `leave_checkout`):
@@ -262,7 +297,7 @@ The UI does not poll:
 - **Components:**
   - `Sidebar`, `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
   - `PrView` (the PR tab), `PrBadge`, `OpenPrDialog`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
-  - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `Markdown`.
+  - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `ProposalCard`, `AutopilotMark`, `PreviewControl`, `Markdown`.
 - **Editor:** `editor/` holds CodeMirror 6 and per-task tab state, kept in localStorage.
 - **i18n:**
   - Texts are Spanish in the code, wrapped in `t()` / `tn()`, and English lives in `i18n/en.ts`, keyed by the Spanish text.

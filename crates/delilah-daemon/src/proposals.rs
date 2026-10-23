@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 use crate::api::{ApiError, NewTask};
 use crate::asks::Ask;
 use crate::events::Topic;
+use crate::lang::Lang;
 use crate::state::AppState;
 
 /// Header of the question that proposes a task.
@@ -22,14 +23,39 @@ pub const DISCARD: &str = "Descartar";
 pub const NOTES_MARK: &str = "> Brief escrito por Claude en la conversación";
 
 /// What Claude is told after `Crear` worked.
-pub fn created_text(key: &str) -> String {
-    format!("{CREATE} — creada {key} en el backlog")
+pub fn created_text(lang: Lang, key: &str) -> String {
+    let tail = lang.pick("creada {} en el backlog", "created {} in the backlog");
+    format!("{CREATE} — {}", tail.replace("{}", key))
 }
 
 /// What Claude is told after `Crear` failed.
-pub fn failed_text(error: &str) -> String {
-    format!("{CREATE} — no se pudo crear: {error}")
+pub fn failed_text(lang: Lang, error: &str) -> String {
+    format!(
+        "{CREATE} — {}: {error}",
+        lang.pick("no se pudo crear", "could not create")
+    )
 }
+
+/// What Claude is told after `Crear` created the task and it was started on autopilot.
+pub fn launched_text(lang: Lang, key: &str) -> String {
+    let tail = lang.pick(
+        "creada {} y lanzada en autopiloto",
+        "created {} and launched on autopilot",
+    );
+    format!("{CREATE} — {}", tail.replace("{}", key))
+}
+
+/// What Claude is told after the task was created but could not be started.
+pub fn not_launched_text(lang: Lang, key: &str, error: &str) -> String {
+    let tail = lang.pick(
+        "creada {} en el backlog; no se pudo lanzar",
+        "created {} in the backlog; could not launch it",
+    );
+    format!("{CREATE} — {}: {error}", tail.replace("{}", key))
+}
+
+/// The `launch` value of an answer that starts the new task on autopilot.
+pub const LAUNCH_AUTOPILOT: &str = "autopilot";
 
 /// Longest title and brief taken from a card; beyond it the card stays a plain one.
 const MAX_TITLE_CHARS: usize = 200;
@@ -82,7 +108,7 @@ pub fn proposal_of(owner: &str, questions: &Value) -> Option<Proposal> {
 }
 
 /// The proposal of a card posted by a hook, only when the session it names exists and
-/// is owned by the same project: a hook cannot claim a conversation that is not its own.
+/// is open and owned by the same project: a hook cannot claim a conversation that is not its own.
 pub async fn for_hook(
     app: &AppState,
     owner: &str,
@@ -90,15 +116,22 @@ pub async fn for_hook(
     questions: &Value,
 ) -> Option<Proposal> {
     let record = app.store.session(session?).await.ok()??;
-    if record.task != owner {
+    if record.task != owner || record.closed {
         return None;
     }
     proposal_of(owner, questions)
 }
 
 /// Runs the proposal side of an answer: on `Crear` creates the task and replaces the
-/// answer Claude gets with what happened. Anything else is left as it is.
-pub async fn on_answer(app: &AppState, ask: &Ask, answers: &mut Map<String, Value>) -> AnswerReply {
+/// answer Claude gets with what happened. With `launch` = `autopilot` the task is also
+/// started on autopilot; if that fails the task stays in the backlog and the reply
+/// carries the error next to it. Anything else is left as it is.
+pub async fn on_answer(
+    app: &AppState,
+    ask: &Ask,
+    answers: &mut Map<String, Value>,
+    launch: Option<&str>,
+) -> AnswerReply {
     let mut reply = AnswerReply::default();
     let Some(proposal) = &ask.proposal else {
         return reply;
@@ -107,15 +140,31 @@ pub async fn on_answer(app: &AppState, ask: &Ask, answers: &mut Map<String, Valu
     if answers.get(question).and_then(Value::as_str).map(str::trim) != Some(CREATE) {
         return reply;
     }
-    let text = match create_from_proposal(app, ask, proposal).await {
-        Ok(key) => {
+    let autopilot = launch == Some(LAUNCH_AUTOPILOT);
+    let lang = app.lang();
+    let text = match create_from_proposal(app, ask, proposal, autopilot).await {
+        Ok((key, declined)) => {
             app.emit(Topic::Tasks);
-            let text = created_text(&key);
+            let started = match (autopilot, declined) {
+                (false, _) => None,
+                (true, Some(e)) => Some(Err(e)),
+                (true, None) => Some(start(app, &key, ask).await),
+            };
+            let text = match started {
+                None => created_text(lang, &key),
+                Some(Ok(())) => launched_text(lang, &key),
+                Some(Err(e)) => {
+                    let text = not_launched_text(lang, &key, &e.message);
+                    reply.error = Some(e.message);
+                    text
+                }
+            };
+            app.emit(Topic::Tasks);
             reply.task = Some(key);
             text
         }
         Err(e) => {
-            let text = failed_text(&e.message);
+            let text = failed_text(lang, &e.message);
             reply.error = Some(e.message);
             text
         }
@@ -124,13 +173,31 @@ pub async fn on_answer(app: &AppState, ask: &Ask, answers: &mut Map<String, Valu
     reply
 }
 
+/// Starts the backlog task `key` in the conversation's project, on autopilot, with the
+/// project's default work mode. A fresh run: the conversation is not adopted.
+async fn start(app: &AppState, key: &str, ask: &Ask) -> Result<(), ApiError> {
+    let project = crate::store_sessions::project_of(&ask.task)
+        .ok_or_else(|| ApiError::bad_request("only a project's conversation can start tasks"))?;
+    let req: crate::run::RunRequest = serde_json::from_value(serde_json::json!({
+        "key": key,
+        "project": project,
+        "autopilot": true,
+        "saving_mode": true,
+    }))
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    crate::run::start_run(axum::extract::State(app.clone()), axum::Json(req))
+        .await
+        .map(|_| ())
+}
+
 /// Creates the proposal's free task in the conversation's project, with the brief as
 /// its notes, and records where it came from.
 async fn create_from_proposal(
     app: &AppState,
     ask: &Ask,
     proposal: &Proposal,
-) -> Result<String, ApiError> {
+    autopilot: bool,
+) -> Result<(String, Option<ApiError>), ApiError> {
     let project = crate::store_sessions::project_of(&ask.task)
         .ok_or_else(|| ApiError::bad_request("only a project's conversation can create tasks"))?;
     // The origin event is part of the feature: without the conversation, no task.
@@ -146,21 +213,33 @@ async fn create_from_proposal(
         now.format("%Y-%m-%d"),
         proposal.brief
     );
-    let new = || NewTask {
+    // Autopilot is for the spec workflow only: elsewhere the task is still created,
+    // without it, and the refusal (naming the task actually made) goes back next to it.
+    let mut declined = false;
+    let new = |autopilot: bool| NewTask {
         key: String::new(),
         title: proposal.title.clone(),
         project: Some(project.to_string()),
         notes: Some(notes.clone()),
         free: true,
         in_checkout: None,
-        saving_mode: None,
+        saving_mode: autopilot.then_some(true),
+        autopilot: autopilot.then_some(true),
         workflow: None,
     };
+    let mut autopilot = autopilot;
     // Another conversation may take the key between allocating it and storing the
     // task: allocate again (the counter has moved on).
     let mut attempts = 0;
     let task = loop {
-        let task = crate::api::build_task(app, new()).await?;
+        let task = match crate::api::build_task(app, new(autopilot)).await {
+            Err(e) if autopilot && e.reason.as_deref() == Some("not-spec-workflow") => {
+                declined = true;
+                autopilot = false;
+                continue;
+            }
+            built => built?,
+        };
         match app
             .store
             .create_task_from_conversation(&task, &record.id, &record.label, now)
@@ -175,7 +254,8 @@ async fn create_from_proposal(
             }
         }
     };
-    Ok(task.key.to_string())
+    let refusal = declined.then(|| crate::autopilot::refusal(task.key.as_str(), app.lang()));
+    Ok((task.key.to_string(), refusal))
 }
 
 #[cfg(test)]
@@ -496,7 +576,7 @@ mod tests {
         };
         let mut answers = Map::new();
         answers.insert(TITLE.into(), json!(CREATE));
-        let reply = on_answer(&app, &ask, &mut answers).await;
+        let reply = on_answer(&app, &ask, &mut answers, None).await;
         assert_eq!(reply.task, None);
         assert_eq!(reply.error.as_deref(), Some("la conversación ya no existe"));
         assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
@@ -564,5 +644,276 @@ mod tests {
             CREATE
         );
         assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    /// Posts the proposal card, answers `Crear` with `launch`, returns the reply.
+    async fn crear_with(app: &AppState, launch: Option<&str>, answer: &str) -> Value {
+        let hook = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, proposal_post(&app)).await }
+        });
+        let item = waiting_ask(app).await;
+        let id = item["ask"]["id"].as_str().unwrap().to_string();
+        let mut body = json!({ "answers": { TITLE: answer } });
+        if let Some(l) = launch {
+            body["launch"] = json!(l);
+        }
+        let (status, reply) = call(app, post(&format!("/api/v1/asks/{id}/answer"), body)).await;
+        assert_eq!(status, StatusCode::OK);
+        hook.await.unwrap();
+        reply
+    }
+
+    fn proposal_post(_app: &AppState) -> axum::http::Request<axum::body::Body> {
+        post(
+            CONV,
+            proposal_card(TITLE, "Nueva tarea", Some("## Idea\nreintentar")),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_keeps_the_backlog_task_with_autopilot_on() {
+        let app = app().await;
+        // The project's folder is not there: the start fails.
+        project_and_conversation(&app).await;
+        let reply = crear_with(&app, Some("autopilot"), "Crear").await;
+        let key = reply["task"].as_str().unwrap();
+        assert!(reply["error"].is_string(), "{reply}");
+        let task = app
+            .store
+            .get_task(&TaskKey::new(key))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, delilah_core::TaskStatus::Queued);
+        assert!(task.autopilot.is_some());
+        assert!(task.saving_mode);
+    }
+
+    #[tokio::test]
+    async fn launch_is_ignored_unless_the_answer_is_crear() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let reply = crear_with(&app, Some("autopilot"), "Descartar").await;
+        assert_eq!(reply["task"], Value::Null);
+        assert!(reply.get("error").is_none());
+        assert_eq!(app.store.list_tasks().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn crear_without_launch_creates_a_plain_backlog_task() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let reply = crear_with(&app, None, "Crear").await;
+        let key = reply["task"].as_str().unwrap();
+        let task = app
+            .store
+            .get_task(&TaskKey::new(key))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(task.autopilot.is_none());
+        assert_eq!(task.status, delilah_core::TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn another_workflow_gets_the_task_and_the_refusal() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        sqlx_set_workflow(&app).await;
+        let reply = crear_with(&app, Some("autopilot"), "Crear").await;
+        let key = reply["task"].as_str().unwrap();
+        assert!(
+            reply["error"]
+                .as_str()
+                .unwrap()
+                .contains("workflow de spec")
+        );
+        let task = app
+            .store
+            .get_task(&TaskKey::new(key))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(task.autopilot.is_none());
+        assert_eq!(task.status, delilah_core::TaskStatus::Queued);
+    }
+
+    async fn conversation(app: &AppState) {
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "conv".into(),
+                task: "@web".into(),
+                kind: crate::store_sessions::SessionKind::Claude,
+                label: "Idea".into(),
+                primary: false,
+                closed: false,
+                read_only: false,
+                conversation: true,
+                step: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    /// Replaces the `web` project by one on another workflow.
+    async fn sqlx_set_workflow(app: &AppState) {
+        app.store.delete_project("web").await.unwrap();
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "prompt".into(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        conversation(app).await;
+    }
+
+    #[tokio::test]
+    async fn crear_and_launch_starts_a_fresh_autopilot_run_in_the_project() {
+        fn git(dir: &std::path::Path, args: &[&str]) {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let repo = home.join("web");
+        let fake = home.join("fake-claude.sh");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nsleep 1\n",
+                home.join("args.txt").display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("README.md"), "web\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        let config = crate::config::Config {
+            home: home.clone(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: Some(fake),
+            claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        project_and_conversation(&app).await;
+        app.store.delete_project("web").await.unwrap();
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo.clone(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        conversation(&app).await;
+
+        let reply = crear_with(&app, Some("autopilot"), "Crear").await;
+        assert!(reply.get("error").is_none(), "{reply}");
+        let key = reply["task"].as_str().unwrap().to_string();
+        let task = app
+            .store
+            .get_task(&TaskKey::new(&key))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, delilah_core::TaskStatus::Running);
+        assert!(task.autopilot.is_some());
+        assert!(task.saving_mode);
+        // The default work mode: a worktree, not the project's checkout.
+        assert_eq!(task.in_checkout, Some(false));
+        // The brief reaches the first session: it is in the notes file the prompt points to.
+        let notes = std::fs::read_to_string(app.config.task_dir(&key).join("notes.md")).unwrap();
+        assert!(notes.ends_with("\n\n## Idea\nreintentar"), "{notes}");
+        let mut args = String::new();
+        for _ in 0..50 {
+            args = std::fs::read_to_string(home.join("args.txt")).unwrap_or_default();
+            if !args.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(args.contains("notes.md"), "{args}");
+        assert!(reply["task"].is_string());
+        // A fresh session of the task; the conversation is still the project's.
+        let conv = app.store.session("conv").await.unwrap().unwrap();
+        assert_eq!(conv.task, "@web");
+        for live in app.sessions.of_task(&key) {
+            let _ = live.pty.kill();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_closed_session_of_the_project_cannot_post_a_proposal() {
+        let app = app().await;
+        project_and_conversation(&app).await;
+        let qs =
+            proposal_card(TITLE, NEW_TASK_HEADER, Some("b"))["tool_input"]["questions"].clone();
+        assert!(for_hook(&app, "@web", Some("conv"), &qs).await.is_some());
+        app.store.close_session("conv").await.unwrap();
+        assert!(for_hook(&app, "@web", Some("conv"), &qs).await.is_none());
+    }
+
+    #[test]
+    fn the_texts_follow_the_app_language() {
+        assert_eq!(
+            created_text(Lang::Es, "K-1"),
+            "Crear — creada K-1 en el backlog"
+        );
+        assert_eq!(
+            created_text(Lang::En, "K-1"),
+            "Crear — created K-1 in the backlog"
+        );
+        assert_eq!(
+            launched_text(Lang::Es, "K-1"),
+            "Crear — creada K-1 y lanzada en autopiloto"
+        );
+        assert_eq!(
+            launched_text(Lang::En, "K-1"),
+            "Crear — created K-1 and launched on autopilot"
+        );
+        assert!(not_launched_text(Lang::Es, "K-1", "x").ends_with("no se pudo lanzar: x"));
+        assert!(not_launched_text(Lang::En, "K-1", "x").ends_with("could not launch it: x"));
+        assert_eq!(failed_text(Lang::Es, "x"), "Crear — no se pudo crear: x");
+        assert_eq!(failed_text(Lang::En, "x"), "Crear — could not create: x");
+    }
+
+    #[tokio::test]
+    async fn the_refusal_follows_the_app_language() {
+        for (lang, expected) in [
+            (Lang::Es, "no está en el workflow de spec"),
+            (Lang::En, "is not on the spec workflow"),
+        ] {
+            let app = app().await;
+            app.lang.set(lang);
+            project_and_conversation(&app).await;
+            sqlx_set_workflow(&app).await;
+            let reply = crear_with(&app, Some("autopilot"), "Crear").await;
+            let error = reply["error"].as_str().unwrap();
+            assert!(error.contains(expected), "{error}");
+            assert!(error.starts_with("LIBRE-"), "{error}");
+        }
     }
 }

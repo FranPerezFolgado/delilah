@@ -20,6 +20,11 @@ const EVENT_LABELS: Record<string, string> = {
   "agent-finished": "El agente terminó",
   "mark-done": "Marcada como hecha",
   fail: "Falló",
+  "autopilot-paused": "Autopiloto en pausa",
+  "autopilot-resumed": "Autopiloto reanudado",
+  "autopilot-answered": "Autopiloto respondió",
+  "autopilot-nudged": "Autopiloto empujó el paso",
+  "autopilot-finished": "Autopiloto terminó",
   "start-aborted": "No se pudo empezar; vuelve al backlog",
 };
 
@@ -99,6 +104,11 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
         <div className="muted" style={{ fontSize: 12 }}>
           {task.project ?? t("sin proyecto")} · workflow <span className="mono">{task.workflow}</span>
         </div>
+        {task.branch && (
+          <div className="muted" style={{ fontSize: 12 }} data-testid="task-branch">
+            {t("Rama")}: <span className="mono selectable">{task.branch}</span>
+          </div>
+        )}
 
         {s.type === "paused-by-limit" && (
           <div className="notice pause">

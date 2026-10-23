@@ -296,6 +296,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
             ..crate::config::Config::test_defaults()
         };
@@ -523,6 +524,7 @@ mod project_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
             ..crate::config::Config::test_defaults()
         };
@@ -533,6 +535,7 @@ mod project_tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -597,6 +600,7 @@ mod project_tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();

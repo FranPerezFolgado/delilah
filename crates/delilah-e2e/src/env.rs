@@ -147,6 +147,15 @@ pub fn layout(root: &Path, opts: &EnvOptions) -> std::io::Result<()> {
             sh_quote(gh_script().display())
         ),
     )?;
+    // The daemon's one-shot Claude calls (branch name, submodule suggestion): logged
+    // and failed, so the daemon falls back to its own names, at once and the same each run.
+    write_exec(
+        &root.join("bin/claude-oneshot"),
+        &format!(
+            "#!/bin/sh\necho \"claude $*\" >> {}\nexit 1\n",
+            sh_quote(format!("{r}/oneshot.log"))
+        ),
+    )?;
     for (dir, name) in [("tripwire", "claude"), ("tripwire", "gh"), ("tripwire-gh", "gh")] {
         write_exec(
             &root.join(dir).join(name),
@@ -218,6 +227,7 @@ fn daemon_env_from(
         if !opts.no_agent_bin {
             set("DELILAH_AGENT_BIN", format!("{r}/bin/claude-fake"));
         }
+        set("DELILAH_CLAUDE_BIN", format!("{r}/bin/claude-oneshot"));
         set("DELILAH_GH_BIN", format!("{r}/bin/gh-fake"));
     }
     if let Some(origin) = &opts.ui_origin {
@@ -578,7 +588,7 @@ mod tests {
             keys,
             [
                 "DELILAH_ADDR", "DELILAH_AGENT_BIN", "DELILAH_ALLOW_FILE_PROTOCOL",
-                "DELILAH_GH_BIN", "DELILAH_HOME", "DELILAH_JIRA_ALLOW_HTTP_LOOPBACK",
+                "DELILAH_CLAUDE_BIN", "DELILAH_GH_BIN", "DELILAH_HOME", "DELILAH_JIRA_ALLOW_HTTP_LOOPBACK",
                 "DELILAH_NOTIFY", "DELILAH_PR_POLL_SECS", "DELILAH_SECRETS", "HOME", "PATH",
                 "SHELL"
             ]
@@ -589,6 +599,7 @@ mod tests {
         assert_eq!(env["DELILAH_HOME"], "/tmp/x/delilah");
         assert_eq!(env["DELILAH_ADDR"], "127.0.0.1:9999");
         assert_eq!(env["DELILAH_AGENT_BIN"], "/tmp/x/bin/claude-fake");
+        assert_eq!(env["DELILAH_CLAUDE_BIN"], "/tmp/x/bin/claude-oneshot");
         assert_eq!(env["DELILAH_GH_BIN"], "/tmp/x/bin/gh-fake");
         assert_eq!(env["DELILAH_SECRETS"], "memory");
         assert_eq!(env["DELILAH_JIRA_ALLOW_HTTP_LOOPBACK"], "1");

@@ -20,6 +20,7 @@ scripts/preview.sh --no-ui    # API only: DELILAH_URL=http://127.0.0.1:750N targ
 How to use a preview:
 - Run it in the background and stop it with Ctrl-C, or by stopping that process. **Never stop a daemon by name** (`pkill delilahd`): it also kills the user's live agent sessions.
 - Open the UI in a browser. In a preview, register the fixture repos (`fixtures/parent-env/parent` as `parent`, `fixtures/signal` as `repo`) as projects.
+- **Previews of tasks.** A project can have a `preview_command` (project view, or `PATCH /api/v1/projects/{name}` with `preview_command`); the daemon runs it in a task's workspace and takes the first URL it prints. For this repo set it to `scripts/preview.sh`: each task's branch then gets its own preview slot, with the UI URL printed first. These nested previews are stopped with the task or by "Parar", never by name. Autopilot starts it before opening the PR.
 - A Claude launched from a preview is a real session on the user's subscription. Keep those tests few and short.
 
 **Trying PRs with a fake `gh`.** `DELILAH_GH_BIN=$PWD/scripts/fake-gh.sh` makes the daemon call a script that answers from JSON files in `$FAKE_GH_DIR` (`pr-list.json`, `pr-<n>.json`, `repo.json`, `user.json`), so a PR can be opened, failed, reviewed or merged by editing a file. Steps in [specs/003-pr-loop/quickstart.md](../specs/003-pr-loop/quickstart.md).
@@ -51,7 +52,7 @@ scripts/e2e.sh --real-claude    # the smoke test, see below
 
 It builds the daemon, the CLI and the harness first, and ends with `api: PASS (Ns)` / `ui: FAIL (Ns)` (non-zero exit if any failed). The first UI run installs Chromium. On a failing UI test, `app/playwright-report/` has the screenshot, trace and daemon log.
 
-- **Safe with the installed Delilah running.** Each test gets a temp root with its own `HOME`, `DELILAH_HOME`, fixture repos and a free port (never 7420 nor 7501-7509), and the daemon runs with `env -i`. A tripwire `claude`/`gh` first on PATH fails the test if either real binary is ever reached. Nothing touches `~/.delilah`. Never kill a daemon by name here either.
+- **Safe with the installed Delilah running.** Each test gets a temp root with its own `HOME`, `DELILAH_HOME`, fixture repos and a free port (never 7420 nor 7501-7509), and the daemon runs with `env -i`. A tripwire `claude`/`gh` first on PATH fails the test if either real binary is ever reached. The daemon's one-shot Claude calls (`DELILAH_CLAUDE_BIN`: branch name, submodule suggestion) go to `bin/claude-oneshot`, which logs to `<root>/oneshot.log` and fails, so branches get the title-based name (`feature/<KEY>-<title-slug>`). Nothing touches `~/.delilah`. Never kill a daemon by name here either.
 - **Run it before a PR that touches the daemon, the CLI or the UI.** Local only: there is no CI.
 - `DELILAH_E2E_KEEP=1` keeps the temp roots of failed tests (the path is printed). `target/debug/e2e-env start --jira --keep` starts a debug environment: use its printed `api` with `DELILAH_URL=<api> target/debug/delilah ls`, then Ctrl-D.
 - Waits are bounded (`wait_until`, 15 s by default, 30 s at most): fix flakiness by waiting for the condition, never by raising a timeout.

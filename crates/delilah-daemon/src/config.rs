@@ -20,6 +20,9 @@ pub struct Config {
     /// One more browser origin allowed to call the API (`DELILAH_UI_ORIGIN`): the UI
     /// of a preview (`scripts/preview.sh`), served on its own port.
     pub ui_origin: Option<String>,
+    /// The `claude` binary for one-shot calls (`DELILAH_CLAUDE_BIN`, default `claude`);
+    /// tests point it at a fake script.
+    pub claude_bin: PathBuf,
     /// Program to run instead of `claude` (`DELILAH_AGENT_BIN`); only tests set it.
     pub agent_program: Option<PathBuf>,
     /// Program to run instead of `gh` (`DELILAH_GH_BIN`): tests and previews with a fake.
@@ -32,10 +35,18 @@ pub struct Config {
     pub pr_poll: Duration,
 }
 
+/// The binary named by `DELILAH_CLAUDE_BIN`, or `claude` when unset or empty.
+fn claude_bin_from(value: Option<std::ffi::OsString>) -> PathBuf {
+    match value {
+        Some(v) if !v.is_empty() => PathBuf::from(v),
+        _ => PathBuf::from("claude"),
+    }
+}
+
 impl Config {
     /// Reads `DELILAH_HOME` (default `~/.delilah`), `DELILAH_ADDR` (default
     /// 127.0.0.1:7420), `DELILAH_ALLOW_FILE_PROTOCOL=1`, `DELILAH_NOTIFY`,
-    /// `DELILAH_UI_ORIGIN` and the test-only switches `DELILAH_AGENT_BIN`,
+    /// `DELILAH_UI_ORIGIN`, `DELILAH_CLAUDE_BIN` and the test-only switches `DELILAH_AGENT_BIN`,
     /// `DELILAH_SECRETS`, `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK` and `DELILAH_PR_POLL_SECS`.
     pub fn from_env() -> Result<Self, String> {
         Self::from_vars(|k| std::env::var_os(k))
@@ -84,12 +95,14 @@ impl Config {
                 }
             },
         };
+        let claude_bin = claude_bin_from(var_os("DELILAH_CLAUDE_BIN"));
         Ok(Self {
             home,
             addr,
             allow_file_protocol,
             notify,
             ui_origin,
+            claude_bin,
             agent_program,
             gh_program,
             secrets_in_memory,
@@ -129,6 +142,7 @@ impl Config {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: PathBuf::from("claude"),
             agent_program: None,
             gh_program: None,
             secrets_in_memory: false,
@@ -186,6 +200,20 @@ fn is_executable(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_bin_defaults_to_claude() {
+        assert_eq!(claude_bin_from(None), PathBuf::from("claude"));
+        assert_eq!(claude_bin_from(Some("".into())), PathBuf::from("claude"));
+    }
+
+    #[test]
+    fn claude_bin_reads_the_given_path() {
+        assert_eq!(
+            claude_bin_from(Some("/tmp/fake-claude".into())),
+            PathBuf::from("/tmp/fake-claude")
+        );
+    }
 
     #[test]
     fn plugin_dir_is_under_home() {

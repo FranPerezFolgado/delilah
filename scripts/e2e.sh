@@ -12,7 +12,7 @@
 # Exit code is non-zero if any layer failed. Details: specs/005-e2e-tests/quickstart.md.
 set -euo pipefail
 
-unset DELILAH_URL DELILAH_HOME DELILAH_ADDR DELILAH_AGENT_BIN DELILAH_GH_BIN FAKE_GH_DIR
+unset DELILAH_URL DELILAH_HOME DELILAH_ADDR DELILAH_AGENT_BIN DELILAH_CLAUDE_BIN DELILAH_GH_BIN FAKE_GH_DIR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

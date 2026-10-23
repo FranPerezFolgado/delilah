@@ -39,14 +39,19 @@ fn failing_checks_a_review_and_the_merge() {
         if b.contains("feature/E2E-10") { Ok(()) } else { Err(b) }
     });
 
+    // The daemon names the branch (key and title); the PR's head must be that branch.
+    let task = env.api().task("E2E-10");
+    let branch = task["branch"].as_str().unwrap_or_else(|| panic!("no branch: {task}")).to_string();
+    assert!(branch.starts_with("feature/E2E-10"), "{branch}");
+
     // The loop only looks for a branch's PR once the task is in review.
     env.api().set_phase("E2E-10", "review");
-    env.gh.open_pr(1, "feature/E2E-10");
+    env.gh.open_pr(1, &branch);
     // The PR's head is the branch tip, as on GitHub; archiving on merge checks it.
     let tip = Command::new("git")
         .arg("-C")
         .arg(&env.fixtures.repo)
-        .args(["rev-parse", "feature/E2E-10"])
+        .args(["rev-parse", &branch])
         .output()
         .expect("git rev-parse");
     env.gh.set_head(1, String::from_utf8_lossy(&tip.stdout).trim());
@@ -86,6 +91,6 @@ fn failing_checks_a_review_and_the_merge() {
     });
     env.wait_for("the local branch deleted", T, || {
         let b = branches(&env);
-        if b.contains("feature/E2E-10") { Err(b) } else { Ok(()) }
+        if b.contains(&branch) { Err(b) } else { Ok(()) }
     });
 }

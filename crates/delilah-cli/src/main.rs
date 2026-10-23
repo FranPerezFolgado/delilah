@@ -7,8 +7,8 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
-use clap::{Args, Parser, Subcommand};
-use delilah_core::{Event, Project, Task, TaskStatus};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use delilah_core::{AutopilotState, Event, Project, Task, TaskStatus};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::json;
@@ -41,7 +41,7 @@ struct SavingModeFlags {
 }
 
 impl SavingModeFlags {
-    /// `None` when no flag was given: the daemon then reads the preference.
+    /// `None` when no flag was given: the daemon then keeps what the task has.
     fn choice(&self) -> Option<bool> {
         match (self.saving_mode, self.no_saving_mode) {
             (true, _) => Some(true),
@@ -57,6 +57,59 @@ fn with_saving_mode(mut body: serde_json::Value, choice: Option<bool>) -> serde_
         body["saving_mode"] = json!(on);
     }
     body
+}
+
+/// The autopilot choice for a task; neither flag means off for a new task and kept
+/// for an existing one (a backlog task started with `run`).
+/// Autopilot implies saving mode, so `--autopilot` rules out `--no-saving-mode`.
+#[derive(Args)]
+struct AutopilotFlags {
+    /// Let the agent answer its own questions with the recommended option and carry on to the PR (implies saving mode).
+    #[arg(long, conflicts_with_all = ["no_autopilot", "no_saving_mode"])]
+    autopilot: bool,
+    /// Run the task without autopilot, also clearing one stored on a backlog task.
+    #[arg(long)]
+    no_autopilot: bool,
+}
+
+impl AutopilotFlags {
+    /// `None` when no flag was given: the daemon then keeps what the task has.
+    fn choice(&self) -> Option<bool> {
+        match (self.autopilot, self.no_autopilot) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// Adds `autopilot` to a request body only when the user chose it.
+fn with_autopilot(mut body: serde_json::Value, choice: Option<bool>) -> serde_json::Value {
+    if let Some(on) = choice {
+        body["autopilot"] = json!(on);
+    }
+    body
+}
+
+/// What `delilah autopilot <KEY>` does.
+#[derive(Clone, Copy, ValueEnum)]
+enum AutopilotAction {
+    /// Turns autopilot on for the task.
+    On,
+    /// Turns autopilot off for the task.
+    Off,
+    /// Resumes an autopilot paused for a permission or a question it could not answer.
+    Resume,
+}
+
+impl AutopilotAction {
+    fn name(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Resume => "resume",
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -88,6 +141,8 @@ enum Command {
         workflow: Option<String>,
         #[command(flatten)]
         saving: SavingModeFlags,
+        #[command(flatten)]
+        autopilot: AutopilotFlags,
     },
     /// Shows a task and its history.
     Show { key: String },
@@ -109,7 +164,8 @@ enum Command {
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
-        /// Defaults to feature/<KEY>.
+        /// Defaults to a name Claude proposes from the title (feature/…); a typed one is
+        /// normalised and made unique.
         #[arg(long)]
         branch: Option<String>,
         /// First prompt; defaults to `/feature <KEY>`.
@@ -120,11 +176,18 @@ enum Command {
         attach: bool,
         #[command(flatten)]
         saving: SavingModeFlags,
+        #[command(flatten)]
+        autopilot: AutopilotFlags,
     },
     /// Opens the live terminal of a task's agent (Ctrl-] detaches).
     Attach { key: String },
     /// Resumes a task paused by the usage limit now, without waiting for the reset.
     Resume { key: String },
+    /// Turns a task's autopilot on or off, or resumes it when paused.
+    Autopilot {
+        key: String,
+        action: AutopilotAction,
+    },
     /// Marks a task as done and stops its agent.
     Done { key: String },
     /// Removes the workspace of a finished task (a worktree is kept while work is
@@ -256,18 +319,22 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             checkout,
             workflow,
             saving,
+            autopilot,
         } => {
             if key.is_none() && !free {
                 return Err("say the ticket's KEY, or --free for a task without one".into());
             }
             let task: Task = api.post(
                 "/api/v1/tasks",
-                &with_saving_mode(
-                    json!({
-                        "key": key.unwrap_or_default(), "title": title, "project": project,
-                        "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
-                    }),
-                    saving.choice(),
+                &with_autopilot(
+                    with_saving_mode(
+                        json!({
+                            "key": key.unwrap_or_default(), "title": title, "project": project,
+                            "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
+                        }),
+                        saving.choice(),
+                    ),
+                    autopilot.choice(),
                 ),
             )?;
             println!(
@@ -306,16 +373,20 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             prompt,
             attach,
             saving,
+            autopilot,
         } => {
             let task: Task = api.post(
                 "/api/v1/runs",
-                &with_saving_mode(
-                    json!({
-                        "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
-                        "workflow": workflow,
-                        "submodules": submodules, "branch": branch, "prompt": prompt,
-                    }),
-                    saving.choice(),
+                &with_autopilot(
+                    with_saving_mode(
+                        json!({
+                            "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
+                            "workflow": workflow,
+                            "submodules": submodules, "branch": branch, "prompt": prompt,
+                        }),
+                        saving.choice(),
+                    ),
+                    autopilot.choice(),
                 ),
             )?;
             println!(
@@ -333,6 +404,13 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         Command::Resume { key } => {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/resume"), &json!({}))?;
             println!("{} is {} again.", task.key, status_label(&task.status));
+        }
+        Command::Autopilot { key, action } => {
+            let task: Task = api.post(
+                &format!("/api/v1/tasks/{key}/autopilot"),
+                &json!({ "action": action.name() }),
+            )?;
+            println!("{}: autopilot {}", task.key, autopilot_label(&task));
         }
         Command::Done { key } => {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/done"), &json!({}))?;
@@ -414,6 +492,19 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The autopilot of a task as the daemon reports it: "off", "on (running)", "paused: why"…
+fn autopilot_label(task: &Task) -> String {
+    let Some(a) = &task.autopilot else {
+        return "off".into();
+    };
+    match (a.state, &a.reason) {
+        (AutopilotState::Running, _) => "on (running)".into(),
+        (AutopilotState::Paused, Some(reason)) => format!("paused ({reason})"),
+        (AutopilotState::Paused, None) => "paused".into(),
+        (AutopilotState::Done, _) => "on (done)".into(),
+    }
 }
 
 fn status_label(status: &TaskStatus) -> String {
@@ -528,5 +619,88 @@ mod tests {
         assert!(with_saving_mode(body(), None).get("saving_mode").is_none());
         assert_eq!(with_saving_mode(body(), Some(true))["saving_mode"], true);
         assert_eq!(with_saving_mode(body(), Some(false))["saving_mode"], false);
+    }
+
+    fn autopilot_choice(args: &[&str]) -> Result<Option<bool>, clap::Error> {
+        let mut argv = vec!["delilah"];
+        argv.extend_from_slice(args);
+        Cli::try_parse_from(argv).map(|cli| match cli.command {
+            Command::New { autopilot, .. } | Command::Run { autopilot, .. } => autopilot.choice(),
+            _ => panic!("not new or run"),
+        })
+    }
+
+    #[test]
+    fn autopilot_flags_on_new_and_run() {
+        let new = ["new", "K-1", "--title", "t", "--project", "p"];
+        let run = ["run", "K-1"];
+        for base in [&new[..], &run[..]] {
+            let with = |flag: &'static str| [base, &[flag]].concat();
+            assert_eq!(autopilot_choice(base).unwrap(), None);
+            assert_eq!(autopilot_choice(&with("--autopilot")).unwrap(), Some(true));
+            assert_eq!(
+                autopilot_choice(&with("--no-autopilot")).unwrap(),
+                Some(false)
+            );
+            assert!(
+                autopilot_choice(&[base, &["--autopilot", "--no-autopilot"]].concat()).is_err()
+            );
+            assert!(
+                autopilot_choice(&[base, &["--autopilot", "--no-saving-mode"]].concat()).is_err()
+            );
+            // Autopilot off is fine without saving mode.
+            assert_eq!(
+                autopilot_choice(&[base, &["--no-autopilot", "--no-saving-mode"]].concat())
+                    .unwrap(),
+                Some(false)
+            );
+        }
+    }
+
+    #[test]
+    fn autopilot_is_sent_only_when_chosen() {
+        let body = || json!({"key": "K-1"});
+        assert!(with_autopilot(body(), None).get("autopilot").is_none());
+        assert_eq!(with_autopilot(body(), Some(true))["autopilot"], true);
+        assert_eq!(with_autopilot(body(), Some(false))["autopilot"], false);
+    }
+
+    #[test]
+    fn autopilot_label_reads_the_returned_state() {
+        use delilah_core::Autopilot;
+        let mut task = Task::new(delilah_core::TaskKey::new("K-1"), "t", "feature");
+        assert_eq!(autopilot_label(&task), "off");
+        let mut a = Autopilot {
+            state: AutopilotState::Running,
+            stage: None,
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+            review_session: None,
+        };
+        task.autopilot = Some(a.clone());
+        assert_eq!(autopilot_label(&task), "on (running)");
+        a.state = AutopilotState::Paused;
+        task.autopilot = Some(a.clone());
+        assert_eq!(autopilot_label(&task), "paused");
+        a.reason = Some("a question".into());
+        task.autopilot = Some(a);
+        assert_eq!(autopilot_label(&task), "paused (a question)");
+    }
+
+    #[test]
+    fn autopilot_subcommand_takes_on_off_resume() {
+        for word in ["on", "off", "resume"] {
+            let cli = Cli::try_parse_from(["delilah", "autopilot", "K-1", word]).unwrap();
+            match cli.command {
+                Command::Autopilot { key, action } => {
+                    assert_eq!(key, "K-1");
+                    assert_eq!(action.name(), word);
+                }
+                _ => panic!("not autopilot"),
+            }
+        }
+        assert!(Cli::try_parse_from(["delilah", "autopilot", "K-1", "maybe"]).is_err());
+        assert!(Cli::try_parse_from(["delilah", "autopilot", "K-1"]).is_err());
     }
 }
