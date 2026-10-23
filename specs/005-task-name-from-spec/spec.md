@@ -95,17 +95,17 @@ archive it.
 
 ### Functional Requirements
 
-- **FR-001**: Starting a free task MUST NOT create a branch for it; its workspace (checkout or worktree) starts on the project's base branch commit. The worktree folder's name is not constrained.
+- **FR-001**: Starting a free task MUST NOT create a branch for it; its workspace (checkout or worktree) starts at the commit today's branch would have started from (the project folder's current `HEAD`). The worktree folder's name is not constrained.
 - **FR-002**: The task's branch MUST be created by the first analysis (specify), and Delilah MUST detect it and the analysis from the repo itself (spec folder and git state), in both checkout and worktree mode, for repo and parent projects.
 - **FR-002a**: When the first spec folder appears and the workspace still has no branch (the project has no branch hook, or it is off), Delilah MUST create the branch itself with the spec folder's name, carrying over the uncommitted spec files.
 - **FR-003**: On that detection, Delilah MUST set the task's title to the feature name of the analysis, keep the previous title, and show the change on every view of the task without a restart.
 - **FR-004**: The user MUST be able to restore the previous title, and to edit the title of a running task by hand.
 - **FR-005**: The automatic rename MUST happen at most once per task, and never after the user has edited the title by hand following it.
-- **FR-006**: After the analysis, every repo of the task MUST be on a branch named like the analysis' spec folder (`NNN-short-name`), and the task's workspace record MUST name that branch. The task's key MUST NOT appear in it.
+- **FR-006**: After the analysis, every repo of the task MUST be on the branch the analysis created (or, when Delilah creates it, one named like the spec folder, `NNN-short-name`), and the task's workspace record MUST name that branch. The task's key MUST NOT appear in it.
 - **FR-007**: Before a descriptive branch exists, no change of the task MUST be committed to the project's base branch; if work begins without an analysis (the session's first edit of a file outside `specs/`), Delilah MUST give the task a branch named from its current title first.
 - **FR-008**: Once the task has a branch, it MUST NOT change: later analyses don't create or rename branches for it.
 - **FR-009**: The running session MUST NOT be interrupted or moved: the branch appears inside the workspace it is already working in.
-- **FR-010**: Name collisions with existing branches MUST be resolved with a free variant, never by reusing or overwriting.
+- **FR-010**: Name collisions with existing branches MUST be resolved with a free variant (a `-2`, `-3`… suffix), never by reusing or overwriting.
 - **FR-011**: Failing to apply the branch to a repo of the task MUST leave the task working where it was, and raise a Bandeja item with a retry; the title update does not depend on it.
 - **FR-012**: The task's key MUST stay the same: URLs, the CLI, the task's notes folder and its history keep using it.
 - **FR-013**: Tasks with a Jira key MUST keep today's behaviour (title from the ticket, branch `feature/<KEY>`).
