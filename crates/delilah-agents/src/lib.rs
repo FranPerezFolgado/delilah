@@ -7,3 +7,4 @@ pub mod limits;
 pub mod oneshot;
 pub mod pty;
 pub mod suggest;
+pub mod transcript;

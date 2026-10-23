@@ -56,7 +56,7 @@
 **Purpose**: separate idea-only logic from the composer, and the tolerant parser every story uses. No behaviour change.
 
 - [ ] T005 Move idea-conversation-only logic out of `crates/delilah-daemon/src/conversation.rs` into a new `crates/delilah-daemon/src/idea.rs`: the Nueva tarea / proposal card handling, the read-only flag and their hook handling. Rename `Live::is_conversation`/`set_conversation` in `crates/delilah-daemon/src/sessions.rs` to `is_idea`/`set_idea`, and update every caller. Pure move: every existing test passes unchanged (moved with its code).
-- [ ] T006 [P] Write the fixtures in `crates/delilah-agents/tests/fixtures/transcripts/`:
+- [X] T006 [P] Write the fixtures in `crates/delilah-agents/tests/fixtures/transcripts/`:
   - `basic.jsonl`: user prompt, assistant text, Bash `tool_use` + `tool_result`, Edit with old/new strings, Read, Grep, TodoWrite, final text;
   - `unknown.jsonl`: unknown line `type`, unknown content block type, extra fields everywhere;
   - `partial.jsonl`: the last line without `\n` and cut mid-JSON;
@@ -65,7 +65,7 @@
   - `large.jsonl`: a 20 KB tool result, and an image block;
   - `ask.jsonl`: an AskUserQuestion `tool_use` + result;
   - `pending.jsonl`: a `tool_use` with no result yet.
-- [ ] T007 Write failing tests in a new `crates/delilah-agents/src/transcript.rs` (tests module) over the T006 fixtures:
+- [X] T007 Write failing tests in a new `crates/delilah-agents/src/transcript.rs` (tests module) over the T006 fixtures:
   - `parse(bytes, from_offset) -> Parsed { entries, next_offset, skipped }` returns, for `basic`, the ordered kinds `user, claude, tool(Bash), tool(Edit), tool(Read), tool(Grep), tool(TodoWrite), claude`, with ids `t:<uuid>:<n>` and RFC 3339 `at`;
   - the Bash tool has `summary` (command or description), `result` and `is_error`;
   - the Edit tool has `path`, and `diff` rows `{kind: add|del|ctx|hunk, old, new, text}` with the right +/- counts;
@@ -77,7 +77,7 @@
   - `pending` gives a tool with `result: null`;
   - `ask` gives `tool(AskUserQuestion)` with `tool_use_id`;
   - `parse_message(&Value)` (the shared R3 mapping over a `message` object) gives the same entries for one line's `message`.
-- [ ] T008 Implement T007 in `crates/delilah-agents/src/transcript.rs`, and export it from `crates/delilah-agents/src/lib.rs`:
+- [X] T008 Implement T007 in `crates/delilah-agents/src/transcript.rs`, and export it from `crates/delilah-agents/src/lib.rs`:
   - `Entry` types (serde, API shape per data-model.md);
   - `parse`, `parse_message`;
   - per-tool summaries;

@@ -121,23 +121,7 @@ pub struct Launch<'a> {
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
 /// whether `--resume` will find it: a session closed before its first message has none.
 pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
-        return false;
-    };
-    let dir = workspace
-        .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf());
-    // Claude names a project's folder after its path, every other character a dash.
-    let folder: String = dir
-        .to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    Path::new(&home)
-        .join(".claude/projects")
-        .join(folder)
-        .join(format!("{session_id}.jsonl"))
-        .is_file()
+    crate::transcript::transcript_path(workspace, session_id).is_some_and(|path| path.is_file())
 }
 
 pub fn command(launch: &Launch) -> CommandBuilder {

@@ -8,7 +8,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01 | 1 | 1A | done | 1 | a7118d8 | |
 | WP-02 | 2 | 2A | implementing | 1 | | T002 done; waiting for the user to run the scenarios (T003/T004) |
 | WP-03 | 3 | 3A | implementing | 0 | | |
-| WP-04 | 3 | 3A | implementing | 0 | | |
+| WP-04 | 3 | 3A | verified | 1 | | |
 | WP-05 | 4 | 4A | pending | 0 | | |
 | WP-06 | 4 | 4B | pending | 0 | | |
 | WP-07 | 4 | 4B | pending | 0 | | |
