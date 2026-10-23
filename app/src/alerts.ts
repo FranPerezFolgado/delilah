@@ -20,8 +20,7 @@ const SAYS: Record<InboxKind, string> = {
   "pr-failed": "CI falló",
   "pr-review": "comentarios en la PR",
   "pr-blocked": "no se pudo archivar",
-  branch: "no se pudo crear la rama",
-  autopilot: "autopiloto en pausa",
+  "base-stale": "rama posiblemente atrasada",
 };
 
 /** Coming back later than this does not jump anywhere: it is no longer "the" news. */

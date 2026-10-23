@@ -356,6 +356,7 @@ export function App() {
                   project={project}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
+                  notices={inbox.filter((i) => i.task === owner && i.kind === "base-stale")}
                   askPosition={askPosition}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
