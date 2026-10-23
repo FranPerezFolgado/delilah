@@ -7,21 +7,25 @@ const platform = vi.hoisted(() => ({
   appVersion: vi.fn(),
   checkForUpdate: vi.fn(),
   relaunch: vi.fn(),
+  onCheckUpdatesMenu: vi.fn(),
 }));
 vi.mock("./platform", () => platform);
 const api = vi.hoisted(() => ({ sessions: vi.fn() }));
 vi.mock("./api", () => ({ api }));
 
+import { setLanguage } from "./i18n";
 import { useUpdates } from "./useUpdates";
 
 const flush = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
 beforeEach(() => {
+  setLanguage("es");
   vi.useFakeTimers();
   platform.canUpdate = true;
   platform.appVersion.mockReset().mockResolvedValue("1.0.0");
   platform.checkForUpdate.mockReset().mockResolvedValue(null);
   platform.relaunch.mockReset().mockResolvedValue(undefined);
+  platform.onCheckUpdatesMenu.mockReset().mockResolvedValue(() => {});
   api.sessions.mockReset().mockResolvedValue([]);
 });
 afterEach(() => {
@@ -162,8 +166,65 @@ describe("useUpdates", () => {
       api.sessions.mockRejectedValue(new Error("down"));
       const { result, install } = await offered();
       await request(result);
-      expect(result.current.state.kind).toBe("available");
+      expect(result.current.state).toMatchObject({ kind: "error", reason: "down", version: "1.1.0" });
       expect(install).not.toHaveBeenCalled();
+    });
+
+    it("retrying after that failure asks for the sessions again", async () => {
+      api.sessions.mockRejectedValue(new Error("down"));
+      const { result, install } = await offered();
+      await request(result);
+      api.sessions.mockResolvedValue([sess(true)]);
+      await act(async () => { result.current.dispatch({ type: "retry" }); });
+      await flush();
+      expect(result.current.state).toMatchObject({ kind: "confirmSessions", running: 1 });
+      expect(install).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("manual checks and the menu", () => {
+    const menu = async () => {
+      const hook = renderHook(() => useUpdates());
+      await flush();
+      const cb = platform.onCheckUpdatesMenu.mock.calls[0][0] as () => void;
+      return { ...hook, cb };
+    };
+
+    it("the menu runs a manual check", async () => {
+      const { result, cb } = await menu();
+      await act(async () => { cb(); });
+      await flush();
+      expect(platform.checkForUpdate).toHaveBeenCalledTimes(1);
+      expect(result.current.state).toEqual({ kind: "upToDate", manual: true });
+    });
+
+    it("the menu in a build without updates answers with an error", async () => {
+      platform.canUpdate = false;
+      const { result, cb } = await menu();
+      await act(async () => { cb(); });
+      expect(platform.checkForUpdate).not.toHaveBeenCalled();
+      expect(result.current.state).toMatchObject({ kind: "error", reason: "Las actualizaciones solo están en la app instalada" });
+    });
+
+    it("unsubscribes from the menu on unmount", async () => {
+      const unlisten = vi.fn();
+      platform.onCheckUpdatesMenu.mockResolvedValue(unlisten);
+      const { unmount } = await menu();
+      unmount();
+      await flush();
+      expect(unlisten).toHaveBeenCalled();
+    });
+
+    it("retry after a failed manual check checks again", async () => {
+      platform.checkForUpdate.mockRejectedValueOnce(new Error("red")).mockResolvedValue(null);
+      const { result } = renderHook(() => useUpdates());
+      await flush();
+      await act(async () => { await result.current.check(true); });
+      expect(result.current.state).toMatchObject({ kind: "error", reason: "red" });
+      await act(async () => { result.current.dispatch({ type: "retry" }); });
+      await flush();
+      expect(platform.checkForUpdate).toHaveBeenCalledTimes(2);
+      expect(result.current.state.kind).toBe("upToDate");
     });
   });
 });

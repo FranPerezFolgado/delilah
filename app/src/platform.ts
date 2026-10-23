@@ -91,7 +91,8 @@ export async function relaunch(): Promise<void> {
 
 /** Calls `cb` when the menu item "Buscar actualizaciones…" is chosen; returns the unlisten. */
 export async function onCheckUpdatesMenu(cb: () => void): Promise<() => void> {
-  if (!canUpdate) return () => {};
+  // Gated on the desktop shell, not canUpdate: in `tauri dev` the menu still answers.
+  if (!isDesktop) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen("check-updates", () => cb());
 }

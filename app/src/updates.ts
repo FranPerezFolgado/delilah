@@ -10,7 +10,7 @@ export type UpdateState =
   | { kind: "waiting"; version: string; notes: string; running: number }
   | { kind: "downloading"; version: string; received: number; total: number | null }
   | { kind: "installing"; version: string }
-  | { kind: "error"; reason: string; manual: boolean; version?: string };
+  | { kind: "error"; reason: string; manual: boolean; version?: string; notes?: string; stage?: "sessions" };
 
 export interface UpdateMeta {
   installed: string;
@@ -25,6 +25,10 @@ export type UpdateEvent =
   | { type: "found"; version: string; notes: string }
   | { type: "none" }
   | { type: "failure"; reason: string }
+  /** The session count could not be read when the user asked to update: nothing is installed. */
+  | { type: "sessionsFailed"; reason: string }
+  /** A manual check in a build that cannot update (dev, browser). */
+  | { type: "unavailable"; reason: string }
   | { type: "later" }
   | { type: "update"; running: number }
   | { type: "now" }
@@ -86,6 +90,16 @@ export function reduce(state: UpdateState, meta: UpdateMeta, event: UpdateEvent,
       }
       return same;
 
+    case "sessionsFailed":
+      if (state.kind !== "available") return same;
+      return to({
+        kind: "error", reason: event.reason, manual: true, version: state.version, notes: state.notes, stage: "sessions",
+      });
+
+    case "unavailable":
+      if (!["idle", "upToDate", "error"].includes(state.kind)) return same;
+      return to({ kind: "error", reason: event.reason, manual: true });
+
     case "later":
       if (state.kind !== "available") return same;
       return to({ kind: "idle" }, { ...meta, dismissed: state.version });
@@ -124,6 +138,8 @@ export function reduce(state: UpdateState, meta: UpdateMeta, event: UpdateEvent,
 
     case "retry":
       if (state.kind !== "error" || !state.version) return same;
+      // The sessions were never counted: back to the offer, so they are asked for again.
+      if (state.stage === "sessions") return to({ kind: "available", version: state.version, notes: state.notes ?? "" });
       return to(downloading(state.version));
 
     case "installed":

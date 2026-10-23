@@ -464,4 +464,12 @@ export const EN: Record<string, string> = {
   "Se actualizará cuando terminen {n} sesiones": "It will update when {n} sessions finish",
   "Buscando actualizaciones…": "Checking for updates…",
   "Delilah está al día": "Delilah is up to date",
+  "Delilah está al día ({version})": "Delilah is up to date ({version})",
+  "Las actualizaciones solo están en la app instalada": "Updates are only available in the installed app",
+  "Actualizaciones": "Updates",
+  "Versión {version}": "Version {version}",
+  "Última comprobación: {time}": "Last check: {time}",
+  "Buscar ahora": "Check now",
+  "Hay una versión nueva": "A new version is available",
+  "falló": "failed",
 };

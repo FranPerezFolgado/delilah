@@ -247,10 +247,10 @@
   - on click, `app.emit_to("main", "check-updates", ())`.
   - The item exists in debug builds too; the UI answers it (T034).
   - Run `cargo check` in debug and release.
-- [ ] T033 [P] [US4] Write tests in `app/src/components/SettingsView.test.tsx` (new file, or the existing one if present) for the "Actualizaciones" section, given `updates` props:
+- [X] T033 [P] [US4] Write tests in `app/src/components/SettingsView.test.tsx` (new file, or the existing one if present) for the "Actualizaciones" section, given `updates` props:
   - it shows "Versión {installed}", "Última comprobación: {time}" (or "Todavía no") with its result, and a "Buscar ahora" button that calls `check(true)`;
   - with `canUpdate=false`, it shows "Las actualizaciones solo están en la app instalada" and no button.
-- [ ] T034 [US4] Implement it:
+- [X] T034 [US4] Implement it:
   - add the section to `app/src/components/SettingsView.tsx` (new optional prop `updates?: {meta, canUpdate, check}` passed from `App.tsx`);
   - in `useUpdates.ts`, subscribe to `onCheckUpdatesMenu(() => check(true))`;
   - when `!canUpdate` and the menu fires, dispatch an `error` with the "solo en la app instalada" text so dev builds answer.
@@ -264,7 +264,7 @@
 
 ## Phase 7: Polish & cross-cutting
 
-- [ ] T035 [P] Rewrite `docs/development.md` "Releasing":
+- [X] T035 [P] Rewrite `docs/development.md` "Releasing":
   - bump on the branch per CLAUDE.md, merge, then `make release` on `main` (or `BUMP=` / `VERSION=` / `MESSAGE=`), and what the workflow does;
   - `make release-dry-run`;
   - one-time setup: key generation, `gh secret set` both secrets as `FranPerezFolgado`, a key backup and why, and making sure the repo is public;
@@ -272,16 +272,16 @@
   - that `npm run dist` now needs the signing env;
   - `$DELILAH_HOME/backups/` and how to restore a copy by hand.
   - Add a Gotchas bullet: no updater in dev builds.
-- [ ] T036 [P] Update `docs/architecture.md`: an "Updates" subsection (who checks, the state machine in `updates.ts`, the relaunch → existing daemon restart → plugin rewrite → migrations), the new files `version` and `backups/` in the data section, and `.github/workflows/release.yml` and `Makefile` in the layout.
-- [ ] T037 [P] Add decisions to `docs/decisions.md`, dated 2026-10-24 and numbered after the last one:
+- [X] T036 [P] Update `docs/architecture.md`: an "Updates" subsection (who checks, the state machine in `updates.ts`, the relaunch → existing daemon restart → plugin rewrite → migrations), the new files `version` and `backups/` in the data section, and `.github/workflows/release.yml` and `Makefile` in the layout.
+- [X] T037 [P] Add decisions to `docs/decisions.md`, dated 2026-10-24 and numbered after the last one:
   - Tauri updater with GitHub Releases on the public repo;
   - user-confirmed updates with the session warning ("Cuando terminen");
   - release on tag push in GitHub Actions, the key in repository secrets, and `make release` as the manual entry point;
   - no Apple signing or notarisation for now;
   - the best-effort DB copy before migrations.
   - Include what was ruled out (Sparkle, a private repo with a token, a local-only script, a silent update).
-- [ ] T038 [P] Update `docs/status.md` (built: auto-update; pending: the maintainer's T005 and the first tagged release) and `README.md` (a section "Actualizaciones": the notice, "Cuando terminen", the menu item, Settings, and that dev builds don't update).
-- [ ] T039 [P] In `CLAUDE.md` "Versioning", change "Tagging and building stay as in the release steps" to point at `make release` and the tag workflow in docs/development.md. The per-branch bump rule stays.
+- [X] T038 [P] Update `docs/status.md` (built: auto-update; pending: the maintainer's T005 and the first tagged release) and `README.md` (a section "Actualizaciones": the notice, "Cuando terminen", the menu item, Settings, and that dev builds don't update).
+- [X] T039 [P] In `CLAUDE.md` "Versioning", change "Tagging and building stay as in the release steps" to point at `make release` and the tag workflow in docs/development.md. The per-branch bump rule stays.
 - [ ] T040 Version bump, **minor** (new user-facing feature): re-check the version on `main` (`git show main:Cargo.toml | grep ^version`), then bump from it, 0.4.0 → 0.5.0 if unchanged. Edit the four files (use `writeVersions` from `scripts/release/versions.mjs`), refresh the lockfiles (`cargo check --workspace`, `cargo check --manifest-path app/src-tauri/Cargo.toml`, `cd app && npm install --package-lock-only`), and commit them on their own as `chore: bump version to 0.5.0`.
 - [ ] T041 Full checks: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cargo check --release --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`, `node --test scripts/release/`. Run quickstart "In a preview" (Settings section, DB copies with the fake `version` marker) with `scripts/preview.sh --fresh` in the background, and stop it by its process, never by name.
 - [ ] T042 PR description:

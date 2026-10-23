@@ -85,4 +85,16 @@ describe("UpdateNotice", () => {
     setup({ kind: "error", reason: "x", manual: true, version: "1.2.0" });
     expect(screen.queryByText("No se pudo buscar actualizaciones: x")).toBeNull();
   });
+
+  it("says up to date with the installed version", () => {
+    const dispatch = vi.fn();
+    render(<UpdateNotice state={{ kind: "upToDate", manual: true }} installed="1.2.0" dispatch={dispatch} />);
+    expect(screen.getByText("Delilah está al día (1.2.0)")).toBeTruthy();
+  });
+
+  it("offers Reintentar on a failed manual check too", () => {
+    const { dispatch } = setup({ kind: "error", reason: "sin red", manual: true });
+    fireEvent.click(screen.getByText("Reintentar"));
+    expect(dispatch).toHaveBeenCalledWith({ type: "retry" });
+  });
 });

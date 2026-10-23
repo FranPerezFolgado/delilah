@@ -6,10 +6,12 @@ import { Markdown } from "./Markdown";
 interface Props {
   state: UpdateState;
   dispatch: (event: UpdateIntent) => void;
+  /** The installed version, shown when up to date. */
+  installed?: string;
 }
 
 /** A slim, non-blocking banner for the update flow; nothing when idle. */
-export function UpdateNotice({ state, dispatch }: Props) {
+export function UpdateNotice({ state, dispatch, installed }: Props) {
   const [notesOpen, setNotesOpen] = useState(false);
 
   switch (state.kind) {
@@ -21,7 +23,7 @@ export function UpdateNotice({ state, dispatch }: Props) {
     case "upToDate":
       return (
         <div className="notice update-notice">
-          <span>{t("Delilah está al día")}</span>
+          <span>{installed ? t("Delilah está al día ({version})", { version: installed }) : t("Delilah está al día")}</span>
           <span className="grow" />
           <button className="btn btn-ghost" onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</button>
         </div>
@@ -62,7 +64,7 @@ export function UpdateNotice({ state, dispatch }: Props) {
           <span className="c-err">●</span>
           <span>{state.version ? t("No se pudo actualizar: {reason}", { reason: state.reason }) : t("No se pudo buscar actualizaciones: {reason}", { reason: state.reason })}</span>
           <span className="grow" />
-          {state.version && <button className="btn btn-p" onClick={() => dispatch({ type: "retry" })}>{t("Reintentar")}</button>}
+          <button className="btn btn-p" onClick={() => dispatch({ type: "retry" })}>{t("Reintentar")}</button>
           <button className="btn btn-ghost" onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</button>
         </div>
       );

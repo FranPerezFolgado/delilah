@@ -16,6 +16,7 @@ import { SettingsView } from "./components/SettingsView";
 import { Sidebar, type View } from "./components/Sidebar";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { useUpdates } from "./useUpdates";
+import { canUpdate } from "./platform";
 import { StatusBar } from "./components/StatusBar";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
 
@@ -297,7 +298,7 @@ export function App() {
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
         <main>
-          <UpdateNotice state={updates.state} dispatch={updates.dispatch} />
+          <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
           {!online && (
             <div className="notice" style={{ margin: 12, borderColor: "var(--err)" }}>
               <span className="c-err">●</span>
@@ -392,6 +393,7 @@ export function App() {
                 });
               }}
               onChange={applyBindings}
+              updates={{ meta: updates.meta, canUpdate, check: updates.check }}
               language={language}
               onLanguage={(l) => {
                 applyLanguage(l);

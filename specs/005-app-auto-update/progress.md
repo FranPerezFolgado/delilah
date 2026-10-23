@@ -10,15 +10,15 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-03 | 3 | 3A | done | 1 | 250d869 | marker sanitised to plain token |
 | WP-04 | 3 | 3A | done | 1 | c7f4f28 | "Actualizar" already = "Refresh" in en.ts (open question) |
 | WP-05 | 3 | 3A | done | 1 | 064cff2 | |
-| WP-06 | 4 | 4A | verified | 1 | eb234eb | run tests with `node --test scripts/release/*.test.mjs` |
-| WP-07 | 4 | 4B | verified | 1 | 6f180c0 | actionlint/shellcheck not installed; workflow + dist build untried |
-| WP-08 | 4 | 4B | verified | 1 | bc81cfb | lockfiles via cargo metadata (sidecar-free); bare-remote trial OK |
-| WP-09 | 5 | 5A | verified | 1 | ecd1ee8 | + phase 3 MEDIUM fixes; i18n option 2 (refresh buttons → "Refrescar", since "Recargar" = Reload exists) |
+| WP-06 | 4 | 4A | done | 1 | eb234eb | run tests with `node --test scripts/release/*.test.mjs` |
+| WP-07 | 4 | 4B | done | 1 | 6f180c0 | actionlint/shellcheck not installed; workflow + dist build untried |
+| WP-08 | 4 | 4B | done | 1 | bc81cfb | lockfiles via cargo metadata (sidecar-free); bare-remote trial OK |
+| WP-09 | 5 | 5A | done | 1 | ecd1ee8 | + phase 3 MEDIUM fixes; i18n option 2 (refresh buttons → "Refrescar", since "Recargar" = Reload exists) |
 | WP-10 | 6 | 6A | verified | 1 | c9865fc | also shows+focuses main window before emit |
-| WP-11 | 6 | 6A | pending | 0 | | |
-| WP-12 | 7 | 7A | pending | 0 | | |
+| WP-11 | 6 | 6A | verified | 1 | | + phase 5 P1/P2 (sessionsFailed, unavailable events) |
+| WP-12 | 7 | 7A | implementing | 0 | | |
 | WP-08F | 4 | fix | done | 1 | 0751083 | phase 4 HIGH fixes + F5–F7; --target skipped |
-| WP-08F2 | 4 | fix | verified | 1 | | tauri-action draft writes untagged-* URLs → own latest.json |
+| WP-08F2 | 4 | fix | done | 1 | 768623e | tauri-action draft writes untagged-* URLs → own latest.json |
 | WP-13 | 7 | 7B | pending | 0 | | |
 
 T005 (updater key + secrets) is maintainer-only: left to the user.
@@ -60,3 +60,7 @@ T005 (updater key + secrets) is maintainer-only: left to the user.
 | 4 | contract | HIGH | CI ships tauri-action latest.json unvalidated (draft URLs?) → fix WP-08F | .github/workflows/release.yml |
 | 4 | spec | MEDIUM | no tests for CLI/git side → notes CLI test in WP-08F | scripts/release/ |
 | 4 | spec | LOW | pickNotes test passes an ignored 3rd arg; gh release list default limit 30 | scripts/release/notes.test.mjs |
+| 5 | spec | MEDIUM | api.sessions() failure on clicking Update is silent → folded into WP-11 | app/src/useUpdates.ts |
+| 5 | spec | LOW | failed manual check has no "Reintentar" → folded into WP-11 | app/src/components/UpdateNotice.tsx |
+| 5 | spec | LOW | shell terminals counted as running sessions (deliberate: restart stops them) → record in decisions (WP-12) | app/src/useUpdates.ts |
+| 5 | spec | LOW | untested: install run-once guard on re-render, retry re-installs | app/src/useUpdates.test.ts |

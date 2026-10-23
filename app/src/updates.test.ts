@@ -163,3 +163,33 @@ describe("installed", () => {
     expect(r.meta.installed).toBe("0.4.1");
   });
 });
+
+describe("sessionsFailed", () => {
+  it("turns an offer into an error that keeps the version, and never downloads", () => {
+    const r = run(avail, { type: "sessionsFailed", reason: "down" });
+    expect(r.state).toEqual({ kind: "error", reason: "down", manual: true, version: "0.5.0", notes: "n", stage: "sessions" });
+  });
+
+  it("retry goes back to the offer rather than downloading", () => {
+    const e = run(avail, { type: "sessionsFailed", reason: "down" }).state;
+    expect(run(e, { type: "retry" }).state).toEqual(avail);
+  });
+
+  it("is ignored outside an offer", () => {
+    const s: UpdateState = { kind: "idle" };
+    expect(run(s, { type: "sessionsFailed", reason: "x" }).state).toBe(s);
+  });
+});
+
+describe("unavailable", () => {
+  it("shows an error from idle, without touching the last check", () => {
+    const r = run({ kind: "idle" }, { type: "unavailable", reason: "solo instalada" });
+    expect(r.state).toEqual({ kind: "error", reason: "solo instalada", manual: true });
+    expect(r.meta.lastCheck).toBeNull();
+  });
+
+  it("is ignored while busy", () => {
+    const s: UpdateState = { kind: "installing", version: "0.5.0" };
+    expect(run(s, { type: "unavailable", reason: "x" }).state).toBe(s);
+  });
+});

@@ -2,7 +2,8 @@
 // download and the relaunch. The decisions live in the pure reducer (updates.ts).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { appVersion, canUpdate, checkForUpdate, relaunch, type FoundUpdate } from "./platform";
+import { t } from "./i18n";
+import { appVersion, canUpdate, checkForUpdate, onCheckUpdatesMenu, relaunch, type FoundUpdate } from "./platform";
 import { reduce, type UpdateEvent, type UpdateIntent, type UpdateMeta, type UpdateState } from "./updates";
 
 const FIRST_CHECK_MS = 10_000;
@@ -72,22 +73,13 @@ export function useUpdates() {
     return () => clearInterval(id);
   }, [state.kind, apply]);
 
-  const dispatch = useCallback(
-    (event: UpdateIntent) => {
-      if (event.type !== "requestUpdate") {
-        apply(event);
-        return;
-      }
-      countRunning()
-        .then((running) => apply({ type: "update", running }))
-        .catch(() => {}); // without the count we can't tell whether sessions would be stopped
-    },
-    [apply],
-  );
-
   const check = useCallback(
     async (manual: boolean) => {
-      if (!canUpdate) return;
+      if (!canUpdate) {
+        // Dev builds and browsers answer a manual check instead of ignoring it.
+        if (manual) apply({ type: "unavailable", reason: t("Las actualizaciones solo están en la app instalada") });
+        return;
+      }
       if (apply({ type: "check", manual }).kind !== "checking") return;
       try {
         const update = await checkForUpdate();
@@ -102,6 +94,29 @@ export function useUpdates() {
       }
     },
     [apply],
+  );
+
+  const requestUpdate = useCallback(() => {
+    countRunning()
+      .then((running) => apply({ type: "update", running }))
+      // Without the count we can't tell whether sessions would be stopped: say so, never install.
+      .catch((e) => apply({ type: "sessionsFailed", reason: (e as Error).message ?? String(e) }));
+  }, [apply]);
+
+  const dispatch = useCallback(
+    (event: UpdateIntent) => {
+      if (event.type === "requestUpdate") return requestUpdate();
+      const { state: now } = cur.current;
+      if (event.type === "retry" && now.kind === "error") {
+        if (!now.version) return void check(true); // a failed manual check
+        if (now.stage === "sessions") {
+          apply(event);
+          return requestUpdate();
+        }
+      }
+      apply(event);
+    },
+    [apply, check, requestUpdate],
   );
 
   useEffect(() => {
@@ -121,6 +136,19 @@ export function useUpdates() {
       clearInterval(every);
     };
   }, [check, apply]);
+
+  // The app menu's "Buscar actualizaciones…".
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    onCheckUpdatesMenu(() => void check(true))
+      .then((u) => (alive ? (unlisten = u) : u()))
+      .catch(() => {});
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [check]);
 
   return { state, meta, dispatch, check };
 }
