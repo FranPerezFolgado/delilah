@@ -46,6 +46,15 @@ fn wait_working(env: &Env, key: &str) {
     });
 }
 
+/// The branch the daemon named for the task (`feature/<KEY>-<title slug>` here, since
+/// the one-shot Claude fake always fails), as the API reports it.
+fn branch_of(env: &Env, key: &str) -> String {
+    let task = env.api().task(key);
+    let branch = task["branch"].as_str().unwrap_or_else(|| panic!("no branch: {task}")).to_string();
+    assert!(branch.starts_with(&format!("feature/{key}")), "{branch}");
+    branch
+}
+
 #[test]
 fn worktree_mode_creates_the_workspace_on_the_feature_branch() {
     let env = Env::start(EnvOptions::default());
@@ -63,8 +72,9 @@ fn worktree_mode_creates_the_workspace_on_the_feature_branch() {
         .split("\n\n")
         .find(|b| b.lines().next().is_some_and(|l| Path::new(l.trim_start_matches("worktree ")) == want))
         .unwrap_or_else(|| panic!("no worktree {} in\n{list}", want.display()));
-    assert!(block.contains("branch refs/heads/feature/E2E-20"), "{block}");
-    assert_eq!(git(&env, &want, &["branch", "--show-current"]), "feature/E2E-20");
+    let branch = branch_of(&env, "E2E-20");
+    assert!(block.contains(&format!("branch refs/heads/{branch}")), "{block}");
+    assert_eq!(git(&env, &want, &["branch", "--show-current"]), branch);
 
     let (status, out, err) = env.cli().run(&["ls"]);
     assert!(status.success(), "ls: {out}\n{err}");
@@ -91,7 +101,7 @@ fn a_parent_task_initialises_only_the_chosen_submodule() {
     }
     // The parent's worktree is detached; the branch lives in the chosen submodule.
     assert_eq!(git(&env, &w, &["branch", "--show-current"]), "");
-    assert_eq!(git(&env, &w.join("svc-orders"), &["branch", "--show-current"]), "feature/E2E-30");
+    assert_eq!(git(&env, &w.join("svc-orders"), &["branch", "--show-current"]), branch_of(&env, "E2E-30"));
 }
 
 #[test]
@@ -104,7 +114,7 @@ fn checkout_mode_switches_the_fixture_and_archive_restores_it() {
         "submodules": [], "in_checkout": true,
     }));
     wait_working(&env, "E2E-40");
-    assert_eq!(git(&env, &env.fixtures.repo, &["branch", "--show-current"]), "feature/E2E-40");
+    assert_eq!(git(&env, &env.fixtures.repo, &["branch", "--show-current"]), branch_of(&env, "E2E-40"));
 
     let (status, out, err) = env.cli().run(&["done", "E2E-40"]);
     assert!(status.success(), "done: {out}\n{err}");
