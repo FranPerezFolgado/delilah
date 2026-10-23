@@ -387,7 +387,9 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .where-opt input { margin: 2px 0 0; accent-color: var(--acc); }
 /* A tall dialog scrolls; its parts never get squeezed. */
 .dialog > * { flex-shrink: 0; }
-.where-opt > span { min-width: 0; }
+.where-opt { min-width: 0; text-align: left; }
+.where-opt > span { min-width: 0; overflow-wrap: anywhere; }
+.dialog { text-align: left; }
 .where-opt .mono { word-break: break-all; }
 .chev-btn { width: 18px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent;
   color: var(--tx3); cursor: pointer; padding: 0 0 0 4px; }

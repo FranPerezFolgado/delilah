@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type FolderInspection, type Project, type ProjectKind } from "../api";
 import { isDesktop, pickFolder } from "../platform";
 import { t } from "../i18n";
+import { createPortal } from "react-dom";
 import { ProjectSettings } from "./ProjectSettings";
 
 export function ProjectsView({ projects, onChanged }: { projects: Project[]; onChanged: () => void }) {
@@ -229,8 +230,9 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
         )}
         {error && <div className="error selectable" style={{ whiteSpace: "normal" }}>{error}</div>}
         {savedNote && !settingsOpen && <div className="muted" role="status" style={{ fontSize: 12 }}>{t("Ajustes guardados")}</div>}
-        {settingsOpen && (
-          <ProjectSettings project={project} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setSavedNote(true); onChanged(); }} />
+        {settingsOpen && createPortal(
+          <ProjectSettings project={project} onClose={() => setSettingsOpen(false)} onSaved={() => { setSettingsOpen(false); setSavedNote(true); onChanged(); }} />,
+          document.body,
         )}
       </td>
     </tr>
