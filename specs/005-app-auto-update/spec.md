@@ -1,0 +1,181 @@
+# Feature Specification: App auto-update
+
+**Feature Branch**: `feature/LIBRE-10`
+
+**Created**: 2026-10-23
+
+**Status**: Draft
+
+**Input**: User description: "Hacer updates: que cuando suba una versión, la instalada pueda aplicar esta nueva." Brief from the «Idea» conversation (2026-10-23): publish each release as a signed artefact with an update manifest; the installed app checks for a new version, tells the user, downloads and installs it and relaunches; after the relaunch the daemon restarts with the new binary and rewrites the Delilah plugin.
+
+## Context
+
+Today a release means building a disk image by hand, copying the app into Applications and clearing the quarantine flag, on each Mac where Delilah is installed (the personal Mac and the work Mac). This feature lets an installed Delilah find, fetch and apply a newer release by itself, with the user's consent. It covers both ends: what the maintainer does to publish a release and what the installed app does with it.
+
+Things the product already does and this feature relies on:
+
+- Opening a newer app restarts the background daemon with the binary it bundles.
+- The daemon, on every start, rewrites the Delilah plugin that agents load and brings the database up to date.
+- The daemon owns the agents' terminals, so restarting it ends the sessions that are running; paused or interrupted work can be resumed afterwards.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Install a new version from the app (Priority: P1)
+
+The user has Delilah open. A newer release has been published. Without leaving the app, Delilah tells them a new version is available (which one, and what changed). They choose "Actualizar"; Delilah downloads it, checks it is genuine, installs it and relaunches. After the relaunch the app, the daemon and the plugin agents use are all on the new version, and their projects, tasks and settings are intact.
+
+**Why this priority**: It is the whole point of the feature: replacing the manual copy-and-unquarantine routine on each Mac.
+
+**Independent Test**: Install version N, publish version N+1, open the app: the notice appears; accepting it ends with the app showing N+1, the daemon's reported version is N+1 and existing tasks are still listed.
+
+**Acceptance Scenarios**:
+
+1. **Given** the installed app is on 0.4.0 and 0.5.0 is published, **When** the app checks for updates, **Then** it shows a notice naming 0.5.0 with its release notes and the actions "Actualizar" and "Más tarde".
+2. **Given** the notice is shown, **When** the user chooses "Actualizar", **Then** the app shows download progress, installs the new version and relaunches itself.
+3. **Given** the app relaunched on 0.5.0, **When** it starts, **Then** the daemon is restarted with the 0.5.0 binary, reports version 0.5.0, the plugin agents load says 0.5.0, and every project, task and setting from before is still there.
+4. **Given** the notice is shown, **When** the user chooses "Más tarde", **Then** the notice goes away and is not shown again for that same version until the app is next launched or the user checks by hand.
+5. **Given** the installed version is the latest one published, **When** the app checks, **Then** no notice is shown.
+
+---
+
+### User Story 2 - Publish a release that installed apps pick up (Priority: P1)
+
+The maintainer has bumped the version and merged to main. With one documented command they build the release, sign it, and publish both the update package and the manifest that tells installed apps which version is the latest. Installed apps see the new version on their next check.
+
+**Why this priority**: Without a published, signed release there is nothing for Story 1 to install; both are needed for the first useful slice.
+
+**Independent Test**: Run the release command for a test version; the published location contains the update package, its signature and a manifest naming that version, and an installed older app offers it.
+
+**Acceptance Scenarios**:
+
+1. **Given** the version is bumped and tagged, **When** the maintainer runs the release command, **Then** it produces the disk image, the update package, its signature and the manifest, and publishes them.
+2. **Given** the signing key is not available, **When** the maintainer runs the release command, **Then** it stops before publishing anything and says which key is missing.
+3. **Given** the tag's version differs from the version in any of the places the version lives, **When** the release command runs, **Then** it stops and lists the mismatch.
+4. **Given** a release has been published, **When** an app on an older version checks, **Then** it is offered exactly that version.
+
+---
+
+### User Story 3 - Don't lose running work by surprise (Priority: P2)
+
+Agents are working when the user decides to update. Because updating restarts the daemon, which ends running sessions, Delilah tells the user how many sessions are running before it does anything, and lets them update anyway or wait.
+
+**Why this priority**: Delilah runs agents all day; an update that silently kills a session mid-edit would be worse than the manual process.
+
+**Independent Test**: Start a task so a session is running, trigger the update: Delilah warns with the count and does nothing until the user decides.
+
+**Acceptance Scenarios**:
+
+1. **Given** two agent sessions are running, **When** the user chooses "Actualizar", **Then** Delilah says that 2 sessions are running and will be stopped, and offers "Actualizar ahora", "Cuando terminen" and "Cancelar".
+2. **Given** that warning, **When** the user chooses "Actualizar ahora", **Then** the update proceeds and the sessions are stopped.
+3. **Given** that warning, **When** the user chooses "Cuando terminen", **Then** the notice says the update is waiting for N sessions (N kept current), still offers "Actualizar ahora" and "Cancelar", and the update starts by itself as soon as no session is live.
+4. **Given** an update is waiting for sessions, **When** the app quits before they end, **Then** the wait is dropped and the version is offered again at the next launch.
+5. **Given** no session is running, **When** the user chooses "Actualizar", **Then** the update proceeds without that warning.
+6. **Given** sessions were stopped by an update, **When** the app relaunches, **Then** those tasks show as interrupted and can be resumed as after any daemon restart.
+
+---
+
+### User Story 4 - Check for updates on demand and see the version (Priority: P3)
+
+The user wants to know which version they run, or has heard a release is out and doesn't want to wait for the next automatic check. From the app menu ("Buscar actualizaciones…") or from Settings they check right away and see the current version and the result.
+
+**Why this priority**: Convenience and transparency; the automatic check already covers the main need.
+
+**Independent Test**: With no newer release, use "Buscar actualizaciones…": Delilah says it is up to date and shows the current version; with a newer one, the Story 1 notice appears.
+
+**Acceptance Scenarios**:
+
+1. **Given** the app is up to date, **When** the user checks by hand, **Then** Delilah says "Delilah está al día" with the installed version.
+2. **Given** the update location cannot be reached, **When** the user checks by hand, **Then** Delilah shows an error saying the check failed and why, and the installed version keeps working.
+3. **Given** Settings is open, **When** the user looks at the updates section, **Then** it shows the installed version, when the last check happened and a button to check now.
+
+---
+
+### Edge Cases
+
+- **No network or update location down** during an automatic check: nothing is shown; the next check tries again. Only a manual check reports the failure.
+- **Signature does not match**: the package is discarded, nothing is installed, and the user sees that the update could not be verified.
+- **Download interrupted or disk full**: nothing is installed, the current version keeps running, and the user can retry.
+- **Manifest names an older or equal version**: no notice (no downgrades).
+- **Development builds and previews** (`tauri dev`, `scripts/preview.sh`): never check or install updates.
+- **Update dismissed and app left open for days**: the periodic check shows the notice again only for a version newer than the dismissed one, or on next launch.
+- **Database changes in the new version**: the daemon brings the database up to date on its first start; before doing so after a version change it keeps a copy of the previous database so a failed upgrade can be recovered by hand.
+- **New daemon fails to start after the update**: the app shows the same error it shows today when the daemon does not answer; the database copy from the previous version is kept.
+- **App installed somewhere other than Applications, or not writable**: the update fails with a message saying where the app is and that it cannot be replaced.
+- **Two Macs**: each installed app updates independently; nothing is shared between them.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+**Checking**
+
+- **FR-001**: The installed app MUST check for a newer published version when it starts and then periodically while it stays open (default: every 6 hours).
+- **FR-002**: Users MUST be able to check for updates on demand from the app menu and from Settings.
+- **FR-003**: The app MUST only offer versions strictly newer than the installed one.
+- **FR-004**: Failed automatic checks MUST be silent; failed manual checks MUST show the reason.
+- **FR-005**: Development builds and previews MUST NOT check for or install updates.
+
+**Notifying and consenting**
+
+- **FR-006**: When a newer version is found, the app MUST show a non-blocking notice in the main window with the new version, its release notes, "Actualizar" and "Más tarde".
+- **FR-007**: The app MUST NOT download or install an update without the user choosing "Actualizar".
+- **FR-008**: "Más tarde" MUST hide the notice for that version until the next launch or a manual check.
+- **FR-009**: Before updating, the app MUST tell the user how many agent sessions are running (if any) and that they will be stopped, and let them update now, update as soon as no session is live, or cancel (User Story 3). A session counts as running while its agent process is alive, whether working or waiting on the user.
+
+**Installing**
+
+- **FR-010**: The app MUST verify the downloaded update against the maintainer's signature before installing it, and MUST refuse it if verification fails.
+- **FR-011**: The app MUST show download progress and MUST leave the current installation untouched if the download or verification fails.
+- **FR-012**: After installing, the app MUST relaunch itself; on relaunch the daemon MUST run the new version's binary and the plugin agents load MUST carry the new version.
+- **FR-013**: The update MUST keep all user data (projects, tasks, settings, workspaces, task notes) and bring the database up to date automatically.
+- **FR-014**: The first time the daemon starts on a new version, it MUST keep a copy of the database as it was before any change, named after the previous version.
+- **FR-015**: The installed app MUST NOT need the quarantine flag cleared by hand after an update.
+
+**Publishing**
+
+- **FR-016**: The maintainer MUST have one documented command that builds the release, signs the update package, generates the manifest and publishes the disk image, the update package, its signature and the manifest as a GitHub Release of the public repository FranPerezFolgado/delilah, where the installed app reads the manifest of the latest release without credentials.
+- **FR-017**: The release command MUST refuse to run when the version is not the same in every place it lives, when the tag is missing, or when the signing key is not available.
+- **FR-018**: The release notes shown in the app MUST come from the published release.
+- **FR-019**: The signing key MUST live outside the repository; only the public key ships with the app.
+
+**Visibility**
+
+- **FR-020**: Settings MUST show the installed version, the time of the last check and its result.
+- **FR-021**: The development docs MUST describe the new release steps, including how to create and back up the signing key and how to bootstrap Macs that still run a version without the updater.
+
+### Key Entities
+
+- **Release**: a published version: version number, release notes, publication date, disk image, update package and its signature.
+- **Update manifest**: the single published document that names the latest version, its notes, date, and where to download the update package with its signature. Installed apps read only this to decide.
+- **Signing key pair**: the private key the maintainer signs with (kept outside the repo, never published) and the public key embedded in the app to verify updates.
+- **Update check state** (per installed app): last check time, last result, version currently offered, version dismissed with "Más tarde".
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: Going from an older installed version to a newly published one takes the user one decision ("Actualizar") and finishes, including the relaunch, in under 2 minutes on a normal connection, with no terminal command.
+- **SC-002**: An installed app notices a newly published release within 6 hours while it is open, or at its next launch.
+- **SC-003**: After an update, 100% of projects, tasks and settings are present, and the app, daemon and plugin all report the new version.
+- **SC-004**: An update package with a wrong or missing signature is never installed (0 of N tampered packages accepted in testing).
+- **SC-005**: No agent session is stopped by an update without the user having been told, beforehand, how many would be stopped.
+- **SC-006**: Publishing a release is one command after the version bump, down from the current five manual steps per Mac.
+
+## Assumptions
+
+- **User-confirmed, not silent**: updates are always offered and applied on the user's choice; there is no silent auto-install (agents may be running).
+- **Check frequency**: at launch and every 6 hours while open, plus on demand. Not configurable in this version.
+- **Manual release from the personal Mac**: a script run by the maintainer, not a CI pipeline; automating it in GitHub Actions is out of scope (the build needs the signing key and is done on Apple Silicon locally today).
+- **No Apple code signing or notarisation**: Delilah is for personal use on two Macs. Updates are verified with the updater's own signature; installing an update does not bring back the quarantine flag. Apple signing can be added later without changing this flow.
+- **Apple Silicon only**, as today's builds.
+- **Bootstrap**: Macs on 0.4.x (no updater) are updated to the first version with the updater by hand, once; from then on, updates come through the app.
+- **Database changes stay forward-only**, as today; there is no automatic rollback, only the pre-upgrade copy (FR-014).
+- **Public repository**: FranPerezFolgado/delilah is public (or made public before the first release with the updater), so release assets are downloadable without a token.
+- **Version bump rules** stay as in CLAUDE.md; this feature adds the publishing step, it does not change how versions are chosen.
+
+## Out of Scope
+
+- Release channels (beta/stable), staged rollouts, downgrades.
+- Updating the `delilah` CLI installed separately (outside the app bundle).
+- Delta updates; each update downloads the full package.
+- Any automatic restart of the daemon outside an update the user accepted.
