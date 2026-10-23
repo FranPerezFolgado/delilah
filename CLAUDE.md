@@ -56,6 +56,23 @@ release steps.
   also has work credentials: confirm the account before any remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.
 
+## Parallelize by default
+
+The setup is built for parallel work, so use it without being asked. Whenever a task
+has pieces that don't depend on each other, run them at the same time:
+
+- **Reading, research, reviews, checks:** subagents (`code-researcher`, the
+  reviewers, `ui-verifier`, `doc-searcher`), all launched in one message.
+- **Independent pieces of code** (separate files, neither needs the other's result):
+  one worktree each, since each worktree gets its own preview slot (1–9). With Spec
+  Kit, `/orchestrate` already runs packages that share no files in parallel.
+- **Tasks of their own** (a separate fix or feature that turns up along the way):
+  propose them as a separate session or Delilah task instead of chaining them here.
+
+Don't parallelize what a handful of tool calls settles, two writers on the same
+files, or steps that need each other's output. When a plan has independent steps
+and you run them one after another anyway, say why in one line.
+
 ## Stack & checks
 
 | Area | Where | Check |
