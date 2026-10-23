@@ -35,6 +35,7 @@ Mode: format=markdown commits=yes
 | WP-18F | 5 | 5F | done | 1 | b4adc52 | review fixes (app): archive setup-failed, reason labels, setup-running helper, Jira/Sidebar status |
 | WP-19F | 6 | 6F | done | 1 | c0fd04c | review fix: settings pickers need never submodules (?all=true) |
 | WP-21F | 7 | 7F | done | 1 | ea2eeb5 | review fixes: CLI --checkout/--worktree, whereOf(null) → project default, real scenario-3 test +app/src/phases.test.ts |
+| WP-09G | 3 | 3G | done | 1 | 2d16928 | user report: settings dialog text right-aligned, WherePicker path overflows |
 | WP-02F | 2 | 2F | done | 1 | dfcf408 | review fixes: pty exit outcome, FieldError.code in TS + api.md |
 
 ## Review notes
