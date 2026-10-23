@@ -110,6 +110,8 @@ The user wants to know which version they run, or has heard a release is out and
 - **Database changes in the new version**: the daemon brings the database up to date on its first start; before doing so after a version change it keeps a copy of the previous database so a failed upgrade can be recovered by hand.
 - **New daemon fails to start after the update**: the app shows the same error it shows today when the daemon does not answer; the database copy from the previous version is kept.
 - **App installed somewhere other than Applications, or not writable**: the update fails with a message saying where the app is and that it cannot be replaced.
+- **A newer release appears while one is downloading or waiting for sessions**: the one in progress carries on; the newer one is offered at the next check.
+- **Signing key lost or rotated**: apps that ship the old public key refuse packages signed with a new key; they must be updated by hand once (as in the bootstrap). The docs say how to back up the key so this does not happen.
 - **Two Macs**: each installed app updates independently; nothing is shared between them.
 
 ## Requirements *(mandatory)*
@@ -143,13 +145,17 @@ The user wants to know which version they run, or has heard a release is out and
 **Publishing**
 
 - **FR-016**: The maintainer MUST have one documented command that builds the release, signs the update package, generates the manifest and publishes the disk image, the update package, its signature and the manifest as a GitHub Release of the public repository FranPerezFolgado/delilah, where the installed app reads the manifest of the latest release without credentials.
-- **FR-017**: The release command MUST refuse to run when the version is not the same in every place it lives, when the tag is missing, or when the signing key is not available.
+- **FR-017**: The release command MUST refuse to run when the version is not the same in every place it lives, when the tag is missing, , when the signing key is not available, or when the repository is not public.
 - **FR-018**: The release command MUST generate the release notes from the conventional commits since the previous tag (features and fixes grouped, other types left out), let the maintainer edit them before publishing, and publish them with the release; the app MUST show those notes.
 - **FR-019**: The signing key MUST live outside the repository; only the public key ships with the app.
+
+- **FR-022**: The release command MUST publish the manifest last, only after every other file is uploaded; if any upload fails it MUST leave the release unpublished (a draft or nothing), so installed apps never see a manifest pointing at missing files, and it MUST be safe to run again.
+- **FR-024**: Installed apps MUST read updates only from that one fixed location over HTTPS; the location is not configurable by the user.
 
 **Visibility**
 
 - **FR-020**: Settings MUST show the installed version, the time of the last check and its result.
+- **FR-023**: The update notice MUST cover these states, each with its text in Spanish and English like the rest of the UI: checking (manual only), up to date (manual only), available, downloading (with progress), waiting for N sessions, installing / relaunching, and error (with the reason and "Reintentar"; the current version keeps running).
 - **FR-021**: The development docs MUST describe the new release steps, including how to create and back up the signing key and how to bootstrap Macs that still run a version without the updater.
 
 ### Key Entities
@@ -166,7 +172,7 @@ The user wants to know which version they run, or has heard a release is out and
 - **SC-001**: Going from an older installed version to a newly published one takes the user one decision ("Actualizar") and finishes, including the relaunch, in under 2 minutes on a normal connection, with no terminal command.
 - **SC-002**: An installed app notices a newly published release within 6 hours while it is open, or at its next launch.
 - **SC-003**: After an update, 100% of projects, tasks and settings are present, and the app, daemon and plugin all report the new version.
-- **SC-004**: An update package with a wrong or missing signature is never installed (0 of N tampered packages accepted in testing).
+- **SC-004**: An update package with a wrong or missing signature is never installed: 0 accepted across the three tamper cases (signature from another key, signature missing, package altered after signing).
 - **SC-005**: No agent session is stopped by an update without the user having been told, beforehand, how many would be stopped.
 - **SC-006**: Publishing a release is one command after the version bump, down from the current five manual steps per Mac.
 
