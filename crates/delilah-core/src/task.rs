@@ -62,6 +62,11 @@ pub enum TaskStatus {
     Failed {
         reason: String,
     },
+    /// The project's setup command failed (or timed out); the worktree is kept and
+    /// the user can retry the setup or launch without it.
+    SetupFailed {
+        reason: String,
+    },
 }
 
 impl TaskStatus {
@@ -74,11 +79,18 @@ impl TaskStatus {
             Self::PausedByLimit { .. } => "paused-by-limit",
             Self::Done => "done",
             Self::Failed { .. } => "failed",
+            Self::SetupFailed { .. } => "setup-failed",
         }
     }
 
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Done | Self::Failed { .. })
+    }
+
+    /// Whether its workspace may be archived: finished, or stopped for good on a
+    /// failed setup.
+    pub fn can_archive(&self) -> bool {
+        self.is_terminal() || matches!(self, Self::SetupFailed { .. })
     }
 }
 
@@ -113,6 +125,14 @@ pub enum Event {
     StartAborted {
         reason: String,
     },
+    /// The setup command failed while preparing the workspace.
+    SetupFailed {
+        reason: String,
+    },
+    /// The user runs the setup again after a failure.
+    RetrySetup,
+    /// The user launches the agent without running the setup.
+    SkipSetup,
     /// The task was created from a conversation with an agent; nothing else changes.
     CreatedFromConversation {
         session: String,
@@ -159,6 +179,9 @@ impl Event {
             Self::MarkDone => "mark-done",
             Self::Fail { .. } => "fail",
             Self::StartAborted { .. } => "start-aborted",
+            Self::SetupFailed { .. } => "setup-failed",
+            Self::RetrySetup => "retry-setup",
+            Self::SkipSetup => "skip-setup",
             Self::CreatedFromConversation { .. } => "created-from-conversation",
             Self::StepStarted { .. } => "step-started",
             Self::AutopilotPaused { .. } => "autopilot-paused",
@@ -390,7 +413,12 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         }
         (S::PausedByLimit { .. }, Event::ManualResume) => Ok(S::Running),
         (S::Running, Event::AgentFinished) => Ok(S::Done),
-        (S::Running | S::WaitingForUser | S::PausedByLimit { .. }, Event::MarkDone) => Ok(S::Done),
+        (
+            S::Running | S::WaitingForUser | S::PausedByLimit { .. } | S::SetupFailed { .. },
+            Event::MarkDone,
+        ) => Ok(S::Done),
+        (S::PreparingWorkspace, Event::SetupFailed { reason }) => Ok(S::SetupFailed { reason }),
+        (S::SetupFailed { .. }, Event::RetrySetup | Event::SkipSetup) => Ok(S::PreparingWorkspace),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
         (S::PreparingWorkspace, Event::StartAborted { .. }) => Ok(S::Queued),
         (S::Queued, Event::CreatedFromConversation { .. }) => Ok(S::Queued),
@@ -459,6 +487,77 @@ mod tests {
         task.apply(Event::Start).unwrap();
         task.apply(Event::WorkspaceReady).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
+    }
+
+    #[test]
+    fn a_setup_failure_can_be_retried_skipped_failed_or_marked_done() {
+        let failed = |reason: &str| Event::SetupFailed {
+            reason: reason.into(),
+        };
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Card retries", "feature");
+        task.apply(Event::Start).unwrap();
+        task.apply(failed("boom")).unwrap();
+        assert_eq!(
+            task.status,
+            TaskStatus::SetupFailed {
+                reason: "boom".into()
+            }
+        );
+        assert_eq!(task.status.name(), "setup-failed");
+        assert!(!task.status.is_terminal());
+
+        task.apply(Event::RetrySetup).unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        task.apply(failed("again")).unwrap();
+        task.apply(Event::SkipSetup).unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        task.apply(Event::WorkspaceReady).unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+
+        for end in [
+            Event::Fail {
+                reason: "gave up".into(),
+            },
+            Event::MarkDone,
+        ] {
+            let mut t = Task::new(TaskKey::new("PROJ-2"), "x", "feature");
+            t.apply(Event::Start).unwrap();
+            t.apply(failed("boom")).unwrap();
+            t.apply(end).unwrap();
+            assert!(t.status.is_terminal());
+        }
+    }
+
+    #[test]
+    fn only_finished_or_setup_failed_tasks_can_be_archived() {
+        assert!(TaskStatus::Done.can_archive());
+        assert!(TaskStatus::Failed { reason: "x".into() }.can_archive());
+        assert!(TaskStatus::SetupFailed { reason: "x".into() }.can_archive());
+        assert!(!TaskStatus::Running.can_archive());
+        assert!(!TaskStatus::PreparingWorkspace.can_archive());
+        assert!(!TaskStatus::Queued.can_archive());
+    }
+
+    #[test]
+    fn setup_events_are_refused_from_other_statuses() {
+        let events = [
+            Event::SetupFailed { reason: "x".into() },
+            Event::RetrySetup,
+            Event::SkipSetup,
+        ];
+        for event in &events {
+            assert!(running_task().apply(event.clone()).is_err());
+            assert!(
+                Task::new(TaskKey::new("PROJ-3"), "x", "feature")
+                    .apply(event.clone())
+                    .is_err()
+            );
+        }
+        // Retry/skip only make sense after a failure, not while preparing.
+        let mut t = Task::new(TaskKey::new("PROJ-4"), "x", "feature");
+        t.apply(Event::Start).unwrap();
+        assert!(t.apply(Event::RetrySetup).is_err());
+        assert!(t.apply(Event::SkipSetup).is_err());
     }
 
     #[test]

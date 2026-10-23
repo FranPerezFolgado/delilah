@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, type Project, type Task } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, api, type Project, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { BacklogTaskView } from "./BacklogTaskView";
 
 vi.mock("./WherePicker", async (orig) => ({ ...(await orig<typeof import("./WherePicker")>()), WherePicker: () => null }));
 
-const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature" };
+const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS };
 const task: Task = {
   key: "LIBRE-1",
   title: "Algo",

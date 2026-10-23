@@ -56,6 +56,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = AppState::new(store, config);
     app.load_language().await;
     app.load_remote_control().await;
+    // Before anything else acts on tasks: the setups that died with the previous
+    // daemon stop as failed.
+    if let Err(e) = delilah_daemon::recover_interrupted_setups(&app).await {
+        tracing::warn!("cannot recover interrupted setups: {e}");
+    }
     scheduler::spawn(app.clone());
     pr_loop::spawn(app.clone());
     specs::spawn(app.clone());

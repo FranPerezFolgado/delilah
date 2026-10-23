@@ -85,6 +85,11 @@ async fn open_for(
     key: String,
     req: OpenSession,
 ) -> Result<(StatusCode, Json<SessionView>), ApiError> {
+    if req.kind == SessionKind::Setup {
+        return Err(ApiError::bad_request(
+            "a setup session is started by the task, not opened",
+        ));
+    }
     let conversation = req.conversation.unwrap_or(false);
     if conversation && req.kind != SessionKind::Claude {
         return Err(ApiError::bad_request("a conversation is a Claude session"));
@@ -127,6 +132,7 @@ async fn open_for(
             let same = existing.iter().filter(|s| s.kind == req.kind).count() + 1;
             match req.kind {
                 SessionKind::Claude => format!("Claude {same}"),
+                SessionKind::Setup => "Setup".into(),
                 SessionKind::Shell => {
                     if same == 1 {
                         "Terminal".into()
@@ -533,6 +539,7 @@ mod project_tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await
@@ -598,6 +605,7 @@ mod project_tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await

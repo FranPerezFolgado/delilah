@@ -5,7 +5,10 @@ mod project;
 mod spec;
 mod task;
 
-pub use project::{Project, ProjectKind};
+pub use project::{
+    FieldError, Project, ProjectKind, ProjectSettings, ShareMode, SharedEntry, SubmoduleRules,
+    WorkspaceMode, branch_name, slug, validate,
+};
 pub use spec::{SpecGroup, SpecItem, SpecPhase, parse_tasks};
 pub use task::{
     Autopilot, AutopilotStage, AutopilotState, Event, Handoff, HandoffStage, InvalidKey, Step,

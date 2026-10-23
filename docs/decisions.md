@@ -160,6 +160,59 @@ losing work.**
 chosen place (checkout or worktree) and started later. A failed start goes back
 to the backlog (`StartAborted`).
 
+**50. Project settings live in Delilah, not in the repo.** The per-project config
+(workspace mode, branch template, shared entries, setup command, submodule rules)
+is kept by the daemon and edited from a settings screen and the CLI. A
+`delilah.toml` in the repo was ruled out for now:
+- editing it from the app would leave the checkout dirty, which blocks checkout tasks;
+- the work repos should not carry a Delilah file.
+
+Sharing settings through the repo can come later, as a base the stored settings
+override. See `specs/004-project-config`.
+
+Also ruled out: hard links for shared folders (they do not work across volumes or for folders).
+
+**51. A field error has a stable `code`; the daemon writes the message.** Settings
+validation returns `FieldError { field, code, message }`. The app and CLI can
+rely on the code, and the message comes from the daemon in the user's language.
+
+**52. Settings are JSON in `projects.settings`.** Migration 0016 adds the column.
+Unknown keys are rejected (`deny_unknown_fields`, a 422 with the fields), so a typo
+does not pass silently. A stored value that cannot be read gives the defaults and
+a warning instead of breaking the project.
+
+**53. The branch template's slug** (when the project has a template; see 49). The title goes through NFKD, loses its marks,
+becomes ASCII lower case with `-`, and is cut to 40 characters at a hyphen.
+Around an empty `{slug}` the `/`, `-`, `_` and `.` next to it are dropped. Rust
+and TypeScript implement it twice and share
+`crates/delilah-core/tests/branch_names.json`.
+
+**54. Shared entries are copied (`cp -cR`, a clone on APFS) or linked (an absolute
+symlink).** The source is canonicalised and must stay under the checkout; nothing
+is written through a symlink in the worktree; a `.git` component is refused. A
+problem with one entry never stops the task: it is noted in
+`<task_dir>/workspace.log` and the rest go on.
+
+**55. The setup command runs as a read-only `Setup` session.** `$SHELL -lc` in
+the worktree, with the agent's clean environment, 10 minutes at most.
+- Cancel and timeout kill the whole process group (`kill -- -pgid`, no `unsafe`).
+- The launch inputs are saved in `<task_dir>/launch.json`, so retry and skip survive a daemon restart; setups interrupted by one are marked at start.
+- `SetupFailed` is not terminal (retry, skip, or leave it) but the task can be archived.
+
+**56. Submodule rules.** `GET …/submodules` hides the `never` ones by default;
+`?all=true` is for the settings screen. `always` ones are merged into every run.
+A rule that names a submodule that no longer exists is a 422 pointing at the
+settings.
+
+**57. The workspace mode is the request's, else the backlog task's saved choice,
+else the project's `workspace` setting, else a worktree.** `settings.workspace` is
+optional (`null` by default), so a project with nothing saved behaves as before the
+settings existed. The CLI sends it only when `--checkout` or `--worktree` is given,
+so the daemon decides otherwise (this also covers idea proposals and "Crear y lanzar
+en autopiloto"). Only the new-task form still preselects the checkout when the
+project has no setting, as it always did; a backlog task with no saved choice shows
+"worktree", which is what the daemon will do.
+
 ## UI
 
 **20. Hand-rolled i18n.** `t("texto en español")`, with English in `i18n/en.ts`
@@ -336,3 +389,22 @@ auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
 **48. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
 project sessions create tasks, so a card is not tied to an idea conversation; only a
 closed session's card is refused.
+
+**49. The branch template is optional and sits between a typed name and Claude's proposal
+(2026-10-23).** Two features named branches: per-project settings (a `{ticket}`/`{slug}`
+template) and task branch names (Claude proposes a descriptive `feature/…` name, 37). They
+are combined, not chosen between. `ProjectSettings.branch` is `null` by default, which is
+exactly 37's behaviour. With a template, the template decides the format: `{ticket}` is the
+key (a free task's `LIBRE-n`), `{slug}` is Claude's short proposal, or the title's `slug()`
+when Claude fails or is slow (the call is skipped when the template has no `{slug}`).
+Precedence at a start: a branch typed in the request, then the template, then 37's
+proposal; every path goes through the `-2`, `-3` free-name logic. A typed branch is
+normalised by 37's `custom_for` when there is no template; with a template it is kept as
+typed (case, `/`, `.`, `_`) and only made safe for git (`sanitize_typed`), because the
+dialog fills the field with the template's full branch and slugging that again would turn
+`fix/PROJ-1-x` into `feature/fix-proj-1-x`. `POST …/branch-name` returns the
+template-expanded branch when there is a template, so the "Rama" field shows what will be
+used; the dialog shows the TypeScript mirror's guess until it answers and sends the field
+only if the answer arrived or the user typed. A blank template is not saved: the screen
+and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
+`branch.empty`.

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
@@ -41,7 +41,7 @@ const task = (status: TaskStatus): Task => ({
   status,
 });
 const spec: SpecSummary = { phase: "plan", dir: "specs/001-x", done: 0, total: 3, current: null };
-const project: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature" };
+const project: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS };
 
 function head(t?: Task, s?: SpecSummary) {
   const { container } = render(

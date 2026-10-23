@@ -36,9 +36,9 @@ done or pending is in [status.md](status.md).
 
 | Path | What it is |
 |---|---|
-| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds, branch-name rules (`branch.rs`: `slug`, `title_slug`, `compose`, `custom`, `fallback`). Pure, no I/O. |
+| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds and per-project settings (`project.rs`: `ProjectSettings`, validation, the `{ticket}`/`{slug}` branch template), branch-name rules (`branch.rs`: `slug`, `title_slug`, `compose`, `custom`, `fallback`). Pure, no I/O. |
 | `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`), the branch-name proposal (`branch_name.rs`) and the headless one-shot both share (`oneshot.rs`). |
-| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving, and branch names that are free (`branch_taken`, `free_branch`) (`workspace.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
+| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving, and branch names that are free (`branch_taken`, `free_branch`) (`workspace.rs`), what a branch changed (`changes.rs`), shared entries copied or linked into a worktree (`share.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
@@ -71,7 +71,8 @@ done or pending is in [status.md](status.md).
 | `archive.rs` | How a task is archived, shared by `actions::archive` and `pr_loop::merge`: stop and await the sessions, release the workspace, delete the verified local branches, finish an `archive-partial`. The policy (what must hold first) stays with the caller. |
 | `transitions.rs` | The one way to change a task's status, so every change emits events and notifications. |
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
-| `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), submodules, and the submodule suggestion. |
+| `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), their settings (validation, `FieldError` with a stable `code`, localised by the daemon), submodules (`GET …/submodules` hides `never` ones unless `?all=true`), and the submodule suggestion. |
+| `setup.rs` | A project's setup command: runs `$SHELL -lc` in the worktree as a `Setup` session (10 min), cancel/retry/skip, recovery of interrupted setups at start. |
 | `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` swaps the binary. |
 
 `DELILAH_CLAUDE_BIN` (`Config.claude_bin`, default `claude`) swaps the binary of the headless Claude calls: the branch name and the submodule suggestion. Tests and previews point it at a fake script.
@@ -99,12 +100,12 @@ and a preview uses `fixtures/preview-home-N`.
 - `tasks`: key, title, project, workflow, phase, status JSON, notes, `in_checkout`.
 - `task_events`: the history.
 - `workspaces`: `task_key`, parent, path, branch, submodules JSON, kind, `previous`. For checkout mode, `previous` is JSON with the branches to go back to.
-- `sessions`: id, owner, kind, label, primary, attention, `conversation` (1 for an idea conversation).
+- `sessions`: id, owner, kind (`claude`, `shell`, `setup`), label, primary, attention, `conversation` (1 for an idea conversation).
 - `conversation_entries`: session, time, kind (`user` / `claude` / `card`) and a JSON body.
 - `pull_requests`: one PR per (task, repo), with host, `owner/name`, number, URL, how it was linked (`detected`, `opened`, `pasted`), the last snapshot as JSON, the watermarks already notified (failed head, review and comment ids), `checked_at` and the last problem (`error`, `error_kind`).
 - `pr_unlinked`: URLs the user unlinked, never detected again for that task.
 - `pr_notices`: what the Bandeja shows for PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`), unique per (task, repo, kind, cause) and resolved rather than deleted. All three cascade when the task is deleted.
-- `projects`
+- `projects`: name, path, kind, `settings` (JSON, migration 0016; `deny_unknown_fields`; an unreadable value falls back to the defaults with a warning) and `preview_command`.
 - `settings`
 
 ## Tasks
@@ -124,7 +125,11 @@ names folders and goes into hook commands. Free tasks are named `LIBRE-n`.
 | PausedByLimit | ResetDue (after `resume_at`) / ManualResume | Running |
 | Running | AgentFinished | Done |
 | Running, WaitingForUser, PausedByLimit | MarkDone | Done |
+| PreparingWorkspace | SetupFailed | SetupFailed { reason } |
+| SetupFailed | RetrySetup / SkipSetup | PreparingWorkspace |
 | any non-terminal | Fail | Failed |
+
+`SetupFailed` is not terminal (the task can be retried, skipped or left alone) but can be archived.
 
 **The phase** (`specify → plan → implement → review`) is separate from the status
 and only changes while the task is under way (see `phases.rs`):
@@ -146,7 +151,7 @@ and only changes while the task is under way (see `phases.rs`):
   project session working in the project's checkout. `owners::workspace` resolves
   the folder for either.
 - **Kinds.** The kinds are the primary Claude (its turns drive the task's status),
-  extra Claudes, and login shells. Each runs in a PTY owned by the daemon; its
+  extra Claudes, login shells, and `SessionKind::Setup`: the read-only session of a project's setup command (no input, its log is the full output). Each runs in a PTY owned by the daemon; its
   scrollback is kept and logged to `tasks/<KEY>/`.
 - **The `claude` command line:**
   - `--session-id <uuid>`, or `--resume <uuid>` when reopening, only if the conversation exists;
@@ -242,9 +247,9 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
 ## Workspaces
 
 - **Branch names:** `start_run` names the branch before the workspace exists.
-  - The name is the request's `branch` (normalised by `delilah_core::branch::custom`) or, when absent, `branch_name::propose`: Claude with a 5 s limit, else `title_slug`, else `fallback(key)`. `compose` gives `feature/<short-name>` or `feature/<KEY>-<short-name>` (the `LIBRE-n` of a free task is left out).
+  - The name is, in this order: the request's `branch` (normalised by `delilah_core::branch::custom_for`; with a project template it is kept as typed, only made git-safe, by `sanitize_typed`); else the project's branch template, if it has one (`settings.branch`, optional: `{ticket}` is the key, `{slug}` is Claude's short proposal, or the title's `slug()` when Claude fails); else `branch_name::propose`: Claude with a 5 s limit, else `title_slug`, else `fallback(key)`. `compose` gives `feature/<short-name>` or `feature/<KEY>-<short-name>` (the `LIBRE-n` of a free task is left out).
   - `branch_name::unique` then calls `delilah_git::free_branch` over every repo of the workspace (the repo, or each chosen submodule): a name is taken if `refs/heads/<name>` or `refs/remotes/*/<name>` exists (`branch_taken`), and `-2`… is tried. It applies in worktree and checkout mode alike, so an explicit `--branch` no longer switches to an existing branch.
-  - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field.
+  - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field. With a project template it returns the template-expanded full branch, and the dialog first shows the instant guess `branchName(template, key, title)` (the TS mirror) until the answer arrives.
   - `Task.branch` is read from `workspaces.branch` by a `LEFT JOIN`; a task with no workspace (backlog, archived) has none.
 
 - **Worktree mode** (in `workspaces/<KEY>/`):
@@ -269,6 +274,7 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
   6. One notification per merge, "mergeada y archivada" or "mergeada, sin archivar"; the per-PR one is held back.
 
   It asks nothing and never deletes a remote branch. A PR closed without merging stops the automatic archive; the task stays and the user archives by hand.
+- **Project settings in a run** (`run.rs`): the mode is the request's, else a backlog task's saved choice, else `settings.workspace` (`Option`; unset: a worktree, as before the settings). The branch follows Branch names above (the template is optional: with none, Delilah proposes the name; Rust and TS share `crates/delilah-core/tests/branch_names.json` for the template expansion). In worktree mode, after the worktree exists: shared entries (`share.rs`, notes in `tasks/<KEY>/workspace.log`), then the setup (`setup.rs`), then the agent. The launch inputs go to `tasks/<KEY>/launch.json` so retry/skip survive a restart; `always` submodules are merged into every run, and a rule naming a missing submodule is a 422 pointing at the settings.
 - **Delete** (`DELETE /api/v1/tasks/{key}`, `delilah rm`): stops the task's agents, releases the workspace (the branch stays) and frees the key. The same force rule applies.
 
 ## Live updates
@@ -289,7 +295,7 @@ The UI does not poll:
   - `platform.ts`: the only Tauri imports, all dynamic, so the UI runs in a plain browser.
 - **Components:**
   - `Sidebar`, `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
-  - `PrView` (the PR tab), `PrBadge`, `OpenPrDialog`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
+  - `PrView` (the PR tab), `PrBadge`, `OpenPrDialog`, `ProjectSettings` (the settings screen), `SetupBanner`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
   - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `ProposalCard`, `AutopilotMark`, `PreviewControl`, `Markdown`.
 - **Editor:** `editor/` holds CodeMirror 6 and per-task tab state, kept in localStorage.
 - **i18n:**

@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, type BranchProposal, type Project, type Session, type Task } from "../api";
+import { api, DEFAULT_PROJECT_SETTINGS, type BranchProposal, type Project, type Session, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { NewTaskDialog } from "./NewTaskDialog";
 
 vi.mock("./WherePicker", async (orig) => ({ ...(await orig<typeof import("./WherePicker")>()), WherePicker: () => null }));
 
-const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature" };
+const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS };
 const session = { id: "s9", task: "@web", kind: "claude", conversation: true } as Session;
 
 function setup() {
@@ -71,7 +71,7 @@ describe("NewTaskDialog origins", () => {
   });
 });
 
-const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature" }];
+const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS }];
 const started: Task = {
   key: "LIBRE-1",
   title: "t",
@@ -183,7 +183,7 @@ describe("NewTaskDialog autopilot", () => {
   });
 });
 
-const branchProjects: Project[] = [{ name: "app", kind: "repo" } as Project];
+const branchProjects: Project[] = [{ name: "app", kind: "repo", settings: DEFAULT_PROJECT_SETTINGS } as Project];
 
 const proposal = (branch: string, source: BranchProposal["source"] = "claude"): BranchProposal => ({ branch, source });
 

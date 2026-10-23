@@ -92,6 +92,14 @@ impl AppState {
                 format!("{key} {}", l.pick("ha fallado", "failed")),
                 reason.clone(),
             ),
+            (TaskStatus::SetupFailed { reason }, _) => (
+                format!("{key} {}", l.pick("el setup ha fallado", "setup failed")),
+                match reason.as_str() {
+                    "cancelled" => l.pick("cancelado", "cancelled").to_string(),
+                    "interrupted" => l.pick("interrumpido", "interrupted").to_string(),
+                    other => other.to_string(),
+                },
+            ),
             _ => return,
         };
         self.notifier.send(title, body);

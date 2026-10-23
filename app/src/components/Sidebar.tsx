@@ -36,7 +36,7 @@ interface Props {
 
 /** Most urgent first; finished tasks stay on the board, not here, and backlog ones
  *  (`queued`) sit in their own folded section: they are not pending work. */
-const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "failed"];
+const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "failed", "setup-failed"];
 
 const COLLAPSED_KEY = "delilah.collapsed-projects";
 /** Backlogs start folded: these are the ones the viewer opened. */
@@ -199,7 +199,7 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
                 {s.conversation ? (
                   <Icon name="idea" className={`idea ${st.cls}`} />
                 ) : (
-                  <Icon name={s.kind === "shell" ? "console" : st.icon} className={s.kind === "shell" ? "c-mut" : st.cls} />
+                  <Icon name={s.kind !== "claude" ? "console" : st.icon} className={s.kind !== "claude" ? "c-mut" : st.cls} />
                 )}
                 <span className="trunc" style={{ flex: 1 }}>{s.label}</span>
                 {s.read_only && <Icon name="lock" className="c-mut" />}

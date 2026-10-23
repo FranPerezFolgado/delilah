@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type Step, type Session, type SessionKind, type Task } from "../api";
-import { sessionStatus } from "./sessionLabels";
+import { SetupBanner } from "./SetupBanner";
+import { isSetupRunning, kindLabel, sessionStatus } from "./sessionLabels";
 import { on } from "../live";
 import { Icon } from "./Icon";
 import { SpecPanel } from "./SpecPanel";
@@ -41,6 +42,9 @@ interface Props {
 }
 
 /** Asks the app to confirm deleting a task (see DeleteTaskDialog in App). */
+/** The workspace of these tasks can be archived (a setup-failed one keeps its worktree). */
+export const canArchive = (s: Task["status"]) => s.type === "done" || s.type === "failed" || s.type === "setup-failed";
+
 export const askToDelete = (task: Task) =>
   window.dispatchEvent(new CustomEvent<Task>("delilah:delete-task", { detail: task }));
 
@@ -121,6 +125,9 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
             </button>
           </div>
         )}
+        {(s.type === "setup-failed" || isSetupRunning(sessions)) && (
+          <SetupBanner task={task} running={isSetupRunning(sessions)} onChanged={onChanged} />
+        )}
         {s.type === "waiting-for-user" && (
           <div className="notice wait">
             <Icon name="wait" className="c-wait" />
@@ -165,7 +172,7 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
               <Icon name="done" /> {t("Marcar como hecha")}
             </button>
           )}
-          {(s.type === "done" || s.type === "failed") && (
+          {canArchive(s) && (
             <button className="btn" disabled={busy} onClick={() => archive(false)}>
               {t("Archivar workspace")}
             </button>
@@ -219,9 +226,9 @@ export function TaskView({ task, sessions, onOpenSession, onNewSession, onChange
                 return (
                   <div className="row" key={s.id} style={{ gridTemplateColumns: "1fr auto auto", alignItems: "center" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Icon name={s.kind === "shell" ? "console" : st.icon} className={st.cls} />
+                      <Icon name={s.kind !== "claude" ? "console" : st.icon} className={st.cls} />
                       <b style={{ fontWeight: 600 }}>{s.label}</b>
-                      <span className="muted">{s.kind === "shell" ? t("terminal") : s.primary ? t("Claude · principal") : "Claude"}</span>
+                      <span className="muted">{kindLabel(s, s.primary ? t("Claude · principal") : "Claude")}</span>
                     </span>
                     <span className={`pill ${st.cls}`} style={{ height: 18, fontSize: 11 }}>{st.label}</span>
                     {s.live ? (
