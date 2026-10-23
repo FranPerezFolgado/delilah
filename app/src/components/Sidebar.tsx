@@ -155,6 +155,7 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
         const id = g.owner ?? "none";
         const folded = collapsed.has(id);
         const count = g.sessions.length + g.tasks.length;
+        const owner = g.owner;
         const ideas = g.sessions.filter((s) => s.conversation);
         const others = g.sessions.filter((s) => !s.conversation);
         const ideasLabel = g.project ? t("Ideas de {name} ({n})", { name: g.project.name, n: ideas.length }) : "";
@@ -197,8 +198,8 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
               </button>
             </div>
           )}
-          {!folded && ideas.length > 0 && (
-            <button className="srow ideas" onClick={() => onOpenIdeas(g.owner!, ideas)} title={ideasLabel} aria-label={ideasLabel}>
+          {!folded && owner && ideas.length > 0 && (
+            <button className="srow ideas" onClick={() => onOpenIdeas(owner, ideas)} title={ideasLabel} aria-label={ideasLabel}>
               <Icon name="idea" className="idea" />
               <span className="trunc" style={{ flex: 1 }}>{t("Ideas")}</span>
               <span className={`pcount mono ${ideas.some((s) => s.state === "waiting") ? "c-wait" : ""}`}>{ideas.length}</span>

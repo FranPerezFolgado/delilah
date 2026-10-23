@@ -399,6 +399,7 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .chev-btn:hover { color: var(--tx); }
 .phead-main { padding-left: 2px; }
 .pcount { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--tx3); }
+.pcount.c-wait { color: var(--acc); }
 .pgroup .srow { padding-left: 24px; }
 
 /* Help › Ver logs */
