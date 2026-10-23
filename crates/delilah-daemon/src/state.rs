@@ -73,6 +73,7 @@ impl AppState {
             Notifier::Recorder(Arc::default())
         };
         let secrets_in_memory = config.secrets_in_memory;
+        let gh_program = config.gh_program.clone();
         let events = Events::default();
         Self {
             store,
@@ -93,7 +94,9 @@ impl AppState {
             review_hints: Arc::default(),
             handoffs: Arc::default(),
             remote_control: Arc::default(),
-            gh: Arc::new(GhClient::new(Arc::new(CliGh))),
+            gh: Arc::new(GhClient::new(Arc::new(CliGh {
+                program: gh_program,
+            }))),
             pr_backoff: Arc::default(),
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),

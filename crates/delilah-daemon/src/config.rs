@@ -22,6 +22,8 @@ pub struct Config {
     pub ui_origin: Option<String>,
     /// Program to run instead of `claude` (`DELILAH_AGENT_BIN`); only tests set it.
     pub agent_program: Option<PathBuf>,
+    /// Program to run instead of `gh` (`DELILAH_GH_BIN`): tests and previews with a fake.
+    pub gh_program: Option<PathBuf>,
     /// Secrets in memory instead of the Keychain (`DELILAH_SECRETS=memory`); tests only.
     pub secrets_in_memory: bool,
     /// Accept `http://` Jira sites on loopback (`DELILAH_JIRA_ALLOW_HTTP_LOOPBACK=1`); tests only.
@@ -63,18 +65,8 @@ impl Config {
         let allow_file_protocol = var("DELILAH_ALLOW_FILE_PROTOCOL").is_some_and(|v| v == "1");
         let notify = var("DELILAH_NOTIFY").is_none_or(|v| v != "0");
         let ui_origin = var("DELILAH_UI_ORIGIN").filter(|o| !o.is_empty());
-        let agent_program = match var("DELILAH_AGENT_BIN") {
-            None => None,
-            Some(bin) => {
-                let path = PathBuf::from(&bin);
-                if !path.is_absolute() || !is_executable(&path) {
-                    return Err(format!(
-                        "DELILAH_AGENT_BIN must be an absolute path to an executable, got {bin}"
-                    ));
-                }
-                Some(path)
-            }
-        };
+        let agent_program = program(&var_os, "DELILAH_AGENT_BIN")?;
+        let gh_program = program(&var_os, "DELILAH_GH_BIN")?;
         let secrets_in_memory = match var("DELILAH_SECRETS").as_deref() {
             None => false,
             Some("memory") => true,
@@ -99,6 +91,7 @@ impl Config {
             notify,
             ui_origin,
             agent_program,
+            gh_program,
             secrets_in_memory,
             jira_http_loopback,
             pr_poll,
@@ -110,6 +103,9 @@ impl Config {
         let mut notes = Vec::new();
         if let Some(bin) = &self.agent_program {
             notes.push(format!("agent program overridden: {}", bin.display()));
+        }
+        if let Some(bin) = &self.gh_program {
+            notes.push(format!("gh program overridden: {}", bin.display()));
         }
         if self.secrets_in_memory {
             notes.push("secrets in memory".to_string());
@@ -134,6 +130,7 @@ impl Config {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            gh_program: None,
             secrets_in_memory: false,
             jira_http_loopback: false,
             pr_poll: DEFAULT_PR_POLL,
@@ -161,6 +158,24 @@ impl Config {
     pub fn url(&self) -> String {
         format!("http://{}", self.addr)
     }
+}
+
+/// An optional program override: unset, or an absolute path to an executable file.
+fn program(
+    var_os: &impl Fn(&str) -> Option<OsString>,
+    name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let Some(bin) = var_os(name) else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(bin);
+    if !path.is_absolute() || !is_executable(&path) {
+        return Err(format!(
+            "{name} must be an absolute path to an executable, got {}",
+            path.display()
+        ));
+    }
+    Ok(Some(path))
 }
 
 fn is_executable(path: &std::path::Path) -> bool {
@@ -252,6 +267,7 @@ mod tests {
         );
         let c = Config::from_vars(vars(&[
             ("DELILAH_AGENT_BIN", "/bin/sh"),
+            ("DELILAH_GH_BIN", "/bin/echo"),
             ("DELILAH_SECRETS", "memory"),
             ("DELILAH_JIRA_ALLOW_HTTP_LOOPBACK", "1"),
             ("DELILAH_PR_POLL_SECS", "2"),
@@ -261,11 +277,25 @@ mod tests {
             c.override_notes(),
             [
                 "agent program overridden: /bin/sh",
+                "gh program overridden: /bin/echo",
                 "secrets in memory",
                 "jira over http on loopback allowed",
                 "pr poll every 2 s",
             ]
         );
+    }
+
+    #[test]
+    fn gh_bin_is_checked_like_the_agent_bin() {
+        assert_eq!(Config::from_vars(vars(&[])).unwrap().gh_program, None);
+        let c = Config::from_vars(vars(&[("DELILAH_GH_BIN", "/bin/sh")])).unwrap();
+        assert_eq!(c.gh_program, Some(PathBuf::from("/bin/sh")));
+        for bin in ["scripts/fake-gh.sh", "/no/such/gh"] {
+            assert_eq!(
+                Config::from_vars(vars(&[("DELILAH_GH_BIN", bin)])).unwrap_err(),
+                format!("DELILAH_GH_BIN must be an absolute path to an executable, got {bin}")
+            );
+        }
     }
 
     #[test]
