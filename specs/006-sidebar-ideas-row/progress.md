@@ -25,3 +25,5 @@ Mode: format=markdown commits=yes autonomy=auto
 | 6 | code-quality | MEDIUM | Ideas row's aria-label/title don't say an idea is waiting (only the colour does) | app/src/components/Sidebar.tsx |
 | 6 | code-quality | MEDIUM | First waiting idea beats a currently shown waiting idea (as FR-007 says; confirm intent) | app/src/components/ideas.ts |
 | 6 | code-quality | LOW | Read-only ideas lose their lock icon now that ideas collapse into one row | app/src/components/Sidebar.tsx |
+| review | /review | HIGH | `.pcount` overrode `.c-wait`, so the waiting colour never showed on a count (also the folded one); fixed with `.pcount.c-wait` | app/src/styles.css |
+| review | user | — | T016 checked by hand in a preview (7 ideas in two projects, waiting colour, open/last-shown, fold): OK | — |
