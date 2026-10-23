@@ -318,10 +318,10 @@
 - [X] T054 [P] [US4] Update `docs/status.md`: E2E tests built (17 flows, fake Claude, local only), plus anything left pending or found flaky.
 - [X] T055 Run the full checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets` (no new warnings), `cargo test --manifest-path app/src-tauri/Cargo.toml` (after `scripts/build-sidecar.sh debug` if needed), `cd app && npx tsc --noEmit && npx vitest run`, `scripts/e2e.sh`.
 - [X] T056 SC-004 / SC-005: time `scripts/e2e.sh api` and `scripts/e2e.sh ui` (API < 3 min, UI < 5 min after a build), then run `scripts/e2e.sh` 10 times in a row. Record times and results in `specs/005-e2e-tests/progress.md`. Fix any flaky test by replacing its timing assumption with a `wait_until`, never by raising a timeout above 30 s.
-- [X] T057 Version bump, patch 0.4.0 → 0.4.1 (re-check `main`'s version first with `git show main:Cargo.toml | grep '^version'`):
+- [X] T057 Version bump, patch 0.5.0 → 0.5.1 (was 0.4.1 before main moved to 0.5.0) (re-check `main`'s version first with `git show main:Cargo.toml | grep '^version'`):
   - edit the four places of `docs/development.md#releasing`: `Cargo.toml` (workspace), `app/src-tauri/Cargo.toml`, `app/package.json`, `app/src-tauri/tauri.conf.json`;
   - refresh the lockfiles: `cargo check --workspace`, `(cd app/src-tauri && cargo check)`, `(cd app && npm install --package-lock-only)`;
-  - commit as its own commit `chore: bump version to 0.4.1`.
+  - commit as its own commit `chore: bump version to 0.5.1`.
   The PR says "patch: tests and test-only daemon switches, no user-facing behaviour".
 
 ---
