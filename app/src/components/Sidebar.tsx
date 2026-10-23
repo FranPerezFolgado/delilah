@@ -27,6 +27,8 @@ interface Props {
   onAsk: (project: string) => void;
   /** Starts an idea conversation in the project. */
   onIdea: (project: string) => void;
+  /** Shows the project's screen on one of its idea conversations. */
+  onOpenIdeas: (owner: string, ideas: Session[]) => void;
   onNewTask: () => void;
   /** Asks to confirm deleting a task (right-click on its row). */
   onDelete: (task: Task) => void;
@@ -66,7 +68,7 @@ function useRememberedSet(key: string) {
   return [set, toggle] as const;
 }
 
-export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, selected, onSelect, onOpenSession, onAsk, onIdea, onNewTask, onDelete, waiting }: Props) {
+export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, selected, onSelect, onOpenSession, onAsk, onIdea, onOpenIdeas, onNewTask, onDelete, waiting }: Props) {
   // Folded projects, remembered per viewer: a project with many sessions and tasks
   // would otherwise take the whole sidebar.
   const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
@@ -153,6 +155,9 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
         const id = g.owner ?? "none";
         const folded = collapsed.has(id);
         const count = g.sessions.length + g.tasks.length;
+        const ideas = g.sessions.filter((s) => s.conversation);
+        const others = g.sessions.filter((s) => !s.conversation);
+        const ideasLabel = g.project ? t("Ideas de {name} ({n})", { name: g.project.name, n: ideas.length }) : "";
         // Folded, it still says when something in it waits on you.
         const waitingHere =
           g.tasks.some((t) => t.status.type === "waiting-for-user") || g.sessions.some((s) => s.state === "waiting");
@@ -192,15 +197,18 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
               </button>
             </div>
           )}
-          {!folded && g.sessions.map((s) => {
+          {!folded && ideas.length > 0 && (
+            <button className="srow ideas" onClick={() => onOpenIdeas(g.owner!, ideas)} title={ideasLabel} aria-label={ideasLabel}>
+              <Icon name="idea" className="idea" />
+              <span className="trunc" style={{ flex: 1 }}>{t("Ideas")}</span>
+              <span className="pcount mono">{ideas.length}</span>
+            </button>
+          )}
+          {!folded && others.map((s) => {
             const st = sessionStatus(s, undefined);
             return (
               <button key={s.id} className="srow" onClick={() => onOpenSession(s.task, s.id)} title={s.read_only ? t("Claude en solo lectura") : s.label}>
-                {s.conversation ? (
-                  <Icon name="idea" className={`idea ${st.cls}`} />
-                ) : (
-                  <Icon name={s.kind !== "claude" ? "console" : st.icon} className={s.kind !== "claude" ? "c-mut" : st.cls} />
-                )}
+                <Icon name={s.kind !== "claude" ? "console" : st.icon} className={s.kind !== "claude" ? "c-mut" : st.cls} />
                 <span className="trunc" style={{ flex: 1 }}>{s.label}</span>
                 {s.read_only && <Icon name="lock" className="c-mut" />}
               </button>

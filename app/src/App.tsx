@@ -289,6 +289,7 @@ export function App() {
               .then((s) => openConversation(name, s))
               .catch((e) => setToast((e as Error).message))
           }
+          onOpenIdeas={(owner, ideas) => openTask(owner, ideas[ideas.length - 1].id)}
           onNewTask={() => setNewTask(true)}
           onDelete={setDeleting}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
