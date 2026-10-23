@@ -62,8 +62,8 @@ None: no new dependency or config.
 
 **Independent Test**: with one of two ideas `state: "waiting"`, the count has `c-wait`; with none, it does not.
 
-- [ ] T010 [US3] Add failing tests to the "Sidebar ideas" describe in `app/src/components/Sidebar.test.tsx`: ideas with states `working` and `waiting` → `.srow.ideas .pcount` has class `c-wait`; both `working` → no `c-wait`.
-- [ ] T011 [US3] In `app/src/components/Sidebar.tsx`, give the row's count `className={\`pcount mono ${ideas.some(s => s.state === "waiting") ? "c-wait" : ""}\`}`. T010 green.
+- [X] T010 [US3] Add failing tests to the "Sidebar ideas" describe in `app/src/components/Sidebar.test.tsx`: ideas with states `working` and `waiting` → `.srow.ideas .pcount` has class `c-wait`; both `working` → no `c-wait`.
+- [X] T011 [US3] In `app/src/components/Sidebar.tsx`, give the row's count `className={\`pcount mono ${ideas.some(s => s.state === "waiting") ? "c-wait" : ""}\`}`. T010 green.
 
 ---
 

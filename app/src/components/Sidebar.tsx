@@ -201,7 +201,7 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
             <button className="srow ideas" onClick={() => onOpenIdeas(g.owner!, ideas)} title={ideasLabel} aria-label={ideasLabel}>
               <Icon name="idea" className="idea" />
               <span className="trunc" style={{ flex: 1 }}>{t("Ideas")}</span>
-              <span className="pcount mono">{ideas.length}</span>
+              <span className={`pcount mono ${ideas.some((s) => s.state === "waiting") ? "c-wait" : ""}`}>{ideas.length}</span>
             </button>
           )}
           {!folded && others.map((s) => {

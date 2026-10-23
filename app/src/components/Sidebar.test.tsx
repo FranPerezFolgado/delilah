@@ -95,7 +95,7 @@ describe("Sidebar ideas", () => {
     expect(onIdea).toHaveBeenCalledWith("web");
   });
 
-  const idea = (id: string) => ({ id, task: "@web", kind: "claude", label: "Idea " + id, primary: false, closed: false, live: true, read_only: false, state: "waiting", conversation: true }) as unknown as Session;
+  const idea = (id: string, state = "waiting") => ({ id, task: "@web", kind: "claude", label: "Idea " + id, primary: false, closed: false, live: true, read_only: false, state, conversation: true }) as unknown as Session;
   const ro = { id: "r1", task: "@web", kind: "claude", label: "Ask", primary: false, closed: false, live: true, read_only: true, state: "idle", conversation: false } as unknown as Session;
 
   it("shows no Ideas row without idea conversations", () => {
@@ -124,6 +124,30 @@ describe("Sidebar ideas", () => {
     fireEvent.click(getByRole("button", { name: "Ideas de web (3)" }));
     expect(onOpenIdeas).toHaveBeenCalledTimes(1);
     expect(onOpenIdeas).toHaveBeenCalledWith("@web", [idea("a"), idea("b"), idea("c")]);
+  });
+
+  it("highlights the count when any idea waits", () => {
+    const { container } = setup([], [idea("a", "working"), idea("b", "waiting")]);
+    expect(container.querySelector(".srow.ideas .pcount")!.classList.contains("c-wait")).toBe(true);
+  });
+
+  it("does not highlight the count when no idea waits", () => {
+    const { container } = setup([], [idea("a", "working"), idea("b", "working")]);
+    expect(container.querySelector(".srow.ideas .pcount")!.classList.contains("c-wait")).toBe(false);
+  });
+
+  it("shows the idea icon on the row", () => {
+    const { container } = setup([], [idea("a")]);
+    expect(container.querySelector(".srow.ideas svg.idea")).not.toBeNull();
+  });
+
+  it("orders the Ideas row, then other sessions, then tasks", () => {
+    const { container } = setup([task("PROJ-1", { type: "running" })], [ro, idea("a")]);
+    const rows = [...container.querySelectorAll(".srow")];
+    expect(rows.length).toBe(3);
+    expect(rows[0].classList.contains("ideas")).toBe(true);
+    expect(rows[1].textContent).toContain("Ask");
+    expect(rows[2].querySelector(".key")!.textContent).toBe("PROJ-1");
   });
 
   it("hides the row with the folded project, whose count still includes ideas", () => {
