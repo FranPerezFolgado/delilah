@@ -14,7 +14,6 @@ use tempfile::TempDir;
 mod common;
 use common::*;
 
-
 fn commit_change(ws: &Workspace, sub: &str) {
     let dir = ws.path.join(sub);
     std::fs::write(dir.join("change.txt"), "retry with jitter\n").unwrap();

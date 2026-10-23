@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default)]
 pub struct GitOptions {
@@ -38,6 +39,27 @@ pub enum GitError {
         "`{0}` is not initialised in your checkout: run `git submodule update --init {0}` or use a worktree"
     )]
     NotInitialised(String),
+    #[error("`git {args}` in {dir} took too long")]
+    Timeout { dir: PathBuf, args: String },
+}
+
+/// A point in time by which a series of git calls must be done.
+#[derive(Debug, Clone, Copy)]
+pub struct Deadline(Instant);
+
+impl Deadline {
+    pub fn after(d: Duration) -> Self {
+        Self(Instant::now() + d)
+    }
+
+    /// Time left; zero once past.
+    pub fn remaining(&self) -> Duration {
+        self.0.saturating_duration_since(Instant::now())
+    }
+
+    pub fn expired(&self) -> bool {
+        self.remaining().is_zero()
+    }
 }
 
 fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
@@ -68,9 +90,149 @@ pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Like [`git`], but gives up at `deadline` (killing git and what it spawned) and never
+/// waits for terminal input.
+pub(crate) fn git_with_timeout(
+    dir: &Path,
+    args: &[&str],
+    opts: &GitOptions,
+    deadline: Deadline,
+) -> Result<String, GitError> {
+    let timeout = || GitError::Timeout {
+        dir: dir.to_path_buf(),
+        args: args.join(" "),
+    };
+    if deadline.expired() {
+        return Err(timeout());
+    }
+    let mut cmd = command(dir, args, opts);
+    cmd.env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        // Own process group, so a timeout can take ssh and friends down with git.
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn()?;
+    // Drain the pipes meanwhile, so a chatty git never blocks on a full one.
+    let mut out_pipe = child.stdout.take();
+    let mut err_pipe = child.stderr.take();
+    let out_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(p) = out_pipe.as_mut() {
+            let _ = std::io::Read::read_to_end(p, &mut buf);
+        }
+        buf
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(p) = err_pipe.as_mut() {
+            let _ = std::io::Read::read_to_end(p, &mut buf);
+        }
+        buf
+    });
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if deadline.expired() {
+            #[cfg(unix)]
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{}", child.id())])
+                .output();
+            let _ = child.kill();
+            let _ = child.wait();
+            // The readers end once every holder of the pipes is gone.
+            let _ = out_reader.join();
+            let _ = err_reader.join();
+            return Err(timeout());
+        }
+        std::thread::sleep(Duration::from_millis(50).min(deadline.remaining()));
+    };
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+    if !status.success() {
+        return Err(GitError::Command {
+            dir: dir.to_path_buf(),
+            args: args.join(" "),
+            stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
 /// Like [`git`], but returns the exit code instead of failing on a non-zero one
 /// (a signal-killed process reads as -1). Fails only if git could not run.
 pub(crate) fn git_code(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<i32, GitError> {
     let status = command(dir, args, opts).output()?.status;
     Ok(status.code().unwrap_or(-1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_repo() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        git(dir.path(), &["init", "-q"], &GitOptions::default()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn deadline_saturates_at_zero() {
+        let d = Deadline::after(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(d.remaining(), Duration::ZERO);
+        assert!(d.expired());
+        assert!(!Deadline::after(Duration::from_secs(5)).expired());
+    }
+
+    #[test]
+    fn fast_command_returns_like_git() {
+        let dir = temp_repo();
+        let o = GitOptions::default();
+        let a = git(dir.path(), &["rev-parse", "--show-toplevel"], &o).unwrap();
+        let b = git_with_timeout(
+            dir.path(),
+            &["rev-parse", "--show-toplevel"],
+            &o,
+            Deadline::after(Duration::from_secs(10)),
+        )
+        .unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn hanging_fetch_times_out() {
+        let dir = temp_repo();
+        let o = GitOptions::default();
+        git(
+            dir.path(),
+            &["remote", "add", "origin", "ssh://example.invalid/x"],
+            &o,
+        )
+        .unwrap();
+        git(dir.path(), &["config", "core.sshCommand", "sleep 30 #"], &o).unwrap();
+        let start = Instant::now();
+        let err = git_with_timeout(
+            dir.path(),
+            &["fetch", "origin"],
+            &o,
+            Deadline::after(Duration::from_secs(1)),
+        )
+        .unwrap_err();
+        assert!(matches!(err, GitError::Timeout { .. }), "{err}");
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn expired_deadline_does_not_spawn() {
+        let dir = temp_repo();
+        let d = Deadline::after(Duration::ZERO);
+        let err = git_with_timeout(dir.path(), &["status"], &GitOptions::default(), d).unwrap_err();
+        assert!(matches!(err, GitError::Timeout { .. }));
+    }
 }

@@ -667,6 +667,9 @@ pub fn free_branch(dirs: &[PathBuf], base: &str, opts: &GitOptions) -> Result<St
 
 /// `git fetch --quiet origin`.
 pub fn fetch(dir: &Path, opts: &GitOptions) -> Result<(), GitError> {
+    // Shares the per-repo lock with `prepare_base`, so they never fetch at once.
+    let lock = crate::base::repo_lock(dir);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     git(dir, &["fetch", "--quiet", "origin"], opts).map(|_| ())
 }
 
