@@ -199,9 +199,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
-            secrets_in_memory: false,
-            jira_http_loopback: false,
-            pr_poll: crate::config::DEFAULT_PR_POLL,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

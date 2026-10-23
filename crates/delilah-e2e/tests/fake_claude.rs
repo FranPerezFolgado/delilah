@@ -76,7 +76,7 @@ fn default_scenario_goes_working_then_waiting() {
     let env = Env::start(EnvOptions::default());
     env.scenario(
         "slow",
-        &json!({"steps": [{"hook": "UserPromptSubmit"}, {"sleep_ms": 2500}, {"stop": "done"}]}),
+        &json!({"steps": [{"hook": "UserPromptSubmit"}, {"sleep_ms": 6000}, {"stop": "done"}]}),
     );
     start(&env, "E2E-2", "Slow", "[fake:slow]");
     wait_state(&env, "E2E-2", "working");

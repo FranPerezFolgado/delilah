@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -35,15 +36,18 @@ impl Config {
     /// `DELILAH_UI_ORIGIN` and the test-only switches `DELILAH_AGENT_BIN`,
     /// `DELILAH_SECRETS`, `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK` and `DELILAH_PR_POLL_SECS`.
     pub fn from_env() -> Result<Self, String> {
-        Self::from_vars(|k| std::env::var(k).ok())
+        Self::from_vars(|k| std::env::var_os(k))
     }
 
     /// `from_env` over any source of variables, so tests need not touch the process env.
-    pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
-        let home = match var("DELILAH_HOME") {
+    /// Paths stay `OsString` (a non-UTF-8 `DELILAH_HOME` is still a path); the other
+    /// variables are read as text.
+    pub fn from_vars(var_os: impl Fn(&str) -> Option<OsString>) -> Result<Self, String> {
+        let var = |k: &str| var_os(k).map(|v| v.to_string_lossy().into_owned());
+        let home = match var_os("DELILAH_HOME") {
             Some(dir) => PathBuf::from(dir),
             None => {
-                let user_home = var("HOME").ok_or("HOME is not set")?;
+                let user_home = var_os("HOME").ok_or("HOME is not set")?;
                 PathBuf::from(user_home).join(".delilah")
             }
         };
@@ -101,22 +105,39 @@ impl Config {
         })
     }
 
-    /// What to log at start-up about the test-only switches that are set.
-    pub fn override_notes(var: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    /// What to warn about at start-up: the test-only switches this config turned on.
+    pub fn override_notes(&self) -> Vec<String> {
         let mut notes = Vec::new();
-        if let Some(bin) = var("DELILAH_AGENT_BIN") {
-            notes.push(format!("agent program overridden: {bin}"));
+        if let Some(bin) = &self.agent_program {
+            notes.push(format!("agent program overridden: {}", bin.display()));
         }
-        if var("DELILAH_SECRETS").is_some() {
+        if self.secrets_in_memory {
             notes.push("secrets in memory".to_string());
         }
-        if var("DELILAH_JIRA_ALLOW_HTTP_LOOPBACK").is_some_and(|v| v == "1") {
+        if self.jira_http_loopback {
             notes.push("jira over http on loopback allowed".to_string());
         }
-        if let Some(secs) = var("DELILAH_PR_POLL_SECS") {
-            notes.push(format!("pr poll every {} s", secs.trim()));
+        if self.pr_poll != DEFAULT_PR_POLL {
+            notes.push(format!("pr poll every {} s", self.pr_poll.as_secs()));
         }
         notes
+    }
+
+    /// Defaults for unit tests to fill in with `..Config::test_defaults()`, so a new
+    /// field does not touch every test that builds a `Config`.
+    #[cfg(test)]
+    pub(crate) fn test_defaults() -> Self {
+        Self {
+            home: PathBuf::from("/nonexistent/delilah-test-home"),
+            addr: DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+            secrets_in_memory: false,
+            jira_http_loopback: false,
+            pr_poll: DEFAULT_PR_POLL,
+        }
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -163,13 +184,22 @@ mod tests {
         );
     }
 
-    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let mut map: std::collections::HashMap<String, String> = pairs
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
+        let mut map: std::collections::HashMap<String, OsString> = pairs
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| (k.to_string(), OsString::from(v)))
             .collect();
         map.entry("HOME".into()).or_insert("/home/x".into());
         move |k| map.get(k).cloned()
+    }
+
+    #[test]
+    fn a_non_utf8_delilah_home_is_still_used() {
+        use std::os::unix::ffi::OsStringExt;
+        let dir = OsString::from_vec(b"/tmp/d\xffh".to_vec());
+        let expected = PathBuf::from(&dir);
+        let c = Config::from_vars(move |k| (k == "DELILAH_HOME").then(|| dir.clone())).unwrap();
+        assert_eq!(c.home, expected);
     }
 
     fn agent_bin_err(bin: &str) -> String {
@@ -213,15 +243,29 @@ mod tests {
     }
 
     #[test]
-    fn override_notes_log_every_switch_that_is_set() {
-        let none = |_: &str| None;
-        assert!(Config::override_notes(none).is_empty());
-        let notes = Config::override_notes(|k| match k {
-            "DELILAH_SECRETS" => Some("memory".into()),
-            "DELILAH_PR_POLL_SECS" => Some("30".into()),
-            _ => None,
-        });
-        assert_eq!(notes, ["secrets in memory", "pr poll every 30 s"]);
+    fn override_notes_log_every_switch_that_is_on() {
+        assert!(
+            Config::from_vars(vars(&[]))
+                .unwrap()
+                .override_notes()
+                .is_empty()
+        );
+        let c = Config::from_vars(vars(&[
+            ("DELILAH_AGENT_BIN", "/bin/sh"),
+            ("DELILAH_SECRETS", "memory"),
+            ("DELILAH_JIRA_ALLOW_HTTP_LOOPBACK", "1"),
+            ("DELILAH_PR_POLL_SECS", "2"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            c.override_notes(),
+            [
+                "agent program overridden: /bin/sh",
+                "secrets in memory",
+                "jira over http on loopback allowed",
+                "pr poll every 2 s",
+            ]
+        );
     }
 
     #[test]

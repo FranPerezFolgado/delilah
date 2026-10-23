@@ -23,6 +23,8 @@ struct Runner<'a, R, W> {
     fake_dir: Option<&'a Path>,
     input: &'a mut R,
     out: &'a mut W,
+    /// The last line ended with `\r`: a `\n` right after it belongs to that line.
+    after_cr: bool,
 }
 
 /// How a step ended: go on, or leave with an exit code.
@@ -64,15 +66,16 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         let mut line = Vec::new();
         let mut byte = [0u8; 1];
         loop {
+            let after_cr = std::mem::take(&mut self.after_cr);
             match self.input.read(&mut byte) {
                 Ok(0) | Err(_) if line.is_empty() => return None,
                 Ok(0) | Err(_) => break,
+                // `\r\n` is one line end. No peeking after the `\r`: on a raw tty that
+                // would hold the line back until the next key.
+                Ok(_) if byte[0] == b'\n' && after_cr && line.is_empty() => continue,
                 Ok(_) if byte[0] == b'\n' => break,
                 Ok(_) if byte[0] == b'\r' => {
-                    // `\r\n` is one line end.
-                    if self.input.fill_buf().is_ok_and(|b| b.first() == Some(&b'\n')) {
-                        self.input.consume(1);
-                    }
+                    self.after_cr = true;
                     break;
                 }
                 Ok(_) => line.push(byte[0]),
@@ -223,7 +226,7 @@ pub fn run<R: BufRead, W: Write>(
     input: &mut R,
     out: &mut W,
 ) -> i32 {
-    let mut r = Runner { record, hooks, fake_dir, input, out };
+    let mut r = Runner { record, hooks, fake_dir, input, out, after_cr: false };
     write_transcript(r.record, fake_dir);
     let mut steps = scenario.steps.iter();
     // Real Claude shows the folder-trust dialog before the session starts.

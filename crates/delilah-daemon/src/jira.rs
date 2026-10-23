@@ -56,8 +56,7 @@ pub async fn status(State(app): State<AppState>) -> Result<Json<JiraStatus>, Api
     }))
 }
 
-/// Saves the connection after checking it against Jira.
-/// `https://` always; `http://` only on loopback and only when the test switch is on.
+/// Whether a Jira site may get the token: `https://` always; `http://` only on loopback and only when the test switch is on.
 fn site_allowed(site: &str, http_loopback: bool) -> bool {
     if site.starts_with("https://") {
         return true;
@@ -81,6 +80,7 @@ fn site_allowed(site: &str, http_loopback: bool) -> bool {
         && (host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
 }
 
+/// Saves the connection after checking it against Jira.
 pub async fn connect(
     State(app): State<AppState>,
     Json(req): Json<Connect>,
@@ -286,9 +286,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
-            secrets_in_memory: false,
-            jira_http_loopback: false,
-            pr_poll: crate::config::DEFAULT_PR_POLL,
+            ..crate::config::Config::test_defaults()
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }

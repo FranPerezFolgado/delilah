@@ -95,7 +95,7 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     env.scenario(
         "ask",
         &json!({"steps": [{"ask": {"question": "Which colour?", "header": "Colour",
-            "options": ["red", "blue"]}}, {"sleep_ms": 2500}, {"stop": "done"}]}),
+            "options": ["red", "blue"]}}, {"sleep_ms": 6000}, {"stop": "done"}]}),
     );
     start(&env, "E2E-21", "[fake:ask]");
     let ask = env.wait_for("the ask in the inbox", T, || {
@@ -108,15 +108,16 @@ fn an_answered_ask_leaves_the_inbox_and_the_task_goes_on() {
     agree(&env, "E2E-21", None, "waiting-for-user");
 
     let id = ask["id"].as_str().unwrap().to_string();
-    let heard = events_during(&env, 2500, || {
+    let heard = events_during(&env, 1000, || {
         env.api().answer_ask(&id, json!({"Which colour?": "blue"}));
     });
     assert!(heard.iter().any(|t| t == "inbox"), "no inbox event: {heard:?}");
 
     agree(&env, "E2E-21", None, "running");
-    // The scenario sleeps 2.5 s after the answer, so the stop happens inside this window.
+    // The scenario sleeps 6 s after the answer (room to see it running even on a
+    // loaded machine), so the stop happens inside this window.
     let mut rec = None;
-    let heard = events_during(&env, 6000, || {
+    let heard = events_during(&env, 10_000, || {
         env.wait_for("the ask left the inbox", T, || {
             let inbox = env.api().inbox();
             if items(&inbox).iter().any(|i| i["ask"]["id"] == id.as_str()) { Err(inbox) } else { Ok(()) }

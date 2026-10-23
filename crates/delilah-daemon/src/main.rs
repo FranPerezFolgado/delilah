@@ -28,8 +28,8 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
-    for note in Config::override_notes(|k| std::env::var(k).ok()) {
-        tracing::info!("{note}");
+    for note in config.override_notes() {
+        tracing::warn!("test-only switch on: {note}");
     }
     match tokio::task::spawn_blocking(delilah_agents::env::init_login_path).await? {
         Some(path) => tracing::info!(%path, "agents get the login shell's PATH"),

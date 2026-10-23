@@ -84,7 +84,7 @@ done or pending is in [status.md](status.md).
 `DELILAH_HOME` defaults to `~/.delilah`. The dev daemon uses `fixtures/dev-home`,
 and a preview uses `fixtures/preview-home-N`.
 
-Four environment variables exist only for the end-to-end tests (read in `Config::from_env`; unset, the daemon behaves as usual; details in `specs/005-e2e-tests/contracts/daemon-env.md`):
+Four environment variables exist only for the end-to-end tests (read in `Config::from_env`; unset, the daemon behaves as usual; any that is on is logged as a warning at start; details in `specs/005-e2e-tests/contracts/daemon-env.md`):
 - `DELILAH_AGENT_BIN`: absolute path of an executable launched instead of `claude` for every session (an invalid value stops the daemon at start);
 - `DELILAH_SECRETS=memory`: secrets in memory instead of the Keychain;
 - `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK=1`: accepts a Jira site over `http://` on 127.0.0.1 or localhost;

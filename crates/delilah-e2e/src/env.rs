@@ -309,6 +309,8 @@ impl Env {
                 .append(true)
                 .open(&self.log)
                 .expect("daemon log");
+            // The log is shared by every start: only this attempt's lines decide a retry.
+            let log_start = log.metadata().map_or(0, |m| m.len()) as usize;
             let child = Command::new(&bin)
                 .env_clear()
                 .envs(daemon_env(&self.root, self.port, &self.opts))
@@ -337,7 +339,8 @@ impl Env {
                 }
                 Ready::Exited(status) => {
                     self.daemon = None;
-                    let text = std::fs::read_to_string(&self.log).unwrap_or_default();
+                    let text = std::fs::read(&self.log).unwrap_or_default();
+                    let text = String::from_utf8_lossy(text.get(log_start..).unwrap_or_default());
                     if attempt < attempts && text.to_lowercase().contains("in use") {
                         if fixed_port.is_some() {
                             std::thread::sleep(Duration::from_millis(500));

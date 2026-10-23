@@ -622,9 +622,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
-            secrets_in_memory: false,
-            jira_http_loopback: false,
-            pr_poll: crate::config::DEFAULT_PR_POLL,
+            ..crate::config::Config::test_defaults()
         };
         let mut conv = session("@web", "Idea");
         conv.conversation = true;
@@ -664,9 +662,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
-            secrets_in_memory: false,
-            jira_http_loopback: false,
-            pr_poll: crate::config::DEFAULT_PR_POLL,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.
@@ -974,9 +970,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: Some(fake),
-            secrets_in_memory: false,
-            jira_http_loopback: false,
-            pr_poll: crate::config::DEFAULT_PR_POLL,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.store

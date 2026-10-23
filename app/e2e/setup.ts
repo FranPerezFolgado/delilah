@@ -52,7 +52,8 @@ async function stop(child: ChildProcess, ms: number): Promise<void> {
 
 function exited(child: ChildProcess): Promise<number | null> {
   return new Promise((resolve) => {
-    if (child.exitCode !== null) return resolve(child.exitCode);
+    // Killed by a signal: exitCode stays null, but `exit` has already fired.
+    if (child.exitCode !== null || child.signalCode !== null) return resolve(child.exitCode);
     child.once("exit", (code) => resolve(code));
   });
 }
@@ -60,7 +61,9 @@ function exited(child: ChildProcess): Promise<number | null> {
 async function waitFor(url: string, child: ChildProcess, what: string): Promise<void> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`${what} exited early (${child.exitCode})`);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`${what} exited early (${child.exitCode ?? child.signalCode})`);
+    }
     try {
       if ((await fetch(url)).ok) return;
     } catch {
@@ -96,10 +99,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     if (vite && vite.exitCode === null) vite.kill("SIGKILL");
   };
   process.once("exit", killVite);
-  process.once("SIGINT", () => {
-    killVite();
-    process.exit(130);
-  });
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+    process.once(signal, () => {
+      killVite();
+      process.exit(code);
+    });
+  }
   const teardown = async () => {
     if (vite) await stop(vite, 5000);
     envProc.stdin?.end();
