@@ -14,9 +14,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 4 | 4B | done | 1 | 6f180c0 | actionlint/shellcheck not installed; workflow + dist build untried |
 | WP-08 | 4 | 4B | done | 1 | bc81cfb | lockfiles via cargo metadata (sidecar-free); bare-remote trial OK |
 | WP-09 | 5 | 5A | done | 1 | ecd1ee8 | + phase 3 MEDIUM fixes; i18n option 2 (refresh buttons → "Refrescar", since "Recargar" = Reload exists) |
-| WP-10 | 6 | 6A | verified | 1 | c9865fc | also shows+focuses main window before emit |
-| WP-11 | 6 | 6A | verified | 1 | 5a85020 | + phase 5 P1/P2 (sessionsFailed, unavailable events) |
-| WP-12 | 7 | 7A | verified | 1 | | restore-by-hand wording to check |
+| WP-10 | 6 | 6A | done | 1 | c9865fc | also shows+focuses main window before emit |
+| WP-11 | 6 | 6A | done | 1 | 5a85020 | + phase 5 P1/P2 (sessionsFailed, unavailable events) |
+| WP-12 | 7 | 7A | verified | 1 | 288e084 | restore-by-hand wording to check |
 | WP-08F | 4 | fix | done | 1 | 0751083 | phase 4 HIGH fixes + F5–F7; --target skipped |
 | WP-08F2 | 4 | fix | done | 1 | 768623e | tauri-action draft writes untagged-* URLs → own latest.json |
 | WP-13 | 7 | 7B | pending | 0 | | |
@@ -64,3 +64,12 @@ T005 (updater key + secrets) is maintainer-only: left to the user.
 | 5 | spec | LOW | failed manual check has no "Reintentar" → folded into WP-11 | app/src/components/UpdateNotice.tsx |
 | 5 | spec | LOW | shell terminals counted as running sessions (deliberate: restart stops them) → record in decisions (WP-12) | app/src/useUpdates.ts |
 | 5 | spec | LOW | untested: install run-once guard on re-render, retry re-installs | app/src/useUpdates.test.ts |
+| 6 | spec | LOW | "Reintentar" shown on dev-build `unavailable` error (no-op) | app/src/components/UpdateNotice.tsx |
+| 6 | spec | LOW | dev builds show no version in Settings (appVersion only when canUpdate) | app/src/useUpdates.ts |
+| 6 | spec | LOW | manual check during download/confirm/wait silently ignored (untested) | app/src/updates.ts |
+| 6 | ui-verifier | — | not run in a browser (no browser tools); source-level only. TaskScreen tree button aria-label still "Actualizar el árbol" | app/src/components/TaskScreen.tsx |
+| 7 | spec | MEDIUM | Releasing step 3 wording: plain `make release` releases the version already bumped → fix with merge | docs/development.md |
+| 7 | spec | MEDIUM | restore steps: stop daemon vs ⌘Q; marker/backup caveats after restore → fix with merge | docs/development.md |
+| 7 | spec | MEDIUM | dry-run prerequisites (public repo, ~/.tauri key, Keychain `delilah-updater`) undocumented → fix with merge | docs/development.md |
+| 7 | spec | LOW | architecture state list / timings location / gh login preflight → fix with merge | docs/architecture.md |
+| 7 | spec | LOW | after a restore to ≥0.5, existing delilah-<old>.db is never refreshed (code gap) | crates/delilah-daemon/src/upgrade.rs |
