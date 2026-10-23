@@ -56,6 +56,12 @@ impl Workspace {
         (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
     }
 
+    /// Whether the task has a branch yet: an empty name means the first analysis has
+    /// not created it.
+    pub fn has_branch(&self) -> bool {
+        !self.branch.is_empty()
+    }
+
     /// Folders that hold the task's branch: each submodule, or the repo itself.
     fn branch_dirs(&self) -> Vec<(String, PathBuf)> {
         match self.kind {
@@ -67,6 +73,27 @@ impl Workspace {
             ProjectKind::Repo => vec![("the workspace".into(), self.path.clone())],
         }
     }
+}
+
+/// Names of the folders in `root/specs/` that hold a `spec.md`, sorted. Empty when
+/// there is no `specs/` folder.
+pub fn spec_dirs(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join("specs")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("spec.md").is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    names
+}
+
+/// The branch checked out in `dir`, or `None` on a detached HEAD.
+pub fn current_branch(dir: &Path, opts: &GitOptions) -> Result<Option<String>, GitError> {
+    let name = git(dir, &["branch", "--show-current"], opts)?;
+    Ok((!name.is_empty()).then_some(name))
 }
 
 /// Top folder of the repo containing `path`.

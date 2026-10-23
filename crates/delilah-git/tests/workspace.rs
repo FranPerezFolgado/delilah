@@ -5,8 +5,8 @@ use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, branch_tip,
     changes, check_merged, check_repos, check_workspace, commit_subjects, create_workspace,
-    delete_branch, fetch, file_diff, leave_checkout, list_submodules, needs_push, push_branch,
-    remove_workspace, repo_root, use_checkout,
+    current_branch, delete_branch, fetch, file_diff, leave_checkout, list_submodules, needs_push,
+    push_branch, remove_workspace, repo_root, spec_dirs, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -675,4 +675,48 @@ fn home_of_is_the_repo_under_the_root_and_nothing_outside_it() {
         Workspace::home_of(&root, "../env/remotes/svc-orders.git"),
         None
     );
+}
+
+#[test]
+fn has_branch_is_false_for_an_empty_name() {
+    let f = Fixture::new();
+    let mut spec = f.repo_spec();
+    let ws = Workspace {
+        path: spec.path.clone(),
+        branch: String::new(),
+        kind: spec.kind,
+        submodules: vec![],
+    };
+    assert!(!ws.has_branch());
+    spec.branch = "feature/x".into();
+    let ws = Workspace {
+        branch: spec.branch,
+        ..ws
+    };
+    assert!(ws.has_branch());
+}
+
+#[test]
+fn spec_dirs_lists_sorted_folders_with_a_spec() {
+    let dir = TempDir::new().unwrap();
+    assert!(spec_dirs(dir.path()).is_empty());
+    let specs = dir.path().join("specs");
+    for (name, has_spec) in [("002-b", true), ("001-a", true), ("003-empty", false)] {
+        std::fs::create_dir_all(specs.join(name)).unwrap();
+        if has_spec {
+            std::fs::write(specs.join(name).join("spec.md"), "# s\n").unwrap();
+        }
+    }
+    std::fs::write(specs.join("stray.md"), "x").unwrap();
+    assert_eq!(spec_dirs(dir.path()), vec!["001-a", "002-b"]);
+}
+
+#[test]
+fn current_branch_is_none_on_a_detached_head() {
+    let f = Fixture::new();
+    let repo = f.repo();
+    let branch = current_branch(&repo, &opts()).unwrap();
+    assert!(branch.is_some_and(|b| !b.is_empty()));
+    git(&repo, &["checkout", "-q", "--detach"]);
+    assert_eq!(current_branch(&repo, &opts()).unwrap(), None);
 }
