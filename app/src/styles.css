@@ -498,3 +498,11 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 
 .pr-group { display: flex; flex-direction: column; gap: 8px; }
 .pr-group-title { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
+
+/* Update notice: a slim banner above the main views */
+.update-notice { margin: 12px 12px 0; }
+.update-notice .grow { flex: 1; }
+.update-notice .update-body { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.update-notice .update-row { display: flex; align-items: center; gap: 12px; }
+.update-notice .update-notes { max-height: 220px; overflow-y: auto; font-size: 12.5px; }
+.update-notice .update-progress { flex: 1; height: 6px; }

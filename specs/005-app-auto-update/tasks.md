@@ -77,7 +77,7 @@
 
 ### Tests first
 
-- [ ] T009 [P] [US1] Write `app/src/components/UpdateNotice.test.tsx` with the state passed as props and a `dispatch` spy. It covers:
+- [X] T009 [P] [US1] Write `app/src/components/UpdateNotice.test.tsx` with the state passed as props and a `dispatch` spy. It covers:
   - `available` shows "Delilah {version} disponible", the notes rendered with the existing `Markdown` component, and the buttons "Actualizar" and "Más tarde";
   - `downloading` shows "Descargando… {pct}%" (or indeterminate with `total=null`);
   - `installing` shows "Instalando y reiniciando…";
@@ -104,27 +104,27 @@
   - call `upgrade::before_open(&config.home, &config.database_path(), env!("CARGO_PKG_VERSION")).await` right before `Store::open`;
   - call `upgrade::after_open(...)` right after it succeeds, logging a warning on error.
   - Add one `tracing::info!` when a copy is made.
-- [ ] T013 [US1] Implement `app/src/components/UpdateNotice.tsx` as a slim non-blocking banner at the top of the main content, styled in `app/src/styles.css` with the existing tokens and matching the app's other notices. Notes are collapsible ("Ver novedades"). T009 passes.
-- [ ] T014 [US1] Implement `app/src/useUpdates.ts`, the hook that owns the side effects. It:
+- [X] T013 [US1] Implement `app/src/components/UpdateNotice.tsx` as a slim non-blocking banner at the top of the main content, styled in `app/src/styles.css` with the existing tokens and matching the app's other notices. Notes are collapsible ("Ver novedades"). T009 passes.
+- [X] T014 [US1] Implement `app/src/useUpdates.ts`, the hook that owns the side effects. It:
   - does nothing unless `canUpdate`;
   - on mount, reads `appVersion()` into meta and schedules the first automatic check after 10 s and then every 6 h (`setInterval`), clearing both on unmount;
   - `check(manual)` calls `checkForUpdate()` and dispatches the result or error;
   - `update` calls `install()` with progress dispatches, then `relaunch()`;
   - exposes `{state, meta, dispatch, check}`.
   - The session count for US3 is added in T029; until then "Actualizar" goes straight to `downloading`.
-- [ ] T015 [US1] Write `app/src/useUpdates.test.ts` with fake timers and a mocked `platform`. It covers:
+- [X] T015 [US1] Write `app/src/useUpdates.test.ts` with fake timers and a mocked `platform`. It covers:
   - the first check happens at 10 s and the next at 6 h;
   - a found update reaches `available`;
   - `update` calls `install`, then `relaunch`;
   - a failed automatic check stays `idle`;
   - with `canUpdate=false`, nothing is called.
   - (It may be written before T014 and fail first.)
-- [ ] T016 [US1] Mount it in `app/src/App.tsx`: call `useUpdates()` once at the top level and render `<UpdateNotice state dispatch />` above the routed views.
+- [X] T016 [US1] Mount it in `app/src/App.tsx`: call `useUpdates()` once at the top level and render `<UpdateNotice state dispatch />` above the routed views.
 - [X] T017 [US1] Register the plugins in `app/src-tauri/src/main.rs`:
   - `.plugin(tauri_plugin_process::init())` always;
   - `tauri_plugin_updater::Builder::new().build()` only under `#[cfg(not(debug_assertions))]` (R12).
   - Run `cargo check` in debug and `--release` on the shell.
-- [ ] T018 [US1] Add the Spanish strings from T009/T013 to `app/src/i18n/en.ts` (English values): "Delilah {version} disponible", "Actualizar", "Más tarde", "Ver novedades", "Descargando… {pct}%", "Instalando y reiniciando…", "No se pudo actualizar: {reason}", "No se pudo verificar la actualización", "Reintentar", "Cerrar".
+- [X] T018 [US1] Add the Spanish strings from T009/T013 to `app/src/i18n/en.ts` (English values): "Delilah {version} disponible", "Actualizar", "Más tarde", "Ver novedades", "Descargando… {pct}%", "Instalando y reiniciando…", "No se pudo actualizar: {reason}", "No se pudo verificar la actualización", "Reintentar", "Cerrar".
 
 **Checkpoint**:
 - `cargo test -p delilah-daemon upgrade` and `npx vitest related --run src/updates.ts src/useUpdates.ts src/components/UpdateNotice.tsx` are green.

@@ -14,6 +14,8 @@ import { BacklogTaskView } from "./components/BacklogTaskView";
 import { ProjectsView } from "./components/ProjectsView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, type View } from "./components/Sidebar";
+import { UpdateNotice } from "./components/UpdateNotice";
+import { useUpdates } from "./useUpdates";
 import { StatusBar } from "./components/StatusBar";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
 
@@ -187,6 +189,7 @@ export function App() {
     openTask(item.task, item.session?.id ?? (item.kind === "waiting" ? primary?.id : undefined));
   };
   useDesktopAlerts(inbox, tasks, prs, openItem);
+  const updates = useUpdates();
 
   const run = (action: ActionId) => {
     switch (action) {
@@ -294,6 +297,7 @@ export function App() {
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
         <main>
+          <UpdateNotice state={updates.state} dispatch={updates.dispatch} />
           {!online && (
             <div className="notice" style={{ margin: 12, borderColor: "var(--err)" }}>
               <span className="c-err">●</span>
