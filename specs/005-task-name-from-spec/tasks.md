@@ -48,9 +48,9 @@ None: no new dependencies.
 - [ ] T016 [US1] Implement `retitle` and wire it into `on_activity`/`recover` in `crates/delilah-daemon/src/branching.rs`.
 - [ ] T017 [US1] Write failing API tests in `crates/delilah-daemon/src/api.rs` (tests module): `PATCH /api/v1/tasks/{key}` with only `title` on a running task → 200, `title_source = manual`, `previous_title = null`; with `project`/`workflow`/`notes`/`in_checkout` on a running task → 409 as today; on an archived task → 409; empty title → 400.
 - [ ] T018 [US1] Implement T017 in `crates/delilah-daemon/src/api.rs` `update_task`: title-only changes go through `store.set_title`, the rest through `update_backlog_task` (which also marks the title `manual` when it changes it).
-- [ ] T019 [P] [US1] Add `title_source`, `previous_title`, `branch_error` to `Task` in `app/src/api.ts` (contracts/api.md).
-- [ ] T020 [US1] Write failing tests in `app/src/components/TaskScreen.test.tsx`: the header title is editable in place (Enter saves via `updateTask({title})`, Escape cancels, empty is refused); with `previous_title` set it shows "Antes: <previous>" and "Restaurar", which patches the previous title; without it, neither shows.
-- [ ] T021 [US1] Implement T020 in `app/src/components/TaskScreen.tsx` and the English strings in `app/src/i18n/en.ts`.
+- [X] T019 [P] [US1] Add `title_source`, `previous_title`, `branch_error` to `Task` in `app/src/api.ts` (contracts/api.md).
+- [X] T020 [US1] Write failing tests in `app/src/components/TaskScreen.test.tsx`: the header title is editable in place (Enter saves via `updateTask({title})`, Escape cancels, empty is refused); with `previous_title` set it shows "Antes: <previous>" and "Restaurar", which patches the previous title; without it, neither shows.
+- [X] T021 [US1] Implement T020 in `app/src/components/TaskScreen.tsx` and the English strings in `app/src/i18n/en.ts`.
 
 **Checkpoint**: US1 works end to end in a preview with today's branches untouched.
 

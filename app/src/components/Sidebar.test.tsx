@@ -12,7 +12,7 @@ const task = (key: string, status: TaskStatus): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
-  saving_mode: false,
+  saving_mode: false, title_source: "initial", previous_title: null, branch_error: null,
   handoff: null,
   status,
 });

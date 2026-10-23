@@ -120,7 +120,7 @@ const taskWith = (handoff: Handoff | null): Task => ({
   workflow: "feature",
   phase: null,
   status: { type: "waiting-for-user" },
-  saving_mode: true,
+  saving_mode: true, title_source: "initial", previous_title: null, branch_error: null,
   handoff,
 });
 

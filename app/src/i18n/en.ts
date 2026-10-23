@@ -1,6 +1,10 @@
 // English for every text of the app, keyed by its Spanish original (see i18n.ts).
 export const EN: Record<string, string> = {
   "Semana": "Week",
+  "Clic para renombrar": "Click to rename",
+  "Título de la tarea": "Task title",
+  "Antes: {title}": "Before: {title}",
+  "Restaurar": "Restore",
   "delilahd conectado": "delilahd connected",
   "delilahd sin conexión": "delilahd offline",
   "Agentes trabajando": "Agents working",

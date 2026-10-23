@@ -10,7 +10,7 @@ const task = (status: TaskStatus, phase: string | null = null): Task => ({
   workflow: "feature",
   phase,
   status,
-  saving_mode: false,
+  saving_mode: false, title_source: "initial", previous_title: null, branch_error: null,
   handoff: null,
 });
 

@@ -11,7 +11,7 @@ const task = (handoff: Handoff | null = null): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
-  saving_mode: true,
+  saving_mode: true, title_source: "initial", previous_title: null, branch_error: null,
   handoff,
   status: { type: "running" },
 });

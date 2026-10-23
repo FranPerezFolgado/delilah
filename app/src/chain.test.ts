@@ -8,7 +8,7 @@ const task = (saving: boolean, handoff: Handoff | null = null): Task => ({
   project: "web",
   workflow: "feature",
   phase: null,
-  saving_mode: saving,
+  saving_mode: saving, title_source: "initial", previous_title: null, branch_error: null,
   handoff,
   status: { type: "running" },
 });

@@ -79,7 +79,7 @@ const started: Task = {
   workflow: "feature",
   phase: null,
   status: { type: "queued" },
-  saving_mode: true,
+  saving_mode: true, title_source: "initial", previous_title: null, branch_error: null,
   handoff: null,
 };
 

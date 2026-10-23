@@ -11,7 +11,7 @@ const running: Task = {
   workflow: "feature",
   phase: null,
   status: { type: "running" },
-  saving_mode: false,
+  saving_mode: false, title_source: "initial", previous_title: null, branch_error: null,
   handoff: null,
 };
 

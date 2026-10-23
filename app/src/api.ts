@@ -38,6 +38,12 @@ export interface Task {
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
   handoff: Handoff | null;
+  /** Who set the title: the first one, the analysis's feature name, or the user. */
+  title_source: "initial" | "spec" | "manual";
+  /** The title before the analysis renamed the task; null once edited by hand or restored. */
+  previous_title: string | null;
+  /** Why the branch could not be renamed, if it could not. */
+  branch_error: string | null;
 }
 
 export interface EventRecord {

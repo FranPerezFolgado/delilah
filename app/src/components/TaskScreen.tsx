@@ -272,6 +272,20 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
       .then(onChanged)
       .catch((e) => setError((e as Error).message));
 
+  const [editing, setEditing] = useState<string | null>(null);
+  const saveTitle = () => {
+    const title = (editing ?? "").trim();
+    setEditing(null);
+    if (!task || !title || title === task.title) return;
+    api.updateTask(owner, { title }).then(onChanged).catch((e) => setError((e as Error).message));
+  };
+  const restoreTitle = () =>
+    task?.previous_title &&
+    api
+      .updateTask(owner, { title: task.previous_title })
+      .then(onChanged)
+      .catch((e) => setError((e as Error).message));
+
   const openChanges = () => {
     session.changesOpen = true;
     activate(CHANGES);
@@ -501,7 +515,34 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
         {task && status ? (
           <>
             <span className="mono muted">{owner}</span>
-            <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
+            {editing === null ? (
+              <h1
+                data-tauri-drag-region
+                className="trunc"
+                title={t("Clic para renombrar")}
+                onClick={() => setEditing(task.title)}
+              >
+                {task.title}
+              </h1>
+            ) : (
+              <input
+                autoFocus
+                aria-label={t("Título de la tarea")}
+                value={editing}
+                onChange={(e) => setEditing(e.target.value)}
+                onBlur={() => setEditing(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveTitle();
+                  else if (e.key === "Escape") setEditing(null);
+                }}
+              />
+            )}
+            {task.previous_title && (
+              <span className="muted trunc">
+                {t("Antes: {title}", { title: task.previous_title })}{" "}
+                <button className="saving-off" onClick={restoreTitle}>{t("Restaurar")}</button>
+              </span>
+            )}
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
               {task.saving_mode && (
