@@ -337,7 +337,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         None => None,
     };
     let key = match new.free && new.key.trim().is_empty() {
-        true => crate::run::next_free_key(&app).await?,
+        true => crate::run::next_free_key(app).await?,
         false => new.key,
     };
     let key = TaskKey::parse(key).map_err(|e| ApiError::bad_request(e.to_string()))?;

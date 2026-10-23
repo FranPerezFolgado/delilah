@@ -138,11 +138,11 @@ async fn build_proposal(
     repo: Option<String>,
 ) -> Result<Proposal, ApiError> {
     let q = ProposalQuery { repo };
-    let rows = app.store.prs_of(&key).await?;
+    let rows = app.store.prs_of(key).await?;
     let has_open = |label: &str| rows.iter().any(|r| r.repo == label && is_open(r));
     let mut candidates = vec![q.repo.clone().unwrap_or_else(|| ".".into())];
     if candidates[0] == "."
-        && let Some((_, ws)) = app.store.workspace(&key).await?
+        && let Some((_, ws)) = app.store.workspace(key).await?
     {
         // A parent has no "." repo: the default is its first submodule without a PR
         // that has commits to open one with.
@@ -160,14 +160,14 @@ async fn build_proposal(
     let mut empty = None;
     let mut picked = None;
     for candidate in &candidates {
-        let (repo, branch, dir, labels) = source_of(&app, &key, Some(candidate)).await?;
+        let (repo, branch, dir, labels) = source_of(app, key, Some(candidate)).await?;
         if has_open(&repo) {
             return Err(ApiError::conflict_reason(
                 format!("{repo} already has an open PR"),
                 "has-pr",
             ));
         }
-        let commits = commits_of(&app, &dir, &branch).await?;
+        let commits = commits_of(app, &dir, &branch).await?;
         if commits.subjects.is_empty() {
             empty.get_or_insert((branch, commits.base));
         } else {
@@ -183,7 +183,7 @@ async fn build_proposal(
         ));
     };
     let mut body = String::new();
-    if let Some(link) = jira_link(&app, &key).await {
+    if let Some(link) = jira_link(app, key).await {
         body.push_str(&format!("Jira: {link}\n\n"));
     }
     for subject in &commits.subjects {
@@ -191,7 +191,7 @@ async fn build_proposal(
     }
     let title = app
         .store
-        .get_task(&key)
+        .get_task(key)
         .await?
         .map(|t| t.title)
         .unwrap_or_default();

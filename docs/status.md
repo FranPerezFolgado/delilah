@@ -88,6 +88,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - **Live sessions lost:** FEAT-4 and FEAT-5 lost their live sessions when the dev daemon was killed. Their conversations can be resumed from the task.
 - **Autopilot, known limits:**
   - previews are lost on a daemon restart (memory only, not adopted again);
+  - a preview's child process that ignores SIGTERM once its leader has exited is left running ([#43](decisions.md));
+  - `handoff` and `autopilot` call each other (as do `autopilot::pause` and the inbox's types): when they grow, give `handoff` a small policy hook that autopilot implements;
   - no time or token caps: a running autopilot is bounded only by one nudge per step and the usage limit;
   - an autopilot stored before `review_session` existed does not auto-recover a finish;
   - a destructive option the agent marks "(Recommended)" would be picked automatically ([#42](decisions.md));

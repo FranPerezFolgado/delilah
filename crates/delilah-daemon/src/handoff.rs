@@ -206,8 +206,8 @@ async fn enter<L: Launcher>(
     launch: &L,
     entered: impl FnOnce(),
 ) {
-    if save_notes_preference(app).await {
-        if let Some(live) = app.sessions.primary(key.as_str()) {
+    if save_notes_preference(app).await
+        && let Some(live) = app.sessions.primary(key.as_str()) {
             set(app, key, to, HandoffStage::Saving, None).await;
             match crate::actions::type_prompt(&live, "/save-session").await {
                 Ok(()) => return entered(),
@@ -216,7 +216,6 @@ async fn enter<L: Launcher>(
                 }
             }
         }
-    }
     if !app.handoffs.mark_starting(key) {
         return;
     }
@@ -599,11 +598,10 @@ async fn start_with<L: Launcher>(app: &AppState, key: &TaskKey, step: Step, laun
     );
     match result {
         Ok(()) => {
-            if still_starting {
-                if let Err(e) = app.store.set_handoff(key, None).await {
+            if still_starting
+                && let Err(e) = app.store.set_handoff(key, None).await {
                     tracing::warn!(task = %key, "cannot clear the handoff: {e}");
                 }
-            }
             tracing::info!(task = %key, step = step.name(), "handoff done");
         }
         Err(message) => {
@@ -707,11 +705,10 @@ async fn try_start<L: Launcher>(
         let _ = tokio::time::timeout(KILL_WAIT, live.pty.wait()).await;
     }
     if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false) {
-        if !relaunch {
-            if let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await {
+        if !relaunch
+            && let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await {
                 tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
             }
-        }
         return Err(e.message().to_string());
     }
     Ok(())
@@ -927,7 +924,7 @@ mod tests {
         );
 
         on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
-        let launched = launched.lock().unwrap();
+        let launched = launched.lock().unwrap().clone();
         assert_eq!(launched.len(), 1);
         assert_eq!(launched[0].0.step, Some(Step::Implement));
         assert!(handoff_of(&app, &key).await.is_none());
@@ -1019,7 +1016,7 @@ mod tests {
             .ok()
             .unwrap();
 
-        let launched = launched.lock().unwrap();
+        let launched = launched.lock().unwrap().clone();
         assert_eq!(launched.len(), 1);
         let (session, prompt) = &launched[0];
         assert_eq!(session.step, Some(Step::Implement));
@@ -1624,7 +1621,7 @@ mod tests {
         check_all(&app);
         let launched = Launched::default();
         on_turn_ended_with(&app, &key, &ok_launcher(&launched)).await;
-        let launched = launched.lock().unwrap();
+        let launched = launched.lock().unwrap().clone();
         assert_eq!(launched.len(), 1);
         let (session, prompt) = &launched[0];
         assert_eq!(session.step, Some(Step::Review));

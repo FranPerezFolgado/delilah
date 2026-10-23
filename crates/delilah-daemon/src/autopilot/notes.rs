@@ -64,6 +64,20 @@ pub(super) fn tasks_unchecked(lang: Lang, n: usize) -> String {
     }
 }
 
+/// What a resumed review is told when its outcome still says blocked: the user may have
+/// fixed it by hand, so it checks again and writes the outcome anew.
+pub(crate) fn recheck_text(lang: Lang, outcome: &Path) -> String {
+    let path = outcome.display();
+    match lang {
+        Lang::Es => format!(
+            "Autopilot reanudado: vuelve a comprobar la revisión (puede que ya se haya resuelto lo que la bloqueaba), haz commit de lo que falte y escribe de nuevo el resultado en `{path}`."
+        ),
+        Lang::En => format!(
+            "Autopilot resumed: check the review again (what blocked it may be solved by now), commit what is missing and write the outcome to `{path}` again."
+        ),
+    }
+}
+
 pub(crate) fn nudge_text(lang: Lang) -> &'static str {
     lang.pick(
         "Autopilot: sigue adelante sin preguntar; elige tú la opción recomendada; si de verdad no puedes continuar, di por qué y para.",

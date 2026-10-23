@@ -303,7 +303,8 @@ prompt always pauses the autopilot instead.
 **43. Process groups are signalled with `/bin/kill -- -<pgid>` (2026-10-22).** The
 workspace forbids `unsafe`, so no `libc::killpg`. The waiter task owns the child; a
 delayed KILL is sent only if the leader has not been reaped, so a reused pid is never
-hit.
+hit. Accepted cost: a child that ignores SIGTERM after its leader has exited is not
+killed.
 
 **44. Autopilot state changes are compare-and-set (2026-10-22).** `Store::update_autopilot`
 writes only if the stored value is still the one the closure saw, so a pause or "off"

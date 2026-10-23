@@ -4,7 +4,8 @@ use chrono::Utc;
 use delilah_core::{AutopilotStage, AutopilotState, Event, HandoffStage, Step, Task, TaskKey};
 
 use super::finish::{finish_guarded, finish_when_free};
-use super::notes::{nudge_text, tasks_unchecked};
+use super::notes::{nudge_text, outcome_path, recheck_text, tasks_unchecked};
+use super::outcome::{Outcome, read_outcome};
 use super::{is_running, is_task, task_of, update};
 use crate::api::ApiError;
 use crate::events::Topic;
@@ -207,6 +208,23 @@ pub(crate) async fn resume_with<L: Launcher>(
 /// (waiting for the one that is running, if any), a session still working is left to
 /// reach its turn end, a failed or offered handoff goes on (and pauses again with the
 /// error if it cannot), and an idle session is looked at as at a turn end.
+/// Types the re-check into the review session (its turn end finishes again), recorded
+/// as the review's nudge.
+async fn recheck(
+    app: &AppState,
+    key: &TaskKey,
+    review: &crate::sessions::Live,
+) -> Result<(), ApiError> {
+    if let Err(e) = app
+        .transition(key, Event::AutopilotNudged { step: Step::Review })
+        .await
+    {
+        tracing::warn!(task = %key, "cannot record the nudge: {e}");
+    }
+    let text = recheck_text(app.lang(), &outcome_path(app, key, &review.id));
+    crate::actions::type_prompt(review, &text).await
+}
+
 pub(crate) async fn advance_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
     let Ok(Some(task)) = app.store.get_task(key).await else {
         return;
@@ -252,10 +270,22 @@ pub(crate) async fn advance_with<L: Launcher>(app: &AppState, key: &TaskKey, lau
             None
         }
         Some(HandoffStage::Starting) => None,
-        _ => {
-            crate::handoff::on_turn_ended_with(app, key, launch).await;
-            None
-        }
+        _ => match primary.filter(|l| a.review_session.as_deref() == Some(l.id.as_str())) {
+            // An idle review whose outcome still says blocked would only pause again
+            // with the same reason: it is asked to check again instead.
+            Some(review)
+                if matches!(
+                    read_outcome(app.lang(), &outcome_path(app, key, &review.id)),
+                    Outcome::Blocked { .. }
+                ) =>
+            {
+                recheck(app, key, &review).await.err()
+            }
+            _ => {
+                crate::handoff::on_turn_ended_with(app, key, launch).await;
+                None
+            }
+        },
     };
     if let Some(e) = failed {
         pause(app, key, e.message()).await;
@@ -436,6 +466,39 @@ mod tests {
         let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
         app.sessions
             .insert(id, "PROJ-1", SessionKind::Claude, true, pty);
+    }
+
+    #[tokio::test]
+    async fn resuming_a_blocked_review_asks_it_to_check_again() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        live(&app, "rev-1");
+        write_outcome(&app, &key, r#"{"outcome":"blocked","reason":"tests fail"}"#);
+        app.store
+            .set_autopilot(&key, Some(&paused()))
+            .await
+            .unwrap();
+        update(&app, &key, |a| {
+            a.review_session = Some("rev-1".into());
+            true
+        })
+        .await
+        .unwrap();
+        let launched = Launched::default();
+        resume_with(&app, &key, &stub(&launched))
+            .await
+            .ok()
+            .unwrap();
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Running, "{:?}", a.reason);
+        let events = app.store.events(&key).await.unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.event == Event::AutopilotNudged { step: Step::Review }),
+            "{:?}",
+            event_names(&events)
+        );
+        assert!(launched.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
