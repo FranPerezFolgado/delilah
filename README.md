@@ -99,6 +99,8 @@ that UI in with `DELILAH_UI_ORIGIN`, and the UI finds it through
 `VITE_DELILAH_URL`. `--fresh` starts empty, `--no-ui` runs only the daemon,
 `--notify` turns notifications on. Ctrl-C stops both.
 
+**End-to-end tests.** `scripts/e2e.sh` runs the API/CLI and UI flows against a fake Claude, safe next to the installed app (see docs/development.md).
+
 The bundle carries `delilahd` inside (`Delilah.app/Contents/MacOS/delilahd`). When
 the installed app opens, it installs a LaunchAgent
 (`~/Library/LaunchAgents/dev.delilah.daemon.plist`) and launchd keeps the daemon

@@ -1,12 +1,13 @@
 {
   "name": "delilah-app",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc --noEmit -p e2e && vite build",
     "test": "vitest run",
+    "e2e": "playwright test",
     "sidecar": "bash ../scripts/build-sidecar.sh release",
     "sidecar:dev": "bash ../scripts/build-sidecar.sh debug",
     "tauri": "tauri",
@@ -34,8 +35,10 @@
     "remark-gfm": "4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.0",
     "@tauri-apps/cli": "^2.12.3",
     "@testing-library/react": "^16.3.3",
+    "@types/node": "22.20.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

@@ -263,6 +263,16 @@ stops between phases (at most 2 fix rounds, MEDIUM/LOW findings logged in `progr
 version bump is a script, `scripts/bump-version.sh`. Rust CI runs on macOS because the daemon has
 macOS-only dependencies; that costs more runner minutes than Linux.
 
+**58. End-to-end tests with a fake Claude, local only (2026-10-22).**
+- **What:** `scripts/e2e.sh` runs a real `delilahd` and the real CLI/UI against a fake Claude, `gh` and Jira, in two layers (API/CLI in Rust, UI in Playwright).
+- **The fake is a Rust binary** (`fake-claude`) that reads a JSON scenario and runs the hooks from the `--settings` file the daemon wrote, as Claude does. That keeps `claude::write_settings` and the hook contract under test.
+- **`DELILAH_AGENT_BIN`** tells the daemon which program to launch instead of `claude` (env, like `DELILAH_GH_BIN`; no daemon flags exist). Both, and the switches below, are parsed and validated in `Config` at start, so a bad value stops the daemon instead of failing at the first call. Three more test-only variables go with it: `DELILAH_SECRETS=memory`, `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK=1`, `DELILAH_PR_POLL_SECS`.
+- **Isolation:** each run has a temp `HOME` (the daemon reads `~/.claude/settings.json` and the login shell's rc files), its own `DELILAH_HOME`, fixtures and a free port, never 7420 nor 7501-7509. A tripwire `claude`/`gh` first on PATH fails the test if the real one is reached; the one-shot Claude calls (`DELILAH_CLAUDE_BIN`) get a fake that always fails, so branch names are the daemon's deterministic fallback. The only exception is the opt-in real-Claude smoke test.
+- **A separate crate, `delilah-e2e`, with an `e2e` feature**, so `cargo test --workspace` stays as fast as before and the flows are not mixed with the `#[ignore]`d smoke test.
+- **UI: one daemon and one Vite per run, tests serial.** `VITE_DELILAH_URL` is fixed when Vite starts; each test makes its own repos and projects instead.
+- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI.
+- **Ruled out:** a shell fake (hard to handle JSON and to keep in step with `claude.rs`); a fake that posts to `/hooks/claude` itself (skips the settings file); a `claude` shim on PATH (the agent's PATH comes from the login shell); replaying real sessions (they depend on the real Claude and its cost); reusing `preview.sh` (user's `HOME`, fixed slots, interactive); tests in `crates/delilah-daemon/tests/` (bloats its dev-dependencies); CI on macOS runners (cost, and the checks run locally anyway); a runtime daemon switch in the UI (`?daemon=`, code that exists only for tests); Cypress (Playwright has traces and runs from Node).
+
 ## Pull requests
 
 **26. GitHub through the user's `gh`, with no token in the daemon (2026-10-20).**

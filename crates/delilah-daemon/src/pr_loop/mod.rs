@@ -24,7 +24,6 @@ use crate::state::AppState;
 use crate::store::StoreError;
 use crate::store_prs::{NewPr, PrRow};
 
-const INTERVAL: Duration = Duration::from_secs(30);
 /// How long after a push or `gh pr create` the PR is looked for: GitHub needs a moment.
 const NUDGE_DELAY: Duration = Duration::from_secs(15);
 
@@ -85,7 +84,7 @@ pub(crate) fn is_checking(app: &AppState, key: &TaskKey) -> bool {
 /// Checks the PRs on a timer: the open ones, and the tasks in review that have none yet.
 pub fn spawn(app: AppState) {
     tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(INTERVAL);
+        let mut ticker = tokio::time::interval(app.config.pr_poll);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;

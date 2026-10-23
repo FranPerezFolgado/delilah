@@ -499,6 +499,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::post("/api/v1/projects/inspect")
@@ -595,6 +596,7 @@ mod tests {
             ui_origin: None,
             agent_program: None,
             claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
         for (path, kind) in [("parent", "parent"), ("parent/svc-orders", "repo")] {
@@ -855,6 +857,7 @@ mod tests {
             ui_origin: None,
             agent_program: None,
             claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let app = crate::api::router(AppState::new(store, config));
         let send = |method: &'static str, uri: &'static str, body: Option<Value>| {

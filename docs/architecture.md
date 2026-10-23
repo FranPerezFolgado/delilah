@@ -42,9 +42,10 @@ done or pending is in [status.md](status.md).
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
-| `app/` | React + TypeScript UI (Vite), CodeMirror 6 editor, xterm.js terminals. |
+| `crates/delilah-e2e` | The end-to-end test harness (library, `e2e` feature): `Env` (an isolated daemon), fixtures, fake Jira, the `fake-claude` binary (runs a JSON scenario and the settings' hooks) and `e2e-env` (starts an Env for the UI tests and for debugging). |
+| `app/` | React + TypeScript UI (Vite), CodeMirror 6 editor, xterm.js terminals. `app/e2e/` has the Playwright specs. |
 | `app/src-tauri` | The Tauri 2 shell (outside the Cargo workspace): `main.rs` (window, menu), `daemon.rs` (LaunchAgent). |
-| `scripts/` | Test fixtures (`make-fixture-parent.sh`), the dev daemon (`dev-daemon.sh`), previews (`preview.sh`), the bundled daemon build (`build-sidecar.sh`). |
+| `scripts/` | Test fixtures (`make-fixture-parent.sh`), the dev daemon (`dev-daemon.sh`), previews (`preview.sh`), the bundled daemon build (`build-sidecar.sh`), the end-to-end tests (`e2e.sh`). |
 | `specs/`, `.specify/` | SpecKit's setup and the specs of features built with it. |
 | `docs/` | These docs, spikes (`docs/spikes/`), and local-only session notes (`docs/sessions/`, git-excluded). |
 
@@ -73,7 +74,7 @@ done or pending is in [status.md](status.md).
 | `changes.rs`, `files.rs` | Cambios (diffs) and the editor's file API, confined to the workspace and checked by file version. |
 | `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), their settings (validation, `FieldError` with a stable `code`, localised by the daemon), submodules (`GET …/submodules` hides `never` ones unless `?all=true`), and the submodule suggestion. |
 | `setup.rs` | A project's setup command: runs `$SHELL -lc` in the worktree as a `Setup` session (10 min), cancel/retry/skip, recovery of interrupted setups at start. |
-| `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` swaps the binary. |
+| `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` (absolute path, checked in `Config` at start) swaps the binary. |
 
 `DELILAH_CLAUDE_BIN` (`Config.claude_bin`, default `claude`) swaps the binary of the headless Claude calls: the branch name and the submodule suggestion. Tests and previews point it at a fake script.
 | `pr_types.rs`, `prs.rs` | PR data types (snapshot, checks, reviews, comments) and the pure logic: `ci_outcome`, `pick`, `summary`, `diff`, back-off. |
@@ -88,6 +89,12 @@ done or pending is in [status.md](status.md).
 
 `DELILAH_HOME` defaults to `~/.delilah`. The dev daemon uses `fixtures/dev-home`,
 and a preview uses `fixtures/preview-home-N`.
+
+Four environment variables exist only for the end-to-end tests (read in `Config::from_env`; unset, the daemon behaves as usual; any that is on is logged as a warning at start; details in `specs/005-e2e-tests/contracts/daemon-env.md`):
+- `DELILAH_AGENT_BIN`: absolute path of an executable launched instead of `claude` for every session (an invalid value stops the daemon at start);
+- `DELILAH_SECRETS=memory`: secrets in memory instead of the Keychain;
+- `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK=1`: accepts a Jira site over `http://` on 127.0.0.1 or localhost;
+- `DELILAH_PR_POLL_SECS`: the PR loop's tick in seconds (default 30).
 
 | Path | Contents |
 |---|---|

@@ -79,8 +79,16 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 
 **Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
 
+**End-to-end tests:**
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Local only, no CI. See [development.md](development.md#end-to-end-tests).
+
 ## Pending and known problems
 
+- **End-to-end tests, pending and known:**
+  - the UI quick-open test covers the file quick open (the UI has no task switcher);
+  - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
+  - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
+  - measured: API layer 57 s (including the build), UI layer 30 s; 10 consecutive full `scripts/e2e.sh` runs all green (78–105 s each), no flaky tests; the installed Delilah stayed untouched (same PID, health OK) and an interrupted run (Ctrl-C) leaves no daemons behind.
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);

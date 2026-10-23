@@ -377,6 +377,7 @@ mod tests {
             ui_origin: None,
             claude_bin: bin,
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let project = Project {

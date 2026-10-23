@@ -728,6 +728,7 @@ mod tests {
             ui_origin: None,
             agent_program: None,
             claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let gh = gh("[]");
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config)

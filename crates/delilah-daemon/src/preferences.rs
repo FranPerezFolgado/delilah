@@ -98,6 +98,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }

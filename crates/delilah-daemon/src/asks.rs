@@ -371,6 +371,7 @@ pub(crate) mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

@@ -1090,7 +1090,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
-            claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let mut conv = session("@web", "Idea");
         conv.conversation = true;
@@ -1131,6 +1131,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "/usr/bin/false".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.
@@ -1659,7 +1660,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: Some(fake),
-            claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.store
@@ -1790,6 +1791,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.store
@@ -1922,6 +1924,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let mut project = delilah_core::Project {

@@ -693,6 +693,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -707,6 +708,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -1257,6 +1259,7 @@ mod cors_tests {
             ui_origin: ui_origin.map(str::to_string),
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -1306,6 +1309,7 @@ mod cors_tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);
