@@ -74,6 +74,7 @@ pub async fn archive(
             task.status.name()
         )));
     }
+    app.end_task_runtime(&key);
     if finish_partial(&app, &key).await? {
         app.emit(Topic::Inbox);
     }
@@ -127,6 +128,7 @@ pub async fn delete(
             .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::unpushed(format!("{key} would lose work: {e}")))?;
     }
+    app.end_task_runtime(&key);
     if task.status == TaskStatus::Queued {
         // No workspace yet; deleted only if still in the backlog, so a start that
         // slipped in since it was read is never left without its task.
@@ -637,6 +639,7 @@ mod tests {
                 path: repo.to_path_buf(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -679,6 +682,50 @@ mod tests {
             axum::extract::Query(ArchiveQuery::default()),
         )
         .await
+    }
+
+    fn start_preview(app: &AppState, key: &str) {
+        app.previews
+            .start(
+                key,
+                &std::env::temp_dir(),
+                "echo http://127.0.0.1:9/x; sleep 30",
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn archive_stops_the_preview() {
+        let (app, repo) = setup().await;
+        git(&repo, &["branch", "feature/PROJ-1"]);
+        let key = partially_archived(&app, &repo, "feature/PROJ-1").await;
+        start_preview(&app, key.as_str());
+        let _ = archive_task(&app, &key)
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert!(app.previews.view(key.as_str()).is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_stops_the_preview() {
+        let (app, repo) = setup().await;
+        started(&app, &repo, "PROJ-2", false).await;
+        start_preview(&app, "PROJ-2");
+        delete_task(&app, "PROJ-2", true).await.ok().unwrap();
+        assert!(app.previews.view("PROJ-2").is_none());
+    }
+
+    #[tokio::test]
+    async fn deleting_a_backlog_task_stops_its_preview() {
+        let (app, _) = setup().await;
+        app.store
+            .create_task(&Task::new(TaskKey::new("PROJ-3"), "x", "feature"))
+            .await
+            .unwrap();
+        start_preview(&app, "PROJ-3");
+        delete_task(&app, "PROJ-3", false).await.ok().unwrap();
+        assert!(app.previews.view("PROJ-3").is_none());
     }
 
     #[tokio::test]

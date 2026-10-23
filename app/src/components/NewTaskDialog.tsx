@@ -51,6 +51,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // Each step in a fresh session: a backlog task keeps its choice, a new one starts from the preference.
   const [savingMode, setSavingMode] = useState(existing?.saving_mode ?? false);
   const savingTouched = useRef(!!existing);
+  // Autopilot implies saving mode: ticked and locked while it is on.
+  const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -58,6 +60,12 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
+  // Only the spec workflow has autopilot; a custom prompt runs outside it.
+  const workflow = prompt.trim() ? "prompt" : (existing?.workflow ?? project?.workflow);
+  const autopilotAllowed = workflow === "feature";
+  const autopilotOn = autopilot && autopilotAllowed;
+  // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
+  const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
   // The branch name (after `feature/`): proposed while the developer hasn't touched it.
   const [branch, setBranch] = useState("");
   const [edited, setEdited] = useState(false);
@@ -182,7 +190,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode,
+        saving_mode: savingMode || autopilotOn,
+        ...autopilotField,
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(branch.trim() ? { branch: "feature/" + branch.trim() } : {}),
@@ -209,7 +218,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode,
+        saving_mode: savingMode || autopilotOn,
+        ...autopilotField,
       });
       onSaved(task);
     } catch (err) {
@@ -293,13 +303,30 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
                 <input
                   type="checkbox"
-                  checked={savingMode}
+                  checked={savingMode || autopilotOn}
+                  disabled={autopilotOn}
                   onChange={(e) => {
                     savingTouched.current = true;
                     setSavingMode(e.target.checked);
                   }}
                 />
                 <span>{t("Modo ahorro")}</span>
+              </label>
+            )}
+            {origin !== "claude" && autopilotAllowed && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
+                <input
+                  type="checkbox"
+                  checked={autopilot}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      savingTouched.current = true;
+                      setSavingMode(true);
+                    }
+                    setAutopilot(e.target.checked);
+                  }}
+                />
+                <span>{t("Autopiloto")}</span>
               </label>
             )}
             {origin !== "claude" && project?.kind === "parent" && (

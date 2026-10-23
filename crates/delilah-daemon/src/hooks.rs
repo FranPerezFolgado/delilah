@@ -93,6 +93,7 @@ pub async fn claude_hook(
             Utc::now(),
             app.lang(),
         );
+        crate::autopilot::on_attention(&app, &TaskKey::new(&q.task), &id, &change).await;
         let changes = match &change {
             Change::Keep => false,
             Change::Clear => current.is_some(),

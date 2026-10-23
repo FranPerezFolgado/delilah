@@ -20,6 +20,7 @@ scripts/preview.sh --no-ui    # API only: DELILAH_URL=http://127.0.0.1:750N targ
 How to use a preview:
 - Run it in the background and stop it with Ctrl-C, or by stopping that process. **Never stop a daemon by name** (`pkill delilahd`): it also kills the user's live agent sessions.
 - Open the UI in a browser. In a preview, register the fixture repos (`fixtures/parent-env/parent` as `parent`, `fixtures/signal` as `repo`) as projects.
+- **Previews of tasks.** A project can have a `preview_command` (project view, or `PATCH /api/v1/projects/{name}` with `preview_command`); the daemon runs it in a task's workspace and takes the first URL it prints. For this repo set it to `scripts/preview.sh`: each task's branch then gets its own preview slot, with the UI URL printed first. These nested previews are stopped with the task or by "Parar", never by name. Autopilot starts it before opening the PR.
 - A Claude launched from a preview is a real session on the user's subscription. Keep those tests few and short.
 
 **Trying PRs with a fake `gh`.** `DELILAH_GH_BIN=$PWD/scripts/fake-gh.sh` makes the daemon call a script that answers from JSON files in `$FAKE_GH_DIR` (`pr-list.json`, `pr-<n>.json`, `repo.json`, `user.json`), so a PR can be opened, failed, reviewed or merged by editing a file. Steps in [specs/003-pr-loop/quickstart.md](../specs/003-pr-loop/quickstart.md).

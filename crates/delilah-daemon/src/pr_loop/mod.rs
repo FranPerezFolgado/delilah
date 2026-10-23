@@ -662,6 +662,7 @@ mod tests {
                 path: "/par".into(),
                 kind: ProjectKind::Parent,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();

@@ -61,6 +61,8 @@ done or pending is in [status.md](status.md).
 | `asks.rs` | AskUserQuestion: the PreToolUse hook posts here and waits up to a day. The answer goes back as `updatedInput.answers`. |
 | `proposals.rs` | A card headed `Nueva tarea` in a project's conversation is a task proposal: answering `Crear` creates the backlog task (brief as notes, `CreatedFromConversation` event) before Claude is told. Owns the protocol strings. Called by `asks::answer` through `on_answer`. |
 | `conversation.rs` | An idea conversation's history (`conversation_entries`, one row per message or card): your messages (sent now, or queued while Claude works and flushed when its turn ends), Claude's closing messages, and cards (`Card`, outcome pending / answered / terminal / withdrawn). Endpoints `GET /sessions/{id}/conversation`, `POST /sessions/{id}/messages`, `DELETE /sessions/{id}/messages/{entry}`, `POST /sessions/{id}/stop`. The live activity and "needs the terminal" flag sit on `Live` (`ConvoState`) and emit the `conversations` topic once per change. |
+| `autopilot/` | The policy over saving mode ([#38](decisions.md)): `mod.rs` (`shape`, the state helpers, `update` as a compare-and-set, `Finishing`), `notes.rs` (what each session is told, the outcome path), `outcome.rs` (reads the review's file), `pause.rs` (pause, stall and nudge, resume, advance), `ask.rs` (recommended answers), `finish.rs` (preview, draft PRs, recovery), `api.rs` (`POST /tasks/{key}/autopilot`). |
+| `preview.rs`, `preview_api.rs` | A task's preview process, owned by the daemon, and its routes (`GET`/`POST`/`DELETE /tasks/{key}/preview`). |
 | `inbox.rs` | `GET /api/v1/inbox` (everything that waits on the user) and replies typed into a session. |
 | `phases.rs` | The phase: set by the user, moved forward by spec files and agent signals, and review hints. |
 | `specs.rs` | A watcher (every 5 s) that reads each task's `specs/<feature>/` and records phase changes. |
@@ -165,7 +167,7 @@ and only changes while the task is under way (see `phases.rs`):
 - **Hooks.** They live only in that settings file, never in the repo or
   `~/.claude`:
   - `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop`, `StopFailure` and `SessionEnd` each `curl` their JSON to `/hooks/claude?task=…&session=…`;
-  - a `PreToolUse` hook on AskUserQuestion waits on `/hooks/claude/ask`.
+  - a `PreToolUse` hook on AskUserQuestion waits on `/hooks/claude/ask` (on autopilot it may be answered inside the hook, see below).
 - **Status line.** The user's own status line from `~/.claude/settings.json`
   still draws: Delilah's script forwards Claude's JSON to `/hooks/claude/statusline`
   (which reads the usage windows) and then runs the user's command.
@@ -184,8 +186,9 @@ and only changes while the task is under way (see `phases.rs`):
 | Signal (hook) | Effect |
 |---|---|
 | `PromptSubmitted` (UserPromptSubmit), `Working` (PostToolUse) | session working; primary → `UserAnswered`; drops the review hint; phase signals |
-| `NeedsUser` (Notification) | inbox attention (permission or idle); primary → `AgentAsked` |
-| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint; in saving mode, a phase boundary offers or starts the next session, and a `saving` handoff goes on to `starting` |
+| `NeedsUser` (Notification) | inbox attention (permission or idle); primary → `AgentAsked`; a permission prompt of the primary session pauses a running autopilot (`autopilot::on_attention`) |
+| `TurnEnded` (Stop) | inbox question with the last message; primary → `AgentAsked`; maybe review hint; in saving mode, a phase boundary offers or starts the next session, and a `saving` handoff goes on to `starting`; on autopilot, see below |
+| AskUserQuestion (PreToolUse, `/hooks/claude/ask`) | the card or inbox question and `AgentAsked`; on a running autopilot, from its primary step session, every question with exactly one "(Recommended)" option is answered at once (history `autopilot-answered`, no inbox item), else autopilot pauses with the question's text and the ask goes on as usual |
 | `TurnFailed` (StopFailure) | inbox error, or a usage limit |
 | a turn ending while a usage window is at 100 % | `LimitReached` (any session: the subscription is shared) |
 
@@ -212,6 +215,29 @@ becomes `primary`, the old one stays in the task as a finished, reopenable tab
 - **Recovery** (`recover`, on each scheduler tick and at start): `saving` and `starting` are finished, `offered` is re-offered, and a step session that was recorded but never launched is relaunched. A `HandoffCoordinator` in `AppState` holds a mutex over the check-and-set and a set of tasks being started, so two confirmations or a tick never start the same step twice. A usage limit mid-handoff pauses the task as usual and the tick resumes it.
 - **API:** `POST /api/v1/tasks/{key}/handoff` (`confirm`, `decline`, `retry`), and `saving_mode` on task create, backlog create and `PATCH` (also while running). The preferences `saving-mode` (default for new tasks) and `save-notes` are in Settings.
 - **UI:** `chain.ts` and `SessionChain.tsx` draw the chain; `HandoffActions.tsx` is shared by the task screen and the Bandeja item (kind `handoff`: offered, saving, starting, failed). The automatic review is announced like a finished turn: quiet when the app is listening.
+
+### Autopilot (`autopilot/`)
+
+A task with `tasks.autopilot` (nullable JSON: `state` running/paused/done, `stage`, `reason`, `since`, `nudged`, `review_session`) runs plan → implement → review → draft PR on its own ([#38](decisions.md)). It implies saving mode (turning saving mode off clears it) and rides on its handoffs: only a task on the `feature` (spec) workflow can have it, enforced on every entry point (409 `not-spec-workflow`). Every change of the state is `Store::update_autopilot`, a compare-and-set, so a pause or "off" is never overwritten by a finish in flight ([#45](decisions.md)). The task's status and phase are untouched by pause or resume; the history gets `autopilot-paused`, `-resumed`, `-answered`, `-nudged` and `-finished`.
+
+- **Shape** (`shape`): while running, the planning → implementation `Offer` becomes a `Start`; paused, done or off, boundaries are left as saving mode has them. Each step's session gets an autopilot note on top of its prompt (`notes.rs`, in the app's language): nobody will answer, pick the recommended option, stop at `tasks.md` / at every task checked / at the outcome file.
+- **Stall and nudge** (`stall`, from `handoff::on_turn_ended`): a turn end of the primary plan or implement session with no boundary reached gets one typed nudge per step (`Autopilot.nudged`, taken atomically); a second stall in the same step pauses ("tasks.md not written", "N tasks unchecked"). The review never stalls: its end is its outcome file ([#39](decisions.md)).
+- **Outcome file:** the review is told to write `~/.delilah/tasks/<KEY>/autopilot/review-<session-id>.json` (`outcome` `ready`/`blocked`, `reason`, `pr_title`, `pr_body`), outside the repo. It is read only if it is a regular file under 256 KiB; missing or invalid means blocked. The session id is recorded in `Autopilot.review_session`, so an old file is never read for a newer review.
+- **Finish** (`finish`, spawned at the review's turn end; one per task, `Finishing` guard): read the outcome (blocked pauses with its reason); refuse uncommitted changes in any repo (git failing to tell pauses too); start the project's preview if it has a command and wait until it runs or fails (a failed preview does not stop the PR); write `stage = opening_pr`; `pr_loop::check_task` to link a PR that exists already; for each repo with commits and no open PR, `pr_api::open_for(..., draft = true)` with the agent's title and body (else the proposal's), plus a "Preview:" line with the URL minus userinfo, query and fragment, only when its host is loopback ([#42](decisions.md)). Then `state = done` and `autopilot-finished` with the PR URLs. Every write only lands while autopilot still runs on that review (`Superseded` otherwise). A retryable failure (`gh`, network) is retried with a doubling back-off, three attempts, then pauses; one before any stage is recorded (which `recover` would never pick up) pauses at once.
+- **Questions and permissions:** see the hook table. Permission prompts are never answered ([#43](decisions.md)).
+- **Pause and resume** (`pause`, `resume`): a pause records reason and time, emits the inbox and sends one notification (none if the app is listening). The inbox derives an `autopilot` item from the paused state, with "Reanudar autopiloto" (`POST /tasks/{key}/autopilot` `resume`) and "Seguir a mano" (`off`, saving mode stays). Resume goes to `advance_with`: re-run an interrupted finish, leave a working session alone, retry or confirm a failed or offered handoff; an idle review whose outcome file still says blocked is typed a re-check (recorded as its nudge) instead of finishing into the same pause; else look at the turn as at a turn end.
+- **Recovery** (`finish::recover`, on each scheduler tick): a running autopilot at stage `preview` or `opening_pr` with a `review_session` re-runs the (idempotent) finish. Autopilots stored without `review_session` are not recovered ([#47](decisions.md)).
+- **API:** `POST /api/v1/tasks/{key}/autopilot` (`on`, `resume`, `off`); `autopilot` on task create and backlog create/`PATCH`; `launch: "autopilot"` on `POST /asks/{id}/answer` with `Crear` on a proposal (`proposals.rs` creates the task, starts it on autopilot, and tells Claude; if the start fails the task stays in the backlog). The CLI has `--autopilot` / `--no-autopilot` on `run` and `new`, and `delilah autopilot <KEY> on|off|resume`.
+- **UI:** `AutopilotMark` (running/paused/done, the reason as tooltip), the option next to saving mode, the chain's preview and PR steps (`chain.ts`), the inbox item, and "Crear y lanzar en autopiloto" on `ProposalCard`.
+
+### Previews (`preview.rs`)
+
+A project's `preview_command` (project field, `PATCH /projects/{name}`) is run by the daemon, not the agent ([#41](decisions.md)). Any task with a workspace can start it by hand (`PreviewControl` in the task header, `POST /tasks/{key}/preview`); autopilot starts it at the finish.
+
+- **Process:** `/bin/zsh -lc "<command>"` (a login shell: launchd's environment lacks the user's PATH) with the agents' clean environment (`delilah_agents::env::agent_env`, not the daemon's variables) in the task's workspace root, in its own process group, stdin null, stdout and stderr read into a ring of the last 200 lines (4 KiB per line).
+- **URL:** the first `http(s)://` URL it prints (cut at whitespace, control characters, quotes and parentheses) becomes `url` and the state `running`. Exit, or no URL in 10 minutes, is `failed` with the last lines; once it runs, the timeout no longer applies. States: `starting`, `running`, `failed`. 409 `no-preview-command`, `no-workspace`, `running`.
+- **Lifecycle:** memory only, one per task, announced on the `tasks` topic. Stopped by `DELETE`, when the task ends (done, failed, archived, deleted: `end_task_runtime`) and at daemon shutdown (`stop_all`); a restart does not adopt it, so it shows none. A stop sends SIGTERM to the group with `/bin/kill -- -<pgid>` (the workspace forbids `unsafe`), and the waiter, which owns the child, sends SIGKILL after 5 s only if the leader is not reaped yet, so a reused pid is never signalled ([#44](decisions.md)).
+- **This repo:** `scripts/preview.sh` prints the UI URL first, so it is the one detected.
 
 ## Workspaces
 
@@ -264,7 +290,7 @@ The UI does not poll:
 - **Components:**
   - `Sidebar`, `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
   - `PrView` (the PR tab), `PrBadge`, `OpenPrDialog`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
-  - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `Markdown`.
+  - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `ProposalCard`, `AutopilotMark`, `PreviewControl`, `Markdown`.
 - **Editor:** `editor/` holds CodeMirror 6 and per-task tab state, kept in localStorage.
 - **i18n:**
   - Texts are Spanish in the code, wrapped in `t()` / `tn()`, and English lives in `i18n/en.ts`, keyed by the Spanish text.

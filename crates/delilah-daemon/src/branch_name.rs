@@ -281,6 +281,7 @@ mod tests {
             path: repo,
             kind: ProjectKind::Repo,
             workflow: "feature".into(),
+            preview_command: None,
         };
         (app, project)
     }
@@ -342,6 +343,7 @@ mod tests {
             path: PathBuf::from("/p"),
             kind: ProjectKind::Parent,
             workflow: "feature".into(),
+            preview_command: None,
         };
         let subs: Vec<String> = ["a", "../../x", "/etc", "b/c", "a/../.."]
             .map(String::from)

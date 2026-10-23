@@ -132,6 +132,25 @@ re-offers it. In Settings: "Modo ahorro por defecto" (new tasks) and "Guardar no
 antes de cambiar de sesión" (on by default). Needs the spec files: without a
 `specs/` folder there are no handoffs.
 
+**Autopilot.** A task can run on its own up to the PR: "Autopiloto" (next to "Modo
+ahorro", which it turns on; a toggle on a running task, `--autopilot` /
+`--no-autopilot` in `delilah run` and `new`, `delilah autopilot <KEY> on|off|resume`).
+Only for tasks on the spec workflow. The implementation starts without asking, the
+review runs the project's checks, and when it reports the branch ready Delilah starts
+the project's preview (if it has one) and opens a draft PR with your `gh`. A step that
+stalls gets one nudge; questions that have an option marked "(Recommended)" are
+answered for you. Anything else (a permission prompt in the task's session, a question without a
+recommendation, a blocked review, a failure) pauses it: the header shows "Autopiloto en
+pausa" with the reason, and the Bandeja offers "Reanudar autopiloto" or "Seguir a
+mano". On the idea card, "Crear y lanzar en autopiloto" creates the task and starts it.
+Delilah pushes and opens the PR without asking again, so turn it on only where that is
+what you want. It never merges.
+
+**Task previews.** A project can have a preview command (field in the project view;
+for Delilah itself, `scripts/preview.sh`). "Lanzar" in a task's header runs it in the
+task's workspace, shows the URL it prints and "Parar" stops it; it also stops when the
+task ends. A restart of the daemon does not bring a preview back.
+
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
 it right there), a permission it needs (answered in its terminal), a failed turn,

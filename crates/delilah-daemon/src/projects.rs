@@ -48,6 +48,7 @@ pub async fn add_project(
         path: root,
         kind: new.kind,
         workflow: new.workflow,
+        preview_command: None,
     };
     app.store.create_project(&project).await?;
     app.emit(crate::events::Topic::Projects);
@@ -61,6 +62,17 @@ pub struct ProjectChange {
     pub path: Option<PathBuf>,
     pub kind: Option<ProjectKind>,
     pub workflow: Option<String>,
+    /// Absent keeps the command; `null` or `""` clears it; text sets it.
+    #[serde(default, deserialize_with = "present")]
+    pub preview_command: Option<Option<String>>,
+}
+
+/// Tells a field that is absent (`None`) from one that is `null` (`Some(None)`).
+fn present<'de, D>(de: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Option<String> as Deserialize>::deserialize(de).map(Some)
 }
 
 /// `PATCH /api/v1/projects/{name}`
@@ -98,6 +110,13 @@ pub async fn update_project(
         project.path = checked_root(project.path.clone(), project.kind).await?;
     }
     app.store.update_project(&name, &project).await?;
+    if let Some(command) = &change.preview_command {
+        let command = command.as_deref().map(str::trim).filter(|c| !c.is_empty());
+        app.store
+            .set_preview_command(&project.name, command)
+            .await?;
+        project.preview_command = command.map(str::to_string);
+    }
     app.emit(crate::events::Topic::Projects);
     app.emit(crate::events::Topic::Tasks);
     app.emit(crate::events::Topic::Sessions);
@@ -359,5 +378,67 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
         assert!(body["error"].as_str().unwrap().contains("not a git repo"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn patch_sets_keeps_and_clears_the_preview_command() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        let config = Config {
+            home: std::env::temp_dir(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: None,
+            claude_bin: "claude".into(),
+        };
+        let app = crate::api::router(AppState::new(store, config));
+        let send = |method: &'static str, uri: &'static str, body: Option<Value>| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.map(|b| b.to_string()).unwrap_or_default()))
+                    .unwrap();
+                let res = app.oneshot(req).await.unwrap();
+                let bytes = http_body_util::BodyExt::collect(res.into_body())
+                    .await
+                    .unwrap()
+                    .to_bytes();
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null)
+            }
+        };
+        let patch = |body: Value| send("PATCH", "/api/v1/projects/web", Some(body));
+
+        let set = patch(json!({ "preview_command": "npm run dev" })).await;
+        assert_eq!(set["preview_command"], "npm run dev");
+        let listed = send("GET", "/api/v1/projects", None).await;
+        assert_eq!(listed[0]["preview_command"], "npm run dev");
+
+        // Absent keeps it.
+        let kept = patch(json!({ "workflow": "custom" })).await;
+        assert_eq!(kept["preview_command"], "npm run dev");
+        let listed = send("GET", "/api/v1/projects", None).await;
+        assert_eq!(listed[0]["preview_command"], "npm run dev");
+
+        let cleared = patch(json!({ "preview_command": "" })).await;
+        assert_eq!(cleared["preview_command"], Value::Null);
+        patch(json!({ "preview_command": "x" })).await;
+        let cleared = patch(json!({ "preview_command": null })).await;
+        assert_eq!(cleared["preview_command"], Value::Null);
+        let listed = send("GET", "/api/v1/projects", None).await;
+        assert_eq!(listed[0]["preview_command"], Value::Null);
     }
 }

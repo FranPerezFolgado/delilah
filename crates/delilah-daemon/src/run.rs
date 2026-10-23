@@ -85,6 +85,10 @@ pub struct RunRequest {
     /// task chose, else the `saving-mode` preference.
     #[serde(default)]
     pub saving_mode: Option<bool>,
+    /// Autopilot: the chain runs by itself until the PRs are open. Implies saving
+    /// mode. Left out: what a backlog task chose, else off.
+    #[serde(default)]
+    pub autopilot: Option<bool>,
     /// A Claude session of the project to carry on as the task's primary one, with
     /// its conversation ("Convertir en tarea"). Implies a free task in the checkout.
     pub from_session: Option<String>,
@@ -148,6 +152,19 @@ pub async fn start_run(
         (None, Some(task)) => task.saving_mode,
         (None, None) => saving_mode_preference(&app).await,
     };
+    if req.autopilot == Some(true) && req.saving_mode == Some(false) {
+        return Err(ApiError::bad_request(
+            "autopilot needs saving mode: it cannot run with saving mode off",
+        ));
+    }
+    // Autopilot on implies saving mode; saving mode off turns an inherited one off.
+    let saving_mode = saving_mode || req.autopilot == Some(true);
+    let autopilot = saving_mode
+        && match (req.autopilot, &existing) {
+            (Some(on), _) => on,
+            (None, Some(task)) => task.autopilot.is_some(),
+            (None, None) => false,
+        };
     if req.title.trim().is_empty() {
         return Err(ApiError::bad_request(match req.free {
             true => "say what the free task is about",
@@ -180,6 +197,9 @@ pub async fn start_run(
         .clone()
         .or_else(|| existing.as_ref().map(|t| t.workflow.clone()))
         .unwrap_or_else(|| project.workflow.clone());
+    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+        return Err(crate::autopilot::not_spec_workflow(&key));
+    }
     let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
         (None, "feature") if req.free => format!("/feature {}", req.title.trim()),
@@ -240,12 +260,17 @@ pub async fn start_run(
             if updated.saving_mode != saving_mode {
                 app.store.set_saving_mode(&key, saving_mode).await?;
             }
+            if updated.autopilot.is_some() != autopilot {
+                let value = autopilot.then(new_autopilot);
+                app.store.set_autopilot(&key, value.as_ref()).await?;
+            }
             updated.notes
         }
         None => {
             let mut task = Task::new(key.clone(), req.title.trim(), &workflow);
             task.project = Some(project.name.clone());
             task.saving_mode = saving_mode;
+            task.autopilot = autopilot.then(new_autopilot);
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
             app.store.create_task(&task).await?;
             task.notes
@@ -298,6 +323,9 @@ pub async fn start_run(
                     }
                     if let Err(e) = app.store.set_saving_mode(&key, task.saving_mode).await {
                         tracing::warn!(task = %key, "cannot put saving mode back: {e}");
+                    }
+                    if let Err(e) = app.store.set_autopilot(&key, task.autopilot.as_ref()).await {
+                        tracing::warn!(task = %key, "cannot put autopilot back: {e}");
                     }
                 }
                 None => {
@@ -362,7 +390,7 @@ pub async fn start_run(
         launch_session(&app, &session, &ws.path, None, true)?;
         app.emit(crate::events::Topic::Sessions);
     } else {
-        let (session, prompt) = first_session(&app, &req.key, saving_mode, prompt);
+        let (session, prompt) = first_session(&app, &req.key, saving_mode, autopilot, prompt);
         app.store.create_session(&session).await?;
         launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
     }
@@ -385,12 +413,26 @@ async fn saving_mode_preference(app: &AppState) -> bool {
         .unwrap_or(false)
 }
 
+/// A fresh autopilot: running, nothing nudged yet.
+fn new_autopilot() -> delilah_core::Autopilot {
+    delilah_core::Autopilot {
+        state: delilah_core::AutopilotState::Running,
+        stage: None,
+        reason: None,
+        since: chrono::Utc::now(),
+        nudged: None,
+        review_session: None,
+    }
+}
+
 /// A task's first (main) session and the prompt it starts with. In saving mode it is
-/// the plan step, told to stop once the tasks are written.
+/// the plan step, told to stop once the tasks are written; with autopilot it is also
+/// told to answer the workflow's questions itself.
 fn first_session(
     app: &AppState,
     task: &str,
     saving_mode: bool,
+    autopilot: bool,
     prompt: String,
 ) -> (SessionRecord, String) {
     let lang = app.lang();
@@ -398,7 +440,13 @@ fn first_session(
         true => (
             crate::handoff::step_label(lang, Step::Plan).to_string(),
             Some(Step::Plan),
-            format!("{prompt} {}", crate::handoff::plan_note(lang)),
+            match autopilot {
+                true => format!(
+                    "{prompt} {}",
+                    crate::autopilot::autopilot_plan_note(lang, task)
+                ),
+                false => format!("{prompt} {}", crate::handoff::plan_note(lang)),
+            },
         ),
         false => (lang.pick("Principal", "Main").to_string(), None, prompt),
     };
@@ -687,6 +735,7 @@ mod tests {
                 path: app.config.home.join("missing"),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -737,6 +786,7 @@ mod tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -844,7 +894,7 @@ mod tests {
     #[tokio::test]
     async fn saving_mode_gives_the_first_session_the_plan_step_and_a_note() {
         let app = app().await;
-        let (s, prompt) = first_session(&app, "PROJ-1", true, "/feature PROJ-1".into());
+        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
         assert_eq!(s.step, Some(Step::Plan));
         assert_eq!(s.label, "Spec y plan");
         assert!(s.primary);
@@ -855,16 +905,16 @@ mod tests {
         );
 
         app.lang.set(crate::lang::Lang::En);
-        let (s, prompt) = first_session(&app, "PROJ-1", true, "/feature PROJ-1".into());
+        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
         assert_eq!(s.label, "Spec and plan");
         assert!(prompt.contains("tasks.md"), "{prompt}");
         assert!(!prompt.ends_with("nueva."), "{prompt}");
 
-        let (s, prompt) = first_session(&app, "PROJ-1", false, "/feature PROJ-1".into());
+        let (s, prompt) = first_session(&app, "PROJ-1", false, false, "/feature PROJ-1".into());
         assert_eq!((s.label.as_str(), s.step), ("Main", None));
         assert_eq!(prompt, "/feature PROJ-1");
         app.lang.set(crate::lang::Lang::Es);
-        let (s, _) = first_session(&app, "PROJ-1", false, String::new());
+        let (s, _) = first_session(&app, "PROJ-1", false, false, String::new());
         assert_eq!(s.label, "Principal");
     }
 
@@ -910,6 +960,102 @@ mod tests {
         req.saving_mode = Some(false);
         start_run(State(app.clone()), Json(req)).await.unwrap_err();
         assert!(saving(&app, "PROJ-4").await, "put back as it was");
+    }
+
+    #[tokio::test]
+    async fn autopilot_replaces_the_saving_mode_note_in_both_languages() {
+        let app = app().await;
+        let (s, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        assert_eq!(s.step, Some(Step::Plan));
+        assert!(prompt.starts_with("/feature PROJ-1 "), "{prompt}");
+        assert!(prompt.contains("Autopilot"), "{prompt}");
+        assert!(prompt.contains("tasks.md"), "{prompt}");
+        assert!(!prompt.contains("Modo ahorro:"), "{prompt}");
+        assert!(prompt.contains("(Recomendado)"), "{prompt}");
+        app.lang.set(crate::lang::Lang::En);
+        let (_, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        assert!(prompt.contains("Autopilot"), "{prompt}");
+        assert!(prompt.contains("(Recommended)"), "{prompt}");
+        assert!(!prompt.contains("Saving mode:"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn autopilot_comes_from_the_request_and_implies_saving_mode() {
+        let app = app().await;
+        let get = |key: &str| {
+            let key = TaskKey::new(key);
+            let store = app.store.clone();
+            async move { store.get_task(&key).await.unwrap().unwrap() }
+        };
+        let mut req = run("PROJ-1");
+        req.title = "a".into();
+        req.autopilot = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        let task = get("PROJ-1").await;
+        assert!(task.saving_mode);
+        assert_eq!(
+            task.autopilot.map(|a| a.state),
+            Some(delilah_core::AutopilotState::Running)
+        );
+
+        let mut req = run("PROJ-2");
+        req.title = "b".into();
+        req.autopilot = Some(true);
+        req.saving_mode = Some(false);
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("PROJ-2"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // Only the spec workflow can have it.
+        let mut req = run("PROJ-9");
+        req.title = "x".into();
+        req.autopilot = Some(true);
+        req.workflow = Some("prompt".into());
+        req.prompt = Some("do it".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
+
+        // Off by default.
+        let mut req = run("PROJ-3");
+        req.title = "c".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(get("PROJ-3").await.autopilot.is_none());
+
+        // A backlog task keeps its autopilot, and it goes back if the start fails.
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        task.project = Some("web".into());
+        task.saving_mode = true;
+        task.autopilot = Some(new_autopilot());
+        let original = task.autopilot.clone();
+        app.store.create_task(&task).await.unwrap();
+        start_run(State(app.clone()), Json(run("PROJ-4")))
+            .await
+            .unwrap_err();
+        assert_eq!(get("PROJ-4").await.autopilot, original, "kept");
+        let mut req = run("PROJ-4");
+        req.autopilot = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(
+            get("PROJ-4").await.autopilot,
+            original,
+            "put back as it was"
+        );
+
+        // A backlog task gets it from the request.
+        let key = backlog_task(&app, "PROJ-5").await;
+        let mut req = run("PROJ-5");
+        req.autopilot = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        // Failing start restores the original (no autopilot, saving mode off).
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(task.autopilot.is_none() && !task.saving_mode);
     }
 
     #[tokio::test]
@@ -1115,6 +1261,7 @@ mod tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -1133,6 +1280,7 @@ mod tests {
                 notes: Some("brief original".into()),
                 in_checkout: None,
                 saving_mode: None,
+                autopilot: None,
                 workflow: None,
                 free: true,
             },

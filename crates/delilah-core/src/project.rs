@@ -37,4 +37,19 @@ pub struct Project {
     pub kind: ProjectKind,
     /// Workflow used when a run does not name one, e.g. `feature`.
     pub workflow: String,
+    /// Command that starts the app for a preview (run in the task's workspace).
+    #[serde(default)]
+    pub preview_command: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_projects_load_without_a_preview_command() {
+        let json = r#"{"name":"p","path":"/tmp/p","kind":"repo","workflow":"feature"}"#;
+        let project: Project = serde_json::from_str(json).unwrap();
+        assert_eq!(project.preview_command, None);
+    }
 }

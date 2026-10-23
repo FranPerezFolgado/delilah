@@ -52,6 +52,32 @@ describe("ProposalCard", () => {
     expect(onDone).toHaveBeenCalled();
   });
 
+  it("Crear y lanzar en autopiloto answers Crear with launch autopilot and links the task", async () => {
+    const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-8" });
+    const { getByText, findByText } = render(<ProposalCard ask={proposal} />);
+    fireEvent.click(getByText("Crear y lanzar en autopiloto"));
+    const link = await findByText("LIBRE-8");
+    expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": "Crear" }, "autopilot");
+    expect(link.tagName).toBe("A");
+  });
+
+  it("launch error shows the error and still links the backlog task", async () => {
+    vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-9", error: "no arrancó" });
+    const { getByText, findByText, queryByText } = render(<ProposalCard ask={proposal} />);
+    fireEvent.click(getByText("Crear y lanzar en autopiloto"));
+    expect(await findByText("no arrancó")).toBeTruthy();
+    expect((await findByText("LIBRE-9")).tagName).toBe("A");
+    expect(queryByText("Descartar")).toBeNull();
+  });
+
+  it("disables all buttons while busy", async () => {
+    vi.spyOn(api, "answerAsk").mockReturnValue(new Promise(() => {}));
+    const { getByText } = render(<ProposalCard ask={proposal} />);
+    fireEvent.click(getByText("Crear y lanzar en autopiloto"));
+    await waitFor(() => expect((getByText("Crear") as HTMLButtonElement).disabled).toBe(true));
+    expect((getByText("Crear y lanzar en autopiloto") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it.each(["Cambiar algo", "Descartar"])("%s answers with it, creates nothing and shows no error", async (label) => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
     const onDone = vi.fn();
