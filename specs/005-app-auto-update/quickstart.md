@@ -21,12 +21,13 @@ node --test scripts/release/
 
 ## End to end (needs the Tauri app; the maintainer does this once)
 
-1. **Key**: run `cd app && npx tauri signer generate -w ~/.tauri/delilah.key`, store the password with `security add-generic-password -s delilah-updater -a "$USER" -w`, paste the public key into `tauri.conf.json`, and back the key file up.
-2. **Bootstrap**: release the first version with the updater (e.g. 0.5.0) with `scripts/release.sh 0.5.0`, then install it by hand as today, once per Mac.
-3. **Next release**: with 0.5.0 installed, publish 0.5.1, then open the app:
+1. **Key**: run `cd app && npx tauri signer generate -w ~/.tauri/delilah.key` and paste the public key into `tauri.conf.json`. Store the secrets with `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/delilah.key` and `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (as `FranPerezFolgado`). Back up the key file and password. Optionally store the password with `security add-generic-password -s delilah-updater -a "$USER" -w` for the dry run.
+2. **Dry run**: run `scripts/release.sh 0.5.0 --dry-run` to check and build locally, with nothing published.
+3. **Bootstrap**: after merging, run `git tag v0.5.0 && git push origin v0.5.0`. When the Actions run is green, download the dmg from the release and install it by hand as today, once per Mac.
+4. **Next release**: with 0.5.0 installed, tag and push v0.5.1. When the run is green, open the app:
    - within about 10 s the notice shows 0.5.1 with the notes;
    - with a task running, "Actualizar" shows the session warning, and "Cuando terminen" waits;
    - after the relaunch, the menu shows 0.5.1, `curl -s 127.0.0.1:7420/api/v1/health` reports `"version":"0.5.1"`, `~/.delilah/plugins/delilah` shows 0.5.1, `~/.delilah/backups/delilah-0.5.0.db` exists, and `xattr /Applications/Delilah.app` has no quarantine.
-4. **Tamper check (SC-004)**: point a local build's endpoint at a hand-edited `latest.json` with a wrong signature. The app reports that it could not verify the update and installs nothing.
+5. **Tamper check (SC-004)**: point a local build's endpoint at a hand-edited `latest.json` with a wrong signature. The app reports that it could not verify the update and installs nothing.
 
-Never restart or kill the installed daemon to try any of this. Step 3 is the real update, done through the app.
+Never restart or kill the installed daemon to try any of this. Step 4 is the real update, done through the app.

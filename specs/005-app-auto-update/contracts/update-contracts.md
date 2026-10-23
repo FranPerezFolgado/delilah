@@ -45,25 +45,21 @@ export function relaunch(): Promise<void>;
 export function onCheckUpdatesMenu(cb: () => void): Promise<() => void>; // unlisten
 ```
 
-## 3. Release command (maintainer CLI)
+## 3. Release pipeline and dry run
 
-```
-scripts/release.sh X.Y.Z [--yes] [--notes-file PATH]
-```
+**Trigger**: run `git tag [-a -m "<notes>"] vX.Y.Z && git push origin vX.Y.Z` (X.Y.Z must be semver). This starts `.github/workflows/release.yml`.
 
-- **Preconditions** (any failure exits non-zero before building, with one line per problem): a clean tree on `main`; tag `vX.Y.Z` at `HEAD`; the version `X.Y.Z` in `Cargo.toml`, `app/src-tauri/Cargo.toml`, `app/package.json` and `app/src-tauri/tauri.conf.json`; `~/.tauri/delilah.key` exists (override with `DELILAH_UPDATER_KEY`); the Keychain item `delilah-updater` is readable; the active `gh` account is `FranPerezFolgado`; the repo is `PUBLIC`; no *published* release `vX.Y.Z` exists.
-- **Steps**:
-  1. Generate the notes, then open `$EDITOR` unless `--yes` or `--notes-file` is given.
-  2. Build with `npm run dist` and the signing env.
-  3. Write `latest.json`.
-  4. Create or reuse a draft release.
-  5. Upload the dmg, tar.gz and sig, then `latest.json`.
-  6. Publish the release.
-- **Exit**: 0 when published. Non-zero leaves at most a draft, so the command can be rerun.
-- **Helpers** (pure, `node --test`):
-  - `scripts/release/versions.mjs`: `readVersions(root) → {file: version}` and `mismatches(versions, expected) → string[]`.
-  - `scripts/release/notes.mjs`: `releaseNotes(subjects: string[]) → string`.
-  - `scripts/release/manifest.mjs`: `manifest({version, notes, pubDate, signature, repo}) → object`.
+**Repository secrets** (set once with `gh secret set`): `TAURI_SIGNING_PRIVATE_KEY` (key file contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. `GITHUB_TOKEN` is the workflow's own token, with `contents: write`.
+
+**Result**: release `vX.Y.Z`, published and marked latest, with the assets `Delilah_X.Y.Z_aarch64.dmg`, `Delilah.app.tar.gz`, `Delilah.app.tar.gz.sig` and `latest.json`. The body is the notes. Any failure leaves at most a draft, and re-running the job for the tag is safe.
+
+**Local dry run**: `scripts/release.sh X.Y.Z --dry-run` performs the same checks plus a clean tree and a `PUBLIC` repo, then the signed build and a local `latest.json`. It never uploads. Without `--dry-run` it exits 2 and prints the tag commands.
+
+**Helpers** (pure, tested with `node --test`):
+- `scripts/release/versions.mjs`: `readVersions(root) → {file: version}` and `mismatches(versions, expected) → string[]`.
+- `scripts/release/notes.mjs`: `releaseNotes(subjects: string[]) → string` and `pickNotes(tagMessage, subjects) → string`.
+- `scripts/release/manifest.mjs`: `manifest({version, notes, pubDate, signature, repo}) → object` (used by the dry run).
+- `scripts/release/check.mjs`: a CLI entry `node scripts/release/check.mjs X.Y.Z` that exits non-zero with one line per problem.
 
 ## 4. Daemon start-up files
 

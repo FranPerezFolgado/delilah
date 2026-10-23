@@ -20,15 +20,15 @@
 
 ## R4. Signing key
 
-- **Decision**: Generate the key with `npx tauri signer generate -w ~/.tauri/delilah.key` (password protected), done once by the maintainer. The public key goes into `plugins.updater.pubkey`. The release script exports `TAURI_SIGNING_PRIVATE_KEY` (path or content) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the password is read from the macOS Keychain (`security find-generic-password -s delilah-updater -w`) so it is never in the repo or shell history.
-- **Rationale**: This is the standard Tauri flow, and FR-019 asks for the key to live outside the repo. The Keychain is already on the Mac and is backed up with it. The docs must say to back the key file up, because losing it means a manual reinstall on every Mac (spec Edge Cases).
-- **Alternatives**: A key without a password (weaker for no gain), or the password in an env file (easy to leak).
+- **Decision**: The maintainer generates the key once with `npx tauri signer generate -w ~/.tauri/delilah.key` (password protected). The public key goes into `plugins.updater.pubkey`. The private key's contents and its password are stored as the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` with `gh secret set`. The maintainer keeps the key file and password backed up (key file plus password manager or Keychain). The local dry run reads the same two variables from the environment, falling back to `~/.tauri/delilah.key` and the Keychain item `delilah-updater`.
+- **Rationale**: The release now runs on GitHub (R15), so the key has to be available there. GitHub encrypts secrets at rest, masks them in logs, and doesn't expose them to workflows triggered by forks. FR-019 asks for the key to live outside the repo. Losing the key means a manual reinstall on each Mac, so the docs require a backup.
+- **Alternatives**: Signing locally and uploading by hand (that is the manual flow the user doesn't want), or a key without a password (weaker for no gain).
 
 ## R5. Build artefacts
 
 - **Decision**: Set `bundle.createUpdaterArtifacts: true`. `tauri build` with the signing env then produces `bundle/macos/Delilah.app.tar.gz` and `Delilah.app.tar.gz.sig` next to the existing `bundle/dmg/Delilah_X.Y.Z_aarch64.dmg`.
 - **Rationale**: This is Tauri 2's own switch (v1's `updater.active` is gone). Without the key env, the build fails. That only affects `npm run dist`, so the release script must set the env. Development docs say so, and `tauri dev` and previews are unaffected.
-- **Note**: `npm run dist` alone (without the script) will now fail without the key; the release docs replace it with `scripts/release.sh`.
+- **Note**: `npm run dist` alone will now fail without the signing variables. Releases run on GitHub (R15), and locally `scripts/release.sh --dry-run` sets them.
 
 ## R6. Manifest (`latest.json`)
 
@@ -40,9 +40,9 @@
 
 ## R7. Release notes
 
-- **Decision**: A pure Node module `scripts/release/notes.mjs` turns `git log --format=%s <prev-tag>..<tag>` into Markdown: a "Novedades" section for `feat` and a "Correcciones" section for `fix`. Scope prefixes are stripped and merges and other types are dropped. The script writes it to a temp file, opens `$EDITOR` (skipped with `--yes`), and passes it to both `gh release create --notes-file` and `latest.json`'s `notes`.
-- **Rationale**: Chosen in clarify. Node already ships with the app toolchain, and `node --test` needs no new dependencies.
-- **Alternatives**: `gh release create --generate-notes` (it groups by PRs and labels rather than conventional commits, and isn't available to embed in `latest.json` before creation).
+- **Decision**: A pure Node module `scripts/release/notes.mjs` builds the notes. If the tag is annotated with a non-empty message, the message is used as is. Otherwise it turns `git log --format=%s <prev-tag>..<tag>` into Markdown: a "Novedades" section for `feat` and a "Correcciones" section for `fix`, with scope prefixes stripped and merges and other types dropped. The workflow writes the result to a file that is used for both the release body and `latest.json`'s `notes`.
+- **Rationale**: The commit-based notes were chosen in clarify. Since nobody edits notes in CI, an annotated tag is the way to write them by hand. Node is on the runner, and `node --test` needs no new dependencies.
+- **Alternatives**: `--generate-notes` (it groups by PRs and labels, not conventional commits), or a CHANGELOG file (ruled out in clarify).
 
 ## R8. Quarantine
 
@@ -80,21 +80,30 @@
 - **Decision**: Check 10 s after start (so the launch isn't slowed and the daemon is up), then every 6 h with `setInterval`, and on demand from the menu ("Buscar actualizaciones…", which emits the `check-updates` event) and from Settings. "Más tarde" stores the dismissed version in memory only.
 - **Rationale**: FR-001, FR-002 and FR-008.
 
-## R14. Release script checks (FR-017)
+## R14. Release checks (FR-017)
 
-`scripts/release.sh vX.Y.Z` stops before building if any of these fail:
-- the working tree is clean and on `main`;
-- tag `vX.Y.Z` exists and points at `HEAD`;
-- the version matches in the four files (pure check in `scripts/release/versions.mjs`);
-- the key file exists and the Keychain password is readable;
-- `gh auth status` reports the active account `FranPerezFolgado` (the work credentials must not be used);
-- `gh repo view --json visibility` is `PUBLIC`;
-- no release `vX.Y.Z` is already published. An existing draft is reused, so it is safe to run again.
+`scripts/release/check.mjs <version>` is shared by the workflow and the dry run. It exits non-zero with one line per problem:
+- the version is the same in the four files (`versions.mjs`) and equals the tag;
+- the signing variables are set;
+- release `vX.Y.Z` is not already published (looked up with `gh release view`). An existing draft is fine: it is reused, so re-runs are safe.
 
-Publishing order:
-1. `gh release create --draft` (or reuse the draft).
-2. Upload the dmg, `.app.tar.gz` and `.sig` with `--clobber`.
-3. Upload `latest.json`.
-4. `gh release edit --draft=false --latest`.
+The dry run also checks, on the Mac, that the tree is clean and that `gh repo view --json visibility` is `PUBLIC`.
 
-Any failure leaves a draft (FR-022).
+## R15. Release pipeline (tag push)
+
+- **Decision**: Add `.github/workflows/release.yml`.
+  - **Trigger**: `on: push: tags: ['v*.*.*']`. `concurrency: release-${{ github.ref }}`, so two pushes of the same tag never race. `permissions: contents: write`.
+  - **Runner**: `macos-14`, which is Apple Silicon and produces `darwin-aarch64`. `actions/checkout` runs with `fetch-depth: 0`, so the notes can see the previous tag.
+  - **Steps**:
+    1. Set up Node (version from `app/package.json` engines or 22) and Rust (stable, with `aarch64-apple-darwin`). Cache cargo and npm.
+    2. Run `node scripts/release/check.mjs`, then the notes.
+    3. Run `npm ci` in `app/`.
+    4. Run `tauri-apps/tauri-action@v0` with `projectPath: app`, `tagName: ${{ github.ref_name }}`, `releaseName: Delilah ${{ github.ref_name }}`, `releaseBody` = notes, `releaseDraft: true`, `includeUpdaterJson: true`, and the env `GITHUB_TOKEN`, `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. It runs `beforeBuildCommand` (which builds the sidecar `delilahd`), uploads the dmg, `.app.tar.gz` and `.sig`, and writes `latest.json` with `signature` and `url`.
+    5. Run `gh release edit vX.Y.Z --draft=false --latest`, only if every step before it passed.
+- **Rationale**: The user wants a release to happen when the tag is pushed. `tauri-action` is the maintained way to do the build, upload and `latest.json` for Tauri 2. Its draft mode plus a final publish step gives FR-022: `releases/latest` never resolves to a draft. On a public repo the macOS runner is free.
+- **Alternatives**:
+  - Our own build and upload in the workflow (it re-implements `latest.json`, which `manifest.mjs` would still cover in the dry run).
+  - A local pre-push hook running the script (it only works from this Mac, and the user chose CI).
+  - Publishing the draft by hand (the user chose fully automatic).
+- **Local dry run**: `scripts/release.sh X.Y.Z --dry-run` runs `check.mjs`, the notes, a signed `npm run dist` and `manifest.mjs` into `app/src-tauri/target/release/bundle/`, and never uploads. Without `--dry-run` it refuses and points to the tag flow.
+- **Sidecar**: `scripts/build-sidecar.sh release` builds the workspace `delilahd` for the host triple, so on `macos-14` it is `aarch64-apple-darwin`, as locally.
