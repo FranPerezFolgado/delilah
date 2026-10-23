@@ -170,12 +170,12 @@
   - prints the problems and exits 1 if any.
   - `notes.mjs` CLI `node scripts/release/notes.mjs vX.Y.Z` prints the notes: it reads the tag message with `git tag -l --format='%(contents)' vX.Y.Z` and the subjects since the previous `v*` tag with `git log --format=%s`.
   - T019–T022 pass.
-- [ ] T025 [US2] Create `.github/workflows/release.yml` per R15:
+- [X] T025 [US2] Create `.github/workflows/release.yml` per R15:
   - `on.push.tags: ['v*.*.*']`, `permissions: contents: write`, `concurrency: release-${{ github.ref }}`, `runs-on: macos-14`;
   - steps: checkout (`fetch-depth: 0`); setup-node 22 with npm cache on `app/package-lock.json`; `dtolnay/rust-toolchain@stable`; `Swatinem/rust-cache` (workspaces `. -> target` and `app/src-tauri -> target`); `node scripts/release/check.mjs ${GITHUB_REF_NAME#v} --require-secrets`; `node scripts/release/notes.mjs $GITHUB_REF_NAME > notes.md` (exported as a multiline output); `npm ci` in `app`; `tauri-apps/tauri-action@v0` with `projectPath: app`, `tagName`, `releaseName: Delilah ${{ github.ref_name }}`, `releaseBody` = notes, `releaseDraft: true`, `includeUpdaterJson: true`, and env `GITHUB_TOKEN`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; finally `gh release edit $GITHUB_REF_NAME --draft=false --latest` (env `GH_TOKEN`).
   - Pin third-party actions to a major tag, add a comment at the top with the trigger and the needed secrets, and never echo the secrets.
   - Run `actionlint` on it if it is installed.
-- [ ] T026 [US2] Create `scripts/release.sh` (bash, `set -euo pipefail`, like the other scripts):
+- [X] T026 [US2] Create `scripts/release.sh` (bash, `set -euo pipefail`, like the other scripts):
   - `X.Y.Z --dry-run`:
     1. checks a clean tree and `gh repo view FranPerezFolgado/delilah --json visibility -q .visibility` = `PUBLIC`;
     2. runs `node scripts/release/check.mjs X.Y.Z --require-secrets`, with the env defaulting to `TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/delilah.key)` and the password from `security find-generic-password -s delilah-updater -w`;
