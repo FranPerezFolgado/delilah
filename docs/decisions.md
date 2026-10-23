@@ -433,3 +433,9 @@ used; the dialog shows the TypeScript mirror's guess until it answers and sends 
 only if the answer arrived or the user typed. A blank template is not saved: the screen
 and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
 `branch.empty`.
+
+**59. The sidebar groups only idea conversations into "Ideas" (2026-10-23).** Read-only
+Claude sessions and terminals keep their own rows, their purpose differs. The "Ideas" row
+opens the waiting idea, else the one the project's screen last showed, else the newest;
+"newest" relies on the daemon listing sessions in creation order, since `Session` has no
+timestamp.

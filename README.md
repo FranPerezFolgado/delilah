@@ -308,7 +308,10 @@ open questions). "Crear" puts the task in the project's **backlog** with that br
 its notes, and its history says "Creada desde la conversación «name»"; you review or
 edit it and start it as any other. The conversation stays open and keeps its history,
 also after restarting Delilah. Project sessions ("Preguntar a Claude") can create
-tasks the same way; a task's own sessions cannot.
+tasks the same way; a task's own sessions cannot. In the sidebar a project's ideas
+appear as one "Ideas" row (with their count, highlighted when one is waiting for you)
+that opens the waiting idea, else the last one shown, else the newest; on the project's
+screen each idea is a tab.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself
