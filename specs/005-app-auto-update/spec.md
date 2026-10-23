@@ -145,7 +145,7 @@ The user wants to know which version they run, or has heard a release is out and
 **Publishing**
 
 - **FR-016**: The maintainer MUST have one documented command that builds the release, signs the update package, generates the manifest and publishes the disk image, the update package, its signature and the manifest as a GitHub Release of the public repository FranPerezFolgado/delilah, where the installed app reads the manifest of the latest release without credentials.
-- **FR-017**: The release command MUST refuse to run when the version is not the same in every place it lives, when the tag is missing, , when the signing key is not available, or when the repository is not public.
+- **FR-017**: The release command MUST refuse to run when the version is not the same in every place it lives, when the tag is missing, when the signing key is not available, or when the repository is not public.
 - **FR-018**: The release command MUST generate the release notes from the conventional commits since the previous tag (features and fixes grouped, other types left out), let the maintainer edit them before publishing, and publish them with the release; the app MUST show those notes.
 - **FR-019**: The signing key MUST live outside the repository; only the public key ships with the app.
 
