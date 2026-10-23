@@ -69,9 +69,9 @@ None: no new dependency or config.
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T012 [P] `docs/status.md`: in the idea-conversation bullet of what is built, add that the sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea.
-- [ ] T013 [P] `README.md`: where the sidebar / "Nueva tarea con Claude" is described, say ideas appear as one "Ideas" row per project and as tabs on the project's screen.
-- [ ] T014 [P] `docs/decisions.md`: new numbered entry (next number after the last one, dated 2026-10-23): the sidebar groups only idea conversations into "Ideas" (read-only Claude and terminals keep rows, their purpose differs); the row opens waiting → last shown → newest, and "newest" relies on the daemon listing sessions in creation order (no timestamp on `Session`).
+- [X] T012 [P] `docs/status.md`: in the idea-conversation bullet of what is built, add that the sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea.
+- [X] T013 [P] `README.md`: where the sidebar / "Nueva tarea con Claude" is described, say ideas appear as one "Ideas" row per project and as tabs on the project's screen.
+- [X] T014 [P] `docs/decisions.md`: new numbered entry (next number after the last one, dated 2026-10-23): the sidebar groups only idea conversations into "Ideas" (read-only Claude and terminals keep rows, their purpose differs); the row opens waiting → last shown → newest, and "newest" relies on the daemon listing sessions in creation order (no timestamp on `Session`).
 - [ ] T015 Run `cd app && npx tsc --noEmit && npx vitest run`; all green.
 - [ ] T016 Try it in a preview following `specs/006-sidebar-ideas-row/quickstart.md` (`scripts/preview.sh --fresh`, never the installed daemon on 7420), or hand the quickstart scenarios to the `ui-verifier` agent with the preview URL.
 - [ ] T017 Version bump, minor (new user-facing behaviour): from `main`'s version (0.5.0 now; re-check) to 0.6.0 in `Cargo.toml` (workspace), `app/src-tauri/Cargo.toml`, `app/package.json`, `app/src-tauri/tauri.conf.json`; refresh lockfiles with `cargo check --workspace`, `(cd app/src-tauri && cargo check)`, `(cd app && npm install --package-lock-only)`; commit alone as `chore: bump version to 0.6.0`.

@@ -35,7 +35,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
-- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md).
+- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). The sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea. See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md), [#59](decisions.md).
 
 **PR loop:**
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
