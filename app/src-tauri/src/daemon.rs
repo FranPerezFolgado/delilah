@@ -71,7 +71,11 @@ fn plist(daemon: &Path) -> Result<String, String> {
     let log = logs.join("delilahd.log");
     // launchd gives its agents almost no environment. The daemon reads PATH from the
     // login shell itself; the shell and the locale have to be given here.
-    let env = [("LANG", locale()), ("SHELL", login_shell()), ("NO_COLOR", "1".into())];
+    let env = [
+        ("LANG", locale()),
+        ("SHELL", login_shell()),
+        ("NO_COLOR", "1".into()),
+    ];
     let env: String = env
         .iter()
         .map(|(k, v)| format!("\t\t<key>{k}</key>\n\t\t<string>{}</string>\n", xml(v)))
@@ -112,7 +116,9 @@ fn plist(daemon: &Path) -> Result<String, String> {
 }
 
 fn xml(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The user's language as a UTF-8 locale, e.g. `es_ES.UTF-8`; `en_US.UTF-8` if macOS
@@ -138,9 +144,12 @@ fn login_shell() -> String {
         return shell;
     }
     let user = std::env::var("USER").unwrap_or_default();
-    output("dscl", &[".", "-read", &format!("/Users/{user}"), "UserShell"])
-        .and_then(|out| out.split_whitespace().last().map(str::to_string))
-        .unwrap_or_else(|| "/bin/zsh".into())
+    output(
+        "dscl",
+        &[".", "-read", &format!("/Users/{user}"), "UserShell"],
+    )
+    .and_then(|out| out.split_whitespace().last().map(str::to_string))
+    .unwrap_or_else(|| "/bin/zsh".into())
 }
 
 fn domain() -> String {
@@ -208,7 +217,10 @@ fn health() -> Option<Health> {
 /// Whether the app speaks English: the language picked in Settings (kept by the
 /// daemon), or else the Mac's.
 pub fn english() -> bool {
-    match get::<serde_json::Value>("/api/v1/preferences/language").as_ref().and_then(|v| v.as_str()) {
+    match get::<serde_json::Value>("/api/v1/preferences/language")
+        .as_ref()
+        .and_then(|v| v.as_str())
+    {
         Some("en") => true,
         Some("es") => false,
         _ => {
