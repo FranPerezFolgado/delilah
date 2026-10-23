@@ -24,13 +24,13 @@
 
 **Purpose**: dependencies and configuration the stories build on.
 
-- [ ] T001 Add `tauri-plugin-updater = "2"` and `tauri-plugin-process = "2"` to `app/src-tauri/Cargo.toml`, pinned with `=` to the current 2.x releases like `notification` and `opener`. Run `cargo check --manifest-path app/src-tauri/Cargo.toml` to refresh `app/src-tauri/Cargo.lock`.
-- [ ] T002 [P] Add `@tauri-apps/plugin-updater` and `@tauri-apps/plugin-process` to `app/package.json` `dependencies`, at exact versions matching the Rust crates. Run `cd app && npm install` and commit `app/package-lock.json`.
-- [ ] T003 Edit `app/src-tauri/tauri.conf.json`:
+- [X] T001 Add `tauri-plugin-updater = "2"` and `tauri-plugin-process = "2"` to `app/src-tauri/Cargo.toml`, pinned with `=` to the current 2.x releases like `notification` and `opener`. Run `cargo check --manifest-path app/src-tauri/Cargo.toml` to refresh `app/src-tauri/Cargo.lock`.
+- [X] T002 [P] Add `@tauri-apps/plugin-updater` and `@tauri-apps/plugin-process` to `app/package.json` `dependencies`, at exact versions matching the Rust crates. Run `cd app && npm install` and commit `app/package-lock.json`.
+- [X] T003 Edit `app/src-tauri/tauri.conf.json`:
   - set `"bundle.createUpdaterArtifacts": true`;
   - add `"plugins": { "updater": { "pubkey": "REPLACE_WITH_UPDATER_PUBKEY", "endpoints": ["https://github.com/FranPerezFolgado/delilah/releases/latest/download/latest.json"] } }`.
   - CSP stays unchanged (the plugin fetches from Rust).
-- [ ] T004 [P] Add `"updater:default"` and `"process:allow-restart"` to `app/src-tauri/capabilities/default.json`, and extend its `description` with "checking for, installing and relaunching into updates".
+- [X] T004 [P] Add `"updater:default"` and `"process:allow-restart"` to `app/src-tauri/capabilities/default.json`, and extend its `description` with "checking for, installing and relaunching into updates".
 - [ ] T005 **[MAINTAINER, not the agent]** Generate the key and set it up, as in quickstart.md step 1:
   - `npx tauri signer generate -w ~/.tauri/delilah.key`;
   - replace `REPLACE_WITH_UPDATER_PUBKEY` in `tauri.conf.json`;
