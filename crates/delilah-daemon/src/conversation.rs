@@ -123,8 +123,45 @@ async fn read_window(file: &mut tokio::fs::File, from: u64) -> std::io::Result<V
     Ok(bytes)
 }
 
+/// Longest transcript line read whole; a longer one is skipped.
+const MAX_LINE: usize = 8 * 1024 * 1024;
+
+/// Reads the next line into `line` (newline included). `None` at the end of the input;
+/// `Some(false)` when the line was longer than `MAX_LINE` and was discarded up to its
+/// newline (never held in memory); `Some(true)` otherwise.
+async fn read_line_capped<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+) -> std::io::Result<Option<bool>> {
+    line.clear();
+    let (mut skipping, mut any) = (false, false);
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            return Ok(any.then_some(!skipping));
+        }
+        any = true;
+        let (take, done) = match chunk.iter().position(|b| *b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (chunk.len(), false),
+        };
+        if !skipping {
+            if line.len() + take > MAX_LINE {
+                skipping = true;
+                line.clear();
+            } else {
+                line.extend_from_slice(&chunk[..take]);
+            }
+        }
+        reader.consume(take);
+        if done {
+            return Ok(Some(!skipping));
+        }
+    }
+}
+
 /// The lines among the first `upto` bytes that mention any of `ids`, newline included;
-/// the rest of the file is never held in memory.
+/// the rest of the file is never held in memory, and a line over `MAX_LINE` is skipped.
 async fn lines_mentioning(
     file: tokio::fs::File,
     upto: u64,
@@ -133,9 +170,10 @@ async fn lines_mentioning(
     let mut reader = tokio::io::BufReader::new(file.take(upto));
     let (mut out, mut line) = (Vec::new(), Vec::new());
     loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line).await? == 0 {
-            return Ok(out);
+        match read_line_capped(&mut reader, &mut line).await? {
+            None => return Ok(out),
+            Some(false) => continue,
+            Some(true) => {}
         }
         if ids.iter().any(|id| transcript::line_mentions(&line, id)) {
             out.extend_from_slice(&line);
@@ -145,6 +183,13 @@ async fn lines_mentioning(
         }
     }
 }
+
+/// Cards whose tool call was not found in the transcript, with the transcript's size at
+/// that scan: such a card is looked for again only once the transcript has grown, so a
+/// card whose call never appears does not rescan the file on every poll. In memory only.
+static NOT_FOUND: std::sync::LazyLock<std::sync::Mutex<HashMap<(String, String), u64>>> =
+    std::sync::LazyLock::new(Default::default);
+const MAX_NOT_FOUND: usize = 10_000;
 
 #[derive(Debug, Deserialize)]
 pub struct ConversationQuery {
@@ -269,6 +314,12 @@ pub async fn get(
             .flatten()
     };
     let mut ats: HashMap<String, Value> = entries.iter().filter_map(ask_at).collect();
+    // A card whose call time was found before carries it (`tool_at`): no scan for it.
+    for card in stored.iter().filter(|c| c["kind"] == "card") {
+        if let (Some(t), Some(at)) = (card["tool_use_id"].as_str(), card["tool_at"].as_str()) {
+            ats.entry(t.to_string()).or_insert_with(|| json!(at));
+        }
+    }
     let wanted: Vec<String> = stored
         .iter()
         .filter(|c| c["kind"] == "card")
@@ -279,15 +330,37 @@ pub async fn get(
     if let (Some(path), false) = (&path, wanted.is_empty())
         && let Some((file, len)) = open_transcript(path).await
     {
+        // Ones already looked for in a transcript of this size are not looked for again.
+        let wanted: Vec<String> = {
+            let seen = NOT_FOUND.lock().unwrap();
+            wanted
+                .into_iter()
+                .filter(|t| seen.get(&(id.clone(), t.clone())).is_none_or(|l| *l < len))
+                .collect()
+        };
         let ids: Vec<&str> = wanted.iter().map(String::as_str).collect();
-        if let Ok(lines) = lines_mentioning(file, len, &ids).await {
-            ats.extend(
-                transcript::parse(&lines, 0)
-                    .entries
-                    .iter()
-                    .filter_map(|e| serde_json::to_value(e).ok())
-                    .filter_map(|e| ask_at(&e)),
-            );
+        if !ids.is_empty()
+            && let Ok(lines) = lines_mentioning(file, len, &ids).await
+        {
+            let found: HashMap<String, Value> = transcript::parse(&lines, 0)
+                .entries
+                .iter()
+                .filter_map(|e| serde_json::to_value(e).ok())
+                .filter_map(|e| ask_at(&e))
+                .collect();
+            {
+                let mut seen = NOT_FOUND.lock().unwrap();
+                if seen.len() > MAX_NOT_FOUND {
+                    seen.clear();
+                }
+                for t in wanted.iter().filter(|t| !found.contains_key(*t)) {
+                    seen.insert((id.clone(), t.clone()), len);
+                }
+            }
+            for (t, at) in &found {
+                remember_tool_at(&app, &id, t, at).await;
+            }
+            ats.extend(found);
         }
     }
     // On the page, the card stands in the call's place; off it, it takes the call's time.
@@ -337,6 +410,23 @@ pub async fn get(
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
         "runtime": "pty",
     })))
+}
+
+/// Stores, in the card tied to `tool_use_id`, when its tool call was made.
+async fn remember_tool_at(app: &AppState, session: &str, tool_use_id: &str, at: &Value) {
+    let Some(at) = at.as_str() else { return };
+    let Ok(cards) = app.store.entries(session).await else {
+        return;
+    };
+    for entry in cards.into_iter().filter(|e| {
+        e.kind == EntryKind::Card && e.body["tool_use_id"].as_str() == Some(tool_use_id)
+    }) {
+        let mut body = entry.body;
+        body["tool_at"] = json!(at);
+        if let Err(e) = app.store.update_entry(entry.id, &body).await {
+            tracing::warn!(session, "cannot keep the card's time: {e}");
+        }
+    }
 }
 
 /// A tool entry's `path` made relative to the workspace when it lies inside it (as the
@@ -485,22 +575,37 @@ pub async fn send(
     } else {
         // What was queued before an interrupted turn goes first, in the same paste.
         let earlier = app.store.claim_queued(&id).await?;
+        let earlier_ids: Vec<i64> = earlier.iter().map(|e| e.id).collect();
         // Recorded before typing: its prompt hook may come back before this returns.
-        let entry = app
+        let entry = match app
             .store
             .add_entry(
                 &id,
                 EntryKind::User,
                 &json!({ "text": text, "state": "sent", "from": "view" }),
             )
-            .await?;
+            .await
+        {
+            Ok(entry) => entry,
+            Err(e) => {
+                let _ = app.store.requeue_entries(&id, &earlier_ids).await;
+                return Err(e.into());
+            }
+        };
         let all = earlier
             .iter()
             .filter_map(|e| e.body["text"].as_str())
             .chain(std::iter::once(text))
             .collect::<Vec<_>>()
             .join("\n\n");
-        crate::actions::type_prompt(&live, &all).await?;
+        if let Err(e) = crate::actions::type_prompt(&live, &all).await {
+            // Nothing was delivered: the earlier messages wait again, this one is dropped
+            // (the view puts its text back in the composer).
+            let _ = app.store.requeue_entries(&id, &earlier_ids).await;
+            let _ = app.store.discard_sent_entry(&id, entry.id).await;
+            app.emit(Topic::Conversations);
+            return Err(e);
+        }
         let _ = app.store.set_attention(&id, None).await;
         app.emit(Topic::Inbox);
         entry
@@ -584,6 +689,8 @@ async fn flush_locked(app: &AppState, live: &Live) {
         .join("\n\n");
     if let Err(e) = crate::actions::type_prompt(live, &text).await {
         tracing::warn!(session = %live.id, "cannot type the queue: {}", e.message());
+        let ids: Vec<i64> = claimed.iter().map(|e| e.id).collect();
+        let _ = app.store.requeue_entries(&live.id, &ids).await;
     }
     app.emit(Topic::Conversations);
 }
@@ -1992,5 +2099,96 @@ mod tests {
         let entries = reopened.entries("conv").await.unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].body["text"], "sigo aquí");
+    }
+
+    #[tokio::test]
+    async fn a_card_keeps_its_call_time_and_later_polls_do_not_rescan() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let path = f.transcript(&live, ask_transcript("toolu_1").as_bytes());
+        add_card(&f, "task1", "ask-1", Some("toolu_1")).await;
+        add_card(&f, "task1", "ask-2", Some("toolu_2")).await;
+        let len = std::fs::metadata(&path).unwrap().len();
+        let uri = format!("/api/v1/sessions/task1/conversation?cursor={len}");
+        let body = f.get_of(&uri).await.1;
+        let card = |body: &Value, ask: &str| {
+            body["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["ask"] == ask)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(card(&body, "ask-1")["at"], "2025-02-01T10:00:00.000Z");
+        let stored = f.app.store.card_entry("task1", "ask-1").await.unwrap().unwrap();
+        assert_eq!(stored.body["tool_at"], "2025-02-01T10:00:00.000Z");
+        // A file that mentions the ids elsewhere would be found by a rescan.
+        let late = ask_transcript("toolu_2").replace("2025-02-01", "2030-01-01");
+        std::fs::write(&path, late.as_bytes()).unwrap();
+        let body = f.get_of(&uri).await.1;
+        assert_eq!(card(&body, "ask-1")["at"], "2025-02-01T10:00:00.000Z");
+        // The one not found is not looked for again while the file keeps its size...
+        assert_ne!(card(&body, "ask-2")["at"], "2030-01-01T10:00:00.000Z");
+        assert!(
+            f.app.store.card_entry("task1", "ask-2").await.unwrap().unwrap().body["tool_at"]
+                .is_null()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_line_over_the_cap_is_skipped_not_buffered() {
+        let mut data = vec![b'x'; MAX_LINE + 10];
+        data.extend_from_slice(b" toolu_1\n");
+        data.extend_from_slice(b"ok toolu_1\n");
+        let path = std::env::temp_dir().join(format!("delilah-long-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, &data).unwrap();
+        let file = tokio::fs::File::open(&path).await.unwrap();
+        let out = lines_mentioning(file, data.len() as u64, &["toolu_1"])
+            .await
+            .unwrap();
+        assert_eq!(out, b"ok toolu_1\n");
+    }
+
+    /// A conversation session whose terminal is already gone: every write fails.
+    async fn dead_terminal(f: &Fixture) -> Live {
+        let mut cmd = CommandBuilder::new("true");
+        cmd.args(["--version"]);
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let live = f
+            .app
+            .sessions
+            .insert("conv", "@web", SessionKind::Claude, false, pty);
+        for _ in 0..100 {
+            if live.pty.write(b"x").is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        live
+    }
+
+    #[tokio::test]
+    async fn a_failed_typing_requeues_the_claimed_messages_and_drops_the_new_one() {
+        let f = Fixture::new().await;
+        let queued = json!({ "text": "earlier", "state": "queued", "from": "view" });
+        f.app
+            .store
+            .add_entry("conv", EntryKind::User, &queued)
+            .await
+            .unwrap();
+        let live = dead_terminal(&f).await;
+        assert!(live.pty.write(b"x").is_err(), "the terminal must be dead");
+        let (status, _) = f.send("now").await;
+        assert!(!status.is_success(), "{status}");
+        let entries = f.app.store.entries("conv").await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].body["text"], "earlier");
+        assert_eq!(entries[0].body["state"], "queued");
+        // The same for a flush of the queue.
+        flush_queue(&f.app, &live).await;
+        let entries = f.app.store.entries("conv").await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].body["state"], "queued");
     }
 }

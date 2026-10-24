@@ -430,6 +430,35 @@ impl Store {
         Ok(entries)
     }
 
+    /// Puts messages claimed by `claim_queued` back in the queue (typing them failed).
+    pub async fn requeue_entries(&self, session: &str, ids: &[i64]) -> Result<(), StoreError> {
+        for id in ids {
+            sqlx::query(
+                "UPDATE conversation_entries SET body = json_set(body, '$.state', 'queued')
+                 WHERE id = ? AND session_id = ? AND kind = 'user'
+                 AND json_extract(body, '$.state') = 'sent'",
+            )
+            .bind(id)
+            .bind(session)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Deletes a user message recorded `sent` whose typing failed.
+    pub async fn discard_sent_entry(&self, session: &str, id: i64) -> Result<(), StoreError> {
+        sqlx::query(
+            "DELETE FROM conversation_entries WHERE id = ? AND session_id = ? AND kind = 'user'
+             AND json_extract(body, '$.state') = 'sent'",
+        )
+        .bind(id)
+        .bind(session)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Marks every card still `pending` as `withdrawn` (the asks live in memory only,
     /// so after a restart none of them can be answered); returns how many.
     pub async fn withdraw_pending_cards(&self) -> Result<u64, StoreError> {

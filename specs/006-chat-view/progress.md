@@ -20,7 +20,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-10 | 4 | 4E | verified | 1 | c8157ed | run together with WP-09 (shared TaskScreen.tsx) |
 | WP-09F | 4 | 4F | verified | 1 | 4e689e7 | open-file path fix |
 | WP-12 | 5 | 5A | verified | 1 | e3f3c57 | |
-| WP-12F | 5 | 5C | verified | 1 | | review fixes |
+| WP-12F | 5 | 5C | verified | 1 | 806cfd7 | review fixes |
+| WP-12G | 5 | 5D | verified | 1 | | re-review fixes |
 | WP-13 | 5 | 5B | verified | 1 | 626cd52 | |
 | WP-14 | 6 | 6A | pending | 0 | | gated by spike |
 | WP-15 | 6 | 6B | pending | 0 | | gated by spike |
@@ -45,6 +46,13 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 5 | architecture | LOW | WP-12G adds a process-wide static NOT_FOUND map (session, tool_use_id) → same smell as the old SEEN static; move to AppState | crates/delilah-daemon/src/conversation.rs |
+| 5 | ui | LOW | UI rendering not verified in a browser (scroll-follow, Edit diff + Abrir en el editor, Chat/Terminal switch, Vista select, idea Nueva tarea); API-level US1/US2 verified | app/ |
+| 5 | spec | LOW | research.md R5 stale: code hides only delivered user entries (doc'd in contracts) — update R5 in docs phase | specs/006-chat-view/research.md |
+| 5 | spec | LOW | weak tests: Detener only tested on idea session; card-answer test's conditional submit click; daemon task tests use a project session; stop_refuses_… misnamed; no InboxView refresh test | app/src/components/ConversationView.test.tsx |
+| 5 | security | LOW | pending-ask check not serialized with ask hooks (pre-existing race, window narrowed) | crates/delilah-daemon/src/conversation.rs:466 |
+| 5 | contract | MEDIUM | idle send: claimed queued + new entries stay `sent` if type_prompt fails (now visible for ideas too); revert to queued on error | crates/delilah-daemon/src/conversation.rs:489 |
+| 5 | contract | LOW | brief double show of a message between transcript write and its prompt hook (sent + t: user) | crates/delilah-daemon/src/conversation.rs:259 |
 | 5 | contract | LOW | old cards (before e3f3c57) have no tool_use_id → existing idea conversations show tool + card | crates/delilah-daemon/src/conversation.rs:260 |
 | 5 | security | MEDIUM | API has no token: any local process without Origin can type prompts into any open Claude session (design risk; document or add token) | crates/delilah-daemon/src/api.rs:194 |
 | 4 | contract | MEDIUM | runtime hardcoded "pty"; Task/Session JSON lack runtime/chat_mode/allowed_tools (chat-mode phases) | crates/delilah-daemon/src/conversation.rs:297 |

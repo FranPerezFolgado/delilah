@@ -33,6 +33,10 @@ pub struct Card {
     /// The AskUserQuestion call's id, which ties the card to the transcript's tool entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_use_id: Option<String>,
+    /// When that call was made, found once in the transcript and kept so later reads
+    /// do not scan for it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_at: Option<String>,
 }
 
 impl Card {
@@ -46,6 +50,7 @@ impl Card {
             task: None,
             error: None,
             tool_use_id: None,
+            tool_at: None,
         }
     }
 }
