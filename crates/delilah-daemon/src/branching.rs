@@ -200,16 +200,37 @@ fn adopted(
     }
 }
 
-/// A name for the branch based on `wanted` that no branch of the main repo has: local
-/// or remote-tracking. `-2`, `-3`… otherwise.
+/// A name for the branch based on `wanted` that no branch of any repo of the task (the
+/// main one and each chosen submodule) has: local or remote-tracking. `-2`, `-3`…
+/// otherwise.
 fn free_name(ws: &Workspace, wanted: &str, opts: &GitOptions) -> Result<String, String> {
+    let repos = spec_repos(ws);
     let mut name = wanted.to_string();
     let mut n = 1;
-    while delilah_git::branch_exists(&ws.path, &name, opts).map_err(|e| e.to_string())? {
+    loop {
+        let mut taken = false;
+        for (label, dir) in &repos {
+            if delilah_git::branch_exists(dir, &name, opts).map_err(|e| format!("{label}: {e}"))? {
+                taken = true;
+                break;
+            }
+        }
+        if !taken {
+            return Ok(name);
+        }
         n += 1;
         name = format!("{wanted}-{n}");
     }
-    Ok(name)
+}
+
+/// Puts `dir` on `branch`: switches to it when the repo has it already (left by the user
+/// or by a partial run), starts it at the current commit otherwise.
+fn bring_onto(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), delilah_git::GitError> {
+    if delilah_git::branch_exists(dir, branch, opts)? {
+        delilah_git::switch_branch(dir, branch, opts)
+    } else {
+        delilah_git::apply_branch(dir, branch, opts)
+    }
 }
 
 /// R2 on the repos: settle the branch name (adopt, or create from the spec folder or the
@@ -219,7 +240,7 @@ fn settle(
     previous: Option<&[(String, String)]>,
     at_start: &[String],
     title: &str,
-    why: Why,
+    name_from_title: bool,
     opts: &GitOptions,
 ) -> Settled {
     let fail = |error: String| Settled {
@@ -238,7 +259,7 @@ fn settle(
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_else(|| slug(title)),
-                    None if why == Why::Guard => slug(title),
+                    None if name_from_title => slug(title),
                     // Nothing to name it after yet.
                     None => {
                         return Settled {
@@ -251,7 +272,7 @@ fn settle(
                     Ok(name) => name,
                     Err(e) => return fail(format!("the main repo: {e}")),
                 };
-                if let Err(e) = delilah_git::apply_branch(&ws.path, &name, opts) {
+                if let Err(e) = bring_onto(&ws.path, &name, opts) {
                     return fail(format!("the main repo: {e}"));
                 }
                 name
@@ -263,7 +284,7 @@ fn settle(
         .flatten()
         .as_deref()
         != Some(branch.as_str())
-        && let Err(e) = delilah_git::apply_branch(&ws.path, &branch, opts)
+        && let Err(e) = bring_onto(&ws.path, &branch, opts)
     {
         return fail(format!("the main repo: {e}"));
     }
@@ -273,7 +294,7 @@ fn settle(
         if on.as_deref() == Some(branch.as_str()) {
             continue;
         }
-        if let Err(e) = delilah_git::apply_branch(&dir, &branch, opts) {
+        if let Err(e) = bring_onto(&dir, &branch, opts) {
             failed.push(format!("{label}: {e}"));
         }
     }
@@ -327,8 +348,18 @@ pub(crate) async fn ensure_locked(
     let opts = git_options(app);
     let title = task.title.clone();
     let recorded = ws.clone();
+    // The guard needs a branch now; a retry of a failure is the same ask, so both fall
+    // back to the title when no spec folder names it.
+    let name_from_title = why == Why::Guard || (why == Why::Retry && task.branch_error.is_some());
     let settled = tokio::task::spawn_blocking(move || {
-        settle(&ws, previous.as_deref(), &at_start, &title, why, &opts)
+        settle(
+            &ws,
+            previous.as_deref(),
+            &at_start,
+            &title,
+            name_from_title,
+            &opts,
+        )
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -361,7 +392,8 @@ pub(crate) async fn ensure_locked(
             Err(error)
         }
         None => {
-            if task.branch_error.is_some() {
+            // Nothing made (no analysis yet): a failure on record stays until it is fixed.
+            if task.branch_error.is_some() && settled.branch.is_some() {
                 if let Err(e) = app.store.set_branch_error(key, None).await {
                     tracing::warn!(task = %key, "branching: {e}");
                 }
@@ -468,11 +500,30 @@ pub(crate) async fn guard(app: &AppState, key: &TaskKey, hook: &Value) -> Option
             _ => return None,
         }
     }
-    let outcome = tokio::time::timeout(GUARD_BUDGET, ensure(app, key, Why::Guard)).await;
-    let reason = match outcome {
-        Ok(Ok(_)) => return None,
-        Ok(Err(reason)) => reason,
-        Err(_) => "it took too long".to_string(),
+    guard_within(app, key, GUARD_BUDGET).await
+}
+
+/// [`guard`]'s second half with the budget given. The work runs detached, under the
+/// task's lock: when the budget runs out the guard only stops waiting, the work still
+/// finishes and records its outcome, and nothing else touches the repos meanwhile.
+async fn guard_within(
+    app: &AppState,
+    key: &TaskKey,
+    budget: std::time::Duration,
+) -> Option<String> {
+    let (work_app, work_key) = (app.clone(), key.clone());
+    let work = tokio::spawn(async move { ensure(&work_app, &work_key, Why::Guard).await });
+    let reason = match tokio::time::timeout(budget, work).await {
+        Ok(Ok(Ok(_))) => return None,
+        Ok(Ok(Err(reason))) => reason,
+        Ok(Err(e)) => e.to_string(),
+        Err(_) => {
+            return Some(
+                "Delilah is still putting this task on its own branch, so nothing was edited \
+                 or committed. Retry in a moment."
+                    .to_string(),
+            );
+        }
     };
     Some(format!(
         "Delilah could not put this task on its own branch ({reason}), so nothing was \
@@ -999,8 +1050,9 @@ mod tests {
         let app = app().await;
         let (key, root) = real_task(&app, "LIBRE-1", &["api", "web"]).await;
         spec(&root, "005-y", true);
-        // `web` cannot take the name: it has it already.
-        git(&root.join("web"), &["branch", "005-y"]);
+        // `web` cannot take the name now: git is busy there.
+        let lock = root.join("web/.git/index.lock");
+        std::fs::write(&lock, "").unwrap();
         let err = ensure(&app, &key, Why::Activity).await.unwrap_err();
         assert!(err.contains("web") && !err.contains("api"), "{err}");
         assert_eq!(on(&root), "005-y");
@@ -1014,13 +1066,125 @@ mod tests {
 
         // The tick and the tool calls leave a failure alone; the retry finishes it.
         assert_eq!(ensure(&app, &key, Why::Activity).await, Ok(None));
-        git(&root.join("web"), &["branch", "-D", "005-y"]);
+        std::fs::remove_file(&lock).unwrap();
         assert_eq!(
             ensure(&app, &key, Why::Retry).await,
             Ok(Some("005-y".into()))
         );
         assert_eq!(on(&root.join("web")), "005-y");
         assert_eq!(task_of(&app, &key).await.branch_error, None);
+    }
+
+    #[tokio::test]
+    async fn a_name_taken_in_any_repo_of_the_task_is_numbered() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &["api", "web"]).await;
+        spec(&root, "005-y", true);
+        git(&root.join("web"), &["branch", "005-y"]);
+        assert_eq!(
+            ensure(&app, &key, Why::Activity).await,
+            Ok(Some("005-y-2".into()))
+        );
+        for dir in [root.clone(), root.join("api"), root.join("web")] {
+            assert_eq!(on(&dir), "005-y-2");
+        }
+        assert_eq!(task_of(&app, &key).await.branch_error, None);
+    }
+
+    #[tokio::test]
+    async fn a_branch_the_hook_made_is_adopted_and_a_submodule_that_has_it_is_switched() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &["web"]).await;
+        git(&root.join("web"), &["branch", "006-x"]);
+        git(&root, &["checkout", "-q", "-b", "006-x"]);
+        assert_eq!(
+            ensure(&app, &key, Why::Activity).await,
+            Ok(Some("006-x".into()))
+        );
+        assert_eq!(on(&root.join("web")), "006-x");
+        assert_eq!(task_of(&app, &key).await.branch_error, None);
+    }
+
+    #[tokio::test]
+    async fn the_main_repo_switches_to_a_recorded_branch_it_already_has() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &[]).await;
+        git(&root, &["branch", "007-z"]);
+        app.store.set_workspace_branch(&key, "007-z").await.unwrap();
+        app.store
+            .set_branch_error(&key, Some("the main repo: boom"))
+            .await
+            .unwrap();
+        assert_eq!(
+            ensure(&app, &key, Why::Retry).await,
+            Ok(Some("007-z".into()))
+        );
+        assert_eq!(on(&root), "007-z");
+        assert_eq!(task_of(&app, &key).await.branch_error, None);
+    }
+
+    #[tokio::test]
+    async fn a_retry_without_a_spec_folder_names_the_branch_from_the_title() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &[]).await;
+        app.store.set_title(&key, "Mi idea").await.unwrap();
+        app.store
+            .set_branch_error(&key, Some("the main repo: boom"))
+            .await
+            .unwrap();
+        let Json(task) = retry(State(app.clone()), UrlPath("LIBRE-1".into()))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(on(&root), "mi-idea");
+        assert_eq!(ws_branch(&app, &key).await, "mi-idea");
+        assert_eq!(task.branch_error, None);
+    }
+
+    #[tokio::test]
+    async fn nothing_made_keeps_the_failure_on_record() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &[]).await;
+        app.store
+            .set_branch_error(&key, Some("the main repo: boom"))
+            .await
+            .unwrap();
+        // The activity path has no spec folder and no title fallback: it does nothing.
+        assert_eq!(ensure(&app, &key, Why::Activity).await, Ok(None));
+        assert_eq!(on(&root), "");
+        assert!(task_of(&app, &key).await.branch_error.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_guard_that_runs_out_of_time_leaves_the_work_to_finish_under_the_lock() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &[]).await;
+        app.store.set_title(&key, "Mi idea").await.unwrap();
+        // Something else holds the task: the guard's work has to wait for it.
+        let held = app.branching.lock(&key).await;
+        let reason = guard_within(&app, &key, std::time::Duration::from_millis(50))
+            .await
+            .expect("denied");
+        assert!(reason.contains("still"), "{reason}");
+        // The retry waits for the same lock, and nothing ran meanwhile.
+        let retrying = tokio::spawn({
+            let app = app.clone();
+            async move { retry(State(app), UrlPath("LIBRE-1".into())).await.is_ok() }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!retrying.is_finished());
+        assert_eq!(on(&root), "");
+        drop(held);
+        // The work finishes and records its branch; the retry then finds nothing to do.
+        let _ = retrying.await.unwrap();
+        for _ in 0..100 {
+            if ws_branch(&app, &key).await == "mi-idea" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(ws_branch(&app, &key).await, "mi-idea");
+        assert_eq!(on(&root), "mi-idea");
     }
 
     #[tokio::test]
@@ -1157,7 +1321,7 @@ mod tests {
         let app = app().await;
         let (key, root) = real_task(&app, "LIBRE-1", &["web"]).await;
         spec(&root, "005-y", true);
-        git(&root.join("web"), &["branch", "005-y"]);
+        std::fs::write(root.join("web/.git/index.lock"), "").unwrap();
         let reason = guard(
             &app,
             &key,
@@ -1199,9 +1363,10 @@ mod tests {
         let app = app().await;
         let (key, root) = real_task(&app, "LIBRE-1", &["web"]).await;
         spec(&root, "005-y", true);
-        git(&root.join("web"), &["branch", "005-y"]);
+        let lock = root.join("web/.git/index.lock");
+        std::fs::write(&lock, "").unwrap();
         assert!(ensure(&app, &key, Why::Activity).await.is_err());
-        git(&root.join("web"), &["branch", "-D", "005-y"]);
+        std::fs::remove_file(&lock).unwrap();
         let Json(task) = retry(State(app.clone()), UrlPath("LIBRE-1".into()))
             .await
             .ok()

@@ -7,7 +7,7 @@ use delilah_git::{
     branch_exists, branch_tip, changes, check_merged, check_repos, check_workspace,
     commit_subjects, create_workspace, current_branch, delete_branch, fetch, file_diff,
     leave_checkout, list_submodules, needs_push, push_branch, remove_workspace, repo_root,
-    spec_dirs, use_checkout,
+    spec_dirs, switch_branch, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -837,4 +837,50 @@ fn branch_exists_sees_local_and_remote_tracking_branches() {
     // Only origin/feature/x is left.
     assert!(branch_exists(&repo, "feature/x", &o).unwrap());
     assert!(!branch_exists(&repo, "x", &o).unwrap());
+}
+
+#[test]
+fn switch_branch_goes_to_an_existing_branch_keeping_uncommitted_files() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    git(&repo, &["branch", "left-over"]);
+    std::fs::write(repo.join("wip.txt"), "draft\n").unwrap();
+    switch_branch(&repo, "left-over", &opts()).unwrap();
+    assert_eq!(
+        current_branch(&repo, &opts()).unwrap().as_deref(),
+        Some("left-over")
+    );
+    assert!(repo.join("wip.txt").is_file());
+    // A missing branch and a bad name are refused.
+    assert!(switch_branch(&repo, "nope", &opts()).is_err());
+    let err = switch_branch(&repo, "bad..name", &opts()).unwrap_err();
+    assert!(matches!(err, GitError::InvalidBranch(_)), "{err}");
+    let err = switch_branch(&repo, "-x", &opts()).unwrap_err();
+    assert!(matches!(err, GitError::InvalidBranch(_)), "{err}");
+}
+
+#[test]
+fn a_parent_branch_made_in_the_parent_repo_is_checked_before_archiving() {
+    let fx = Fixture::new();
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    // A task started before the branch existed in the parent: nothing to check there.
+    commit_change(&ws, ".");
+    archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap();
+    assert!(!ws.path.exists());
+
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    apply_branch(&ws.path, BRANCH, &opts()).unwrap();
+    // Uncommitted work in the parent's own repo.
+    std::fs::write(ws.path.join("wip.txt"), "draft\n").unwrap();
+    let err = check_workspace(&ws, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+    std::fs::remove_file(ws.path.join("wip.txt")).unwrap();
+    // A submodule changed on its own is not the parent's change.
+    check_workspace(&ws, &opts()).unwrap();
+    commit_change(&ws, ".");
+    let err = archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Unpushed { count: 1, .. }), "{err}");
+    assert!(ws.path.exists());
+    archive_workspace(&fx.parent(), &ws, true, &opts()).unwrap();
+    assert!(!ws.path.exists());
 }

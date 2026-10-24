@@ -15,8 +15,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 4 | 4B | verified | 1 | c808cb6 | ensure()+ensure_locked(); Activity waits while branch_error set |
 | WP-09 | 4 | 4B | verified | 1 | 407a9a3 | no delilah-git change needed |
 | WP-08 | 4 | 4C | verified | 1 | d792563 | guard on every free-task session outside start_run (returns at once once branched) |
-| WP-4F | 4 | 4F | implementing | 0 | | phase 4 review fixes (round 1) |
-| WP-11 | 5 | 5A | verified | 1 | PENDING | CHK016, CHK033-035 left open |
+| WP-4F | 4 | 4F | verified | 1 | PENDING | phase 4 review fixes (round 1): F1–F6 |
+| WP-11 | 5 | 5A | verified | 1 | 84d80e4 | CHK016, CHK033-035 left open |
 | WP-12 | 5 | 5B | pending | 0 | | quickstart walk via ui-verifier |
 
 ## Open findings

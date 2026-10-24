@@ -104,12 +104,30 @@ pub(crate) async fn archive_workspace(
         stop_sessions(app, key).await;
         return Ok(Outcome::default());
     };
-    release_workspace(app, key, force).await?;
-    app.store.delete_workspace(key).await?;
-
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
+    // A parent's own repo has the task's branch too (the descriptive one made after the
+    // start): after a merge it goes like a submodule's, at the tip the workspace had.
+    let mut verified = verified.clone();
+    if !verified.is_empty() && !verified.contains_key(".") {
+        let (ws, root, opts) = (ws.clone(), root.clone(), opts.clone());
+        let tip = tokio::task::spawn_blocking(move || {
+            let home = Workspace::home_of(&root, ".")?;
+            if !ws.parent_has_branch(&opts) {
+                return None;
+            }
+            delilah_git::branch_tip(&home, &ws.branch, &opts).ok()?
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        if let Some(tip) = tip {
+            verified.insert(".".to_string(), tip);
+        }
+    }
+    release_workspace(app, key, force).await?;
+    app.store.delete_workspace(key).await?;
+
     let mut outcome = Outcome::default();
     let mut labels: Vec<_> = verified.iter().collect();
     labels.sort();

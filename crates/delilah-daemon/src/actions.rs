@@ -734,6 +734,77 @@ mod tests {
         .await
     }
 
+    /// A done task with a parent-kind worktree (no submodules) whose own repo has the
+    /// branch `feature/PROJ-1` with one commit that is not pushed.
+    async fn parent_with_a_branch(
+        app: &AppState,
+        repo: &FsPath,
+    ) -> (TaskKey, delilah_git::Workspace) {
+        let key = TaskKey::new("PROJ-1");
+        app.store
+            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .await
+            .unwrap();
+        app.store
+            .apply_event(&key, Event::Start, chrono::Utc::now())
+            .await
+            .unwrap();
+        let spec = delilah_git::WorkspaceSpec {
+            path: app.config.workspaces_dir().join("PROJ-1"),
+            branch: None,
+            kind: delilah_core::ProjectKind::Parent,
+            submodules: vec![],
+        };
+        let opts = GitOptions::default();
+        let mut ws = delilah_git::create_workspace(repo, &spec, &opts).unwrap();
+        delilah_git::apply_branch(&ws.path, "feature/PROJ-1", &opts).unwrap();
+        ws.branch = "feature/PROJ-1".into();
+        app.store.save_workspace(&key, repo, &ws).await.unwrap();
+        app.store
+            .apply_event(&key, Event::WorkspaceReady, chrono::Utc::now())
+            .await
+            .unwrap();
+        git(&ws.path, &["commit", "-q", "--allow-empty", "-m", "work"]);
+        (key, ws)
+    }
+
+    #[tokio::test]
+    async fn a_parent_archive_checks_the_branch_in_the_parents_own_repo() {
+        let (app, repo) = setup().await;
+        let (key, ws) = parent_with_a_branch(&app, &repo).await;
+
+        let err = archive_workspace(&app, &key, false, &HashMap::new())
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT, "{}", err.message);
+        assert!(ws.path.exists());
+
+        git(&ws.path, &["push", "-q", "origin", "feature/PROJ-1"]);
+        archive_workspace(&app, &key, false, &HashMap::new())
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert!(!ws.path.exists());
+        // The user's archive keeps the branch.
+        assert!(!git(&repo, &["branch", "--list", "feature/PROJ-1"]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_merge_archive_deletes_the_parents_own_branch_too() {
+        let (app, repo) = setup().await;
+        let (key, ws) = parent_with_a_branch(&app, &repo).await;
+        git(&ws.path, &["push", "-q", "origin", "feature/PROJ-1"]);
+
+        // A submodule's PR merged (no such repo is set up here: nothing to delete there).
+        let verified = HashMap::from([("svc".to_string(), "0".repeat(40))]);
+        let outcome = archive_workspace(&app, &key, false, &verified)
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert!(outcome.left.is_empty(), "{:?}", outcome.problems);
+        assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).is_empty());
+    }
+
     #[tokio::test]
     async fn archive_finishes_an_archive_partial() {
         let (app, repo) = setup().await;

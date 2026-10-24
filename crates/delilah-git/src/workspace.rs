@@ -57,6 +57,16 @@ impl Workspace {
         (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
     }
 
+    /// Whether a parent workspace is on the task's branch in the parent's own repo too (a
+    /// descriptive branch made after the start; older tasks never were, and a branch of
+    /// the same name that the parent happens to have is not theirs).
+    pub fn parent_has_branch(&self, opts: &GitOptions) -> bool {
+        self.kind == ProjectKind::Parent
+            && self.has_branch()
+            && current_branch(&self.path, opts).ok().flatten().as_deref()
+                == Some(self.branch.as_str())
+    }
+
     /// Whether the task has a branch yet: an empty name means the first analysis has
     /// not created it.
     pub fn has_branch(&self) -> bool {
@@ -124,6 +134,16 @@ pub fn apply_branch(dir: &Path, name: &str, opts: &GitOptions) -> Result<(), Git
         return Err(GitError::InvalidBranch(name.to_string()));
     }
     git(dir, &["checkout", "-q", "-b", name], opts)?;
+    Ok(())
+}
+
+/// Switches `dir` to the existing branch `name`, keeping the uncommitted files. Fails if
+/// git cannot carry them over, or the name is not a valid branch name.
+pub fn switch_branch(dir: &Path, name: &str, opts: &GitOptions) -> Result<(), GitError> {
+    if git(dir, &["check-ref-format", "--branch", name], opts).is_err() {
+        return Err(GitError::InvalidBranch(name.to_string()));
+    }
+    git(dir, &["checkout", "-q", name], opts)?;
     Ok(())
 }
 
@@ -277,7 +297,10 @@ pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError
         return Ok(());
     }
     for (location, dir) in ws.branch_dirs() {
-        check_dir(&location, &dir, &ws.branch, opts)?;
+        check_dir(&location, &dir, &ws.branch, false, opts)?;
+    }
+    if ws.parent_has_branch(opts) {
+        check_dir("the parent", &ws.path, &ws.branch, true, opts)?;
     }
     Ok(())
 }
@@ -295,15 +318,26 @@ pub fn check_repos(ws: &Workspace, labels: &[String], opts: &GitOptions) -> Resu
             } else {
                 label
             };
-            check_dir(&location, &dir, &ws.branch, opts)?;
+            check_dir(&location, &dir, &ws.branch, false, opts)?;
         }
     }
     Ok(())
 }
 
-fn check_dir(location: &str, dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+/// `ignore_submodules`: for a parent's own repo, whose submodules are checked on their own.
+fn check_dir(
+    location: &str,
+    dir: &Path,
+    branch: &str,
+    ignore_submodules: bool,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
     let location = location.to_string();
-    if !git(dir, &["status", "--porcelain"], opts)?.is_empty() {
+    let mut status = vec!["status", "--porcelain"];
+    if ignore_submodules {
+        status.push("--ignore-submodules=all");
+    }
+    if !git(dir, &status, opts)?.is_empty() {
         return Err(GitError::Dirty { location });
     }
     // Commits of this branch that are neither pushed nor on another local branch

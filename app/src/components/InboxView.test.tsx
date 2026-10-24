@@ -207,4 +207,22 @@ describe("InboxView branch item", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(retry).toHaveBeenCalledWith("PROJ-1");
   });
+
+  it.each([404, 409])("refreshes the list when the retry gets a %i, and keeps the error", async (status) => {
+    vi.spyOn(api, "retryBranch").mockRejectedValue(new ApiError("the task is on its branch already", status));
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("the task is on its branch already")).toBeTruthy();
+  });
+
+  it("does not refresh on other failures of the retry", async () => {
+    vi.spyOn(api, "retryBranch").mockRejectedValue(new ApiError("boom", 500));
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
+    expect(onChanged).not.toHaveBeenCalled();
+  });
 });

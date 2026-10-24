@@ -109,6 +109,8 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.resumeAt && item.pr) setPaused(true);
       setError((e as Error).message);
+      // The branch item is stale (task gone, or already on its branch): let the list refresh.
+      if (item.kind === "branch" && e instanceof ApiError && (e.status === 404 || e.status === 409)) onChanged();
     } finally {
       setBusy(false);
     }
