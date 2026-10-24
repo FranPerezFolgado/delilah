@@ -42,6 +42,22 @@ contract review):
 - Allowed for every live Claude session, not only idea conversations.
 - In chat mode, `stop` interrupts the stream turn (R7-e), and pending permission asks
   are released as denied.
+- `POST …/messages`: typed now when Claude is idle, queued when it works or a card is
+  pending. Deciding and typing is one step per session (two sends never interleave).
+  When the message is typed and earlier messages are still queued (e.g. after `stop`),
+  they are typed first, in order, in the same paste, and all marked sent. At most 20
+  queued messages and 64 000 queued characters per session: beyond that, `409`.
+  A closed or shell session gives `409`.
+- `stop` keeps the queue (queued messages are not sent); it goes out ahead of the next
+  message sent, or at the next turn's end.
+- `DELETE …/messages/{entry}`: `404` for a non-numeric id or a transcript (`t:…`) id;
+  `409` when the message is no longer queued.
+- Cards carry `tool_use_id` (only when it is a safe id: at most 128 characters of
+  `[A-Za-z0-9_-]`). A card replaces the AskUserQuestion tool entry with the same
+  `tool_use_id`, on full and incremental responses alike, and carries that call's `at`.
+- Hide rules once a transcript exists: stored user entries that are `delivered` are
+  hidden (`queued` and `sent` stay visible), and for idea conversations stored `claude`
+  entries are hidden too.
 
 ### `GET /api/v1/sessions/{id}/terminal`, `GET /api/v1/tasks/{key}/terminal` (attach)
 

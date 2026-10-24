@@ -42,7 +42,10 @@ function merge(
     if (i >= 0) out[i] = e;
     else out.push(e);
   }
+  // A card stands in for its AskUserQuestion call, whichever response brought each.
+  const asked = new Set(out.flatMap((e) => (e.kind === "card" && e.tool_use_id ? [e.tool_use_id] : [])));
   return out
+    .filter((e) => !(e.kind === "tool" && asked.has(e.tool_use_id)))
     .map((e, i) => [e, i] as const)
     .sort(([a, i], [b, j]) => time(a.at) - time(b.at) || i - j)
     .map(([e]) => e);

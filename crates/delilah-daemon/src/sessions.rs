@@ -51,6 +51,8 @@ pub struct Live {
     pub convo: Arc<Mutex<ConvoState>>,
     /// Where Claude saves this session's transcript, as its latest hook said.
     transcript: Arc<Mutex<Option<PathBuf>>>,
+    /// Held while a message is decided on and typed, so two never interleave.
+    pub typing: Arc<tokio::sync::Mutex<()>>,
     events: Events,
 }
 
@@ -153,6 +155,7 @@ impl Sessions {
             conversation: Arc::default(),
             convo: Arc::default(),
             transcript: Arc::default(),
+            typing: Arc::default(),
             events: self.events.clone(),
         };
         self.live

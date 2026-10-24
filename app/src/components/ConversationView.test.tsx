@@ -271,6 +271,21 @@ describe("ConversationView", () => {
     expect(container.textContent).toContain("nuevo");
   });
 
+  it("drops the earlier ask tool entry when its card arrives in a later poll", async () => {
+    const ask = tool("t:ask1", "2026-01-01T00:00:01Z", { tool: "AskUserQuestion", summary: "Preguntó" });
+    const first = conv([ask], { cursor: "c1" });
+    const second = conv([card(7, { tool_use_id: "ask1", at: "2026-01-01T00:00:01Z" })], { cursor: "c2" });
+    vi.spyOn(api, "conversation").mockResolvedValueOnce(first).mockResolvedValue(second);
+    const { container, findByText, queryByText } = render(
+      <ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("Preguntó");
+    emit("conversations");
+    await findByText("¿Cuál?");
+    expect(queryByText("Preguntó")).toBeNull();
+    expect(container.querySelectorAll(".tool-card")).toHaveLength(0);
+  });
+
   it("fetches again right away when the answer is not complete", async () => {
     const spy = vi
       .spyOn(api, "conversation")

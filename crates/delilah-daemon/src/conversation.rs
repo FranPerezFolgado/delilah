@@ -3,7 +3,7 @@
 //! from the session's own hooks and from the view's requests.
 
 use axum::Json;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt};
@@ -25,6 +25,9 @@ use crate::store_sessions::{EntryKind, SessionKind, SessionRecord};
 
 /// Longest message taken from the view (and longest first prompt), in characters.
 pub(crate) const MAX_MESSAGE_CHARS: usize = 16_000;
+/// Most messages, and characters in all, a session keeps queued.
+const MAX_QUEUED: usize = 20;
+const MAX_QUEUED_CHARS: usize = 64_000;
 
 /// The session the composer writes to, or the 404 / 409 of the contract: any open
 /// Claude session, not a shell.
@@ -248,30 +251,74 @@ pub async fn get(
     }
     let mut stored: Vec<Value> = stored.as_array().cloned().unwrap_or_default();
     // The transcript has the same messages as the stored ones: hidden once it is there
-    // (an idea keeps none of its own, a task keeps what is not delivered yet).
+    // (an idea keeps none of its own; a message not yet delivered stays in view).
     if has_transcript {
         let idea = record.conversation;
         stored.retain(|e| match e["kind"].as_str() {
             Some("claude") => !idea,
-            Some("user") => e["state"] == "queued" || (!idea && e["state"] != "delivered"),
+            Some("user") => e["state"] != "delivered",
             _ => true,
         });
     }
-    // An AskUserQuestion call of the transcript is shown as its card, in its place.
-    for entry in &mut entries {
-        if entry["kind"] != "tool" || entry["tool"] != "AskUserQuestion" {
-            continue;
+    // An AskUserQuestion call of the transcript is shown as its card, in its place: the
+    // card takes the call's time on every response, whether the call is on this page or
+    // an earlier one, and the call's own entry is dropped.
+    let ask_at = |entry: &Value| {
+        (entry["kind"] == "tool" && entry["tool"] == "AskUserQuestion")
+            .then(|| entry["tool_use_id"].as_str().map(|t| (t.to_string(), entry["at"].clone())))
+            .flatten()
+    };
+    let mut ats: HashMap<String, Value> = entries.iter().filter_map(ask_at).collect();
+    let wanted: Vec<String> = stored
+        .iter()
+        .filter(|c| c["kind"] == "card")
+        .filter_map(|c| c["tool_use_id"].as_str())
+        .filter(|t| transcript::is_safe_id(t) && !ats.contains_key(*t))
+        .map(str::to_string)
+        .collect();
+    if let (Some(path), false) = (&path, wanted.is_empty())
+        && let Some((file, len)) = open_transcript(path).await
+    {
+        let ids: Vec<&str> = wanted.iter().map(String::as_str).collect();
+        if let Ok(lines) = lines_mentioning(file, len, &ids).await {
+            ats.extend(
+                transcript::parse(&lines, 0)
+                    .entries
+                    .iter()
+                    .filter_map(|e| serde_json::to_value(e).ok())
+                    .filter_map(|e| ask_at(&e)),
+            );
         }
-        let Some(tool_use_id) = entry["tool_use_id"].as_str() else {
+    }
+    // On the page, the card stands in the call's place; off it, it takes the call's time.
+    let mut placed: HashSet<String> = HashSet::new();
+    let mut shown: Vec<Value> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some((tool_use_id, _)) = ask_at(&entry) else {
+            shown.push(entry);
             continue;
         };
-        if let Some(i) = stored
+        let card = stored
             .iter()
-            .position(|c| c["kind"] == "card" && c["tool_use_id"].as_str() == Some(tool_use_id))
+            .position(|c| c["kind"] == "card" && c["tool_use_id"].as_str() == Some(&tool_use_id));
+        match card {
+            Some(i) => {
+                let mut card = stored.remove(i);
+                card["at"] = entry["at"].clone();
+                placed.insert(tool_use_id);
+                shown.push(card);
+            }
+            // Its card was placed already (the call came twice: as an update and on the page).
+            None if placed.contains(&tool_use_id) => {}
+            None => shown.push(entry),
+        }
+    }
+    let mut entries = shown;
+    for card in &mut stored {
+        if card["kind"] == "card"
+            && let Some(at) = card["tool_use_id"].as_str().and_then(|t| ats.get(t))
         {
-            let mut card = stored.remove(i);
-            card["at"] = entry["at"].clone();
-            *entry = card;
+            card["at"] = at.clone();
         }
     }
     entries.extend(stored);
@@ -411,26 +458,57 @@ pub async fn send(
         .sessions
         .get(&id)
         .ok_or_else(|| ApiError::conflict("the session is not running; reopen it to write"))?;
+    // Deciding and typing is one step: two sends, or a send and a flush, never interleave
+    // in the terminal.
+    let _typing = live.typing.lock().await;
     // A pending card holds the turn: what is typed now would land in the PTY under it.
     let queued = live.state() == LiveState::Working || app.asks.has_session(&id);
-    let state = if queued { "queued" } else { "sent" };
-    // Recorded before typing: its prompt hook may come back before this returns.
-    let entry = app
-        .store
-        .add_entry(
-            &id,
-            EntryKind::User,
-            &json!({ "text": text, "state": state, "from": "view" }),
-        )
-        .await?;
-    if !queued {
-        crate::actions::type_prompt(&live, text).await?;
+    let entry = if queued {
+        let waiting = app.store.queued_entries(&id).await?;
+        let chars: usize = waiting
+            .iter()
+            .filter_map(|e| e.body["text"].as_str())
+            .map(|t| t.chars().count())
+            .sum();
+        if waiting.len() >= MAX_QUEUED || chars + text.chars().count() > MAX_QUEUED_CHARS {
+            return Err(ApiError::conflict(format!(
+                "too many queued messages (at most {MAX_QUEUED}, {MAX_QUEUED_CHARS} characters); wait for the turn to end or remove some"
+            )));
+        }
+        app.store
+            .add_entry(
+                &id,
+                EntryKind::User,
+                &json!({ "text": text, "state": "queued", "from": "view" }),
+            )
+            .await?
+    } else {
+        // What was queued before an interrupted turn goes first, in the same paste.
+        let earlier = app.store.claim_queued(&id).await?;
+        // Recorded before typing: its prompt hook may come back before this returns.
+        let entry = app
+            .store
+            .add_entry(
+                &id,
+                EntryKind::User,
+                &json!({ "text": text, "state": "sent", "from": "view" }),
+            )
+            .await?;
+        let all = earlier
+            .iter()
+            .filter_map(|e| e.body["text"].as_str())
+            .chain(std::iter::once(text))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        crate::actions::type_prompt(&live, &all).await?;
         let _ = app.store.set_attention(&id, None).await;
         app.emit(Topic::Inbox);
-    } else if live.state() != LiveState::Working && !app.asks.has_session(&id) {
+        entry
+    };
+    if queued && live.state() != LiveState::Working && !app.asks.has_session(&id) {
         // The turn ended between reading the state and recording the entry: its Stop
         // hook has already flushed the queue without this message, so flush again.
-        flush_queue(&app, &live).await;
+        flush_locked(&app, &live).await;
     }
     app.emit(Topic::Conversations);
     let mut body = json!(entry);
@@ -484,6 +562,12 @@ pub async fn stop(
 /// The store hands each queued message to one caller only, so two flushes (the Stop
 /// hook and a message's own re-flush) never type the same one twice.
 pub async fn flush_queue(app: &AppState, live: &Live) {
+    let _typing = live.typing.lock().await;
+    flush_locked(app, live).await;
+}
+
+/// `flush_queue` for a caller that holds the session's typing lock.
+async fn flush_locked(app: &AppState, live: &Live) {
     // Marked sent as they are claimed: the prompt hook that follows must find them so.
     let claimed = match app.store.claim_queued(&live.id).await {
         Ok(c) if !c.is_empty() => c,
@@ -1197,10 +1281,10 @@ mod tests {
     #[tokio::test]
     async fn a_queued_message_can_be_removed_but_a_sent_one_cannot() {
         let f = Fixture::new().await;
-        f.live.set_state(LiveState::Working);
-        let queued = f.send("later").await.1["id"].as_str().unwrap().to_string();
         f.live.set_state(LiveState::Waiting);
         let sent = f.send("now").await.1["id"].as_str().unwrap().to_string();
+        f.live.set_state(LiveState::Working);
+        let queued = f.send("later").await.1["id"].as_str().unwrap().to_string();
         let delete = |id: String| {
             Request::delete(format!("/api/v1/sessions/conv/messages/{id}"))
                 .body(Body::empty())
@@ -1639,12 +1723,105 @@ mod tests {
             .filter(|e| !e["id"].as_str().unwrap().starts_with("t:"))
             .map(|e| e["kind"].as_str().unwrap().to_string())
             .collect();
-        assert_eq!(stored.len(), 2, "{stored:?}");
+        // The card, the sent message (the transcript may not have it yet) and the queued one.
+        assert_eq!(stored.len(), 3, "{stored:?}");
         assert!(stored.contains(&"card".to_string()));
+        assert!(
+            with.iter()
+                .any(|e| e["text"] == "sent" && e["state"] == "sent")
+        );
+        assert!(with.iter().all(|e| e["text"] != "idea"));
         assert!(
             with.iter()
                 .any(|e| e["text"] == "later" && e["state"] == "queued")
         );
+    }
+
+    #[tokio::test]
+    async fn two_concurrent_sends_to_an_idle_session_never_interleave() {
+        let f = Fixture::new().await;
+        let ((s1, a), (s2, b)) = tokio::join!(f.send("alpha"), f.send("bravo"));
+        assert_eq!((s1, s2), (StatusCode::CREATED, StatusCode::CREATED));
+        let mut states = [
+            a["state"].as_str().unwrap().to_string(),
+            b["state"].as_str().unwrap().to_string(),
+        ];
+        states.sort();
+        assert_eq!(states, ["queued", "sent"]);
+        let (first, second) = if a["state"] == "sent" {
+            ("alpha", "bravo")
+        } else {
+            ("bravo", "alpha")
+        };
+        let typed = f.typed(first.len() + 1).await;
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(typed, format!("{first}\r"));
+        let typed = String::from_utf8_lossy(&std::fs::read(&f.typed).unwrap()).into_owned();
+        assert!(!typed.contains(second), "{typed:?}");
+    }
+
+    #[tokio::test]
+    async fn a_message_after_stop_is_typed_with_the_queued_ones_first() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Working);
+        let (_, queued) = f.send("uno").await;
+        assert_eq!(queued["state"], "queued");
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, entry) = f.send("dos").await;
+        assert_eq!(entry["state"], "sent");
+        let typed = f.typed(1 + 200 + 3 + 6 + 1).await;
+        assert!(typed.contains("\x1b[200~uno\n\ndos\x1b[201~"), "{typed:?}");
+        let states: Vec<_> = f
+            .entries()
+            .await
+            .iter()
+            .filter(|e| e["kind"] == "user")
+            .map(|e| e["state"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(states, ["sent", "sent"]);
+    }
+
+    #[tokio::test]
+    async fn the_queue_is_capped_by_messages_and_by_characters() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Working);
+        for n in 0..MAX_QUEUED {
+            assert_eq!(f.send(&format!("m{n}")).await.0, StatusCode::CREATED);
+        }
+        let (status, body) = f.send("one more").await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body["error"].as_str().unwrap().contains("too many queued"));
+
+        let g = Fixture::new().await;
+        g.live.set_state(LiveState::Working);
+        let big = "x".repeat(MAX_MESSAGE_CHARS);
+        for _ in 0..MAX_QUEUED_CHARS / MAX_MESSAGE_CHARS {
+            assert_eq!(g.send(&big).await.0, StatusCode::CREATED);
+        }
+        assert_eq!(g.send("y").await.0, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn an_incremental_poll_shows_the_card_once_at_its_tool_time() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let path = f.transcript(&live, ask_transcript("toolu_1").as_bytes());
+        add_card(&f, "task1", "ask-1", Some("toolu_1")).await;
+        let first = f.get_of("/api/v1/sessions/task1/conversation").await.1;
+        let cursor = first["cursor"].as_str().unwrap().to_string();
+        let mut more = std::fs::read(&path).unwrap();
+        more.extend_from_slice(assistant_line(3).as_bytes());
+        std::fs::write(&path, more).unwrap();
+        let body = f
+            .get_of(&format!("/api/v1/sessions/task1/conversation?cursor={cursor}"))
+            .await
+            .1;
+        let entries = body["entries"].as_array().unwrap();
+        assert!(entries.iter().all(|e| e["kind"] != "tool"), "{entries:?}");
+        let cards: Vec<_> = entries.iter().filter(|e| e["ask"] == "ask-1").collect();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["at"], "2025-02-01T10:00:00.000Z");
     }
 
     fn card_hook() -> Value {

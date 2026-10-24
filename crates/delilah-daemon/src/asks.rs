@@ -206,7 +206,7 @@ pub async fn hook(
         let mut card = Card::pending(&ask.id, &ask.questions, ask.proposal.clone());
         card.tool_use_id = hook["tool_use_id"]
             .as_str()
-            .filter(|t| !t.is_empty())
+            .filter(|t| delilah_agents::transcript::is_safe_id(t))
             .map(str::to_string);
         crate::idea::card_added(&app, session, &card).await;
     }
@@ -925,6 +925,17 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn the_hooks_tool_use_id_is_stored_in_the_card() {
+        assert_eq!(stored_tool_use_id("toolu_42").await, "toolu_42");
+    }
+
+    #[tokio::test]
+    async fn an_unsafe_tool_use_id_is_not_stored() {
+        assert!(stored_tool_use_id("../x\"y").await.is_null());
+        assert!(stored_tool_use_id(&"a".repeat(129)).await.is_null());
+    }
+
+    /// The `tool_use_id` the card keeps for a hook that carried `id`.
+    async fn stored_tool_use_id(id: &str) -> Value {
         let app = app().await;
         app.store
             .create_project(&delilah_core::Project {
@@ -951,7 +962,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let mut hook = question();
-        hook["tool_use_id"] = json!("toolu_42");
+        hook["tool_use_id"] = json!(id);
         let waiting = tokio::spawn({
             let app = app.clone();
             async move { call(&app, post("/hooks/claude/ask?task=@web&session=s1", hook)).await }
@@ -964,7 +975,7 @@ pub(crate) mod tests {
         }
         let entries = app.store.entries("s1").await.unwrap();
         assert_eq!(entries.len(), 1, "a task session gets its card too");
-        assert_eq!(entries[0].body["tool_use_id"], "toolu_42");
         waiting.abort();
+        entries[0].body["tool_use_id"].clone()
     }
 }
