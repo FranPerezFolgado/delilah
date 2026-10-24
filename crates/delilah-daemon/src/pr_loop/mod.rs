@@ -174,7 +174,8 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
 
     if let Ok(Some((_, ws))) = app.store.workspace(key).await {
         let rows = app.store.prs_of(key).await.unwrap_or_default();
-        for (repo, dir) in ws.repos() {
+        // A task without a branch has no PR to find.
+        for (repo, dir) in ws.repos().into_iter().filter(|_| ws.has_branch()) {
             let has_row = rows.iter().any(|r| r.repo == repo);
             if !force && (has_row || !in_review) {
                 continue;
@@ -438,6 +439,18 @@ mod tests {
         let task = app.store.get_task(&key).await.unwrap().unwrap();
         assert_eq!(task.phase.as_deref(), Some("review"));
         assert!(drain(&mut rx).contains(&Topic::Prs));
+    }
+
+    #[tokio::test]
+    async fn a_branchless_task_is_not_searched_for_a_pr() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Implement)).await;
+        let (root, mut ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        ws.branch = String::new();
+        app.store.save_workspace(&key, &root, &ws).await.unwrap();
+        check_task(&app, &key, true).await;
+        assert!(fake.calls().is_empty());
+        assert!(app.store.prs_of(&key).await.unwrap().is_empty());
     }
 
     #[tokio::test]

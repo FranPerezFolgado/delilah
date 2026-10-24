@@ -62,6 +62,12 @@ export interface Task {
   /** Autopilot: null when off. */
   autopilot?: Autopilot | null;
   handoff: Handoff | null;
+  /** Who set the title: the first one, the analysis's feature name, or the user. */
+  title_source: "initial" | "spec" | "manual";
+  /** The title before the analysis renamed the task; null once edited by hand or restored. */
+  previous_title: string | null;
+  /** Why the branch could not be renamed, if it could not. */
+  branch_error: string | null;
 }
 
 export interface EventRecord {
@@ -344,7 +350,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "autopilot";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -518,6 +524,8 @@ export const api = {
   setupSkip: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/skip`),
   setupCancel: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/cancel`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
+  /** Retries applying the branch derived from the spec; branch_error says if it failed again. */
+  retryBranch: (key: string) => post<Task>(`/api/v1/tasks/${key}/branch`),
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),

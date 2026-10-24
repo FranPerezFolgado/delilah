@@ -170,8 +170,10 @@ enum Command {
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
-        /// Defaults to a name Claude proposes from the title (feature/…); a typed one is
-        /// normalised and made unique.
+        /// Defaults to the project's branch template if it has one; else a free task starts
+        /// without a branch (the first analysis names it), and a Jira task gets a name
+        /// Claude proposes from the title (feature/KEY-…). A typed one is normalised and
+        /// made unique.
         #[arg(long)]
         branch: Option<String>,
         /// First prompt; defaults to `/feature <KEY>`.

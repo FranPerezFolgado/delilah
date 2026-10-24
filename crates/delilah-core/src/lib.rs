@@ -12,5 +12,5 @@ pub use project::{
 pub use spec::{SpecGroup, SpecItem, SpecPhase, parse_tasks};
 pub use task::{
     Autopilot, AutopilotStage, AutopilotState, Event, Handoff, HandoffStage, InvalidKey, Step,
-    Task, TaskKey, TaskStatus, TransitionError,
+    Task, TaskKey, TaskStatus, TitleSource, TransitionError,
 };

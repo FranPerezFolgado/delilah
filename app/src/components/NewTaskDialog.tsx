@@ -85,6 +85,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // the name has none of its own (no template, or one that starts with `feature/`).
   const template = project?.settings.branch?.trim() || null;
   const prefixed = !template || template.startsWith("feature/");
+  // A free task in a project without a template starts without a branch: the first
+  // analysis creates it, so nothing is proposed (nor sent) unless the user types one.
+  const analysisNames = origin === "libre" && !template;
   const fieldOf = (full: string) => (prefixed ? full.replace(/^feature\//, "") : full);
   const fullOf = (value: string) => (prefixed ? "feature/" + value : value);
   const [branch, setBranch] = useState("");
@@ -127,6 +130,12 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const pickedKey = picked.join("\n");
   useEffect(() => {
     const ticket = existing ? existing.key : origin === "jira" ? key.trim() : "";
+    if (analysisNames && !editedRef.current) {
+      sureRef.current = false;
+      setBranch("");
+      setBranchHint(null);
+      return;
+    }
     if (!projectName || !title.trim() || editedRef.current) {
       setBranchHint(null);
       return;
@@ -161,7 +170,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       stale = true;
       clearTimeout(timer);
     };
-  }, [projectName, key, title, notes, origin, pickedKey, edited, template]);
+  }, [projectName, key, title, notes, origin, pickedKey, edited, template, analysisNames]);
 
   const editBranch = (value: string) => {
     // Raw value in state (a typed space must stay); trimmed only to decide and on submit.
@@ -400,7 +409,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {prefixed && <span className="mono muted">feature/</span>}
-                  <input className="input mono" style={{ flex: 1 }} aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={t("automática si la dejas vacía")} />
+                  <input className="input mono" style={{ flex: 1 }} aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={analysisNames ? t("la creará el análisis") : t("automática si la dejas vacía")} />
                 </span>
               </label>
             )}

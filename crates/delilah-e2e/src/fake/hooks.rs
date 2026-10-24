@@ -294,6 +294,7 @@ mod tests {
             None,
             Permission::Default,
             &[],
+            false,
         );
         for (event, groups) in s["hooks"].as_object_mut().unwrap() {
             for g in groups.as_array_mut().unwrap() {
@@ -334,6 +335,7 @@ mod tests {
             None,
             Permission::Default,
             &[],
+            false,
         );
         let p = dir.path().join("s.json");
         std::fs::write(&p, s.to_string()).unwrap();

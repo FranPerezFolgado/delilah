@@ -13,7 +13,7 @@ vi.mock("../api", async (orig) => {
 });
 vi.mock("./SpecPanel", () => ({ SpecPanel: () => null }));
 
-const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, handoff: null };
+const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, title_source: "initial", previous_title: null, branch_error: null, handoff: null };
 
 const show = (tk: Task = task) =>
   render(

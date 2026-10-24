@@ -47,6 +47,8 @@ pub struct AppState {
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
     /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
     pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
+    /// One lock per task for the branch and name triggers (see `branching.rs`).
+    pub(crate) branching: Arc<crate::branching::BranchLocks>,
     /// The autopilot finishes running now, and their retries (see `autopilot/finish.rs`).
     pub(crate) finishing: Arc<crate::autopilot::Finishing>,
     /// Whether Claude sessions start with Remote Control (the `remote-control`
@@ -98,6 +100,7 @@ impl AppState {
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             handoffs: Arc::default(),
+            branching: Arc::default(),
             finishing: Arc::default(),
             remote_control: Arc::default(),
             gh: Arc::new(GhClient::new(Arc::new(CliGh {

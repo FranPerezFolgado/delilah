@@ -469,3 +469,21 @@ quarantine flag by hand. Revisit if Delilah is installed on Macs beyond the owne
 When the version changes, the daemon copies the database to `backups/delilah-<prev>.db`
 (keeps 3) before the migrations run, because they cannot be undone. A failed copy only
 warns: it must not stop Delilah from starting. A downgrade is treated like an upgrade.
+
+## Task name and branch from the analysis
+
+**65. The branch of a free task comes from the first analysis; the title is replaced once
+(2026-10-24).** Supersedes #37 and #49 only for a free task with no typed branch and no
+project template. Precedence at a start: a branch typed in the request, then the
+project's template (#49), then, for a free task, no branch at all (this decision), else
+#37's proposal (Jira tasks, `feature/<KEY>-<short-name>`). Only that third case is
+branchless; the others behave as before. A free task used to start on
+`feature/<short-name>` (#37 dropped the `LIBRE-n` from the name, which Spec Kit's own
+branch then duplicated). Now it starts without a branch and takes
+the one named like the spec folder ([research](../specs/005-task-name-from-spec/research.md)).
+- **Scope of the branch steps:** only a task that *started* branchless (a durable mark, `workspaces.started_branchless`) gets adopt/create/guard/retry. A free task that started on a typed or template branch keeps it for good (#37: never switched or renamed): even if Spec Kit's hook checks out its own branch, Delilah touches no git for it; only the retitle below applies to it.
+- **Baseline:** the spec folders present at start are read after the shared entries are linked, and again (union) when the setup command ends, so a shared or generated folder is not mistaken for the analysis.
+- **Branch:** adopted if Spec Kit's `before_specify` hook made it, else created by Delilah from the spec folder; the task's title as a slug only when the guard needs a branch and there is no spec yet. A taken name gets `-2`, `-3`. A provisional branch renamed later was ruled out: the hook would have created a second one.
+- **The worktree folder keeps the key** (`workspaces/<KEY>`): moving it under a running agent was ruled out. Jira tasks (`feature/<KEY>-<short-name>`) and tasks started before keep their branch.
+- **Guard:** a PreToolUse hook makes the branch before the first code edit, commit, push, merge, rebase or PR, so nothing lands on the base. Failing closed (deny with the reason) was chosen over letting the edit through. It is best-effort: substring match on commands, symlinks not resolved; a full shell parser was judged not worth it.
+- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restaurar" brings it back. Any manual edit (`title_source = manual`) is final.

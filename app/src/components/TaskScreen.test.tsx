@@ -7,12 +7,13 @@ import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "updateTask" ? updateTask : name === "setAutopilot" ? setAutopilot : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -38,6 +39,9 @@ const task = (status: TaskStatus): Task => ({
   phase: null,
   saving_mode: false,
   handoff: null,
+  title_source: "initial",
+  previous_title: null,
+  branch_error: null,
   status,
 });
 const spec: SpecSummary = { phase: "plan", dir: "specs/001-x", done: 0, total: 3, current: null };
@@ -62,6 +66,7 @@ function head(t?: Task, s?: SpecSummary) {
 beforeEach(() => {
   setLanguage("es");
   setSavingMode.mockClear();
+  updateTask.mockClear();
   setAutopilot.mockClear();
 });
 afterEach(() => {
@@ -277,5 +282,49 @@ describe("TaskScreen follows the primary session", () => {
     const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
     rerender(screenOf("PROJ-2", [sess("c", true)]));
     expect(selected()).toBe("Tarea");
+  });
+});
+
+describe("TaskScreen editable title", () => {
+  const edit = (t: Task) => {
+    const h = head(t);
+    fireEvent.click(h.querySelector("h1")!);
+    return screen.getByRole("textbox") as HTMLInputElement;
+  };
+
+  it("saves the new title with Enter", () => {
+    const input = edit(task({ type: "running" }));
+    fireEvent.change(input, { target: { value: "Better name" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { title: "Better name" });
+  });
+
+  it("cancels with Escape", () => {
+    const input = edit(task({ type: "running" }));
+    fireEvent.change(input, { target: { value: "Other" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(document.querySelector("h1")!.textContent).toBe("A task");
+  });
+
+  it("refuses an empty title", () => {
+    const input = edit(task({ type: "running" }));
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it("offers to restore the previous title", () => {
+    const h = head({ ...task({ type: "running" }), title_source: "spec", previous_title: "Old name" });
+    expect(h.textContent).toContain("Antes: Old name");
+    fireEvent.click(screen.getByText("Restaurar"));
+    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { title: "Old name" });
+  });
+
+  it("shows no restore without a previous title", () => {
+    const h = head(task({ type: "running" }));
+    expect(h.textContent).not.toContain("Antes:");
+    expect(screen.queryByText("Restaurar")).toBeNull();
   });
 });

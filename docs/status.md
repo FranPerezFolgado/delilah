@@ -45,7 +45,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
 
 **Branch names:**
-- A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`, free tasks `feature/<short-name>`.
+- A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`; a free task gets that proposal only when it is started with a branch typed or a project template, else it starts without a branch and takes the spec folder's name (decision 65).
 - A taken name (local or remote, in any repo of the workspace) gets `-2`, `-3`…; a branch is never reused or renamed.
 - A "Rama" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
 - `Task.branch` (from the stored workspace) is shown on the task view.
@@ -68,6 +68,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
 
+**Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
+- Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restaurar".
+- A guard hook makes the branch before the first edit outside `specs/` or a commit/push/PR; failures show in the Bandeja with "Reintentar".
+- The title is editable in the task screen on any non-archived task.
+
 **Autopilot** (a task runs plan → implement → review → draft PR on its own; opt-in per task, spec workflow only, implies saving mode):
 - Option on new tasks, backlog items and running tasks (`--autopilot` / `--no-autopilot`, `delilah autopilot <KEY> on|off|resume`), a mark in the task header, and the chain's preview and PR steps.
 - The implementation starts without asking; a stalled step gets one nudge; questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into a Bandeja item (*Reanudar autopiloto* / *Seguir a mano*).
@@ -89,6 +94,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 
 ## Pending and known problems
 
+- **Branch guard is best-effort:** it matches substrings of Bash commands and does not resolve symlinks, so an unusual command can write before the branch exists.
 - **End-to-end tests, pending and known:**
   - the UI quick-open test covers the file quick open (the UI has no task switcher);
   - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);

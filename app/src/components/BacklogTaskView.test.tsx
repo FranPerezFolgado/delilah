@@ -16,6 +16,9 @@ const task: Task = {
   phase: null,
   status: { type: "queued" },
   saving_mode: false,
+  title_source: "manual",
+  previous_title: null,
+  branch_error: null,
   autopilot: null,
   handoff: null,
 };

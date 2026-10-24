@@ -105,6 +105,11 @@ async fn ask_claude(
     }
 }
 
+/// Whether the project has a branch template (a blank one counts as none).
+pub(crate) fn has_template(project: &Project) -> bool {
+    template_of(project).is_some()
+}
+
 /// The project's branch template, if it has one (a blank one counts as none).
 fn template_of(project: &Project) -> Option<&str> {
     project

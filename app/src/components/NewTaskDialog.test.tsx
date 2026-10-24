@@ -79,7 +79,7 @@ const started: Task = {
   workflow: "feature",
   phase: null,
   status: { type: "queued" },
-  saving_mode: true,
+  saving_mode: true, title_source: "initial", previous_title: null, branch_error: null,
   autopilot: null,
   handoff: null,
 };
@@ -187,12 +187,12 @@ const branchProjects: Project[] = [{ name: "app", kind: "repo", settings: DEFAUL
 
 const proposal = (branch: string, source: BranchProposal["source"] = "claude"): BranchProposal => ({ branch, source });
 
-function setupBranch(props: Partial<React.ComponentProps<typeof NewTaskDialog>> = {}) {
+function setupBranch(props: Partial<React.ComponentProps<typeof NewTaskDialog>> = {}, free = true) {
   const utils = render(<NewTaskDialog projects={branchProjects} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} {...props} />);
   const radios = utils.container.querySelectorAll("[role=radio]");
-  if (radios[1]) fireEvent.click(radios[1]); // free task: no ticket key needed
+  if (free && radios[1]) fireEvent.click(radios[1]); // free task: no ticket key needed
   const field = () => utils.getByLabelText("Branch") as HTMLInputElement;
-  const title = () => utils.container.querySelector("input[required]") as HTMLInputElement;
+  const title = () => Array.from(utils.container.querySelectorAll("input[required]")).pop() as HTMLInputElement;
   return { ...utils, field, title };
 }
 
@@ -210,7 +210,7 @@ describe("NewTaskDialog branch field", () => {
 
   it("proposes after 1 s and shows the source", async () => {
     const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/arreglo-del-login"));
-    const { field, title, container } = setupBranch();
+    const { field, title, container } = setupBranch({}, false);
     type(title(), "Arreglo del login");
     await wait(900);
     expect(spy).not.toHaveBeenCalled();
@@ -223,7 +223,7 @@ describe("NewTaskDialog branch field", () => {
 
   it("does not overwrite what the developer edited; clearing re-enables proposals", async () => {
     const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/one", "title"));
-    const { field, title } = setupBranch();
+    const { field, title } = setupBranch({}, false);
     type(title(), "One");
     await wait(1100);
     expect(field().value).toBe("one");
@@ -257,7 +257,7 @@ describe("NewTaskDialog branch field", () => {
   it("ignores a stale proposal", async () => {
     const resolvers: ((p: BranchProposal) => void)[] = [];
     vi.spyOn(api, "proposeBranch").mockImplementation(() => new Promise((r) => resolvers.push(r)));
-    const { field, title } = setupBranch();
+    const { field, title } = setupBranch({}, false);
     type(title(), "a");
     await wait(1100);
     type(title(), "ab");
@@ -270,7 +270,7 @@ describe("NewTaskDialog branch field", () => {
 
   it("leaves the field empty when the proposal fails", async () => {
     vi.spyOn(api, "proposeBranch").mockRejectedValue(new Error("boom"));
-    const { field, title, container } = setupBranch();
+    const { field, title, container } = setupBranch({}, false);
     type(title(), "a");
     await wait(1100);
     expect(field().value).toBe("");
@@ -296,7 +296,7 @@ describe("NewTaskDialog branch field", () => {
 
   it("proposes again when the notes change", async () => {
     const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/one", "title"));
-    const { title, container } = setupBranch();
+    const { title, container } = setupBranch({}, false);
     type(title(), "One");
     await wait(1100);
     expect(spy).toHaveBeenCalledTimes(1);
@@ -317,6 +317,56 @@ describe("NewTaskDialog branch field", () => {
     fireEvent.click(getByText("Start", { selector: "button" }));
     await wait(0);
     expect(run.mock.calls[0][0].branch).toBe("feature/PROJ-12-retry-failed-payments");
+  });
+
+  it("does not propose nor send a branch for a free task without a template; says the analysis creates it", async () => {
+    const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/x"));
+    const run = vi.spyOn(api, "run").mockRejectedValue(new Error("x"));
+    const { field, title, getByText } = setupBranch();
+    type(title(), "Arreglo del login");
+    await wait(1500);
+    expect(spy).not.toHaveBeenCalled();
+    expect(field().value).toBe("");
+    expect(field().placeholder).toBe("the analysis will create it");
+    fireEvent.click(getByText("Start", { selector: "button" }));
+    await wait(0);
+    expect(run.mock.calls[0][0]).not.toHaveProperty("branch");
+    expect(run.mock.calls[0][0].free).toBe(true);
+  });
+
+  it("sends the branch a free task's user typed", async () => {
+    const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/x"));
+    const run = vi.spyOn(api, "run").mockRejectedValue(new Error("x"));
+    const { field, title, getByText } = setupBranch();
+    type(title(), "Algo");
+    type(field(), "mine");
+    await wait(1500);
+    expect(spy).not.toHaveBeenCalled();
+    fireEvent.click(getByText("Start", { selector: "button" }));
+    await wait(0);
+    expect(run.mock.calls[0][0].branch).toBe("feature/mine");
+  });
+
+  it("proposes and sends no branch for a backlog LIBRE task in a project without a template", async () => {
+    const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/x"));
+    const run = vi.spyOn(api, "run").mockRejectedValue(new Error("x"));
+    const existing = { key: "LIBRE-3", title: "Arreglo", project: "app", in_checkout: true } as Task;
+    const { field, getByText } = setupBranch({ existing }, false);
+    await wait(1500);
+    expect(spy).not.toHaveBeenCalled();
+    expect(field().value).toBe("");
+    fireEvent.click(getByText("Start", { selector: "button" }));
+    await wait(0);
+    expect(run.mock.calls[0][0]).not.toHaveProperty("branch");
+  });
+
+  it("keeps proposing for a free task when the project has a template", async () => {
+    const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("fix/libre-1-algo"));
+    const projects = [{ name: "app", kind: "repo", settings: { ...DEFAULT_PROJECT_SETTINGS, branch: "fix/{ticket}-{slug}" } } as Project];
+    const { title } = setupBranch({ projects });
+    type(title(), "Algo");
+    await wait(1100);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("shows the field for existing and fromSession", () => {

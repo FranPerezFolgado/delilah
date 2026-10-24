@@ -295,7 +295,20 @@ title; type your own name there and it is kept, or empty it to let Delilah choos
 A name already used (as a local branch or on a remote, in any repo of the task) gets
 `-2`, `-3`…: a branch is never reused. `delilah run --branch <name>` is cleaned up
 the same way (`feature/` added once, spaces and accents turned into `-`/letters). The
-branch shows on the task's screen and stays the same for the whole task.
+branch shows on the task's screen and stays the same for the whole task. The one
+exception is a free task with no branch typed in a project without a template: see
+the next paragraph.
+
+**Branch and name from the analysis.** A free task started with no branch typed and in a
+project without a branch template starts without a branch of its own
+(in a worktree, detached at your project's HEAD; in your checkout, nothing is
+switched). Once the agent writes the spec, the task takes the spec's title (the task
+screen shows "Antes: ..." with "Restaurar", and you can edit the title in place at any
+time) and a branch named like the spec folder (`005-my-feature`), also in the chosen
+submodules of a parent. If the agent edits code or commits before that, Delilah makes
+the branch first. If it cannot, the Bandeja shows it with "Reintentar". Without a
+branch, "Abrir PR" is refused. A typed branch, a project's template, and Jira tasks follow the paragraph above
+(and keep the ticket's title).
 
 **Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
 and Libre (after choosing the project), and on the project's screen and its "+".

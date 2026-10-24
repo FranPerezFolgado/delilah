@@ -131,6 +131,9 @@ pub enum ItemKind {
     PrFailed,
     /// A reviewer asked for changes or commented on a task's PR.
     PrReview,
+    /// The branch derived from the spec could not be applied to a repo; retry from here.
+    /// Right after the review items: an actionable problem that blocks no agent.
+    Branch,
     /// The task waits on you, but no session said what for (e.g. after a restart).
     Waiting,
     Review,
@@ -289,6 +292,18 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             );
             (ItemKind::Review, Some(progress), "phase-reached")
         });
+        if let Some(err) = t.branch_error.as_ref().filter(|_| !t.status.is_terminal()) {
+            items.push(InboxItem {
+                kind: ItemKind::Branch,
+                task: key.to_string(),
+                title: t.title.clone(),
+                session: None,
+                text: Some(err.clone()),
+                since: None,
+                ask: None,
+                pr: None,
+            });
+        }
         for (kind, text, event) in found.into_iter().chain(review) {
             items.push(InboxItem {
                 kind,
@@ -664,6 +679,43 @@ mod tests {
 
         let hex: String = expected.iter().map(|b| format!("{b:02x}")).collect();
         read_until(&format!("got:{hex};")).await;
+    }
+
+    #[tokio::test]
+    async fn a_branch_error_is_an_item_until_cleared_and_never_for_archived_tasks() {
+        let app = app_with_pr_task().await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let kinds = |app: AppState| async move {
+            let Ok(Json(items)) = list(State(app)).await else {
+                panic!("the inbox failed");
+            };
+            items
+        };
+
+        app.store
+            .set_branch_error(&key, Some("no remote"))
+            .await
+            .unwrap();
+        let items = kinds(app.clone()).await;
+        let b = items.iter().find(|i| i.kind == ItemKind::Branch).unwrap();
+        assert_eq!(b.task, "PROJ-1");
+        assert_eq!(b.title, "Fix it");
+        assert_eq!(b.text.as_deref(), Some("no remote"));
+
+        app.store.set_branch_error(&key, None).await.unwrap();
+        let items = kinds(app.clone()).await;
+        assert!(items.iter().all(|i| i.kind != ItemKind::Branch));
+
+        app.store
+            .set_branch_error(&key, Some("no remote"))
+            .await
+            .unwrap();
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+        let items = kinds(app).await;
+        assert!(items.iter().all(|i| i.kind != ItemKind::Branch));
     }
 
     async fn app_with_pr_task() -> AppState {

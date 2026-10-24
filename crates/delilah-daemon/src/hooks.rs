@@ -167,6 +167,21 @@ pub async fn claude_statusline(
     StatusCode::NO_CONTENT
 }
 
+/// `POST /hooks/claude/guard?task=…&session=…`: the PreToolUse hook of a task without a
+/// branch. Answers at once unless the tool would land work (see `branching::guard`); an
+/// empty reply lets it through.
+pub async fn guard_hook(
+    State(app): State<AppState>,
+    Query(q): Query<HookQuery>,
+    Json(hook): Json<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    if !is_owner_name(&q.task) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let denial = crate::branching::guard(&app, &delilah_core::TaskKey::new(&q.task), &hook).await;
+    Ok(Json(crate::branching::guard_reply(denial)))
+}
+
 /// A task key or `@<project>`: one plain folder name under the task dirs, so a forged
 /// `?task=../..` cannot write elsewhere.
 fn is_owner_name(owner: &str) -> bool {

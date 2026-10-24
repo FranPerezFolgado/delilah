@@ -6,6 +6,7 @@ mod archive;
 pub mod asks;
 mod autopilot;
 mod branch_name;
+mod branching;
 mod changes;
 pub mod config;
 mod conversation;

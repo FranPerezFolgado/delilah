@@ -3,10 +3,11 @@ use std::process::Command;
 
 use delilah_core::ProjectKind;
 use delilah_git::{
-    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, archive_workspace, branch_taken,
-    branch_tip, changes, check_merged, check_repos, check_workspace, commit_subjects,
-    create_workspace, delete_branch, fetch, file_diff, free_branch, leave_checkout,
-    list_submodules, needs_push, push_branch, remove_workspace, repo_root, use_checkout,
+    ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, apply_branch, archive_workspace,
+    branch_taken, branch_tip, changes, check_merged, check_repos, check_workspace, commit_subjects,
+    create_workspace, current_branch, delete_branch, fetch, file_diff, free_branch, leave_checkout,
+    list_submodules, needs_push, push_branch, remove_workspace, repo_root, spec_dirs,
+    switch_branch, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -43,7 +44,7 @@ impl Fixture {
     fn spec(&self, submodules: &[&str]) -> WorkspaceSpec {
         WorkspaceSpec {
             path: self.root.join("workspaces/PROJ-1234"),
-            branch: BRANCH.into(),
+            branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
             submodules: submodules.iter().map(|s| s.to_string()).collect(),
         }
@@ -66,7 +67,7 @@ impl Fixture {
     fn repo_spec(&self) -> WorkspaceSpec {
         WorkspaceSpec {
             path: self.root.join("workspaces/SIGNAL-12"),
-            branch: "feature/SIGNAL-12".into(),
+            branch: Some("feature/SIGNAL-12".into()),
             kind: ProjectKind::Repo,
             submodules: vec![],
         }
@@ -168,7 +169,7 @@ fn rejects_invalid_branch_names_and_existing_folders() {
     let fx = Fixture::new();
 
     let mut spec = fx.spec(&["svc-payments"]);
-    spec.branch = "bad..branch".into();
+    spec.branch = Some("bad..branch".into());
     let err = create_workspace(&fx.parent(), &spec, &opts()).unwrap_err();
     assert!(matches!(err, GitError::InvalidBranch(_)), "{err}");
 
@@ -331,7 +332,7 @@ fn a_task_can_work_in_the_checkout_and_leave_it_as_it_was() {
     git(&parent, &["submodule", "update", "--init", "-q"]);
     let spec = WorkspaceSpec {
         path: parent.clone(),
-        branch: "feature/PROJ-9".into(),
+        branch: Some("feature/PROJ-9".into()),
         kind: ProjectKind::Parent,
         submodules: vec!["svc-payments".into()],
     };
@@ -374,7 +375,7 @@ fn the_checkout_is_not_used_with_uncommitted_changes() {
     std::fs::write(repo.join("wip.txt"), "mine\n").unwrap();
     let spec = WorkspaceSpec {
         path: repo.clone(),
-        branch: "feature/X-1".into(),
+        branch: Some("feature/X-1".into()),
         kind: ProjectKind::Repo,
         submodules: vec![],
     };
@@ -675,6 +676,198 @@ fn home_of_is_the_repo_under_the_root_and_nothing_outside_it() {
         Workspace::home_of(&root, "../env/remotes/svc-orders.git"),
         None
     );
+}
+
+#[test]
+fn has_branch_is_false_for_an_empty_name() {
+    let f = Fixture::new();
+    let mut spec = f.repo_spec();
+    let ws = Workspace {
+        path: spec.path.clone(),
+        branch: String::new(),
+        kind: spec.kind,
+        submodules: vec![],
+    };
+    assert!(!ws.has_branch());
+    spec.branch = Some("feature/x".into());
+    let ws = Workspace {
+        branch: spec.branch.unwrap(),
+        ..ws
+    };
+    assert!(ws.has_branch());
+}
+
+#[test]
+fn spec_dirs_lists_sorted_folders_with_a_spec() {
+    let dir = TempDir::new().unwrap();
+    assert!(spec_dirs(dir.path()).is_empty());
+    let specs = dir.path().join("specs");
+    for (name, has_spec) in [("002-b", true), ("001-a", true), ("003-empty", false)] {
+        std::fs::create_dir_all(specs.join(name)).unwrap();
+        if has_spec {
+            std::fs::write(specs.join(name).join("spec.md"), "# s\n").unwrap();
+        }
+    }
+    std::fs::write(specs.join("stray.md"), "x").unwrap();
+    assert_eq!(spec_dirs(dir.path()), vec!["001-a", "002-b"]);
+}
+
+#[test]
+fn current_branch_is_none_on_a_detached_head() {
+    let f = Fixture::new();
+    let repo = f.repo();
+    let branch = current_branch(&repo, &opts()).unwrap();
+    assert!(branch.is_some_and(|b| !b.is_empty()));
+    git(&repo, &["checkout", "-q", "--detach"]);
+    assert_eq!(current_branch(&repo, &opts()).unwrap(), None);
+}
+
+// --- Branchless workspaces ---
+
+fn branchless(spec: WorkspaceSpec) -> WorkspaceSpec {
+    WorkspaceSpec {
+        branch: None,
+        ..spec
+    }
+}
+
+#[test]
+fn a_repo_workspace_without_branch_is_a_detached_worktree() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let head = git(&repo, &["rev-parse", "HEAD"]);
+    let branches = git(&repo, &["branch", "--list"]);
+    let ws = create_workspace(&repo, &branchless(fx.repo_spec()), &opts()).unwrap();
+    assert!(!ws.has_branch());
+    assert_eq!(ws.branch, "");
+    assert_eq!(git(&ws.path, &["rev-parse", "HEAD"]), head);
+    assert_eq!(current_branch(&ws.path, &opts()).unwrap(), None);
+    assert_eq!(git(&repo, &["branch", "--list"]), branches);
+}
+
+#[test]
+fn a_parent_workspace_without_branch_leaves_the_submodules_detached() {
+    let fx = Fixture::new();
+    let ws = create_workspace(
+        &fx.parent(),
+        &branchless(fx.spec(&["svc-payments"])),
+        &opts(),
+    )
+    .unwrap();
+    assert!(!ws.has_branch());
+    let pay = ws.path.join("svc-payments");
+    assert_eq!(current_branch(&pay, &opts()).unwrap(), None);
+    assert_eq!(current_branch(&ws.path, &opts()).unwrap(), None);
+}
+
+#[test]
+fn the_checkout_without_branch_refuses_dirt_and_switches_nothing() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let mut spec = branchless(fx.repo_spec());
+    spec.path = repo.clone();
+    std::fs::write(repo.join("wip.txt"), "mine\n").unwrap();
+    assert!(matches!(
+        use_checkout(&repo, &spec, &opts()),
+        Err(GitError::Dirty { .. })
+    ));
+    std::fs::remove_file(repo.join("wip.txt")).unwrap();
+    let was = current_branch(&repo, &opts()).unwrap();
+    let (ws, previous) = use_checkout(&repo, &spec, &opts()).unwrap();
+    assert!(!ws.has_branch());
+    assert_eq!(current_branch(&repo, &opts()).unwrap(), was);
+    assert_eq!(previous.len(), 1);
+    assert_eq!(previous[0].0, ".");
+    assert_eq!(Some(previous[0].1.clone()), was);
+}
+
+#[test]
+fn the_parent_checkout_without_branch_records_the_parent_and_puts_it_back() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let mut spec = branchless(fx.spec(&["svc-payments"]));
+    spec.path = parent.clone();
+    let pay = parent.join("svc-payments");
+    let pay_before = git(&pay, &["rev-parse", "HEAD"]);
+    let parent_branch = current_branch(&parent, &opts()).unwrap().unwrap();
+
+    let (_, previous) = use_checkout(&parent, &spec, &opts()).unwrap();
+    assert!(previous.iter().any(|(l, _)| l == "svc-payments"));
+    assert!(
+        previous
+            .iter()
+            .any(|(l, b)| l == "." && *b == parent_branch)
+    );
+    assert_eq!(git(&pay, &["rev-parse", "HEAD"]), pay_before);
+
+    // A hook switches the parent root meanwhile.
+    git(&parent, &["checkout", "-q", "-b", "scratch"]);
+    assert!(leave_checkout(&parent, &previous, &opts()).is_empty());
+    assert_eq!(
+        current_branch(&parent, &opts()).unwrap().as_deref(),
+        Some(parent_branch.as_str())
+    );
+}
+
+#[test]
+fn apply_branch_keeps_uncommitted_files_and_refuses_an_existing_name() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    std::fs::write(repo.join("wip.txt"), "mine\n").unwrap();
+    apply_branch(&repo, "feature/new", &opts()).unwrap();
+    assert_eq!(
+        current_branch(&repo, &opts()).unwrap().as_deref(),
+        Some("feature/new")
+    );
+    assert!(repo.join("wip.txt").exists());
+    assert!(apply_branch(&repo, "feature/new", &opts()).is_err());
+}
+
+#[test]
+fn switch_branch_goes_to_an_existing_branch_keeping_uncommitted_files() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    git(&repo, &["branch", "left-over"]);
+    std::fs::write(repo.join("wip.txt"), "draft\n").unwrap();
+    switch_branch(&repo, "left-over", &opts()).unwrap();
+    assert_eq!(
+        current_branch(&repo, &opts()).unwrap().as_deref(),
+        Some("left-over")
+    );
+    assert!(repo.join("wip.txt").is_file());
+    // A missing branch and a bad name are refused.
+    assert!(switch_branch(&repo, "nope", &opts()).is_err());
+    let err = switch_branch(&repo, "bad..name", &opts()).unwrap_err();
+    assert!(matches!(err, GitError::InvalidBranch(_)), "{err}");
+    let err = switch_branch(&repo, "-x", &opts()).unwrap_err();
+    assert!(matches!(err, GitError::InvalidBranch(_)), "{err}");
+}
+
+#[test]
+fn a_parent_branch_made_in_the_parent_repo_is_checked_before_archiving() {
+    let fx = Fixture::new();
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    // A task started before the branch existed in the parent: nothing to check there.
+    commit_change(&ws, ".");
+    archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap();
+    assert!(!ws.path.exists());
+
+    let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts()).unwrap();
+    apply_branch(&ws.path, BRANCH, &opts()).unwrap();
+    // Uncommitted work in the parent's own repo.
+    std::fs::write(ws.path.join("wip.txt"), "draft\n").unwrap();
+    let err = check_workspace(&ws, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Dirty { .. }), "{err}");
+    std::fs::remove_file(ws.path.join("wip.txt")).unwrap();
+    // A submodule changed on its own is not the parent's change.
+    check_workspace(&ws, &opts()).unwrap();
+    commit_change(&ws, ".");
+    let err = archive_workspace(&fx.parent(), &ws, false, &opts()).unwrap_err();
+    assert!(matches!(err, GitError::Unpushed { count: 1, .. }), "{err}");
+    assert!(ws.path.exists());
+    archive_workspace(&fx.parent(), &ws, true, &opts()).unwrap();
+    assert!(!ws.path.exists());
 }
 
 #[test]

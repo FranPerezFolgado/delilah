@@ -130,11 +130,15 @@ fn find_spec_dir(ws: &Workspace, key: &str, opts: &GitOptions) -> Option<PathBuf
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_lowercase();
-            name.contains(&key) || name == branch
+            name.contains(&key) || (ws.has_branch() && name == branch)
         });
         if named.is_some() {
             return named;
         }
+    }
+    // Without a branch there is nothing it has written to.
+    if !ws.has_branch() {
+        return None;
     }
     roots.iter().find_map(|root| {
         let touched = changed_paths(root, SPECS, &ws.branch, opts).ok()?;
@@ -351,6 +355,34 @@ mod tests {
         git(&["commit", "-qm", "spec"]);
         let spec = read_spec(&workspace(&dir), "PROJ-7", &GitOptions::default());
         assert_eq!(spec.summary.dir.as_deref(), Some("specs/002-card-retries"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_branchless_task_finds_only_the_folder_named_after_the_ticket() {
+        let dir = std::env::temp_dir().join(format!("delilah-spec-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["init", "-q", "-b", "main"])
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        write(dir.join("specs/002-card-retries/spec.md"), "# Spec\n");
+        let mut ws = workspace(&dir);
+        ws.branch = String::new();
+        let spec = read_spec(&ws, "PROJ-7", &GitOptions::default());
+        assert_eq!(spec.summary.dir, None);
+        assert_eq!(spec.summary.phase, SpecPhase::Specify);
+
+        write(dir.join("specs/PROJ-7-card-retries/spec.md"), "# Spec\n");
+        let spec = read_spec(&ws, "PROJ-7", &GitOptions::default());
+        assert_eq!(
+            spec.summary.dir.as_deref(),
+            Some("specs/PROJ-7-card-retries")
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

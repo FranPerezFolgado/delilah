@@ -346,7 +346,7 @@ mod tests {
             } else {
                 let spec = WorkspaceSpec {
                     path: base.join("ws"),
-                    branch: BRANCH.into(),
+                    branch: Some(BRANCH.into()),
                     kind: ProjectKind::Repo,
                     submodules: vec![],
                 };
@@ -612,7 +612,7 @@ mod tests {
         let subs = ["svc-payments", "svc-orders"];
         let spec = WorkspaceSpec {
             path: dir.path().join("cs-ws"),
-            branch: BRANCH.into(),
+            branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
             submodules: subs.iter().map(ToString::to_string).collect(),
         };
@@ -721,7 +721,7 @@ mod tests {
         let root = fixture_parent(dir.path());
         let spec = WorkspaceSpec {
             path: dir.path().join("unused"),
-            branch: BRANCH.into(),
+            branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
             submodules: vec!["svc-payments".into(), "svc-orders".into()],
         };

@@ -18,7 +18,8 @@ pub struct Submodule {
 pub struct WorkspaceSpec {
     /// Folder of the new workspace, e.g. `~/.delilah/workspaces/PROJ-1234`.
     pub path: PathBuf,
-    pub branch: String,
+    /// `None`: no branch yet (the workspace starts detached at `HEAD`).
+    pub branch: Option<String>,
     pub kind: ProjectKind,
     /// `parent` only: submodule paths, as listed by [`list_submodules`].
     pub submodules: Vec<String>,
@@ -56,6 +57,22 @@ impl Workspace {
         (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
     }
 
+    /// Whether a parent workspace is on the task's branch in the parent's own repo too (a
+    /// descriptive branch made after the start; older tasks never were, and a branch of
+    /// the same name that the parent happens to have is not theirs).
+    pub fn parent_has_branch(&self, opts: &GitOptions) -> bool {
+        self.kind == ProjectKind::Parent
+            && self.has_branch()
+            && current_branch(&self.path, opts).ok().flatten().as_deref()
+                == Some(self.branch.as_str())
+    }
+
+    /// Whether the task has a branch yet: an empty name means the first analysis has
+    /// not created it.
+    pub fn has_branch(&self) -> bool {
+        !self.branch.is_empty()
+    }
+
     /// The repos (as in [`Workspace::repos`]) with uncommitted changes. Errors when a
     /// folder cannot be read by git.
     pub fn uncommitted(&self, opts: &GitOptions) -> Result<Vec<String>, GitError> {
@@ -79,6 +96,47 @@ impl Workspace {
             ProjectKind::Repo => vec![("the workspace".into(), self.path.clone())],
         }
     }
+}
+
+/// Names of the folders in `root/specs/` that hold a `spec.md`, sorted. Empty when
+/// there is no `specs/` folder.
+pub fn spec_dirs(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join("specs")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("spec.md").is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    names
+}
+
+/// The branch checked out in `dir`, or `None` on a detached HEAD.
+pub fn current_branch(dir: &Path, opts: &GitOptions) -> Result<Option<String>, GitError> {
+    let name = git(dir, &["branch", "--show-current"], opts)?;
+    Ok((!name.is_empty()).then_some(name))
+}
+
+/// Starts the branch `name` at the current `HEAD` of `dir` and switches to it, keeping
+/// the uncommitted files. Fails if the branch already exists.
+pub fn apply_branch(dir: &Path, name: &str, opts: &GitOptions) -> Result<(), GitError> {
+    if git(dir, &["check-ref-format", "--branch", name], opts).is_err() {
+        return Err(GitError::InvalidBranch(name.to_string()));
+    }
+    git(dir, &["checkout", "-q", "-b", name], opts)?;
+    Ok(())
+}
+
+/// Switches `dir` to the existing branch `name`, keeping the uncommitted files. Fails if
+/// git cannot carry them over, or the name is not a valid branch name.
+pub fn switch_branch(dir: &Path, name: &str, opts: &GitOptions) -> Result<(), GitError> {
+    if git(dir, &["check-ref-format", "--branch", name], opts).is_err() {
+        return Err(GitError::InvalidBranch(name.to_string()));
+    }
+    git(dir, &["checkout", "-q", name], opts)?;
+    Ok(())
 }
 
 /// Top folder of the repo containing `path`.
@@ -125,8 +183,8 @@ pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
 /// Creates the workspace of `root` (the parent or the repo) described by `spec`.
 ///
 /// - `parent`: a worktree detached at the parent's `HEAD`, with only `submodules`
-///   initialised, each on `branch`. Branches and PRs live in the submodules.
-/// - `repo`: a worktree of the repo on a new `branch`.
+///   initialised, each on `branch` (detached when it is `None`). Branches and PRs live in the submodules.
+/// - `repo`: a worktree of the repo on a new `branch` (detached at `HEAD` when `None`).
 pub fn create_workspace(
     root: &Path,
     spec: &WorkspaceSpec,
@@ -135,8 +193,10 @@ pub fn create_workspace(
     if spec.path.exists() {
         return Err(GitError::WorkspaceExists(spec.path.clone()));
     }
-    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
-        return Err(GitError::InvalidBranch(spec.branch.clone()));
+    if let Some(branch) = &spec.branch
+        && git(root, &["check-ref-format", "--branch", branch], opts).is_err()
+    {
+        return Err(GitError::InvalidBranch(branch.clone()));
     }
     let ws_path = path_str(&spec.path);
 
@@ -145,11 +205,18 @@ pub fn create_workspace(
             if !spec.submodules.is_empty() {
                 return Err(GitError::SubmodulesInRepo);
             }
-            git(
-                root,
-                &["worktree", "add", "-b", &spec.branch, &ws_path, "HEAD"],
-                opts,
-            )?;
+            match &spec.branch {
+                Some(branch) => git(
+                    root,
+                    &["worktree", "add", "-b", branch, &ws_path, "HEAD"],
+                    opts,
+                )?,
+                None => git(
+                    root,
+                    &["worktree", "add", "--detach", &ws_path, "HEAD"],
+                    opts,
+                )?,
+            };
         }
         ProjectKind::Parent => {
             let known = list_submodules(root)?;
@@ -175,7 +242,7 @@ pub fn create_workspace(
 
     Ok(Workspace {
         path: spec.path.clone(),
-        branch: spec.branch.clone(),
+        branch: spec.branch.clone().unwrap_or_default(),
         kind: spec.kind,
         submodules: spec.submodules.clone(),
     })
@@ -189,8 +256,11 @@ fn init_submodules(ws: &Path, spec: &WorkspaceSpec, opts: &GitOptions) -> Result
     args.extend(spec.submodules.iter().map(String::as_str));
     git(ws, &args, opts)?;
 
-    for sub in &spec.submodules {
-        git(&ws.join(sub), &["checkout", "-b", &spec.branch], opts)?;
+    // Without a branch the submodules stay detached at their recorded commit.
+    if let Some(branch) = &spec.branch {
+        for sub in &spec.submodules {
+            git(&ws.join(sub), &["checkout", "-b", branch], opts)?;
+        }
     }
     Ok(())
 }
@@ -219,7 +289,10 @@ pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError
         return Ok(());
     }
     for (location, dir) in ws.branch_dirs() {
-        check_dir(&location, &dir, &ws.branch, opts)?;
+        check_dir(&location, &dir, &ws.branch, false, opts)?;
+    }
+    if ws.parent_has_branch(opts) {
+        check_dir("the parent", &ws.path, &ws.branch, true, opts)?;
     }
     Ok(())
 }
@@ -237,15 +310,26 @@ pub fn check_repos(ws: &Workspace, labels: &[String], opts: &GitOptions) -> Resu
             } else {
                 label
             };
-            check_dir(&location, &dir, &ws.branch, opts)?;
+            check_dir(&location, &dir, &ws.branch, false, opts)?;
         }
     }
     Ok(())
 }
 
-fn check_dir(location: &str, dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+/// `ignore_submodules`: for a parent's own repo, whose submodules are checked on their own.
+fn check_dir(
+    location: &str,
+    dir: &Path,
+    branch: &str,
+    ignore_submodules: bool,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
     let location = location.to_string();
-    if !git(dir, &["status", "--porcelain"], opts)?.is_empty() {
+    let mut status = vec!["status", "--porcelain"];
+    if ignore_submodules {
+        status.push("--ignore-submodules=all");
+    }
+    if !git(dir, &status, opts)?.is_empty() {
         return Err(GitError::Dirty { location });
     }
     // Commits of this branch that are neither pushed nor on another local branch
@@ -370,17 +454,20 @@ fn checkout_dirs(root: &Path, spec: &WorkspaceSpec) -> Result<Vec<(String, PathB
 
 /// Puts the task's branch in the project's own checkout instead of a worktree:
 /// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
-/// while there are uncommitted changes. Returns the workspace and, per folder, the
+/// while there are uncommitted changes. With no branch it switches nothing, and a
+/// parent's own checkout (`"."`) is recorded too, as a hook may switch it. Returns the workspace and, per folder, the
 /// branch (or commit) it was on, to go back there when the task is archived.
 pub fn use_checkout(
     root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
 ) -> Result<(Workspace, Vec<(String, String)>), GitError> {
-    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
-        return Err(GitError::InvalidBranch(spec.branch.clone()));
+    if let Some(branch) = &spec.branch
+        && git(root, &["check-ref-format", "--branch", branch], opts).is_err()
+    {
+        return Err(GitError::InvalidBranch(branch.clone()));
     }
-    let dirs = checkout_dirs(root, spec)?;
+    let mut dirs = checkout_dirs(root, spec)?;
     for (location, dir) in &dirs {
         if !git(dir, &["status", "--porcelain"], opts)?.is_empty() {
             return Err(GitError::Dirty {
@@ -388,27 +475,34 @@ pub fn use_checkout(
             });
         }
     }
+    if spec.branch.is_none() && spec.kind == ProjectKind::Parent {
+        dirs.push((".".into(), root.to_path_buf()));
+    }
     let mut previous: Vec<(String, String)> = Vec::new();
     for (location, dir) in &dirs {
         let was = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"], opts)
             .ok()
             .filter(|b| !b.is_empty())
             .map_or_else(|| git(dir, &["rev-parse", "HEAD"], opts), Ok)?;
+        let Some(branch) = &spec.branch else {
+            previous.push((location.clone(), was));
+            continue;
+        };
         let exists = git(
             dir,
             &[
                 "rev-parse",
                 "--verify",
                 "--quiet",
-                &format!("refs/heads/{}", spec.branch),
+                &format!("refs/heads/{branch}"),
             ],
             opts,
         )
         .is_ok();
         let switched = if exists {
-            git(dir, &["checkout", "-q", &spec.branch], opts)
+            git(dir, &["checkout", "-q", branch], opts)
         } else {
-            git(dir, &["checkout", "-q", "-b", &spec.branch], opts)
+            git(dir, &["checkout", "-q", "-b", branch], opts)
         };
         if let Err(e) = switched {
             // Leave nothing half-switched behind.
@@ -426,7 +520,7 @@ pub fn use_checkout(
     }
     let ws = Workspace {
         path: root.to_path_buf(),
-        branch: spec.branch.clone(),
+        branch: spec.branch.clone().unwrap_or_default(),
         kind: spec.kind,
         submodules: spec.submodules.clone(),
     };

@@ -264,6 +264,40 @@ pub struct Handoff {
     pub error: Option<String>,
 }
 
+/// Where a task's title came from: decides whether it may still be renamed
+/// automatically (`initial` only; `manual` is terminal).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TitleSource {
+    /// The placeholder given at creation; the first analysis may replace it.
+    Initial,
+    /// Taken from the task's spec.
+    Spec,
+    /// Set by the user, or a task that predates automatic names (Jira, old rows).
+    #[default]
+    Manual,
+}
+
+impl TitleSource {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Initial => "initial",
+            Self::Spec => "spec",
+            Self::Manual => "manual",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "initial" => Some(Self::Initial),
+            "spec" => Some(Self::Spec),
+            "manual" => Some(Self::Manual),
+            _ => None,
+        }
+    }
+}
+
+/// Whether autopilot is moving, paused or finished.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AutopilotState {
@@ -327,6 +361,15 @@ pub struct Task {
     /// The handoff to the next step under way, if any.
     #[serde(default)]
     pub handoff: Option<Handoff>,
+    /// Where `title` came from.
+    #[serde(default)]
+    pub title_source: TitleSource,
+    /// The title an automatic rename replaced, so the user can restore it.
+    #[serde(default)]
+    pub previous_title: Option<String>,
+    /// Why the task's branch couldn't be created; cleared when it is.
+    #[serde(default)]
+    pub branch_error: Option<String>,
     /// Autopilot, if on (`None` = off).
     #[serde(default)]
     pub autopilot: Option<Autopilot>,
@@ -346,6 +389,9 @@ impl Task {
             branch: None,
             saving_mode: false,
             handoff: None,
+            title_source: TitleSource::Manual,
+            previous_title: None,
+            branch_error: None,
             autopilot: None,
         }
     }
@@ -702,6 +748,32 @@ mod tests {
                 .is_err()
         );
         assert_eq!(queued.phase, None);
+    }
+
+    #[test]
+    fn title_source_is_lowercase_and_defaults_to_manual() {
+        assert_eq!(TitleSource::default(), TitleSource::Manual);
+        for (source, text) in [
+            (TitleSource::Initial, "\"initial\""),
+            (TitleSource::Spec, "\"spec\""),
+            (TitleSource::Manual, "\"manual\""),
+        ] {
+            assert_eq!(serde_json::to_string(&source).unwrap(), text);
+            assert_eq!(serde_json::from_str::<TitleSource>(text).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn a_task_without_the_new_fields_reads_with_defaults() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,"status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.title_source, TitleSource::Manual);
+        assert_eq!(task.previous_title, None);
+        assert_eq!(task.branch_error, None);
+        assert_eq!(
+            Task::new(TaskKey::new("PROJ-1"), "t", "feature").title_source,
+            TitleSource::Manual
+        );
     }
 
     #[test]

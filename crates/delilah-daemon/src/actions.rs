@@ -342,6 +342,17 @@ mod tests {
         key: &str,
         in_checkout: bool,
     ) -> delilah_git::Workspace {
+        started_on(app, repo, key, in_checkout, Some(format!("feature/{key}"))).await
+    }
+
+    /// Like [`started`], with the branch given (`None`: the task has none yet).
+    async fn started_on(
+        app: &AppState,
+        repo: &FsPath,
+        key: &str,
+        in_checkout: bool,
+        branch: Option<String>,
+    ) -> delilah_git::Workspace {
         let key = TaskKey::new(key);
         app.store
             .create_task(&Task::new(key.clone(), "x", "feature"))
@@ -353,7 +364,7 @@ mod tests {
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
             path: app.config.workspaces_dir().join(key.as_str()),
-            branch: format!("feature/{key}"),
+            branch,
             kind: delilah_core::ProjectKind::Repo,
             submodules: vec![],
         };
@@ -401,7 +412,7 @@ mod tests {
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
             path: app.config.workspaces_dir().join(key.as_str()),
-            branch: format!("feature/{key}"),
+            branch: Some(format!("feature/{key}")),
             kind: delilah_core::ProjectKind::Repo,
             submodules: vec![],
         };
@@ -549,6 +560,49 @@ mod tests {
         );
         assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
         assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).contains("PROJ-1"));
+    }
+
+    #[tokio::test]
+    async fn a_branchless_worktree_goes_away_clean_and_is_refused_dirty_unless_forced() {
+        let (app, repo) = setup().await;
+        let ws = started_on(&app, &repo, "PROJ-1", false, None).await;
+        assert!(!ws.has_branch());
+        std::fs::write(ws.path.join("notes.txt"), "wip\n").unwrap();
+        let err = delete_task(&app, "PROJ-1", false).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT, "{}", err.message);
+        assert!(ws.path.exists());
+        assert!(
+            app.store
+                .workspace(&TaskKey::new("PROJ-1"))
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        assert_eq!(
+            delete_task(&app, "PROJ-1", true).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert!(!ws.path.exists());
+
+        let ws = started_on(&app, &repo, "PROJ-2", false, None).await;
+        assert_eq!(
+            delete_task(&app, "PROJ-2", false).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert!(!ws.path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_branchless_checkout_task_goes_back_to_the_previous_branch() {
+        let (app, repo) = setup().await;
+        started_on(&app, &repo, "PROJ-1", true, None).await;
+        assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
+        assert_eq!(
+            delete_task(&app, "PROJ-1", false).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
     }
 
     #[tokio::test]
@@ -763,6 +817,77 @@ mod tests {
             axum::extract::Query(ArchiveQuery::default()),
         )
         .await
+    }
+
+    /// A done task with a parent-kind worktree (no submodules) whose own repo has the
+    /// branch `feature/PROJ-1` with one commit that is not pushed.
+    async fn parent_with_a_branch(
+        app: &AppState,
+        repo: &FsPath,
+    ) -> (TaskKey, delilah_git::Workspace) {
+        let key = TaskKey::new("PROJ-1");
+        app.store
+            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .await
+            .unwrap();
+        app.store
+            .apply_event(&key, Event::Start, chrono::Utc::now())
+            .await
+            .unwrap();
+        let spec = delilah_git::WorkspaceSpec {
+            path: app.config.workspaces_dir().join("PROJ-1"),
+            branch: None,
+            kind: delilah_core::ProjectKind::Parent,
+            submodules: vec![],
+        };
+        let opts = GitOptions::default();
+        let mut ws = delilah_git::create_workspace(repo, &spec, &opts).unwrap();
+        delilah_git::apply_branch(&ws.path, "feature/PROJ-1", &opts).unwrap();
+        ws.branch = "feature/PROJ-1".into();
+        app.store.save_workspace(&key, repo, &ws).await.unwrap();
+        app.store
+            .apply_event(&key, Event::WorkspaceReady, chrono::Utc::now())
+            .await
+            .unwrap();
+        git(&ws.path, &["commit", "-q", "--allow-empty", "-m", "work"]);
+        (key, ws)
+    }
+
+    #[tokio::test]
+    async fn a_parent_archive_checks_the_branch_in_the_parents_own_repo() {
+        let (app, repo) = setup().await;
+        let (key, ws) = parent_with_a_branch(&app, &repo).await;
+
+        let err = archive_workspace(&app, &key, false, &HashMap::new())
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT, "{}", err.message);
+        assert!(ws.path.exists());
+
+        git(&ws.path, &["push", "-q", "origin", "feature/PROJ-1"]);
+        archive_workspace(&app, &key, false, &HashMap::new())
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert!(!ws.path.exists());
+        // The user's archive keeps the branch.
+        assert!(!git(&repo, &["branch", "--list", "feature/PROJ-1"]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_merge_archive_deletes_the_parents_own_branch_too() {
+        let (app, repo) = setup().await;
+        let (key, ws) = parent_with_a_branch(&app, &repo).await;
+        git(&ws.path, &["push", "-q", "origin", "feature/PROJ-1"]);
+
+        // A submodule's PR merged (no such repo is set up here: nothing to delete there).
+        let verified = HashMap::from([("svc".to_string(), "0".repeat(40))]);
+        let outcome = archive_workspace(&app, &key, false, &verified)
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert!(outcome.left.is_empty(), "{:?}", outcome.problems);
+        assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).is_empty());
     }
 
     fn start_preview(app: &AppState, key: &str) {

@@ -68,7 +68,8 @@ done or pending is in [status.md](status.md).
 | `inbox.rs` | `GET /api/v1/inbox` (everything that waits on the user) and replies typed into a session. |
 | `phases.rs` | The phase: set by the user, moved forward by spec files and agent signals, and review hints. |
 | `specs.rs` | A watcher (every 5 s) that reads each task's `specs/<feature>/` and records phase changes. |
-| `scheduler.rs` | Runs every 30 s: resumes tasks paused by a usage limit once the window resets. |
+| `scheduler.rs` | Runs every 30 s: resumes tasks paused by a usage limit once the window resets, and runs the branching `recover`. |
+| `branching.rs` | The branch and title of a free task, from its first analysis (see Workspaces). A per-task lock (`BranchLocks` in `AppState`). Also `POST /hooks/claude/guard` and `POST /api/v1/tasks/{key}/branch`. |
 | `actions.rs` | Resume, done, archive, delete, and the usage report. |
 | `archive.rs` | How a task is archived, shared by `actions::archive` and `pr_loop::merge`: stop and await the sessions, release the workspace, delete the verified local branches, finish an `archive-partial`. The policy (what must hold first) stays with the caller. |
 | `transitions.rs` | The one way to change a task's status, so every change emits events and notifications. |
@@ -108,9 +109,9 @@ Four environment variables exist only for the end-to-end tests (read in `Config:
 | `tasks/<KEY>/` | Per-task files kept out of the repo: the Claude settings file with Delilah's hooks, the status line script, `ticket.md`, `hooks.jsonl` (raw hook log), and session logs. `tasks/@<project>/` holds the same for project sessions. |
 
 **Tables:**
-- `tasks`: key, title, project, workflow, phase, status JSON, notes, `in_checkout`.
+- `tasks`: key, title, project, workflow, phase, status JSON, notes, `in_checkout`, `title_source` (`initial` / `spec` / `manual`; only `initial` is renamed automatically), `previous_title` (the title the automatic rename replaced) and `branch_error` (why the branch could not be made).
 - `task_events`: the history.
-- `workspaces`: `task_key`, parent, path, branch, submodules JSON, kind, `previous`. For checkout mode, `previous` is JSON with the branches to go back to.
+- `workspaces`: `task_key`, parent, path, branch, submodules JSON, kind, `previous`, `spec_dirs_at_start` (JSON `label:name` list of the spec folders present at start, taken after the shared entries and extended when the setup ends), `started_branchless` (1 when the task started without a branch: only those get the branch steps; any free task with a baseline is still retitled). `branch` is `''` while a free task has no branch yet. For checkout mode, `previous` is JSON with the branches to go back to (the parent's `.` included).
 - `sessions`: id, owner, kind (`claude`, `shell`, `setup`), label, primary, attention, `conversation` (1 for an idea conversation).
 - `conversation_entries`: session, time, kind (`user` / `claude` / `card`) and a JSON body.
 - `pull_requests`: one PR per (task, repo), with host, `owner/name`, number, URL, how it was linked (`detected`, `opened`, `pasted`), the last snapshot as JSON, the watermarks already notified (failed head, review and comment ids), `checked_at` and the last problem (`error`, `error_kind`).
@@ -263,6 +264,13 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
   - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field. With a project template it returns the template-expanded full branch, and the dialog first shows the instant guess `branchName(template, key, title)` (the TS mirror) until the answer arrives.
   - `Task.branch` is read from `workspaces.branch` by a `LEFT JOIN`; a task with no workspace (backlog, archived) has none.
 
+- **Branchless start** (free `LIBRE-` tasks with no typed branch and no project template, `branching.rs`; every other start is named as in the previous item, decision 65):
+  - **Start:** a worktree is detached at the project's HEAD (the folder is still `workspaces/<KEY>`); checkout mode switches nothing and only records where each folder was (`previous`).
+  - **Trigger:** every `Working`/`TurnEnded` hook of the task (`on_activity`), the 30 s scheduler tick and the daemon start (`recover`), under the task's `BranchLocks` lock.
+  - **Steps:** *retitle* (once: `initial` → `spec`, the old title kept in `previous_title`) and then *ensure*: adopt the branch Spec Kit's hook made; else create it, named like the new spec folder (`apply_branch` keeps uncommitted files; a taken name becomes `-2`, `-3`); with only the guard and no spec folder, `slug(title)`. A parent gets the parent first, then each chosen submodule.
+  - **Failure:** `tasks.branch_error` and a Bandeja item `branch` with "Reintentar" (`POST /api/v1/tasks/{key}/branch`).
+  - **Guard:** a session of a free task gets a second `PreToolUse` hook (`Edit|Write|MultiEdit|NotebookEdit|Bash`, `curl -m 15` to `/hooks/claude/guard`). An edit outside `specs/` and `.specify/`, or Bash with `git commit/push/merge/rebase` or `gh pr create`, makes the branch first; if that fails the tool is denied with the reason. Best-effort: substring match on commands, symlinks not resolved.
+  - **Without a branch:** opening a PR is a 422, the PR loop skips the task, spec progress skips the branch match, archive and delete work.
 - **Worktree mode** (in `workspaces/<KEY>/`):
   - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch, named as in Branch names below.
   - **Repo projects:** a plain worktree.

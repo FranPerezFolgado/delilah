@@ -15,6 +15,9 @@ const task = (status: Task["status"]): Task => ({
   phase: null,
   status,
   saving_mode: false,
+  title_source: "manual",
+  previous_title: null,
+  branch_error: null,
   handoff: null,
 });
 const failed = task({ type: "setup-failed", reason: "npm ERR!\nline 2" });

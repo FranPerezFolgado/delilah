@@ -155,6 +155,12 @@ pub async fn on_hook(
 ) {
     use delilah_agents::claude::Signal;
     let key = TaskKey::new(task);
+    // A free task's first analysis may have just appeared; never holds up the hook.
+    if matches!(signal, Signal::Working | Signal::TurnEnded) && crate::branching::is_free(&key) {
+        let app = app.clone();
+        let key = key.clone();
+        tokio::spawn(async move { crate::branching::on_activity(&app, &key).await });
+    }
     match signal {
         Signal::Working => {
             if let Some(phase) = signal_phase(hook) {
