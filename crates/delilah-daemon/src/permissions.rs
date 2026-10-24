@@ -212,13 +212,17 @@ pub async fn on_request(
         }
         return;
     }
+    let workspace = crate::owners::workspace(app, task)
+        .await
+        .map(|w| w.path)
+        .unwrap_or_default();
     let ask = PermissionAsk {
         id: uuid::Uuid::new_v4().to_string(),
         request_id,
         task: task.to_string(),
         session: session.to_string(),
         summary: summary(&tool, &input),
-        rule: rule_to_add(&tool, suggestion.as_ref(), &input),
+        rule: rule_to_add(&tool, suggestion.as_ref(), &input, &workspace),
         tool,
         input,
         suggestion,
@@ -328,9 +332,16 @@ pub async fn answer(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The one rule "always allow" adds: the first that Claude's suggestion offers for this
-/// very tool and that passes [`validate_rule`]. Never a bare tool name.
-pub fn rule_to_add(tool: &str, suggestion: Option<&Value>, input: &Value) -> Option<String> {
+/// The one rule "always allow" adds, for a tool Claude offered a rule for: the first
+/// suggested rule that passes [`validate_rule`], else (Bash) the exact command when it
+/// may be remembered. Never a bare tool name. `workspace` bounds file rules.
+pub fn rule_to_add(
+    tool: &str,
+    suggestion: Option<&Value>,
+    input: &Value,
+    workspace: &std::path::Path,
+) -> Option<String> {
+    let mut offered = false;
     for s in suggestion.and_then(Value::as_array).into_iter().flatten() {
         if s["type"] != "addRules" || s["behavior"] != "allow" {
             continue;
@@ -339,24 +350,86 @@ pub fn rule_to_add(tool: &str, suggestion: Option<&Value>, input: &Value) -> Opt
             if r["toolName"].as_str() != Some(tool) {
                 continue;
             }
+            offered = true;
             if let Some(content) = r["ruleContent"].as_str()
-                && let Some(rule) = validate_rule(tool, content, input)
+                && let Some(rule) = validate_rule(tool, content, input, workspace)
             {
                 return Some(rule);
             }
         }
     }
+    // A prefix that is not on the allowlist is remembered as the exact command instead.
+    if offered && tool == "Bash" {
+        let command = input["command"].as_str()?.trim();
+        return validate_rule(tool, command, input, workspace);
+    }
+    // Claude often suggests a mode or a directory for a file tool, not a rule: the rule is
+    // built from the approved file whenever it suggested anything.
+    let suggested = suggestion
+        .and_then(Value::as_array)
+        .is_some_and(|a| !a.is_empty());
+    if suggested && delilah_agents::claude::PATH_TOOLS.contains(&tool) {
+        return validate_rule(tool, "", input, workspace);
+    }
     None
 }
 
-/// `Tool(content)` when the suggested content is safe to remember (see
-/// [`delilah_agents::claude::is_safe_allow_rule`]) and, for Bash, the command being
-/// approved starts with the prefix at a word boundary.
-pub fn validate_rule(tool: &str, content: &str, input: &Value) -> Option<String> {
+/// The file the call works on, relative to the workspace (`None` when it lies outside).
+fn relative_file(input: &Value, workspace: &std::path::Path) -> Option<String> {
+    let file = ["file_path", "notebook_path", "path"]
+        .iter()
+        .find_map(|k| input[*k].as_str())?;
+    let path = std::path::Path::new(file);
+    if !path.is_absolute() {
+        return Some(file.to_string());
+    }
+    let canonical = workspace.canonicalize().ok();
+    std::iter::once(workspace)
+        .chain(canonical.as_deref())
+        .find_map(|w| path.strip_prefix(w).ok())
+        .and_then(|p| p.to_str())
+        .map(str::to_string)
+}
+
+/// The host of a URL, lowercased.
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?;
+    if host.contains('@') || host.contains(':') {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// `Tool(content)` when it is safe to remember (see
+/// [`delilah_agents::claude::is_safe_allow_rule`]) and covers the call being approved:
+/// - Bash: the command starts with the prefix at a word boundary (a prefix must be on the
+///   claude.rs allowlist) or equals the exact command. An exact command is remembered
+///   unless it has shell metacharacters, a leading `VAR=value` or an interpreter/wrapper
+///   head (`sh x.sh` runs whatever the file holds later).
+/// - File tools: the content is ignored; the rule is the approved file itself, relative to
+///   `workspace` (a directory `/**` rule is never offered). A file outside it gets none.
+/// - WebFetch: `domain:<host>` for exactly the host being fetched.
+pub fn validate_rule(
+    tool: &str,
+    content: &str,
+    input: &Value,
+    workspace: &std::path::Path,
+) -> Option<String> {
     let content = content.trim();
-    let rule = format!("{tool}({content})");
+    let rule = if delilah_agents::claude::PATH_TOOLS.contains(&tool) {
+        format!("{tool}({})", relative_file(input, workspace)?)
+    } else {
+        format!("{tool}({content})")
+    };
     if !delilah_agents::claude::is_safe_allow_rule(&rule) {
         return None;
+    }
+    if tool == "WebFetch" {
+        let host = content.strip_prefix("domain:")?;
+        if url_host(input["url"].as_str()?)? != host.to_ascii_lowercase() {
+            return None;
+        }
     }
     if tool == "Bash" {
         let command = input["command"].as_str()?.trim();
@@ -601,7 +674,7 @@ mod tests {
             .unwrap()
             .get_mut(&ask.id)
             .unwrap()
-            .rule = Some("Bash(npm --version:*)".into());
+            .rule = Some("Bash(npm --version)".into());
         let status = f
             .post(
                 &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
@@ -611,7 +684,7 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert_eq!(f.turn_text().await, "allowed");
         let task = f.app.store.get_task(&TaskKey::new("PROJ-1")).await.unwrap();
-        assert_eq!(task.unwrap().allowed_tools, ["Bash(npm --version:*)"]);
+        assert_eq!(task.unwrap().allowed_tools, ["Bash(npm --version)"]);
         // Same request again: no ask, the agent goes on by itself.
         assert!(f.ask().await.is_none());
         assert_eq!(f.turn_text().await, "allowed");
@@ -648,7 +721,7 @@ mod tests {
             .unwrap()
             .get_mut(&ask.id)
             .unwrap()
-            .rule = Some("Bash(npm --version:*)".into());
+            .rule = Some("Bash(npm --version)".into());
         f.app.sessions.remove_if_same("s-1", &f.live.runtime);
         let status = f
             .post(
@@ -749,6 +822,7 @@ mod tests {
 
     #[test]
     fn the_rule_comes_only_from_a_validated_suggestion_never_a_bare_tool() {
+        let ws = std::path::Path::new("/ws");
         let bash = json!({ "command": "npm install left-pad" });
         let suggestion = json!([{
             "type": "addRules", "behavior": "allow", "destination": "localSettings",
@@ -759,33 +833,143 @@ mod tests {
                 {"toolName": "Bash", "ruleContent": "npm install:*"},
             ]
         }]);
+        // `npm install` is not on the allowlist: the exact command is remembered.
         assert_eq!(
-            rule_to_add("Bash", Some(&suggestion), &bash).as_deref(),
-            Some("Bash(npm install:*)")
+            rule_to_add("Bash", Some(&suggestion), &bash, ws).as_deref(),
+            Some("Bash(npm install left-pad)")
         );
-        assert_eq!(rule_to_add("Write", Some(&suggestion), &json!({})), None);
-        assert_eq!(rule_to_add("Read", Some(&suggestion), &json!({})), None);
-        assert_eq!(rule_to_add("Bash", None, &bash), None);
+        let test = json!({ "command": "npm test -- --ci" });
+        let allow = |c: &str| {
+            json!([{"type": "addRules", "behavior": "allow",
+                "rules": [{"toolName": "Bash", "ruleContent": c}]}])
+        };
         assert_eq!(
-            rule_to_add("Read", Some(&json!([{"type": "setMode"}])), &json!({})),
+            rule_to_add("Bash", Some(&allow("npm test:*")), &test, ws).as_deref(),
+            Some("Bash(npm test:*)")
+        );
+        // A write tool with no file to approve has no rule.
+        assert_eq!(
+            rule_to_add("Write", Some(&suggestion), &json!({}), ws),
+            None
+        );
+        assert_eq!(rule_to_add("Read", Some(&suggestion), &json!({}), ws), None);
+        assert_eq!(rule_to_add("Bash", None, &bash, ws), None);
+        assert_eq!(
+            rule_to_add("Read", Some(&json!([{"type": "setMode"}])), &json!({}), ws),
             None
         );
     }
 
     #[test]
-    fn validate_rule_checks_the_content_and_that_the_command_is_covered() {
-        let cmd = |c: &str| json!({ "command": c });
-        let ok = |t: &str, c: &str, i: &Value| validate_rule(t, c, i);
+    fn bypass_prefixes_are_downgraded_to_the_exact_command_or_nothing() {
+        let ws = std::path::Path::new("/ws");
+        let offer = |c: &str| {
+            json!([{"type": "addRules", "behavior": "allow",
+                "rules": [{"toolName": "Bash", "ruleContent": c}]}])
+        };
+        let rule = |prefix: &str, command: &str| {
+            rule_to_add(
+                "Bash",
+                Some(&offer(prefix)),
+                &json!({ "command": command }),
+                ws,
+            )
+        };
+        for (prefix, command) in [
+            ("git:*", "git status"),
+            ("npm run:*", "npm run build"),
+            ("find:*", "find . -name x"),
+            ("git config:*", "git config user.name"),
+            ("rm:*", "rm -rf x"),
+            ("curl:*", "curl example.com"),
+            ("git -c core.pager=sh:*", "git -c core.pager=sh log"),
+        ] {
+            assert_eq!(
+                rule(prefix, command).as_deref(),
+                Some(format!("Bash({command})").as_str()),
+                "{prefix}"
+            );
+        }
+        // Nothing at all: interpreter head, env assignment, metacharacters.
+        assert_eq!(rule("FOO=1 sh:*", "FOO=1 sh x.sh"), None);
+        assert_eq!(rule("sh:*", "sh x.sh"), None);
+        assert_eq!(rule("git:*", "git log; rm -rf x"), None);
+        // Accepted prefixes.
+        for (prefix, command) in [
+            ("npm test:*", "npm test"),
+            ("cargo test:*", "cargo test -p x"),
+            ("git status:*", "git status -s"),
+            ("ls:*", "ls -la"),
+        ] {
+            assert_eq!(
+                rule(prefix, command).as_deref(),
+                Some(format!("Bash({prefix})").as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn file_rules_are_the_approved_file_inside_the_workspace() {
+        let ws = std::path::Path::new("/ws");
+        let sugg = json!([{"type": "setMode", "mode": "acceptEdits"}]);
+        let rule = |tool: &str, input: Value| rule_to_add(tool, Some(&sugg), &input, ws);
         assert_eq!(
-            ok("Bash", " npm install:* ", &cmd("npm install x")).as_deref(),
-            Some("Bash(npm install:*)")
+            rule("Edit", json!({ "file_path": "/ws/src/a.rs" })).as_deref(),
+            Some("Edit(src/a.rs)")
+        );
+        assert_eq!(
+            rule("Write", json!({ "file_path": "src/b.rs" })).as_deref(),
+            Some("Write(src/b.rs)")
+        );
+        for outside in [
+            "/etc/passwd",
+            "/ws/../etc/passwd",
+            "../x",
+            "~/x",
+            "/ws/src/*.rs",
+            "/wsx/a.rs",
+        ] {
+            assert_eq!(
+                rule("Edit", json!({ "file_path": outside })),
+                None,
+                "{outside}"
+            );
+        }
+        assert_eq!(rule("Edit", json!({})), None);
+    }
+
+    #[test]
+    fn web_fetch_rules_are_the_exact_host() {
+        let ws = std::path::Path::new("/ws");
+        let v = |c: &str, url: &str| validate_rule("WebFetch", c, &json!({ "url": url }), ws);
+        assert_eq!(
+            v("domain:docs.rs", "https://docs.rs/serde").as_deref(),
+            Some("WebFetch(domain:docs.rs)")
+        );
+        assert_eq!(v("domain:*.com", "https://a.com/x"), None);
+        assert_eq!(v("domain:docs.rs", "https://evil.com/docs.rs"), None);
+        assert_eq!(v("domain:*", "https://docs.rs"), None);
+    }
+
+    #[test]
+    fn validate_rule_checks_the_content_and_that_the_command_is_covered() {
+        let ws = std::path::Path::new("/ws");
+        let cmd = |c: &str| json!({ "command": c });
+        let ok = |t: &str, c: &str, i: &Value| validate_rule(t, c, i, ws);
+        assert_eq!(
+            ok("Bash", " npm test:* ", &cmd("npm test x")).as_deref(),
+            Some("Bash(npm test:*)")
         );
         assert_eq!(
             ok("Bash", "git status", &cmd("git status")).as_deref(),
             Some("Bash(git status)")
         );
+        assert_eq!(
+            ok("Bash", "npm install lodash", &cmd("npm install lodash")).as_deref(),
+            Some("Bash(npm install lodash)")
+        );
         // The prefix must cover the command, at a word boundary.
-        assert_eq!(ok("Bash", "npm install:*", &cmd("npm installer")), None);
+        assert_eq!(ok("Bash", "npm test:*", &cmd("npm testing")), None);
         assert_eq!(ok("Bash", "npm test:*", &cmd("npm install")), None);
         assert_eq!(ok("Bash", "git status", &cmd("git status -s")), None);
         assert_eq!(ok("Bash", "npm test:*", &json!({})), None);
@@ -811,10 +995,6 @@ mod tests {
             assert_eq!(ok("WebFetch", bad, &json!({})), None, "{bad:?}");
             assert_eq!(ok("Read", bad, &json!({})), None, "{bad:?}");
         }
-        assert_eq!(
-            ok("WebFetch", "domain:example.com", &json!({})).as_deref(),
-            Some("WebFetch(domain:example.com)")
-        );
     }
 
     #[test]

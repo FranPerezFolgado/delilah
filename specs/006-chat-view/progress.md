@@ -35,9 +35,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19F | 7 | 7G | done | 1 | | review fixes (init wait CRITICAL) |
 | WP-22F | 8 | 8F | verified | 1 | | permission rule security |
 | WP-19G | 7 | 7H | done | 1 | | fix round 2 |
-| WP-22G | 8 | 8G | implementing | 0 | | allowlist for remembered rules (user decision) |
+| WP-22G | 8 | 8G | verified | 1 | | allowlist for remembered rules (user decision) |
 | WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
-| WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
+| WP-23 | 8 | 8B | implementing | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
 | WP-26 | 9 | 9A | pending | 0 | | go (decision 49) |
@@ -51,6 +51,8 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 8 | security | LOW | allowlist caveats: `cat:*`/`head:*`/`grep:*` can read outside the workspace (~/.ssh); `cargo/npm/go/make test|build` run repo code — document in decisions | crates/delilah-agents/src/claude.rs |
+| 7 | tests | LOW | a_chat_mode_start_that_fails_leaves_the_task_startable_in_the_terminal flaked once under load | crates/delilah-daemon/src/run.rs |
 | 8 | security | LOW | env-assignment first word (`FOO=1 sh:*`) slips past the head check; rule_matches ignores quoting (fails safe) | crates/delilah-agents/src/claude.rs:290 |
 | 7 | spec | LOW | rate-limit 'reached' detection in stream is a guess (status/window/result text); real value never observed — verify on a real limit hit | crates/delilah-agents/src/stream.rs |
 | 7 | arch | LOW | PTY start failure still leaves a Running task + workspace + session row (rollback only for chat mode) | crates/delilah-daemon/src/run.rs |

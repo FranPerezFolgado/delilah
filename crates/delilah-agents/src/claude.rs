@@ -212,7 +212,48 @@ pub fn stream_command(launch: &Launch) -> tokio::process::Command {
     cmd
 }
 
-/// First words of a Bash prefix rule that would hand over arbitrary execution.
+/// Safe, bounded commands a remembered Bash PREFIX rule (`Bash(<prefix>:*)`) may cover.
+/// Each entry is a word sequence; a prefix is accepted when it starts with one of them
+/// (so `git diff --stat:*` is fine and `git:*` is not). Anything else is remembered only
+/// as the exact command. To extend: add an entry of words that, followed by ANY arguments,
+/// can neither run arbitrary code (no `-exec`, `--pre`, `-c alias=`, scripts, wrappers)
+/// nor write outside the workspace.
+pub const SAFE_BASH_PREFIXES: &[&[&str]] = &[
+    &["ls"],
+    &["cat"],
+    &["head"],
+    &["tail"],
+    &["wc"],
+    &["grep"],
+    &["pwd"],
+    &["echo"],
+    &["which"],
+    &["tree"],
+    &["diff"],
+    &["stat"],
+    &["file"],
+    &["git", "status"],
+    &["git", "diff"],
+    &["git", "log"],
+    &["git", "show"],
+    &["git", "add"],
+    &["npm", "test"],
+    &["pnpm", "test"],
+    &["yarn", "test"],
+    &["cargo", "test"],
+    &["cargo", "check"],
+    &["cargo", "build"],
+    &["cargo", "clippy"],
+    &["cargo", "fmt", "--check"],
+    &["go", "test"],
+    &["go", "vet"],
+    &["go", "build"],
+    &["pytest"],
+    &["make", "test"],
+];
+
+/// First words that hand over arbitrary execution: not even an exact command starting with
+/// one is remembered (`sh x.sh` runs whatever the file holds at that moment).
 const UNSAFE_BASH_HEADS: &[&str] = &[
     "sh",
     "bash",
@@ -254,11 +295,89 @@ const SHELL_META: &[char] = &[
     '(', ')', '\n', '\r', ';', '&', '|', '`', '$', '<', '>', '{', '}', '!', '\\',
 ];
 
-/// Structural check of an allow rule before it is written into a session's settings:
-/// `Tool(content)` only (never a bare tool name, which would allow every use). For Bash,
-/// `<prefix>:*` with a plain prefix (no wildcard but the trailing one, no shell
-/// metacharacters, not an interpreter or wrapper) or one exact plain command. For other
-/// tools, content that is not just wildcards.
+/// Tools whose rule content is a path (inside the workspace only).
+pub const PATH_TOOLS: &[&str] = &[
+    "Read",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+];
+
+/// `NAME=value`, a shell environment assignment.
+fn is_env_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Whether `command` (a plain command line) is one Delilah may remember exactly: no
+/// wildcard, chaining, substitution or redirection, no leading `VAR=value`, and not
+/// starting with an interpreter or wrapper.
+pub fn is_safe_exact_command(command: &str) -> bool {
+    let command = command.trim();
+    if command.is_empty() || command.contains('*') || command.contains(SHELL_META) {
+        return false;
+    }
+    let head = command.split_whitespace().next().unwrap_or_default();
+    if is_env_assignment(head) {
+        return false;
+    }
+    let head = head.rsplit('/').next().unwrap_or(head);
+    !UNSAFE_BASH_HEADS.contains(&head)
+}
+
+/// Whether a Bash prefix (without `:*`) is a plain command line at least as specific as an
+/// entry of [`SAFE_BASH_PREFIXES`].
+pub fn is_safe_bash_prefix(prefix: &str) -> bool {
+    let prefix = prefix.trim();
+    if !is_safe_exact_command(prefix) {
+        return false;
+    }
+    let words: Vec<&str> = prefix.split_whitespace().collect();
+    SAFE_BASH_PREFIXES
+        .iter()
+        .any(|entry| words.len() >= entry.len() && words[..entry.len()] == **entry)
+}
+
+/// Whether a path rule content stays inside the workspace: relative, no `~`, no `//`
+/// (absolute), no `..`, and no wildcard but a trailing `/**` after a real directory.
+pub fn is_workspace_path(content: &str) -> bool {
+    let content = content.trim();
+    if content.is_empty() || content.starts_with(['/', '~', '!', '#']) {
+        return false;
+    }
+    let path = content.strip_suffix("/**").unwrap_or(content);
+    !path.is_empty()
+        && !path.contains(['*', '?', '[', ']', '\\', '{', '}', '\n', '\r', '(', ')'])
+        && !path.contains("//")
+        && path
+            .split('/')
+            .all(|c| !c.is_empty() && c != ".." && c != ".")
+}
+
+/// Whether a WebFetch content is `domain:<exact host>`.
+fn is_exact_domain(content: &str) -> bool {
+    content.trim().strip_prefix("domain:").is_some_and(|host| {
+        !host.is_empty()
+            && host.contains('.')
+            && !host.starts_with(['.', '-'])
+            && host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    })
+}
+
+/// Structural check of an allow rule before it is written into a session's settings (the
+/// daemon applies the same one before remembering): `Tool(content)` only, never a bare
+/// tool name, which would allow every use. Bash: `<prefix>:*` only for a prefix on the
+/// [`SAFE_BASH_PREFIXES`] allowlist, else one exact plain command. File tools: a path
+/// relative to the workspace (so inside it), wildcards only as a trailing `/**`.
+/// WebFetch: `domain:<exact host>`. Other tools (MCP): content that is not just wildcards.
 pub fn is_safe_allow_rule(rule: &str) -> bool {
     let rule = rule.trim();
     let Some((tool, rest)) = rule.split_once('(') else {
@@ -276,26 +395,22 @@ pub fn is_safe_allow_rule(rule: &str) -> bool {
     {
         return false;
     }
+    if PATH_TOOLS.contains(&tool) {
+        return is_workspace_path(content);
+    }
+    if tool == "WebFetch" {
+        return is_exact_domain(content);
+    }
     if tool != "Bash" {
         let rest = content.trim();
-        let rest = rest.strip_prefix("domain:").unwrap_or(rest);
         return !rest
             .chars()
             .all(|c| matches!(c, '*' | '/' | '.' | ':') || c.is_whitespace());
     }
-    let (command, is_prefix) = match content.strip_suffix(":*") {
-        Some(prefix) => (prefix.trim(), true),
-        None => (content.trim(), false),
-    };
-    if command.is_empty() || command.contains('*') || command.contains(SHELL_META) {
-        return false;
+    match content.strip_suffix(":*") {
+        Some(prefix) => is_safe_bash_prefix(prefix),
+        None => is_safe_exact_command(content),
     }
-    let mut words = command.split_whitespace();
-    let head = words.next().unwrap_or_default();
-    let head = head.rsplit('/').next().unwrap_or(head);
-    // A wrapper or interpreter as the first word runs whatever follows (`node -e`, `sh -c`).
-    // An exact command is one specific line, so only a prefix is held to this.
-    !(is_prefix && UNSAFE_BASH_HEADS.contains(&head))
 }
 
 /// Settings for one session: every hook posts its JSON to the daemon, and the status
@@ -898,8 +1013,10 @@ mod tests {
     #[test]
     fn a_tasks_allowed_tools_go_into_the_allow_list_of_an_editing_session_only() {
         let rules = vec![
-            "Bash(npm install:*)".to_string(),
+            "Bash(npm test:*)".to_string(),
             " Bash(git status) ".to_string(),
+            "Bash(git:*)".to_string(),
+            "Edit(~/**)".to_string(),
             "Bash".to_string(),
             "Read".to_string(),
             "Bash(sh:*)".to_string(),
@@ -920,7 +1037,7 @@ mod tests {
         };
         assert_eq!(
             s(Permission::Default)["permissions"]["allow"],
-            json!(["Bash(npm install:*)", "Bash(git status)"])
+            json!(["Bash(npm test:*)", "Bash(git status)"])
         );
         assert!(s(Permission::Default)["permissions"].get("deny").is_none());
         assert!(s(Permission::Plan).get("permissions").is_none());
@@ -935,11 +1052,20 @@ mod tests {
     #[test]
     fn only_specific_safe_rules_pass_is_safe_allow_rule() {
         for ok in [
-            "Bash(npm install:*)",
+            "Bash(npm test:*)",
+            "Bash(cargo test:*)",
+            "Bash(cargo test -p foo:*)",
+            "Bash(git status:*)",
+            "Bash(git diff --stat:*)",
+            "Bash(ls:*)",
+            "Bash(ls -la:*)",
             "Bash(git status)",
-            "Bash(node script.js)",
-            "WebFetch(domain:example.com)",
+            "Bash(npm install lodash)",
+            "Bash(rm -rf target)",
+            "WebFetch(domain:docs.rs)",
+            "Edit(src/a.rs)",
             "Edit(src/**)",
+            "Read(README.md)",
             "mcp__srv__tool(read x)",
         ] {
             assert!(is_safe_allow_rule(ok), "{ok}");
@@ -953,8 +1079,8 @@ mod tests {
             "Bash(:*)",
             "Bash(*)",
             "Bash(npm*:*)",
-            "Bash(npm *:*)",
-            "Bash(npm install;:*)",
+            "Bash(ls *:*)",
+            "Bash(ls;:*)",
             "Bash(a && b:*)",
             "Bash(a | b:*)",
             "Bash(echo `id`:*)",
@@ -969,8 +1095,38 @@ mod tests {
             "Bash(python -c:*)",
             "Bash(xargs rm:*)",
             "Bash(ls\nrm:*)",
+            // The review's bypasses: not on the allowlist.
+            "Bash(git:*)",
+            "Bash(npm run:*)",
+            "Bash(npm:*)",
+            "Bash(find:*)",
+            "Bash(git config:*)",
+            "Bash(rm:*)",
+            "Bash(curl:*)",
+            "Bash(git -c core.pager=sh:*)",
+            "Bash(cargo:*)",
+            "Bash(make:*)",
+            // Env assignments and interpreters, also as exact commands.
+            "Bash(FOO=1 sh:*)",
+            "Bash(FOO=1 ls:*)",
+            "Bash(FOO=1 ls)",
+            "Bash(sh x.sh)",
+            "Bash(node script.js)",
             "WebFetch(*)",
             "WebFetch(domain:*)",
+            "WebFetch(domain:*.com)",
+            "WebFetch(domain:com)",
+            "Edit(~/**)",
+            "Write(//**/*.sh)",
+            "Read(~/.ssh/**)",
+            "Edit(*.rs)",
+            "Edit(src/*.rs)",
+            "Edit(**/*.rs)",
+            "Edit(/etc/passwd)",
+            "Edit(//etc/passwd)",
+            "Edit(../x)",
+            "Edit(src/../../x)",
+            "Edit(**)",
             "Read(**)",
             "Read(//**)",
             "Read(  )",
