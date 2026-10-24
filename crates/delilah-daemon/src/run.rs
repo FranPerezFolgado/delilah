@@ -1368,6 +1368,8 @@ mod tests {
         sh(&other, &["commit", "-qm", "ahead"]);
         sh(&other, &["push", "-q", "origin", "HEAD:main"]);
         let remote_head = sh(&other, &["rev-parse", "HEAD"]);
+        let folder_head = sh(&repo, &["rev-parse", "HEAD"]);
+        let folder_main = sh(&repo, &["rev-parse", "refs/heads/main"]);
 
         let agent = home.join("agent.sh");
         std::fs::write(&agent, "#!/bin/sh\nexec sleep 5\n").unwrap();
@@ -1399,11 +1401,11 @@ mod tests {
 
         let ws = app.config.workspaces_dir().join("PROJ-9");
         assert_eq!(sh(&ws, &["rev-parse", "HEAD"]), remote_head);
-        assert_ne!(
-            sh(&repo, &["rev-parse", "HEAD"]),
-            remote_head,
-            "the project folder is untouched"
-        );
+        // The project folder is untouched: same commit, same branch, `main` not moved.
+        assert_eq!(sh(&repo, &["rev-parse", "HEAD"]), folder_head);
+        assert_eq!(sh(&repo, &["branch", "--show-current"]), "main");
+        assert_eq!(sh(&repo, &["rev-parse", "refs/heads/main"]), folder_main);
+        assert_ne!(folder_main, remote_head);
     }
 
     /// A one-commit repo project "stale" in the app's home, with `origin` set to
