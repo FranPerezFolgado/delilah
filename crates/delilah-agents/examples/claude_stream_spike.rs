@@ -48,6 +48,11 @@
 //! - `ask`: the model calls AskUserQuestion; the PreToolUse ask hook answers after 2 s. [d3]
 //!   Does the hook run and block in print mode, does the model get the answer? Compare
 //!   the hook's `ts` in `hooks.jsonl` with the tool result in `stream.jsonl`.
+//!   Defaults to `--permission-prompt-tool stdio` (override with `--prompt-tool none`):
+//!   a `can_use_tool` for AskUserQuestion is answered with allow + `updatedInput.answers`
+//!   (first option of each question). `summary.txt` says whether init `tools` has it.
+//! - `ask-pty`: the same AskUserQuestion prompt through a PTY session (blocking
+//!   PreToolUse ask hook in the terminal runtime).
 //! - `remote`: `--remote-control <name>` together with `-p`. [h] Does it start, what does
 //!   `stderr.log` / `stream.jsonl` say?
 
@@ -114,17 +119,19 @@ fn main() {
         "interrupt",
         "trust",
         "ask",
+        "ask-pty",
         "remote",
     ]
     .contains(&scenario.as_str())
     {
         usage();
     }
-    // Only `permission` needs the stdio permission prompt by default.
+    // `permission` and `ask` need the stdio permission prompt by default (in -p mode
+    // AskUserQuestion is only registered, and routed as can_use_tool, in that mode).
     let prompt_tool = match prompt_tool.as_deref() {
         Some("none") => None,
         Some(other) => Some(other.to_string()),
-        None => (scenario == "permission").then(|| "stdio".to_string()),
+        None => matches!(scenario.as_str(), "permission" | "ask").then(|| "stdio".to_string()),
     };
     let out = out.unwrap_or_else(|| {
         let secs = chrono::Utc::now().timestamp();
@@ -139,7 +146,7 @@ fn main() {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: claude_stream_spike <turns|resume|permission|interrupt|trust|ask|remote> \
+        "usage: claude_stream_spike <turns|resume|permission|interrupt|trust|ask|ask-pty|remote> \
          [--out <dir>] [--prompt-tool stdio|none]"
     );
     std::process::exit(2);
@@ -197,6 +204,7 @@ fn run(scenario: &str, out: PathBuf, prompt_tool: Option<String>) -> Result<(), 
         "interrupt" => interrupt(&ctx),
         "trust" => trust(&ctx),
         "ask" => ask(&ctx),
+        "ask-pty" => ask_pty(&ctx),
         "remote" => remote(&ctx),
         _ => unreachable!(),
     };
@@ -752,13 +760,12 @@ fn trust(ctx: &Ctx) -> Result<(), String> {
 fn ask(ctx: &Ctx) -> Result<(), String> {
     let mut p = StreamProc::spawn(ctx, "stream", &ctx.workspace, &new_session(), false, &[])?;
     let turn = p.turn(
-        "Use the AskUserQuestion tool to ask me which colour I prefer, with the options \
-         red and blue, then tell me which one I chose.",
+        ASK_PROMPT,
         &mut |p: &mut StreamProc, msg: Option<&Value>| {
             if let Some(m) = msg
                 && m["type"] == "control_request"
             {
-                answer_control(p, m, true);
+                answer_ask_control(p, m);
             }
         },
     );
@@ -772,6 +779,50 @@ fn ask(ctx: &Ctx) -> Result<(), String> {
     thread::sleep(Duration::from_secs(2));
     p.finish();
     turn.map(|_| ())
+}
+
+const ASK_PROMPT: &str = "Use the AskUserQuestion tool to ask me which colour I prefer, with the \
+                          options red and blue, then tell me which one I chose.";
+
+fn ask_pty(ctx: &Ctx) -> Result<(), String> {
+    let session = new_session();
+    let result = pty_turn(ctx, "pty-ask", &ctx.workspace, &session, false, ASK_PROMPT, 1);
+    println!(
+        "ask hook posts: {}",
+        hooks(ctx)
+            .iter()
+            .filter(|b| b["tool_name"] == "AskUserQuestion" && b["hook_event_name"] == "PreToolUse")
+            .count()
+    );
+    result
+}
+
+/// Like [`answer_control`] (allow), but a `can_use_tool` for AskUserQuestion carries
+/// `updatedInput.answers` (question -> first option label), like the daemon's allow_reply.
+fn answer_ask_control(p: &mut StreamProc, msg: &Value) {
+    let request = &msg["request"];
+    if request["subtype"] != "can_use_tool" || request["tool_name"] != "AskUserQuestion" {
+        return answer_control(p, msg, true);
+    }
+    let questions = request["input"]["questions"].clone();
+    let mut answers = serde_json::Map::new();
+    for q in questions.as_array().into_iter().flatten() {
+        if let Some(text) = q["question"].as_str() {
+            let first = q["options"][0]["label"].as_str().unwrap_or("");
+            answers.insert(text.to_string(), json!(first));
+        }
+    }
+    println!(
+        "[{}] can_use_tool AskUserQuestion: answering {answers:?}",
+        p.label
+    );
+    let body = json!({
+        "behavior": "allow",
+        "updatedInput": { "questions": questions, "answers": answers },
+    });
+    p.send(&json!({ "type": "control_response", "response": {
+        "subtype": "success", "request_id": msg["request_id"].clone(), "response": body
+    } }));
 }
 
 fn remote(ctx: &Ctx) -> Result<(), String> {
@@ -854,24 +905,57 @@ fn pty_turn(
         }
     });
 
-    let mut trust_sent = false;
+    let prompts_before = hook_count(ctx, "UserPromptSubmit");
+    let settle = Duration::from_millis(600);
+    // (selection seen last, when it last changed)
+    let mut seen: (Option<bool>, Instant) = (None, Instant::now());
+    let mut accepted_at: Option<Instant> = None;
+    let mut typed = false;
     let start = Instant::now();
     let mut done = false;
+    let mut early_exit = None;
     while start.elapsed() < TURN_TIMEOUT {
-        if !trust_sent
-            && String::from_utf8_lossy(&screen.lock().unwrap())
-                .to_lowercase()
-                .contains("trust")
+        if let Ok(Some(status)) = child.try_wait() {
+            early_exit = Some(status);
+            break;
+        }
+        if accepted_at.is_none() {
+            let selection = claude::trust_dialog_selection(&screen.lock().unwrap());
+            if selection != seen.0 {
+                seen = (selection, Instant::now());
+            } else if let Some(yes) = selection
+                && seen.1.elapsed() >= settle
+            {
+                if yes {
+                    println!("[{label}] trust dialog: \"Yes\" selected, accepting");
+                    let _ = writer.write_all(claude::ENTER);
+                    accepted_at = Some(Instant::now());
+                } else {
+                    println!("[{label}] trust dialog: \"No\" selected, moving down");
+                    let _ = writer.write_all(claude::DOWN);
+                    seen.1 = Instant::now();
+                }
+            }
+        } else if !typed
+            && accepted_at.is_some_and(|t| t.elapsed() > Duration::from_secs(10))
+            && hook_count(ctx, "UserPromptSubmit") == prompts_before
         {
-            println!("[{label}] trust dialog shown: accepting");
+            println!("[{label}] no UserPromptSubmit after the trust dialog: typing the prompt");
+            let _ = writer.write_all(format!("\x1b[200~{prompt}\x1b[201~").as_bytes());
+            thread::sleep(Duration::from_millis(300));
             let _ = writer.write_all(b"\r");
-            trust_sent = true;
+            typed = true;
         }
         if hook_count(ctx, "Stop") >= stops {
             done = true;
             break;
         }
-        thread::sleep(Duration::from_millis(300));
+        thread::sleep(Duration::from_millis(100));
+    }
+    if let Some(status) = early_exit {
+        return Err(format!(
+            "[{label}] claude exited early ({status:?}) before the Stop hook (see pty-{label}.raw)"
+        ));
     }
     thread::sleep(Duration::from_secs(2));
     let _ = writer.write_all(b"/exit\r");
@@ -1003,6 +1087,18 @@ fn summarize(ctx: &Ctx) {
         "text_delta events: {deltas} (with some id field on the wrapper/event: {deltas_with_id}; \
          the wrapper's `uuid` is not a message id: check message_start's message.id in stream.jsonl)\n"
     ));
+    for line in read_jsonl(&ctx.out.join("stream.jsonl")) {
+        let msg = &line["msg"];
+        if line["dir"] == "out" && msg["type"] == "system" && msg["subtype"] == "init" {
+            let has = msg["tools"]
+                .as_array()
+                .is_some_and(|t| t.iter().any(|n| n == "AskUserQuestion"));
+            s.push_str(&format!(
+                "init tools [{}] contain AskUserQuestion: {has}\n",
+                line["proc"].as_str().unwrap_or("?")
+            ));
+        }
+    }
     s.push_str(&format!(
         "control_requests received: {control_requests:?}\n"
     ));
