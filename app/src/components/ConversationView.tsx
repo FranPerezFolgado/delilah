@@ -1,20 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Conversation, type Session } from "../api";
+import { api, type Conversation, type ConversationEntry, type Session } from "../api";
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
+import { ToolCard } from "./ToolCard";
 
 interface Props {
   session: Session;
   onOpenTerminal: () => void;
   onOpenTask: (key: string) => void;
   onReopen: () => void;
+  /** Opens a file in the editor (the path of an edit card). */
+  onOpenFile?: (path: string) => void;
+}
+
+const noop = () => {};
+
+/** Folds a response into what is on screen. Without a cursor it is everything; with one,
+ *  the stored entries (ids not starting with "t:") are replaced by the new set and the
+ *  transcript ones are upserted by id (a tool re-sent with its result replaces the earlier
+ *  one in place). The result is ordered by time, keeping the order of equal ones. */
+function merge(prev: ConversationEntry[], next: ConversationEntry[], incremental: boolean): ConversationEntry[] {
+  if (!incremental) return next;
+  const out = prev.filter((e) => e.id.startsWith("t:"));
+  for (const e of next) {
+    const i = e.id.startsWith("t:") ? out.findIndex((o) => o.id === e.id) : -1;
+    if (i >= 0) out[i] = e;
+    else out.push(e);
+  }
+  return out
+    .map((e, i) => [e, i] as const)
+    .sort(([a, i], [b, j]) => (a.at < b.at ? -1 : a.at > b.at ? 1 : i - j))
+    .map(([e]) => e);
 }
 
 /** An idea conversation without a terminal: messages, Claude's replies, questions as
  *  cards and a field to write. Sending is allowed while Claude works (it queues). */
-export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen }: Props) {
+export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen, onOpenFile }: Props) {
   const [conv, setConv] = useState<Conversation | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -25,14 +48,20 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
   // session, is ignored.
   const seq = useRef(0);
   const stick = useRef(true);
+  // Where the daemon left off; empty until the first answer.
+  const cursor = useRef<string | null>(null);
 
   const load = useCallback(() => {
     const mine = ++seq.current;
-    api.conversation(id).then(
+    const from = cursor.current;
+    (from ? api.conversation(id, from) : api.conversation(id)).then(
       (c) => {
         if (mine !== seq.current) return;
-        setConv(c);
+        cursor.current = c.cursor;
+        setConv((prev) => ({ ...c, entries: merge(prev?.entries ?? [], c.entries, !!from) }));
         setError(null);
+        // More transcript is waiting: take it without waiting for an event.
+        if (!c.complete) load();
       },
       (e) => {
         if (mine === seq.current) setError((e as Error).message);
@@ -41,6 +70,7 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
   }, [id]);
 
   useEffect(() => {
+    cursor.current = null;
     setConv(null);
     setError(null);
     stick.current = true;
@@ -86,7 +116,20 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
-        {conv && conv.entries.length === 0 && <div className="muted">{t("Cuéntale tu idea…")}</div>}
+        {conv && conv.entries.length === 0 && conv.transcript === "present" && session.conversation && (
+          <div className="muted">{t("Cuéntale tu idea…")}</div>
+        )}
+        {conv && conv.entries.length === 0 && conv.transcript === "pending" && (
+          <div className="muted">{t("Esperando la conversación de Claude…")}</div>
+        )}
+        {conv && conv.entries.length === 0 && conv.transcript === "missing" && (
+          <div className="conv-notice">
+            {t("No hay conversación que mostrar")}
+            <button className="btn" onClick={onOpenTerminal}>
+              {t("Abrir terminal")}
+            </button>
+          </div>
+        )}
         {conv?.entries.map((e) => {
           if (e.kind === "user") {
             return (
@@ -115,7 +158,14 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
               </div>
             );
           }
-          if (e.kind === "tool" || e.kind === "marker") return null; // WP-09 renders these
+          if (e.kind === "tool") return <ToolCard key={e.id} entry={e} sessionId={id} onOpenFile={onOpenFile ?? noop} />;
+          if (e.kind === "marker") {
+            return (
+              <div key={e.id} className="conv-marker muted">
+                {e.marker === "compacted" ? t("Conversación compactada") : t("Detenida")}
+              </div>
+            );
+          }
           const pending = e.outcome === "pending";
           return (
             <div key={e.id} className="conv-card">

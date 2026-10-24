@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task } from "../api";
+import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
@@ -78,15 +78,13 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   const [starting, setStarting] = useState<string | null>(null);
   // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
   const [mounted, setMounted] = useState<Set<string>>(() => new Set());
-  // Conversations whose terminal is on screen instead of the conversation view.
-  const [terminals, setTerminals] = useState<Set<string>>(() => new Set());
-  const showTerminal = (id: string, on: boolean) =>
-    setTerminals((cur) => {
-      const next = new Set(cur);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+  // Per Claude session, the view the user picked with the Chat / Terminal switch; without
+  // one, the task's setting decides (a project's sessions open in chat). Kept while the
+  // screen is open.
+  const [views, setViews] = useState<Map<string, ViewMode>>(() => new Map());
+  const viewOf = (s: Session): ViewMode =>
+    s.kind === "shell" ? "terminal" : (views.get(s.id) ?? (task?.view === "terminal" ? "terminal" : "chat"));
+  const showView = (id: string, v: ViewMode) => setViews((cur) => new Map(cur).set(id, v));
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
   // The PR tab: for a task with a workspace (its PR is coming) or with PRs already linked.
@@ -125,7 +123,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   shownRef.current = shown;
   const active = tab(shown);
   const shownSession = sessionOf(shown);
-  const shownConversation = project ? sessions.find((s) => s.id === shownSession && s.conversation) : undefined;
+  const shownClaude = sessions.find((s) => s.id === shownSession && s.kind !== "shell");
   if (shownSession && !mounted.has(shownSession)) setMounted(new Set(mounted).add(shownSession));
 
   // The live state of a file: the view's for the active one, the stored one otherwise.
@@ -531,6 +529,20 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                   )}
                 </span>
               )}
+              <select
+                className="input view-select"
+                aria-label={t("Vista")}
+                title={t("Vista")}
+                value={task.view === "terminal" ? "terminal" : "chat"}
+                onChange={(e) => {
+                  const v = e.target.value as ViewMode;
+                  setViews(new Map());
+                  api.updateTask(owner, { view: v }).then(onChanged, (err) => setError((err as Error).message));
+                }}
+              >
+                <option value="chat">Chat</option>
+                <option value="terminal">Terminal</option>
+              </select>
               <span className={`pill ${status.cls}`}>
                 <Icon name={status.icon} /> {statusLabel(task.status)}
               </span>
@@ -552,11 +564,6 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <h1 data-tauri-drag-region className="trunc">{project?.name}</h1>
             <span className="mono muted trunc" style={{ marginRight: "auto" }}>{project?.path}</span>
           </>
-        )}
-        {shownConversation && (
-          <button className="btn btn-ghost" onClick={() => showTerminal(shownConversation.id, !terminals.has(shownConversation.id))}>
-            {terminals.has(shownConversation.id) ? t("Ver conversación") : t("Ver terminal")}
-          </button>
         )}
         {hasWorkspace && (
           <button
@@ -612,6 +619,20 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                 onClose={close}
               />
             ))}
+            {shownClaude && (
+              <span className="segs view-switch" style={{ marginLeft: "auto", alignSelf: "center", marginRight: 8 }}>
+                {(["chat", "terminal"] as const).map((v) => (
+                  <button
+                    key={v}
+                    className={`seg ${viewOf(shownClaude) === v ? "on" : ""}`}
+                    aria-pressed={viewOf(shownClaude) === v}
+                    onClick={() => showView(shownClaude.id, v)}
+                  >
+                    {v === "chat" ? "Chat" : "Terminal"}
+                  </button>
+                ))}
+              </span>
+            )}
           </div>
 
           {shown === OVERVIEW && project && (
@@ -652,7 +673,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             .map((s) => {
               const on = shownSession === s.id;
               const sessionAsks = asks.filter((a) => a.session?.id === s.id && a.ask);
-              const asConversation = !!project && s.conversation && !terminals.has(s.id);
+              const asConversation = viewOf(s) === "chat" && s.kind !== "shell";
               const reopen = () =>
                 api
                   .reopenSession(s.id)
@@ -712,7 +733,8 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                     {asConversation ? (
                       <ConversationView
                         session={s}
-                        onOpenTerminal={() => showTerminal(s.id, true)}
+                        onOpenTerminal={() => showView(s.id, "terminal")}
+                        onOpenFile={(path) => void openFile(path)}
                         onOpenTask={(key) => onOpenTask?.(key)}
                         onReopen={reopen}
                       />

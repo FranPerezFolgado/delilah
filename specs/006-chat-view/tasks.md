@@ -146,7 +146,7 @@
   - `truncated` shows "Ver todo", which calls `api.toolDetail` and shows the full text;
   - a pending tool (`result: null`) shows a running state.
 - [X] T021 [US1] Implement T020 in `app/src/components/ToolCard.tsx`, with styles next to the existing `conv-*` styles and es/en strings in the i18n files.
-- [ ] T022 [US1] Write failing tests in `app/src/components/ConversationView.test.tsx`:
+- [X] T022 [US1] Write failing tests in `app/src/components/ConversationView.test.tsx`:
   - a non-idea task session renders user, claude, tool and marker entries in order;
   - on the `conversations` topic it calls `api.conversation(id, cursor)` and appends new entries, replacing stored ones;
   - `complete: false` triggers another fetch;
@@ -154,14 +154,14 @@
   - `needs_terminal` shows the "Claude espera en la terminal" notice with a button;
   - the view sticks to the bottom only when the user was at the bottom;
   - every existing idea-conversation test still passes.
-- [ ] T023 [US1] Implement T022 in `app/src/components/ConversationView.tsx`: an `onOpenFile(path)` prop wired from `TaskScreen.tsx` to the existing editor tab opening (FR-012), cursor state, merge, `ToolCard` for tool entries, markers, the notices, and `content-visibility: auto` on entries for long sessions.
-- [ ] T024 [US1] Write failing tests in `app/src/components/TaskScreen.test.tsx`:
+- [X] T023 [US1] Implement T022 in `app/src/components/ConversationView.tsx`: an `onOpenFile(path)` prop wired from `TaskScreen.tsx` to the existing editor tab opening (FR-012), cursor state, merge, `ToolCard` for tool entries, markers, the notices, and `content-visibility: auto` on entries for long sessions.
+- [X] T024 [US1] Write failing tests in `app/src/components/TaskScreen.test.tsx`:
   - a Claude task session opens in ConversationView when `task.view` is `chat`, and in TerminalPane when it is `terminal`;
   - the "Chat / Terminal" switch toggles a session either way and stays toggled while the screen is open;
   - a shell session always shows the terminal;
   - project sessions open in chat;
   - the task's view control calls `api.updateTask(key, {view})`.
-- [ ] T025 [US1] Implement T024 in `app/src/components/TaskScreen.tsx`: the starting view from `task.view`, the existing `terminals` set generalised into a per-session override for every Claude session, the switch in the session tab bar, and the view control in the task's settings area.
+- [X] T025 [US1] Implement T024 in `app/src/components/TaskScreen.tsx`: the starting view from `task.view`, the existing `terminals` set generalised into a per-session override for every Claude session, the switch in the session tab bar, and the view control in the task's settings area.
 - [X] T026 [P] [US1] Write failing tests and implement the "Vista" select ("Chat" / "Terminal", default Chat) in `app/src/components/NewTaskDialog.tsx` and its test file, sent as `view` on create.
 
 **Checkpoint**: US1 independently testable with quickstart "Chat view" 1–4 and 6. Contract review of `api.rs` ↔ `api.ts` for this phase.

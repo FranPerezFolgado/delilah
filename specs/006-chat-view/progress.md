@@ -13,12 +13,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 4 | 4B | verified | 1 | f357cc2 | |
 | WP-07 | 4 | 4B | verified | 1 | 2561634 | |
 | WP-05F | 4 | 4B | verified | 1 | 693ba38 | security fixes |
-| WP-06F | 4 | 4C | verified | 1 | | architecture fixes |
+| WP-06F | 4 | 4C | verified | 1 | f5680ab | architecture fixes |
 | WP-08 | 4 | 4C | verified | 1 | c3d82e0 | |
-| WP-09 | 4 | 4D | implementing | 0 | | |
+| WP-09 | 4 | 4D | verified | 1 | | |
 | WP-11 | 4 | 4D | verified | 1 | 5e51e60 | |
-| WP-10 | 4 | 4E | implementing | 0 | | run together with WP-09 (shared TaskScreen.tsx) |
-| WP-12 | 5 | 5A | pending | 0 | | |
+| WP-10 | 4 | 4E | verified | 1 | | run together with WP-09 (shared TaskScreen.tsx) |
+| WP-12 | 5 | 5A | implementing | 0 | | |
 | WP-13 | 5 | 5B | pending | 0 | | |
 | WP-14 | 6 | 6A | pending | 0 | | gated by spike |
 | WP-15 | 6 | 6B | pending | 0 | | gated by spike |

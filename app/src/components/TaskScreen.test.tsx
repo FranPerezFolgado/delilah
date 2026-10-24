@@ -8,11 +8,12 @@ import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -118,20 +119,54 @@ describe("TaskScreen conversation sessions", () => {
     expect(container.querySelector(".tterm .ebar")).toBeNull();
   });
 
-  it("toggles to the terminal and back", () => {
-    const { queryByTestId, getByText } = open(conv);
-    fireEvent.click(getByText("Ver terminal"));
+  it("toggles to the terminal and back with the Chat / Terminal switch", () => {
+    const { queryByTestId, getByRole } = open(conv);
+    fireEvent.click(getByRole("button", { name: "Terminal" }));
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
-    fireEvent.click(getByText("Ver conversación"));
+    fireEvent.click(getByRole("button", { name: "Chat" }));
     expect(queryByTestId("conversation")).not.toBeNull();
     expect(queryByTestId("terminal")).toBeNull();
   });
 
-  it("keeps the terminal for a plain session", () => {
+  it("opens a project session in chat even when it is not an idea conversation", () => {
     const { queryByTestId } = open({ ...conv, conversation: false });
+    expect(queryByTestId("conversation")).not.toBeNull();
+    expect(queryByTestId("terminal")).toBeNull();
+  });
+
+  it("always shows the terminal for a shell session, without the switch", () => {
+    const { queryByTestId, queryByRole } = open({ ...conv, kind: "shell", conversation: false });
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
+    expect(queryByRole("button", { name: "Chat" })).toBeNull();
+  });
+
+  const inTask = (s: Session, view?: "chat" | "terminal") => {
+    sessionFor("PROJ-1").active = sessionTab(s.id);
+    return render(
+      <TaskScreen owner="PROJ-1" task={{ ...task({ type: "running" }), view }} sessions={[{ ...s, task: "PROJ-1", conversation: false }]} asks={[]} askPosition="right" onChanged={() => {}} />,
+    );
+  };
+
+  it("starts a task session in chat or terminal from task.view, and the switch overrides it", () => {
+    const a = inTask(conv, "chat");
+    expect(a.queryByTestId("conversation")).not.toBeNull();
+    cleanup();
+    const b = inTask(conv, "terminal");
+    expect(b.queryByTestId("terminal")).not.toBeNull();
+    expect(b.queryByTestId("conversation")).toBeNull();
+    fireEvent.click(b.getByRole("button", { name: "Chat" }));
+    expect(b.queryByTestId("conversation")).not.toBeNull();
+    fireEvent.click(b.getByRole("button", { name: "Terminal" }));
+    expect(b.queryByTestId("terminal")).not.toBeNull();
+  });
+
+  it("changes the task's view with the view control", () => {
+    updateTask.mockClear();
+    const { getByLabelText } = inTask(conv, "chat");
+    fireEvent.change(getByLabelText("Vista"), { target: { value: "terminal" } });
+    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { view: "terminal" });
   });
 
   const pendingAsk = {
@@ -153,7 +188,7 @@ describe("TaskScreen conversation sessions", () => {
   it("has no ask-bar in conversation mode, but keeps it for a terminal session", () => {
     expect(openWithAsk(conv).container.querySelector(".ask-bar")).toBeNull();
     cleanup();
-    expect(openWithAsk({ ...conv, conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
+    expect(openWithAsk({ ...conv, kind: "shell", conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
   });
 
   it("shows a proposal ask beside the terminal and opens the created task", () => {
@@ -162,7 +197,7 @@ describe("TaskScreen conversation sessions", () => {
       ask: { id: "a2", questions: [], proposal: { title: "Nueva", brief: "b" } },
     } as unknown as InboxItem;
     const onOpenTask = vi.fn();
-    const { getByTestId, getByText, queryByTestId } = openWithAsk({ ...conv, conversation: false }, proposal, onOpenTask);
+    const { getByTestId, getByText, queryByTestId } = openWithAsk({ ...conv, kind: "shell", conversation: false }, proposal, onOpenTask);
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(getByTestId("askcard").getAttribute("data-proposal")).toBe("Nueva");
     fireEvent.click(getByText("open-created"));
