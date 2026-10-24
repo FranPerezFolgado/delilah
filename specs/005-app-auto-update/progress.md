@@ -16,10 +16,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 5 | 5A | done | 1 | ecd1ee8 | + phase 3 MEDIUM fixes; i18n option 2 (refresh buttons → "Refrescar", since "Recargar" = Reload exists) |
 | WP-10 | 6 | 6A | done | 1 | c9865fc | also shows+focuses main window before emit |
 | WP-11 | 6 | 6A | done | 1 | 5a85020 | + phase 5 P1/P2 (sessionsFailed, unavailable events) |
-| WP-12 | 7 | 7A | verified | 1 | 288e084 | restore-by-hand wording to check |
+| WP-12 | 7 | 7A | done | 1 | 288e084 | docs fixes D1–D5 applied in merge d376a3d |
 | WP-08F | 4 | fix | done | 1 | 0751083 | phase 4 HIGH fixes + F5–F7; --target skipped |
 | WP-08F2 | 4 | fix | done | 1 | 768623e | tauri-action draft writes untagged-* URLs → own latest.json |
-| WP-13 | 7 | 7B | pending | 0 | | |
+| WP-13 | 7 | 7B | done | 1 | 8fdaf75 | full checks green; T041 preview run not driven (no browser tools); merged main twice (d376a3d, 48892cc); bump 0.8.0 (main was 0.7.0) |
 
 T005 (updater key + secrets) is maintainer-only: left to the user.
 

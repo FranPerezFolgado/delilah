@@ -282,9 +282,9 @@
   - Include what was ruled out (Sparkle, a private repo with a token, a local-only script, a silent update).
 - [X] T038 [P] Update `docs/status.md` (built: auto-update; pending: the maintainer's T005 and the first tagged release) and `README.md` (a section "Actualizaciones": the notice, "Cuando terminen", the menu item, Settings, and that dev builds don't update).
 - [X] T039 [P] In `CLAUDE.md` "Versioning", change "Tagging and building stay as in the release steps" to point at `make release` and the tag workflow in docs/development.md. The per-branch bump rule stays.
-- [ ] T040 Version bump, **minor** (new user-facing feature): re-check the version on `main` (`git show main:Cargo.toml | grep ^version`), then bump from it, 0.4.0 → 0.5.0 if unchanged. Edit the four files (use `writeVersions` from `scripts/release/versions.mjs`), refresh the lockfiles (`cargo check --workspace`, `cargo check --manifest-path app/src-tauri/Cargo.toml`, `cd app && npm install --package-lock-only`), and commit them on their own as `chore: bump version to 0.5.0`.
+- [X] T040 Version bump, **minor** (new user-facing feature): re-check the version on `main` (`git show main:Cargo.toml | grep ^version`), then bump from it, 0.4.0 → 0.5.0 if unchanged. Edit the four files (use `writeVersions` from `scripts/release/versions.mjs`), refresh the lockfiles (`cargo check --workspace`, `cargo check --manifest-path app/src-tauri/Cargo.toml`, `cd app && npm install --package-lock-only`), and commit them on their own as `chore: bump version to 0.5.0`.
 - [ ] T041 Full checks: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cargo check --release --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`, `node --test scripts/release/`. Run quickstart "In a preview" (Settings section, DB copies with the fake `version` marker) with `scripts/preview.sh --fresh` in the background, and stop it by its process, never by name.
-- [ ] T042 PR description:
+- [X] T042 PR description:
   - the version level (minor, and why);
   - the maintainer's steps (T005, making the repo public, the first `make release` and the bootstrap install);
   - what couldn't be tried before a real tag (the workflow run, the in-app update, quarantine after the swap: quickstart steps 4–5).
