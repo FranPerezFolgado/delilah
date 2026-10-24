@@ -347,6 +347,19 @@ describe("NewTaskDialog branch field", () => {
     expect(run.mock.calls[0][0].branch).toBe("feature/mine");
   });
 
+  it("proposes and sends no branch for a backlog LIBRE task in a project without a template", async () => {
+    const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("feature/x"));
+    const run = vi.spyOn(api, "run").mockRejectedValue(new Error("x"));
+    const existing = { key: "LIBRE-3", title: "Arreglo", project: "app", in_checkout: true } as Task;
+    const { field, getByText } = setupBranch({ existing }, false);
+    await wait(1500);
+    expect(spy).not.toHaveBeenCalled();
+    expect(field().value).toBe("");
+    fireEvent.click(getByText("Start", { selector: "button" }));
+    await wait(0);
+    expect(run.mock.calls[0][0]).not.toHaveProperty("branch");
+  });
+
   it("keeps proposing for a free task when the project has a template", async () => {
     const spy = vi.spyOn(api, "proposeBranch").mockResolvedValue(proposal("fix/libre-1-algo"));
     const projects = [{ name: "app", kind: "repo", settings: { ...DEFAULT_PROJECT_SETTINGS, branch: "fix/{ticket}-{slug}" } } as Project];

@@ -18,7 +18,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-4F | 4 | 4F | done | 1 | 326194d | phase 4 review fixes (round 1): F1–F6 |
 | WP-11 | 5 | 5A | verified | 1 | 84d80e4 | CHK016, CHK033-035 left open |
 | WP-12 | 5 | 5B | verified | 1 | 10e3de5 | full checks green (tauri not run: sidecar binary missing in worktree); quickstart 1-5,7 pass via API, 6 partial (gh needs GitHub remote; stale fixture worktree), UI not checked (no browser) |
-| WP-M | 6 | 6A | implementing | 0 | | merge origin/main (185 commits), combine branch naming with decisions 37/49, migration → 0017 |
+| WP-M | 6 | 6A | verified | 1 | 0e2c006 | merge origin/main (185 commits), combine branch naming with decisions 37/49, migration → 0017 |
+| WP-MF | 6 | 6F | verified | 1 | PENDING | merge review fixes M1–M6; started_branchless column in 0017 |
 
 ## Open findings
 
@@ -63,3 +64,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | architecture (re-review) | MEDIUM | Detached ensure cut off at shutdown leaves branch created but unrecorded (self-heals on recover) | crates/delilah-daemon/src/branching.rs (guard_within) |
 | 4 | architecture (re-review) | LOW | remote-only branch counts as existing → checkout DWIM (fails with several remotes); timed-out guard calls queue on the lock | workspace.rs, branching.rs |
 | 5 | orchestrator | — | Base is 185 commits behind main: main shipped 0015_autopilot/0016_project_settings (our migration must be 0017) and decisions 37/49 (branch named at start by Claude/template) contradicting US2. User chose: merge and combine (free tasks without typed branch/template start branchless). | — |
+| 6 | migration | LOW | save_workspace INSERT OR REPLACE / update_backlog_task stale write still latent (see phase 2); no upgrade test from a populated 0016 DB | store_runs.rs:19, store.rs:128-176 |
+| 6 | contract | LOW | branchless Task omits `branch` (skip_serializing_if) rather than null; contracts/api.md wording; BLOCKING excludes branch/autopilot kinds | task.rs:356, api.ts:411 |
+| 6 | code-quality | LOW | Preview homes that applied the branch's old migration 15 fail sqlx check after the rename to 0017 → use preview.sh --fresh (note in PR) | migrations/0017 |
+| 6 | spec-compliance | LOW | Untested: backlog free task without template in NewTaskDialog | NewTaskDialog.tsx |

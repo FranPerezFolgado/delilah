@@ -51,7 +51,7 @@ the task is shown, and that restoring brings the old one back.
 
 ### User Story 2 - The branch is named after the analysis, not the key (Priority: P1)
 
-The user starts a free task. Its workspace is prepared on the project's base
+The user starts a free task (with no typed branch and no project template; with either, it starts on that branch and keeps it, and only its title follows the analysis; updated after the merge with main). Its workspace is prepared on the project's base
 branch without a branch of its own (a worktree, in worktree mode, under any folder
 name). The first analysis (specify) creates the task's branch, with the descriptive
 name of the analysis (the same `NNN-short-name` as its spec folder), and Delilah
@@ -95,7 +95,7 @@ archive it.
 
 ### Functional Requirements
 
-- **FR-001**: Starting a free task MUST NOT create a branch for it; its workspace (checkout or worktree) starts at the commit today's branch would have started from (the project folder's current `HEAD`). The worktree folder's name is not constrained.
+- **FR-001**: Starting a free task with no typed branch and no project branch template MUST NOT create a branch for it (updated after the merge with main: a typed or template branch is honoured as before, and such a task keeps it); its workspace (checkout or worktree) starts at the commit today's branch would have started from (the project folder's current `HEAD`). The worktree folder's name is not constrained.
 - **FR-002**: The task's branch MUST be created by the first analysis (specify), and Delilah MUST detect it and the analysis from the repo itself (spec folder and git state), in both checkout and worktree mode, for repo and parent projects.
 - **FR-002a**: When the first spec folder appears and the workspace still has no branch (the project has no branch hook, or it is off), Delilah MUST create the branch itself with the spec folder's name, carrying over the uncommitted spec files.
 - **FR-003**: On that detection, Delilah MUST set the task's title to the feature name of the analysis, keep the previous title, and show the change on every view of the task without a restart.
@@ -108,7 +108,7 @@ archive it.
 - **FR-010**: Name collisions with existing branches MUST be resolved with a free variant (a `-2`, `-3`… suffix), never by reusing or overwriting.
 - **FR-011**: Failing to apply the branch to a repo of the task MUST leave the task working where it was, and raise a Bandeja item with a retry; the title update does not depend on it.
 - **FR-012**: The task's key MUST stay the same: URLs, the CLI, the task's notes folder and its history keep using it.
-- **FR-013**: Tasks with a Jira key MUST keep today's behaviour (title from the ticket, branch `feature/<KEY>`).
+- **FR-013**: Tasks with a Jira key MUST keep today's behaviour (title from the ticket, branch `feature/<KEY>-<short-name>` since decision 37; updated after the merge with main).
 - **FR-014**: Tasks started before this feature MUST keep their current branch and folder.
 - **FR-015**: PR creation, archive, archive on merge, delete and the spec progress MUST work with the descriptive branch and folder exactly as they do today with the key-named ones.
 - **FR-016**: An analysis written while the daemon was down MUST be picked up on the next start.
@@ -124,14 +124,14 @@ archive it.
 ### Measurable Outcomes
 
 - **SC-001**: For 100 % of free tasks that go through specify, the title and branch match the analysis within 10 seconds of the spec being written.
-- **SC-002**: No new free task creates a `feature/LIBRE-N` branch.
+- **SC-002**: No new free task creates a `feature/LIBRE-N` branch (nor, unless typed or from a template, any branch at start; updated after the merge with main).
 - **SC-003**: Zero commits of a task land on the project's base branch because the branch did not exist yet.
 - **SC-004**: No session is interrupted by the branch appearing; every session of the task can still be reopened with its conversation.
 - **SC-005**: Opening a PR, archiving and deleting a renamed task succeed as often as for a task with a key-named branch (no new failure kinds in the fixtures).
 
 ## Assumptions
 
-- Only free tasks (`LIBRE-N`) change; Jira keys are meaningful and Jira tools link branches by key.
+- Only free tasks (`LIBRE-N`) change; Jira keys are meaningful and Jira tools link branches by key (their branch is `feature/<KEY>-<short-name>` since decision 37). A free task started with a typed branch or a template keeps that branch: only its title follows the analysis (updated after the merge with main).
 - The feature name is the title of the analysis' spec, as written there (it may be in English while the original title was in Spanish); no translation; the user can edit or restore it.
 - Delilah follows the repo, as it does for phases (decision 17): Spec Kit's own branch hook (`before_specify`) creates the branch inside the workspace, and Delilah reads what it left; it doesn't drive Spec Kit.
 - The worktree folder name doesn't matter to the user (decided 2026-10-23): it stays as today and never moves, so sessions are never disturbed.

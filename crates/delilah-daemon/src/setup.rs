@@ -292,6 +292,13 @@ async fn ready_and_launch(app: &AppState, key: &TaskKey) -> Result<(), LaunchErr
             return Err(e);
         }
     };
+    // What the setup created is not the agent's analysis.
+    if crate::branching::is_free(key)
+        && matches!(app.store.spec_dirs_at_start(key).await, Ok(Some(_)))
+        && let Err(e) = crate::branching::record_baseline(app, key, &ws).await
+    {
+        tracing::warn!(task = %key, "cannot update the spec folders at start: {e}");
+    }
     app.transition(key, Event::WorkspaceReady).await?;
     match start_agent(app, key, &ws, launch).await {
         Ok(()) => {

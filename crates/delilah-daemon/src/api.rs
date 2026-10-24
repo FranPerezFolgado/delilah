@@ -781,6 +781,11 @@ mod tests {
             .set_spec_dirs_at_start(&key, Some(&[]))
             .await
             .unwrap();
+        state
+            .store
+            .set_started_branchless(&key, branch.is_empty())
+            .await
+            .unwrap();
         root
     }
 

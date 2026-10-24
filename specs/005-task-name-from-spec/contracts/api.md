@@ -13,6 +13,7 @@ Changes to `crates/delilah-daemon/src/api.rs` ↔ `app/src/api.ts`. All additive
 - `title_source`: `"initial" | "spec" | "manual"`.
 - `previous_title`: `string | null`.
 - `branch_error`: `string | null`.
+- `branch`: omitted while the task has no branch (a branchless free task before its first analysis).
 
 ## `PATCH /api/v1/tasks/{key}`
 
@@ -26,7 +27,7 @@ Changes to `crates/delilah-daemon/src/api.rs` ↔ `app/src/api.ts`. All additive
 
 Retries creating/applying the task's branch.
 - 200 with the `Task` (its `branch_error` null on success, set on failure).
-- 404 unknown task; 409 the task isn't a free task, or already has its branch in every repo.
+- 404 unknown task; 409 the task isn't a free task, did not start branchless (it started on a typed or template branch), or already has its branch in every repo.
 
 ## `POST /hooks/claude/guard?task=&session=` (new, internal)
 

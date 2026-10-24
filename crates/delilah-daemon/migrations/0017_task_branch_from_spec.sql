@@ -7,3 +7,5 @@ ALTER TABLE tasks ADD COLUMN previous_title TEXT;
 ALTER TABLE tasks ADD COLUMN branch_error TEXT;
 -- JSON array of the spec folder names present at start (`label:name`); NULL for a workspace started with a branch.
 ALTER TABLE workspaces ADD COLUMN spec_dirs_at_start TEXT;
+-- 1 when the workspace started without a branch (a free task with nothing typed and no template): only those get the branch steps. A task that started on a branch keeps it.
+ALTER TABLE workspaces ADD COLUMN started_branchless INTEGER NOT NULL DEFAULT 0;

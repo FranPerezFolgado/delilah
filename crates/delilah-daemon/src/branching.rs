@@ -58,6 +58,36 @@ pub(crate) fn scan_spec_dirs(ws: &Workspace) -> Vec<String> {
         .collect()
 }
 
+/// Records the spec folders now in the workspace as the ones from before the task's
+/// first analysis, adding to any record already there (the setup command may have
+/// created some).
+pub(crate) async fn record_baseline(
+    app: &AppState,
+    key: &TaskKey,
+    ws: &Workspace,
+) -> Result<(), String> {
+    let scanned = ws.clone();
+    let mut dirs = tokio::task::spawn_blocking(move || scan_spec_dirs(&scanned))
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(before) = app
+        .store
+        .spec_dirs_at_start(key)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        for dir in before {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    app.store
+        .set_spec_dirs_at_start(key, Some(&dirs))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// The first spec folder (with a `spec.md`) of `ws` that is not in `at_start`: its
 /// repo's label and its path.
 fn find_new_spec(ws: &Workspace, at_start: &[String]) -> Option<(String, PathBuf)> {
@@ -107,6 +137,10 @@ async fn pending(app: &AppState, task: &Task) -> bool {
     }
     if task.title_source == TitleSource::Initial {
         return true;
+    }
+    // A task that started on a branch keeps it (decision 65): only the title is pending.
+    if !matches!(app.store.started_branchless(&task.key).await, Ok(true)) {
+        return false;
     }
     let Ok(Some((_, ws))) = app.store.workspace(&task.key).await else {
         return false;
@@ -301,6 +335,12 @@ pub(crate) async fn ensure_locked(
         Ok(_) => return Ok(None),
         Err(e) => return Err(e.to_string()),
     };
+    // A task that started on a branch (typed, template) is never moved off it.
+    match app.store.started_branchless(key).await {
+        Ok(true) => {}
+        Ok(false) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    }
     // A failure waits for the user's retry (or the guard), not for the next tool call.
     if why == Why::Activity && task.branch_error.is_some() {
         return Ok(None);
@@ -457,6 +497,9 @@ pub(crate) async fn guard(app: &AppState, key: &TaskKey, hook: &Value) -> Option
     if !is_free(key) {
         return None;
     }
+    if !matches!(app.store.started_branchless(key).await, Ok(true)) {
+        return None;
+    }
     let Ok(Some((_, ws))) = app.store.workspace(key).await else {
         return None;
     };
@@ -532,6 +575,11 @@ pub async fn retry(
         .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
     if !is_free(&key) {
         return Err(ApiError::conflict("only free tasks have a branch to retry"));
+    }
+    if !app.store.started_branchless(&key).await? {
+        return Err(ApiError::conflict(
+            "the task started on its own branch: there is nothing to retry",
+        ));
     }
     let settled = match app.store.workspace(&key).await? {
         Some((_, ws)) if ws.has_branch() && task.branch_error.is_none() => {
@@ -694,6 +742,7 @@ mod tests {
             .set_spec_dirs_at_start(key, Some(&dirs))
             .await
             .unwrap();
+        app.store.set_started_branchless(key, true).await.unwrap();
     }
 
     #[tokio::test]
@@ -1203,6 +1252,27 @@ mod tests {
             .unwrap();
         assert_eq!(ensure(&app, &old, Why::Retry).await, Ok(None));
         assert_eq!(ws_branch(&app, &old).await, "feature/x");
+    }
+
+    #[tokio::test]
+    async fn a_task_that_did_not_start_branchless_is_left_alone_by_every_step() {
+        let app = app().await;
+        let (key, root) = task_with(&app, ProjectKind::Repo, &[]).await;
+        record(&app, &key).await;
+        app.store.set_started_branchless(&key, false).await.unwrap();
+        spec(&root, "002-new", true);
+        for why in [Why::Activity, Why::Guard, Why::Retry] {
+            assert_eq!(ensure(&app, &key, why).await, Ok(None));
+        }
+        let edit = json!({ "tool_name": "Edit", "tool_input": { "file_path": "src/a.rs" } });
+        assert_eq!(guard(&app, &key, &edit).await, None);
+        // Only the title is still pending: the branch is not.
+        retitle(&app, &key).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(!pending(&app, &task).await);
+        let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        assert!(!ws.has_branch());
+        assert_eq!(task.branch_error, None);
     }
 
     #[tokio::test]

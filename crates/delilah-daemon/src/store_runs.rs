@@ -59,6 +59,31 @@ impl Store {
         Ok(())
     }
 
+    /// Marks a workspace that started without a branch (decision 65): the only kind that
+    /// gets the branch steps (adopt, create, guard) from its first analysis.
+    pub async fn set_started_branchless(
+        &self,
+        key: &TaskKey,
+        branchless: bool,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE workspaces SET started_branchless = ? WHERE task_key = ?")
+            .bind(branchless)
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Whether the workspace started without a branch (see [`Store::set_started_branchless`]).
+    pub async fn started_branchless(&self, key: &TaskKey) -> Result<bool, StoreError> {
+        let flag: Option<bool> =
+            sqlx::query_scalar("SELECT started_branchless FROM workspaces WHERE task_key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(flag.unwrap_or(false))
+    }
+
     /// The spec folders recorded at start (see [`Store::set_spec_dirs_at_start`]).
     pub async fn spec_dirs_at_start(
         &self,
@@ -186,6 +211,30 @@ mod tests {
             store.workspace(&key).await.unwrap(),
             Some(("/tmp/parent".into(), ws))
         );
+    }
+
+    #[tokio::test]
+    async fn the_started_branchless_mark_defaults_off_and_survives_the_branch() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("LIBRE-1");
+        store
+            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .await
+            .unwrap();
+        let ws = Workspace {
+            path: "/tmp/ws/LIBRE-1".into(),
+            branch: String::new(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        store
+            .save_workspace(&key, "/tmp/parent".as_ref(), &ws)
+            .await
+            .unwrap();
+        assert!(!store.started_branchless(&key).await.unwrap());
+        store.set_started_branchless(&key, true).await.unwrap();
+        store.set_workspace_branch(&key, "003-x").await.unwrap();
+        assert!(store.started_branchless(&key).await.unwrap());
     }
 
     #[tokio::test]

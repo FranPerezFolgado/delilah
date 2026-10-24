@@ -26,6 +26,9 @@ pub(crate) enum FinishStop {
     /// None of the task's repos has commits to open a PR with.
     NoCommits,
     NoWorkspace,
+    /// The task has no branch and none could be made (the reason, when there is one): a
+    /// PR needs one.
+    NoBranch(Option<String>),
     /// `gh` or the network failed: worth trying again later.
     OpenPr(ApiError),
     /// The autopilot's state cannot be written: worth trying again later.
@@ -47,6 +50,7 @@ impl FinishStop {
             Self::Blocked(_)
                 | Self::NoCommits
                 | Self::NoWorkspace
+                | Self::NoBranch(_)
                 | Self::Uncommitted(_)
                 | Self::GitStatus(_)
         )
@@ -68,6 +72,16 @@ impl FinishStop {
             Self::NoWorkspace => lang
                 .pick("la tarea no tiene workspace", "the task has no workspace")
                 .into(),
+            Self::NoBranch(reason) => {
+                let base = lang.pick(
+                    "la tarea no tiene rama y Delilah no ha podido crearla",
+                    "the task has no branch and Delilah could not create one",
+                );
+                match reason {
+                    Some(reason) => format!("{base}: {reason}"),
+                    None => base.into(),
+                }
+            }
             Self::OpenPr(e) => format!(
                 "{}: {}",
                 lang.pick("no puedo abrir la PR", "cannot open the PR"),
@@ -254,6 +268,20 @@ async fn uncommitted(app: &AppState, key: &TaskKey) -> Result<Vec<String>, Finis
     }
 }
 
+/// The task's workspace has a branch, making one first if it started without (decision
+/// 65). No workspace passes: the PR step reports that itself.
+async fn ensure_branch(app: &AppState, key: &TaskKey) -> Result<(), FinishStop> {
+    match app.store.workspace(key).await {
+        Ok(Some((_, ws))) if !ws.has_branch() => {}
+        _ => return Ok(()),
+    }
+    match crate::branching::ensure(app, key, crate::branching::Why::Guard).await {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(FinishStop::NoBranch(None)),
+        Err(reason) => Err(FinishStop::NoBranch(Some(reason))),
+    }
+}
+
 async fn run_finish(app: &AppState, key: &TaskKey, session: &str) -> Result<(), FinishStop> {
     let Ok(Some(task)) = app.store.get_task(key).await else {
         return Ok(());
@@ -281,6 +309,9 @@ async fn run_finish(app: &AppState, key: &TaskKey, session: &str) -> Result<(), 
         Outcome::Blocked { .. } if reopening => {}
         Outcome::Blocked { reason } => return Err(FinishStop::Blocked(reason)),
     }
+    // A free task that never got a branch (no spec folder to take it from, say) gets one
+    // from its title now; if it still has none, nothing is previewed or retried.
+    ensure_branch(app, key).await?;
     if !reopening {
         // Before anything is pushed: what the agent left uncommitted would not be in
         // the PR.
@@ -746,6 +777,82 @@ mod tests {
         finish(&app, &key, "rev-1").await;
         assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Paused);
         assert_not_retried(&app, &key, &gh).await;
+    }
+
+    /// A free task `LIBRE-1` whose workspace (the ready task's repo, detached) has no
+    /// branch; `branchless` says whether it started that way.
+    async fn branchless_ready(
+        gh: Arc<FakeGh>,
+        branchless: bool,
+    ) -> (AppState, TaskKey, crate::pr_testkit::TempDir) {
+        let (app, _, dir) = ready_task(gh, None).await;
+        let ws_dir = dir.path().join("ws");
+        git_in(&ws_dir, &["checkout", "-q", "--detach"]);
+        let key = TaskKey::new("LIBRE-1");
+        let mut t = Task::new(key.clone(), "Idea", "feature");
+        t.saving_mode = true;
+        t.autopilot = Some(Autopilot {
+            review_session: Some("rev-1".into()),
+            ..running()
+        });
+        app.store.create_task(&t).await.unwrap();
+        let ws = delilah_git::Workspace {
+            path: ws_dir.clone(),
+            branch: String::new(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store.save_workspace(&key, &ws_dir, &ws).await.unwrap();
+        app.store
+            .set_spec_dirs_at_start(&key, Some(&[]))
+            .await
+            .unwrap();
+        app.store
+            .set_started_branchless(&key, branchless)
+            .await
+            .unwrap();
+        write_outcome(&app, &key, r#"{"outcome":"ready"}"#);
+        (app, key, dir)
+    }
+
+    #[tokio::test]
+    async fn a_branchless_task_gets_its_branch_from_the_title_before_the_pr() {
+        let gh = gh("[]");
+        let (app, key, _dir) = branchless_ready(gh.clone(), true).await;
+        finish(&app, &key, "rev-1").await;
+        let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        assert_eq!(ws.branch, "idea");
+        assert_eq!(creates(&gh).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_task_that_still_has_no_branch_stops_before_the_preview_and_any_pr() {
+        let gh = gh("[]");
+        // Not started branchless: Delilah must not create one for it.
+        let (mut app, key, _dir) = branchless_ready(gh.clone(), false).await;
+        with_preview(&mut app, "echo http://localhost:1", 500).await;
+        finish(&app, &key, "rev-1").await;
+        assert!(creates(&gh).is_empty());
+        assert!(app.previews.view(key.as_str()).is_none());
+        assert_eq!(autopilot_of(&app, &key).await.state, AutopilotState::Paused);
+        assert_not_retried(&app, &key, &gh).await;
+        let reason = autopilot_of(&app, &key).await.reason.unwrap();
+        assert!(reason.contains("no tiene rama"), "{reason}");
+    }
+
+    #[test]
+    fn a_missing_branch_is_terminal_and_says_so() {
+        let stop = FinishStop::NoBranch(Some("disk full".into()));
+        assert!(stop.is_terminal());
+        assert_eq!(
+            stop.describe(Lang::En),
+            "the task has no branch and Delilah could not create one: disk full"
+        );
+        assert!(
+            FinishStop::NoBranch(None)
+                .describe(Lang::Es)
+                .contains("rama")
+        );
     }
 
     fn failing_create() -> Arc<FakeGh> {

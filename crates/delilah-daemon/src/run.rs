@@ -68,8 +68,9 @@ pub struct RunRequest {
     /// `parent` projects only: the submodules the task touches.
     #[serde(default)]
     pub submodules: Vec<String>,
-    /// Defaults to the project's branch template if it has one, else to a name Claude
-    /// proposes from the title, as `feature/…`; always normalised and made unique.
+    /// Defaults to the project's branch template if it has one; else a free task starts
+    /// without a branch (decision 65) and a Jira task gets a name Claude proposes from
+    /// the title, as `feature/KEY-…`. Always normalised and made unique.
     pub branch: Option<String>,
     /// Defaults to `/feature <key>` for the `feature` workflow (`/feature <title>`
     /// for a free task).
@@ -252,7 +253,8 @@ pub async fn start_run(
         .as_deref()
         .map(str::trim)
         .is_some_and(|b| !b.is_empty());
-    let branch = match crate::branching::starts_branchless(&project, &key, typed) {
+    let branchless = crate::branching::starts_branchless(&project, &key, typed);
+    let branch = match branchless {
         true => None,
         false => Some(
             crate::branch_name::for_start(
@@ -388,14 +390,6 @@ pub async fn start_run(
         }
     };
     app.store.save_workspace(&key, &project.path, &ws).await?;
-    if crate::branching::is_free(&key) {
-        // What the first analysis adds is told apart from what was already there.
-        let scanned = ws.clone();
-        let dirs = tokio::task::spawn_blocking(move || crate::branching::scan_spec_dirs(&scanned))
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-        app.store.set_spec_dirs_at_start(&key, Some(&dirs)).await?;
-    }
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
@@ -412,7 +406,10 @@ pub async fn start_run(
     // A new worktree gets the shared entries and then the setup; the project's own
     // checkout gets neither.
     let setup = match previous {
-        Some(_) => None,
+        Some(_) => {
+            record_start_state(&app, &key, &ws, branchless).await?;
+            None
+        }
         None => {
             let (checkout, worktree) = (project.path.clone(), ws.path.clone());
             let shared = project.settings.shared.clone();
@@ -422,6 +419,7 @@ pub async fn start_run(
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
             log_share_notes(&app, &key, &notes);
+            record_start_state(&app, &key, &ws, branchless).await?;
             project
                 .settings
                 .setup
@@ -454,6 +452,26 @@ pub async fn start_run(
         .await?
         .expect("task was just created");
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// What a free task's first analysis is told apart from: the spec folders present at
+/// start (taken after the shared entries are linked, so a shared or generated folder
+/// does not look new; the setup adds to it when it ends), and whether it started
+/// without a branch. Nothing for a Jira task.
+async fn record_start_state(
+    app: &AppState,
+    key: &TaskKey,
+    ws: &delilah_git::Workspace,
+    branchless: bool,
+) -> Result<(), ApiError> {
+    if !crate::branching::is_free(key) {
+        return Ok(());
+    }
+    crate::branching::record_baseline(app, key, ws)
+        .await
+        .map_err(ApiError::internal)?;
+    app.store.set_started_branchless(key, branchless).await?;
+    Ok(())
 }
 
 /// One line per shared entry in the task's `workspace.log` (only if there were any).
@@ -1308,6 +1326,57 @@ mod tests {
         assert_eq!(started(&app, req).await, "work/task-branch-names");
     }
 
+    /// A free task that started ON a branch (typed or template) keeps main's behaviour
+    /// for it: the first analysis renames the task but nothing moves or creates a branch.
+    #[tokio::test]
+    async fn a_free_task_started_on_a_branch_is_retitled_but_never_branched() {
+        for typed in [true, false] {
+            let (app, _) = repo_app(NAMES_IT).await;
+            let mut req = run("");
+            req.title = "Nombres de rama".into();
+            req.free = true;
+            if typed {
+                req.branch = Some("feature/mine".into());
+            } else {
+                let settings = delilah_core::ProjectSettings {
+                    branch: Some("work/{slug}".into()),
+                    ..Default::default()
+                };
+                app.store
+                    .set_project_settings("repo", &settings)
+                    .await
+                    .unwrap();
+            }
+            let branch = started(&app, req).await;
+            let key = TaskKey::new("LIBRE-1");
+            let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+            // What Spec Kit's hook does: its own branch and a spec folder.
+            git(&ws.path, &["checkout", "-q", "-b", "006-x"]);
+            let folder = ws.path.join("specs/006-x");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(
+                folder.join("spec.md"),
+                "# Feature Specification: Real name\n",
+            )
+            .unwrap();
+            let task = app.store.get_task(&key).await.unwrap().unwrap();
+            crate::branching::recover(&app, &task).await;
+            assert_eq!(
+                crate::branching::ensure(&app, &key, crate::branching::Why::Guard).await,
+                Ok(None)
+            );
+            let task = app.store.get_task(&key).await.unwrap().unwrap();
+            assert_eq!(task.title, "Real name", "typed={typed}");
+            assert_eq!(task.branch_error, None);
+            let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+            assert_eq!(ws.branch, branch, "typed={typed}");
+            // The guard lets edits through: the task has its branch.
+            let edit = serde_json::json!({ "tool_name": "Edit", "tool_input": { "file_path": "src/a.rs" } });
+            assert_eq!(crate::branching::guard(&app, &key, &edit).await, None);
+            assert_eq!(git(&ws.path, &["branch", "--show-current"]), "006-x");
+        }
+    }
+
     /// Precedence at start, free task with neither: no branch at all.
     #[tokio::test]
     async fn a_free_task_with_neither_starts_without_a_branch() {
@@ -1841,7 +1910,8 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
-            claude_bin: "claude".into(),
+            // A failing one-shot: the Jira task is named from its title, never by a real Claude.
+            claude_bin: "/usr/bin/false".into(),
             agent_program: Some(fake),
             ..crate::config::Config::test_defaults()
         };
@@ -1949,7 +2019,7 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
-            claude_bin: "claude".into(),
+            claude_bin: "/usr/bin/false".into(),
             agent_program: None,
             ..crate::config::Config::test_defaults()
         };
@@ -2143,6 +2213,77 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].kind, SessionKind::Setup);
         let _ = live[0].pty.kill();
+    }
+
+    /// Waits for `key` to leave `preparing-workspace` (its setup ended).
+    async fn wait_for_setup(app: &AppState, key: &str) {
+        for _ in 0..200 {
+            if status_of(app, key).await != TaskStatus::PreparingWorkspace {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("the setup of {key} did not end");
+    }
+
+    /// After the start: the first analysis finds no new folder, so the task keeps its
+    /// title and stays without a branch.
+    async fn assert_nothing_taken(app: &AppState, key: &str) {
+        let key = TaskKey::new(key);
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        crate::branching::recover(app, &task).await;
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.title, "T");
+        assert_eq!(task.branch_error, None);
+        let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        assert_eq!(ws.branch, "");
+    }
+
+    #[tokio::test]
+    async fn a_shared_specs_folder_is_not_the_first_analysis() {
+        let mut shared = settings(None);
+        shared.shared = vec![delilah_core::SharedEntry {
+            path: "specs".into(),
+            mode: None,
+        }];
+        let (app, repo) = settings_app(shared).await;
+        let old = repo.join("specs/001-old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("spec.md"), "# Feature Specification: Old\n").unwrap();
+        let exclude = repo.join(".git/info/exclude");
+        let text = std::fs::read_to_string(&exclude).unwrap();
+        std::fs::write(&exclude, format!("{text}specs\n")).unwrap();
+        let _ = start_run(State(app.clone()), Json(request("LIBRE-1", false)))
+            .await
+            .ok()
+            .expect("the run starts");
+        let at_start = app
+            .store
+            .spec_dirs_at_start(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(at_start, vec![".:001-old".to_string()]);
+        assert_nothing_taken(&app, "LIBRE-1").await;
+    }
+
+    #[tokio::test]
+    async fn a_setup_that_creates_spec_folders_is_not_the_first_analysis() {
+        let setup = "mkdir -p specs/x && printf '# Feature Specification: X\\n' > specs/x/spec.md";
+        let (app, _repo) = settings_app(settings(Some(setup))).await;
+        let _ = start_run(State(app.clone()), Json(request("LIBRE-1", false)))
+            .await
+            .ok()
+            .expect("the run starts");
+        wait_for_setup(&app, "LIBRE-1").await;
+        let at_start = app
+            .store
+            .spec_dirs_at_start(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(at_start, vec![".:x".to_string()]);
+        assert_nothing_taken(&app, "LIBRE-1").await;
     }
 
     #[tokio::test]
