@@ -83,7 +83,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   // screen is open.
   const [views, setViews] = useState<Map<string, ViewMode>>(() => new Map());
   const viewOf = (s: Session): ViewMode =>
-    s.kind === "shell" ? "terminal" : (views.get(s.id) ?? (task?.view === "terminal" ? "terminal" : "chat"));
+    s.kind === "shell" ? "terminal" : s.runtime === "stream" ? "chat" : (views.get(s.id) ?? (task?.view === "terminal" ? "terminal" : "chat"));
   const showView = (id: string, v: ViewMode) => setViews((cur) => new Map(cur).set(id, v));
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
@@ -515,6 +515,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
+              {task.chat_mode && <span className="pill chat-mode-pill">{t("experimental: modo chat")}</span>}
               <PreviewControl taskKey={owner} project={task.project} status={task.status} />
               {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
                 <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
@@ -626,6 +627,8 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                     key={v}
                     className={`seg ${viewOf(shownClaude) === v ? "on" : ""}`}
                     aria-pressed={viewOf(shownClaude) === v}
+                    disabled={v === "terminal" && shownClaude.runtime === "stream"}
+                    title={v === "terminal" && shownClaude.runtime === "stream" ? t("Esta sesión va en modo chat: no hay terminal") : undefined}
                     onClick={() => showView(shownClaude.id, v)}
                   >
                     {v === "chat" ? "Chat" : "Terminal"}

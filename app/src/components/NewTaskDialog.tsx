@@ -54,6 +54,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
   const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
+  // Experimental: the agent runs headless, with no terminal.
+  const [chatMode, setChatMode] = useState(!!existing?.chat_mode);
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -168,8 +170,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
 
   const toggle = (path: string) => setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (e: React.FormEvent | null, chat = chatMode) => {
+    e?.preventDefault();
     if (!project) return;
     setBusy(true);
     setError(null);
@@ -194,6 +196,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
         view,
+        ...(chat || existing ? { chat_mode: chat } : {}),
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(branch.trim() ? { branch: "feature/" + branch.trim() } : {}),
@@ -223,6 +226,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
         view,
+        ...(chatMode ? { chat_mode: true } : {}),
       });
       onSaved(task);
     } catch (err) {
@@ -325,6 +329,17 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 </select>
               </label>
             )}
+            {origin !== "claude" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={chatMode} onChange={(e) => setChatMode(e.target.checked)} />
+                <span>{t("Modo chat (experimental)")}</span>
+              </label>
+            )}
+            {origin !== "claude" && chatMode && (
+              <div className="muted" style={{ fontSize: 12 }}>
+                {t("Sin terminal, y el agente no puede pedir permisos: solo usa las herramientas permitidas")}
+              </div>
+            )}
             {origin !== "claude" && autopilotAllowed && (
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
                 <input
@@ -397,6 +412,19 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           </>
         )}
         {error && <div className="error selectable">{error}</div>}
+        {error && chatMode && error.includes("chat mode could not start") && (
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              setChatMode(false);
+              submit(null, false);
+            }}
+          >
+            {t("Iniciar en terminal")}
+          </button>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>{t("Cancelar")}</button>
           {origin !== "claude" && !fromSession && !existing && (

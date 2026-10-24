@@ -101,6 +101,11 @@ describe("TaskScreen header phase", () => {
     expect(head(task({ type: "done" }), spec).querySelector(".phase-pill")).toBeNull();
   });
 
+  it("marks a chat-mode task as experimental", () => {
+    expect(head({ ...task({ type: "running" }), chat_mode: true }).textContent).toContain("experimental: modo chat");
+    expect(head(task({ type: "running" })).textContent).not.toContain("experimental: modo chat");
+  });
+
   it("shows no phase pill on the project screen", () => {
     expect(head().querySelector(".phase-pill")).toBeNull();
   });
@@ -139,6 +144,16 @@ describe("TaskScreen conversation sessions", () => {
     fireEvent.click(container.querySelector(".tool-head")!);
     fireEvent.click(getByText("Abrir en el editor"));
     expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
+  });
+
+  it("disables the Terminal switch with a tooltip on a stream session", () => {
+    const { queryByTestId, getByRole } = open({ ...conv, runtime: "stream" });
+    const btn = getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toBe("Esta sesión va en modo chat: no hay terminal");
+    fireEvent.click(btn);
+    expect(queryByTestId("terminal")).toBeNull();
+    expect(queryByTestId("conversation")).not.toBeNull();
   });
 
   it("toggles to the terminal and back with the Chat / Terminal switch", () => {

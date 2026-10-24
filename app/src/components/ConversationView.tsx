@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  liveSocket,
   type Conversation,
   type ConversationEntry,
   type Session,
@@ -101,13 +102,66 @@ export function ConversationView({
     stick.current = true;
   }, [id]);
 
+  // Chat mode (stream runtime): the text of the messages being written, by message id, from
+  // the live socket. A bubble goes away once its transcript entry is in the conversation.
+  // Entries do not carry the message id (their ids are `t:<line uuid>:<n>`), so besides an
+  // id of the form `t:<message id>:<n>` a finished bubble is replaced by the first claude
+  // entry that was not on screen when its `done` arrived.
+  const [writing, setWriting] = useState<Map<string, { text: string; seen?: Set<string> }>>(() => new Map());
+  const claudeIds = useRef<Set<string>>(new Set());
+  claudeIds.current = new Set((conv?.entries ?? []).filter((e) => e.kind === "claude").map((e) => e.id));
+  const stream = session.runtime === "stream";
+  useEffect(() => {
+    setWriting(new Map());
+    if (!stream) return;
+    const ws = liveSocket(id);
+    ws.onmessage = (ev) => {
+      let m: { message?: string; text?: string; done?: boolean };
+      try {
+        m = JSON.parse(String(ev.data));
+      } catch {
+        return;
+      }
+      const msg = m.message;
+      if (!msg) return;
+      setWriting((cur) => {
+        const next = new Map(cur);
+        const old = next.get(msg);
+        if (m.done) {
+          if (old) next.set(msg, { ...old, seen: new Set(claudeIds.current) });
+          load();
+        } else if (m.text) {
+          next.set(msg, { text: (old?.text ?? "") + m.text });
+        }
+        return next;
+      });
+    };
+    return () => {
+      ws.onmessage = null;
+      ws.close();
+    };
+  }, [id, stream, load]);
+  useEffect(() => {
+    setWriting((cur) => {
+      let next: Map<string, { text: string; seen?: Set<string> }> | null = null;
+      for (const [msg, w] of cur) {
+        const arrived = (conv?.entries ?? []).some(
+          (e) => e.kind === "claude" && (e.id.startsWith(`t:${msg}:`) || (w.seen && !w.seen.has(e.id))),
+        );
+        if (arrived) (next ??= new Map(cur)).delete(msg);
+      }
+      return next ?? cur;
+    });
+  }, [conv]);
+
   useEffect(() => {
     load();
     const offs = [on("conversations", load), on("inbox", load)];
     return () => offs.forEach((off) => off());
   }, [load]);
 
-  const count = conv?.entries.length ?? 0;
+  const count = (conv?.entries.length ?? 0) + writing.size;
+
   useEffect(() => {
     const el = log.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
@@ -262,6 +316,11 @@ export function ConversationView({
             </div>
           );
         })}
+        {[...writing].map(([msg, w]) => (
+          <div key={`w:${msg}`} className="conv-msg conv-claude conv-writing selectable" data-testid="writing">
+            <Markdown text={w.text} remoteImages="click" />
+          </div>
+        ))}
       </div>
       {working && conv?.activity && (
         <div className="conv-activity muted">{conv.activity}</div>

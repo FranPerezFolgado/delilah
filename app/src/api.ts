@@ -61,6 +61,10 @@ export interface Task {
   autopilot?: Autopilot | null;
   /** How the task's agent is shown: the chat view or its terminal. */
   view?: TaskView;
+  /** Experimental: the agent runs headless (stream-json) with no terminal. */
+  chat_mode?: boolean;
+  /** Tools a chat-mode agent may use without asking. */
+  allowed_tools?: string[];
   handoff: Handoff | null;
 }
 
@@ -112,6 +116,8 @@ export interface NewBacklogTask {
   /** Implies saving mode. */
   autopilot?: boolean;
   view?: TaskView;
+  /** Experimental chat mode: no terminal. */
+  chat_mode?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -143,6 +149,8 @@ export interface RunRequest {
   /** Implies saving mode. */
   autopilot?: boolean;
   view?: TaskView;
+  /** Experimental chat mode: no terminal. */
+  chat_mode?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
@@ -245,6 +253,8 @@ export interface Session {
   conversation: boolean;
   /** The saving-mode step it works on, if any. */
   step: Step | null;
+  /** "stream": a chat-mode session with no terminal. Absent: "pty". */
+  runtime?: "pty" | "stream";
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -660,3 +670,6 @@ export function ago(iso: string): string {
 }
 
 export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+
+/** The live text of a chat-mode session: deltas of the message being written, then `done`. */
+export const liveSocket = (sessionId: string) => new WebSocket(`${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/live`);

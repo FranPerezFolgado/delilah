@@ -450,6 +450,7 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .conv-msg { max-width: 80%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--bd); background: var(--panel); white-space: pre-wrap; }
 .conv-user { align-self: flex-end; background: var(--accbg); border-color: var(--acc); }
 .conv-claude { align-self: flex-start; white-space: normal; }
+.conv-writing { opacity: .85; }
 .conv-card { align-self: stretch; border: 1px solid var(--bd); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
 .conv-log > * { content-visibility: auto; contain-intrinsic-size: auto 48px; }
 .conv-marker { align-self: center; font-size: 11.5px; }

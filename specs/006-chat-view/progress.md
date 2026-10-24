@@ -30,7 +30,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-18 | 7 | 7B | implementing | 0 | | go (decision 49) |
 | WP-19 | 7 | 7C | pending | 0 | | go (decision 49) |
 | WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
-| WP-21 | 7 | 7D | implementing | 0 | | go (decision 49) |
+| WP-21 | 7 | 7D | verified | 1 | | go (decision 49) |
 | WP-22 | 8 | 8A | pending | 0 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |

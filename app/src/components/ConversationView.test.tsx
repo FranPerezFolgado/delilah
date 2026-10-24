@@ -395,3 +395,46 @@ describe("ConversationView", () => {
     expect([...container.querySelector(".conv-log")!.children].map((k) => k.textContent)).toEqual(["a", "b"]);
   });
 });
+
+describe("ConversationView chat mode", () => {
+  class FakeSocket {
+    static last: FakeSocket;
+    onmessage: ((ev: { data: string }) => void) | null = null;
+    close = vi.fn();
+    constructor(public url: string) {
+      FakeSocket.last = this;
+    }
+    push(m: object) {
+      act(() => this.onmessage?.({ data: JSON.stringify(m) }));
+    }
+  }
+  beforeEach(() => vi.stubGlobal("WebSocket", FakeSocket));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("grows a writing bubble from deltas and replaces it with the transcript entry", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    const { findByText, queryByTestId, getByTestId } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(FakeSocket.last.url).toMatch(/\/api\/v1\/sessions\/s1\/live$/);
+    FakeSocket.last.push({ message: "m1", text: "Hel" });
+    expect(getByTestId("writing").textContent).toBe("Hel");
+    FakeSocket.last.push({ message: "m1", text: "lo" });
+    expect(getByTestId("writing").textContent).toBe("Hello");
+    FakeSocket.last.push({ message: "m1", done: true });
+    expect(queryByTestId("writing")).not.toBeNull();
+    spy.mockResolvedValue(conv([at("t:uuid1:0", "2025-01-01T00:00:00Z", "Hello")], { cursor: "1" }));
+    emit("conversations");
+    await findByText("Hello", { selector: ".conv-claude:not(.conv-writing) *" });
+    await waitFor(() => expect(queryByTestId("writing")).toBeNull());
+  });
+
+  it("does not open the socket on a pty session", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    FakeSocket.last = undefined as never;
+    render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    expect(FakeSocket.last).toBeUndefined();
+  });
+});
+
