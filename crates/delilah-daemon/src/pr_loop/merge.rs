@@ -161,9 +161,12 @@ fn verify(
     opts: &GitOptions,
 ) -> Result<HashMap<String, String>, String> {
     let repos = ws.repos();
+    // All the fetches together, like a task's start.
+    let deadline = delilah_git::Deadline::after(delilah_git::NETWORK_LIMIT);
     for (label, dir) in &repos {
         if heads.contains_key(label) {
-            delilah_git::fetch(dir, opts).map_err(|e| format!("fetching {label}: {e}"))?;
+            delilah_git::fetch(dir, opts, deadline)
+                .map_err(|e| format!("fetching {label}: {e}"))?;
         }
     }
     delilah_git::check_merged(ws, heads, opts).map_err(|e| e.to_string())?;

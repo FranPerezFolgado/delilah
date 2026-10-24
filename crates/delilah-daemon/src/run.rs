@@ -416,7 +416,7 @@ pub async fn start_run(
         allow_file_protocol: app.config.allow_file_protocol,
     };
     let root = project.path.clone();
-    let deadline = Deadline::after(Duration::from_secs(30));
+    let deadline = Deadline::after(delilah_git::NETWORK_LIMIT);
     let created = tokio::task::spawn_blocking(move || {
         if in_checkout {
             delilah_git::use_checkout(&root, &spec, &opts, deadline)

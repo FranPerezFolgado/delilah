@@ -5,7 +5,7 @@ use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
 use crate::base::{FetchOutcome, RepoBase, prepare_base};
-use crate::command::{Deadline, GitError, GitOptions, git, git_code};
+use crate::command::{Deadline, GitError, GitOptions, NETWORK_LIMIT, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Submodule {
@@ -735,12 +735,13 @@ pub fn free_branch(dirs: &[PathBuf], base: &str, opts: &GitOptions) -> Result<St
     Ok(format!("{base}-{secs}"))
 }
 
-/// `git fetch --quiet origin`.
-pub fn fetch(dir: &Path, opts: &GitOptions) -> Result<(), GitError> {
-    // Shares the per-repo lock with `prepare_base`, so they never fetch at once.
-    let lock = crate::base::repo_lock(dir);
-    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-    git(dir, &["fetch", "--quiet", "origin"], opts).map(|_| ())
+/// Fetches `origin`, giving up at `deadline`. The error is git's stderr, or why it
+/// did not run.
+pub fn fetch(dir: &Path, opts: &GitOptions, deadline: Deadline) -> Result<(), String> {
+    // The same lock and limits as `prepare_base`, so they never fetch at once and a
+    // hung remote holds neither for long. Never reuses an earlier fetch: a merge check
+    // must see the remote as it is now.
+    crate::base::locked_fetch(dir, opts, deadline, std::time::Duration::ZERO)
 }
 
 /// Fails, touching nothing, if archiving after a merged PR would lose work: uncommitted
@@ -780,7 +781,13 @@ pub fn check_merged(
         let mut code = git_code(&dir, &args, opts)?;
         if code > 1 {
             // Probably a head this clone has not fetched yet.
-            fetch(&dir, opts)?;
+            fetch(&dir, opts, Deadline::after(NETWORK_LIMIT)).map_err(|stderr| {
+                GitError::Command {
+                    dir: dir.clone(),
+                    args: "fetch origin".into(),
+                    stderr,
+                }
+            })?;
             code = git_code(&dir, &args, opts)?;
         }
         match code {

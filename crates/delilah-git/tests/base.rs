@@ -121,7 +121,8 @@ fn fetch_and_prepare_do_not_clash() {
     let fx = Fixture::new();
     let repo = fx.repo();
     let r = repo.clone();
-    let t = std::thread::spawn(move || fetch(&r, &opts()));
+    let t =
+        std::thread::spawn(move || fetch(&r, &opts(), Deadline::after(Duration::from_secs(30))));
     let b = prepare_base(&repo, "svc", &opts(), dl());
     assert_eq!(b.fetch, FetchOutcome::Fetched);
     t.join().unwrap().unwrap();

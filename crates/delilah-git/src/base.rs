@@ -5,10 +5,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::command::{Deadline, GitError, GitOptions, git, git_with_timeout};
+use crate::command::{Deadline, GitError, GitOptions, git_with_timeout};
 
 /// A fetch that finished less ago than this is reused by the next caller.
 const FRESH_FOR: Duration = Duration::from_secs(5);
+
+/// The limit of each local read (no network). Its own, not the start's deadline: a
+/// fetch that used that up must still find the last known `origin`.
+fn local() -> Deadline {
+    Deadline::after(Duration::from_secs(5))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchOutcome {
@@ -31,10 +37,20 @@ pub struct RepoBase {
 
 type RepoLock = Arc<Mutex<Option<Instant>>>;
 
-/// One lock per repo, process-wide; the value is when it last fetched.
-pub(crate) fn repo_lock(dir: &Path) -> RepoLock {
+/// One lock per repo, process-wide; the value is when it last fetched. Keyed on the
+/// repo's common git dir, so a worktree and its main checkout (which share `origin`'s
+/// refs) share it too. The map holds one small entry per repo ever fetched.
+fn repo_lock(dir: &Path, opts: &GitOptions) -> RepoLock {
     static FETCHING: OnceLock<Mutex<HashMap<PathBuf, RepoLock>>> = OnceLock::new();
-    let key = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let common = git_with_timeout(
+        dir,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        opts,
+        local(),
+    )
+    .map(PathBuf::from)
+    .unwrap_or_else(|_| dir.to_path_buf());
+    let key = common.canonicalize().unwrap_or(common);
     let mut map = FETCHING
         .get_or_init(Default::default)
         .lock()
@@ -43,11 +59,11 @@ pub(crate) fn repo_lock(dir: &Path) -> RepoLock {
 }
 
 fn has_origin(dir: &Path, opts: &GitOptions) -> bool {
-    git(dir, &["remote", "get-url", "origin"], opts).is_ok()
+    git_with_timeout(dir, &["remote", "get-url", "origin"], opts, local()).is_ok()
 }
 
 fn verify(dir: &Path, refname: &str, opts: &GitOptions) -> Option<String> {
-    git(
+    git_with_timeout(
         dir,
         &[
             "rev-parse",
@@ -56,6 +72,7 @@ fn verify(dir: &Path, refname: &str, opts: &GitOptions) -> Option<String> {
             &format!("{refname}^{{commit}}"),
         ],
         opts,
+        local(),
     )
     .ok()
     .filter(|s| !s.is_empty())
@@ -64,10 +81,11 @@ fn verify(dir: &Path, refname: &str, opts: &GitOptions) -> Option<String> {
 /// The first usable of `origin/HEAD` (by the name it points to), `origin/main`,
 /// `origin/master`, `main`, `master` and `HEAD`.
 fn resolve_base(dir: &Path, opts: &GitOptions) -> Option<(String, String)> {
-    let head = git(
+    let head = git_with_timeout(
         dir,
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
         opts,
+        local(),
     )
     .ok()
     .filter(|s| !s.is_empty());
@@ -80,9 +98,16 @@ fn resolve_base(dir: &Path, opts: &GitOptions) -> Option<(String, String)> {
         .find_map(|r| verify(dir, &r, opts).map(|sha| (r, sha)))
 }
 
-/// Fetches `origin` under the repo's lock. `Ok(())` also when a fetch just finished.
-fn locked_fetch(dir: &Path, opts: &GitOptions, deadline: Deadline) -> Result<(), String> {
-    let lock = repo_lock(dir);
+/// Fetches `origin` under the repo's lock, bounded by `deadline` (waiting for the lock
+/// included). `Ok(())` without fetching when a fetch finished less than `reuse` ago.
+/// The error is git's stderr, or why it did not run.
+pub(crate) fn locked_fetch(
+    dir: &Path,
+    opts: &GitOptions,
+    deadline: Deadline,
+    reuse: Duration,
+) -> Result<(), String> {
+    let lock = repo_lock(dir, opts);
     let mut last = loop {
         match lock.try_lock() {
             Ok(g) => break g,
@@ -95,7 +120,7 @@ fn locked_fetch(dir: &Path, opts: &GitOptions, deadline: Deadline) -> Result<(),
             }
         }
     };
-    if last.is_some_and(|t| t.elapsed() < FRESH_FOR) {
+    if last.is_some_and(|t| t.elapsed() < reuse) {
         return Ok(());
     }
     git_with_timeout(
@@ -126,7 +151,7 @@ pub fn prepare_base(dir: &Path, label: &str, opts: &GitOptions, deadline: Deadli
     let fetch = if !has_origin(dir, opts) {
         FetchOutcome::NoRemote
     } else {
-        match locked_fetch(dir, opts, deadline) {
+        match locked_fetch(dir, opts, deadline, FRESH_FOR) {
             Ok(()) => FetchOutcome::Fetched,
             Err(reason) => FetchOutcome::Failed(reason),
         }
@@ -137,5 +162,74 @@ pub fn prepare_base(dir: &Path, label: &str, opts: &GitOptions, deadline: Deadli
         refname,
         sha,
         fetch,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::git;
+
+    #[test]
+    fn a_worktree_shares_its_main_checkout_lock() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        let o = GitOptions::default();
+        std::fs::create_dir(&main).unwrap();
+        git(&main, &["init", "-q", "-b", "main"], &o).unwrap();
+        git(
+            &main,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+            &o,
+        )
+        .unwrap();
+        let wt = tmp.path().join("wt");
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "b", wt.to_str().unwrap()],
+            &o,
+        )
+        .unwrap();
+        let other = tmp.path().join("other");
+        std::fs::create_dir(&other).unwrap();
+        git(&other, &["init", "-q"], &o).unwrap();
+
+        assert!(Arc::ptr_eq(&repo_lock(&main, &o), &repo_lock(&wt, &o)));
+        assert!(!Arc::ptr_eq(&repo_lock(&main, &o), &repo_lock(&other, &o)));
+    }
+
+    #[test]
+    fn a_hung_fetch_gives_up_at_the_deadline_and_releases_the_lock() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let o = GitOptions::default();
+        git(tmp.path(), &["init", "-q"], &o).unwrap();
+        git(
+            tmp.path(),
+            &["remote", "add", "origin", "ssh://example.invalid/x"],
+            &o,
+        )
+        .unwrap();
+        git(tmp.path(), &["config", "core.sshCommand", "sleep 30 #"], &o).unwrap();
+
+        let start = Instant::now();
+        let err = locked_fetch(
+            tmp.path(),
+            &o,
+            Deadline::after(Duration::from_secs(1)),
+            Duration::ZERO,
+        )
+        .unwrap_err();
+        assert!(start.elapsed() < Duration::from_secs(5), "{err}");
+        assert!(repo_lock(tmp.path(), &o).try_lock().is_ok());
     }
 }

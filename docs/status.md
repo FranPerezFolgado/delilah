@@ -99,11 +99,9 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 
 - **Fresh bases, known limits:**
   - parent worktrees still need the network to init submodules;
-  - the fetch lock is keyed on the folder path, so a worktree and its main checkout do not share it;
   - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
-  - only `GIT_TERMINAL_PROMPT=0` is set, so ssh askpass and keychain dialogs are still possible, bounded by the 30 s deadline.
-  - the PR loop's `workspace::fetch` takes the same per-repo lock with no deadline and no `GIT_TERMINAL_PROMPT=0`: a hung fetch there makes starts of that repo give up after 30 s with a `base-stale` notice;
-  - the local reads around the fetch (`has_origin`, `resolve_base`) run with the plain `git()`, outside the deadline; `git()` and `git_with_timeout` are still two runners.
+  - only `GIT_TERMINAL_PROMPT=0` is set, so ssh askpass and keychain dialogs are still possible, bounded by the 30 s deadline;
+  - the fetch lock lives in the git crate (process-wide), not in the daemon's state.
 - **End-to-end tests, pending and known:**
   - the UI quick-open test covers the file quick open (the UI has no task switcher);
   - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);

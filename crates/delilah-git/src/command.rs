@@ -44,6 +44,10 @@ pub enum GitError {
     Timeout { dir: PathBuf, args: String },
 }
 
+/// How long the network part of a task's start (or of a merge check) may take, all
+/// repos together.
+pub const NETWORK_LIMIT: Duration = Duration::from_secs(30);
+
 /// A point in time by which a series of git calls must be done.
 #[derive(Debug, Clone, Copy)]
 pub struct Deadline(Instant);
@@ -68,9 +72,10 @@ impl Deadline {
     }
 }
 
+/// Every git call goes through here: no hook or fsmonitor command of the repo runs
+/// (agents write those repos), and git never waits for terminal input.
 fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
     let mut cmd = Command::new("git");
-    // The repos are written by agents: no hook or fsmonitor command of theirs runs here.
     cmd.args([
         "-c",
         "core.hooksPath=/dev/null",
@@ -81,23 +86,36 @@ fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
         cmd.args(["-c", "protocol.file.allow=always"]);
     }
     cmd.arg("-C").arg(dir).args(args);
+    cmd.env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null());
     cmd
 }
 
-pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String, GitError> {
-    let output = command(dir, args, opts).output()?;
-    if !output.status.success() {
+/// Git's output as a result: stdout on success, stderr in the error otherwise.
+fn checked(
+    dir: &Path,
+    args: &[&str],
+    status: std::process::ExitStatus,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<String, GitError> {
+    if !status.success() {
         return Err(GitError::Command {
             dir: dir.to_path_buf(),
             args: args.join(" "),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            stderr: String::from_utf8_lossy(stderr).trim().to_string(),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(stdout).trim().to_string())
 }
 
-/// Like [`git`], but gives up at `deadline` (killing git and what it spawned) and never
-/// waits for terminal input.
+/// Runs git to the end, however long it takes. For calls with a time limit, see
+/// [`git_with_timeout`].
+pub(crate) fn git(dir: &Path, args: &[&str], opts: &GitOptions) -> Result<String, GitError> {
+    let output = command(dir, args, opts).output()?;
+    checked(dir, args, output.status, &output.stdout, &output.stderr)
+}
+
+/// Like [`git`], but gives up at `deadline`, killing git and what it spawned.
 pub(crate) fn git_with_timeout(
     dir: &Path,
     args: &[&str],
@@ -112,10 +130,7 @@ pub(crate) fn git_with_timeout(
         return Err(timeout());
     }
     let mut cmd = command(dir, args, opts);
-    cmd.env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         // Own process group, so a timeout can take ssh and friends down with git.
@@ -128,11 +143,14 @@ pub(crate) fn git_with_timeout(
     // (ssh ControlMaster, a `setsid` child) can't make us wait past the deadline.
     let out = drain(child.stdout.take());
     let err = drain(child.stderr.take());
+    // Polls often at first, so a quick local read costs little more than with `git`.
+    let mut pause = Duration::from_millis(1);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if !deadline.expired() => {
-                std::thread::sleep(Duration::from_millis(50).min(deadline.remaining()));
+                std::thread::sleep(pause.min(deadline.remaining()));
+                pause = (pause * 2).min(Duration::from_millis(50));
             }
             waited => {
                 kill_group(&mut child);
@@ -146,14 +164,7 @@ pub(crate) fn git_with_timeout(
     let (Ok(stdout), Ok(stderr)) = (out.recv_timeout(wait_for), err.recv_timeout(wait_for)) else {
         return Err(timeout());
     };
-    if !status.success() {
-        return Err(GitError::Command {
-            dir: dir.to_path_buf(),
-            args: args.join(" "),
-            stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
-        });
-    }
-    Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+    checked(dir, args, status, &stdout, &stderr)
 }
 
 /// How long to wait for a pipe's end after git has exited, when the deadline has passed.

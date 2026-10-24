@@ -17,6 +17,7 @@ use crate::actions::type_prompt;
 use crate::api::ApiError;
 use crate::archive::{KIND_BLOCKED, KIND_PARTIAL};
 use crate::state::AppState;
+use crate::store_prs::{KIND_BASE_STALE, NoticeRow};
 use crate::store_sessions::SessionKind;
 
 /// Long answers are cut: the inbox shows the gist, the session tab the rest.
@@ -179,6 +180,23 @@ pub struct InboxItem {
     pub notice: Option<i64>,
 }
 
+impl InboxItem {
+    /// An item with only what every item has; the rest is set with `..`.
+    fn new(kind: ItemKind, task: String, title: String) -> Self {
+        Self {
+            kind,
+            task,
+            title,
+            session: None,
+            text: None,
+            since: None,
+            ask: None,
+            pr: None,
+            notice: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct InboxPr {
     pub notice: i64,
@@ -216,9 +234,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             asking.insert(id.clone());
         }
         items.push(InboxItem {
-            kind: ItemKind::Question,
-            task: ask.task.clone(),
-            title: title.clone(),
             session: record.map(|r| ItemSession {
                 live: app.sessions.get(&r.id).is_some(),
                 id: r.id,
@@ -232,8 +247,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 questions: ask.questions,
                 proposal: ask.proposal,
             }),
-            pr: None,
-            notice: None,
+            ..InboxItem::new(ItemKind::Question, ask.task.clone(), title.clone())
         });
     }
 
@@ -252,13 +266,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         }
         asked.insert(s.task.clone());
         items.push(InboxItem {
-            kind: match attention.kind {
-                AttentionKind::Question => ItemKind::Question,
-                AttentionKind::Permission => ItemKind::Permission,
-                AttentionKind::Error => ItemKind::Error,
-            },
-            task: s.task.clone(),
-            title: title.clone(),
             session: Some(ItemSession {
                 id: s.id,
                 label: s.label,
@@ -267,9 +274,15 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             }),
             text: Some(attention.text),
             since: Some(attention.since),
-            ask: None,
-            pr: None,
-            notice: None,
+            ..InboxItem::new(
+                match attention.kind {
+                    AttentionKind::Question => ItemKind::Question,
+                    AttentionKind::Permission => ItemKind::Permission,
+                    AttentionKind::Error => ItemKind::Error,
+                },
+                s.task.clone(),
+                title.clone(),
+            )
         });
     }
 
@@ -313,16 +326,10 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         }
         for (kind, text, event) in found.into_iter().chain(review) {
             items.push(InboxItem {
-                kind,
-                task: key.to_string(),
-                title: t.title.clone(),
-                session: None,
                 text,
                 // When the event that raised it happened.
                 since: last_event(&app, t, event).await,
-                ask: None,
-                pr: None,
-                notice: None,
+                ..InboxItem::new(kind, key.to_string(), t.title.clone())
             });
         }
     }
@@ -378,15 +385,9 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 primary: true,
             });
         items.push(InboxItem {
-            kind: ItemKind::Handoff,
-            task: t.key.to_string(),
-            title: t.title.clone(),
             session,
             text: Some(text),
-            since: None,
-            ask: None,
-            pr: None,
-            notice: None,
+            ..InboxItem::new(ItemKind::Handoff, t.key.to_string(), t.title.clone())
         });
     }
 
@@ -399,18 +400,13 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             continue;
         };
         items.push(InboxItem {
-            kind: ItemKind::Autopilot,
-            task: t.key.to_string(),
-            title: t.title.clone(),
-            session: None,
             text: Some(a.reason.clone().unwrap_or_else(|| {
                 app.lang()
                     .pick("El autopiloto está en pausa.", "Autopilot is paused.")
                     .to_string()
             })),
             since: Some(a.since),
-            ask: None,
-            pr: None,
+            ..InboxItem::new(ItemKind::Autopilot, t.key.to_string(), t.title.clone())
         });
     }
 
@@ -423,10 +419,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             continue;
         }
         items.push(InboxItem {
-            kind: ItemKind::SuggestReview,
-            task: t.key.to_string(),
-            title: t.title.clone(),
-            session: None,
             text: Some(
                 app.lang()
                     .pick(
@@ -435,10 +427,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                     )
                     .to_string(),
             ),
-            since: None,
-            ask: None,
-            pr: None,
-            notice: None,
+            ..InboxItem::new(ItemKind::SuggestReview, t.key.to_string(), t.title.clone())
         });
     }
 
@@ -447,7 +436,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             "ci-failed" => ItemKind::PrFailed,
             "changes-requested" | "comments" => ItemKind::PrReview,
             KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
-            crate::store_prs::KIND_BASE_STALE => ItemKind::BaseStale,
+            KIND_BASE_STALE => ItemKind::BaseStale,
             _ => continue,
         };
         let Some(t) = task(&n.task_key) else {
@@ -463,18 +452,8 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         {
             continue;
         }
-        if n.kind == crate::store_prs::KIND_BASE_STALE {
-            items.push(InboxItem {
-                kind,
-                task: n.task_key,
-                title: t.title.clone(),
-                session: None,
-                text: Some(n.text),
-                since: Some(n.created_at),
-                ask: None,
-                pr: None,
-                notice: Some(n.id),
-            });
+        if n.kind == KIND_BASE_STALE {
+            items.push(stale_base_item(n, t));
             continue;
         }
         // An unlinked PR resolves its notices; one still open without its PR is stale.
@@ -484,24 +463,30 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             continue;
         };
         items.push(InboxItem {
-            kind,
-            task: n.task_key,
-            title: t.title.clone(),
-            session: None,
             text: Some(n.text),
             since: Some(n.created_at),
-            ask: None,
             pr: Some(InboxPr {
                 notice: n.id,
                 url: pr.url.clone(),
                 repo: n.repo,
             }),
-            notice: None,
+            ..InboxItem::new(kind, n.task_key, t.title.clone())
         });
     }
 
     items.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.since.cmp(&a.since)));
     Ok(Json(items))
+}
+
+/// The warning that a task's branch started from a base that could not be refreshed.
+/// It is about the start, not a PR: it carries the notice to dismiss, not a PR.
+fn stale_base_item(n: NoticeRow, t: &Task) -> InboxItem {
+    InboxItem {
+        text: Some(n.text),
+        since: Some(n.created_at),
+        notice: Some(n.id),
+        ..InboxItem::new(ItemKind::BaseStale, n.task_key, t.title.clone())
+    }
 }
 
 async fn last_event(app: &AppState, t: &Task, name: &str) -> Option<DateTime<Utc>> {
@@ -914,15 +899,7 @@ mod tests {
         assert!(app.store.open_notices().await.unwrap().is_empty());
 
         let plain = InboxItem {
-            kind: ItemKind::Waiting,
-            task: "PROJ-1".into(),
-            title: "t".into(),
-            session: None,
-            text: None,
-            since: None,
-            ask: None,
-            pr: None,
-            notice: None,
+            ..InboxItem::new(ItemKind::Waiting, "PROJ-1".into(), "t".into())
         };
         assert!(serde_json::to_value(plain).unwrap().get("notice").is_none());
     }

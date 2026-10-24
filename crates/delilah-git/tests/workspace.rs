@@ -524,7 +524,7 @@ fn fetch_updates_the_remote_refs() {
     run(&other, &["config", "user.email", "t@example.com"]);
     run(&other, &["commit", "--allow-empty", "-m", "more"]);
     run(&other, &["push", "origin", "main"]);
-    fetch(&repo, &GitOptions::default()).unwrap();
+    fetch(&repo, &GitOptions::default(), dl()).unwrap();
     assert_eq!(git(&repo, &["rev-parse", "origin/main"]), head(&other));
 }
 
