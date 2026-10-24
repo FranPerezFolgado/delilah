@@ -1531,7 +1531,31 @@ mod tests {
             base("svc-local", FetchOutcome::NoRemote),
         ];
 
-        report_bases(&app, &key, "platform", "feature/PROJ-5-x", &bases).await;
+        let logs = crate::logs::LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(logs.clone())
+            .with_ansi(false)
+            .finish();
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            report_bases(&app, &key, "platform", "feature/PROJ-5-x", &bases).await;
+        }
+
+        // Every repo's base is logged, warned or not.
+        let lines = logs.tail(50);
+        for repo in [
+            "repo=.",
+            "repo=svc-payments",
+            "repo=svc-billing",
+            "repo=svc-local",
+        ] {
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("task branch base") && l.contains(repo)),
+                "{repo} in {lines:?}"
+            );
+        }
 
         let notices = app.store.open_notices().await.unwrap();
         assert_eq!(notices.len(), 1, "{notices:?}");
