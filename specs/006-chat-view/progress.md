@@ -9,20 +9,20 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-02 | 2 | 2A | implementing | 1 | | T002 done; waiting for the user to run the scenarios (T003/T004) |
 | WP-03 | 3 | 3A | done | 1 | 7a74a83 | |
 | WP-04 | 3 | 3A | done | 1 | 95b1959 | |
-| WP-05 | 4 | 4A | verified | 1 | dfd483e | |
-| WP-06 | 4 | 4B | verified | 1 | f357cc2 | |
-| WP-07 | 4 | 4B | verified | 1 | 2561634 | |
-| WP-05F | 4 | 4B | verified | 1 | 693ba38 | security fixes |
-| WP-06F | 4 | 4C | verified | 1 | f5680ab | architecture fixes |
-| WP-08 | 4 | 4C | verified | 1 | c3d82e0 | |
-| WP-09 | 4 | 4D | verified | 1 | c8157ed | |
-| WP-11 | 4 | 4D | verified | 1 | 5e51e60 | |
-| WP-10 | 4 | 4E | verified | 1 | c8157ed | run together with WP-09 (shared TaskScreen.tsx) |
-| WP-09F | 4 | 4F | verified | 1 | 4e689e7 | open-file path fix |
-| WP-12 | 5 | 5A | verified | 1 | e3f3c57 | |
-| WP-12F | 5 | 5C | verified | 1 | 806cfd7 | review fixes |
-| WP-12G | 5 | 5D | verified | 1 | | re-review fixes |
-| WP-13 | 5 | 5B | verified | 1 | 626cd52 | |
+| WP-05 | 4 | 4A | done | 1 | dfd483e | |
+| WP-06 | 4 | 4B | done | 1 | f357cc2 | |
+| WP-07 | 4 | 4B | done | 1 | 2561634 | |
+| WP-05F | 4 | 4B | done | 1 | 693ba38 | security fixes |
+| WP-06F | 4 | 4C | done | 1 | f5680ab | architecture fixes |
+| WP-08 | 4 | 4C | done | 1 | c3d82e0 | |
+| WP-09 | 4 | 4D | done | 1 | c8157ed | |
+| WP-11 | 4 | 4D | done | 1 | 5e51e60 | |
+| WP-10 | 4 | 4E | done | 1 | c8157ed | run together with WP-09 (shared TaskScreen.tsx) |
+| WP-09F | 4 | 4F | done | 1 | 4e689e7 | open-file path fix |
+| WP-12 | 5 | 5A | done | 1 | e3f3c57 | |
+| WP-12F | 5 | 5C | done | 1 | 806cfd7 | review fixes |
+| WP-12G | 5 | 5D | done | 1 | 2e6af70 | re-review fixes |
+| WP-13 | 5 | 5B | done | 1 | 626cd52 | |
 | WP-14 | 6 | 6A | pending | 0 | | gated by spike |
 | WP-15 | 6 | 6B | pending | 0 | | gated by spike |
 | WP-16 | 7 | 7A | pending | 0 | | gated by spike |
