@@ -3,7 +3,7 @@
 //! folder and runs the triggers; two triggers never run together for one task.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use delilah_core::{Task, TaskKey, TitleSource};
@@ -57,7 +57,6 @@ pub(crate) fn scan_spec_dirs(ws: &Workspace) -> Vec<String> {
 /// The first spec folder (with a `spec.md`) that was not there when the task started:
 /// its repo's label and its path. `None` without a workspace, a record of the start,
 /// or a new folder.
-#[allow(dead_code)] // used by the retitle step
 pub(crate) async fn new_spec_folder(app: &AppState, key: &TaskKey) -> Option<(String, PathBuf)> {
     let (_, ws) = app.store.workspace(key).await.ok()??;
     let at_start = app.store.spec_dirs_at_start(key).await.ok()??;
@@ -86,21 +85,62 @@ async fn pending(app: &AppState, task: &Task) -> bool {
     }
 }
 
-/// A free task did something (a tool ran, a turn ended): its analysis may be there now.
-pub async fn on_activity(app: &AppState, key: &TaskKey) {
+/// The feature name in a `spec.md`: the text after `# Feature Specification:`, trimmed.
+/// `None` without the heading, with an empty name or with a template placeholder
+/// (`[FEATURE NAME]`, any `[...]`-only name).
+pub(crate) fn spec_title(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let name = text
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("# Feature Specification:"))?
+        .trim();
+    let placeholder = name.starts_with('[') && name.ends_with(']');
+    (!name.is_empty() && !placeholder).then(|| name.to_string())
+}
+
+/// Gives a free task still on its initial title the feature name of its first analysis,
+/// once. Call it holding the task's lock.
+pub(crate) async fn retitle(app: &AppState, key: &TaskKey) {
     if !is_free(key) {
         return;
     }
+    let Some((_, folder)) = new_spec_folder(app, key).await else {
+        return;
+    };
+    let Some(title) = spec_title(&folder.join("spec.md")) else {
+        return;
+    };
+    // The WHERE on the initial title keeps it to once, whatever else is going on.
+    match app.store.rename_from_spec(key, &title).await {
+        Ok(Some(_)) => app.emit(crate::events::Topic::Tasks),
+        Ok(None) => {}
+        Err(e) => tracing::warn!(task = %key, "branching: {e}"),
+    }
+}
+
+/// Takes what is pending from the first analysis, on the task as it is now.
+async fn step(app: &AppState, key: &TaskKey) {
     let task = match app.store.get_task(key).await {
         Ok(Some(task)) => task,
         Ok(None) => return,
         Err(e) => return tracing::warn!(task = %key, "branching: {e}"),
     };
-    let _guard = app.branching.lock(key).await;
     if !pending(app, &task).await {
         return;
     }
-    // The retitle and branch steps come here.
+    if task.title_source == TitleSource::Initial {
+        retitle(app, key).await;
+    }
+    // The branch step comes here.
+}
+
+/// A free task did something (a tool ran, a turn ended): its analysis may be there now.
+pub async fn on_activity(app: &AppState, key: &TaskKey) {
+    if !is_free(key) {
+        return;
+    }
+    let _guard = app.branching.lock(key).await;
+    step(app, key).await;
 }
 
 /// Catches up on an analysis written while the daemon was down (or missed): at start
@@ -110,16 +150,11 @@ pub async fn recover(app: &AppState, task: &Task) {
         return;
     }
     let _guard = app.branching.lock(&task.key).await;
-    if !pending(app, task).await {
-        return;
-    }
-    // The retitle and branch steps come here.
+    step(app, &task.key).await;
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use delilah_core::ProjectKind;
 
     use super::*;
@@ -142,15 +177,32 @@ mod tests {
         let dir = root.join("specs").join(name);
         std::fs::create_dir_all(&dir).unwrap();
         if with_spec {
-            std::fs::write(dir.join("spec.md"), "# spec").unwrap();
+            std::fs::write(
+                dir.join("spec.md"),
+                format!("# Feature Specification: {name} feature\n"),
+            )
+            .unwrap();
         }
     }
 
     /// A free task with a branchless workspace of `kind` in a fresh folder.
     async fn task_with(app: &AppState, kind: ProjectKind, subs: &[&str]) -> (TaskKey, PathBuf) {
+        task_with_key_kind(app, "LIBRE-1", kind, subs).await
+    }
+
+    async fn task_with_key(app: &AppState, key: &str) -> (TaskKey, PathBuf) {
+        task_with_key_kind(app, key, ProjectKind::Repo, &[]).await
+    }
+
+    async fn task_with_key_kind(
+        app: &AppState,
+        key: &str,
+        kind: ProjectKind,
+        subs: &[&str],
+    ) -> (TaskKey, PathBuf) {
         let root = std::env::temp_dir().join(format!("delilah-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        let key = TaskKey::new("LIBRE-1");
+        let key = TaskKey::new(key);
         let mut task = Task::new(key.clone(), "Idea", "feature");
         task.title_source = TitleSource::Initial;
         app.store.create_task(&task).await.unwrap();
@@ -228,5 +280,122 @@ mod tests {
         let _b = app.branching.lock(&TaskKey::new("LIBRE-2")).await;
         drop(a);
         let _again = app.branching.lock(&TaskKey::new("LIBRE-1")).await;
+    }
+
+    fn write_spec(path: &Path, text: &str) -> PathBuf {
+        std::fs::write(path, text).unwrap();
+        path.to_path_buf()
+    }
+
+    #[test]
+    fn spec_title_reads_the_feature_name() {
+        let dir = std::env::temp_dir().join(format!("delilah-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("spec.md");
+        write_spec(
+            &f,
+            "# Feature Specification:   Reintentos de tarjeta \n\nbody",
+        );
+        assert_eq!(spec_title(&f).as_deref(), Some("Reintentos de tarjeta"));
+        for text in [
+            "no heading",
+            "# Feature Specification:   \n",
+            "# Feature Specification: [FEATURE NAME]\n",
+            "# Feature Specification: [anything]\n",
+        ] {
+            write_spec(&f, text);
+            assert_eq!(spec_title(&f), None, "{text}");
+        }
+        assert_eq!(spec_title(&dir.join("missing.md")), None);
+    }
+
+    async fn task_of(app: &AppState, key: &TaskKey) -> Task {
+        app.store.get_task(key).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn retitle_names_an_initial_task_once() {
+        let app = app().await;
+        let (key, root) = task_with(&app, ProjectKind::Repo, &[]).await;
+        record(&app, &key).await;
+        let mut rx = app.events.subscribe();
+        spec(&root, "001-new", true);
+        retitle(&app, &key).await;
+        let t = task_of(&app, &key).await;
+        assert_eq!(t.title, "001-new feature");
+        assert_eq!(t.title_source, TitleSource::Spec);
+        assert_eq!(t.previous_title.as_deref(), Some("Idea"));
+        assert!(rx.try_recv().is_ok(), "tasks event");
+        // Edited later: no second rename.
+        write_spec(
+            &root.join("specs/001-new/spec.md"),
+            "# Feature Specification: Other\n",
+        );
+        retitle(&app, &key).await;
+        assert_eq!(task_of(&app, &key).await.title, "001-new feature");
+    }
+
+    #[tokio::test]
+    async fn retitle_leaves_alone_what_is_not_theirs() {
+        let app = app().await;
+        let (key, root) = task_with(&app, ProjectKind::Repo, &[]).await;
+        record(&app, &key).await;
+        spec(&root, "001-new", true);
+        for source in [TitleSource::Manual, TitleSource::Spec] {
+            app.store
+                .set_title_source(&key, source, None)
+                .await
+                .unwrap();
+            retitle(&app, &key).await;
+            assert_eq!(task_of(&app, &key).await.title, "Idea");
+        }
+        // A placeholder heading.
+        app.store
+            .set_title_source(&key, TitleSource::Initial, None)
+            .await
+            .unwrap();
+        write_spec(
+            &root.join("specs/001-new/spec.md"),
+            "# Feature Specification: [FEATURE NAME]\n",
+        );
+        retitle(&app, &key).await;
+        assert_eq!(task_of(&app, &key).await.title, "Idea");
+    }
+
+    #[tokio::test]
+    async fn an_old_folder_does_not_retitle() {
+        let app = app().await;
+        let (key, root) = task_with(&app, ProjectKind::Repo, &[]).await;
+        spec(&root, "001-old", true);
+        record(&app, &key).await;
+        retitle(&app, &key).await;
+        assert_eq!(task_of(&app, &key).await.title, "Idea");
+    }
+
+    #[tokio::test]
+    async fn activity_and_recovery_retitle() {
+        let app = app().await;
+        let (key, root) = task_with(&app, ProjectKind::Repo, &[]).await;
+        record(&app, &key).await;
+        spec(&root, "001-new", true);
+        on_activity(&app, &key).await;
+        assert_eq!(task_of(&app, &key).await.title_source, TitleSource::Spec);
+
+        // Recovery acts on the task as it is now, not on the snapshot given.
+        let stale = task_of(&app, &key).await;
+        app.store
+            .set_title_source(&key, TitleSource::Initial, None)
+            .await
+            .unwrap();
+        app.store.set_title(&key, "Mine").await.unwrap();
+        recover(&app, &stale).await;
+        assert_eq!(task_of(&app, &key).await.title, "Mine");
+
+        let (key2, root2) = task_with_key(&app, "LIBRE-2").await;
+        record(&app, &key2).await;
+        spec(&root2, "002-x", true);
+        let snapshot = task_of(&app, &key2).await;
+        recover(&app, &snapshot).await;
+        assert_eq!(task_of(&app, &key2).await.title_source, TitleSource::Spec);
     }
 }

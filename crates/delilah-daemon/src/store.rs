@@ -257,6 +257,31 @@ impl Store {
         Ok(self.get_task(key).await?.expect("task was just updated"))
     }
 
+    /// The automatic rename from the first analysis: only while the title is still the
+    /// initial one, so it happens at most once. The replaced title is kept. `None` when
+    /// the task was not (or no longer) `initial`.
+    pub async fn rename_from_spec(
+        &self,
+        key: &TaskKey,
+        title: &str,
+    ) -> Result<Option<Task>, StoreError> {
+        let updated = sqlx::query(
+            "UPDATE tasks SET previous_title = title, title = ?, title_source = ?, updated_at = ?
+             WHERE key = ? AND title_source = ?",
+        )
+        .bind(title)
+        .bind(TitleSource::Spec.name())
+        .bind(Utc::now().to_rfc3339())
+        .bind(key.as_str())
+        .bind(TitleSource::Initial.name())
+        .execute(&self.pool)
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_task(key).await
+    }
+
     /// Records the handoff under way, or clears it.
     pub async fn set_handoff(
         &self,
@@ -597,6 +622,25 @@ mod tests {
         };
         let got = store.update_backlog_task(&key, &retitle).await.unwrap();
         assert_eq!(got.title_source, TitleSource::Manual);
+    }
+
+    #[tokio::test]
+    async fn rename_from_spec_happens_once_and_only_from_initial() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("LIBRE-1");
+        let mut t = task("LIBRE-1");
+        t.title_source = TitleSource::Initial;
+        store.create_task(&t).await.unwrap();
+        let got = store
+            .rename_from_spec(&key, "Cards")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(got.title, "Cards");
+        assert_eq!(got.title_source, TitleSource::Spec);
+        assert_eq!(got.previous_title.as_deref(), Some(t.title.as_str()));
+        assert_eq!(store.rename_from_spec(&key, "Other").await.unwrap(), None);
+        assert_eq!(store.get_task(&key).await.unwrap().unwrap().title, "Cards");
     }
 
     #[tokio::test]

@@ -42,12 +42,12 @@ None: no new dependencies.
 
 **Independent test**: preview, free task "cosas de ramas", run specify: the title changes on the board, Sidebar and task screen; "Restaurar" brings it back; a second spec doesn't rename it (quickstart 1 and 7).
 
-- [ ] T013 [P] [US1] Write failing tests in `crates/delilah-daemon/src/branching.rs`: `spec_title(path)` reads `# Feature Specification: <name>` (trimmed); `None` for a missing heading, empty name, `[FEATURE NAME]` or any `[…]`-only name.
-- [ ] T014 [US1] Implement `spec_title` in `crates/delilah-daemon/src/branching.rs`.
-- [ ] T015 [US1] Write failing tests in `crates/delilah-daemon/src/branching.rs`: `retitle(app, key)` on an `initial` free task with a new spec folder sets the title, `title_source = spec`, `previous_title = old`, emits `Topic::Tasks`; does nothing for `spec`/`manual` tasks, Jira tasks, a placeholder heading, or an old folder; `on_activity` and `recover` call it.
-- [ ] T016 [US1] Implement `retitle` and wire it into `on_activity`/`recover` in `crates/delilah-daemon/src/branching.rs`.
-- [ ] T017 [US1] Write failing API tests in `crates/delilah-daemon/src/api.rs` (tests module): `PATCH /api/v1/tasks/{key}` with only `title` on a running task → 200, `title_source = manual`, `previous_title = null`; with `project`/`workflow`/`notes`/`in_checkout` on a running task → 409 as today; on an archived task → 409; empty title → 400.
-- [ ] T018 [US1] Implement T017 in `crates/delilah-daemon/src/api.rs` `update_task`: title-only changes go through `store.set_title`, the rest through `update_backlog_task` (which also marks the title `manual` when it changes it).
+- [X] T013 [P] [US1] Write failing tests in `crates/delilah-daemon/src/branching.rs`: `spec_title(path)` reads `# Feature Specification: <name>` (trimmed); `None` for a missing heading, empty name, `[FEATURE NAME]` or any `[…]`-only name.
+- [X] T014 [US1] Implement `spec_title` in `crates/delilah-daemon/src/branching.rs`.
+- [X] T015 [US1] Write failing tests in `crates/delilah-daemon/src/branching.rs`: `retitle(app, key)` on an `initial` free task with a new spec folder sets the title, `title_source = spec`, `previous_title = old`, emits `Topic::Tasks`; does nothing for `spec`/`manual` tasks, Jira tasks, a placeholder heading, or an old folder; `on_activity` and `recover` call it.
+- [X] T016 [US1] Implement `retitle` and wire it into `on_activity`/`recover` in `crates/delilah-daemon/src/branching.rs`.
+- [X] T017 [US1] Write failing API tests in `crates/delilah-daemon/src/api.rs` (tests module): `PATCH /api/v1/tasks/{key}` with only `title` on a running task → 200, `title_source = manual`, `previous_title = null`; with `project`/`workflow`/`notes`/`in_checkout` on a running task → 409 as today; on an archived task → 409; empty title → 400.
+- [X] T018 [US1] Implement T017 in `crates/delilah-daemon/src/api.rs` `update_task`: title-only changes go through `store.set_title`, the rest through `update_backlog_task` (which also marks the title `manual` when it changes it).
 - [X] T019 [P] [US1] Add `title_source`, `previous_title`, `branch_error` to `Task` in `app/src/api.ts` (contracts/api.md).
 - [X] T020 [US1] Write failing tests in `app/src/components/TaskScreen.test.tsx`: the header title is editable in place (Enter saves via `updateTask({title})`, Escape cancels, empty is refused); with `previous_title` set it shows "Antes: <previous>" and "Restaurar", which patches the previous title; without it, neither shows.
 - [X] T021 [US1] Implement T020 in `app/src/components/TaskScreen.tsx` and the English strings in `app/src/i18n/en.ts`.

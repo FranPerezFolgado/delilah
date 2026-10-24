@@ -343,6 +343,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
 }
 
 /// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
+/// The title alone can change on any task but an archived one.
 async fn update_task(
     State(app): State<AppState>,
     Path(key): Path<String>,
@@ -359,7 +360,15 @@ async fn update_task(
         }
     }
     let key = TaskKey::new(key);
-    let mut task = app.store.update_backlog_task(&key, &change).await?;
+    // Only the title: any task but an archived one; the rest is for the backlog.
+    let title_only = change.notes.is_none()
+        && change.project.is_none()
+        && change.workflow.is_none()
+        && change.in_checkout.is_none();
+    let mut task = match &change.title {
+        Some(title) if title_only => app.store.set_title(&key, title).await?,
+        _ => app.store.update_backlog_task(&key, &change).await?,
+    };
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
     }
@@ -666,7 +675,7 @@ mod tests {
             &app,
             "PATCH",
             "/api/v1/tasks/LIBRE-1",
-            Some(json!({"title": "y"})),
+            Some(json!({"notes": "y"})),
         )
         .await;
         assert_eq!(
@@ -674,6 +683,53 @@ mod tests {
             StatusCode::CONFLICT,
             "only backlog tasks can be edited"
         );
+    }
+
+    #[tokio::test]
+    async fn the_title_alone_can_change_on_a_running_task() {
+        let (app, _) = app_with_project().await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-1", "title": "x", "project": "web"})),
+        )
+        .await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/events",
+            Some(json!({"type": "start"})),
+        )
+        .await;
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"title": "  mine "})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{task}");
+        assert_eq!(task["title"], "mine");
+        assert_eq!(task["title_source"], "manual");
+        assert!(task["previous_title"].is_null());
+        for body in [
+            json!({"title": "z", "notes": "n"}),
+            json!({"title": "z", "project": "web"}),
+            json!({"title": "z", "workflow": "w"}),
+            json!({"title": "z", "in_checkout": true}),
+        ] {
+            let (status, _) = call(&app, "PATCH", "/api/v1/tasks/PROJ-1", Some(body.clone())).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        }
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"title": " "})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

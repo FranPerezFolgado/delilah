@@ -5,13 +5,13 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 2 | 2A | verified | 1 | b9cd4b4 | archived = Done/Failed with no workspace row; also touched delilah-core lib.rs (re-export) |
-| WP-02 | 2 | 2A | verified | 1 | 8286607 | |
-| WP-03 | 2 | 2B | verified | 1 | c472b6b | proposals.rs untouched (goes through build_task) |
-| WP-04 | 3 | 3A | pending | 0 | | |
+| WP-01 | 2 | 2A | done | 1 | b9cd4b4 | archived = Done/Failed with no workspace row; also touched delilah-core lib.rs (re-export) |
+| WP-02 | 2 | 2A | done | 1 | 8286607 | |
+| WP-03 | 2 | 2B | done | 1 | c472b6b | proposals.rs untouched (goes through build_task) |
+| WP-04 | 3 | 3A | verified | 1 | PENDING | store.rename_from_spec added (atomic, WHERE initial) |
 | WP-05 | 3 | 3A | verified | 1 | 2b5996b | run early with 2A (no deps) |
-| WP-06 | 4 | 4A | pending | 0 | | |
-| WP-10 | 4 | 4A | verified | 1 | PENDING | run early; alerts.ts allowed by user |
+| WP-06 | 4 | 4A | implementing | 0 | | run alongside WP-04 (no shared files) |
+| WP-10 | 4 | 4A | verified | 1 | 98a3637 | run early; alerts.ts allowed by user |
 | WP-07 | 4 | 4B | pending | 0 | | |
 | WP-09 | 4 | 4B | pending | 0 | | |
 | WP-08 | 4 | 4C | pending | 0 | | |
@@ -23,3 +23,15 @@ Mode: format=markdown commits=yes autonomy=auto
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
 | 2 | orchestrator | LOW | Pre-existing flaky daemon tests (timing): conversation::tests::a_message_sent_while_a_card_is_pending_is_queued, pr_loop::tests::nudges_in_the_window_make_one_delayed_check, run::tests::a_started_task_from_a_conversation_reads_the_edited_brief | crates/delilah-daemon/src |
+| 2 | migration | MEDIUM | save_workspace (INSERT OR REPLACE) omits spec_dirs_at_start, so any re-save resets it to NULL; use ON CONFLICT DO UPDATE or re-set after save | crates/delilah-daemon/src/store_runs.rs:19 |
+| 2 | migration | MEDIUM | update_backlog_task writes back title_source/previous_title from a stale read; a concurrent set_title_source(Spec) is lost | crates/delilah-daemon/src/store.rs:~145 |
+| 2 | migration | LOW | set_title archived check and UPDATE not atomic | crates/delilah-daemon/src/store.rs |
+| 2 | migration | LOW | set_workspace_branch / set_spec_dirs_at_start return Ok when no row matched; branch can be overwritten | crates/delilah-daemon/src/store_runs.rs:33,50 |
+| 2 | migration | LOW | unknown title_source makes task_from_row Corrupt for every list | crates/delilah-daemon/src/store.rs |
+| 2 | architecture | MEDIUM | "free task" = LIBRE- prefix defined twice (is_free vs next_free_key); a Jira project keyed LIBRE would count as free | crates/delilah-daemon/src/branching.rs:30, run.rs:592 |
+| 2 | architecture | MEDIUM | recover takes the per-task lock on every tick before a cheap pending check; lock held during the whole work | crates/delilah-daemon/src/scheduler.rs:40, branching.rs:107 |
+| 2 | architecture | MEDIUM | on_activity/recover check a task snapshot read before the lock (stale title_source) — WP-04 told to re-read under lock | crates/delilah-daemon/src/branching.rs:84-100 |
+| 2 | architecture | MEDIUM | on_hook spawns one on_activity per Working/TurnEnded with no coalescing | crates/delilah-daemon/src/phases.rs:158-163 |
+| 2 | architecture | LOW | BranchLocks never shrinks; Initial-for-free duplicated in api.rs/run.rs; start_run overwrites spec_dirs baseline on a second start; recover_branches blocks startup; tick/recover_branches loop duplicated | branching.rs, api.rs:332, run.rs:232,305, main.rs:59, scheduler.rs:20 |
+| 2 | spec-compliance | MEDIUM | T012 untested: no test that start_run/build_task create free tasks initial and Jira manual, or that spec_dirs_at_start is recorded (incl. submodules) | crates/delilah-daemon/src/run.rs, api.rs |
+| 2 | spec-compliance | LOW | set_spec_dirs_at_start failure at run.rs:311 returns after save_workspace without Fail/StartAborted (task stuck Starting) | crates/delilah-daemon/src/run.rs:311 |
