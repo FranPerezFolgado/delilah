@@ -275,7 +275,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "branch";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -435,6 +435,8 @@ export const api = {
     request<null>(`/api/v1/tasks/${key}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
+  /** Retries applying the branch derived from the spec; branch_error says if it failed again. */
+  retryBranch: (key: string) => post<Task>(`/api/v1/tasks/${key}/branch`),
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),

@@ -194,3 +194,17 @@ describe("InboxView proposal item", () => {
     expect(onOpenTask).toHaveBeenCalledWith("LIBRE-9");
   });
 });
+
+describe("InboxView branch item", () => {
+  const branch: InboxItem = { ...item, kind: "branch", text: "no remote", pr: undefined };
+
+  it("shows the error and retries the branch", async () => {
+    const retry = vi.spyOn(api, "retryBranch").mockResolvedValue({} as Task);
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    expect(screen.getByText("The branch could not be created: no remote")).toBeTruthy();
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(retry).toHaveBeenCalledWith("PROJ-1");
+  });
+});

@@ -25,6 +25,7 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   "pr-failed": { label: "CI falló en la PR", icon: "failed", cls: "c-err" },
   "pr-review": { label: "Comentarios en la PR", icon: "review", cls: "c-wait" },
   "pr-blocked": { label: "No se pudo archivar", icon: "failed", cls: "c-err" },
+  branch: { label: "Rama sin crear", icon: "failed", cls: "c-err" },
 };
 
 interface Props {
@@ -140,7 +141,11 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       {item.ask && <AskCard ask={item.ask} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />}
       {item.text && !item.ask && (
         <div className={`inbox-text ${long && !expanded ? "clamped" : ""}`}>
-          <Markdown text={item.text} remoteImages="click" />
+          {item.kind === "branch" ? (
+            <p>{t("No se pudo crear la rama: {text}", { text: item.text })}</p>
+          ) : (
+            <Markdown text={item.text} remoteImages="click" />
+          )}
         </div>
       )}
       {long && !item.ask && (
@@ -282,6 +287,11 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
         {item.pr && (
           <button className="btn" onClick={() => openExternal(item.pr!.url).catch(() => {})}>
             {t("Ver PR")}
+          </button>
+        )}
+        {item.kind === "branch" && (
+          <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.retryBranch(item.task))}>
+            {t("Reintentar")}
           </button>
         )}
         {item.kind === "failed" && (

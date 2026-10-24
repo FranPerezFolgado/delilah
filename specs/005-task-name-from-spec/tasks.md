@@ -89,10 +89,10 @@ None: no new dependencies.
 
 ### Bandeja
 
-- [ ] T038 [US2] Write failing tests in `crates/delilah-daemon/src/inbox.rs`: a task with `branch_error` yields an item `{ kind: "branch", task, title, text }`; none once cleared; none for archived tasks.
-- [ ] T039 [US2] Implement T038 in `crates/delilah-daemon/src/inbox.rs` (`ItemKind::Branch`).
-- [ ] T040 [P] [US2] Add `"branch"` to the inbox item kind and `retryBranch(key)` to `app/src/api.ts`.
-- [ ] T041 [US2] Write failing tests in `app/src/components/InboxView.test.tsx`: a `branch` item shows "No se pudo crear la rama: <text>" and "Reintentar", which calls `retryBranch`; then implement in `app/src/components/InboxView.tsx` and `app/src/i18n/en.ts`.
+- [X] T038 [US2] Write failing tests in `crates/delilah-daemon/src/inbox.rs`: a task with `branch_error` yields an item `{ kind: "branch", task, title, text }`; none once cleared; none for archived tasks.
+- [X] T039 [US2] Implement T038 in `crates/delilah-daemon/src/inbox.rs` (`ItemKind::Branch`).
+- [X] T040 [P] [US2] Add `"branch"` to the inbox item kind and `retryBranch(key)` to `app/src/api.ts`.
+- [X] T041 [US2] Write failing tests in `app/src/components/InboxView.test.tsx`: a `branch` item shows "No se pudo crear la rama: <text>" and "Reintentar", which calls `retryBranch`; then implement in `app/src/components/InboxView.tsx` and `app/src/i18n/en.ts`.
 
 **Checkpoint**: quickstart 1–6 pass in a preview; `cargo test --workspace` green.
 

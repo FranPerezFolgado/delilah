@@ -7,11 +7,11 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 2 | 2A | verified | 1 | b9cd4b4 | archived = Done/Failed with no workspace row; also touched delilah-core lib.rs (re-export) |
 | WP-02 | 2 | 2A | verified | 1 | 8286607 | |
-| WP-03 | 2 | 2B | verified | 1 | PENDING | proposals.rs untouched (goes through build_task) |
+| WP-03 | 2 | 2B | verified | 1 | c472b6b | proposals.rs untouched (goes through build_task) |
 | WP-04 | 3 | 3A | pending | 0 | | |
 | WP-05 | 3 | 3A | verified | 1 | 2b5996b | run early with 2A (no deps) |
 | WP-06 | 4 | 4A | pending | 0 | | |
-| WP-10 | 4 | 4A | implementing | 0 | | run early alongside WP-03 |
+| WP-10 | 4 | 4A | verified | 1 | PENDING | run early; alerts.ts allowed by user |
 | WP-07 | 4 | 4B | pending | 0 | | |
 | WP-09 | 4 | 4B | pending | 0 | | |
 | WP-08 | 4 | 4C | pending | 0 | | |
