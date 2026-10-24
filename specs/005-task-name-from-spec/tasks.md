@@ -102,8 +102,8 @@ None: no new dependencies.
 
 - [X] T042 [P] Update `docs/architecture.md` (Workspaces: branchless start, `branching.rs`, guard hook; data: new columns), `docs/status.md` (feature landed), `docs/decisions.md` (new entry: the branch comes from the analysis; worktree folder keeps the key; guard rationale; title once with restore) and `README.md` (user-facing behaviour).
 - [X] T043 [P] Tick the answered items of `specs/005-task-name-from-spec/checklists/workspace.md` with a pointer to research.md.
-- [ ] T044 Run the full checks: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`; `cargo clippy --workspace` clean.
-- [ ] T045 Walk quickstart.md in a preview (`scripts/preview.sh --fresh`), never on 7420.
+- [X] T044 Run the full checks: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`; `cargo clippy --workspace` clean.
+- [X] T045 Walk quickstart.md in a preview (`scripts/preview.sh --fresh`), never on 7420.
 - [ ] T046 Version bump **minor** from `main`'s version in the four places in `docs/development.md#releasing` plus the lockfiles, as its own commit `chore: bump version to X.Y.0`.
 
 ---

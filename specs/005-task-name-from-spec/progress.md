@@ -10,14 +10,15 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-03 | 2 | 2B | done | 1 | c472b6b | proposals.rs untouched (goes through build_task) |
 | WP-04 | 3 | 3A | done | 1 | bd30a70 | store.rename_from_spec added (atomic, WHERE initial) |
 | WP-05 | 3 | 3A | done | 1 | 2b5996b | run early with 2A (no deps) |
-| WP-06 | 4 | 4A | verified | 1 | 5e05d63 | parent root not dirty-checked in branchless use_checkout (submodules only) |
-| WP-10 | 4 | 4A | verified | 1 | 98a3637 | run early; alerts.ts allowed by user |
-| WP-07 | 4 | 4B | verified | 1 | c808cb6 | ensure()+ensure_locked(); Activity waits while branch_error set |
-| WP-09 | 4 | 4B | verified | 1 | 407a9a3 | no delilah-git change needed |
-| WP-08 | 4 | 4C | verified | 1 | d792563 | guard on every free-task session outside start_run (returns at once once branched) |
-| WP-4F | 4 | 4F | verified | 1 | PENDING | phase 4 review fixes (round 1): F1–F6 |
+| WP-06 | 4 | 4A | done | 1 | 5e05d63 | parent root not dirty-checked in branchless use_checkout (submodules only) |
+| WP-10 | 4 | 4A | done | 1 | 98a3637 | run early; alerts.ts allowed by user |
+| WP-07 | 4 | 4B | done | 1 | c808cb6 | ensure()+ensure_locked(); Activity waits while branch_error set |
+| WP-09 | 4 | 4B | done | 1 | 407a9a3 | no delilah-git change needed |
+| WP-08 | 4 | 4C | done | 1 | d792563 | guard on every free-task session outside start_run (returns at once once branched) |
+| WP-4F | 4 | 4F | done | 1 | 326194d | phase 4 review fixes (round 1): F1–F6 |
 | WP-11 | 5 | 5A | verified | 1 | 84d80e4 | CHK016, CHK033-035 left open |
-| WP-12 | 5 | 5B | pending | 0 | | quickstart walk via ui-verifier |
+| WP-12 | 5 | 5B | verified | 1 | 10e3de5 | full checks green (tauri not run: sidecar binary missing in worktree); quickstart 1-5,7 pass via API, 6 partial (gh needs GitHub remote; stale fixture worktree), UI not checked (no browser) |
+| WP-M | 6 | 6A | implementing | 0 | | merge origin/main (185 commits), combine branch naming with decisions 37/49, migration → 0017 |
 
 ## Open findings
 
@@ -57,3 +58,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | spec-compliance | LOW | on_activity spawned (not synchronous with the hook) so branch not guaranteed before next tool; adopted sessions miss R8 sentence | phases.rs:159-163, run.rs:373 |
 | 4 | spec-compliance | LOW | untested: checkout-mode free start via start_run; parent archive with descriptive branch | run.rs, archive.rs |
 | 4 | ui-verifier | LOW | E2E (API) 5/6 pass; Bandeja branch item not exercised end to end. `preview.sh --fresh` left a stale prunable LIBRE-2 worktree in fixtures/signal from an earlier preview (first detached worktree add failed once) | scripts/preview.sh / fixtures |
+| 4 | architecture (re-review) | MEDIUM | Archive doesn't take the branching lock; a detached ensure can switch branches while archive releases/deletes the workspace — take app.branching.lock(key) around archiving a free task | crates/delilah-daemon/src/archive.rs |
+| 4 | architecture (re-review) | MEDIUM | parent_has_branch = "parent currently on the task branch" heuristic: parent commits missed if the user moved it off; record explicitly that the parent was branched | crates/delilah-git/src/workspace.rs |
+| 4 | architecture (re-review) | MEDIUM | Detached ensure cut off at shutdown leaves branch created but unrecorded (self-heals on recover) | crates/delilah-daemon/src/branching.rs (guard_within) |
+| 4 | architecture (re-review) | LOW | remote-only branch counts as existing → checkout DWIM (fails with several remotes); timed-out guard calls queue on the lock | workspace.rs, branching.rs |
+| 5 | orchestrator | — | Base is 185 commits behind main: main shipped 0015_autopilot/0016_project_settings (our migration must be 0017) and decisions 37/49 (branch named at start by Claude/template) contradicting US2. User chose: merge and combine (free tasks without typed branch/template start branchless). | — |
