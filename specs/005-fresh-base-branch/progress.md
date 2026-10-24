@@ -15,7 +15,7 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | WP-07 | 6 | 6A | done | 1 | 5845a13 | started early, UI only |
 | WP-08 | 7 | 7A | verified | 1 | ff45b66 | |
 | WP-09 | 7 | 7B | done | 1 | b5a55ea | merged main, full suite green |
-| WP-10 | 7 | 7C | pending | 0 | | |
+| WP-10 | 7 | 7C | done | 1 | f77beb8 | 0.8.0 → 0.9.0 (main had moved past 0.5.0) |
 
 ## Findings (closed after the branch review)
 
