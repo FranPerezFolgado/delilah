@@ -657,7 +657,7 @@ fn repo_workspace_starts_at_the_fresh_remote_head() {
         vec![RepoBase {
             repo: ".".into(),
             refname: "origin/main".into(),
-            sha: new_head,
+            sha: Some(new_head),
             fetch: FetchOutcome::Fetched,
         }]
     );
@@ -722,7 +722,7 @@ fn checkout_starts_the_new_branch_at_the_fresh_remote_head() {
     assert_eq!(git(&repo, &["rev-parse", "main"]), local_main);
     assert_eq!(previous, [(".".to_string(), "main".to_string())]);
     assert_eq!(bases[0].fetch, FetchOutcome::Fetched);
-    assert_eq!(bases[0].sha, new_head);
+    assert_eq!(bases[0].sha.as_deref(), Some(new_head.as_str()));
     assert!(leave_checkout(&repo, &previous, &opts()).is_empty());
     assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
 }
@@ -737,16 +737,47 @@ fn checkout_uses_an_existing_branch_as_it_is_without_fetching() {
     git(&repo, &["commit", "-qm", "mine"]);
     let tip = git(&repo, &["rev-parse", "HEAD"]);
     git(&repo, &["checkout", "-q", "main"]);
-    git(&repo, &["remote", "set-url", "origin", "/nonexistent"]);
+    // A fetch would hang: one that ran would show in the time taken.
+    git(&repo, &["config", "core.sshCommand", "sleep 30 #"]);
+    git(
+        &repo,
+        &["remote", "set-url", "origin", "ssh://host/repo.git"],
+    );
 
+    let started = std::time::Instant::now();
     let (_, previous, bases) =
         use_checkout(&repo, &checkout_spec("feature/X-2"), &opts(), dl()).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(10));
 
     assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/X-2");
     assert_eq!(git(&repo, &["rev-parse", "HEAD"]), tip);
     assert_eq!(bases[0].fetch, FetchOutcome::Existing);
-    assert_eq!(bases[0].sha, tip);
+    assert_eq!(bases[0].sha.as_deref(), Some(tip.as_str()));
     assert_eq!(previous, [(".".to_string(), "main".to_string())]);
+}
+
+#[test]
+fn a_repo_workspace_refuses_before_any_fetch() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    git(&repo, &["config", "core.sshCommand", "sleep 30 #"]);
+    git(
+        &repo,
+        &["remote", "set-url", "origin", "ssh://host/repo.git"],
+    );
+    let started = std::time::Instant::now();
+
+    let mut spec = fx.repo_spec();
+    spec.branch = "bad..name".into();
+    let r = create_workspace(&repo, &spec, &opts(), dl());
+    assert!(matches!(r, Err(GitError::InvalidBranch(_))), "{r:?}");
+
+    let spec = fx.repo_spec();
+    std::fs::create_dir_all(&spec.path).unwrap();
+    let r = create_workspace(&repo, &spec, &opts(), dl());
+    assert!(matches!(r, Err(GitError::WorkspaceExists(_))), "{r:?}");
+
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 #[test]
@@ -800,9 +831,15 @@ fn parent_workspace_starts_the_parent_and_submodules_fresh() {
     );
     assert_eq!(bases.len(), 2);
     assert_eq!(base_of(&bases, ".").fetch, FetchOutcome::Fetched);
-    assert_eq!(base_of(&bases, ".").sha, parent_head);
+    assert_eq!(
+        base_of(&bases, ".").sha.as_deref(),
+        Some(parent_head.as_str())
+    );
     assert_eq!(base_of(&bases, "svc-payments").fetch, FetchOutcome::Fetched);
-    assert_eq!(base_of(&bases, "svc-payments").sha, pay_head);
+    assert_eq!(
+        base_of(&bases, "svc-payments").sha.as_deref(),
+        Some(pay_head.as_str())
+    );
 }
 
 #[test]
@@ -828,7 +865,7 @@ fn parent_workspace_starts_each_submodule_from_its_own_default_branch() {
 
     let bill = base_of(&bases, "svc-billing");
     assert_eq!(bill.refname, "origin/master", "{bill:?}");
-    assert_eq!(bill.sha, bill_head);
+    assert_eq!(bill.sha.as_deref(), Some(bill_head.as_str()));
     assert_eq!(base_of(&bases, "svc-payments").refname, "origin/main");
     assert_eq!(
         git(&ws.path.join("svc-billing"), &["rev-parse", "HEAD"]),

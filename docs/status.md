@@ -100,7 +100,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - **Fresh bases, known limits:**
   - parent worktrees still need the network to init submodules;
   - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
-  - only `GIT_TERMINAL_PROMPT=0` is set, so ssh askpass and keychain dialogs are still possible, bounded by the 30 s deadline;
+  - git and ssh never prompt (no terminal, no askpass, `credential.interactive=never`), but a macOS keychain access dialog raised by a credential helper still can, bounded by the 30 s deadline;
   - the fetch lock lives in the git crate (process-wide), not in the daemon's state.
 - **End-to-end tests, pending and known:**
   - the UI quick-open test covers the file quick open (the UI has no task switcher);

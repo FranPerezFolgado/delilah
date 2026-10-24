@@ -31,13 +31,22 @@ pub enum FetchOutcome {
 pub struct RepoBase {
     pub repo: String,
     pub refname: String,
-    pub sha: String,
+    /// `None` when no commit could be resolved (an empty repo); `refname` is then `HEAD`.
+    pub sha: Option<String>,
     pub fetch: FetchOutcome,
 }
 
-type RepoLock = Arc<Mutex<Option<Instant>>>;
+impl RepoBase {
+    /// What a new branch starts at: the commit, else the ref.
+    pub fn start(&self) -> &str {
+        self.sha.as_deref().unwrap_or(&self.refname)
+    }
+}
 
-/// One lock per repo, process-wide; the value is when it last fetched. Keyed on the
+/// When the repo last fetched, and how that went.
+type RepoLock = Arc<Mutex<Option<(Instant, Result<(), String>)>>>;
+
+/// One lock per repo, process-wide; the value is its last fetch. Keyed on the
 /// repo's common git dir, so a worktree and its main checkout (which share `origin`'s
 /// refs) share it too. The map holds one small entry per repo ever fetched.
 fn repo_lock(dir: &Path, opts: &GitOptions) -> RepoLock {
@@ -99,8 +108,9 @@ fn resolve_base(dir: &Path, opts: &GitOptions) -> Option<(String, String)> {
 }
 
 /// Fetches `origin` under the repo's lock, bounded by `deadline` (waiting for the lock
-/// included). `Ok(())` without fetching when a fetch finished less than `reuse` ago.
-/// The error is git's stderr, or why it did not run.
+/// included). A fetch that finished less than `reuse` ago is not repeated: its result
+/// is returned, failure included, so starts queued on an unreachable remote don't
+/// each wait for it again. The error is git's stderr, or why it did not run.
 pub(crate) fn locked_fetch(
     dir: &Path,
     opts: &GitOptions,
@@ -120,20 +130,24 @@ pub(crate) fn locked_fetch(
             }
         }
     };
-    if last.is_some_and(|t| t.elapsed() < reuse) {
-        return Ok(());
+    if let Some((at, result)) = last.as_ref()
+        && at.elapsed() < reuse
+    {
+        return result.clone();
     }
-    git_with_timeout(
+    let result = git_with_timeout(
         dir,
         &["fetch", "--quiet", "--no-tags", "origin"],
         opts,
         deadline,
     )
+    .map(|_| ())
     .map_err(|e| match e {
         GitError::Command { stderr, .. } if !stderr.is_empty() => stderr,
         e => e.to_string(),
-    })?;
-    *last = Some(Instant::now());
+    });
+    *last = Some((Instant::now(), result.clone()));
+    result?;
     if verify(dir, "refs/remotes/origin/HEAD", opts).is_none() {
         let _ = git_with_timeout(
             dir,
@@ -156,7 +170,10 @@ pub fn prepare_base(dir: &Path, label: &str, opts: &GitOptions, deadline: Deadli
             Err(reason) => FetchOutcome::Failed(reason),
         }
     };
-    let (refname, sha) = resolve_base(dir, opts).unwrap_or_else(|| ("HEAD".into(), String::new()));
+    let (refname, sha) = match resolve_base(dir, opts) {
+        Some((refname, sha)) => (refname, Some(sha)),
+        None => ("HEAD".into(), None),
+    };
     RepoBase {
         repo: label.to_string(),
         refname,
@@ -231,5 +248,69 @@ mod tests {
         .unwrap_err();
         assert!(start.elapsed() < Duration::from_secs(5), "{err}");
         assert!(repo_lock(tmp.path(), &o).try_lock().is_ok());
+    }
+
+    fn repo_with_origin(origin: &str) -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let o = GitOptions::default();
+        git(tmp.path(), &["init", "-q"], &o).unwrap();
+        git(tmp.path(), &["remote", "add", "origin", origin], &o).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn a_fetch_is_reused_within_the_window_failure_included() {
+        let o = GitOptions::default();
+        let remote = tempfile::TempDir::new().unwrap();
+        git(remote.path(), &["init", "-q", "--bare"], &o).unwrap();
+        let repo = repo_with_origin(remote.path().to_str().unwrap());
+        let dl = || Deadline::after(Duration::from_secs(10));
+
+        locked_fetch(repo.path(), &o, dl(), FRESH_FOR).unwrap();
+        git(
+            repo.path(),
+            &["remote", "set-url", "origin", "/nonexistent"],
+            &o,
+        )
+        .unwrap();
+        // Reused: the broken URL is not tried yet.
+        locked_fetch(repo.path(), &o, dl(), FRESH_FOR).unwrap();
+        // No reuse: it is.
+        let err = locked_fetch(repo.path(), &o, dl(), Duration::ZERO).unwrap_err();
+        // And that failure is what the next caller in the window gets.
+        assert_eq!(locked_fetch(repo.path(), &o, dl(), FRESH_FOR), Err(err));
+    }
+
+    #[test]
+    fn waiting_for_the_lock_gives_up_at_the_deadline() {
+        let o = GitOptions::default();
+        let repo = repo_with_origin("ssh://example.invalid/x");
+        git(
+            repo.path(),
+            &["config", "core.sshCommand", "sleep 30 #"],
+            &o,
+        )
+        .unwrap();
+        let dir = repo.path().to_path_buf();
+        let o2 = o.clone();
+        let holder = std::thread::spawn(move || {
+            locked_fetch(
+                &dir,
+                &o2,
+                Deadline::after(Duration::from_secs(3)),
+                Duration::ZERO,
+            )
+        });
+        std::thread::sleep(Duration::from_millis(500));
+
+        let err = locked_fetch(
+            repo.path(),
+            &o,
+            Deadline::after(Duration::from_millis(500)),
+            FRESH_FOR,
+        )
+        .unwrap_err();
+        assert!(err.contains("still running"), "{err}");
+        assert!(holder.join().unwrap().is_err());
     }
 }

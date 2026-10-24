@@ -271,6 +271,7 @@ export const EN: Record<string, string> = {
   "Comentarios en la PR": "Comments on the PR",
   "No se pudo archivar": "Could not be archived",
   "Rama posiblemente atrasada": "Branch may be behind",
+  "rama posiblemente atrasada": "branch may be behind",
   "Pedir al agente que lo arregle": "Ask the agent to fix it",
   "Ver PR": "View PR",
   "la sesión no está en marcha": "the session is not running",

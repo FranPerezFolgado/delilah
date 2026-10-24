@@ -22,7 +22,7 @@ fn fresh_remote_head_is_the_base_and_main_stays() {
     let new = advance_remote(&remote(&fx), "a.txt", "advance");
     let b = prepare_base(&repo, "svc", &opts(), dl());
     assert_eq!(b.refname, "origin/main");
-    assert_eq!(b.sha, new);
+    assert_eq!(b.sha.as_deref(), Some(new.as_str()));
     assert_eq!(b.fetch, FetchOutcome::Fetched);
     assert_eq!(git(&repo, &["rev-parse", "main"]), before);
 }
@@ -35,7 +35,7 @@ fn no_origin_is_no_remote() {
     let b = prepare_base(dir.path(), "x", &opts(), dl());
     assert_eq!(b.fetch, FetchOutcome::NoRemote);
     assert_eq!(b.refname, "main");
-    assert_eq!(b.sha, git(dir.path(), &["rev-parse", "HEAD"]));
+    assert_eq!(b.sha, Some(git(dir.path(), &["rev-parse", "HEAD"])));
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn failed_fetch_falls_back_to_last_fetched() {
         o => panic!("{o:?}"),
     }
     assert_eq!(b.refname, "origin/main");
-    assert_eq!(b.sha, old);
+    assert_eq!(b.sha.as_deref(), Some(old.as_str()));
 }
 
 #[test]

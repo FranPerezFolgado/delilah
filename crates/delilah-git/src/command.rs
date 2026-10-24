@@ -73,7 +73,9 @@ impl Deadline {
 }
 
 /// Every git call goes through here: no hook or fsmonitor command of the repo runs
-/// (agents write those repos), and git never waits for terminal input.
+/// (agents write those repos), and nothing asks for input: no terminal prompt, no
+/// askpass dialog (git's or ssh's), no interactive credential helper. Credentials that
+/// need no one (a keychain helper, an ssh agent) still work.
 fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
     let mut cmd = Command::new("git");
     cmd.args([
@@ -81,12 +83,17 @@ fn command(dir: &Path, args: &[&str], opts: &GitOptions) -> Command {
         "core.hooksPath=/dev/null",
         "-c",
         "core.fsmonitor=false",
+        "-c",
+        "credential.interactive=never",
     ]);
     if opts.allow_file_protocol {
         cmd.args(["-c", "protocol.file.allow=always"]);
     }
     cmd.arg("-C").arg(dir).args(args);
-    cmd.env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null());
+    cmd.env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true")
+        .env("SSH_ASKPASS_REQUIRE", "never")
+        .stdin(Stdio::null());
     cmd
 }
 
@@ -259,6 +266,43 @@ mod tests {
     }
 
     #[test]
+    fn a_timeout_leaves_no_child_behind() {
+        let dir = temp_repo();
+        let o = GitOptions::default();
+        git(
+            dir.path(),
+            &["remote", "add", "origin", "ssh://example.invalid/x"],
+            &o,
+        )
+        .unwrap();
+        // A sleep only this test starts, to look for it afterwards.
+        git(
+            dir.path(),
+            &["config", "core.sshCommand", "sleep 41.37 #"],
+            &o,
+        )
+        .unwrap();
+        let err = git_with_timeout(
+            dir.path(),
+            &["fetch", "origin"],
+            &o,
+            Deadline::after(Duration::from_secs(1)),
+        )
+        .unwrap_err();
+        assert!(matches!(err, GitError::Timeout { .. }), "{err}");
+        // SIGKILL is sent, not awaited: give the orphan a moment to go.
+        let gone = (0..20).any(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            !Command::new("pgrep")
+                .args(["-f", "sleep 41.37"])
+                .status()
+                .unwrap()
+                .success()
+        });
+        assert!(gone, "a child of git outlived the timeout");
+    }
+
+    #[test]
     fn expired_deadline_does_not_spawn() {
         let dir = temp_repo();
         let d = Deadline::after(Duration::ZERO);
@@ -297,5 +341,27 @@ mod tests {
     #[test]
     fn a_huge_deadline_does_not_overflow() {
         assert!(!Deadline::after(Duration::MAX).expired());
+    }
+
+    #[test]
+    fn credentials_are_never_asked_for() {
+        let dir = temp_repo();
+        let o = GitOptions::default();
+        let out = command(dir.path(), &["config", "credential.interactive"], &o)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "never");
+        let cmd = command(dir.path(), &["status"], &o);
+        let envs: Vec<_> = cmd.get_envs().collect();
+        for (k, v) in [
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GIT_ASKPASS", "true"),
+            ("SSH_ASKPASS_REQUIRE", "never"),
+        ] {
+            assert!(
+                envs.contains(&(k.as_ref(), Some(v.as_ref()))),
+                "{k} in {envs:?}"
+            );
+        }
     }
 }

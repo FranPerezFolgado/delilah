@@ -214,11 +214,7 @@ pub fn create_workspace(
                 return Err(GitError::SubmodulesInRepo);
             }
             let base = prepare_base(root, ".", opts, deadline);
-            let start = if base.sha.is_empty() {
-                base.refname.clone()
-            } else {
-                base.sha.clone()
-            };
+            let start = base.start().to_string();
             git(
                 root,
                 &[
@@ -244,11 +240,7 @@ pub fn create_workspace(
                 return Err(GitError::UnknownSubmodule(unknown.clone()));
             }
             let base = prepare_base(root, ".", opts, deadline);
-            let start = if base.sha.is_empty() {
-                "HEAD".to_string()
-            } else {
-                base.sha.clone()
-            };
+            let start = base.start().to_string();
             git(
                 root,
                 &["worktree", "add", "--detach", &ws_path, &start],
@@ -292,11 +284,7 @@ fn init_submodules(
     for sub in &spec.submodules {
         let dir = ws.join(sub);
         let base = prepare_base(&dir, sub, opts, deadline);
-        let start = if base.sha.is_empty() {
-            base.refname.clone()
-        } else {
-            base.sha.clone()
-        };
+        let start = base.start().to_string();
         git(
             &dir,
             &["checkout", "-q", "--no-track", "-b", &spec.branch, &start],
@@ -549,16 +537,12 @@ pub fn use_checkout(
                 .map(|sha| RepoBase {
                     repo: location.clone(),
                     refname: spec.branch.clone(),
-                    sha,
+                    sha: Some(sha),
                     fetch: FetchOutcome::Existing,
                 })
         } else {
             let base = prepare_base(dir, location, opts, deadline);
-            let start = if base.sha.is_empty() {
-                base.refname.clone()
-            } else {
-                base.sha.clone()
-            };
+            let start = base.start().to_string();
             git(
                 dir,
                 &["checkout", "-q", "--no-track", "-b", &spec.branch, &start],

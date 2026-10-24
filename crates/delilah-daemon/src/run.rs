@@ -41,14 +41,14 @@ async fn report_bases(
 ) {
     let mut warned = false;
     for b in bases {
-        tracing::info!(task = %key, repo = %b.repo, base = %b.refname, sha = %b.sha, fetch = ?b.fetch, "task branch base");
+        tracing::info!(task = %key, repo = %b.repo, base = %b.refname, sha = b.sha.as_deref().unwrap_or("-"), fetch = ?b.fetch, "task branch base");
         let FetchOutcome::Failed(reason) = &b.fetch else {
             continue;
         };
         let reason = short_reason(reason);
         let reason = reason.as_str();
         let name = if b.repo == "." { project } else { &b.repo };
-        let sha7: String = b.sha.chars().take(7).collect();
+        let sha7: String = b.start().chars().take(7).collect();
         let text = format!(
             "{} {name} ({reason}); {} {} @ {sha7} {}",
             app.lang().pick("No se pudo actualizar", "Could not update"),
@@ -1508,7 +1508,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_remote_or_an_existing_branch_leave_no_notice() {
+    async fn a_parent_start_warns_only_for_the_repo_whose_fetch_failed() {
+        let app = app().await;
+        let key = TaskKey::new("PROJ-5");
+        app.store
+            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .await
+            .unwrap();
+        let base = |repo: &str, fetch| RepoBase {
+            repo: repo.into(),
+            refname: "origin/main".into(),
+            sha: Some("0123456789abcdef".into()),
+            fetch,
+        };
+        let bases = [
+            base(".", FetchOutcome::Fetched),
+            base("svc-payments", FetchOutcome::Fetched),
+            base(
+                "svc-billing",
+                FetchOutcome::Failed("fatal: no route".into()),
+            ),
+            base("svc-local", FetchOutcome::NoRemote),
+        ];
+
+        report_bases(&app, &key, "platform", "feature/PROJ-5-x", &bases).await;
+
+        let notices = app.store.open_notices().await.unwrap();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].repo, "svc-billing");
+        assert!(
+            notices[0].text.contains("svc-billing (fatal: no route)"),
+            "{}",
+            notices[0].text
+        );
+        assert!(
+            notices[0].text.contains("origin/main @ 0123456"),
+            "{}",
+            notices[0].text
+        );
+    }
+
+    #[tokio::test]
+    async fn no_remote_leaves_no_notice_in_either_mode() {
         let app = repo_project(None).await;
         start_stale(&app, "PROJ-7", false).await;
         assert!(app.store.open_notices().await.unwrap().is_empty());
