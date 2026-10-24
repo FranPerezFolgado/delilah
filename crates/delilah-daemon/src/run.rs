@@ -240,14 +240,16 @@ pub async fn start_run(
 
     let spec = WorkspaceSpec {
         path: app.config.workspaces_dir().join(&req.key),
-        branch: Some(
-            req.branch
-                .clone()
-                .unwrap_or_else(|| format!("feature/{}", req.key)),
-        ),
+        // A free task starts at the project's HEAD without a branch: the first analysis
+        // creates it. Jira tasks keep `feature/<KEY>`.
+        branch: req
+            .branch
+            .clone()
+            .or_else(|| (!crate::branching::is_free(&key)).then(|| format!("feature/{}", req.key))),
         kind: project.kind,
         submodules: req.submodules.clone(),
     };
+    let branchless = spec.branch.is_none();
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
@@ -341,6 +343,16 @@ pub async fn start_run(
         _ => prompt,
     };
     let prompt = point_to_notes(&app, &key, prompt, notes.as_deref());
+    let prompt = match branchless {
+        true => format!(
+            "{prompt} ({})",
+            app.lang().pick(
+                "La tarea aún no tiene rama: deja que Spec Kit la cree al especificar",
+                "The task has no branch yet: let Spec Kit create it when specifying"
+            )
+        ),
+        false => prompt,
+    };
 
     if let Some(mut session) = adopted {
         // The project's Claude becomes the task's: it goes on with its conversation,
@@ -1058,6 +1070,96 @@ mod tests {
         assert!(
             args.contains(&format!("{})", path.display())),
             "the prompt does not point to notes.md: {args}"
+        );
+    }
+
+    #[tokio::test]
+    async fn free_tasks_start_branchless_and_jira_ones_on_their_feature_branch() {
+        use tower::ServiceExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let repo = home.join("web");
+        let fake = home.join("fake-claude.sh");
+        let seen = home.join("args.txt");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\nsleep 1\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("README.md"), "web\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        let config = crate::config::Config {
+            home: home.clone(),
+            addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: Some(fake),
+        };
+        let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+
+        for (key, free) in [("LIBRE-1", true), ("PROJ-1", false)] {
+            let req = axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/v1/runs")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({ "key": key, "title": "Idea", "project": "web", "free": free })
+                        .to_string(),
+                ))
+                .unwrap();
+            let res = crate::api::router(app.clone()).oneshot(req).await.unwrap();
+            assert_eq!(res.status(), StatusCode::CREATED, "{key}");
+        }
+        let branch_of = |key: &str| {
+            let app = app.clone();
+            let key = TaskKey::new(key);
+            async move { app.store.workspace(&key).await.unwrap().unwrap().1.branch }
+        };
+        assert_eq!(branch_of("LIBRE-1").await, "");
+        assert_eq!(branch_of("PROJ-1").await, "feature/PROJ-1");
+
+        let mut args = String::new();
+        for _ in 0..100 {
+            args = std::fs::read_to_string(&seen).unwrap_or_default();
+            if args.contains("PROJ-1") && args.contains("Idea") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        for key in ["LIBRE-1", "PROJ-1"] {
+            for live in app.sessions.of_task(key) {
+                let _ = live.pty.kill();
+            }
+        }
+        // Only the free task's first prompt says it has no branch.
+        assert_eq!(
+            args.matches("let Spec Kit create it when specifying")
+                .count()
+                + args
+                    .matches("deja que Spec Kit la cree al especificar")
+                    .count(),
+            1,
+            "{args}"
         );
     }
 
