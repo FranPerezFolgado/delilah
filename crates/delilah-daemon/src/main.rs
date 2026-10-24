@@ -28,6 +28,9 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
+    for note in config.override_notes() {
+        tracing::warn!("test-only switch on: {note}");
+    }
     match tokio::task::spawn_blocking(delilah_agents::env::init_login_path).await? {
         Some(path) => tracing::info!(%path, "agents get the login shell's PATH"),
         None => tracing::warn!("could not read the login shell's PATH; agents get the daemon's"),
@@ -61,12 +64,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = AppState::new(store, config);
     app.load_language().await;
     app.load_remote_control().await;
+    // Before anything else acts on tasks: the setups that died with the previous
+    // daemon stop as failed.
+    if let Err(e) = delilah_daemon::recover_interrupted_setups(&app).await {
+        tracing::warn!("cannot recover interrupted setups: {e}");
+    }
     scheduler::spawn(app.clone());
     pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
-    axum::serve(listener, api::router(app))
+    let shutdown = app.clone();
+    let served = axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
-        .await?;
+        .await;
+    // Also when serving failed: no preview is left running behind the daemon.
+    shutdown.shutdown_runtime().await;
+    served?;
     Ok(())
 }
 

@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import type { Project, Session, Task, TaskStatus } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, type Project, type Session, type Task, type TaskStatus } from "../api";
 import { Sidebar } from "./Sidebar";
 import { setLanguage } from "../i18n";
 
-const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature" };
+const web: Project = {
+  name: "web",
+  path: "/w/web",
+  kind: "repo",
+  workflow: "feature",
+  settings: DEFAULT_PROJECT_SETTINGS,
+};
 const task = (key: string, status: TaskStatus): Task => ({
   key,
   title: key,

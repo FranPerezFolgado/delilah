@@ -56,6 +56,18 @@ impl Workspace {
         (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
     }
 
+    /// The repos (as in [`Workspace::repos`]) with uncommitted changes. Errors when a
+    /// folder cannot be read by git.
+    pub fn uncommitted(&self, opts: &GitOptions) -> Result<Vec<String>, GitError> {
+        let mut dirty = Vec::new();
+        for (label, dir) in self.repos() {
+            if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+                dirty.push(label);
+            }
+        }
+        Ok(dirty)
+    }
+
     /// Folders that hold the task's branch: each submodule, or the repo itself.
     fn branch_dirs(&self) -> Vec<(String, PathBuf)> {
         match self.kind {
@@ -504,6 +516,59 @@ pub fn needs_push(dir: &Path, branch: &str, opts: &GitOptions) -> Result<bool, G
 pub fn push_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
     check_branch(branch)?;
     git(dir, &["push", "-u", "origin", branch], opts).map(|_| ())
+}
+
+/// True when `name` is a local branch, or a remote-tracking branch of any remote, in `dir`.
+pub fn branch_taken(dir: &Path, name: &str, opts: &GitOptions) -> Result<bool, GitError> {
+    let out = git(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        opts,
+    )?;
+    // Remote names may contain `/`, so strip each known remote instead of splitting.
+    let remotes = git(dir, &["remote"], opts)?;
+    let local = format!("refs/heads/{name}");
+    Ok(out.lines().any(|r| {
+        r == local
+            || remotes.lines().any(|remote| {
+                r.strip_prefix("refs/remotes/")
+                    .and_then(|rest| rest.strip_prefix(remote))
+                    .and_then(|rest| rest.strip_prefix('/'))
+                    == Some(name)
+            })
+    }))
+}
+
+/// `base` if no repo in `dirs` has that branch, else the first free `base-2`..`base-99`,
+/// else `base` with the unix time.
+pub fn free_branch(dirs: &[PathBuf], base: &str, opts: &GitOptions) -> Result<String, GitError> {
+    let taken = |name: &str| -> Result<bool, GitError> {
+        for dir in dirs {
+            if branch_taken(dir, name, opts)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    if !taken(base)? {
+        return Ok(base.to_string());
+    }
+    for n in 2..=99 {
+        let name = format!("{base}-{n}");
+        if !taken(&name)? {
+            return Ok(name);
+        }
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(format!("{base}-{secs}"))
 }
 
 /// `git fetch --quiet origin`.

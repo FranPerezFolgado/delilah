@@ -93,6 +93,7 @@ pub async fn claude_hook(
             Utc::now(),
             app.lang(),
         );
+        crate::autopilot::on_attention(&app, &TaskKey::new(&q.task), &id, &change).await;
         let changes = match &change {
             Change::Keep => false,
             Change::Clear => current.is_some(),
@@ -208,7 +209,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -388,7 +391,9 @@ mod limit_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

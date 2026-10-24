@@ -2,7 +2,6 @@
 //! so the user starts from a suggestion instead of a blank list.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// A small model is plenty to map a ticket onto a handful of folders.
 pub const MODEL: &str = "haiku";
@@ -73,33 +72,9 @@ pub fn args(prompt: &str) -> Vec<String> {
     .collect()
 }
 
-/// The same clean environment as the interactive agent.
-pub fn env() -> Vec<(String, std::ffi::OsString)> {
-    let mut vars = crate::env::agent_env();
-    vars.push(("TERM".into(), "dumb".into()));
-    vars
-}
-
 /// Reads Claude's `--output-format json` answer, keeping only real submodules, once each.
 pub fn parse(output: &str, known: &[String]) -> Result<Vec<Suggestion>, String> {
-    let envelope: Value =
-        serde_json::from_str(output).map_err(|e| format!("unexpected output from claude: {e}"))?;
-    if envelope["is_error"] == true {
-        return Err(format!(
-            "claude failed: {}",
-            envelope["result"].as_str().unwrap_or("unknown error")
-        ));
-    }
-    let text = envelope["result"].as_str().ok_or("claude gave no result")?;
-    let (start, end) = (text.find('{'), text.rfind('}'));
-    let (Some(start), Some(end)) = (start, end) else {
-        return Err(format!(
-            "claude did not answer with JSON: {}",
-            text.chars().take(200).collect::<String>()
-        ));
-    };
-    let answer: Value = serde_json::from_str(&text[start..=end])
-        .map_err(|e| format!("claude's JSON is not valid: {e}"))?;
+    let answer = crate::oneshot::answer_json(output)?;
     let mut out: Vec<Suggestion> = Vec::new();
     for item in answer["submodules"].as_array().into_iter().flatten() {
         let Some(path) = item["path"].as_str() else {

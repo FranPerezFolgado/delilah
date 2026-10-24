@@ -56,6 +56,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/sessions",
             get(session_api::list_for_task).post(session_api::open),
         )
+        .route(
+            "/api/v1/tasks/{key}/preview",
+            get(crate::preview_api::get_preview)
+                .post(crate::preview_api::start_preview)
+                .delete(crate::preview_api::stop_preview),
+        )
         .route("/api/v1/prs", get(crate::pr_api::summaries))
         .route(
             "/api/v1/tasks/{key}/prs",
@@ -104,6 +110,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/resume", post(actions::resume))
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
+        .route("/api/v1/tasks/{key}/setup/retry", post(setup_retry))
+        .route("/api/v1/tasks/{key}/setup/skip", post(setup_skip))
+        .route("/api/v1/tasks/{key}/setup/cancel", post(setup_cancel))
         .route("/api/v1/usage", get(actions::usage))
         .route("/api/v1/events", get(events::stream))
         .route("/api/v1/logs", get(crate::logs::tail))
@@ -115,6 +124,7 @@ pub fn router(state: AppState) -> Router {
             post(crate::handoff::set_saving_mode),
         )
         .route("/api/v1/tasks/{key}/handoff", post(crate::handoff::act))
+        .route("/api/v1/tasks/{key}/autopilot", post(crate::autopilot::act))
         .route(
             "/api/v1/tasks/{key}/review-hint/dismiss",
             post(crate::phases::dismiss),
@@ -157,8 +167,16 @@ pub fn router(state: AppState) -> Router {
             axum::routing::patch(projects::update_project).delete(projects::delete_project),
         )
         .route(
+            "/api/v1/projects/{name}/settings",
+            axum::routing::put(projects::update_settings),
+        )
+        .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),
+        )
+        .route(
+            "/api/v1/projects/{name}/branch-name",
+            post(crate::branch_name::propose_branch),
         )
         .route(
             "/api/v1/projects/{name}/suggest-submodules",
@@ -226,6 +244,12 @@ fn is_loopback_host(host: &str) -> bool {
             .is_ok_and(|ip| ip.is_loopback())
 }
 
+/// The body of the action endpoints (`handoff`, `autopilot`): `{ "action": "…" }`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ActionReq {
+    pub action: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Health {
     pub version: String,
@@ -259,12 +283,55 @@ pub struct NewTask {
     /// Each phase in a fresh session; absent, the `saving-mode` preference.
     #[serde(default)]
     pub saving_mode: Option<bool>,
+    /// Autopilot on: forces saving mode on, and conflicts with it being off.
+    #[serde(default)]
+    pub autopilot: Option<bool>,
     /// Defaults to the project's workflow (`feature` without a project).
     pub workflow: Option<String>,
 }
 
 fn default_workflow() -> String {
     "feature".into()
+}
+
+/// `POST /api/v1/tasks/{key}/setup/retry`: from `setup-failed`, runs the setup again.
+async fn setup_retry(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::retry(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+/// `POST /api/v1/tasks/{key}/setup/skip`: from `setup-failed`, launches the agent.
+async fn setup_skip(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::skip(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+/// `POST /api/v1/tasks/{key}/setup/cancel`: kills the running setup; the task ends
+/// in `setup-failed` ("cancelled") a moment later.
+async fn setup_cancel(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::cancel(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+async fn accepted(app: &AppState, key: &TaskKey) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
 }
 
 async fn health() -> Json<Health> {
@@ -315,12 +382,13 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     if new.title.trim().is_empty() {
         return Err(ApiError::bad_request("say what the task is about"));
     }
+    check_autopilot(new.autopilot, new.saving_mode)?;
     let project = match &new.project {
         Some(name) => Some(app.store.project(name).await?),
         None => None,
     };
     let key = match new.free && new.key.trim().is_empty() {
-        true => crate::run::next_free_key(&app).await?,
+        true => crate::run::next_free_key(app).await?,
         false => new.key,
     };
     let key = TaskKey::parse(key).map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -328,6 +396,9 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         .workflow
         .or_else(|| project.as_ref().map(|p| p.workflow.clone()))
         .unwrap_or_else(default_workflow);
+    if new.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+        return Err(crate::autopilot::not_spec_workflow(&key));
+    }
     let mut task = Task::new(key, new.title.trim(), workflow);
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
@@ -336,7 +407,21 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         Some(on) => on,
         None => crate::handoff::saving_mode_preference(app).await,
     };
+    if new.autopilot == Some(true) {
+        task.saving_mode = true;
+        task.autopilot = Some(crate::autopilot::fresh());
+    }
     Ok(task)
+}
+
+/// `autopilot: true` with `saving_mode: false` is a contradiction.
+fn check_autopilot(autopilot: Option<bool>, saving_mode: Option<bool>) -> Result<(), ApiError> {
+    match (autopilot, saving_mode) {
+        (Some(true), Some(false)) => Err(ApiError::bad_request(
+            "autopilot needs saving mode: it cannot run with saving mode off",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
@@ -348,7 +433,9 @@ async fn update_task(
     let UpdateTask {
         mut change,
         saving_mode,
+        autopilot,
     } = body;
+    check_autopilot(autopilot, saving_mode)?;
     if let Some(title) = &mut change.title {
         *title = title.trim().to_string();
         if title.is_empty() {
@@ -359,6 +446,20 @@ async fn update_task(
     let mut task = app.store.update_backlog_task(&key, &change).await?;
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
+    }
+    if let Some(on) = autopilot {
+        if on && !crate::autopilot::allowed(&key, &task.workflow) {
+            return Err(crate::autopilot::not_spec_workflow(&key));
+        }
+        // On brings saving mode with it; off leaves it as it is. A paused or finished
+        // autopilot stays as it is (`resume` continues it), like `turn_on`.
+        app.store
+            .update_autopilot(&key, |current| match on {
+                true => current.is_none().then(|| Some(crate::autopilot::fresh())),
+                false => current.is_some().then_some(None),
+            })
+            .await?;
+        task = app.store.get_task(&key).await?.unwrap_or(task);
     }
     app.emit(crate::events::Topic::Tasks);
     Ok(Json(task))
@@ -371,6 +472,8 @@ struct UpdateTask {
     change: crate::store::BacklogChange,
     #[serde(default)]
     saving_mode: Option<bool>,
+    #[serde(default)]
+    autopilot: Option<bool>,
 }
 
 async fn get_task(
@@ -410,6 +513,9 @@ pub struct ErrorBody {
     /// Refused because work in a worktree would be lost: the client may offer to force it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unpushed: bool,
+    /// For a 422 on a form: each problem, tied to its field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<delilah_core::FieldError>,
     /// A task paused by the limit: when it resumes by itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_at: Option<chrono::DateTime<Utc>>,
@@ -422,11 +528,23 @@ pub struct ApiError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
     pub(crate) unpushed: bool,
+    pub(crate) fields: Vec<delilah_core::FieldError>,
     pub(crate) resume_at: Option<chrono::DateTime<Utc>>,
     pub(crate) reason: Option<String>,
 }
 
 impl ApiError {
+    /// A 422 that names the fields at fault.
+    pub fn invalid_fields(
+        message: impl Into<String>,
+        fields: Vec<delilah_core::FieldError>,
+    ) -> Self {
+        Self {
+            fields,
+            ..Self::unprocessable(message)
+        }
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
@@ -488,6 +606,7 @@ impl ApiError {
             status,
             message: message.into(),
             unpushed: false,
+            fields: Vec::new(),
             resume_at: None,
             reason: None,
         }
@@ -521,6 +640,7 @@ impl IntoResponse for ApiError {
             Json(ErrorBody {
                 error: self.message,
                 unpushed: self.unpushed,
+                fields: self.fields,
                 resume_at: self.resume_at,
                 reason: self.reason,
             }),
@@ -571,7 +691,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -584,7 +706,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -594,6 +718,8 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "custom".into(),
+                settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -801,6 +927,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn setup_actions_are_refused_from_the_wrong_status() {
+        let (app, state) = app_with_project().await;
+        let key = TaskKey::new("PROJ-1");
+        let mut task = Task::new(key.clone(), "T", "custom");
+        task.project = Some("web".into());
+        state.store.create_task(&task).await.unwrap();
+        state.transition(&key, Event::Start).await.unwrap();
+        for action in ["retry", "skip", "cancel"] {
+            let (status, _) = call(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/PROJ-1/setup/{action}"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{action}");
+        }
+    }
+
+    #[tokio::test]
     async fn unknown_tasks_are_not_found() {
         let app = app().await;
         let (status, _) = call(&app, "GET", "/api/v1/tasks/PROJ-404", None).await;
@@ -910,6 +1056,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_backlog_task_takes_autopilot_and_it_forces_saving_mode() {
+        let (app, _state) = app_with_project().await;
+        let new = |extra: Value| {
+            let mut body =
+                json!({"free": true, "title": "T", "project": "web", "workflow": "feature"});
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            body
+        };
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new(json!({"autopilot": true, "saving_mode": false}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new(json!({"autopilot": true}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(task["saving_mode"], true);
+        assert_eq!(task["autopilot"]["state"], "running");
+
+        let (_, plain) = call(&app, "POST", "/api/v1/tasks", Some(new(json!({})))).await;
+        assert!(plain["autopilot"].is_null());
+        let uri = format!("/api/v1/tasks/{}", plain["key"].as_str().unwrap());
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            &uri,
+            Some(json!({"autopilot": true, "saving_mode": false})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert_eq!(task["saving_mode"], true);
+        assert_eq!(task["autopilot"]["state"], "running");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"title": "U"}))).await;
+        assert_eq!(task["autopilot"]["state"], "running", "left out, it stays");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": false}))).await;
+        assert!(task["autopilot"].is_null());
+        assert_eq!(task["saving_mode"], true, "off keeps saving mode");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert!(task["autopilot"].is_object());
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"saving_mode": false}))).await;
+        assert!(task["autopilot"].is_null(), "saving mode off clears it");
+    }
+
+    #[tokio::test]
+    async fn autopilot_is_for_the_spec_workflow_only() {
+        let (app, _state) = app_with_project().await;
+        let body = |extra: Value| {
+            let mut b = json!({"free": true, "title": "T", "project": "web"});
+            b.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            b
+        };
+        let (status, err) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(body(json!({"autopilot": true, "workflow": "prompt"}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(err["reason"], "not-spec-workflow");
+        let (_, plain) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(body(json!({"workflow": "prompt"}))),
+        )
+        .await;
+        let uri = format!("/api/v1/tasks/{}", plain["key"].as_str().unwrap());
+        let (status, err) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(err["reason"], "not-spec-workflow");
+        let (status, _) = call(&app, "PATCH", &uri, Some(json!({"autopilot": false}))).await;
+        assert_eq!(status, StatusCode::OK, "off is always fine");
+    }
+
+    #[tokio::test]
+    async fn patching_autopilot_on_keeps_a_paused_one() {
+        let (app, state) = app_with_project().await;
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "project": "web", "workflow": "feature", "autopilot": true})),
+        )
+        .await;
+        let key = TaskKey::new(task["key"].as_str().unwrap());
+        let mut paused = crate::autopilot::fresh();
+        paused.state = delilah_core::AutopilotState::Paused;
+        state
+            .store
+            .set_autopilot(&key, Some(&paused))
+            .await
+            .unwrap();
+        let uri = format!("/api/v1/tasks/{key}");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert_eq!(task["autopilot"]["state"], "paused");
+    }
+
+    #[tokio::test]
+    async fn the_autopilot_route_refuses_tasks_without_saving_mode() {
+        let (app, state) = app_with_project().await;
+        let key = TaskKey::new("PROJ-1");
+        state
+            .store
+            .create_task(&Task::new(key, "t", "prompt"))
+            .await
+            .unwrap();
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/autopilot",
+            Some(json!({"action": "on"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["reason"], "not-spec-workflow");
+    }
+
+    #[tokio::test]
+    async fn saving_mode_off_clears_autopilot_through_the_route() {
+        let (app, state) = app_with_project().await;
+        let key = TaskKey::new("PROJ-1");
+        state
+            .store
+            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .await
+            .unwrap();
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/autopilot",
+            Some(json!({"action": "on"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(task["autopilot"]["state"], "running");
+        assert_eq!(task["saving_mode"], true);
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/saving-mode",
+            Some(json!({"on": false})),
+        )
+        .await;
+        assert!(task["autopilot"].is_null());
+        assert_eq!(task["saving_mode"], false);
+    }
+
+    #[tokio::test]
     async fn patching_saving_mode_off_clears_a_pending_handoff() {
         let (app, state) = app_with_project().await;
         let body = json!({"free": true, "title": "T", "project": "web", "saving_mode": true});
@@ -949,7 +1257,9 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: ui_origin.map(str::to_string),
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -997,7 +1307,9 @@ mod cors_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

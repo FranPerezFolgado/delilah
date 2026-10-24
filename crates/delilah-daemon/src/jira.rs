@@ -56,6 +56,30 @@ pub async fn status(State(app): State<AppState>) -> Result<Json<JiraStatus>, Api
     }))
 }
 
+/// Whether a Jira site may get the token: `https://` always; `http://` only on loopback and only when the test switch is on.
+fn site_allowed(site: &str, http_loopback: bool) -> bool {
+    if site.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = site.strip_prefix("http://") else {
+        return false;
+    };
+    if !http_loopback {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // Userinfo or a backslash can hide the real host (`http://localhost:80@evil.com`).
+    if authority.contains(['@', '\\']) {
+        return false;
+    }
+    let (host, port) = match authority.split_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (authority, None),
+    };
+    port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && (host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
+}
+
 /// Saves the connection after checking it against Jira.
 pub async fn connect(
     State(app): State<AppState>,
@@ -71,7 +95,7 @@ pub async fn connect(
     // The token goes with every request: never in clear text.
     if req.mode != JiraMode::Sample
         && let Some(site) = &site
-        && !site.starts_with("https://")
+        && !site_allowed(site, app.config.jira_http_loopback)
     {
         return Err(ApiError::bad_request(format!(
             "the Jira site must be an https:// URL, got `{site}`"
@@ -261,7 +285,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }
@@ -386,6 +412,28 @@ mod tests {
         );
         assert!(md.contains("- Componentes: svc-payments, svc-orders"));
         assert!(md.contains("## Descripción"));
+    }
+
+    #[test]
+    fn plain_http_is_only_allowed_on_loopback_with_the_switch() {
+        use super::site_allowed;
+        for site in ["http://127.0.0.1:5000", "http://localhost:5000"] {
+            assert!(!site_allowed(site, false), "{site}");
+            assert!(site_allowed(site, true), "{site}");
+        }
+        assert!(!site_allowed("http://example.com", true));
+        assert!(!site_allowed("http://127.0.0.1.evil.com", true));
+        for evil in [
+            "http://127.0.0.1:1@evil.com",
+            "http://localhost:80@evil.com",
+            "http://localhost@evil.com",
+            "http://127.0.0.1:80\\@evil.com",
+            "http://localhost:x",
+            "http://localhost:",
+        ] {
+            assert!(!site_allowed(evil, true), "{evil}");
+        }
+        assert!(site_allowed("https://acme.atlassian.net", false));
     }
 
     #[tokio::test]

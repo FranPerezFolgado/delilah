@@ -124,9 +124,27 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         &[
             &PredefinedMenuItem::about(app, Some(l("Acerca de Delilah", "About Delilah")), None)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, CHECK_UPDATES, l("Buscar actualizaciones…", "Check for updates…"), true, None::<&str>)?,
-            &MenuItem::with_id(app, RESTART_DAEMON, l("Reiniciar el daemon", "Restart the daemon"), true, None::<&str>)?,
-            &MenuItem::with_id(app, STOP_DAEMON, l("Detener el daemon", "Stop the daemon"), true, None::<&str>)?,
+            &MenuItem::with_id(
+                app,
+                CHECK_UPDATES,
+                l("Buscar actualizaciones…", "Check for updates…"),
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                RESTART_DAEMON,
+                l("Reiniciar el daemon", "Restart the daemon"),
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                STOP_DAEMON,
+                l("Detener el daemon", "Stop the daemon"),
+                true,
+                None::<&str>,
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, Some(l("Ocultar Delilah", "Hide Delilah")))?,
             &PredefinedMenuItem::hide_others(app, Some(l("Ocultar otros", "Hide Others")))?,
@@ -157,7 +175,10 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::minimize(app, Some(l("Minimizar", "Minimize")))?,
             &PredefinedMenuItem::maximize(app, Some(l("Zoom", "Zoom")))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::fullscreen(app, Some(l("Pantalla completa", "Enter Full Screen")))?,
+            &PredefinedMenuItem::fullscreen(
+                app,
+                Some(l("Pantalla completa", "Enter Full Screen")),
+            )?,
         ],
     )?;
     let help = Submenu::with_items(

@@ -444,6 +444,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         }
     }
 
@@ -478,6 +479,8 @@ mod tests {
                     path: "/w/web".into(),
                     kind: delilah_core::ProjectKind::Repo,
                     workflow: "feature".into(),
+                    settings: Default::default(),
+                    preview_command: None,
                 })
                 .await
                 .unwrap();
@@ -1010,6 +1013,8 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();

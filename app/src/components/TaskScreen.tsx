@@ -16,14 +16,17 @@ import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
 import { Icon, type IconName } from "./Icon";
+import { AutopilotMark } from "./AutopilotMark";
+import { PreviewControl } from "./PreviewControl";
 import { PhaseBadge } from "./PhaseBadge";
 import { SessionChain } from "./SessionChain";
 import { headerPhaseOf } from "../phases";
-import { sessionStatus } from "./sessionLabels";
+import { isSetupRunning, kindLabel, sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
 import { PrView } from "./PrView";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
+import { SetupBanner } from "./SetupBanner";
 import { TerminalPane } from "./TerminalPane";
 
 interface Props {
@@ -272,6 +275,16 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
       .then(onChanged)
       .catch((e) => setError((e as Error).message));
 
+  const [autopilotBusy, setAutopilotBusy] = useState(false);
+  const setAutopilotMode = (action: "on" | "off") => {
+    setAutopilotBusy(true);
+    api
+      .setAutopilot(owner, action)
+      .then(onChanged)
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setAutopilotBusy(false));
+  };
+
   const openChanges = () => {
     session.changesOpen = true;
     activate(CHANGES);
@@ -504,6 +517,13 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
             <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
+              <AutopilotMark autopilot={task.autopilot} />
+              <PreviewControl taskKey={owner} project={task.project} status={task.status} />
+              {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
+                <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
+                  {t("Desactivar")}
+                </button>
+              )}
               {task.saving_mode && (
                 <span className="pill saving-pill">
                   {t("Modo ahorro")}
@@ -515,6 +535,11 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               <span className={`pill ${status.cls}`}>
                 <Icon name={status.icon} /> {statusLabel(task.status)}
               </span>
+              {task.workflow === "feature" && task.status.type !== "done" && !task.autopilot && (
+                <button className="btn btn-ghost saving-on" disabled={autopilotBusy} title={t("Activa el autopiloto: la cadena sigue sola hasta abrir las PRs")} onClick={() => setAutopilotMode("on")}>
+                  {t("Activar autopiloto")}
+                </button>
+              )}
               {!task.saving_mode && task.status.type !== "done" && (
                 <button className="btn btn-ghost saving-on" onClick={() => setSaving(true)}>
                   {t("Activar modo ahorro")}
@@ -560,9 +585,9 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                   key={s.id}
                   id={sessionTab(s.id)}
                   label={s.label}
-                  title={`${s.label} · ${s.kind === "shell" ? t("terminal") : "Claude"} · ${st.label}`}
-                  icon={s.kind === "shell" ? "console" : st.icon}
-                  iconClass={s.kind === "shell" ? "" : st.cls}
+                  title={`${s.label} · ${kindLabel(s)} · ${st.label}`}
+                  icon={s.kind === "claude" ? st.icon : "console"}
+                  iconClass={s.kind === "claude" ? st.cls : ""}
                   shown={shown}
                   onActivate={activate}
                   onClose={s.primary ? undefined : close}
@@ -636,6 +661,9 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                   .catch((e) => setError((e as Error).message));
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                  {s.kind === "setup" && s.live && task && (
+                    <SetupBanner task={task} running={isSetupRunning(sessions)} onChanged={onChanged} />
+                  )}
                   {!asConversation && s.read_only && s.kind === "claude" && s.live && (
                     <div className="ebar warn">
                       <Icon name="lock" />

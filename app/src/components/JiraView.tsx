@@ -20,6 +20,7 @@ const TASK_LABELS: Record<string, string> = {
   "paused-by-limit": "Pausada",
   done: "Hecha",
   failed: "Fallida",
+  "setup-failed": "Setup fallido",
 };
 
 type GroupBy = "status" | "epic";

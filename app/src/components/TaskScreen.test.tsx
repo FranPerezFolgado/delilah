@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -40,7 +41,7 @@ const task = (status: TaskStatus): Task => ({
   status,
 });
 const spec: SpecSummary = { phase: "plan", dir: "specs/001-x", done: 0, total: 3, current: null };
-const project: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature" };
+const project: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS };
 
 function head(t?: Task, s?: SpecSummary) {
   const { container } = render(
@@ -61,6 +62,7 @@ function head(t?: Task, s?: SpecSummary) {
 beforeEach(() => {
   setLanguage("es");
   setSavingMode.mockClear();
+  setAutopilot.mockClear();
 });
 afterEach(() => {
   cleanup();
@@ -209,6 +211,32 @@ describe("TaskScreen saving mode", () => {
     saving({ type: "running" }, false);
     fireEvent.click(screen.getByText("Activar modo ahorro"));
     expect(setSavingMode).toHaveBeenLastCalledWith("PROJ-1", true);
+  });
+});
+
+describe("TaskScreen autopilot control", () => {
+  const withAp = (over: Partial<Task>) => head({ ...task({ type: "running" }), ...over });
+
+  it("offers to turn it on when off, in a spec-workflow task only", () => {
+    withAp({});
+    fireEvent.click(screen.getByText("Activar autopiloto"));
+    expect(setAutopilot).toHaveBeenCalledWith("PROJ-1", "on");
+    cleanup();
+    withAp({ workflow: "prompt" });
+    expect(screen.queryByText("Activar autopiloto")).toBeNull();
+    cleanup();
+    withAp({ status: { type: "done" } });
+    expect(screen.queryByText("Activar autopiloto")).toBeNull();
+  });
+
+  it("offers to turn it off while running, and leaves a paused one to the banner", () => {
+    withAp({ saving_mode: true, autopilot: { state: "running", since: "2026-10-21T10:00:00Z" } });
+    fireEvent.click(screen.getByTitle("Desactiva el autopiloto y sigue a mano"));
+    expect(setAutopilot).toHaveBeenCalledWith("PROJ-1", "off");
+    cleanup();
+    withAp({ saving_mode: true, autopilot: { state: "paused", since: "2026-10-21T10:00:00Z" } });
+    expect(screen.queryByTitle("Desactiva el autopiloto y sigue a mano")).toBeNull();
+    expect(screen.queryByText("Activar autopiloto")).toBeNull();
   });
 });
 
