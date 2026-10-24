@@ -48,6 +48,9 @@ pub async fn claude_hook(
     {
         live.set_transcript(path);
     }
+    if let Some(live) = &live {
+        crate::transcript_watch::poke(&app, &live.id);
+    }
     // No live session (e.g. a hook from before a restart): treat it as the primary.
     let primary = live.as_ref().is_none_or(|l| l.primary);
     if signal == Signal::SessionStarted

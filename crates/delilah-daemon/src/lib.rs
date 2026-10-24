@@ -47,4 +47,5 @@ mod store_runs;
 pub mod store_sessions;
 mod store_settings;
 mod terminal;
+pub mod transcript_watch;
 mod transitions;

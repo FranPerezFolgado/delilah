@@ -9,9 +9,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-02 | 2 | 2A | implementing | 1 | | T002 done; waiting for the user to run the scenarios (T003/T004) |
 | WP-03 | 3 | 3A | done | 1 | 7a74a83 | |
 | WP-04 | 3 | 3A | done | 1 | 95b1959 | |
-| WP-05 | 4 | 4A | verified | 1 | | |
-| WP-06 | 4 | 4B | pending | 0 | | |
-| WP-07 | 4 | 4B | pending | 0 | | |
+| WP-05 | 4 | 4A | verified | 1 | dfd483e | |
+| WP-06 | 4 | 4B | verified | 1 | | |
+| WP-07 | 4 | 4B | implementing | 0 | | |
 | WP-08 | 4 | 4C | pending | 0 | | |
 | WP-09 | 4 | 4D | pending | 0 | | |
 | WP-11 | 4 | 4D | pending | 0 | | |
@@ -41,6 +41,10 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 4 | security | MEDIUM | hook transcript_path accepted anywhere (absolute .jsonl, no ..; symlinks pass) → served via GET conversation; restrict canonical path to ~/.claude/projects, re-check at read | crates/delilah-daemon/src/hooks.rs:151 |
+| 4 | security | MEDIUM | every GET reads the whole transcript (no size cap, no is_file); orphan path re-parses whole file; tool_detail parses every line — seek from cursor, cap size, cache | crates/delilah-daemon/src/conversation.rs:82 |
+| 4 | security | LOW | any hook overwrites the live transcript path before validation (integrity side of the above) | crates/delilah-daemon/src/hooks.rs:46 |
+| 4 | security | LOW | tool-detail response size uncapped (consider 1 MB) | crates/delilah-daemon/src/conversation.rs:166 |
 | 3 | spec | LOW | "Delilah's own injected text → skipped" (R3) not implemented; no marker exists yet | crates/delilah-agents/src/transcript.rs:313 |
 | 3 | spec | LOW | parse_message pairs results only within one message; stream-json sends tool_result in a separate user message (needs own pairing for FR-016) | crates/delilah-agents/src/transcript.rs:214 |
 | 3 | spec | LOW | untested: MultiEdit/Write diffs, Glob/NotebookEdit/Agent summaries, input truncation, tool_detail is_error, missing uuid/bad timestamp | crates/delilah-agents/src/transcript.rs |

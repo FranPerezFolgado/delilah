@@ -1,5 +1,5 @@
 use delilah_daemon::{
-    api, config::Config, pr_loop, scheduler, specs, state::AppState, store::Store,
+    api, config::Config, pr_loop, scheduler, specs, state::AppState, store::Store, transcript_watch,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -59,6 +59,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     scheduler::spawn(app.clone());
     pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
+    transcript_watch::spawn(app.clone());
     let shutdown = app.clone();
     let served = axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())

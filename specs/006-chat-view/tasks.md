@@ -112,12 +112,12 @@
   - merge with stored entries, whose ids are now strings;
   - drop the `conversation = 1` guard for reading.
 - [X] T013 [US1] Write failing tests and implement `GET /api/v1/sessions/{id}/conversation/tools/{tool_use_id}` (full input and result, 404 when unknown) in `crates/delilah-daemon/src/conversation.rs`, with the route in `crates/delilah-daemon/src/api.rs`.
-- [ ] T014 [US1] Write failing tests in a new `crates/delilah-daemon/src/transcript_watch.rs` (tests module, short interval injected):
+- [X] T014 [US1] Write failing tests in a new `crates/delilah-daemon/src/transcript_watch.rs` (tests module, short interval injected):
   - appending a complete line to a live session's transcript emits `Topic::Conversations` within one interval;
   - appending only a partial line emits nothing until it is completed;
   - no live session means no events;
   - `poke(session)` (called from hooks) checks at once.
-- [ ] T015 [US1] Implement T014: one daemon-wide loop (1 s) over `app.sessions`, remembering the last size per session and forgetting sessions that are gone. Start it with the daemon (`crates/delilah-daemon/src/main.rs` or wherever background loops start, next to the scheduler), and call `poke` from `claude_hook` in `crates/delilah-daemon/src/hooks.rs`.
+- [X] T015 [US1] Implement T014: one daemon-wide loop (1 s) over `app.sessions`, remembering the last size per session and forgetting sessions that are gone. Start it with the daemon (`crates/delilah-daemon/src/main.rs` or wherever background loops start, next to the scheduler), and call `poke` from `claude_hook` in `crates/delilah-daemon/src/hooks.rs`.
 - [ ] T016 [P] [US1] Write failing tests and implement migration `crates/delilah-daemon/migrations/0016_task_view.sql` (`ALTER TABLE tasks ADD COLUMN view TEXT NOT NULL DEFAULT 'chat';`):
   - `Task.view: TaskView { Chat, Terminal }` (serde lowercase, default `Chat`) in `crates/delilah-core/src/task.rs`;
   - read and write in every task query in `crates/delilah-daemon/src/store.rs`, plus `set_view(key, view)`.

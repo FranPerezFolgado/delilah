@@ -167,6 +167,11 @@ impl Sessions {
         self.live.lock().unwrap().get(id).cloned()
     }
 
+    /// Every live session.
+    pub fn all(&self) -> Vec<Live> {
+        self.live.lock().unwrap().values().cloned().collect()
+    }
+
     pub fn of_task(&self, task: &str) -> Vec<Live> {
         self.live
             .lock()
