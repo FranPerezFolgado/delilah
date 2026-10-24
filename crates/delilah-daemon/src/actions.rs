@@ -370,7 +370,9 @@ mod tests {
         };
         let opts = GitOptions::default();
         let ws = if in_checkout {
-            let (ws, previous) = delilah_git::use_checkout(repo, &spec, &opts).unwrap();
+            let deadline = delilah_git::Deadline::after(std::time::Duration::from_secs(30));
+            let (ws, previous, _) =
+                delilah_git::use_checkout(repo, &spec, &opts, deadline).unwrap();
             app.store.save_workspace(&key, repo, &ws).await.unwrap();
             app.store
                 .set_checkout_previous(&key, &previous)

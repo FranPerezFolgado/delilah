@@ -346,8 +346,8 @@ pub async fn start_run(
     let deadline = Deadline::after(Duration::from_secs(30));
     let created = tokio::task::spawn_blocking(move || {
         if in_checkout {
-            delilah_git::use_checkout(&root, &spec, &opts)
-                .map(|(ws, prev)| (ws, Some(prev), Vec::new()))
+            delilah_git::use_checkout(&root, &spec, &opts, deadline)
+                .map(|(ws, prev, bases)| (ws, Some(prev), bases))
         } else {
             delilah_git::create_workspace(&root, &spec, &opts, deadline)
                 .map(|(ws, bases)| (ws, None, bases))

@@ -739,7 +739,8 @@ mod tests {
             kind: ProjectKind::Parent,
             submodules: vec!["svc-payments".into(), "svc-orders".into()],
         };
-        let (ws, previous) = delilah_git::use_checkout(&root, &spec, &opts()).unwrap();
+        let deadline = delilah_git::Deadline::after(std::time::Duration::from_secs(30));
+        let (ws, previous, _) = delilah_git::use_checkout(&root, &spec, &opts(), deadline).unwrap();
         let head = commit_and_push(&root.join("svc-payments"));
         app.store.save_workspace(&key, &root, &ws).await.unwrap();
         app.store

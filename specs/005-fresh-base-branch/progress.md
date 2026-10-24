@@ -8,8 +8,8 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 654fa24 | |
 | WP-02 | 2 | 2A | done | 1 | ec9e4ce | |
-| WP-03 | 3 | 3A | implementing | 0 | | |
-| WP-04 | 4 | 4A | pending | 0 | | |
+| WP-03 | 3 | 3A | done | 1 | d44308e | |
+| WP-04 | 4 | 4A | implementing | 0 | | |
 | WP-05 | 5 | 5A | pending | 0 | | parallel with WP-06 |
 | WP-06 | 6 | 6A | pending | 0 | | parallel with WP-05 |
 | WP-07 | 6 | 6A | verified | 1 | 5845a13 | started early, UI only |
@@ -31,3 +31,5 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | 2 | architecture | LOW | git_with_timeout duplicates git()'s setup/error mapping; GitError::Timeout is a new public variant | crates/delilah-git/src/command.rs |
 | 2 | spec | LOW | Untested: no child left after timeout, lock-wait past deadline → Failed, 5 s reuse window; test (f) indistinguishable from (a) | crates/delilah-git/tests/base.rs |
 | 2 | security | LOW | repo_lock map never pruned (negligible) | crates/delilah-git/src/base.rs |
+| 3 | spec | LOW | No repo-project test (`fx.repo_spec()`) that an existing folder / invalid branch still fail before the new fetch (code order is right) | crates/delilah-git/tests/workspace.rs |
+| 3 | spec | LOW | report_bases log line untested; T011 checks project folder only by HEAD != remote head | crates/delilah-daemon/src/run.rs |

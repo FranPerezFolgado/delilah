@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
-use crate::base::{RepoBase, prepare_base};
+use crate::base::{FetchOutcome, RepoBase, prepare_base};
 use crate::command::{Deadline, GitError, GitOptions, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -470,18 +470,19 @@ fn checkout_dirs(root: &Path, spec: &WorkspaceSpec) -> Result<Vec<(String, PathB
 
 /// Puts the task's branch in the project's own checkout instead of a worktree:
 /// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
-/// while there are uncommitted changes. With no branch it switches nothing, and a
-/// parent's own checkout (`"."`) is recorded too, as a hook may switch it. Returns the workspace and, per folder, the
-/// branch (or commit) it was on, to go back there when the task is archived.
+/// while there are uncommitted changes (before any fetch). A new branch starts at the
+/// fresh `origin` default branch (see [`prepare_base`]) with no upstream; one that
+/// already exists is switched to as it is, never moved. Returns the workspace, per
+/// folder the branch (or commit) it was on, to go back there when the task is archived,
+/// and the base each folder's branch started from.
 pub fn use_checkout(
     root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
-) -> Result<(Workspace, Vec<(String, String)>), GitError> {
-    if let Some(branch) = &spec.branch
-        && git(root, &["check-ref-format", "--branch", branch], opts).is_err()
-    {
-        return Err(GitError::InvalidBranch(branch.clone()));
+    deadline: Deadline,
+) -> Result<(Workspace, Vec<(String, String)>, Vec<RepoBase>), GitError> {
+    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
+        return Err(GitError::InvalidBranch(spec.branch.clone()));
     }
     let mut dirs = checkout_dirs(root, spec)?;
     for (location, dir) in &dirs {
@@ -495,6 +496,7 @@ pub fn use_checkout(
         dirs.push((".".into(), root.to_path_buf()));
     }
     let mut previous: Vec<(String, String)> = Vec::new();
+    let mut bases: Vec<RepoBase> = Vec::new();
     for (location, dir) in &dirs {
         let was = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"], opts)
             .ok()
@@ -516,22 +518,45 @@ pub fn use_checkout(
         )
         .is_ok();
         let switched = if exists {
-            git(dir, &["checkout", "-q", branch], opts)
+            git(dir, &["checkout", "-q", &spec.branch], opts).map(|_| {
+                let sha = git(dir, &["rev-parse", "HEAD"], opts).unwrap_or_default();
+                RepoBase {
+                    repo: location.clone(),
+                    refname: spec.branch.clone(),
+                    sha,
+                    fetch: FetchOutcome::Existing,
+                }
+            })
         } else {
-            git(dir, &["checkout", "-q", "-b", branch], opts)
+            let base = prepare_base(dir, location, opts, deadline);
+            let start = if base.sha.is_empty() {
+                base.refname.clone()
+            } else {
+                base.sha.clone()
+            };
+            git(
+                dir,
+                &["checkout", "-q", "--no-track", "-b", &spec.branch, &start],
+                opts,
+            )
+            .map(|_| base)
         };
-        if let Err(e) = switched {
-            // Leave nothing half-switched behind.
-            for (loc, back) in &previous {
-                let d = if loc == "." {
-                    root.to_path_buf()
-                } else {
-                    root.join(loc)
-                };
-                let _ = git(&d, &["checkout", "-q", back], opts);
+        let base = match switched {
+            Ok(base) => base,
+            Err(e) => {
+                // Leave nothing half-switched behind.
+                for (loc, back) in &previous {
+                    let d = if loc == "." {
+                        root.to_path_buf()
+                    } else {
+                        root.join(loc)
+                    };
+                    let _ = git(&d, &["checkout", "-q", back], opts);
+                }
+                return Err(e);
             }
-            return Err(e);
-        }
+        };
+        bases.push(base);
         previous.push((location.clone(), was));
     }
     let ws = Workspace {
@@ -540,7 +565,7 @@ pub fn use_checkout(
         kind: spec.kind,
         submodules: spec.submodules.clone(),
     };
-    Ok((ws, previous))
+    Ok((ws, previous, bases))
 }
 
 /// Ends a task that worked in the project's checkout: goes back to the branches it

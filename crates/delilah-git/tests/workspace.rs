@@ -268,7 +268,7 @@ fn a_task_can_work_in_the_checkout_and_leave_it_as_it_was() {
     let pay = parent.join("svc-payments");
     let before = git(&pay, &["rev-parse", "HEAD"]);
 
-    let (ws, previous) = use_checkout(&parent, &spec, &opts()).unwrap();
+    let (ws, previous, _) = use_checkout(&parent, &spec, &opts(), dl()).unwrap();
     assert_eq!(ws.path, parent);
     assert_eq!(git(&pay, &["branch", "--show-current"]), "feature/PROJ-9");
     assert_eq!(previous[0].0, "svc-payments");
@@ -311,7 +311,7 @@ fn the_checkout_is_not_used_with_uncommitted_changes() {
         submodules: vec![],
     };
     assert!(matches!(
-        use_checkout(&repo, &spec, &opts()),
+        use_checkout(&repo, &spec, &opts(), dl()),
         Err(GitError::Dirty { .. })
     ));
 }
@@ -692,4 +692,77 @@ fn repo_workspace_starts_from_the_old_origin_when_the_fetch_fails() {
         "{:?}",
         bases[0]
     );
+}
+
+fn checkout_spec(branch: &str) -> WorkspaceSpec {
+    WorkspaceSpec {
+        path: PathBuf::new(),
+        branch: branch.into(),
+        kind: ProjectKind::Repo,
+        submodules: vec![],
+    }
+}
+
+#[test]
+fn checkout_starts_the_new_branch_at_the_fresh_remote_head() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let remote = fx.root.join("env/remotes/svc-orders.git");
+    let local_main = git(&repo, &["rev-parse", "main"]);
+    let new_head = advance_remote(&remote, "fresh.txt", "Fresh");
+    assert_ne!(new_head, local_main);
+    let spec = checkout_spec("feature/X-1");
+
+    let (_, previous, bases) = use_checkout(&repo, &spec, &opts(), dl()).unwrap();
+
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/X-1");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), new_head);
+    assert_eq!(upstream_of(&repo, "feature/X-1"), None);
+    assert_eq!(git(&repo, &["rev-parse", "main"]), local_main);
+    assert_eq!(previous, [(".".to_string(), "main".to_string())]);
+    assert_eq!(bases[0].fetch, FetchOutcome::Fetched);
+    assert_eq!(bases[0].sha, new_head);
+    assert!(leave_checkout(&repo, &previous, &opts()).is_empty());
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
+}
+
+#[test]
+fn checkout_uses_an_existing_branch_as_it_is_without_fetching() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    git(&repo, &["checkout", "-q", "-b", "feature/X-2"]);
+    std::fs::write(repo.join("mine.txt"), "x\n").unwrap();
+    git(&repo, &["add", "mine.txt"]);
+    git(&repo, &["commit", "-qm", "mine"]);
+    let tip = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["checkout", "-q", "main"]);
+    git(&repo, &["remote", "set-url", "origin", "/nonexistent"]);
+
+    let (_, previous, bases) =
+        use_checkout(&repo, &checkout_spec("feature/X-2"), &opts(), dl()).unwrap();
+
+    assert_eq!(git(&repo, &["branch", "--show-current"]), "feature/X-2");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), tip);
+    assert_eq!(bases[0].fetch, FetchOutcome::Existing);
+    assert_eq!(bases[0].sha, tip);
+    assert_eq!(previous, [(".".to_string(), "main".to_string())]);
+}
+
+#[test]
+fn a_dirty_checkout_fails_before_any_fetch() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    git(&repo, &["config", "core.sshCommand", "sleep 30 #"]);
+    git(
+        &repo,
+        &["remote", "set-url", "origin", "ssh://host/repo.git"],
+    );
+    std::fs::write(repo.join("wip.txt"), "mine\n").unwrap();
+    git(&repo, &["add", "wip.txt"]);
+
+    let started = std::time::Instant::now();
+    let r = use_checkout(&repo, &checkout_spec("feature/X-3"), &opts(), dl());
+
+    assert!(matches!(r, Err(GitError::Dirty { .. })));
+    assert!(started.elapsed() < Duration::from_secs(5));
 }
