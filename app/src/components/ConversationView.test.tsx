@@ -17,15 +17,19 @@ const session = (over: Partial<Session> = {}): Session =>
 
 const conv = (entries: ConversationEntry[] = [], over: Partial<Conversation> = {}): Conversation => ({
   entries,
+  cursor: "0",
+  complete: true,
+  transcript: "present",
   activity: null,
   needs_terminal: false,
+  runtime: "stream",
   ...over,
 });
 
-const user = (id: number, text: string, state: "queued" | "sent" | "delivered" = "delivered"): ConversationEntry => ({ id, at: "", kind: "user", text, state, from: "view" });
-const claude = (id: number, text: string): ConversationEntry => ({ id, at: "", kind: "claude", text });
+const user = (id: number, text: string, state: "queued" | "sent" | "delivered" = "delivered"): ConversationEntry => ({ id: String(id), at: "", kind: "user", text, state, from: "view" });
+const claude = (id: number, text: string): ConversationEntry => ({ id: String(id), at: "", kind: "claude", text });
 const card = (id: number, over: object = {}): ConversationEntry => ({
-  id,
+  id: String(id),
   at: "",
   kind: "card",
   ask: "ask-1",
@@ -63,7 +67,7 @@ describe("ConversationView", () => {
     const { findByText, getByLabelText } = setup(conv([user(4, "luego", "queued")]));
     await findByText("en cola");
     fireEvent.click(getByLabelText("Quitar mensaje"));
-    expect(rm).toHaveBeenCalledWith("s1", 4);
+    expect(rm).toHaveBeenCalledWith("s1", "4");
   });
 
   it("sends with Enviar and with cmd+enter, clears, and cannot send empty", async () => {

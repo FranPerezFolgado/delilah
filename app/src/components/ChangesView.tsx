@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type ChangeKind, type FileChange, type RepoChanges } from "../api";
 import { Icon } from "./Icon";
+import { DiffRows, type DiffRowData } from "./DiffRows";
 import { t, tn } from "../i18n";
 
 const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> = {
@@ -168,7 +169,7 @@ function FileRow({ file, on, onClick }: { file: FileChange; on: boolean; onClick
   );
 }
 
-type Line = { type: "add" | "del" | "ctx" | "hunk" | "note"; text: string; old?: number; new?: number };
+type Line = DiffRowData;
 
 /** Unified diff to rows with old and new line numbers. Git's own headers are dropped. */
 function parse(diff: string): Line[] {
@@ -182,17 +183,17 @@ function parse(diff: string): Line[] {
       o = Number(hunk[1]);
       n = Number(hunk[2]);
       inHunk = true;
-      lines.push({ type: "hunk", text: raw });
+      lines.push({ kind: "hunk", text: raw, old: null, new: null });
     } else if (!inHunk) {
-      if (raw.startsWith("Binary files") || raw === "Binary file") lines.push({ type: "note", text: "Archivo binario" });
+      if (raw.startsWith("Binary files") || raw === "Binary file") lines.push({ kind: "note", text: "Archivo binario", old: null, new: null });
     } else if (raw.startsWith("+")) {
-      lines.push({ type: "add", text: raw.slice(1), new: n++ });
+      lines.push({ kind: "add", text: raw.slice(1), old: null, new: n++ });
     } else if (raw.startsWith("-")) {
-      lines.push({ type: "del", text: raw.slice(1), old: o++ });
+      lines.push({ kind: "del", text: raw.slice(1), old: o++, new: null });
     } else if (raw.startsWith("\\")) {
-      lines.push({ type: "note", text: raw.slice(2) });
+      lines.push({ kind: "note", text: raw.slice(2), old: null, new: null });
     } else if (raw.startsWith(" ")) {
-      lines.push({ type: "ctx", text: raw.slice(1), old: o++, new: n++ });
+      lines.push({ kind: "ctx", text: raw.slice(1), old: o++, new: n++ });
     } else if (raw.startsWith("diff --git")) {
       inHunk = false;
     }
@@ -250,30 +251,7 @@ function Diff({
       {error && <div className="error" style={{ padding: 12 }}>{error}</div>}
       {text !== null && lines.length === 0 && <div className="muted" style={{ padding: 12 }}>{t("Sin cambios de contenido.")}</div>}
       <div className="diff selectable">
-        {lines.map((l, i) =>
-          l.type === "hunk" ? (
-            <div key={i} className="dl hunk">
-              <span className="ln" />
-              <span className="ln" />
-              <span className="code">{l.text}</span>
-            </div>
-          ) : l.type === "note" ? (
-            <div key={i} className="dl note">
-              <span className="ln" />
-              <span className="ln" />
-              <span className="code">{l.text}</span>
-            </div>
-          ) : (
-            <div key={i} className={`dl ${l.type}`}>
-              <span className="ln">{l.old ?? ""}</span>
-              <span className="ln">{l.new ?? ""}</span>
-              <span className="code">
-                <span className="sign">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span>
-                {l.text}
-              </span>
-            </div>
-          ),
-        )}
+        <DiffRows rows={lines} />
       </div>
     </>
   );

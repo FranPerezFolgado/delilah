@@ -125,8 +125,8 @@
 
 ### UI
 
-- [ ] T018 [P] [US1] Extract the diff row rendering from `app/src/components/ChangesView.tsx` into `app/src/components/DiffRows.tsx`, taking rows `{kind, old, new, text}`. ChangesView uses it. Its tests still pass.
-- [ ] T019 [US1] Update `app/src/api.ts`:
+- [X] T018 [P] [US1] Extract the diff row rendering from `app/src/components/ChangesView.tsx` into `app/src/components/DiffRows.tsx`, taking rows `{kind, old, new, text}`. ChangesView uses it. Its tests still pass.
+- [X] T019 [US1] Update `app/src/api.ts`:
   - the `Entry` union: string ids, `kind: "tool"` and `kind: "marker"` per data-model.md;
   - the `Conversation` response fields (`cursor`, `complete`, `transcript`, `runtime`);
   - `api.conversation(id, cursor?)`;
@@ -134,7 +134,7 @@
   - `Task.view`, and `api.updateTask` accepting `view`.
 
   Fix the type errors this causes (`npx tsc --noEmit`).
-- [ ] T020 [US1] Write failing tests in a new `app/src/components/ToolCard.test.tsx`:
+- [X] T020 [US1] Write failing tests in a new `app/src/components/ToolCard.test.tsx`:
   - each card starts collapsed with its summary line and expands on click;
   - Bash shows the command, the output and a failed state when `is_error`;
   - Edit and Write show the path, the diff via DiffRows, and an "Abrir en el editor" button calling the given `onOpenFile(path)`;
@@ -145,7 +145,7 @@
   - an unknown tool shows a generic card (name, JSON input, result);
   - `truncated` shows "Ver todo", which calls `api.toolDetail` and shows the full text;
   - a pending tool (`result: null`) shows a running state.
-- [ ] T021 [US1] Implement T020 in `app/src/components/ToolCard.tsx`, with styles next to the existing `conv-*` styles and es/en strings in the i18n files.
+- [X] T021 [US1] Implement T020 in `app/src/components/ToolCard.tsx`, with styles next to the existing `conv-*` styles and es/en strings in the i18n files.
 - [ ] T022 [US1] Write failing tests in `app/src/components/ConversationView.test.tsx`:
   - a non-idea task session renders user, claude, tool and marker entries in order;
   - on the `conversations` topic it calls `api.conversation(id, cursor)` and appends new entries, replacing stored ones;

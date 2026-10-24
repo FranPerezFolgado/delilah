@@ -115,6 +115,7 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
               </div>
             );
           }
+          if (e.kind === "tool" || e.kind === "marker") return null; // WP-09 renders these
           const pending = e.outcome === "pending";
           return (
             <div key={e.id} className="conv-card">

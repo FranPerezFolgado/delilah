@@ -12,8 +12,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05 | 4 | 4A | verified | 1 | dfd483e | |
 | WP-06 | 4 | 4B | verified | 1 | f357cc2 | |
 | WP-07 | 4 | 4B | verified | 1 | 2561634 | |
-| WP-05F | 4 | 4B | verified | 1 | | security fixes |
-| WP-08 | 4 | 4C | pending | 0 | | |
+| WP-05F | 4 | 4B | verified | 1 | 693ba38 | security fixes |
+| WP-06F | 4 | 4C | implementing | 0 | | architecture fixes |
+| WP-08 | 4 | 4C | verified | 1 | | |
 | WP-09 | 4 | 4D | pending | 0 | | |
 | WP-11 | 4 | 4D | pending | 0 | | |
 | WP-10 | 4 | 4E | pending | 0 | | |
@@ -42,6 +43,10 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 4 | architecture | LOW | parse_view duplicates validation outside TaskView (string round-trip) | crates/delilah-daemon/src/api.rs:290 |
+| 4 | architecture | LOW | conversation.rs grows: split file I/O/bounds into a submodule when next touched | crates/delilah-daemon/src/conversation.rs |
+| 4 | migration | LOW | unknown stored view silently reads as chat; optional tracing::warn | crates/delilah-daemon/src/store.rs:455 |
+| 4 | migration | LOW | no test applying 0016 over existing 0015 rows | crates/delilah-daemon/migrations/0016_task_view.sql |
 | 4 | security | MEDIUM | hook transcript_path accepted anywhere (absolute .jsonl, no ..; symlinks pass) → served via GET conversation; restrict canonical path to ~/.claude/projects, re-check at read | crates/delilah-daemon/src/hooks.rs:151 |
 | 4 | security | MEDIUM | every GET reads the whole transcript (no size cap, no is_file); orphan path re-parses whole file; tool_detail parses every line — seek from cursor, cap size, cache | crates/delilah-daemon/src/conversation.rs:82 |
 | 4 | security | LOW | any hook overwrites the live transcript path before validation (integrity side of the above) | crates/delilah-daemon/src/hooks.rs:46 |

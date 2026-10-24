@@ -479,4 +479,10 @@ export const EN: Record<string, string> = {
   "Preview fallida": "Preview failed",
   "Comando de preview": "Preview command",
   "El modo ahorro queda activo mientras el autopiloto esté activado": "Saving mode stays on while autopilot is on",
+  "Abrir en el editor": "Open in the editor",
+  "En curso…": "Running…",
+  "Encargo": "Task",
+  "Resultado": "Result",
+  "{n} resultado": "{n} result",
+  "{n} resultados": "{n} results",
 };
