@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use crate::events::Topic;
 use crate::proposals::Proposal;
 use crate::state::AppState;
-use crate::store_sessions::EntryKind;
+use crate::store_sessions::{EntryKind, SessionKind};
 
 /// How a card stands: waiting for your pick, picked, answered in the terminal, or
 /// withdrawn because the turn was stopped.
@@ -30,6 +30,9 @@ pub struct Card {
     pub answer: Option<Map<String, Value>>,
     pub task: Option<String>,
     pub error: Option<String>,
+    /// The AskUserQuestion call's id, which ties the card to the transcript's tool entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
 }
 
 impl Card {
@@ -42,6 +45,7 @@ impl Card {
             answer: None,
             task: None,
             error: None,
+            tool_use_id: None,
         }
     }
 }
@@ -57,7 +61,14 @@ pub async fn is_idea(app: &AppState, session: &str) -> bool {
 
 /// A card of a conversation's session enters the history as pending.
 pub async fn card_added(app: &AppState, session: &str, card: &Card) {
-    if !is_idea(app, session).await {
+    // Every Claude session shows its cards inline, not only ideas.
+    let claude = match app.sessions.get(session) {
+        Some(live) => live.kind != SessionKind::Shell,
+        None => {
+            matches!(app.store.session(session).await, Ok(Some(r)) if r.kind != SessionKind::Shell)
+        }
+    };
+    if !claude {
         return;
     }
     let body = match serde_json::to_value(card) {

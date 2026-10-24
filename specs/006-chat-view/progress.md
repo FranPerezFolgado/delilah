@@ -15,10 +15,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05F | 4 | 4B | verified | 1 | 693ba38 | security fixes |
 | WP-06F | 4 | 4C | verified | 1 | f5680ab | architecture fixes |
 | WP-08 | 4 | 4C | verified | 1 | c3d82e0 | |
-| WP-09 | 4 | 4D | verified | 1 | | |
+| WP-09 | 4 | 4D | verified | 1 | c8157ed | |
 | WP-11 | 4 | 4D | verified | 1 | 5e51e60 | |
-| WP-10 | 4 | 4E | verified | 1 | | run together with WP-09 (shared TaskScreen.tsx) |
-| WP-12 | 5 | 5A | implementing | 0 | | |
+| WP-10 | 4 | 4E | verified | 1 | c8157ed | run together with WP-09 (shared TaskScreen.tsx) |
+| WP-12 | 5 | 5A | verified | 1 | | |
 | WP-13 | 5 | 5B | pending | 0 | | |
 | WP-14 | 6 | 6A | pending | 0 | | gated by spike |
 | WP-15 | 6 | 6B | pending | 0 | | gated by spike |
@@ -43,6 +43,13 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 4 | contract | MEDIUM | runtime hardcoded "pty"; Task/Session JSON lack runtime/chat_mode/allowed_tools (chat-mode phases) | crates/delilah-daemon/src/conversation.rs:297 |
+| 4 | contract | LOW | Task.view optional in api.ts though always sent | app/src/api.ts:63 |
+| 4 | contract | LOW | ask_kind typed but never emitted yet (chat-mode permissions) | app/src/api.ts |
+| 4 | contract | LOW | stored id stringify via Value::to_string relies on numeric JSON id; keep a test asserting "5" | crates/delilah-daemon/src/conversation.rs:247 |
+| 4 | contract | LOW | no test asserting the exact key set of the conversation response | crates/delilah-daemon/src/conversation.rs |
+| 4 | spec | LOW | "Vista" select hidden for origin "Con Claude" (FR-007) — sends chat | app/src/components/NewTaskDialog.tsx:319 |
+| 4 | spec | LOW | Working session without transcript file yet reads "missing" (only Starting = pending) → notice may flash | crates/delilah-daemon/src/conversation.rs |
 | 4 | architecture | LOW | parse_view duplicates validation outside TaskView (string round-trip) | crates/delilah-daemon/src/api.rs:290 |
 | 4 | architecture | LOW | conversation.rs grows: split file I/O/bounds into a submodule when next touched | crates/delilah-daemon/src/conversation.rs |
 | 4 | migration | LOW | unknown stored view silently reads as chat; optional tracing::warn | crates/delilah-daemon/src/store.rs:455 |

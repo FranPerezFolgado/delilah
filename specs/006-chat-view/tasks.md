@@ -174,15 +174,15 @@
 
 **Independent Test**: quickstart.md "Chat view" steps 5 and 7.
 
-- [ ] T027 [US2] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module, a fake PTY like the existing ones):
+- [X] T027 [US2] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module, a fake PTY like the existing ones):
   - `POST /sessions/{id}/messages` on an idle task session types the text (as `actions::type_prompt` does) and records a `sent` user entry;
   - on a working session it stores a `queued` entry, typed at the next `Stop` by `flush_queue`;
   - `DELETE …/messages/{entry}` with a string id removes a queued one;
   - `POST …/stop` sends ESC on a task session and keeps the queue (as today for ideas);
   - a closed session gives 409.
-- [ ] T028 [US2] Implement T027, and make `needs_terminal` (FR-008) set for every Claude session, not only ideas: a `Notification` hook for a permission prompt or a dialog sets it, and the next `UserPromptSubmit`/`PostToolUse` clears it. Add a test for a task session in the T027 tests. Widen the guards in `crates/delilah-daemon/src/conversation.rs` to any live Claude session (shell sessions get 409); in `crates/delilah-daemon/src/hooks.rs`, call `flush_queue` on turn end for every session with queued entries, not only ideas.
-- [ ] T029 [US2] Write failing tests in `crates/delilah-daemon/src/asks.rs` (tests module): the ask hook's `tool_use_id` (from the PreToolUse payload) is stored in the card's body. Then implement it in `crates/delilah-daemon/src/asks.rs`, and in `crates/delilah-daemon/src/conversation.rs` where cards are recorded.
-- [ ] T030 [US2] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module):
+- [X] T028 [US2] Implement T027, and make `needs_terminal` (FR-008) set for every Claude session, not only ideas: a `Notification` hook for a permission prompt or a dialog sets it, and the next `UserPromptSubmit`/`PostToolUse` clears it. Add a test for a task session in the T027 tests. Widen the guards in `crates/delilah-daemon/src/conversation.rs` to any live Claude session (shell sessions get 409); in `crates/delilah-daemon/src/hooks.rs`, call `flush_queue` on turn end for every session with queued entries, not only ideas.
+- [X] T029 [US2] Write failing tests in `crates/delilah-daemon/src/asks.rs` (tests module): the ask hook's `tool_use_id` (from the PreToolUse payload) is stored in the card's body. Then implement it in `crates/delilah-daemon/src/asks.rs`, and in `crates/delilah-daemon/src/conversation.rs` where cards are recorded.
+- [X] T030 [US2] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module):
   - a transcript `tool(AskUserQuestion)` whose `tool_use_id` matches a stored card is replaced by that card at the tool's position;
   - an unmatched card stays at its own `at`;
   - for an idea session with a transcript, stored non-queued `user` entries and stored `claude` entries are left out;

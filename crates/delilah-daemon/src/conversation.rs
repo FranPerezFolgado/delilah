@@ -26,15 +26,12 @@ use crate::store_sessions::{EntryKind, SessionKind, SessionRecord};
 /// Longest message taken from the view (and longest first prompt), in characters.
 pub(crate) const MAX_MESSAGE_CHARS: usize = 16_000;
 
-/// The conversation's session record, or the 404 / 409 of the contract.
+/// The session the composer writes to, or the 404 / 409 of the contract: any open
+/// Claude session, not a shell.
 async fn ensure_conversation(app: &AppState, id: &str) -> Result<(), ApiError> {
-    let record = app
-        .store
-        .session(id)
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
-    if !record.conversation {
-        return Err(ApiError::conflict("that session is not a conversation"));
+    let record = readable(app, id).await?;
+    if record.closed {
+        return Err(ApiError::conflict("the session is closed"));
     }
     Ok(())
 }
@@ -235,6 +232,7 @@ pub async fn get(
         None => (offset.unwrap_or(0), true, missing(live.as_ref())),
     };
     let mut stored = json!(app.store.entries(&id).await?);
+    let has_transcript = state == "present";
     // Asks live in memory: a card whose ask is gone cannot be answered any more.
     for entry in stored.as_array_mut().into_iter().flatten() {
         if entry["kind"] == "card"
@@ -248,7 +246,35 @@ pub async fn get(
         // Ids are strings in the conversation: the row id.
         entry["id"] = json!(entry["id"].to_string());
     }
-    entries.extend(stored.as_array().cloned().unwrap_or_default());
+    let mut stored: Vec<Value> = stored.as_array().cloned().unwrap_or_default();
+    // The transcript has the same messages as the stored ones: hidden once it is there
+    // (an idea keeps none of its own, a task keeps what is not delivered yet).
+    if has_transcript {
+        let idea = record.conversation;
+        stored.retain(|e| match e["kind"].as_str() {
+            Some("claude") => !idea,
+            Some("user") => e["state"] == "queued" || (!idea && e["state"] != "delivered"),
+            _ => true,
+        });
+    }
+    // An AskUserQuestion call of the transcript is shown as its card, in its place.
+    for entry in &mut entries {
+        if entry["kind"] != "tool" || entry["tool"] != "AskUserQuestion" {
+            continue;
+        }
+        let Some(tool_use_id) = entry["tool_use_id"].as_str() else {
+            continue;
+        };
+        if let Some(i) = stored
+            .iter()
+            .position(|c| c["kind"] == "card" && c["tool_use_id"].as_str() == Some(tool_use_id))
+        {
+            let mut card = stored.remove(i);
+            card["at"] = entry["at"].clone();
+            *entry = card;
+        }
+    }
+    entries.extend(stored);
     entries.sort_by_cached_key(at_of);
     Ok(Json(json!({
         "entries": entries,
@@ -371,15 +397,21 @@ pub async fn send(
         flush_queue(&app, &live).await;
     }
     app.emit(Topic::Conversations);
-    Ok((StatusCode::CREATED, Json(json!(entry))))
+    let mut body = json!(entry);
+    body["id"] = json!(entry.id.to_string());
+    Ok((StatusCode::CREATED, Json(body)))
 }
 
 /// `DELETE /api/v1/sessions/{id}/messages/{entry}`: takes back a queued message.
 pub async fn remove(
     State(app): State<AppState>,
-    Path((id, entry)): Path<(String, i64)>,
+    Path((id, entry)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     ensure_conversation(&app, &id).await?;
+    // Ids are strings: a stored row's number. A transcript entry (`t:…`) is not one.
+    let entry: i64 = entry
+        .parse()
+        .map_err(|_| ApiError::not_found(format!("no message {entry}")))?;
     if !app.store.delete_queued_entry(&id, entry).await? {
         return Err(ApiError::conflict("only a queued message can be removed"));
     }
@@ -389,7 +421,7 @@ pub async fn remove(
 
 /// `POST /api/v1/sessions/{id}/stop`: interrupts the current turn. Claude fires no
 /// hook after an ESC, so the session is put back to waiting here, its pending cards
-/// withdrawn and whatever was queued typed at once.
+/// withdrawn. What was queued stays queued: it is typed at the next turn's end.
 pub async fn stop(
     State(app): State<AppState>,
     Path(id): Path<String>,
@@ -408,7 +440,6 @@ pub async fn stop(
         card_outcome(&app, &id, &ask, CardOutcome::Withdrawn).await;
     }
     let _ = app.store.set_attention(&id, None).await;
-    flush_queue(&app, &live).await;
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -450,7 +481,7 @@ fn activity_of(hook: &Value) -> Option<String> {
     })
 }
 
-/// Records what a conversation session's hook says: the prompts typed in its
+/// Records what a Claude session's hook says: the prompts typed in its
 /// terminal, Claude's closing message of each turn, its activity, and whether it
 /// waits on the terminal.
 pub async fn on_hook(
@@ -460,6 +491,9 @@ pub async fn on_hook(
     signal: Signal,
     hook: &Value,
 ) {
+    // An idea keeps its whole history; a task's is in its transcript, so only what the
+    // view sent is tracked.
+    let idea = crate::idea::is_idea(app, session).await;
     // The live state emits by itself when it changes; entries recorded emit here.
     match signal {
         Signal::PromptSubmitted => {
@@ -468,7 +502,7 @@ pub async fn on_hook(
                 .map(str::trim)
                 .filter(|t| !t.is_empty())
             {
-                if let Err(e) = prompt_submitted(app, session, text).await {
+                if let Err(e) = prompt_submitted(app, session, text, idea).await {
                     tracing::warn!(session, "cannot record the prompt: {e}");
                 }
                 app.emit(Topic::Conversations);
@@ -487,8 +521,10 @@ pub async fn on_hook(
             }
         }
         Signal::NeedsUser => {
-            if hook["notification_type"].as_str() == Some("permission_prompt")
-                && let Some(live) = live
+            if matches!(
+                hook["notification_type"].as_str(),
+                Some("permission_prompt" | "elicitation_dialog")
+            ) && let Some(live) = live
             {
                 live.update_convo(|c| c.needs_terminal = true);
             }
@@ -498,10 +534,11 @@ pub async fn on_hook(
                 live.reset_turn_state();
             }
             if signal == Signal::TurnEnded {
-                if let Some(text) = hook["last_assistant_message"]
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|t| !t.is_empty())
+                if idea
+                    && let Some(text) = hook["last_assistant_message"]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|t| !t.is_empty())
                 {
                     let body = json!({ "text": text });
                     if let Err(e) = app.store.add_entry(session, EntryKind::Claude, &body).await {
@@ -524,6 +561,7 @@ async fn prompt_submitted(
     app: &AppState,
     session: &str,
     text: &str,
+    record_terminal: bool,
 ) -> Result<(), crate::store::StoreError> {
     let sent: Vec<_> = app
         .store
@@ -554,13 +592,15 @@ async fn prompt_submitted(
             return Ok(());
         }
     }
-    app.store
-        .add_entry(
-            session,
-            EntryKind::User,
-            &json!({ "text": text, "state": "delivered", "from": "terminal" }),
-        )
-        .await?;
+    if record_terminal {
+        app.store
+            .add_entry(
+                session,
+                EntryKind::User,
+                &json!({ "text": text, "state": "delivered", "from": "terminal" }),
+            )
+            .await?;
+    }
     Ok(())
 }
 
@@ -1098,22 +1138,25 @@ mod tests {
     async fn a_queued_message_can_be_removed_but_a_sent_one_cannot() {
         let f = Fixture::new().await;
         f.live.set_state(LiveState::Working);
-        let queued = f.send("later").await.1["id"].as_i64().unwrap();
+        let queued = f.send("later").await.1["id"].as_str().unwrap().to_string();
         f.live.set_state(LiveState::Waiting);
-        let sent = f.send("now").await.1["id"].as_i64().unwrap();
-        let delete = |id: i64| {
+        let sent = f.send("now").await.1["id"].as_str().unwrap().to_string();
+        let delete = |id: String| {
             Request::delete(format!("/api/v1/sessions/conv/messages/{id}"))
                 .body(Body::empty())
                 .unwrap()
         };
-        assert_eq!(f.call(delete(sent)).await.0, StatusCode::CONFLICT);
-        assert_eq!(f.call(delete(queued)).await.0, StatusCode::NO_CONTENT);
+        assert_eq!(f.call(delete(sent.clone())).await.0, StatusCode::CONFLICT);
+        assert_eq!(
+            f.call(delete(queued.clone())).await.0,
+            StatusCode::NO_CONTENT
+        );
         assert_eq!(f.call(delete(queued)).await.0, StatusCode::CONFLICT);
         assert_eq!(f.entries().await.len(), 1);
     }
 
     #[tokio::test]
-    async fn stop_writes_escape_withdraws_pending_cards_and_flushes_the_queue() {
+    async fn stop_writes_escape_withdraws_pending_cards_and_keeps_the_queue() {
         let f = Fixture::new().await;
         f.live.set_state(LiveState::Working);
         f.live.set_activity(Some("Leyendo x".into()));
@@ -1143,18 +1186,20 @@ mod tests {
 
         let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
-        let expected = "\x1blater\r";
-        assert_eq!(f.typed(expected.len()).await, expected);
+        assert_eq!(f.typed(1).await, "\x1b", "only the ESC is typed");
         assert!(f.app.asks.list().is_empty());
         assert_eq!(ask.await.unwrap().1, json!({}), "the hook lets go");
         let entries = f.entries().await;
         let card = entries.iter().find(|e| e["kind"] == "card").unwrap();
         assert_eq!(card["outcome"], "withdrawn");
         let user = entries.iter().find(|e| e["kind"] == "user").unwrap();
-        assert_eq!(user["state"], "sent");
+        assert_eq!(user["state"], "queued", "kept, not sent");
         assert_eq!(f.conversation().await["activity"], Value::Null);
-        // The flush typed a prompt: working again.
-        assert_eq!(f.live.state(), LiveState::Working);
+        assert_eq!(f.live.state(), LiveState::Waiting);
+        // It goes out at the next turn's end.
+        f.hook(stop("")).await;
+        let expected = "\x1blater\r";
+        assert_eq!(f.typed(expected.len()).await, expected);
     }
 
     #[tokio::test]
@@ -1293,13 +1338,253 @@ mod tests {
     async fn a_message_claimed_by_a_flush_cannot_be_removed() {
         let f = Fixture::new().await;
         f.live.set_state(LiveState::Working);
-        let id = f.send("later").await.1["id"].as_i64().unwrap();
+        let id = f.send("later").await.1["id"].as_str().unwrap().to_string();
         f.app.store.claim_queued("conv").await.unwrap();
         let req = Request::delete(format!("/api/v1/sessions/conv/messages/{id}"))
             .body(Body::empty())
             .unwrap();
         assert_eq!(f.call(req).await.0, StatusCode::CONFLICT);
         assert_eq!(f.entries().await[0]["state"], "sent");
+    }
+
+    #[tokio::test]
+    async fn a_task_session_takes_messages_like_an_idea() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let msg = |text: &str| json!({ "text": text });
+        live.set_state(LiveState::Waiting);
+        let (status, sent) = f.post("/api/v1/sessions/task1/messages", msg("hola")).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(sent["state"], "sent");
+        assert!(sent["id"].is_string());
+
+        live.set_state(LiveState::Working);
+        let (_, queued) = f
+            .post("/api/v1/sessions/task1/messages", msg("luego"))
+            .await;
+        assert_eq!(queued["state"], "queued");
+        let stored = f.app.store.entries("task1").await.unwrap();
+        assert_eq!(stored.len(), 2);
+
+        // Removing takes the string id; a transcript id or a number-less one is not found.
+        let delete = |id: &str| {
+            Request::delete(format!("/api/v1/sessions/task1/messages/{id}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        assert_eq!(f.call(delete("t:u1:0")).await.0, StatusCode::NOT_FOUND);
+        assert_eq!(f.call(delete("abc")).await.0, StatusCode::NOT_FOUND);
+        let id = queued["id"].as_str().unwrap();
+        assert_eq!(f.call(delete(id)).await.0, StatusCode::NO_CONTENT);
+        assert_eq!(f.app.store.entries("task1").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_task_queue_is_typed_at_the_turn_end_and_stop_keeps_it() {
+        let f = Fixture::new().await;
+        // A task session whose terminal is a raw `cat`, as the idea one.
+        let typed = std::env::temp_dir().join(format!("delilah-typed-{}", uuid::Uuid::new_v4()));
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.args([
+            "--noprofile",
+            "--norc",
+            "-c",
+            &format!("stty raw -echo; exec cat > {}", typed.display()),
+        ]);
+        f.app
+            .store
+            .create_session(&record("task1", false))
+            .await
+            .unwrap();
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let live = f
+            .app
+            .sessions
+            .insert("task1", "@web", SessionKind::Claude, false, pty);
+        for _ in 0..100 {
+            if typed.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        live.set_state(LiveState::Working);
+        f.post(
+            "/api/v1/sessions/task1/messages",
+            json!({ "text": "luego" }),
+        )
+        .await;
+        let (status, _) = f.post("/api/v1/sessions/task1/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let queued = f.app.store.queued_entries("task1").await.unwrap();
+        assert_eq!(queued.len(), 1, "stop keeps the queue");
+
+        let url = "/hooks/claude?task=@web&session=task1";
+        let (status, _) = f.post(url, stop("listo")).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let expected = "\x1bluego\r";
+        for _ in 0..100 {
+            if std::fs::read(&typed).unwrap_or_default().len() >= expected.len() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(std::fs::read_to_string(&typed).unwrap(), expected);
+        assert!(
+            f.app
+                .store
+                .queued_entries("task1")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // A task's own Claude messages live in its transcript, not in the store.
+        let kinds: Vec<_> = f
+            .app
+            .store
+            .entries("task1")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        assert_eq!(kinds, [EntryKind::User]);
+    }
+
+    #[tokio::test]
+    async fn a_shell_and_a_closed_session_refuse_messages() {
+        let f = Fixture::new().await;
+        let mut shell = record("sh", false);
+        shell.kind = SessionKind::Shell;
+        f.app.store.create_session(&shell).await.unwrap();
+        let mut closed = record("old", false);
+        closed.closed = true;
+        f.app.store.create_session(&closed).await.unwrap();
+        for id in ["sh", "old"] {
+            let (status, _) = f
+                .post(
+                    &format!("/api/v1/sessions/{id}/messages"),
+                    json!({ "text": "x" }),
+                )
+                .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{id}");
+            let (status, _) = f
+                .post(&format!("/api/v1/sessions/{id}/stop"), json!({}))
+                .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{id}");
+        }
+        let (_, body) = f
+            .post("/api/v1/sessions/sh/messages", json!({ "text": "x" }))
+            .await;
+        assert_eq!(body["error"], "a shell session has no conversation");
+    }
+
+    #[tokio::test]
+    async fn a_task_session_needs_the_terminal_on_a_permission_prompt_or_a_dialog() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let url = "/hooks/claude?task=@web&session=task1";
+        let needs = || live.needs_terminal();
+        for kind in ["permission_prompt", "elicitation_dialog"] {
+            let hook = json!({ "hook_event_name": "Notification", "notification_type": kind });
+            assert_eq!(f.post(url, hook).await.0, StatusCode::NO_CONTENT);
+            assert!(needs(), "{kind}");
+            let post_tool = json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                "tool_input": { "command": "ls" } });
+            f.post(url, post_tool).await;
+            assert!(!needs());
+        }
+        let hook =
+            json!({ "hook_event_name": "Notification", "notification_type": "permission_prompt" });
+        f.post(url, hook).await;
+        f.post(
+            url,
+            json!({ "hook_event_name": "UserPromptSubmit", "prompt": "sigue" }),
+        )
+        .await;
+        assert!(!needs());
+        assert_eq!(
+            f.get_of("/api/v1/sessions/task1/conversation").await.1["needs_terminal"],
+            false
+        );
+    }
+
+    fn ask_transcript(tool_use_id: &str) -> String {
+        format!(
+            "{{\"type\":\"assistant\",\"uuid\":\"a1\",\"timestamp\":\"2025-02-01T10:00:00.000Z\",\"message\":{{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[{{\"type\":\"tool_use\",\"id\":\"{tool_use_id}\",\"name\":\"AskUserQuestion\",\"input\":{{\"questions\":[]}}}}]}}}}\n"
+        ) + &assistant_line(2)
+    }
+
+    async fn add_card(f: &Fixture, session: &str, ask: &str, tool_use_id: Option<&str>) {
+        let mut card = Card::pending(ask, &json!([]), None);
+        card.tool_use_id = tool_use_id.map(str::to_string);
+        f.app
+            .store
+            .add_entry(
+                session,
+                EntryKind::Card,
+                &serde_json::to_value(card).unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_card_replaces_its_ask_tool_entry_and_an_unmatched_one_stays() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        f.transcript(&live, ask_transcript("toolu_1").as_bytes());
+        add_card(&f, "task1", "ask-1", Some("toolu_1")).await;
+        add_card(&f, "task1", "ask-old", None).await;
+        let body = f.get_of("/api/v1/sessions/task1/conversation").await.1;
+        let entries = body["entries"].as_array().unwrap();
+        assert!(entries.iter().all(|e| e["kind"] != "tool"), "tool dropped");
+        let pos = |ask: &str| entries.iter().position(|e| e["ask"] == ask).unwrap();
+        // The matched card sits where the tool was: first, before the text after it.
+        assert_eq!(pos("ask-1"), 0);
+        assert_eq!(entries[0]["at"], "2025-02-01T10:00:00.000Z");
+        assert_eq!(entries[0]["tool_use_id"], "toolu_1");
+        assert_eq!(entries.iter().filter(|e| e["ask"] == "ask-1").count(), 1);
+        // The unmatched one keeps its own time (now, so after the transcript's text).
+        assert_eq!(pos("ask-old"), 2);
+    }
+
+    #[tokio::test]
+    async fn an_idea_with_a_transcript_hides_stored_messages_and_without_one_keeps_them() {
+        let f = Fixture::new().await;
+        for (kind, body) in [
+            (
+                EntryKind::User,
+                json!({ "text": "idea", "state": "delivered", "from": "view" }),
+            ),
+            (
+                EntryKind::User,
+                json!({ "text": "sent", "state": "sent", "from": "view" }),
+            ),
+            (
+                EntryKind::User,
+                json!({ "text": "later", "state": "queued", "from": "view" }),
+            ),
+            (EntryKind::Claude, json!({ "text": "hola" })),
+        ] {
+            f.app.store.add_entry("conv", kind, &body).await.unwrap();
+        }
+        add_card(&f, "conv", "a", None).await;
+        let without = f.entries().await;
+        assert_eq!(without.len(), 5);
+
+        f.transcript(&f.live, &fixture_bytes("basic"));
+        let with = f.entries().await;
+        let stored: Vec<_> = with
+            .iter()
+            .filter(|e| !e["id"].as_str().unwrap().starts_with("t:"))
+            .map(|e| e["kind"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(stored.len(), 2, "{stored:?}");
+        assert!(stored.contains(&"card".to_string()));
+        assert!(
+            with.iter()
+                .any(|e| e["text"] == "later" && e["state"] == "queued")
+        );
     }
 
     fn card_hook() -> Value {

@@ -203,7 +203,11 @@ pub async fn hook(
         .unwrap()
         .insert(id.clone(), (ask.clone(), tx));
     if let Some(session) = &q.session {
-        let card = Card::pending(&ask.id, &ask.questions, ask.proposal.clone());
+        let mut card = Card::pending(&ask.id, &ask.questions, ask.proposal.clone());
+        card.tool_use_id = hook["tool_use_id"]
+            .as_str()
+            .filter(|t| !t.is_empty())
+            .map(str::to_string);
         crate::idea::card_added(&app, session, &card).await;
     }
     let _pending = Pending { app: &app, id };
@@ -917,5 +921,50 @@ pub(crate) mod tests {
         assert_eq!(auto, manual);
         assert_eq!(auto["hookSpecificOutput"]["permissionDecision"], "allow");
         assert!(auto["hookSpecificOutput"]["updatedInput"]["questions"].is_array());
+    }
+
+    #[tokio::test]
+    async fn the_hooks_tool_use_id_is_stored_in_the_card() {
+        let app = app().await;
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "s1".into(),
+                task: "@web".into(),
+                kind: crate::store_sessions::SessionKind::Claude,
+                label: "Claude".into(),
+                primary: false,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: None,
+            })
+            .await
+            .unwrap();
+        let mut hook = question();
+        hook["tool_use_id"] = json!("toolu_42");
+        let waiting = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, post("/hooks/claude/ask?task=@web&session=s1", hook)).await }
+        });
+        for _ in 0..100 {
+            if !app.store.entries("s1").await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let entries = app.store.entries("s1").await.unwrap();
+        assert_eq!(entries.len(), 1, "a task session gets its card too");
+        assert_eq!(entries[0].body["tool_use_id"], "toolu_42");
+        waiting.abort();
     }
 }

@@ -76,14 +76,12 @@ pub async fn claude_hook(
         });
     }
 
-    // An idea conversation also keeps its own history.
+    // A Claude session's conversation keeps its own state (an idea, its whole history).
     let session_id = q
         .session
         .clone()
         .or_else(|| live.as_ref().map(|l| l.id.clone()));
-    if let Some(id) = &session_id
-        && crate::idea::is_idea(&app, id).await
-    {
+    if let Some(id) = &session_id {
         crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
     }
 

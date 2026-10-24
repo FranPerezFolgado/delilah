@@ -605,7 +605,7 @@ mod tests {
     const PLAIN: &str = "/hooks/claude/ask?task=@web&session=plain";
 
     #[tokio::test]
-    async fn a_project_sessions_proposal_creates_a_task_and_records_no_entries() {
+    async fn a_project_sessions_proposal_creates_a_task_and_records_its_answered_card() {
         let app = app().await;
         project_session(&app, true).await;
         let card = proposal_card(TITLE, NEW_TASK_HEADER, Some("brief"));
@@ -613,8 +613,10 @@ mod tests {
         let key = reply["task"].as_str().unwrap().to_string();
         assert!(key.starts_with("LIBRE-"));
         assert_eq!(app.store.list_tasks().await.unwrap().len(), 2);
-        // A terminal session has no chat history to record.
-        assert!(app.store.entries("plain").await.unwrap().is_empty());
+        // Every Claude session shows its cards inline: the one entry is the answered card.
+        let entries = app.store.entries("plain").await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].body["outcome"], "answered");
     }
 
     #[tokio::test]
