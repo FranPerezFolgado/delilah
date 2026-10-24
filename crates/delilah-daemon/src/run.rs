@@ -354,6 +354,8 @@ pub async fn start_run(
         false => prompt,
     };
 
+    // A free task that starts without a branch gets one before anything lands (R3).
+    let guard = crate::branching::is_free(&key) && !ws.has_branch();
     if let Some(mut session) = adopted {
         // The project's Claude becomes the task's: it goes on with its conversation,
         // now able to edit, on the task's branch.
@@ -368,12 +370,12 @@ pub async fn start_run(
         session.primary = true;
         session.read_only = false;
         session.label = app.lang().pick("Principal", "Main").into();
-        launch_session(&app, &session, &ws.path, None, true)?;
+        launch_session_guarded(&app, &session, &ws.path, None, true, guard)?;
         app.emit(crate::events::Topic::Sessions);
     } else {
         let (session, prompt) = first_session(&app, &req.key, saving_mode, prompt);
         app.store.create_session(&session).await?;
-        launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
+        launch_session_guarded(&app, &session, &ws.path, Some(&prompt), false, guard)?;
     }
 
     let task = app
@@ -434,6 +436,22 @@ pub fn launch_session(
     prompt: Option<&str>,
     resume: bool,
 ) -> Result<(), ApiError> {
+    // Not told whether the task has its branch: any free task gets the guard, which
+    // answers at once once the branch exists.
+    let guard = crate::branching::is_free(&TaskKey::new(&session.task));
+    launch_session_guarded(app, session, workspace, prompt, resume, guard)
+}
+
+/// [`launch_session`] knowing whether the session needs the branch guard hook: the
+/// task is free and has no branch yet.
+pub fn launch_session_guarded(
+    app: &AppState,
+    session: &SessionRecord,
+    workspace: &std::path::Path,
+    prompt: Option<&str>,
+    resume: bool,
+    guard: bool,
+) -> Result<(), ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume = resume && claude::has_conversation(workspace, &session.id);
     // No control character reaches the agent's command line.
@@ -452,6 +470,7 @@ pub fn launch_session(
                 &session.id,
                 permission,
                 &[task_dir.as_path()],
+                guard,
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));

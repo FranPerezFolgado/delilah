@@ -12,9 +12,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05 | 3 | 3A | done | 1 | 2b5996b | run early with 2A (no deps) |
 | WP-06 | 4 | 4A | verified | 1 | 5e05d63 | parent root not dirty-checked in branchless use_checkout (submodules only) |
 | WP-10 | 4 | 4A | verified | 1 | 98a3637 | run early; alerts.ts allowed by user |
-| WP-07 | 4 | 4B | verified | 1 | PENDING | ensure()+ensure_locked(); Activity waits while branch_error set |
+| WP-07 | 4 | 4B | verified | 1 | c808cb6 | ensure()+ensure_locked(); Activity waits while branch_error set |
 | WP-09 | 4 | 4B | verified | 1 | 407a9a3 | no delilah-git change needed |
-| WP-08 | 4 | 4C | pending | 0 | | |
+| WP-08 | 4 | 4C | verified | 1 | PENDING | guard on every free-task session outside start_run (returns at once once branched) |
 | WP-11 | 5 | 5A | pending | 0 | | |
 | WP-12 | 5 | 5B | pending | 0 | | quickstart walk via ui-verifier |
 
@@ -42,3 +42,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | spec-compliance | LOW | untested: PATCH archived → 409 at API level; retitle no-op on a Jira task with a new spec folder; title from a submodule's spec | api.rs, branching.rs |
 | 3 | ui-verifier | MEDIUM | No browser tools: header edit, Escape, Antes/Restaurar not checked in a real browser (API behaviour + auto-rename verified in preview; vitest passes) | app/src/components/TaskScreen.tsx |
 | 4 | orchestrator | MEDIUM | A submodule that already has a branch with the chosen name fails apply_branch → branch_error instead of being switched to it (needs a delilah-git checkout-existing helper) | crates/delilah-daemon/src/branching.rs |
+| 4 | orchestrator | LOW | Sessions launched outside start_run (resume, extra sessions) get the guard hook for any free task even after the branch exists (R3 says they shouldn't); cost = one curl per edit/commit | crates/delilah-daemon/src/run.rs |

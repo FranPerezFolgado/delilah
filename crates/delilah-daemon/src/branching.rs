@@ -6,9 +6,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use axum::Json;
+use axum::extract::{Path as UrlPath, State};
 use delilah_core::{ProjectKind, Task, TaskKey, TitleSource};
 use delilah_git::{GitOptions, Workspace};
+use serde_json::{Value, json};
 
+use crate::api::ApiError;
 use crate::state::AppState;
 
 /// One lock per task, so a hook and a recovery tick never work on the same task at once.
@@ -157,7 +161,6 @@ fn all_on_branch(ws: &Workspace, opts: &GitOptions) -> bool {
 
 /// Who asks for the branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Guard and Retry are used by the guard hook and the retry route
 pub(crate) enum Why {
     /// A tool ran or a turn ended: the analysis may be there now.
     Activity,
@@ -286,7 +289,6 @@ fn settle(
 /// free task, started with a branch, no analysis); `Ok(Some(branch))`: the task is on its
 /// branch; `Err(reason)`: it could not be applied, recorded as the task's `branch_error`.
 /// Idempotent.
-#[allow(dead_code)] // used by the guard hook and the retry route
 pub(crate) async fn ensure(
     app: &AppState,
     key: &TaskKey,
@@ -372,6 +374,163 @@ pub(crate) async fn ensure_locked(
             Ok(settled.branch)
         }
     }
+}
+
+/// How long the guard may take to put a task on its branch: inside the hook's `curl -m 15`.
+const GUARD_BUDGET: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// Commands that publish or move work: they need the branch as much as an edit does.
+const GUARDED_COMMANDS: [&str; 5] = [
+    "git commit",
+    "git push",
+    "gh pr create",
+    "git merge",
+    "git rebase",
+];
+
+/// `a/./b/../c` as `a/c`, without touching the disk.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Whether a file is part of the repo's work and not of its specs: under one of the
+/// task's repos (a submodule, or else the workspace) and outside that repo's `specs/` and
+/// `.specify/`. A file elsewhere on the disk (the task's notes, say) is not.
+fn is_repo_work(ws: &Workspace, file: &str) -> bool {
+    let root = normalize(&ws.path);
+    let file = normalize(&ws.path.join(file));
+    let Ok(in_ws) = file.strip_prefix(&root) else {
+        return false;
+    };
+    // The deepest repo that holds it decides what "under specs/" means.
+    let mut inner = in_ws;
+    for sub in &ws.submodules {
+        let sub = normalize(Path::new(sub));
+        if let Ok(rest) = in_ws.strip_prefix(&sub)
+            && rest.components().count() < inner.components().count()
+        {
+            inner = rest;
+        }
+    }
+    let first = inner.components().next();
+    !matches!(
+        first,
+        Some(std::path::Component::Normal(n)) if n == "specs" || n == ".specify"
+    )
+}
+
+/// Whether the tool call in a PreToolUse hook lands work: an edit of a file outside the
+/// spec folders, or a command that commits, pushes, merges, rebases or opens a PR.
+fn needs_branch(ws: &Workspace, hook: &Value) -> bool {
+    let input = &hook["tool_input"];
+    match hook["tool_name"].as_str() {
+        Some("Edit" | "Write" | "MultiEdit") => input["file_path"]
+            .as_str()
+            .is_none_or(|f| is_repo_work(ws, f)),
+        Some("NotebookEdit") => input["notebook_path"]
+            .as_str()
+            .is_none_or(|f| is_repo_work(ws, f)),
+        Some("Bash") => input["command"]
+            .as_str()
+            .is_some_and(|c| GUARDED_COMMANDS.iter().any(|g| c.contains(g))),
+        _ => false,
+    }
+}
+
+/// The guard's verdict on one tool call (R3): `None` lets it through; `Some(reason)`
+/// stops it. A task without a branch gets one first, from the title if nothing else names
+/// it, so no edit or commit lands on the base branch.
+pub(crate) async fn guard(app: &AppState, key: &TaskKey, hook: &Value) -> Option<String> {
+    if !is_free(key) {
+        return None;
+    }
+    let Ok(Some((_, ws))) = app.store.workspace(key).await else {
+        return None;
+    };
+    if !needs_branch(&ws, hook) {
+        return None;
+    }
+    // On its branch (and nothing waiting to be finished): nothing to do.
+    if ws.has_branch() {
+        match app.store.get_task(key).await {
+            Ok(Some(task)) if task.branch_error.is_none() => return None,
+            Ok(Some(_)) => {}
+            _ => return None,
+        }
+    }
+    let outcome = tokio::time::timeout(GUARD_BUDGET, ensure(app, key, Why::Guard)).await;
+    let reason = match outcome {
+        Ok(Ok(_)) => return None,
+        Ok(Err(reason)) => reason,
+        Err(_) => "it took too long".to_string(),
+    };
+    Some(format!(
+        "Delilah could not put this task on its own branch ({reason}), so nothing was \
+         edited or committed. Stop and tell the user: they can retry from Delilah."
+    ))
+}
+
+/// The PreToolUse hook's reply: empty to allow, a denial with its reason otherwise.
+pub(crate) fn guard_reply(denial: Option<String>) -> Value {
+    match denial {
+        None => json!({}),
+        Some(reason) => json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }),
+    }
+}
+
+/// `POST /api/v1/tasks/{key}/branch`: try again to put a free task on its branch (the
+/// Bandeja's retry). 409 when there is nothing to retry: not a free task, or every repo is
+/// on its branch already. The outcome is the task's `branch_error`.
+pub async fn retry(
+    State(app): State<AppState>,
+    UrlPath(key): UrlPath<String>,
+) -> Result<Json<Task>, ApiError> {
+    let key = TaskKey::new(key);
+    let _guard = app.branching.lock(&key).await;
+    let task = app
+        .store
+        .get_task(&key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
+    if !is_free(&key) {
+        return Err(ApiError::conflict("only free tasks have a branch to retry"));
+    }
+    let settled = match app.store.workspace(&key).await? {
+        Some((_, ws)) if ws.has_branch() && task.branch_error.is_none() => {
+            let opts = git_options(&app);
+            tokio::task::spawn_blocking(move || all_on_branch(&ws, &opts))
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+        }
+        _ => false,
+    };
+    if settled {
+        return Err(ApiError::conflict("the task is on its branch already"));
+    }
+    // A failure is recorded on the task; the answer is the task as it is now.
+    let _ = ensure_locked(&app, &key, Why::Retry).await;
+    let task = app
+        .store
+        .get_task(&key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
+    Ok(Json(task))
 }
 
 /// The feature name in a `spec.md`: the text after `# Feature Specification:`, trimmed.
@@ -922,5 +1081,136 @@ mod tests {
         assert_eq!(ensure(&app, &key, Why::Activity).await, first);
         assert_eq!(on(&root), "005-y");
         assert_eq!(rx.try_recv().ok(), None, "the second time changes nothing");
+    }
+
+    fn hook(tool: &str, input: Value) -> Value {
+        json!({ "hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": input })
+    }
+
+    #[tokio::test]
+    async fn the_guard_lets_spec_edits_through_without_a_branch() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &["api"]).await;
+        for (tool, input) in [
+            (
+                "Write",
+                json!({ "file_path": root.join("specs/001-x/spec.md") }),
+            ),
+            ("Edit", json!({ "file_path": "specs/001-x/plan.md" })),
+            (
+                "MultiEdit",
+                json!({ "file_path": root.join(".specify/memory/c.md") }),
+            ),
+            (
+                "Write",
+                json!({ "file_path": root.join("api/specs/001-x/spec.md") }),
+            ),
+            (
+                "NotebookEdit",
+                json!({ "notebook_path": "./specs/n.ipynb" }),
+            ),
+            // Outside the workspace: not repo work.
+            ("Write", json!({ "file_path": "/tmp/notes.md" })),
+            ("Bash", json!({ "command": "ls -la && git status" })),
+            ("Read", json!({ "file_path": "src/main.rs" })),
+        ] {
+            assert_eq!(
+                guard(&app, &key, &hook(tool, input.clone())).await,
+                None,
+                "{tool} {input}"
+            );
+        }
+        assert_eq!(ws_branch(&app, &key).await, "");
+        assert_eq!(on(&root), "");
+    }
+
+    #[tokio::test]
+    async fn the_guard_makes_the_branch_before_an_edit_or_a_commit() {
+        for (tool, input) in [
+            ("Edit", json!({ "file_path": "src/main.rs" })),
+            ("Write", json!({ "file_path": "specs/../src/a.rs" })),
+            ("Write", json!({ "file_path": "api/src/a.rs" })),
+            ("Write", json!({ "file_path": "myspecs/a.md" })),
+            ("NotebookEdit", json!({ "notebook_path": "n.ipynb" })),
+            ("Bash", json!({ "command": "git add . && git commit -m x" })),
+            ("Bash", json!({ "command": "git push origin HEAD" })),
+            ("Bash", json!({ "command": "gh pr create --fill" })),
+            ("Bash", json!({ "command": "git merge main" })),
+            ("Bash", json!({ "command": "git rebase main" })),
+        ] {
+            let app = app().await;
+            let (key, root) = real_task(&app, "LIBRE-1", &["api"]).await;
+            app.store.set_title(&key, "Mi idea").await.unwrap();
+            assert_eq!(
+                guard(&app, &key, &hook(tool, input.clone())).await,
+                None,
+                "{tool} {input}"
+            );
+            assert_eq!(on(&root), "mi-idea", "{tool} {input}");
+            assert_eq!(on(&root.join("api")), "mi-idea");
+            assert_eq!(ws_branch(&app, &key).await, "mi-idea");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_guard_denies_when_the_branch_cannot_be_made() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &["web"]).await;
+        spec(&root, "005-y", true);
+        git(&root.join("web"), &["branch", "005-y"]);
+        let reason = guard(
+            &app,
+            &key,
+            &hook("Bash", json!({ "command": "git commit -am x" })),
+        )
+        .await
+        .expect("denied");
+        assert!(reason.contains("web"), "{reason}");
+        assert!(task_of(&app, &key).await.branch_error.is_some());
+        let reply = guard_reply(Some(reason.clone()));
+        assert_eq!(reply["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(
+            reply["hookSpecificOutput"]["permissionDecisionReason"],
+            reason
+        );
+        assert_eq!(guard_reply(None), json!({}));
+    }
+
+    #[tokio::test]
+    async fn the_guard_answers_at_once_for_a_task_with_its_branch() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &[]).await;
+        app.store
+            .set_workspace_branch(&key, "feature/x")
+            .await
+            .unwrap();
+        let edit = hook("Edit", json!({ "file_path": "src/a.rs" }));
+        assert_eq!(guard(&app, &key, &edit).await, None);
+        // Nothing was touched: the repo is still detached.
+        assert_eq!(on(&root), "");
+        // Jira tasks and unknown ones are not the guard's.
+        let (jira, _) = real_task(&app, "PROJ-1", &[]).await;
+        assert_eq!(guard(&app, &jira, &edit).await, None);
+        assert_eq!(guard(&app, &TaskKey::new("LIBRE-9"), &edit).await, None);
+    }
+
+    #[tokio::test]
+    async fn retry_finishes_a_failed_branch_and_refuses_a_settled_one() {
+        let app = app().await;
+        let (key, root) = real_task(&app, "LIBRE-1", &["web"]).await;
+        spec(&root, "005-y", true);
+        git(&root.join("web"), &["branch", "005-y"]);
+        assert!(ensure(&app, &key, Why::Activity).await.is_err());
+        git(&root.join("web"), &["branch", "-D", "005-y"]);
+        let Json(task) = retry(State(app.clone()), UrlPath("LIBRE-1".into()))
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(task.branch_error, None);
+        assert_eq!(on(&root.join("web")), "005-y");
+        let err = retry(State(app.clone()), UrlPath("LIBRE-1".into()))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::CONFLICT);
     }
 }

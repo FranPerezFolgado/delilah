@@ -168,6 +168,8 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/claude", post(hooks::claude_hook))
         .route("/hooks/claude/statusline", post(hooks::claude_statusline))
         .route("/hooks/claude/ask", post(asks::hook))
+        .route("/hooks/claude/guard", post(hooks::guard_hook))
+        .route("/api/v1/tasks/{key}/branch", post(crate::branching::retry))
         .route("/api/v1/asks/{id}/answer", post(asks::answer))
         .route("/api/v1/asks/{id}/release", post(asks::release))
         .with_state(state)
@@ -610,6 +612,130 @@ mod tests {
             .await
             .unwrap();
         (router(state.clone()), state)
+    }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    }
+
+    /// A task `key` with a real repo as workspace, branchless (detached) when `branch`
+    /// is empty.
+    async fn task_in_repo(state: &AppState, key: &str, branch: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("delilah-api-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        git_in(&root, &["init", "-q", "-b", "main"]);
+        git_in(&root, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        if branch.is_empty() {
+            git_in(&root, &["checkout", "-q", "--detach"]);
+        } else {
+            git_in(&root, &["checkout", "-q", "-b", branch]);
+        }
+        let key = TaskKey::new(key);
+        state
+            .store
+            .create_task(&Task::new(key.clone(), "Idea", "feature"))
+            .await
+            .unwrap();
+        let ws = delilah_git::Workspace {
+            path: root.clone(),
+            branch: branch.into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        state.store.save_workspace(&key, &root, &ws).await.unwrap();
+        state
+            .store
+            .set_spec_dirs_at_start(&key, Some(&[]))
+            .await
+            .unwrap();
+        root
+    }
+
+    #[tokio::test]
+    async fn the_branch_route_retries_a_free_task() {
+        let (app, state) = app_with_project().await;
+        let root = task_in_repo(&state, "LIBRE-1", "").await;
+        state
+            .store
+            .set_branch_error(&TaskKey::new("LIBRE-1"), Some("old"))
+            .await
+            .unwrap();
+        let folder = root.join("specs/005-y");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("spec.md"), "# Feature Specification: Y\n").unwrap();
+        let (status, task) = call(&app, "POST", "/api/v1/tasks/LIBRE-1/branch", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(task["key"], "LIBRE-1");
+        assert_eq!(task["branch_error"], Value::Null);
+        let (_, ws) = state
+            .store
+            .workspace(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ws.branch, "005-y");
+        // Now on its branch: nothing to retry.
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/LIBRE-1/branch", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn the_branch_route_answers_404_and_409() {
+        let (app, state) = app_with_project().await;
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/LIBRE-9/branch", None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        task_in_repo(&state, "PROJ-1", "").await;
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/PROJ-1/branch", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        task_in_repo(&state, "LIBRE-2", "006-z").await;
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/LIBRE-2/branch", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn the_guard_route_allows_and_checks_the_task_name() {
+        let (app, state) = app_with_project().await;
+        task_in_repo(&state, "LIBRE-3", "").await;
+        let read = json!({ "tool_name": "Read", "tool_input": { "file_path": "a" } });
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/hooks/claude/guard?task=LIBRE-3&session=s",
+            Some(read.clone()),
+        )
+        .await;
+        assert_eq!((status, body), (StatusCode::OK, json!({})));
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/hooks/claude/guard?task=..&session=s",
+            Some(read),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let edit = json!({ "tool_name": "Edit", "tool_input": { "file_path": "src/a.rs" } });
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/hooks/claude/guard?task=LIBRE-3&session=s",
+            Some(edit),
+        )
+        .await;
+        assert_eq!((status, body), (StatusCode::OK, json!({})));
+        let (_, ws) = state
+            .store
+            .workspace(&TaskKey::new("LIBRE-3"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ws.branch, "idea");
     }
 
     #[tokio::test]
