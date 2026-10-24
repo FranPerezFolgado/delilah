@@ -7,5 +7,6 @@ mod task;
 pub use project::{Project, ProjectKind};
 pub use spec::{SpecGroup, SpecItem, SpecPhase, parse_tasks};
 pub use task::{
-    Event, Handoff, HandoffStage, InvalidKey, Step, Task, TaskKey, TaskStatus, TransitionError,
+    Event, Handoff, HandoffStage, InvalidKey, Step, Task, TaskKey, TaskStatus, TitleSource,
+    TransitionError,
 };

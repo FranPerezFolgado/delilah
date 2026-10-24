@@ -2,7 +2,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use delilah_core::{Event, Handoff, Task, TaskKey, TaskStatus, TransitionError};
+use delilah_core::{Event, Handoff, Task, TaskKey, TaskStatus, TitleSource, TransitionError};
 use serde::Serialize;
 use sqlx::Row;
 use sqlx::sqlite::{
@@ -102,7 +102,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff FROM tasks WHERE key = ?",
+            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, title_source, previous_title, branch_error FROM tasks WHERE key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&self.pool)
@@ -112,7 +112,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff FROM tasks ORDER BY created_at, key",
+            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, title_source, previous_title, branch_error FROM tasks ORDER BY created_at, key",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -140,12 +140,27 @@ impl Store {
             .notes
             .as_ref()
             .map(|n| Some(n.clone()).filter(|n| !n.trim().is_empty()));
+        // A title the user changes is theirs from then on.
+        let title_changed = change.title.as_ref().is_some_and(|t| *t != task.title);
         // The status in the WHERE: a start that slipped in between wins.
         let updated = sqlx::query(
-            "UPDATE tasks SET title = ?, project = ?, workflow = ?, notes = ?, in_checkout = ?, updated_at = ?
+            "UPDATE tasks SET title = ?, title_source = ?, previous_title = ?, project = ?, workflow = ?, notes = ?, in_checkout = ?, updated_at = ?
              WHERE key = ? AND status = ?",
         )
         .bind(change.title.as_ref().unwrap_or(&task.title))
+        .bind(
+            if title_changed {
+                TitleSource::Manual
+            } else {
+                task.title_source
+            }
+            .name(),
+        )
+        .bind(if title_changed {
+            None
+        } else {
+            task.previous_title.as_ref()
+        })
         .bind(change.project.as_ref().or(task.project.as_ref()))
         .bind(change.workflow.as_ref().unwrap_or(&task.workflow))
         .bind(notes.unwrap_or(task.notes))
@@ -173,6 +188,73 @@ impl Store {
             return Err(StoreError::NotFound(key.clone()));
         }
         Ok(())
+    }
+
+    /// Records where the title came from and the title it replaced (if any).
+    pub async fn set_title_source(
+        &self,
+        key: &TaskKey,
+        source: TitleSource,
+        previous_title: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let updated = sqlx::query(
+            "UPDATE tasks SET title_source = ?, previous_title = ?, updated_at = ? WHERE key = ?",
+        )
+        .bind(source.name())
+        .bind(previous_title)
+        .bind(Utc::now().to_rfc3339())
+        .bind(key.as_str())
+        .execute(&self.pool)
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
+    /// Records why the task's branch couldn't be created, or clears it.
+    pub async fn set_branch_error(
+        &self,
+        key: &TaskKey,
+        error: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let updated =
+            sqlx::query("UPDATE tasks SET branch_error = ?, updated_at = ? WHERE key = ?")
+                .bind(error)
+                .bind(Utc::now().to_rfc3339())
+                .bind(key.as_str())
+                .execute(&self.pool)
+                .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
+    /// The user's own title for a task in any state but archived (finished and its
+    /// workspace released, which is a conflict): the title becomes `manual` and the
+    /// replaced one is forgotten.
+    pub async fn set_title(&self, key: &TaskKey, title: &str) -> Result<Task, StoreError> {
+        let task = self
+            .get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+        if task.status.is_terminal() && self.workspace(key).await?.is_none() {
+            return Err(StoreError::Transition(TransitionError::Invalid {
+                status: task.status.name(),
+                event: "rename",
+            }));
+        }
+        sqlx::query(
+            "UPDATE tasks SET title = ?, title_source = ?, previous_title = NULL, updated_at = ? WHERE key = ?",
+        )
+        .bind(title)
+        .bind(TitleSource::Manual.name())
+        .bind(Utc::now().to_rfc3339())
+        .bind(key.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(self.get_task(key).await?.expect("task was just updated"))
     }
 
     /// Records the handoff under way, or clears it.
@@ -237,7 +319,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff FROM tasks WHERE key = ?",
+            "SELECT key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, title_source, previous_title, branch_error FROM tasks WHERE key = ?",
         )
         .bind(key.as_str())
         .fetch_optional(&mut *tx)
@@ -293,8 +375,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, title_source, previous_title, branch_error, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -306,6 +388,9 @@ async fn insert_task<'e>(
     .bind(task.in_checkout)
     .bind(task.saving_mode)
     .bind(task.handoff.as_ref().map(serde_json::to_string).transpose()?)
+    .bind(task.title_source.name())
+    .bind(&task.previous_title)
+    .bind(&task.branch_error)
     .bind(&now)
     .bind(&now)
     .execute(executor)
@@ -346,6 +431,13 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
             .try_get::<Option<String>, _>("handoff")?
             .map(|json| serde_json::from_str(&json))
             .transpose()?,
+        title_source: {
+            let source: String = row.try_get("title_source")?;
+            TitleSource::parse(&source)
+                .ok_or_else(|| StoreError::Corrupt(format!("unknown title source `{source}`")))?
+        },
+        previous_title: row.try_get("previous_title")?,
+        branch_error: row.try_get("branch_error")?,
     })
 }
 
@@ -377,6 +469,134 @@ mod tests {
             .map(|t| t.key)
             .collect();
         assert_eq!(keys, [TaskKey::new("PROJ-1"), TaskKey::new("PROJ-2")]);
+    }
+
+    #[tokio::test]
+    async fn title_source_branch_error_and_previous_title_persist() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut t = task("PROJ-1");
+        t.title_source = TitleSource::Initial;
+        t.branch_error = Some("no".into());
+        store.create_task(&t).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap(), Some(t));
+
+        store
+            .set_title_source(&key, TitleSource::Spec, Some("Card retries"))
+            .await
+            .unwrap();
+        store.set_branch_error(&key, None).await.unwrap();
+        let got = store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(got.title_source, TitleSource::Spec);
+        assert_eq!(got.previous_title.as_deref(), Some("Card retries"));
+        assert_eq!(got.branch_error, None);
+        store.set_branch_error(&key, Some("boom")).await.unwrap();
+        assert_eq!(
+            store.list_tasks().await.unwrap()[0].branch_error.as_deref(),
+            Some("boom")
+        );
+        let missing = TaskKey::new("NOPE-1");
+        assert!(matches!(
+            store.set_branch_error(&missing, None).await,
+            Err(StoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            store
+                .set_title_source(&missing, TitleSource::Manual, None)
+                .await,
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_row_from_before_the_migration_reads_manual() {
+        let store = Store::in_memory().await.unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (key, title, workflow, status, created_at, updated_at)
+             VALUES ('OLD-1', 't', 'feature', '{\"type\":\"queued\"}', 'x', 'x')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let got = store
+            .get_task(&TaskKey::new("OLD-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(got.title_source, TitleSource::Manual);
+        assert_eq!((got.previous_title, got.branch_error), (None, None));
+    }
+
+    #[tokio::test]
+    async fn set_title_makes_it_manual_and_refuses_archived_tasks() {
+        use delilah_core::{Event, ProjectKind};
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        store
+            .set_title_source(&key, TitleSource::Spec, Some("old"))
+            .await
+            .unwrap();
+        for e in [Event::Start, Event::WorkspaceReady] {
+            store.apply_event(&key, e, Utc::now()).await.unwrap();
+        }
+        let ws = delilah_git::Workspace {
+            path: "/w".into(),
+            branch: String::new(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        store
+            .save_workspace(&key, "/p".as_ref(), &ws)
+            .await
+            .unwrap();
+
+        let got = store.set_title(&key, "Mine").await.unwrap();
+        assert_eq!(got.title, "Mine");
+        assert_eq!(got.title_source, TitleSource::Manual);
+        assert_eq!(got.previous_title, None);
+
+        store
+            .apply_event(&key, Event::MarkDone, Utc::now())
+            .await
+            .unwrap();
+        store
+            .set_title(&key, "Done but not archived")
+            .await
+            .unwrap();
+        store.delete_workspace(&key).await.unwrap();
+        let err = store.set_title(&key, "Late").await.unwrap_err();
+        assert!(matches!(err, StoreError::Transition(_)), "{err}");
+        assert_eq!(
+            store.get_task(&key).await.unwrap().unwrap().title,
+            "Done but not archived"
+        );
+        let err = store
+            .set_title(&TaskKey::new("X-1"), "t")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::NotFound(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn changing_a_backlog_title_makes_it_manual() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut t = task("PROJ-1");
+        t.title_source = TitleSource::Initial;
+        store.create_task(&t).await.unwrap();
+        let notes_only = BacklogChange {
+            notes: Some("n".into()),
+            ..Default::default()
+        };
+        let got = store.update_backlog_task(&key, &notes_only).await.unwrap();
+        assert_eq!(got.title_source, TitleSource::Initial);
+        let retitle = BacklogChange {
+            title: Some("New".into()),
+            ..Default::default()
+        };
+        let got = store.update_backlog_task(&key, &retitle).await.unwrap();
+        assert_eq!(got.title_source, TitleSource::Manual);
     }
 
     #[tokio::test]

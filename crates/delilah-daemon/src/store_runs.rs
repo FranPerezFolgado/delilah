@@ -30,6 +30,49 @@ impl Store {
         Ok(())
     }
 
+    /// Sets the branch of a workspace saved without one, leaving the rest as it is.
+    pub async fn set_workspace_branch(
+        &self,
+        key: &TaskKey,
+        branch: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE workspaces SET branch = ? WHERE task_key = ?")
+            .bind(branch)
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Records the spec folders present when a workspace started without a branch
+    /// (`label:name`); `None` for one started with a branch.
+    pub async fn set_spec_dirs_at_start(
+        &self,
+        key: &TaskKey,
+        dirs: Option<&[String]>,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE workspaces SET spec_dirs_at_start = ? WHERE task_key = ?")
+            .bind(dirs.map(serde_json::to_string).transpose()?)
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The spec folders recorded at start (see [`Store::set_spec_dirs_at_start`]).
+    pub async fn spec_dirs_at_start(
+        &self,
+        key: &TaskKey,
+    ) -> Result<Option<Vec<String>>, StoreError> {
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT spec_dirs_at_start FROM workspaces WHERE task_key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+        Ok(json.map(|j| serde_json::from_str(&j)).transpose()?)
+    }
+
     /// The workspace and the parent repo it was created from.
     pub async fn workspace(
         &self,
@@ -143,6 +186,45 @@ mod tests {
             store.workspace(&key).await.unwrap(),
             Some(("/tmp/parent".into(), ws))
         );
+    }
+
+    #[tokio::test]
+    async fn a_workspace_without_branch_keeps_its_spec_dirs_and_gets_the_branch_later() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store
+            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .await
+            .unwrap();
+        let ws = Workspace {
+            path: "/tmp/ws/PROJ-1".into(),
+            branch: String::new(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        store
+            .save_workspace(&key, "/tmp/parent".as_ref(), &ws)
+            .await
+            .unwrap();
+        // Saved without spec dirs: reads None.
+        assert_eq!(store.spec_dirs_at_start(&key).await.unwrap(), None);
+
+        let dirs = vec![".:001-a".to_string(), "svc:002-b".to_string()];
+        store
+            .set_spec_dirs_at_start(&key, Some(&dirs))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.spec_dirs_at_start(&key).await.unwrap(),
+            Some(dirs.clone())
+        );
+
+        store.set_workspace_branch(&key, "003-x").await.unwrap();
+        let (parent, got) = store.workspace(&key).await.unwrap().unwrap();
+        assert_eq!(parent, std::path::PathBuf::from("/tmp/parent"));
+        assert_eq!(got.branch, "003-x");
+        assert_eq!(got.path, ws.path);
+        assert_eq!(store.spec_dirs_at_start(&key).await.unwrap(), Some(dirs));
     }
 
     #[tokio::test]
