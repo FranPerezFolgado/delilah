@@ -101,7 +101,17 @@ pub struct RunRequest {
 
 pub async fn start_run(
     State(app): State<AppState>,
-    Json(mut req): Json<RunRequest>,
+    Json(req): Json<RunRequest>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    start_run_with(app, req, FIRST_TURN_TIMEOUT, SETTLE).await
+}
+
+/// [`start_run`] with the waits of a chat-mode start given (tests shorten or stretch them).
+pub(crate) async fn start_run_with(
+    app: AppState,
+    mut req: RunRequest,
+    first_turn_timeout: Duration,
+    settle: Duration,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
     // The conversation lives with the folder it was held in: carrying it over means
     // working in that same checkout.
@@ -310,7 +320,7 @@ pub async fn start_run(
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
-            abort_start(&app, &key, existing, &reason).await?;
+            abort_start(&app, &key, existing, false, &reason).await?;
             return Err(ApiError::unprocessable(reason));
         }
     };
@@ -348,73 +358,22 @@ pub async fn start_run(
     };
     let prompt = point_to_notes(&app, &key, prompt, notes.as_deref());
 
-    let (session, restore, launch_prompt, resume) = match adopted {
-        Some(original) => {
-            // The project's Claude becomes the task's: it goes on with its conversation,
-            // now able to edit, on the task's branch.
-            let mut session = original.clone();
-            if let Some(live) = app.sessions.get(&session.id) {
-                let _ = live.runtime.kill();
-                live.runtime.wait().await;
-            }
-            let label = app.lang().pick("Principal", "Main");
-            let adopted = app.store.adopt_session(&session.id, &req.key, label).await;
-            session.task = req.key.clone();
-            session.primary = true;
-            session.read_only = false;
-            session.label = label.into();
-            if let Err(e) = adopted {
-                let reason = e.to_string();
-                rollback_start(&app, &key, &session, Some(&original), existing, &reason).await;
-                return Err(e.into());
-            }
-            (session, Some(original), None, true)
-        }
-        None => {
-            let (session, prompt) = first_session(&app, &req.key, saving_mode, autopilot, prompt);
-            if let Err(e) = app.store.create_session(&session).await {
-                let reason = e.to_string();
-                rollback_start(&app, &key, &session, None, existing, &reason).await;
-                return Err(e.into());
-            }
-            (session, None, Some(prompt), false)
-        }
+    // The launch (which, in chat mode, waits up to a minute for the agent's first sign of
+    // work) and its rollback run in a task of their own: a client that gives up on the
+    // request drops this handler's future, and must not leave a live agent behind with the
+    // task running.
+    let launch = Launch {
+        app: app.clone(),
+        key: key.clone(),
+        workspace: ws.path.clone(),
+        saving_mode,
+        autopilot,
+        first_turn_timeout,
+        settle,
     };
-    // A chat-mode agent can fail to come up, and the start is then undone: it is spawned,
-    // then the task is running, then it gets its first message (so the hooks it fires land
-    // on a running task, and until then the start can still be undone). A terminal agent
-    // has its prompt on the command line and, as ever, a task that runs even if it fails
-    // to spawn: its session is there to reopen.
-    let chat = runtime_kind(&app, &session).await? == RuntimeKind::Stream;
-    if !chat {
-        app.transition(&key, Event::WorkspaceReady).await?;
-    }
-    let launched = async {
-        let spawned = spawn_session(
-            &app,
-            &session,
-            &ws.path,
-            launch_prompt.as_deref(),
-            resume,
-            FIRST_TURN_TIMEOUT,
-        )
-        .await?;
-        if chat && let Err(e) = app.transition(&key, Event::WorkspaceReady).await {
-            spawned.discard(&app).await;
-            return Err(ApiError::from(e));
-        }
-        spawned.send_first(&app).await
-    }
-    .await;
-    if let Err(e) = launched {
-        if chat {
-            rollback_start(&app, &key, &session, restore.as_ref(), existing, &e.message).await;
-        }
-        return Err(e);
-    }
-    if restore.is_some() {
-        app.emit(crate::events::Topic::Sessions);
-    }
+    tokio::spawn(launch.run(adopted, existing, req.key.clone(), prompt))
+        .await
+        .map_err(|e| ApiError::internal(format!("the start was interrupted: {e}")))??;
 
     let task = app
         .store
@@ -422,6 +381,114 @@ pub async fn start_run(
         .await?
         .expect("task was just created");
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// What the second half of a start needs: the agent's spawn, its first message and, when
+/// either fails, the undoing of the whole start.
+struct Launch {
+    app: AppState,
+    key: TaskKey,
+    workspace: std::path::PathBuf,
+    saving_mode: bool,
+    autopilot: bool,
+    first_turn_timeout: Duration,
+    settle: Duration,
+}
+
+impl Launch {
+    async fn run(
+        self,
+        adopted: Option<SessionRecord>,
+        existing: Option<Task>,
+        req_key: String,
+        prompt: String,
+    ) -> Result<(), ApiError> {
+        let Self {
+            app,
+            key,
+            workspace,
+            saving_mode,
+            autopilot,
+            first_turn_timeout,
+            settle,
+        } = self;
+        let (session, restore, launch_prompt, resume) = match adopted {
+            Some(original) => {
+                // The project's Claude becomes the task's: it goes on with its conversation,
+                // now able to edit, on the task's branch.
+                let mut session = original.clone();
+                if let Some(live) = app.sessions.get(&session.id) {
+                    let _ = live.runtime.kill();
+                    live.runtime.wait().await;
+                }
+                let label = app.lang().pick("Principal", "Main");
+                let adopted = app.store.adopt_session(&session.id, &req_key, label).await;
+                session.task = req_key.clone();
+                session.primary = true;
+                session.read_only = false;
+                session.label = label.into();
+                if let Err(e) = adopted {
+                    let reason = e.to_string();
+                    rollback_start(&app, &key, &session, Some(&original), existing, &reason).await;
+                    return Err(e.into());
+                }
+                (session, Some(original), None, true)
+            }
+            None => {
+                let (session, prompt) =
+                    first_session(&app, &req_key, saving_mode, autopilot, prompt);
+                if let Err(e) = app.store.create_session(&session).await {
+                    let reason = e.to_string();
+                    rollback_start(&app, &key, &session, None, existing, &reason).await;
+                    return Err(e.into());
+                }
+                (session, None, Some(prompt), false)
+            }
+        };
+        // A chat-mode agent can fail to come up, and the start is then undone: it is spawned,
+        // then the task is running, then it gets its first message (so the hooks it fires land
+        // on a running task, and until then the start can still be undone). A terminal agent
+        // has its prompt on the command line and, as ever, a task that runs even if it fails
+        // to spawn: its session is there to reopen.
+        let chat = match runtime_kind(&app, &session).await {
+            Ok(kind) => kind == RuntimeKind::Stream,
+            Err(e) => {
+                rollback_start(&app, &key, &session, restore.as_ref(), existing, &e.message).await;
+                return Err(e);
+            }
+        };
+        if !chat {
+            app.transition(&key, Event::WorkspaceReady).await?;
+        }
+        let launched = async {
+            let spawned = spawn_session(
+                &app,
+                &session,
+                &workspace,
+                launch_prompt.as_deref(),
+                resume,
+                first_turn_timeout,
+                settle,
+            )
+            .await?;
+            if chat && let Err(e) = app.transition(&key, Event::WorkspaceReady).await {
+                spawned.discard(&app).await;
+                return Err(ApiError::from(e));
+            }
+            spawned.send_first(&app).await
+        }
+        .await;
+        if let Err(e) = launched {
+            if chat {
+                rollback_start(&app, &key, &session, restore.as_ref(), existing, &e.message).await;
+            }
+            return Err(e);
+        }
+        if restore.is_some() {
+            app.emit(crate::events::Topic::Sessions);
+        }
+        Ok(())
+    }
 }
 
 /// Most of the agent's stderr that goes into the error of a failed start, and the longest line.
@@ -465,21 +532,36 @@ fn redact_secrets(line: &str) -> String {
 
 /// A start that did not get an agent: a backlog task goes back to the backlog as it was,
 /// to be tried again; any other task fails.
+///
+/// `keep_new`: a task created by this very start stays in the backlog too (instead of
+/// failing) so the start can be tried again, as when its agent did not come up.
 async fn abort_start(
     app: &AppState,
     key: &TaskKey,
     existing: Option<Task>,
+    keep_new: bool,
     reason: &str,
 ) -> Result<(), ApiError> {
-    // Only a task still preparing its workspace can go back to the backlog; one that
-    // already runs (its agent failed on the first message) fails.
-    let preparing = app
-        .store
-        .get_task(key)
-        .await?
-        .is_some_and(|t| t.status == TaskStatus::PreparingWorkspace);
+    // Only a start in progress can go back to the backlog: the workspace being prepared,
+    // or a task that already runs because its agent was given a chance (and failed on the
+    // first message).
+    let in_progress = app.store.get_task(key).await?.is_some_and(|t| {
+        matches!(
+            t.status,
+            TaskStatus::PreparingWorkspace | TaskStatus::Running | TaskStatus::WaitingForUser
+        )
+    });
     match existing {
-        Some(task) if preparing => {
+        None if in_progress && keep_new => {
+            app.transition(
+                key,
+                Event::StartAborted {
+                    reason: reason.to_string(),
+                },
+            )
+            .await?;
+        }
+        Some(task) if in_progress => {
             app.transition(
                 key,
                 Event::StartAborted {
@@ -550,7 +632,7 @@ async fn rollback_start(
     if let Err(e) = app.store.delete_workspace(key).await {
         tracing::warn!(task = %key, "cannot forget the workspace: {e}");
     }
-    if let Err(e) = abort_start(app, key, existing, reason).await {
+    if let Err(e) = abort_start(app, key, existing, true, reason).await {
         tracing::warn!(task = %key, "cannot abort the start: {}", e.message());
     }
     app.emit(crate::events::Topic::Sessions);
@@ -682,10 +764,18 @@ pub(crate) async fn launch_session_with(
     resume: bool,
     first_turn_timeout: Duration,
 ) -> Result<(), ApiError> {
-    spawn_session(app, session, workspace, prompt, resume, first_turn_timeout)
-        .await?
-        .send_first(app)
-        .await
+    spawn_session(
+        app,
+        session,
+        workspace,
+        prompt,
+        resume,
+        first_turn_timeout,
+        SETTLE,
+    )
+    .await?
+    .send_first(app)
+    .await
 }
 
 /// A spawned session that has not yet been given its first message (a stream one).
@@ -707,6 +797,8 @@ struct StreamStart {
 enum Wait {
     Up,
     Exited,
+    /// Its first word was an error (what it said).
+    Failed(String),
     TimedOut,
 }
 
@@ -720,6 +812,7 @@ impl StreamStart {
                 self.up = true;
                 Wait::Up
             }
+            Ok(Ok(crate::stream_events::Started::Failed(said))) => Wait::Failed(said),
             // Exited, or the pump ended without a word (the process is gone).
             Ok(_) => Wait::Exited,
             Err(_) => Wait::TimedOut,
@@ -751,7 +844,8 @@ impl Spawned {
             Err(e) => Some(e),
             Ok(()) => match start.wait(self.timeout).await {
                 Wait::Up => None,
-                Wait::Exited | Wait::TimedOut => Some(start_failure(&self.runtime).await),
+                Wait::Failed(said) => Some(start_failure(&self.runtime, Some(&said)).await),
+                Wait::Exited | Wait::TimedOut => Some(start_failure(&self.runtime, None).await),
             },
         };
         match failure {
@@ -764,14 +858,18 @@ impl Spawned {
     }
 }
 
-/// The error of a chat-mode agent that did not come up: what it said on stderr.
-async fn start_failure(runtime: &Runtime) -> ApiError {
+/// The error of a chat-mode agent that did not come up: what it said as its error result,
+/// or else on stderr.
+async fn start_failure(runtime: &Runtime, said: Option<&str>) -> ApiError {
     let _ = runtime.kill();
     runtime.wait().await;
-    let tail = runtime
-        .as_stream()
-        .map(|s| start_error_tail(&s.stderr_tail()))
-        .unwrap_or_default();
+    let tail = match said.filter(|s| !s.trim().is_empty()) {
+        Some(said) => start_error_tail(said),
+        None => runtime
+            .as_stream()
+            .map(|s| start_error_tail(&s.stderr_tail()))
+            .unwrap_or_default(),
+    };
     let tail = match tail.trim() {
         "" => "claude printed nothing before it stopped",
         tail => tail,
@@ -782,6 +880,7 @@ async fn start_failure(runtime: &Runtime) -> ApiError {
 /// Starts the session's process and registers it, but a chat-mode agent is not given its
 /// first message yet: that is [`Spawned::send_first`]. For a stream session, fails if the
 /// process does not stay alive for a moment.
+/// `settle`: how long a stream agent with no first message must stay alive to count as up.
 pub(crate) async fn spawn_session(
     app: &AppState,
     session: &SessionRecord,
@@ -789,6 +888,7 @@ pub(crate) async fn spawn_session(
     prompt: Option<&str>,
     resume: bool,
     first_turn_timeout: Duration,
+    settle: Duration,
 ) -> Result<Spawned, ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume =
@@ -889,9 +989,16 @@ pub(crate) async fn spawn_session(
         let started = crate::stream_events::spawn_pump(app, &session.id, &session.task, events);
         let mut start = StreamStart { started, up: false };
         // An agent that dies on its flags or login does so at once; it says nothing else
-        // until it has a message.
-        if let Wait::Exited = start.wait(first_turn_timeout.min(SETTLE)).await {
-            let e = start_failure(&runtime).await;
+        // until it has a message. With no message to send (a resumed conversation), this
+        // brief wait is the only check of the start: an agent that dies later is seen
+        // only by the exit watcher above, which drops its session from the registry.
+        let early = match start.wait(first_turn_timeout.min(settle)).await {
+            Wait::Exited => Some(None),
+            Wait::Failed(said) => Some(Some(said)),
+            Wait::Up | Wait::TimedOut => None,
+        };
+        if let Some(said) = early {
+            let e = start_failure(&runtime, said.as_deref()).await;
             spawned.discard(app).await;
             return Err(e);
         }
@@ -1925,11 +2032,21 @@ mod tests {
             .unwrap();
         let live = app.sessions.get("sess-1").expect("registered");
         let _ = live.runtime.kill();
-        // And one that dies at once is not.
+        // And one that dies at once is not: with a settle far longer than it takes to die,
+        // so a slow machine cannot make it look up.
         let (app, ws) = chat_app("exit 1", true).await;
-        let err = launch_session_with(&app, &record, &ws, None, false, Duration::from_secs(10))
-            .await
-            .unwrap_err();
+        let err = spawn_session(
+            &app,
+            &record,
+            &ws,
+            None,
+            false,
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+        )
+        .await
+        .map(|_| ())
+        .unwrap_err();
         assert!(err.message.starts_with("chat mode could not start:"));
     }
 
@@ -2125,15 +2242,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_chat_agent_that_dies_on_the_first_message_fails_the_task_and_leaves_no_session() {
-        let app = chat_repo_app("read line\necho 'no credit' >&2\nexit 1").await;
+    async fn a_chat_agent_that_dies_on_the_first_message_leaves_the_task_startable_and_no_session()
+    {
+        // A stream agent dies on its first message; a terminal one (the retry) stays up.
+        let made = std::env::temp_dir().join(format!("delilah-pty-{}", uuid::Uuid::new_v4()));
+        let app = chat_repo_app(&format!(
+            "case \"$*\" in *stream-json*) read line; echo 'no credit' >&2; exit 1;; esac\necho ran > '{}'\nsleep 5",
+            made.display()
+        ))
+        .await;
         let err = start_run(State(app.clone()), Json(chat_run("LIBRE-1")))
             .await
             .unwrap_err();
         assert_eq!(err.message, "chat mode could not start: no credit");
         let key = TaskKey::new("LIBRE-1");
         let task = app.store.get_task(&key).await.unwrap().unwrap();
-        assert_eq!(task.status.name(), "failed");
+        assert_eq!(task.status, TaskStatus::Queued, "back in the backlog");
         assert!(
             app.store
                 .primary_session("LIBRE-1")
@@ -2143,6 +2267,87 @@ mod tests {
         );
         assert!(app.store.workspace(&key).await.unwrap().is_none());
         assert!(app.sessions.primary("LIBRE-1").is_none());
+
+        // "Iniciar en terminal": the same task, chat mode off.
+        let mut retry = chat_run("LIBRE-1");
+        retry.chat_mode = Some(false);
+        let (status, Json(started)) = start_run(State(app.clone()), Json(retry))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(!started.chat_mode);
+        assert_eq!(started.status, TaskStatus::Running);
+        let live = app.sessions.primary("LIBRE-1").expect("a live session");
+        assert!(live.runtime.as_pty().is_some());
+        assert!(!read_when_there(made).await.is_empty());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn an_error_result_as_the_first_word_fails_the_start_with_its_text() {
+        let app = chat_repo_app(
+            "read line\necho '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"result\":\"Invalid API key\"}'\nsleep 5",
+        )
+        .await;
+        let err = start_run(State(app.clone()), Json(chat_run("LIBRE-1")))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message, "chat mode could not start: Invalid API key");
+        let task = app.store.get_task(&TaskKey::new("LIBRE-1")).await.unwrap();
+        assert_eq!(task.unwrap().status, TaskStatus::Queued);
+        assert!(
+            app.sessions.primary("LIBRE-1").is_none(),
+            "the agent was stopped"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_that_gives_up_mid_start_leaves_no_agent_and_a_startable_task() {
+        // Reads its message and then says nothing: the start waits for a sign of work.
+        let app = chat_repo_app("read line\nsleep 30").await;
+        let mut waiting = Box::pin(start_run_with(
+            app.clone(),
+            chat_run("LIBRE-1"),
+            Duration::from_secs(2),
+            SETTLE,
+        ));
+        // The request is dropped once the agent is up and the start waits on it (what a
+        // closed connection does).
+        loop {
+            tokio::select! {
+                _ = &mut waiting => panic!("the start cannot finish: the agent says nothing"),
+                () = tokio::time::sleep(Duration::from_millis(20)) => {
+                    if app.sessions.primary("LIBRE-1").is_some() {
+                        break;
+                    }
+                }
+            }
+        }
+        drop(waiting);
+        let key = TaskKey::new("LIBRE-1");
+        for _ in 0..300 {
+            let queued = app
+                .store
+                .get_task(&key)
+                .await
+                .unwrap()
+                .is_some_and(|t| t.status == TaskStatus::Queued);
+            if queued {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Queued, "the rollback ran");
+        assert!(app.sessions.primary("LIBRE-1").is_none(), "no live agent");
+        assert!(
+            app.store
+                .primary_session("LIBRE-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -2160,7 +2365,16 @@ mod tests {
         app.store.create_session(&original).await.unwrap();
         let mut req = chat_run("");
         req.from_session = Some("conv-1".into());
-        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        // A settle far longer than the agent takes to die: it is seen dying, never taken
+        // as up because the machine was slow to run it.
+        let err = start_run_with(
+            app.clone(),
+            req,
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.message.starts_with("chat mode could not start:"),
             "{}",
@@ -2168,6 +2382,38 @@ mod tests {
         );
         let after = app.store.session("conv-1").await.unwrap().unwrap();
         assert_eq!(after, original, "still the project's, as it was");
+    }
+
+    #[tokio::test]
+    async fn an_adopted_start_that_dies_after_the_settle_is_seen_by_the_exit_watcher() {
+        let (app, ws) = chat_app("sleep 0.5\nexit 1", true).await;
+        let record = session("PROJ-1", "Main");
+        // No first message (a resumed conversation): up after the settle alone.
+        let spawned = spawn_session(
+            &app,
+            &record,
+            &ws,
+            None,
+            true,
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        assert!(app.sessions.get("sess-1").is_some(), "judged up");
+        spawned
+            .send_first(&app)
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        for _ in 0..100 {
+            if app.sessions.get("sess-1").is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(app.sessions.get("sess-1").is_none(), "gone once it died");
     }
 
     #[tokio::test]

@@ -484,11 +484,12 @@ impl Parser {
                 let five_hour = window(info, "five_hour");
                 let seven_day = window(info, "seven_day");
                 let full = |w: &Option<LimitWindow>| w.is_some_and(|w| w.percent >= 100);
-                let reached = info
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .is_some_and(|s| !matches!(s, "allowed" | "allowed_warning"))
-                    || full(&five_hour)
+                // Only a status that says the limit blocks counts; one this adapter does
+                // not know is taken as benign rather than pausing the task on a guess.
+                let reached = info.get("status").and_then(Value::as_str).is_some_and(|s| {
+                    let s = s.to_lowercase();
+                    s.contains("reject") || s.contains("exceeded")
+                }) || full(&five_hour)
                     || full(&seven_day);
                 vec![StreamEvent::RateLimit {
                     five_hour,
@@ -811,6 +812,11 @@ mod tests {
         assert!(reached(
             r#"{"status":"rejected","rateLimitType":"five_hour"}"#
         ));
+        assert!(reached(r#"{"status":"limit_exceeded"}"#));
+        assert!(reached(r#"{"status":"Rejected_Hard"}"#));
+        // A status this adapter does not know is not a reason to pause.
+        assert!(!reached(r#"{"status":"queued"}"#));
+        assert!(!reached(r#"{"status":"throttled_softly"}"#));
         assert!(reached(
             r#"{"status":"allowed","unifiedWindows":{"seven_day":{"utilization":1.0,"resetsAt":5}}}"#
         ));

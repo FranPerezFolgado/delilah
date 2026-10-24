@@ -25,16 +25,17 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-13 | 5 | 5B | done | 1 | 626cd52 | |
 | WP-14 | 6 | 6A | done | 1 | 8e3f0a9 | |
 | WP-15 | 6 | 6B | done | 1 | cf8c546 | go (decision 49) |
-| WP-16 | 7 | 7A | verified | 1 | | T037–T039 now (stream.rs); T040 after WP-15 |
-| WP-17 | 7 | 7A | verified | 1 | 49220b6 | |
-| WP-18 | 7 | 7B | verified | 1 | | go (decision 49) |
-| WP-19 | 7 | 7C | verified | 1 | | go (decision 49) |
-| WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
-| WP-21 | 7 | 7D | verified | 1 | 9d0e3cc | go (decision 49) |
-| WP-21F | 7 | 7F | verified | 1 | | UI/CLI review fixes |
-| WP-19F | 7 | 7G | verified | 1 | | review fixes (init wait CRITICAL) |
+| WP-16 | 7 | 7A | done | 1 | | T037–T039 now (stream.rs); T040 after WP-15 |
+| WP-17 | 7 | 7A | done | 1 | 49220b6 | |
+| WP-18 | 7 | 7B | done | 1 | | go (decision 49) |
+| WP-19 | 7 | 7C | done | 1 | | go (decision 49) |
+| WP-20 | 7 | 7C | done | 1 | ee3b3da | go (decision 49) |
+| WP-21 | 7 | 7D | done | 1 | 9d0e3cc | go (decision 49) |
+| WP-21F | 7 | 7F | done | 1 | | UI/CLI review fixes |
+| WP-19F | 7 | 7G | done | 1 | | review fixes (init wait CRITICAL) |
 | WP-22F | 8 | 8F | verified | 1 | | permission rule security |
-| WP-19G | 7 | 7H | implementing | 0 | | fix round 2 |
+| WP-19G | 7 | 7H | done | 1 | | fix round 2 |
+| WP-22G | 8 | 8G | implementing | 0 | | allowlist for remembered rules (user decision) |
 | WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
@@ -50,6 +51,7 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 8 | security | LOW | env-assignment first word (`FOO=1 sh:*`) slips past the head check; rule_matches ignores quoting (fails safe) | crates/delilah-agents/src/claude.rs:290 |
 | 7 | spec | LOW | rate-limit 'reached' detection in stream is a guess (status/window/result text); real value never observed — verify on a real limit hit | crates/delilah-agents/src/stream.rs |
 | 7 | arch | LOW | PTY start failure still leaves a Running task + workspace + session row (rollback only for chat mode) | crates/delilah-daemon/src/run.rs |
 | 7 | tests | LOW | 700 ms settle can flake under load (a_failed_chat_start_from_a_conversation_gives_it_back_to_its_project once) | crates/delilah-daemon/src/run.rs |
@@ -115,3 +117,4 @@ Mode: format=markdown commits=yes autonomy=auto
 - WP-20: CLI sends chat_mode on POST /api/v1/tasks AND POST /api/v1/runs → WP-18 must accept it on both; README needs --chat (WP-30).
 - WP-21: writing bubble is replaced heuristically (no message id on transcript claude entries) → add `message_id` to claude entries in transcript.rs + use it in ConversationView (fold into WP-19 or a fix).
 - WP-22 security: allow_always must not fall back to a bare tool rule (Bash) → WP-22F; the UI (WP-24) shows 'Permitir siempre' only when a specific rule is offered (ask carries the rule it would add, or none).
+- WP-22F: ask JSON = {id, task, session, tool, suggestion, summary, at, rule: string|null}; UI offers 'Permitir siempre en esta tarea' only when rule != null (allow_always without rule → 400).

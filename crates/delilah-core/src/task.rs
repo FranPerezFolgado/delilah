@@ -109,7 +109,8 @@ pub enum Event {
     Fail {
         reason: String,
     },
-    /// A backlog task could not get its workspace: it goes back to the backlog.
+    /// A start was undone (no workspace, or the agent did not come up): the task goes back
+    /// to the backlog, startable again. Only the start's rollback sends it.
     StartAborted {
         reason: String,
     },
@@ -431,7 +432,9 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         (S::Running, Event::AgentFinished) => Ok(S::Done),
         (S::Running | S::WaitingForUser | S::PausedByLimit { .. }, Event::MarkDone) => Ok(S::Done),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
-        (S::PreparingWorkspace, Event::StartAborted { .. }) => Ok(S::Queued),
+        (S::PreparingWorkspace | S::Running | S::WaitingForUser, Event::StartAborted { .. }) => {
+            Ok(S::Queued)
+        }
         (S::Queued, Event::CreatedFromConversation { .. }) => Ok(S::Queued),
         _ => Err(invalid),
     }
@@ -508,14 +511,38 @@ mod tests {
         task.apply(aborted.clone()).unwrap();
         assert_eq!(task.status, TaskStatus::Queued);
 
-        // Only a start being prepared can be aborted.
+        // Only a start in progress can be aborted: not a task that is already back.
         assert!(task.apply(aborted.clone()).is_err());
-        assert!(running_task().apply(aborted).is_err());
 
         // And it can be started again.
         task.apply(Event::Start).unwrap();
         task.apply(Event::WorkspaceReady).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
+    }
+
+    #[test]
+    fn a_start_whose_agent_failed_after_the_task_ran_goes_back_to_the_backlog() {
+        let aborted = Event::StartAborted {
+            reason: "chat mode could not start".into(),
+        };
+        let mut task = running_task();
+        task.apply(aborted.clone()).unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+        // A hook may have moved it on before the rollback.
+        let mut waiting = running_task();
+        waiting.apply(Event::AgentAsked).unwrap();
+        waiting.apply(aborted.clone()).unwrap();
+        assert_eq!(waiting.status, TaskStatus::Queued);
+        // Finished or failed tasks stay as they are.
+        let mut done = running_task();
+        done.apply(Event::AgentFinished).unwrap();
+        assert!(done.apply(aborted.clone()).is_err());
+        let mut failed = running_task();
+        failed.apply(Event::Fail { reason: "x".into() }).unwrap();
+        assert!(failed.apply(aborted).is_err());
+        // And it starts again.
+        task.apply(Event::Start).unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
     }
 
     #[test]

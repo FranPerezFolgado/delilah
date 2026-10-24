@@ -13,14 +13,19 @@ use crate::sessions::LiveState;
 use crate::state::AppState;
 
 /// How the start of a stream session went, as the pump saw it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Started {
     /// The agent is working on its first turn: its `Init`, or a message or result, came.
     /// (The real CLI says nothing but hook lines until it has read the first message.)
     Up,
     /// The process ended before that.
     Exited,
+    /// The first thing it said was an error result (a login or auth error, say): its text.
+    Failed(String),
 }
+
+/// How long, once the process is gone, the pump waits for what it said last to arrive.
+const DRAIN: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Starts the session's pump over its lossless events (see `StreamSession::take_events`:
 /// every event but the text, none dropped). The receiver resolves at the first sign of
@@ -41,9 +46,14 @@ pub fn spawn_pump(
     tokio::spawn(async move {
         // Once the process is gone, what it said last is still read; then the pump is done.
         let mut gone = false;
+        // Whether the agent has shown any sign of work yet.
+        let mut worked = false;
         loop {
             let event = if gone {
-                events.try_recv().ok()
+                tokio::time::timeout(DRAIN, events.recv())
+                    .await
+                    .ok()
+                    .flatten()
             } else {
                 tokio::select! {
                     event = events.recv() => event,
@@ -57,17 +67,39 @@ pub fn spawn_pump(
             let outcome = match &event {
                 StreamEvent::Exited { .. } => Some(Started::Exited),
                 StreamEvent::RateLimit { .. } => None,
+                // An error before any sign of work is the start failing, not a turn.
+                StreamEvent::TurnResult {
+                    is_error: true,
+                    result,
+                    subtype,
+                } if !worked => Some(Started::Failed(
+                    result.clone().unwrap_or_else(|| subtype.clone()),
+                )),
                 _ => Some(Started::Up),
             };
+            let failed = matches!(outcome, Some(Started::Failed(_)));
+            if !matches!(
+                event,
+                StreamEvent::RateLimit { .. } | StreamEvent::Exited { .. }
+            ) && !failed
+            {
+                worked = true;
+            }
+            let mut told = false;
             if let (Some(outcome), Some(tx)) = (outcome, started_tx.take()) {
-                let _ = tx.send(outcome);
+                told = tx.send(outcome).is_ok();
             }
             let ended = matches!(event, StreamEvent::Exited { .. });
-            handle(&app, &task, &session, event).await;
+            // The start failing is undone by whoever waits for it: the error is not a turn.
+            if !(failed && told) {
+                handle(&app, &task, &session, event).await;
+            }
             if ended {
                 break;
             }
         }
+        // However it ended, nobody is left to answer what the agent asked.
+        crate::permissions::release_session(&app, &session).await;
     });
     started_rx
 }
@@ -133,6 +165,13 @@ async fn turn_result(
     is_error: bool,
     result: Option<&str>,
 ) {
+    // Any result settles an interrupt asked before it: a marker left from one that ended
+    // some other way must not make a later genuine error be taken for a stale one.
+    let current = app
+        .sessions
+        .get(session)
+        .and_then(|live| live.runtime.as_stream().map(|s| s.take_interrupt_current()))
+        .unwrap_or(true);
     if is_error && mentions_limit(subtype, result) {
         pause_on_limit(app, task, session).await;
         return;
@@ -148,26 +187,30 @@ async fn turn_result(
         return;
     }
     // An interrupt's result can come after a new message was sent: it is not that turn's.
-    if subtype == "error_during_execution"
-        && let Some(stream) = live.runtime.as_stream()
-        && !stream.take_interrupt_current()
-    {
+    if subtype == "error_during_execution" && !current {
         return;
     }
     crate::conversation::turn_interrupted(app, &live).await;
 }
 
+/// Whether an error result says the usage or rate limit was hit. A bare `429` in free
+/// text is not enough (a URL, a count, a line number can carry it): only the words, or
+/// the status code when it leads the text as an API error does (`429 {…}`, `API Error: 429`).
 fn mentions_limit(subtype: &str, result: Option<&str>) -> bool {
     let text = format!("{subtype} {}", result.unwrap_or_default()).to_lowercase();
-    [
-        "usage limit",
-        "rate limit",
-        "rate_limit",
-        "limit reached",
-        "429",
-    ]
-    .iter()
-    .any(|needle| text.contains(needle))
+    if ["usage limit", "rate limit", "rate_limit", "limit reached"]
+        .iter()
+        .any(|needle| text.contains(needle))
+    {
+        return true;
+    }
+    let result = result.unwrap_or_default().trim().to_lowercase();
+    let api_status = result
+        .strip_prefix("api error:")
+        .map_or(result.as_str(), str::trim_start);
+    api_status
+        .strip_prefix("429")
+        .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphanumeric()))
 }
 
 /// The stream's way to the pause the `StopFailure` hook gives a terminal session. Not
@@ -487,5 +530,141 @@ mod tests {
         }
         assert!(paused(&app, &key).await);
         let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_stale_interrupt_marker_does_not_hide_a_later_genuine_error() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let stream = live.runtime.as_stream().unwrap().clone();
+        live.set_state(LiveState::Working);
+        // Detener, but the turn ended on its own: a success result, no interrupt result.
+        stream.interrupt().await.unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(result("success", false, Some("done"))).unwrap();
+        // A new turn later fails for real.
+        stream.send_user("otra cosa").await.unwrap();
+        tx.send(result("error_during_execution", true, None))
+            .unwrap();
+        until(|| live.state() == LiveState::Waiting).await;
+        assert_eq!(live.state(), LiveState::Waiting, "the error ends the turn");
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn an_error_result_before_any_work_is_a_failed_start_with_its_text() {
+        let app = test_app().await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        let started = spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(result("success", true, Some("Invalid API key")))
+            .unwrap();
+        assert_eq!(
+            started.await.unwrap(),
+            Started::Failed("Invalid API key".into())
+        );
+        // After a sign of work, an error is just a turn's end.
+        let (tx, rx) = mpsc::unbounded_channel();
+        let started = spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(StreamEvent::Init {
+            session_id: "s-1".into(),
+        })
+        .unwrap();
+        assert_eq!(started.await.unwrap(), Started::Up);
+        tx.send(result("success", true, Some("boom"))).unwrap();
+    }
+
+    #[tokio::test]
+    async fn what_the_agent_said_last_is_read_after_it_is_gone_and_its_asks_are_released() {
+        let app = test_app().await;
+        running_task(&app).await;
+        let live = insert_stream(&app, "sh", &["-c", "sleep 0.3"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(StreamEvent::PermissionRequest {
+            request_id: "r-1".into(),
+            tool: "Bash".into(),
+            input: json!({ "command": "ls" }),
+            suggestion: None,
+        })
+        .unwrap();
+        for _ in 0..150 {
+            if app.permissions.has_session("s-1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(app.permissions.has_session("s-1"));
+        live.runtime.wait().await;
+        // Said a moment after the process was seen gone, still within the drain.
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        tx.send(StreamEvent::RateLimit {
+            five_hour: Some(LimitWindow {
+                percent: 7,
+                resets_at: 1,
+            }),
+            seven_day: None,
+            reached: false,
+            kind: None,
+            resets_at: None,
+        })
+        .unwrap();
+        until(|| app.latest_limits().is_some()).await;
+        assert!(app.latest_limits().is_some(), "read after the exit");
+        // No `Exited` ever comes, and the pump still lets the asks go.
+        for _ in 0..150 {
+            if !app.permissions.has_session("s-1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!app.permissions.has_session("s-1"));
+        drop(tx);
+    }
+
+    #[tokio::test]
+    async fn a_stream_limit_pause_is_not_written_to_the_raw_hooks_log() {
+        let app = test_app().await;
+        let key = running_task(&app).await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        live.set_state(LiveState::Working);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(limit_event()).unwrap();
+        for _ in 0..150 {
+            if paused(&app, &key).await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(paused(&app, &key).await);
+        assert!(
+            !app.config.task_dir("PROJ-1").join("hooks.jsonl").exists(),
+            "hooks.jsonl holds what the agent posted, not what the stream implied"
+        );
+        let _ = live.runtime.kill();
+    }
+
+    #[test]
+    fn only_the_limit_words_or_a_leading_429_mean_the_limit() {
+        assert!(mentions_limit(
+            "success",
+            Some("Claude usage limit reached|17")
+        ));
+        assert!(mentions_limit("success", Some("Rate limit exceeded")));
+        assert!(mentions_limit(
+            "success",
+            Some("API Error: 429 too many requests")
+        ));
+        assert!(mentions_limit("success", Some("429 {\"type\":\"error\"}")));
+        assert!(!mentions_limit(
+            "success",
+            Some("fetch https://x.test/item/4291 failed")
+        ));
+        assert!(!mentions_limit(
+            "success",
+            Some("processed 429 files, then crashed")
+        ));
+        assert!(!mentions_limit("error_during_execution", None));
     }
 }

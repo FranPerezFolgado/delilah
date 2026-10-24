@@ -42,11 +42,9 @@ pub(crate) async fn limit_hit_from_stream(app: &AppState, task: &str, session: &
         "error": "rate_limit",
         "source": "stream",
     });
-    let q = HookQuery {
-        task: task.to_string(),
-        session: Some(session.to_string()),
-    };
-    apply_hook(app.clone(), q, hook).await;
+    // Not logged raw: hooks.jsonl holds what the agent really posted, not what the
+    // daemon made up from the stream.
+    apply_signal(app.clone(), task, Some(session), Signal::TurnFailed, &hook).await;
 }
 
 async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
@@ -58,8 +56,25 @@ async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
     if let Err(e) = append_raw(&app, &q.task, &hook).await {
         tracing::warn!(task = %q.task, "cannot log hook: {e}");
     }
-
     let signal = claude::classify(&hook);
+    apply_signal(app, &q.task, q.session.as_deref(), signal, &hook).await;
+    StatusCode::NO_CONTENT
+}
+
+/// What a hook (or a stream event that stands for one) does to the session, the inbox and
+/// the task, without logging it.
+async fn apply_signal(
+    app: AppState,
+    task: &str,
+    session: Option<&str>,
+    signal: Signal,
+    hook: &Value,
+) {
+    let q = HookQuery {
+        task: task.to_string(),
+        session: session.map(str::to_string),
+    };
+    let hook = hook.clone();
     let live = match &q.session {
         Some(id) => app.sessions.get(id),
         None => app.sessions.primary(&q.task),
@@ -168,7 +183,6 @@ async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
             Err(e) => tracing::warn!(task = %q.task, "hook not applied: {e}"),
         }
     }
-    StatusCode::NO_CONTENT
 }
 
 /// The transcript path a hook carries, only when it is absolute, ends in `.jsonl` and,
