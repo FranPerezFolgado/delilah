@@ -24,12 +24,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12G | 5 | 5D | done | 1 | 2e6af70 | re-review fixes |
 | WP-13 | 5 | 5B | done | 1 | 626cd52 | |
 | WP-14 | 6 | 6A | verified | 1 | 8e3f0a9 | |
-| WP-15 | 6 | 6B | verified | 1 | | go (decision 49) |
+| WP-15 | 6 | 6B | verified | 1 | cf8c546 | go (decision 49) |
 | WP-16 | 7 | 7A | implementing | 0 | | T037–T039 now (stream.rs); T040 after WP-15 |
 | WP-17 | 7 | 7A | verified | 1 | 49220b6 | |
 | WP-18 | 7 | 7B | pending | 0 | | go (decision 49) |
 | WP-19 | 7 | 7C | pending | 0 | | go (decision 49) |
-| WP-20 | 7 | 7C | pending | 0 | | go (decision 49) |
+| WP-20 | 7 | 7C | verified | 1 | | go (decision 49) |
 | WP-21 | 7 | 7D | pending | 0 | | go (decision 49) |
 | WP-22 | 8 | 8A | pending | 0 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |

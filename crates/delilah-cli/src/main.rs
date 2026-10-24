@@ -51,6 +51,14 @@ impl SavingModeFlags {
     }
 }
 
+/// Adds `chat_mode: true` only with `--chat`, so old daemons get the body they know.
+fn with_chat(mut body: serde_json::Value, chat: bool) -> serde_json::Value {
+    if chat {
+        body["chat_mode"] = json!(true);
+    }
+    body
+}
+
 /// Adds `saving_mode` to a request body only when the user chose it.
 fn with_saving_mode(mut body: serde_json::Value, choice: Option<bool>) -> serde_json::Value {
     if let Some(on) = choice {
@@ -139,6 +147,9 @@ enum Command {
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
+        /// Run it as a chat session (the chat view) instead of a terminal.
+        #[arg(long)]
+        chat: bool,
         #[command(flatten)]
         saving: SavingModeFlags,
         #[command(flatten)]
@@ -174,6 +185,9 @@ enum Command {
         /// Attach to the agent's terminal right away.
         #[arg(long)]
         attach: bool,
+        /// Run it as a chat session (the chat view) instead of a terminal.
+        #[arg(long)]
+        chat: bool,
         #[command(flatten)]
         saving: SavingModeFlags,
         #[command(flatten)]
@@ -318,6 +332,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             free,
             checkout,
             workflow,
+            chat,
             saving,
             autopilot,
         } => {
@@ -328,10 +343,10 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 "/api/v1/tasks",
                 &with_autopilot(
                     with_saving_mode(
-                        json!({
+                        with_chat(json!({
                             "key": key.unwrap_or_default(), "title": title, "project": project,
                             "notes": notes, "free": free, "in_checkout": checkout, "workflow": workflow,
-                        }),
+                        }), chat),
                         saving.choice(),
                     ),
                     autopilot.choice(),
@@ -372,6 +387,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             branch,
             prompt,
             attach,
+            chat,
             saving,
             autopilot,
         } => {
@@ -379,11 +395,11 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 "/api/v1/runs",
                 &with_autopilot(
                     with_saving_mode(
-                        json!({
+                        with_chat(json!({
                             "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
                             "workflow": workflow,
                             "submodules": submodules, "branch": branch, "prompt": prompt,
-                        }),
+                        }), chat),
                         saving.choice(),
                     ),
                     autopilot.choice(),
@@ -611,6 +627,33 @@ mod tests {
             assert_eq!(choice(&with("--no-saving-mode")).unwrap(), Some(false));
             assert!(choice(&[base, &["--saving-mode", "--no-saving-mode"]].concat()).is_err());
         }
+    }
+
+    #[test]
+    fn chat_flag_on_new_and_run_sets_chat_mode() {
+        for args in [
+            &["new", "K-1", "--title", "t", "--project", "p"][..],
+            &["run", "K-1"][..],
+        ] {
+            let chat = |extra: &[&str]| {
+                let mut argv = vec!["delilah"];
+                argv.extend_from_slice(args);
+                argv.extend_from_slice(extra);
+                match Cli::try_parse_from(argv).unwrap().command {
+                    Command::New { chat, .. } | Command::Run { chat, .. } => chat,
+                    _ => panic!("not new or run"),
+                }
+            };
+            assert!(!chat(&[]));
+            assert!(chat(&["--chat"]));
+        }
+    }
+
+    #[test]
+    fn chat_mode_is_sent_only_with_chat() {
+        let body = || json!({"key": "K-1"});
+        assert!(with_chat(body(), false).get("chat_mode").is_none());
+        assert_eq!(with_chat(body(), true)["chat_mode"], true);
     }
 
     #[test]
