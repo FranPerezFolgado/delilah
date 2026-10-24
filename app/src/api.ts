@@ -367,20 +367,48 @@ export type ConversationEntry =
   | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
   | ToolEntry
   | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" }
-  | {
-      id: string;
-      at: string;
-      kind: "card";
-      ask: string;
-      questions: AskQuestion[];
-      proposal: { title: string; brief: string } | null;
-      outcome: "pending" | "answered" | "terminal" | "withdrawn";
-      answer: Record<string, string> | null;
-      task: string | null;
-      error: string | null;
-      tool_use_id?: string;
-      ask_kind?: "question" | "permission";
-    };
+  | QuestionCardEntry
+  | PermissionCardEntry;
+
+interface CardBase {
+  id: string;
+  at: string;
+  kind: "card";
+  ask: string;
+  outcome: "pending" | "answered" | "terminal" | "withdrawn";
+  tool_use_id?: string;
+}
+
+/** A question with options (or a proposal); the default card when ask_kind is absent. */
+export interface QuestionCardEntry extends CardBase {
+  ask_kind?: "question";
+  questions: AskQuestion[];
+  proposal: { title: string; brief: string } | null;
+  answer: Record<string, string> | null;
+  task: string | null;
+  error: string | null;
+}
+
+/** A permission ask of the agent; gone from the conversation once answered. */
+export interface PermissionCardEntry extends CardBase {
+  ask_kind: "permission";
+  tool: string;
+  summary: string;
+  suggestion: unknown;
+  /** The exact rule "allow always" would remember; null when there is none. */
+  rule: string | null;
+}
+
+export type PermissionDecision = "allow_once" | "allow_always" | "deny";
+
+/** A permission ask as the inbox carries it. */
+export interface PermissionAsk {
+  id: string;
+  tool: string;
+  summary: string;
+  suggestion: unknown;
+  rule: string | null;
+}
 
 export interface Conversation {
   entries: ConversationEntry[];
@@ -413,6 +441,8 @@ export interface InboxItem {
   ask?: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
   /** The PR notice behind a pr-* item. */
   pr?: { notice: number; url: string; repo: string };
+  /** The permission asked, for a permission item. */
+  permission?: PermissionAsk;
 }
 
 /** Where a session's questions with options sit, next to its terminal. */
@@ -577,6 +607,8 @@ export const api = {
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
     post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, launch ? { answers, launch } : { answers }),
+  answerPermission: (sessionId: string, ask: string, decision: PermissionDecision, reason?: string) =>
+    post<null>(`/api/v1/sessions/${sessionId}/permissions/${encodeURIComponent(ask)}`, reason?.trim() ? { decision, reason: reason.trim() } : { decision }),
   conversation: (id: string, cursor?: string) =>
     request<Conversation>(`/api/v1/sessions/${id}/conversation${cursor ? `?${new URLSearchParams({ cursor })}` : ""}`),
   toolDetail: (id: string, toolUseId: string) =>

@@ -9,6 +9,7 @@ import {
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
+import { PermissionCard } from "./PermissionCard";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
 
@@ -286,6 +287,17 @@ export function ConversationView({
                 {e.marker === "compacted"
                   ? t("Conversación compactada")
                   : t("Detenida")}
+              </div>
+            );
+          }
+          if (e.ask_kind === "permission") {
+            return (
+              <div key={e.id} className="conv-card">
+                <PermissionCard
+                  sessionId={id}
+                  ask={{ id: e.ask, tool: e.tool, summary: e.summary, suggestion: e.suggestion, rule: e.rule }}
+                  onDone={load}
+                />
               </div>
             );
           }

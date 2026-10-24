@@ -145,6 +145,16 @@ describe("ConversationView", () => {
     expect(onReopen).toHaveBeenCalled();
   });
 
+  it("renders a permission card and answers it through the session", async () => {
+    const perm: ConversationEntry = { id: "perm:p1", at: "", kind: "card", ask_kind: "permission", ask: "p1", tool: "Bash", summary: "npm test", suggestion: null, rule: "Bash(npm test)", outcome: "pending" };
+    const answer = vi.spyOn(api, "answerPermission").mockResolvedValue(null);
+    const { findByText } = setup(conv([perm]));
+    expect(await findByText("npm test")).toBeTruthy();
+    expect(await findByText("Bash(npm test)")).toBeTruthy();
+    fireEvent.click(await findByText("Permitir una vez"));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("s1", "p1", "allow_once", undefined));
+  });
+
   it("shows an answered card's task as a link", async () => {
     const onOpenTask = vi.fn();
     const { findByText } = setup(conv([card(5, { outcome: "answered", answer: { "¿Cuál?": "Crear" }, task: "LIBRE-7" })]), session(), { onOpenTask });

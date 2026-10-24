@@ -4,6 +4,7 @@ import { HandoffActions } from "./HandoffActions";
 
 import { Icon, type IconName } from "./Icon";
 import { AskCard } from "./AskCard";
+import { PermissionCard } from "./PermissionCard";
 import { Markdown } from "./Markdown";
 import { locale, t } from "../i18n";
 import { isSendKey } from "../keys";
@@ -139,12 +140,13 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       </header>
 
       {item.ask && <AskCard ask={item.ask} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />}
-      {item.text && !item.ask && (
+      {item.permission && s && <PermissionCard sessionId={s.id} ask={item.permission} onDone={onChanged} />}
+      {item.text && !item.ask && !(item.permission && s) && (
         <div className={`inbox-text ${long && !expanded ? "clamped" : ""}`}>
           <Markdown text={item.text} remoteImages="click" />
         </div>
       )}
-      {long && !item.ask && (
+      {long && !item.ask && !(item.permission && s) && (
         <button className="btn btn-ghost" style={{ alignSelf: "flex-start" }} onClick={() => setExpanded((e) => !e)}>
           {expanded ? t("Ver menos") : t("Ver todo")}
         </button>

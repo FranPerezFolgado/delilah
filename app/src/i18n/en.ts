@@ -1,5 +1,9 @@
 // English for every text of the app, keyed by its Spanish original (see i18n.ts).
 export const EN: Record<string, string> = {
+  "Permitir una vez": "Allow once",
+  "Permitir siempre en esta tarea": "Always allow in this task",
+  "Denegar": "Deny",
+  "Motivo (opcional)": "Reason (optional)",
   "Semana": "Week",
   "delilahd conectado": "delilahd connected",
   "delilahd sin conexión": "delilahd offline",

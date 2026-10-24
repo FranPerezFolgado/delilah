@@ -523,3 +523,8 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .preview-ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .preview-ctl .preview-err { color: var(--tx3); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-setting { display: flex; flex-direction: column; gap: 4px; font-size: 12px; max-width: 520px; }
+.perm-what { display: flex; align-items: flex-start; gap: 8px; }
+.perm-summary { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: var(--mono, monospace); font-size: 12.5px; max-height: 160px; overflow: auto; }
+.perm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.perm-rule { font-size: 12px; }
+.perm-reason { flex: 1; min-width: 160px; }
