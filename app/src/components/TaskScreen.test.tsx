@@ -9,15 +9,30 @@ import { TaskScreen } from "./TaskScreen";
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const fileApi = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "file" ? fileApi : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
-vi.mock("./ConversationView", () => ({ ConversationView: () => <div data-testid="conversation" /> }));
+vi.mock("./ConversationView", async () => {
+  const { ToolCard } = await vi.importActual<typeof import("./ToolCard")>("./ToolCard");
+  return {
+    // A tool entry as the daemon serves it: its path relative to the workspace.
+    ConversationView: (p: { onOpenFile: (path: string) => void }) => (
+      <div data-testid="conversation">
+        <ToolCard
+          sessionId="s1"
+          onOpenFile={p.onOpenFile}
+          entry={{ id: "t1", at: "", kind: "tool", tool: "Edit", tool_use_id: "tu1", summary: "a.rs", path: "src/a.rs", input: {}, result: "", is_error: false, truncated: false }}
+        />
+      </div>
+    ),
+  };
+});
 vi.mock("./FileTree", () => ({ FileTree: () => null }));
 vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
 vi.mock("./TaskView", () => ({ TaskView: () => null }));
@@ -117,6 +132,13 @@ describe("TaskScreen conversation sessions", () => {
     expect(queryByTestId("conversation")).not.toBeNull();
     expect(queryByTestId("terminal")).toBeNull();
     expect(container.querySelector(".tterm .ebar")).toBeNull();
+  });
+
+  it("opens the file of a tool entry in the editor with its workspace-relative path", () => {
+    const { container, getByText } = open(conv);
+    fireEvent.click(container.querySelector(".tool-head")!);
+    fireEvent.click(getByText("Abrir en el editor"));
+    expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
   });
 
   it("toggles to the terminal and back with the Chat / Terminal switch", () => {

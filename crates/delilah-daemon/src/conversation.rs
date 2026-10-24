@@ -275,6 +275,11 @@ pub async fn get(
         }
     }
     entries.extend(stored);
+    if let Ok(ws) = crate::owners::workspace(&app, &record.task).await {
+        for entry in &mut entries {
+            relativize_path(entry, &ws.path);
+        }
+    }
     entries.sort_by_cached_key(at_of);
     Ok(Json(json!({
         "entries": entries,
@@ -285,6 +290,37 @@ pub async fn get(
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
         "runtime": "pty",
     })))
+}
+
+/// A tool entry's `path` made relative to the workspace when it lies inside it (as the
+/// workspace is given or in its canonical form: `/tmp` vs `/private/tmp`), so the view
+/// can open it; one outside stays absolute.
+fn relativize_path(entry: &mut Value, workspace: &std::path::Path) {
+    if entry["kind"] != "tool" {
+        return;
+    }
+    let Some(path) = entry["path"].as_str().map(std::path::PathBuf::from) else {
+        return;
+    };
+    if !path.is_absolute() {
+        return;
+    }
+    let canonical = workspace.canonicalize().ok();
+    let rel = std::iter::once(workspace)
+        .chain(canonical.as_deref())
+        .find_map(|root| path.strip_prefix(root).ok())
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| {
+            // The file's own canonical form (it may be reached through a link).
+            let real = path.canonicalize().ok()?;
+            std::iter::once(workspace)
+                .chain(canonical.as_deref())
+                .find_map(|root| real.strip_prefix(root).ok())
+                .map(std::path::Path::to_path_buf)
+        });
+    if let Some(rel) = rel.filter(|r| !r.as_os_str().is_empty()) {
+        entry["path"] = json!(rel.to_string_lossy());
+    }
 }
 
 /// A transcript file that is not there: expected until the session's first turn.
@@ -959,6 +995,30 @@ mod tests {
             .expect("the tool entry again");
         assert_eq!(bash["result"], "1 failed");
         assert_eq!(bash["id"], "t:a2:0");
+    }
+
+    #[tokio::test]
+    async fn a_tool_path_inside_the_workspace_is_relative_and_outside_stays_absolute() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let edit = |id: &str, path: &str| {
+            format!(
+                "{{\"type\":\"assistant\",\"uuid\":\"a{id}\",\"timestamp\":\"2025-02-01T10:00:00.000Z\",\"message\":{{\"id\":\"m{id}\",\"role\":\"assistant\",\"content\":[{{\"type\":\"tool_use\",\"id\":\"{id}\",\"name\":\"Edit\",\"input\":{{\"file_path\":\"{path}\",\"old_string\":\"a\",\"new_string\":\"b\"}}}}]}}}}\n"
+            )
+        };
+        let lines = edit("in", "/w/web/src/a.rs") + &edit("out", "/elsewhere/b.rs");
+        f.transcript(&live, lines.as_bytes());
+        let body = f.get_of("/api/v1/sessions/task1/conversation").await.1;
+        let path_of = |id: &str| {
+            body["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["tool_use_id"] == id)
+                .map(|e| e["path"].clone())
+        };
+        assert_eq!(path_of("in"), Some(json!("src/a.rs")));
+        assert_eq!(path_of("out"), Some(json!("/elsewhere/b.rs")));
     }
 
     #[tokio::test]

@@ -68,7 +68,12 @@ contract review):
 
 ### `GET /api/v1/sessions/{id}/conversation/tools/{tool_use_id}`
 
-`{ "input": {...}, "result": "…full text…", "is_error": false }`. 404 if not found.
+`{ "input": {...}, "result": "…full text…", "is_error": false, "truncated": false }`.
+404 if not found. `truncated` is true when the input or the result was cut to 1 MB.
+
+A tool entry's `path` (in `GET …/conversation`) is relative to the session's workspace
+when the file is inside it (so the view can open it in the editor); it stays absolute
+when the file is outside, and the view then offers no "Abrir en el editor".
 
 ### `GET /api/v1/sessions/{id}/live` (WebSocket, chat mode)
 

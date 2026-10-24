@@ -60,7 +60,7 @@ export function ToolCard({ entry, sessionId, onOpenFile }: Props) {
           <>
             <div className="tool-path">
               <span className="mono selectable trunc">{path}</span>
-              {path && (
+              {path && !path.startsWith("/") && (
                 <button className="btn btn-ghost" onClick={() => onOpenFile(path)}>
                   {t("Abrir en el editor")}
                 </button>

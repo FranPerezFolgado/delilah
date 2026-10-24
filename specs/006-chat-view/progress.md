@@ -18,9 +18,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 4 | 4D | verified | 1 | c8157ed | |
 | WP-11 | 4 | 4D | verified | 1 | 5e51e60 | |
 | WP-10 | 4 | 4E | verified | 1 | c8157ed | run together with WP-09 (shared TaskScreen.tsx) |
-| WP-09F | 4 | 4F | implementing | 0 | | open-file path fix |
+| WP-09F | 4 | 4F | verified | 1 | | open-file path fix |
 | WP-12 | 5 | 5A | verified | 1 | e3f3c57 | |
-| WP-13 | 5 | 5B | verified | 1 | | |
+| WP-13 | 5 | 5B | verified | 1 | 626cd52 | |
 | WP-14 | 6 | 6A | pending | 0 | | gated by spike |
 | WP-15 | 6 | 6B | pending | 0 | | gated by spike |
 | WP-16 | 7 | 7A | pending | 0 | | gated by spike |
@@ -44,6 +44,8 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 5 | contract | LOW | old cards (before e3f3c57) have no tool_use_id → existing idea conversations show tool + card | crates/delilah-daemon/src/conversation.rs:260 |
+| 5 | security | MEDIUM | API has no token: any local process without Origin can type prompts into any open Claude session (design risk; document or add token) | crates/delilah-daemon/src/api.rs:194 |
 | 4 | contract | MEDIUM | runtime hardcoded "pty"; Task/Session JSON lack runtime/chat_mode/allowed_tools (chat-mode phases) | crates/delilah-daemon/src/conversation.rs:297 |
 | 4 | contract | LOW | Task.view optional in api.ts though always sent | app/src/api.ts:63 |
 | 4 | contract | LOW | ask_kind typed but never emitted yet (chat-mode permissions) | app/src/api.ts |

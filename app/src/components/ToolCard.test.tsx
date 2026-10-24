@@ -73,6 +73,12 @@ describe("ToolCard", () => {
     expect(r.onOpenFile).toHaveBeenCalledWith("src/a.ts");
   });
 
+  it("offers no editor button for a path outside the workspace (absolute)", () => {
+    const r = setup(tool({ tool: "Edit", summary: "x", path: "/etc/hosts", input: { file_path: "/etc/hosts" } }));
+    open(r);
+    expect(r.queryByText("Abrir en el editor")).toBeNull();
+  });
+
   it("Write shows the path and the open button", () => {
     const r = setup(tool({ tool: "Write", summary: "n.md +1 −0", path: "n.md", input: { file_path: "n.md" }, diff: [{ kind: "add", old: null, new: 1, text: "hola" }] }));
     open(r, "n.md +1 −0");
