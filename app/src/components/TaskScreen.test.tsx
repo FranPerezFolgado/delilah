@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
@@ -9,12 +9,18 @@ import { TaskScreen } from "./TaskScreen";
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+// A spy that returns a rejected promise reports it as unhandled: record the calls apart.
+const runtime = vi.hoisted(() => ({ calls: vi.fn(), result: (): Promise<unknown> => Promise.resolve(null) }));
+const setRuntime = vi.hoisted(() => (...a: unknown[]) => {
+  runtime.calls(...a);
+  return runtime.result();
+});
 const fileApi = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "file" ? fileApi : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setRuntime" ? setRuntime : name === "file" ? fileApi : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -349,5 +355,51 @@ describe("TaskScreen follows the primary session", () => {
     const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
     rerender(screenOf("PROJ-2", [sess("c", true)]));
     expect(selected()).toBe("Tarea");
+  });
+});
+
+describe("TaskScreen runtime switch", () => {
+  const stream: Session = { id: "s1", task: "PROJ-1", kind: "claude", label: "Main", primary: true, closed: false, live: true, read_only: false, step: null, state: "waiting", conversation: false, runtime: "stream" };
+  const screen1 = (t: Task, s: Session) => (
+    <TaskScreen owner="PROJ-1" task={t} sessions={[s]} asks={[]} askPosition="right" onChanged={() => {}} />
+  );
+  const chatTask = { ...task({ type: "running" }), chat_mode: true };
+
+  beforeEach(() => {
+    runtime.calls.mockClear();
+    runtime.result = () => Promise.resolve(null);
+  });
+
+  it("offers Pasar a terminal on a chat-mode task and enables the Terminal switch after refetch", async () => {
+        sessionFor("PROJ-1").active = sessionTab("s1");
+    const r = render(screen1(chatTask, stream));
+    expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(r.getByRole("button", { name: "Pasar a terminal" }));
+    expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "terminal");
+    await waitFor(() => expect((r.getByRole("button", { name: "Pasar a terminal" }) as HTMLButtonElement).disabled).toBe(false));
+    r.rerender(screen1({ ...chatTask, chat_mode: false }, { ...stream, runtime: "pty" }));
+    expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(r.queryByRole("button", { name: "Pasar a terminal" })).toBeNull();
+  });
+
+  it("offers Pasar a modo chat on a PTY task, disabled while it runs", async () => {
+    let done!: () => void;
+    const pending = new Promise<null>((res) => (done = () => res(null)));
+    runtime.result = () => pending;
+    const r = render(screen1(task({ type: "running" }), { ...stream, runtime: "pty" }));
+    const btn = r.getByRole("button", { name: "Pasar a modo chat" }) as HTMLButtonElement;
+    expect(btn.title).toContain("Experimental");
+    fireEvent.click(btn);
+    expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "chat");
+    expect(btn.disabled).toBe(true);
+    done();
+    await waitFor(() => expect(btn.disabled).toBe(false));
+  });
+
+  it("shows the 409 message", async () => {
+    runtime.result = () => Promise.reject(new Error("wait for the turn to end or press Detener"));
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: "Pasar a terminal" }));
+    await waitFor(() => expect(r.getByText("wait for the turn to end or press Detener")).toBeTruthy());
   });
 });

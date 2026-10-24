@@ -42,7 +42,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
 | WP-26 | 9 | 9A | verified | 1 | | go (decision 49) |
 | WP-27 | 9 | 9B | verified | 1 | | go (decision 49) |
-| WP-28 | 9 | 9B | implementing | 0 | | go (decision 49) |
+| WP-28 | 9 | 9B | verified | 1 | | go (decision 49) |
 | WP-29 | 9 | 9B | implementing | 0 | | go (decision 49) |
 | WP-30 | 10 | 10A | pending | 0 | | |
 | WP-31 | 10 | 10B | pending | 0 | | |
@@ -51,6 +51,9 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 8 | contract | MEDIUM | contracts/api.md + data-model.md stale for permissions (rule, 400/409, allow_always never a bare tool, card shape, PermissionAsk fields) → fix in WP-30 | specs/006-chat-view/contracts/api.md |
+| 8 | contract | LOW | answer: a failed reply returns 409 after the ask was taken → retry gets 404 (document or re-insert) | crates/delilah-daemon/src/permissions.rs:296 |
+| 8 | contract | LOW | CardBase.outcome allows values a permission card never has; no TS↔Rust round-trip fixture | app/src/api.ts:392 |
 | 8 | security | LOW | allowlist caveats: `cat:*`/`head:*`/`grep:*` can read outside the workspace (~/.ssh); `cargo/npm/go/make test|build` run repo code — document in decisions | crates/delilah-agents/src/claude.rs |
 | 7 | tests | LOW | a_chat_mode_start_that_fails_leaves_the_task_startable_in_the_terminal flaked once under load | crates/delilah-daemon/src/run.rs |
 | 8 | security | LOW | env-assignment first word (`FOO=1 sh:*`) slips past the head check; rule_matches ignores quoting (fails safe) | crates/delilah-agents/src/claude.rs:290 |

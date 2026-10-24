@@ -570,6 +570,8 @@ export const api = {
   startPreview: (key: string) => post<PreviewView>(`/api/v1/tasks/${key}/preview`),
   stopPreview: (key: string) => request<null>(`/api/v1/tasks/${key}/preview`, { method: "DELETE" }),
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  /** Moves the task between chat mode and terminal; its sessions resume in the new runtime. */
+  setRuntime: (key: string, mode: "chat" | "terminal") => post<null>(`/api/v1/tasks/${key}/runtime`, { mode }),
   setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),

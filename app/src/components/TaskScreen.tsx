@@ -66,6 +66,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
   const view = useRef<EditorView | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [error, setError] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const [closing, setClosing] = useState<string | null>(null);
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
@@ -500,6 +501,15 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
     redraw();
   };
 
+  const switchRuntime = (mode: "chat" | "terminal") => {
+    setSwitching(true);
+    setError(null);
+    api
+      .setRuntime(owner, mode)
+      .then(onChanged, (err) => setError((err as Error).message))
+      .finally(() => setSwitching(false));
+  };
+
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
   const toggleTree = () => window.dispatchEvent(new Event("delilah:toggle-tree"));
   const status = task ? statusIcon(task.status) : null;
@@ -516,6 +526,16 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
               {task.chat_mode && <span className="pill chat-mode-pill">{t("experimental: modo chat")}</span>}
+              {task.status.type !== "done" && (
+                <button
+                  className="btn btn-ghost saving-on"
+                  disabled={switching}
+                  title={task.chat_mode ? undefined : t("Experimental: la tarea sigue en modo chat, sin terminal")}
+                  onClick={() => switchRuntime(task.chat_mode ? "terminal" : "chat")}
+                >
+                  {task.chat_mode ? t("Pasar a terminal") : t("Pasar a modo chat")}
+                </button>
+              )}
               <PreviewControl taskKey={owner} project={task.project} status={task.status} />
               {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
                 <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
