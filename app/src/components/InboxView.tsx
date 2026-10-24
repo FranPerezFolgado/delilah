@@ -26,6 +26,8 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   "pr-failed": { label: "CI falló en la PR", icon: "failed", cls: "c-err" },
   "pr-review": { label: "Comentarios en la PR", icon: "review", cls: "c-wait" },
   "pr-blocked": { label: "No se pudo archivar", icon: "failed", cls: "c-err" },
+  "base-stale": { label: "Rama posiblemente atrasada", icon: "failed", cls: "c-pause" },
+  branch: { label: "Rama sin crear", icon: "failed", cls: "c-err" },
   autopilot: { label: "Autopiloto en pausa", icon: "pause", cls: "c-pause" },
 };
 
@@ -110,6 +112,8 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.resumeAt && item.pr) setPaused(true);
       setError((e as Error).message);
+      // The branch item is stale (task gone, or already on its branch): let the list refresh.
+      if (item.kind === "branch" && e instanceof ApiError && (e.status === 404 || e.status === 409)) onChanged();
     } finally {
       setBusy(false);
     }
@@ -143,7 +147,11 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       {item.permission && s && <PermissionCard sessionId={s.id} ask={item.permission} onDone={onChanged} />}
       {item.text && !item.ask && !(item.permission && s) && (
         <div className={`inbox-text ${long && !expanded ? "clamped" : ""}`}>
-          <Markdown text={item.text} remoteImages="click" />
+          {item.kind === "branch" ? (
+            <p>{t("No se pudo crear la rama: {text}", { text: item.text })}</p>
+          ) : (
+            <Markdown text={item.text} remoteImages="click" />
+          )}
         </div>
       )}
       {long && !item.ask && !(item.permission && s) && (
@@ -293,9 +301,19 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
             </button>
           </>
         )}
+        {item.kind === "base-stale" && item.notice != null && (
+          <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissNotice(item.notice!))}>
+            {t("Descartar")}
+          </button>
+        )}
         {item.pr && (
           <button className="btn" onClick={() => openExternal(item.pr!.url).catch(() => {})}>
             {t("Ver PR")}
+          </button>
+        )}
+        {item.kind === "branch" && (
+          <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.retryBranch(item.task))}>
+            {t("Reintentar")}
           </button>
         )}
         {item.kind === "failed" && (

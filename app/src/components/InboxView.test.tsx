@@ -120,7 +120,7 @@ const taskWith = (handoff: Handoff | null): Task => ({
   workflow: "feature",
   phase: null,
   status: { type: "waiting-for-user" },
-  saving_mode: true,
+  saving_mode: true, title_source: "initial", previous_title: null, branch_error: null,
   handoff,
 });
 
@@ -232,6 +232,69 @@ describe("InboxView permission items", () => {
     render(<InboxView items={[withRule]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);
     expect(screen.getByText("Always allow in this task")).toBeTruthy();
     expect(screen.getByText("Bash(npm test)")).toBeTruthy();
+  });
+});
+
+describe("InboxView base-stale", () => {
+  const stale: InboxItem = {
+    kind: "base-stale",
+    task: "PROJ-1",
+    title: "Reintentos",
+    session: null,
+    text: "No se pudo actualizar r (sin red); se usó main",
+    since: null,
+    notice: 9,
+  };
+  const viewStale = (onChanged = () => {}) =>
+    render(<InboxView items={[stale]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("shows the label and the text, with no PR actions", () => {
+    viewStale();
+    expect(screen.getByText("Branch may be behind")).toBeTruthy();
+    expect(screen.getByText("No se pudo actualizar r (sin red); se usó main")).toBeTruthy();
+    expect(screen.queryByText("View PR")).toBeNull();
+    expect(screen.queryByText("Ask the agent to fix it")).toBeNull();
+  });
+
+  it("dismisses the notice by its id", async () => {
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    const onChanged = vi.fn();
+    viewStale(onChanged);
+    fireEvent.click(screen.getByText("Discard"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(dis).toHaveBeenCalledWith(9);
+  });
+});
+
+describe("InboxView branch item", () => {
+  const branch: InboxItem = { ...item, kind: "branch", text: "no remote", pr: undefined };
+
+  it("shows the error and retries the branch", async () => {
+    const retry = vi.spyOn(api, "retryBranch").mockResolvedValue({} as Task);
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    expect(screen.getByText("The branch could not be created: no remote")).toBeTruthy();
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(retry).toHaveBeenCalledWith("PROJ-1");
+  });
+
+  it.each([404, 409])("refreshes the list when the retry gets a %i, and keeps the error", async (status) => {
+    vi.spyOn(api, "retryBranch").mockRejectedValue(new ApiError("the task is on its branch already", status));
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("the task is on its branch already")).toBeTruthy();
+  });
+
+  it("does not refresh on other failures of the retry", async () => {
+    vi.spyOn(api, "retryBranch").mockRejectedValue(new ApiError("boom", 500));
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
+    expect(onChanged).not.toHaveBeenCalled();
   });
 });
 

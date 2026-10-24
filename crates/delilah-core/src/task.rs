@@ -62,6 +62,11 @@ pub enum TaskStatus {
     Failed {
         reason: String,
     },
+    /// The project's setup command failed (or timed out); the worktree is kept and
+    /// the user can retry the setup or launch without it.
+    SetupFailed {
+        reason: String,
+    },
 }
 
 impl TaskStatus {
@@ -74,11 +79,18 @@ impl TaskStatus {
             Self::PausedByLimit { .. } => "paused-by-limit",
             Self::Done => "done",
             Self::Failed { .. } => "failed",
+            Self::SetupFailed { .. } => "setup-failed",
         }
     }
 
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Done | Self::Failed { .. })
+    }
+
+    /// Whether its workspace may be archived: finished, or stopped for good on a
+    /// failed setup.
+    pub fn can_archive(&self) -> bool {
+        self.is_terminal() || matches!(self, Self::SetupFailed { .. })
     }
 }
 
@@ -114,6 +126,14 @@ pub enum Event {
     StartAborted {
         reason: String,
     },
+    /// The setup command failed while preparing the workspace.
+    SetupFailed {
+        reason: String,
+    },
+    /// The user runs the setup again after a failure.
+    RetrySetup,
+    /// The user launches the agent without running the setup.
+    SkipSetup,
     /// The task was created from a conversation with an agent; nothing else changes.
     CreatedFromConversation {
         session: String,
@@ -160,6 +180,9 @@ impl Event {
             Self::MarkDone => "mark-done",
             Self::Fail { .. } => "fail",
             Self::StartAborted { .. } => "start-aborted",
+            Self::SetupFailed { .. } => "setup-failed",
+            Self::RetrySetup => "retry-setup",
+            Self::SkipSetup => "skip-setup",
             Self::CreatedFromConversation { .. } => "created-from-conversation",
             Self::StepStarted { .. } => "step-started",
             Self::AutopilotPaused { .. } => "autopilot-paused",
@@ -242,6 +265,40 @@ pub struct Handoff {
     pub error: Option<String>,
 }
 
+/// Where a task's title came from: decides whether it may still be renamed
+/// automatically (`initial` only; `manual` is terminal).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TitleSource {
+    /// The placeholder given at creation; the first analysis may replace it.
+    Initial,
+    /// Taken from the task's spec.
+    Spec,
+    /// Set by the user, or a task that predates automatic names (Jira, old rows).
+    #[default]
+    Manual,
+}
+
+impl TitleSource {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Initial => "initial",
+            Self::Spec => "spec",
+            Self::Manual => "manual",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "initial" => Some(Self::Initial),
+            "spec" => Some(Self::Spec),
+            "manual" => Some(Self::Manual),
+            _ => None,
+        }
+    }
+}
+
+/// Whether autopilot is moving, paused or finished.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AutopilotState {
@@ -332,6 +389,15 @@ pub struct Task {
     /// The handoff to the next step under way, if any.
     #[serde(default)]
     pub handoff: Option<Handoff>,
+    /// Where `title` came from.
+    #[serde(default)]
+    pub title_source: TitleSource,
+    /// The title an automatic rename replaced, so the user can restore it.
+    #[serde(default)]
+    pub previous_title: Option<String>,
+    /// Why the task's branch couldn't be created; cleared when it is.
+    #[serde(default)]
+    pub branch_error: Option<String>,
     /// Autopilot, if on (`None` = off).
     #[serde(default)]
     pub autopilot: Option<Autopilot>,
@@ -360,6 +426,9 @@ impl Task {
             branch: None,
             saving_mode: false,
             handoff: None,
+            title_source: TitleSource::Manual,
+            previous_title: None,
+            branch_error: None,
             autopilot: None,
             view: TaskView::default(),
             chat_mode: false,
@@ -430,7 +499,12 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         }
         (S::PausedByLimit { .. }, Event::ManualResume) => Ok(S::Running),
         (S::Running, Event::AgentFinished) => Ok(S::Done),
-        (S::Running | S::WaitingForUser | S::PausedByLimit { .. }, Event::MarkDone) => Ok(S::Done),
+        (
+            S::Running | S::WaitingForUser | S::PausedByLimit { .. } | S::SetupFailed { .. },
+            Event::MarkDone,
+        ) => Ok(S::Done),
+        (S::PreparingWorkspace, Event::SetupFailed { reason }) => Ok(S::SetupFailed { reason }),
+        (S::SetupFailed { .. }, Event::RetrySetup | Event::SkipSetup) => Ok(S::PreparingWorkspace),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
         (S::PreparingWorkspace | S::Running | S::WaitingForUser, Event::StartAborted { .. }) => {
             Ok(S::Queued)
@@ -518,6 +592,77 @@ mod tests {
         task.apply(Event::Start).unwrap();
         task.apply(Event::WorkspaceReady).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
+    }
+
+    #[test]
+    fn a_setup_failure_can_be_retried_skipped_failed_or_marked_done() {
+        let failed = |reason: &str| Event::SetupFailed {
+            reason: reason.into(),
+        };
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Card retries", "feature");
+        task.apply(Event::Start).unwrap();
+        task.apply(failed("boom")).unwrap();
+        assert_eq!(
+            task.status,
+            TaskStatus::SetupFailed {
+                reason: "boom".into()
+            }
+        );
+        assert_eq!(task.status.name(), "setup-failed");
+        assert!(!task.status.is_terminal());
+
+        task.apply(Event::RetrySetup).unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        task.apply(failed("again")).unwrap();
+        task.apply(Event::SkipSetup).unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
+        task.apply(Event::WorkspaceReady).unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+
+        for end in [
+            Event::Fail {
+                reason: "gave up".into(),
+            },
+            Event::MarkDone,
+        ] {
+            let mut t = Task::new(TaskKey::new("PROJ-2"), "x", "feature");
+            t.apply(Event::Start).unwrap();
+            t.apply(failed("boom")).unwrap();
+            t.apply(end).unwrap();
+            assert!(t.status.is_terminal());
+        }
+    }
+
+    #[test]
+    fn only_finished_or_setup_failed_tasks_can_be_archived() {
+        assert!(TaskStatus::Done.can_archive());
+        assert!(TaskStatus::Failed { reason: "x".into() }.can_archive());
+        assert!(TaskStatus::SetupFailed { reason: "x".into() }.can_archive());
+        assert!(!TaskStatus::Running.can_archive());
+        assert!(!TaskStatus::PreparingWorkspace.can_archive());
+        assert!(!TaskStatus::Queued.can_archive());
+    }
+
+    #[test]
+    fn setup_events_are_refused_from_other_statuses() {
+        let events = [
+            Event::SetupFailed { reason: "x".into() },
+            Event::RetrySetup,
+            Event::SkipSetup,
+        ];
+        for event in &events {
+            assert!(running_task().apply(event.clone()).is_err());
+            assert!(
+                Task::new(TaskKey::new("PROJ-3"), "x", "feature")
+                    .apply(event.clone())
+                    .is_err()
+            );
+        }
+        // Retry/skip only make sense after a failure, not while preparing.
+        let mut t = Task::new(TaskKey::new("PROJ-4"), "x", "feature");
+        t.apply(Event::Start).unwrap();
+        assert!(t.apply(Event::RetrySetup).is_err());
+        assert!(t.apply(Event::SkipSetup).is_err());
     }
 
     #[test]
@@ -687,6 +832,32 @@ mod tests {
                 .is_err()
         );
         assert_eq!(queued.phase, None);
+    }
+
+    #[test]
+    fn title_source_is_lowercase_and_defaults_to_manual() {
+        assert_eq!(TitleSource::default(), TitleSource::Manual);
+        for (source, text) in [
+            (TitleSource::Initial, "\"initial\""),
+            (TitleSource::Spec, "\"spec\""),
+            (TitleSource::Manual, "\"manual\""),
+        ] {
+            assert_eq!(serde_json::to_string(&source).unwrap(), text);
+            assert_eq!(serde_json::from_str::<TitleSource>(text).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn a_task_without_the_new_fields_reads_with_defaults() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,"status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.title_source, TitleSource::Manual);
+        assert_eq!(task.previous_title, None);
+        assert_eq!(task.branch_error, None);
+        assert_eq!(
+            Task::new(TaskKey::new("PROJ-1"), "t", "feature").title_source,
+            TitleSource::Manual
+        );
     }
 
     #[test]

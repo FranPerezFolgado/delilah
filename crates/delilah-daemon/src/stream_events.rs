@@ -288,6 +288,7 @@ mod tests {
                 agent_program: None,
                 claude_projects: crate::config::Config::scratch_projects(),
                 claude_bin: "claude".into(),
+                ..crate::config::Config::test_defaults()
             },
         )
     }

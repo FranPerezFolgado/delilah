@@ -67,6 +67,10 @@ pub(crate) struct NewNotice {
 
 const PR_COLUMNS: &str = "id, task_key, repo, host, owner_name, number, url, linked_by, snapshot, \
      ci_failed_sha, review_seen, issue_comment_seen, review_comment_seen, checked_at, error, error_kind, created_at";
+/// The `pr_notices.kind` of "the branch started from a base that could not be
+/// refreshed". It belongs to the task's start, not to a PR, so PR changes leave it.
+pub(crate) const KIND_BASE_STALE: &str = "base-stale";
+
 const NOTICE_COLUMNS: &str =
     "id, task_key, repo, kind, cause, text, detail, created_at, resolved_at";
 
@@ -181,11 +185,12 @@ impl Store {
         if old_url.is_some_and(|old| old != pr.url) {
             sqlx::query(
                 "UPDATE pr_notices SET resolved_at = ?
-                 WHERE task_key = ? AND repo = ? AND resolved_at IS NULL",
+                 WHERE task_key = ? AND repo = ? AND kind != ? AND resolved_at IS NULL",
             )
             .bind(Utc::now().to_rfc3339())
             .bind(key.as_str())
             .bind(&pr.repo)
+            .bind(KIND_BASE_STALE)
             .execute(&mut *tx)
             .await?;
         }
@@ -265,13 +270,15 @@ impl Store {
             .bind(id)
             .execute(&mut *tx)
             .await?;
+        // The stale-base warning is about the task's start, not the PR.
         sqlx::query(
             "UPDATE pr_notices SET resolved_at = ?
-             WHERE task_key = ? AND repo = ? AND resolved_at IS NULL",
+             WHERE task_key = ? AND repo = ? AND kind != ? AND resolved_at IS NULL",
         )
         .bind(Utc::now().to_rfc3339())
         .bind(&row.task_key)
         .bind(&row.repo)
+        .bind(KIND_BASE_STALE)
         .execute(&mut *tx)
         .await?;
         sqlx::query("INSERT OR IGNORE INTO pr_unlinked (task_key, url) VALUES (?, ?)")
@@ -389,7 +396,6 @@ impl Store {
 
     /// Adds a notice unless the same (task, repo, kind, cause) exists; whether it was
     /// new.
-    #[allow(dead_code)] // used by the API in the next packages
     pub(crate) async fn insert_notice(
         &self,
         key: &TaskKey,
@@ -540,8 +546,20 @@ mod tests {
         assert_eq!(again.snapshot, Some(snap));
         assert_eq!(again.marks, marks);
 
-        // Another URL starts clean.
+        // Another URL starts clean, but keeps the task's stale-base warning.
+        let key = TaskKey::new("PROJ-1");
+        store
+            .insert_notice(&key, &notice(".", "ci-failed", "abc"))
+            .await
+            .unwrap();
+        store
+            .insert_notice(&key, &notice(".", KIND_BASE_STALE, "feature/x"))
+            .await
+            .unwrap();
         let second = link(&store, "PROJ-1", ".", 2).await;
+        let open = store.open_notices().await.unwrap();
+        assert_eq!(open.len(), 1, "{open:?}");
+        assert_eq!(open[0].kind, KIND_BASE_STALE);
         assert_eq!(second.id, first.id);
         assert_eq!(second.number, 2);
         assert_eq!(second.snapshot, None);
@@ -634,12 +652,19 @@ mod tests {
             .insert_notice(&key, &notice(".", "ci-failed", "abc"))
             .await
             .unwrap();
+        store
+            .insert_notice(&key, &notice(".", KIND_BASE_STALE, "feature/x"))
+            .await
+            .unwrap();
         assert!(!store.is_unlinked(&key, &url(1)).await.unwrap());
 
         assert!(store.unlink_pr(pr.id).await.unwrap().is_some());
         assert!(store.pr(pr.id).await.unwrap().is_none());
         assert!(store.is_unlinked(&key, &url(1)).await.unwrap());
-        assert!(store.open_notices().await.unwrap().is_empty());
+        // Only the PR's own notices go: the stale-base warning stays.
+        let open = store.open_notices().await.unwrap();
+        assert_eq!(open.len(), 1, "{open:?}");
+        assert_eq!(open[0].kind, KIND_BASE_STALE);
         assert!(store.unlink_pr(pr.id).await.unwrap().is_none());
 
         // Linking it by hand again forgets the unlink.

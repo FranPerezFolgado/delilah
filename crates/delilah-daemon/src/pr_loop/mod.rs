@@ -24,7 +24,6 @@ use crate::state::AppState;
 use crate::store::StoreError;
 use crate::store_prs::{NewPr, PrRow};
 
-const INTERVAL: Duration = Duration::from_secs(30);
 /// How long after a push or `gh pr create` the PR is looked for: GitHub needs a moment.
 const NUDGE_DELAY: Duration = Duration::from_secs(15);
 
@@ -85,7 +84,7 @@ pub(crate) fn is_checking(app: &AppState, key: &TaskKey) -> bool {
 /// Checks the PRs on a timer: the open ones, and the tasks in review that have none yet.
 pub fn spawn(app: AppState) {
     tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(INTERVAL);
+        let mut ticker = tokio::time::interval(app.config.pr_poll);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
@@ -175,7 +174,8 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
 
     if let Ok(Some((_, ws))) = app.store.workspace(key).await {
         let rows = app.store.prs_of(key).await.unwrap_or_default();
-        for (repo, dir) in ws.repos() {
+        // A task without a branch has no PR to find.
+        for (repo, dir) in ws.repos().into_iter().filter(|_| ws.has_branch()) {
             let has_row = rows.iter().any(|r| r.repo == repo);
             if !force && (has_row || !in_review) {
                 continue;
@@ -442,6 +442,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_branchless_task_is_not_searched_for_a_pr() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Implement)).await;
+        let (root, mut ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        ws.branch = String::new();
+        app.store.save_workspace(&key, &root, &ws).await.unwrap();
+        check_task(&app, &key, true).await;
+        assert!(fake.calls().is_empty());
+        assert!(app.store.prs_of(&key).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn every_good_check_announces_even_when_nothing_changed() {
         let fake = Arc::new(FakeGh::happy());
         let (app, key, _dir) = task_with_workspace(fake, Some(SpecPhase::Review)).await;
@@ -662,6 +674,7 @@ mod tests {
                 path: "/par".into(),
                 kind: ProjectKind::Parent,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await

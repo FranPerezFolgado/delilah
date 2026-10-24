@@ -115,6 +115,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/resume", post(actions::resume))
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
+        .route("/api/v1/tasks/{key}/setup/retry", post(setup_retry))
+        .route("/api/v1/tasks/{key}/setup/skip", post(setup_skip))
+        .route("/api/v1/tasks/{key}/setup/cancel", post(setup_cancel))
         .route("/api/v1/usage", get(actions::usage))
         .route("/api/v1/events", get(events::stream))
         .route("/api/v1/logs", get(crate::logs::tail))
@@ -173,6 +176,10 @@ pub fn router(state: AppState) -> Router {
             axum::routing::patch(projects::update_project).delete(projects::delete_project),
         )
         .route(
+            "/api/v1/projects/{name}/settings",
+            axum::routing::put(projects::update_settings),
+        )
+        .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),
         )
@@ -188,6 +195,8 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/claude", post(hooks::claude_hook))
         .route("/hooks/claude/statusline", post(hooks::claude_statusline))
         .route("/hooks/claude/ask", post(asks::hook))
+        .route("/hooks/claude/guard", post(hooks::guard_hook))
+        .route("/api/v1/tasks/{key}/branch", post(crate::branching::retry))
         .route("/api/v1/asks/{id}/answer", post(asks::answer))
         .route("/api/v1/asks/{id}/release", post(asks::release))
         .route(
@@ -312,6 +321,46 @@ fn default_workflow() -> String {
     "feature".into()
 }
 
+/// `POST /api/v1/tasks/{key}/setup/retry`: from `setup-failed`, runs the setup again.
+async fn setup_retry(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::retry(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+/// `POST /api/v1/tasks/{key}/setup/skip`: from `setup-failed`, launches the agent.
+async fn setup_skip(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::skip(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+/// `POST /api/v1/tasks/{key}/setup/cancel`: kills the running setup; the task ends
+/// in `setup-failed` ("cancelled") a moment later.
+async fn setup_cancel(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let key = TaskKey::new(key);
+    crate::setup::cancel(&app, &key).await?;
+    accepted(&app, &key).await
+}
+
+async fn accepted(app: &AppState, key: &TaskKey) -> Result<(StatusCode, Json<Task>), ApiError> {
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
 async fn health() -> Json<Health> {
     let (exe, exe_mtime) = EXE.get_or_init(running_binary).clone();
     Json(Health {
@@ -389,6 +438,9 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
     let mut task = Task::new(key, new.title.trim(), workflow);
+    if crate::branching::is_free(&task.key) {
+        task.title_source = delilah_core::TitleSource::Initial;
+    }
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
@@ -414,8 +466,9 @@ fn check_autopilot(autopilot: Option<bool>, saving_mode: Option<bool>) -> Result
     }
 }
 
-/// Edits a backlog task (title, notes, project, workflow, where; 409 once it has started)
-/// and, in any state, its view, saving mode and autopilot.
+/// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
+/// The title alone can change on any task but an archived one; the view, saving mode and
+/// autopilot change in any state.
 async fn update_task(
     State(app): State<AppState>,
     Path(key): Path<String>,
@@ -436,14 +489,22 @@ async fn update_task(
         }
     }
     let key = TaskKey::new(key);
-    // A view-only change works in any state; the rest edits the backlog.
-    let mut task = match view.is_some() && change.is_empty() {
-        true => app
-            .store
+    // A view-only change works in any state; a title alone, on any task but an archived
+    // one; the rest edits the backlog.
+    let title_only = change.notes.is_none()
+        && change.project.is_none()
+        && change.workflow.is_none()
+        && change.in_checkout.is_none();
+    let mut task = if view.is_some() && change.is_empty() {
+        app.store
             .get_task(&key)
             .await?
-            .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?,
-        false => app.store.update_backlog_task(&key, &change).await?,
+            .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?
+    } else {
+        match &change.title {
+            Some(title) if title_only => app.store.set_title(&key, title).await?,
+            _ => app.store.update_backlog_task(&key, &change).await?,
+        }
     };
     if let Some(view) = view.filter(|v| *v != task.view) {
         task = app.store.set_view(&key, view).await?;
@@ -520,6 +581,9 @@ pub struct ErrorBody {
     /// Refused because work in a worktree would be lost: the client may offer to force it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unpushed: bool,
+    /// For a 422 on a form: each problem, tied to its field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<delilah_core::FieldError>,
     /// A task paused by the limit: when it resumes by itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_at: Option<chrono::DateTime<Utc>>,
@@ -532,11 +596,23 @@ pub struct ApiError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
     pub(crate) unpushed: bool,
+    pub(crate) fields: Vec<delilah_core::FieldError>,
     pub(crate) resume_at: Option<chrono::DateTime<Utc>>,
     pub(crate) reason: Option<String>,
 }
 
 impl ApiError {
+    /// A 422 that names the fields at fault.
+    pub fn invalid_fields(
+        message: impl Into<String>,
+        fields: Vec<delilah_core::FieldError>,
+    ) -> Self {
+        Self {
+            fields,
+            ..Self::unprocessable(message)
+        }
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
@@ -598,6 +674,7 @@ impl ApiError {
             status,
             message: message.into(),
             unpushed: false,
+            fields: Vec::new(),
             resume_at: None,
             reason: None,
         }
@@ -631,6 +708,7 @@ impl IntoResponse for ApiError {
             Json(ErrorBody {
                 error: self.message,
                 unpushed: self.unpushed,
+                fields: self.fields,
                 resume_at: self.resume_at,
                 reason: self.reason,
             }),
@@ -683,7 +761,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -698,7 +776,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -708,11 +786,141 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "custom".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await
             .unwrap();
         (router(state.clone()), state)
+    }
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+    }
+
+    /// A task `key` with a real repo as workspace, branchless (detached) when `branch`
+    /// is empty.
+    async fn task_in_repo(state: &AppState, key: &str, branch: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("delilah-api-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        git_in(&root, &["init", "-q", "-b", "main"]);
+        git_in(&root, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        if branch.is_empty() {
+            git_in(&root, &["checkout", "-q", "--detach"]);
+        } else {
+            git_in(&root, &["checkout", "-q", "-b", branch]);
+        }
+        let key = TaskKey::new(key);
+        state
+            .store
+            .create_task(&Task::new(key.clone(), "Idea", "feature"))
+            .await
+            .unwrap();
+        let ws = delilah_git::Workspace {
+            path: root.clone(),
+            branch: branch.into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        state.store.save_workspace(&key, &root, &ws).await.unwrap();
+        state
+            .store
+            .set_spec_dirs_at_start(&key, Some(&[]))
+            .await
+            .unwrap();
+        state
+            .store
+            .set_started_branchless(&key, branch.is_empty())
+            .await
+            .unwrap();
+        root
+    }
+
+    #[tokio::test]
+    async fn the_branch_route_retries_a_free_task() {
+        let (app, state) = app_with_project().await;
+        let root = task_in_repo(&state, "LIBRE-1", "").await;
+        state
+            .store
+            .set_branch_error(&TaskKey::new("LIBRE-1"), Some("old"))
+            .await
+            .unwrap();
+        let folder = root.join("specs/005-y");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("spec.md"), "# Feature Specification: Y\n").unwrap();
+        let (status, task) = call(&app, "POST", "/api/v1/tasks/LIBRE-1/branch", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(task["key"], "LIBRE-1");
+        assert_eq!(task["branch_error"], Value::Null);
+        let (_, ws) = state
+            .store
+            .workspace(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ws.branch, "005-y");
+        // Now on its branch: nothing to retry.
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/LIBRE-1/branch", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn the_branch_route_answers_404_and_409() {
+        let (app, state) = app_with_project().await;
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/LIBRE-9/branch", None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        task_in_repo(&state, "PROJ-1", "").await;
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/PROJ-1/branch", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        task_in_repo(&state, "LIBRE-2", "006-z").await;
+        let (status, _) = call(&app, "POST", "/api/v1/tasks/LIBRE-2/branch", None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn the_guard_route_allows_and_checks_the_task_name() {
+        let (app, state) = app_with_project().await;
+        task_in_repo(&state, "LIBRE-3", "").await;
+        let read = json!({ "tool_name": "Read", "tool_input": { "file_path": "a" } });
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/hooks/claude/guard?task=LIBRE-3&session=s",
+            Some(read.clone()),
+        )
+        .await;
+        assert_eq!((status, body), (StatusCode::OK, json!({})));
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/hooks/claude/guard?task=..&session=s",
+            Some(read),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let edit = json!({ "tool_name": "Edit", "tool_input": { "file_path": "src/a.rs" } });
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/hooks/claude/guard?task=LIBRE-3&session=s",
+            Some(edit),
+        )
+        .await;
+        assert_eq!((status, body), (StatusCode::OK, json!({})));
+        let (_, ws) = state
+            .store
+            .workspace(&TaskKey::new("LIBRE-3"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ws.branch, "idea");
     }
 
     #[tokio::test]
@@ -834,7 +1042,7 @@ mod tests {
             &app,
             "PATCH",
             "/api/v1/tasks/LIBRE-1",
-            Some(json!({"title": "y"})),
+            Some(json!({"notes": "y"})),
         )
         .await;
         assert_eq!(
@@ -842,6 +1050,53 @@ mod tests {
             StatusCode::CONFLICT,
             "only backlog tasks can be edited"
         );
+    }
+
+    #[tokio::test]
+    async fn the_title_alone_can_change_on_a_running_task() {
+        let (app, _) = app_with_project().await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-1", "title": "x", "project": "web"})),
+        )
+        .await;
+        call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/events",
+            Some(json!({"type": "start"})),
+        )
+        .await;
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"title": "  mine "})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{task}");
+        assert_eq!(task["title"], "mine");
+        assert_eq!(task["title_source"], "manual");
+        assert!(task["previous_title"].is_null());
+        for body in [
+            json!({"title": "z", "notes": "n"}),
+            json!({"title": "z", "project": "web"}),
+            json!({"title": "z", "workflow": "w"}),
+            json!({"title": "z", "in_checkout": true}),
+        ] {
+            let (status, _) = call(&app, "PATCH", "/api/v1/tasks/PROJ-1", Some(body.clone())).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        }
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"title": " "})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -999,6 +1254,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(history[0]["event"], json!({"type": "start"}));
         assert_eq!(history.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn setup_actions_are_refused_from_the_wrong_status() {
+        let (app, state) = app_with_project().await;
+        let key = TaskKey::new("PROJ-1");
+        let mut task = Task::new(key.clone(), "T", "custom");
+        task.project = Some("web".into());
+        state.store.create_task(&task).await.unwrap();
+        state.transition(&key, Event::Start).await.unwrap();
+        for action in ["retry", "skip", "cancel"] {
+            let (status, _) = call(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/PROJ-1/setup/{action}"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{action}");
+        }
     }
 
     #[tokio::test]
@@ -1314,7 +1589,7 @@ mod cors_tests {
             ui_origin: ui_origin.map(str::to_string),
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -1364,7 +1639,7 @@ mod cors_tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

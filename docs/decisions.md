@@ -134,30 +134,6 @@ of plan mode; a plugin passed to project-owned sessions.**
   - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
   - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
 
-**49. Chat mode (stream-json): go, adjusted (2026-10-24).** Spike on claude 2.1.292
-([docs/spikes/2026-10-24-claude-stream.md](spikes/2026-10-24-claude-stream.md)): hooks
-fire in `-p`, one process takes several turns and writes the transcript (stream
-`uuid`s equal transcript `uuid`s), `--resume` works PTY -> stream -> PTY, interrupt keeps
-the process up. So US3 and US4 go ahead, with these adjustments to research.md R7:
-- **Permissions: `--permission-prompt-tool stdio`**, not `--permission-prompts host`.
-  With it a not-allowed tool arrives as `control_request` `can_use_tool` (with
-  `permission_suggestions`) and `control_response` allow/deny works (R8 stands, no MCP
-  server, no allow-list-only fallback). Without it Claude denies by itself.
-- **AskUserQuestion** exists in a `-p` session only with that same flag; the blocking
-  PreToolUse ask hook then answers it as in the PTY, so question cards are unchanged.
-- **Usage limits from `rate_limit_event`**, because the status line never runs in
-  print mode (it does in the PTY). Its `utilization` is a fraction; resets are epoch
-  seconds, as in the status line.
-- **"Detener" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
-  interrupted turn (same as ESC, decision 36).
-- **Entries still come from the transcript**; the stream gives only live text. Deltas
-  carry no message id: it is the `message_start`'s `message.id`.
-- **Remote Control is hidden in chat mode**: `--remote-control` with `-p` was accepted but
-  nothing shows it registered.
-- Not observed: `Notification` and `StopFailure` in print mode, and the `rate_limit_event`
-  `status` when a limit is hit.
-- **The switch to chat mode relaunches without a prompt**, and the real CLI says nothing until it gets a message, so the switch judges the agent healthy if it stays alive for 3 s; a later death is seen by the exit watcher and leaves the task in chat mode with no live session (resume or switch back).
-
 ## Workflows and tasks
 
 **15. SpecKit is the first workflow, through the user's `/feature` wrapper.**
@@ -183,6 +159,59 @@ losing work.**
 **19. The backlog is the `Queued` status.** A task can be saved with notes and a
 chosen place (checkout or worktree) and started later. A failed start goes back
 to the backlog (`StartAborted`).
+
+**50. Project settings live in Delilah, not in the repo.** The per-project config
+(workspace mode, branch template, shared entries, setup command, submodule rules)
+is kept by the daemon and edited from a settings screen and the CLI. A
+`delilah.toml` in the repo was ruled out for now:
+- editing it from the app would leave the checkout dirty, which blocks checkout tasks;
+- the work repos should not carry a Delilah file.
+
+Sharing settings through the repo can come later, as a base the stored settings
+override. See `specs/004-project-config`.
+
+Also ruled out: hard links for shared folders (they do not work across volumes or for folders).
+
+**51. A field error has a stable `code`; the daemon writes the message.** Settings
+validation returns `FieldError { field, code, message }`. The app and CLI can
+rely on the code, and the message comes from the daemon in the user's language.
+
+**52. Settings are JSON in `projects.settings`.** Migration 0016 adds the column.
+Unknown keys are rejected (`deny_unknown_fields`, a 422 with the fields), so a typo
+does not pass silently. A stored value that cannot be read gives the defaults and
+a warning instead of breaking the project.
+
+**53. The branch template's slug** (when the project has a template; see 49). The title goes through NFKD, loses its marks,
+becomes ASCII lower case with `-`, and is cut to 40 characters at a hyphen.
+Around an empty `{slug}` the `/`, `-`, `_` and `.` next to it are dropped. Rust
+and TypeScript implement it twice and share
+`crates/delilah-core/tests/branch_names.json`.
+
+**54. Shared entries are copied (`cp -cR`, a clone on APFS) or linked (an absolute
+symlink).** The source is canonicalised and must stay under the checkout; nothing
+is written through a symlink in the worktree; a `.git` component is refused. A
+problem with one entry never stops the task: it is noted in
+`<task_dir>/workspace.log` and the rest go on.
+
+**55. The setup command runs as a read-only `Setup` session.** `$SHELL -lc` in
+the worktree, with the agent's clean environment, 10 minutes at most.
+- Cancel and timeout kill the whole process group (`kill -- -pgid`, no `unsafe`).
+- The launch inputs are saved in `<task_dir>/launch.json`, so retry and skip survive a daemon restart; setups interrupted by one are marked at start.
+- `SetupFailed` is not terminal (retry, skip, or leave it) but the task can be archived.
+
+**56. Submodule rules.** `GET …/submodules` hides the `never` ones by default;
+`?all=true` is for the settings screen. `always` ones are merged into every run.
+A rule that names a submodule that no longer exists is a 422 pointing at the
+settings.
+
+**57. The workspace mode is the request's, else the backlog task's saved choice,
+else the project's `workspace` setting, else a worktree.** `settings.workspace` is
+optional (`null` by default), so a project with nothing saved behaves as before the
+settings existed. The CLI sends it only when `--checkout` or `--worktree` is given,
+so the daemon decides otherwise (this also covers idea proposals and "Crear y lanzar
+en autopiloto"). Only the new-task form still preselects the checkout when the
+project has no setting, as it always did; a backlog task with no saved choice shows
+"worktree", which is what the daemon will do.
 
 ## UI
 
@@ -218,6 +247,31 @@ repos is ever referenced or copied. Development uses
 (FranPerezFolgado). The machine also has work credentials, so confirm the account
 before any remote operation. Agents commit finished work without asking, and the
 user pushes. Commit messages carry no `Co-Authored-By: Claude` trailer.
+
+**49. The installed app is guarded by a hook, not only by CLAUDE.md (2026-10-23).** A
+`PreToolUse` hook in the committed `.claude/settings.json` blocks agent commands that would
+stop or change the installed Delilah (decision 22), so the rule also holds in agents' worktrees.
+`.claude/launch.json` lost its `daemon`/`ui` entries, which bound 7420. Matching is textual and
+per statement, skipping heredoc bodies; a commit message quoting such a command is still
+blocked, and rewording it is cheaper than a shell parser.
+
+**50. Machines check code, the user checks specs and plans (2026-10-23).** fmt, clippy with
+`-D warnings` and tests gate each implementer (`.claude/verify.sh`) and each PR (GitHub Actions,
+no LLM review in CI: `/orchestrate` already reviews each phase). `/feature` has an
+`architecture-reviewer` look at the plan before the user does, and `/orchestrate` runs without
+stops between phases (at most 2 fix rounds, MEDIUM/LOW findings logged in `progress.md`). The
+version bump is a script, `scripts/bump-version.sh`. Rust CI runs on macOS because the daemon has
+macOS-only dependencies; that costs more runner minutes than Linux.
+
+**58. End-to-end tests with a fake Claude, local only (2026-10-22).**
+- **What:** `scripts/e2e.sh` runs a real `delilahd` and the real CLI/UI against a fake Claude, `gh` and Jira, in two layers (API/CLI in Rust, UI in Playwright).
+- **The fake is a Rust binary** (`fake-claude`) that reads a JSON scenario and runs the hooks from the `--settings` file the daemon wrote, as Claude does. That keeps `claude::write_settings` and the hook contract under test.
+- **`DELILAH_AGENT_BIN`** tells the daemon which program to launch instead of `claude` (env, like `DELILAH_GH_BIN`; no daemon flags exist). Both, and the switches below, are parsed and validated in `Config` at start, so a bad value stops the daemon instead of failing at the first call. Three more test-only variables go with it: `DELILAH_SECRETS=memory`, `DELILAH_JIRA_ALLOW_HTTP_LOOPBACK=1`, `DELILAH_PR_POLL_SECS`.
+- **Isolation:** each run has a temp `HOME` (the daemon reads `~/.claude/settings.json` and the login shell's rc files), its own `DELILAH_HOME`, fixtures and a free port, never 7420 nor 7501-7509. A tripwire `claude`/`gh` first on PATH fails the test if the real one is reached; the one-shot Claude calls (`DELILAH_CLAUDE_BIN`) get a fake that always fails, so branch names are the daemon's deterministic fallback. The only exception is the opt-in real-Claude smoke test.
+- **A separate crate, `delilah-e2e`, with an `e2e` feature**, so `cargo test --workspace` stays as fast as before and the flows are not mixed with the `#[ignore]`d smoke test.
+- **UI: one daemon and one Vite per run, tests serial.** `VITE_DELILAH_URL` is fixed when Vite starts; each test makes its own repos and projects instead.
+- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI.
+- **Ruled out:** a shell fake (hard to handle JSON and to keep in step with `claude.rs`); a fake that posts to `/hooks/claude` itself (skips the settings file); a `claude` shim on PATH (the agent's PATH comes from the login shell); replaying real sessions (they depend on the real Claude and its cost); reusing `preview.sh` (user's `HOME`, fixed slots, interactive); tests in `crates/delilah-daemon/tests/` (bloats its dev-dependencies); CI on macOS runners (cost, and the checks run locally anyway); a runtime daemon switch in the UI (`?daemon=`, code that exists only for tests); Cypress (Playwright has traces and runs from Node).
 
 ## Pull requests
 
@@ -360,3 +414,113 @@ auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
 **48. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
 project sessions create tasks, so a card is not tied to an idea conversation; only a
 closed session's card is refused.
+
+**49. The branch template is optional and sits between a typed name and Claude's proposal
+(2026-10-23).** Two features named branches: per-project settings (a `{ticket}`/`{slug}`
+template) and task branch names (Claude proposes a descriptive `feature/…` name, 37). They
+are combined, not chosen between. `ProjectSettings.branch` is `null` by default, which is
+exactly 37's behaviour. With a template, the template decides the format: `{ticket}` is the
+key (a free task's `LIBRE-n`), `{slug}` is Claude's short proposal, or the title's `slug()`
+when Claude fails or is slow (the call is skipped when the template has no `{slug}`).
+Precedence at a start: a branch typed in the request, then the template, then 37's
+proposal; every path goes through the `-2`, `-3` free-name logic. A typed branch is
+normalised by 37's `custom_for` when there is no template; with a template it is kept as
+typed (case, `/`, `.`, `_`) and only made safe for git (`sanitize_typed`), because the
+dialog fills the field with the template's full branch and slugging that again would turn
+`fix/PROJ-1-x` into `feature/fix-proj-1-x`. `POST …/branch-name` returns the
+template-expanded branch when there is a template, so the "Rama" field shows what will be
+used; the dialog shows the TypeScript mirror's guess until it answers and sends the field
+only if the answer arrived or the user typed. A blank template is not saved: the screen
+and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
+`branch.empty`.
+
+**59. The sidebar groups only idea conversations into "Ideas" (2026-10-23).** Read-only
+Claude sessions and terminals keep their own rows, their purpose differs. The "Ideas" row
+opens the waiting idea, else the one the project's screen last showed, else the newest;
+"newest" relies on the daemon listing sessions in creation order, since `Session` has no
+timestamp.
+
+## Updates
+
+**60. Updates through the Tauri updater and GitHub Releases on the public repo (2026-10-24).**
+The app checks the latest release's `latest.json` and verifies the signature against
+a key baked into the build. The repo is public so no token ships in the app.
+- **Ruled out:** Sparkle (a second updater beside Tauri's, for the same job); a private repo with a token in the app (it would have to be embedded in every install).
+
+**61. Updates need the user's confirmation, with a session warning (2026-10-24).**
+The notice says how many sessions are open and offers "Más tarde" and "Cuando
+terminen" (polls every 10 s). The count includes shell terminals on purpose: the
+relaunch restarts the daemon and stops them too.
+- **Ruled out:** a silent update, which would kill running agents without warning.
+
+**62. A release is a tag pushed to GitHub Actions; `make release` is the manual entry point (2026-10-24).**
+The signing key lives in repository secrets, so a build never needs it on a Mac.
+`make release` bumps if needed, tags and pushes. The workflow builds as a draft and
+builds `latest.json` itself from the local `.sig`: tauri-action's own would carry
+temporary `untagged-*` draft URLs. It publishes only after the asset is checked, so a
+failure leaves at most a draft.
+- **Ruled out:** a local-only release script (the key on the Mac, uploads by hand, nothing to re-run).
+
+**63. No Apple signing or notarisation for now (2026-10-24).**
+Updates are authenticated by the Tauri key alone. The first install still clears the
+quarantine flag by hand. Revisit if Delilah is installed on Macs beyond the owner's.
+
+**64. A best-effort copy of the database before migrating (2026-10-24).**
+When the version changes, the daemon copies the database to `backups/delilah-<prev>.db`
+(keeps 3) before the migrations run, because they cannot be undone. A failed copy only
+warns: it must not stop Delilah from starting. A downgrade is treated like an upgrade.
+
+## Task name and branch from the analysis
+
+**65. The branch of a free task comes from the first analysis; the title is replaced once
+(2026-10-24).** Supersedes #37 and #49 only for a free task with no typed branch and no
+project template. Precedence at a start: a branch typed in the request, then the
+project's template (#49), then, for a free task, no branch at all (this decision), else
+#37's proposal (Jira tasks, `feature/<KEY>-<short-name>`). Only that third case is
+branchless; the others behave as before. A free task used to start on
+`feature/<short-name>` (#37 dropped the `LIBRE-n` from the name, which Spec Kit's own
+branch then duplicated). Now it starts without a branch and takes
+the one named like the spec folder ([research](../specs/005-task-name-from-spec/research.md)).
+- **Scope of the branch steps:** only a task that *started* branchless (a durable mark, `workspaces.started_branchless`) gets adopt/create/guard/retry. A free task that started on a typed or template branch keeps it for good (#37: never switched or renamed): even if Spec Kit's hook checks out its own branch, Delilah touches no git for it; only the retitle below applies to it.
+- **Baseline:** the spec folders present at start are read after the shared entries are linked, and again (union) when the setup command ends, so a shared or generated folder is not mistaken for the analysis.
+- **Branch:** adopted if Spec Kit's `before_specify` hook made it, else created by Delilah from the spec folder; the task's title as a slug only when the guard needs a branch and there is no spec yet. A taken name gets `-2`, `-3`. A provisional branch renamed later was ruled out: the hook would have created a second one.
+- **The worktree folder keeps the key** (`workspaces/<KEY>`): moving it under a running agent was ruled out. Jira tasks (`feature/<KEY>-<short-name>`) and tasks started before keep their branch.
+- **Guard:** a PreToolUse hook makes the branch before the first code edit, commit, push, merge, rebase or PR, so nothing lands on the base. Failing closed (deny with the reason) was chosen over letting the edit through. It is best-effort: substring match on commands, symlinks not resolved; a full shell parser was judged not worth it.
+- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restaurar" brings it back. Any manual edit (`title_source = manual`) is final.
+
+## Fresh task bases
+
+**66. Task branches start from `origin`'s default branch, just fetched.** Before, a
+branch started from whatever the folder had checked out, often a stale `main`.
+- Delilah fetches `origin` and starts the branch at the resolved default's **sha**, so it has no upstream to pull or push by mistake. The default is `origin/HEAD`'s target, then `origin/main`, `origin/master`, `main`, `master`, `HEAD`.
+- **A failed fetch warns and continues:** the task starts from the last known `origin` state, with a `base-stale` notice. A repo with no origin gets none. One 30 s deadline covers the whole start.
+- **Local `main` is never fast-forwarded:** it is the user's, and may hold unpushed work.
+- **Ruled out:** a per-project base branch (out of scope for now); blocking the start on a failed fetch (offline work must still start).
+- **Why `pr_notices` was reused** for the warning: it already gives a Bandeja item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the moment of the start, so each start can warn again.
+- **The warning notifies but does not block:** it raises a desktop notification like any new item, and is not in `BLOCKING`, since the task goes on.
+- **The repo's own config is trusted during the fetch** (`core.sshCommand`, credential helpers, `insteadOf`): it is the same config the user's own `git fetch` runs, and an agent able to write it can already run anything as the user. What Delilah adds is that nothing may ask: no terminal prompt, no askpass, no interactive credential helper, and a 30 s limit.
+- **A branchless start (65)** gets the fresh base too: its worktree, and each chosen submodule, is detached there, so the branch the first analysis makes starts from it. A branchless start in checkout mode fetches and switches nothing (the folder is the user's, and #65 leaves it as it is), so its branch starts from where the folder is.
+
+**67. Chat mode (stream-json): go, adjusted (2026-10-24).** Spike on claude 2.1.292
+([docs/spikes/2026-10-24-claude-stream.md](spikes/2026-10-24-claude-stream.md)): hooks
+fire in `-p`, one process takes several turns and writes the transcript (stream
+`uuid`s equal transcript `uuid`s), `--resume` works PTY -> stream -> PTY, interrupt keeps
+the process up. So US3 and US4 go ahead, with these adjustments to research.md R7:
+- **Permissions: `--permission-prompt-tool stdio`**, not `--permission-prompts host`.
+  With it a not-allowed tool arrives as `control_request` `can_use_tool` (with
+  `permission_suggestions`) and `control_response` allow/deny works (R8 stands, no MCP
+  server, no allow-list-only fallback). Without it Claude denies by itself.
+- **AskUserQuestion** exists in a `-p` session only with that same flag; the blocking
+  PreToolUse ask hook then answers it as in the PTY, so question cards are unchanged.
+- **Usage limits from `rate_limit_event`**, because the status line never runs in
+  print mode (it does in the PTY). Its `utilization` is a fraction; resets are epoch
+  seconds, as in the status line.
+- **"Detener" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
+  interrupted turn (same as ESC, decision 36).
+- **Entries still come from the transcript**; the stream gives only live text. Deltas
+  carry no message id: it is the `message_start`'s `message.id`.
+- **Remote Control is hidden in chat mode**: `--remote-control` with `-p` was accepted but
+  nothing shows it registered.
+- Not observed: `Notification` and `StopFailure` in print mode, and the `rate_limit_event`
+  `status` when a limit is hit.
+- **The switch to chat mode relaunches without a prompt**, and the real CLI says nothing until it gets a message, so the switch judges the agent healthy if it stays alive for 3 s; a later death is seen by the exit watcher and leaves the task in chat mode with no live session (resume or switch back).

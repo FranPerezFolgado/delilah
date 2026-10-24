@@ -2,7 +2,7 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-22
-(version 0.5.0: autopilot and task previews, on `feature/LIBRE-9`).
+(version 0.5.0: autopilot and task previews, on `feature/LIBRE-9`; per-project settings, on `feature/LIBRE-2`).
 
 ## Built
 
@@ -30,12 +30,15 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - The Bandeja, with replies, AskUserQuestion answers (with a configurable panel position) and review suggestions.
 - Live updates over WebSocket, the Dock badge, and notifications.
 
+**Fresh task bases:**
+- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 66.
+
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
-- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md).
+- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). The sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea. See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md), [#59](decisions.md).
 
 **PR loop:**
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
@@ -45,10 +48,16 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
 
 **Branch names:**
-- A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`, free tasks `feature/<short-name>`.
+- A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`; a free task gets that proposal only when it is started with a branch typed or a project template, else it starts without a branch and takes the spec folder's name (decision 65).
 - A taken name (local or remote, in any repo of the workspace) gets `-2`, `-3`…; a branch is never reused or renamed.
 - A "Rama" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
 - `Task.branch` (from the stored workspace) is shown on the task view.
+
+**Project settings** (spec `004-project-config`, personal to the install, in `projects.settings`):
+- A settings screen (Proyectos › Ajustes) and `delilah project show|set|unset`: default workspace mode, optional branch template, shared entries, setup command, always/never submodules.
+- A project's optional branch template (null by default, then the proposal above applies) decides the branch format; the "Rama" field of the new task form shows the template's branch at once and then the daemon's answer (decision 49); `delilah new|run` take `--checkout` / `--worktree`.
+- Shared entries are copied or linked into new worktrees.
+- A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
 
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
@@ -62,6 +71,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
 
+**Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
+- Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restaurar".
+- A guard hook makes the branch before the first edit outside `specs/` or a commit/push/PR; failures show in the Bandeja with "Reintentar".
+- The title is editable in the task screen on any non-archived task.
+
 **Autopilot** (a task runs plan → implement → review → draft PR on its own; opt-in per task, spec workflow only, implies saving mode):
 - Option on new tasks, backlog items and running tasks (`--autopilot` / `--no-autopilot`, `delilah autopilot <KEY> on|off|resume`), a mark in the task header, and the chain's preview and PR steps.
 - The implementation starts without asking; a stalled step gets one nudge; questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into a Bandeja item (*Reanudar autopiloto* / *Seguir a mano*).
@@ -69,10 +83,37 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - "Crear y lanzar en autopiloto" on the idea card.
 - See [architecture.md](architecture.md) and decisions [#38](decisions.md) to [#48](decisions.md).
 
+**Dev workflow** (for working on this repo, not a product feature): CI on every PR (`.github/workflows/`), fmt/clippy/tests gating each implementer (`.claude/verify.sh`), a hook guarding the installed app, `scripts/bump-version.sh`. Decisions [#49](decisions.md) and [#50](decisions.md).
+
 **Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
+
+**End-to-end tests:**
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Local only, no CI. See [development.md](development.md#end-to-end-tests).
+
+**Auto-update** (0.8.0):
+- Tauri updater against GitHub Releases: a notice with the open-session count, "Más tarde" / "Cuando terminen", menu item and Ajustes › Actualizaciones; release builds only.
+- The daemon copies the database to `backups/` before migrating after a version change.
+- `make release` / `make release-dry-run` and the tag workflow `.github/workflows/release.yml`.
 
 ## Pending and known problems
 
+- **Fresh bases, known limits:**
+  - parent worktrees still need the network to init submodules;
+  - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
+  - git and ssh never prompt (no terminal, no askpass, `credential.interactive=never`), but a macOS keychain access dialog raised by a credential helper still can, bounded by the 30 s deadline;
+  - the fetch lock lives in the git crate (process-wide), not in the daemon's state;
+  - a branchless task in checkout mode is not rebased: its branch starts from where the folder is (decision 66).
+- **Branch guard is best-effort:** it matches substrings of Bash commands and does not resolve symlinks, so an unusual command can write before the branch exists.
+- **End-to-end tests, pending and known:**
+  - the UI quick-open test covers the file quick open (the UI has no task switcher);
+  - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
+  - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
+  - measured: API layer 57 s (including the build), UI layer 30 s; 10 consecutive full `scripts/e2e.sh` runs all green (78–105 s each), no flaky tests; the installed Delilah stayed untouched (same PID, health OK) and an interrupted run (Ctrl-C) leaves no daemons behind.
+- **Auto-update, pending:**
+  - the maintainer's key and secrets (T005 of `specs/005-app-auto-update`): until the public key replaces `REPLACE_WITH_UPDATER_PUBKEY`, `check.mjs` refuses to release;
+  - the first tagged release, which verifies the workflow end to end (draft lookups, asset name, relaunch into the new version, daemon and plugin version);
+  - next step: `vX.Y.Z-rc.N` tags published as GitHub prereleases (no `--latest`, so `releases/latest` and installed apps ignore them) to rehearse the pipeline. Needs the workflow to accept `-rc` tags and publish with `--prerelease`, and `check.mjs`, `manifest.mjs` and `versions.mjs` to accept the suffix. No update channel in the app: one fixed endpoint;
+  - third-party actions are pinned to major tags, not SHAs.
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);
@@ -103,6 +144,9 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - **Optional next steps for previews:**
   - a "Delilah Preview" Tauri build (another identifier and port) for native-only features;
   - a browser MCP so the agent inside a task can see the preview UI.
+- **Project settings, open items:**
+  - the settings screen, the setup banner and the new task form were never checked in a browser during that feature's reviews (API and CLI were);
+  - low: no test for the "Ajustes guardados" confirmation; a PATCH that changes a project's kind does two non-atomic writes; the Spanish "unknown submodule" message omits the path; the CLI's 422 output is untested end to end; no migration test over pre-existing rows; `ß`/`Æ` become hyphens in branch slugs;
 - **PR loop follow-ups:**
   - cross-linked PRs of a changeset (each PR names the others);
   - saving lessons to QMD when a task merges;

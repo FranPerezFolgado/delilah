@@ -136,6 +136,7 @@ mod tests {
             claude_bin: "claude".into(),
             agent_program: None,
             claude_projects: crate::config::Config::scratch_projects(),
+            ..Config::test_defaults()
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }

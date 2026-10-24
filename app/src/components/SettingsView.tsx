@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ASK_POSITIONS, type AskPosition } from "../api";
-import { t, type LangSetting } from "../i18n";
+import { locale, t, type LangSetting } from "../i18n";
+import type { UpdateMeta } from "../updates";
 import { ACTIONS, type ActionId, type Bindings, comboFromEvent, DEFAULTS, formatCombo, setRecording } from "../shortcuts";
 
 interface Props {
@@ -10,11 +11,25 @@ interface Props {
   onLanguage: (l: LangSetting) => void;
   askPosition: AskPosition;
   onAskPosition: (p: AskPosition) => void;
+  /** The update flow's data; the section is left out when absent. */
+  updates?: { meta: UpdateMeta; canUpdate: boolean; check: (manual: boolean) => void | Promise<void> };
+}
+
+/** "when · result" of the last update check, or "Todavía no". */
+function lastCheckText(meta: UpdateMeta): string {
+  if (!meta.lastCheck) return t("Todavía no");
+  const when = meta.lastCheck.toLocaleString(locale(), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const result =
+    meta.lastResult === "upToDate" ? t("Delilah está al día")
+    : meta.lastResult === "available" ? t("Hay una versión nueva")
+    : meta.lastResult === "error" ? t("falló")
+    : "";
+  return result ? `${when} · ${result}` : when;
 }
 
 /** Settings: the language, where the agent's questions sit, Remote Control, and the
  *  keyboard shortcuts (press "Cambiar", then the new keys). */
-export function SettingsView({ bindings, onChange, language, onLanguage, askPosition, onAskPosition }: Props) {
+export function SettingsView({ bindings, onChange, language, onLanguage, askPosition, onAskPosition, updates }: Props) {
   const [recordingFor, setRecordingFor] = useState<ActionId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [remote, setRemote] = useState(false);
@@ -181,6 +196,29 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
             {t("Antes de pasar a la sesión siguiente, la actual guarda sus notas con /save-session.")}
           </p>
         </div>
+        {updates && (
+          <div>
+            <div className="sec" style={{ marginBottom: 8 }}>{t("Actualizaciones")}</div>
+            {updates.canUpdate ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>{t("Versión {version}", { version: updates.meta.installed })}</span>
+                  <button className="btn" onClick={() => void updates.check(true)}>{t("Buscar ahora")}</button>
+                </div>
+                <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                  {t("Última comprobación: {time}", { time: lastCheckText(updates.meta) })}
+                </p>
+              </>
+            ) : (
+              <>
+                <div>{updates.meta.installed && t("Versión {version}", { version: updates.meta.installed })}</div>
+                <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                  {t("Las actualizaciones solo están en la app instalada")}
+                </p>
+              </>
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="sec">{t("Atajos de teclado")}</span>
           <button className="btn" style={{ marginLeft: "auto" }} onClick={() => save({ ...DEFAULTS })}>

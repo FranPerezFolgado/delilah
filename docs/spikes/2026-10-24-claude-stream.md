@@ -10,7 +10,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose \
   --include-partial-messages --session-id <uuid> --settings <file> [--permission-prompt-tool stdio]
 ```
 
-Answers research.md R7 (a-h). Verdict: **adjust**, see decision 49 in
+Answers research.md R7 (a-h). Verdict: **adjust**, see decision 67 in
 [decisions.md](../decisions.md).
 
 ## R7 answers

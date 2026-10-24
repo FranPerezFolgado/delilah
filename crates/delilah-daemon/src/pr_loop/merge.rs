@@ -161,9 +161,12 @@ fn verify(
     opts: &GitOptions,
 ) -> Result<HashMap<String, String>, String> {
     let repos = ws.repos();
+    // All the fetches together, like a task's start.
+    let deadline = delilah_git::Deadline::after(delilah_git::NETWORK_LIMIT);
     for (label, dir) in &repos {
         if heads.contains_key(label) {
-            delilah_git::fetch(dir, opts).map_err(|e| format!("fetching {label}: {e}"))?;
+            delilah_git::fetch(dir, opts, deadline)
+                .map_err(|e| format!("fetching {label}: {e}"))?;
         }
     }
     delilah_git::check_merged(ws, heads, opts).map_err(|e| e.to_string())?;
@@ -346,11 +349,18 @@ mod tests {
             } else {
                 let spec = WorkspaceSpec {
                     path: base.join("ws"),
-                    branch: BRANCH.into(),
+                    branch: Some(BRANCH.into()),
                     kind: ProjectKind::Repo,
                     submodules: vec![],
                 };
-                create_workspace(&root, &spec, &opts()).unwrap()
+                create_workspace(
+                    &root,
+                    &spec,
+                    &opts(),
+                    delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+                )
+                .unwrap()
+                .0
             };
             let head = commit_and_push(&ws.path);
             app.store.save_workspace(&key, &root, &ws).await.unwrap();
@@ -612,11 +622,18 @@ mod tests {
         let subs = ["svc-payments", "svc-orders"];
         let spec = WorkspaceSpec {
             path: dir.path().join("cs-ws"),
-            branch: BRANCH.into(),
+            branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
             submodules: subs.iter().map(ToString::to_string).collect(),
         };
-        let ws = create_workspace(&root, &spec, &opts()).unwrap();
+        let ws = create_workspace(
+            &root,
+            &spec,
+            &opts(),
+            delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+        )
+        .unwrap()
+        .0;
         let mut prs = HashMap::new();
         for (i, sub) in subs.iter().enumerate() {
             let head = commit_and_push(&ws.path.join(sub));
@@ -721,11 +738,12 @@ mod tests {
         let root = fixture_parent(dir.path());
         let spec = WorkspaceSpec {
             path: dir.path().join("unused"),
-            branch: BRANCH.into(),
+            branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
             submodules: vec!["svc-payments".into(), "svc-orders".into()],
         };
-        let (ws, previous) = delilah_git::use_checkout(&root, &spec, &opts()).unwrap();
+        let deadline = delilah_git::Deadline::after(std::time::Duration::from_secs(30));
+        let (ws, previous, _) = delilah_git::use_checkout(&root, &spec, &opts(), deadline).unwrap();
         let head = commit_and_push(&root.join("svc-payments"));
         app.store.save_workspace(&key, &root, &ws).await.unwrap();
         app.store

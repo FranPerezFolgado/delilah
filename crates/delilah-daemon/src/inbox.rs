@@ -17,6 +17,7 @@ use crate::actions::type_prompt;
 use crate::api::ApiError;
 use crate::archive::{KIND_BLOCKED, KIND_PARTIAL};
 use crate::state::AppState;
+use crate::store_prs::{KIND_BASE_STALE, NoticeRow};
 use crate::store_sessions::SessionKind;
 
 /// Long answers are cut: the inbox shows the gist, the session tab the rest.
@@ -131,6 +132,9 @@ pub enum ItemKind {
     PrFailed,
     /// A reviewer asked for changes or commented on a task's PR.
     PrReview,
+    /// The branch derived from the spec could not be applied to a repo; retry from here.
+    /// Right after the review items: an actionable problem that blocks no agent.
+    Branch,
     /// The task waits on you, but no session said what for (e.g. after a restart).
     Waiting,
     Review,
@@ -142,6 +146,8 @@ pub enum ItemKind {
     SuggestReview,
     /// Archiving the task left a PR behind (blocked or partial).
     PrBlocked,
+    /// A task's branch started from a base that could not be refreshed.
+    BaseStale,
     Paused,
     Failed,
 }
@@ -173,6 +179,9 @@ pub struct InboxItem {
     /// (`POST /api/v1/sessions/{id}/permissions/{ask}`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission: Option<PermissionView>,
+    /// The notice this item stands for, when it has no PR (e.g. a stale base).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -185,6 +194,24 @@ pub struct PermissionView {
     pub suggestion: Option<Value>,
     /// The rule "allow always" would remember; null: that button is not offered.
     pub rule: Option<String>,
+}
+
+impl InboxItem {
+    /// An item with only what every item has; the rest is set with `..`.
+    fn new(kind: ItemKind, task: String, title: String) -> Self {
+        Self {
+            kind,
+            task,
+            title,
+            session: None,
+            text: None,
+            since: None,
+            ask: None,
+            pr: None,
+            permission: None,
+            notice: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,9 +251,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             asking.insert(id.clone());
         }
         items.push(InboxItem {
-            kind: ItemKind::Question,
-            task: ask.task.clone(),
-            title: title.clone(),
             session: record.map(|r| ItemSession {
                 live: app.sessions.get(&r.id).is_some(),
                 id: r.id,
@@ -240,8 +264,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 questions: ask.questions,
                 proposal: ask.proposal,
             }),
-            pr: None,
-            permission: None,
+            ..InboxItem::new(ItemKind::Question, ask.task.clone(), title.clone())
         });
     }
 
@@ -259,9 +282,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             format!("{}: {}", ask.tool, ask.summary)
         };
         items.push(InboxItem {
-            kind: ItemKind::Permission,
-            task: ask.task.clone(),
-            title,
             session: Some(ItemSession {
                 live: app.sessions.get(&record.id).is_some(),
                 id: record.id,
@@ -270,8 +290,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             }),
             text: Some(text),
             since: Some(ask.at),
-            ask: None,
-            pr: None,
             permission: Some(PermissionView {
                 id: ask.id,
                 tool: ask.tool,
@@ -279,6 +297,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 suggestion: ask.suggestion,
                 rule: ask.rule,
             }),
+            ..InboxItem::new(ItemKind::Permission, ask.task.clone(), title)
         });
     }
 
@@ -301,13 +320,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         }
         asked.insert(s.task.clone());
         items.push(InboxItem {
-            kind: match attention.kind {
-                AttentionKind::Question => ItemKind::Question,
-                AttentionKind::Permission => ItemKind::Permission,
-                AttentionKind::Error => ItemKind::Error,
-            },
-            task: s.task.clone(),
-            title: title.clone(),
             session: Some(ItemSession {
                 id: s.id,
                 label: s.label,
@@ -316,9 +328,15 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             }),
             text: Some(attention.text),
             since: Some(attention.since),
-            ask: None,
-            pr: None,
-            permission: None,
+            ..InboxItem::new(
+                match attention.kind {
+                    AttentionKind::Question => ItemKind::Question,
+                    AttentionKind::Permission => ItemKind::Permission,
+                    AttentionKind::Error => ItemKind::Error,
+                },
+                s.task.clone(),
+                title.clone(),
+            )
         });
     }
 
@@ -334,6 +352,9 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             }
             TaskStatus::PausedByLimit { .. } => Some((ItemKind::Paused, None, "limit-reached")),
             TaskStatus::Failed { reason } => Some((ItemKind::Failed, Some(reason.clone()), "fail")),
+            TaskStatus::SetupFailed { reason } => {
+                Some((ItemKind::Failed, Some(reason.clone()), "setup-failed"))
+            }
             _ => None,
         };
         let review = in_review.map(|s| {
@@ -345,18 +366,18 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             );
             (ItemKind::Review, Some(progress), "phase-reached")
         });
+        if let Some(err) = t.branch_error.as_ref().filter(|_| !t.status.is_terminal()) {
+            items.push(InboxItem {
+                text: Some(err.clone()),
+                ..InboxItem::new(ItemKind::Branch, key.to_string(), t.title.clone())
+            });
+        }
         for (kind, text, event) in found.into_iter().chain(review) {
             items.push(InboxItem {
-                kind,
-                task: key.to_string(),
-                title: t.title.clone(),
-                session: None,
                 text,
                 // When the event that raised it happened.
                 since: last_event(&app, t, event).await,
-                ask: None,
-                pr: None,
-                permission: None,
+                ..InboxItem::new(kind, key.to_string(), t.title.clone())
             });
         }
     }
@@ -412,15 +433,9 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 primary: true,
             });
         items.push(InboxItem {
-            kind: ItemKind::Handoff,
-            task: t.key.to_string(),
-            title: t.title.clone(),
             session,
             text: Some(text),
-            since: None,
-            ask: None,
-            pr: None,
-            permission: None,
+            ..InboxItem::new(ItemKind::Handoff, t.key.to_string(), t.title.clone())
         });
     }
 
@@ -433,19 +448,13 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             continue;
         };
         items.push(InboxItem {
-            kind: ItemKind::Autopilot,
-            task: t.key.to_string(),
-            title: t.title.clone(),
-            session: None,
             text: Some(a.reason.clone().unwrap_or_else(|| {
                 app.lang()
                     .pick("El autopiloto está en pausa.", "Autopilot is paused.")
                     .to_string()
             })),
             since: Some(a.since),
-            ask: None,
-            pr: None,
-            permission: None,
+            ..InboxItem::new(ItemKind::Autopilot, t.key.to_string(), t.title.clone())
         });
     }
 
@@ -458,10 +467,6 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             continue;
         }
         items.push(InboxItem {
-            kind: ItemKind::SuggestReview,
-            task: t.key.to_string(),
-            title: t.title.clone(),
-            session: None,
             text: Some(
                 app.lang()
                     .pick(
@@ -470,10 +475,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                     )
                     .to_string(),
             ),
-            since: None,
-            ask: None,
-            pr: None,
-            permission: None,
+            ..InboxItem::new(ItemKind::SuggestReview, t.key.to_string(), t.title.clone())
         });
     }
 
@@ -482,6 +484,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             "ci-failed" => ItemKind::PrFailed,
             "changes-requested" | "comments" => ItemKind::PrReview,
             KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
+            KIND_BASE_STALE => ItemKind::BaseStale,
             _ => continue,
         };
         let Some(t) = task(&n.task_key) else {
@@ -497,6 +500,10 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         {
             continue;
         }
+        if n.kind == KIND_BASE_STALE {
+            items.push(stale_base_item(n, t));
+            continue;
+        }
         // An unlinked PR resolves its notices; one still open without its PR is stale.
         let prs = app.store.prs_of(&t.key).await?;
         let same_repo = prs.iter().find(|p| p.repo == n.repo);
@@ -504,24 +511,30 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             continue;
         };
         items.push(InboxItem {
-            kind,
-            task: n.task_key,
-            title: t.title.clone(),
-            session: None,
             text: Some(n.text),
             since: Some(n.created_at),
-            ask: None,
-            permission: None,
             pr: Some(InboxPr {
                 notice: n.id,
                 url: pr.url.clone(),
                 repo: n.repo,
             }),
+            ..InboxItem::new(kind, n.task_key, t.title.clone())
         });
     }
 
     items.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.since.cmp(&a.since)));
     Ok(Json(items))
+}
+
+/// The warning that a task's branch started from a base that could not be refreshed.
+/// It is about the start, not a PR: it carries the notice to dismiss, not a PR.
+fn stale_base_item(n: NoticeRow, t: &Task) -> InboxItem {
+    InboxItem {
+        text: Some(n.text),
+        since: Some(n.created_at),
+        notice: Some(n.id),
+        ..InboxItem::new(ItemKind::BaseStale, n.task_key, t.title.clone())
+    }
 }
 
 async fn last_event(app: &AppState, t: &Task, name: &str) -> Option<DateTime<Utc>> {
@@ -684,7 +697,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
@@ -727,6 +740,43 @@ mod tests {
         read_until(&format!("got:{hex};")).await;
     }
 
+    #[tokio::test]
+    async fn a_branch_error_is_an_item_until_cleared_and_never_for_archived_tasks() {
+        let app = app_with_pr_task().await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let kinds = |app: AppState| async move {
+            let Ok(Json(items)) = list(State(app)).await else {
+                panic!("the inbox failed");
+            };
+            items
+        };
+
+        app.store
+            .set_branch_error(&key, Some("no remote"))
+            .await
+            .unwrap();
+        let items = kinds(app.clone()).await;
+        let b = items.iter().find(|i| i.kind == ItemKind::Branch).unwrap();
+        assert_eq!(b.task, "PROJ-1");
+        assert_eq!(b.title, "Fix it");
+        assert_eq!(b.text.as_deref(), Some("no remote"));
+
+        app.store.set_branch_error(&key, None).await.unwrap();
+        let items = kinds(app.clone()).await;
+        assert!(items.iter().all(|i| i.kind != ItemKind::Branch));
+
+        app.store
+            .set_branch_error(&key, Some("no remote"))
+            .await
+            .unwrap();
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+        let items = kinds(app).await;
+        assert!(items.iter().all(|i| i.kind != ItemKind::Branch));
+    }
+
     async fn app_with_pr_task() -> AppState {
         use crate::config::Config;
         use crate::store::Store;
@@ -740,7 +790,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");
@@ -819,6 +869,87 @@ mod tests {
         let json = serde_json::to_value(failed).unwrap();
         assert_eq!(json["kind"], "pr-failed");
         assert_eq!(json["pr"]["notice"], pr.notice);
+    }
+
+    async fn stale_task() -> AppState {
+        use crate::store_prs::NewNotice;
+        let app = app_with_pr_task().await;
+        // No PR: a stale base is about the task, not a PR.
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        app.store.unlink_pr(row.id).await.unwrap();
+        app.store
+            .insert_notice(
+                &key,
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: "base-stale".into(),
+                    cause: "start".into(),
+                    text: "stale text".into(),
+                    detail: None,
+                },
+            )
+            .await
+            .unwrap();
+        app
+    }
+
+    #[tokio::test]
+    async fn a_base_stale_notice_is_an_item_without_pr_until_dismissed() {
+        let app = stale_task().await;
+        let Ok(Json(items)) = list(State(app.clone())).await else {
+            panic!("the inbox failed");
+        };
+        let stale: Vec<_> = items
+            .iter()
+            .filter(|i| i.kind == ItemKind::BaseStale)
+            .collect();
+        assert_eq!(stale.len(), 1, "{items:?}");
+        let item = stale[0];
+        let id = app.store.open_notices().await.unwrap()[0].id;
+        assert_eq!(item.notice, Some(id));
+        assert!(item.pr.is_none());
+        assert_eq!(item.text.as_deref(), Some("stale text"));
+        let json = serde_json::to_value(item).unwrap();
+        assert_eq!(json["kind"], "base-stale");
+        assert_eq!(json["notice"], id);
+        assert!(json.get("pr").is_none());
+
+        let status = crate::pr_api::dismiss(State(app.clone()), axum::extract::Path(id))
+            .await
+            .map_err(|e| e.status);
+        assert_eq!(status, Ok(axum::http::StatusCode::NO_CONTENT));
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        assert!(
+            items.iter().all(|i| i.kind != ItemKind::BaseStale),
+            "{items:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn archiving_resolves_the_base_stale_notice_and_other_items_have_no_notice_key() {
+        let app = stale_task().await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+        let Ok(Json(items)) = list(State(app.clone())).await else {
+            panic!("the inbox failed");
+        };
+        assert!(
+            items.iter().all(|i| i.kind != ItemKind::BaseStale),
+            "{items:?}"
+        );
+        app.store.resolve_all_notices_of_task(&key).await.unwrap();
+        assert!(app.store.open_notices().await.unwrap().is_empty());
+
+        let plain = InboxItem {
+            ..InboxItem::new(ItemKind::Waiting, "PROJ-1".into(), "t".into())
+        };
+        assert!(serde_json::to_value(plain).unwrap().get("notice").is_none());
     }
 
     #[tokio::test]
@@ -906,8 +1037,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
-            claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");

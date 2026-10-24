@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { setLanguage } from "../i18n";
-import { api, ApiError, type PreviewView, type Project } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, api, ApiError, type PreviewView, type Project } from "../api";
 import { PreviewControl } from "./PreviewControl";
 
 const live = vi.hoisted(() => ({ handlers: {} as Record<string, () => void> }));
@@ -23,7 +23,7 @@ afterEach(() => {
   openExternal.mockClear();
 });
 
-const proj = (preview_command: string | null): Project => ({ name: "app", path: "/x", kind: "repo", workflow: "feature", preview_command });
+const proj = (preview_command: string | null): Project => ({ name: "app", path: "/x", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS, preview_command });
 const view = (over: Partial<PreviewView>): PreviewView => ({ state: "running", started_at: "2026-01-01T00:00:00Z", ...over });
 
 describe("PreviewControl", () => {

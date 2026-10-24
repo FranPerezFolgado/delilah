@@ -155,6 +155,12 @@ pub async fn on_hook(
 ) {
     use delilah_agents::claude::Signal;
     let key = TaskKey::new(task);
+    // A free task's first analysis may have just appeared; never holds up the hook.
+    if matches!(signal, Signal::Working | Signal::TurnEnded) && crate::branching::is_free(&key) {
+        let app = app.clone();
+        let key = key.clone();
+        tokio::spawn(async move { crate::branching::on_activity(&app, &key).await });
+    }
     match signal {
         Signal::Working => {
             if let Some(phase) = signal_phase(hook) {
@@ -200,7 +206,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

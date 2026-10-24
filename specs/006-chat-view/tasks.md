@@ -11,7 +11,7 @@
 
 **Gate**: Phase 2 (the spike) decides Phases 6–9. If it says **drop**, delete Phases 6–9 from this file, record the decision, and go to Phase 10. If it says **adjust**, rewrite the affected tasks of Phases 6–9 to the fallbacks in research.md R7 before starting them.
 
-**Verdict (T004, 2026-10-24)**: **adjust** ([decision 49](../../docs/decisions.md), [spike](../../docs/spikes/2026-10-24-claude-stream.md)). Chat mode runs with `--permission-prompt-tool stdio`; limits come from `rate_limit_event`; interrupt ends the turn from `result`; Remote Control is hidden in chat mode; **T059 is dropped**. Changed tasks are marked *(spike)* below.
+**Verdict (T004, 2026-10-24)**: **adjust** ([decision 67](../../docs/decisions.md), [spike](../../docs/spikes/2026-10-24-claude-stream.md)). Chat mode runs with `--permission-prompt-tool stdio`; limits come from `rate_limit_event`; interrupt ends the turn from `result`; Remote Control is hidden in chat mode; **T059 is dropped**. Changed tasks are marked *(spike)* below.
 
 ## Format: `[ID] [P?] [Story] Description`
 

@@ -374,7 +374,7 @@ pub(crate) mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -517,6 +517,7 @@ pub(crate) mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await
@@ -943,6 +944,7 @@ pub(crate) mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await

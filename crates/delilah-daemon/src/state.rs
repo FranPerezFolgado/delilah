@@ -51,6 +51,8 @@ pub struct AppState {
     pub(crate) transcript_seen: Arc<Mutex<HashMap<String, u64>>>,
     /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
     pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
+    /// One lock per task for the branch and name triggers (see `branching.rs`).
+    pub(crate) branching: Arc<crate::branching::BranchLocks>,
     /// The autopilot finishes running now, and their retries (see `autopilot/finish.rs`).
     pub(crate) finishing: Arc<crate::autopilot::Finishing>,
     /// Whether Claude sessions start with Remote Control (the `remote-control`
@@ -68,6 +70,11 @@ pub struct AppState {
     pub(crate) previews: Arc<crate::preview::Previews>,
 }
 
+/// Unit tests must never touch the real Keychain; `DELILAH_SECRETS=memory` also asks for it.
+fn use_memory_secrets(secrets_in_memory: bool, under_test: bool) -> bool {
+    under_test || secrets_in_memory
+}
+
 impl AppState {
     pub fn new(store: Store, config: Config) -> Self {
         let notifier = if config.notify {
@@ -75,6 +82,8 @@ impl AppState {
         } else {
             Notifier::Recorder(Arc::default())
         };
+        let secrets_in_memory = config.secrets_in_memory;
+        let gh_program = config.gh_program.clone();
         let events = Events::default();
         Self {
             store,
@@ -84,7 +93,7 @@ impl AppState {
             usage: Arc::default(),
             notifier,
             // Unit tests must never touch the real Keychain.
-            secrets: if cfg!(test) {
+            secrets: if use_memory_secrets(secrets_in_memory, cfg!(test)) {
                 Secrets::Memory(Arc::default())
             } else {
                 Secrets::Keychain
@@ -97,9 +106,12 @@ impl AppState {
             review_hints: Arc::default(),
             transcript_seen: Arc::default(),
             handoffs: Arc::default(),
+            branching: Arc::default(),
             finishing: Arc::default(),
             remote_control: Arc::default(),
-            gh: Arc::new(GhClient::new(Arc::new(CliGh))),
+            gh: Arc::new(GhClient::new(Arc::new(CliGh {
+                program: gh_program,
+            }))),
             pr_backoff: Arc::default(),
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),
@@ -159,5 +171,17 @@ impl AppState {
 impl FromRef<AppState> for Store {
     fn from_ref(state: &AppState) -> Self {
         state.store.clone()
+    }
+}
+
+#[cfg(test)]
+mod secrets_tests {
+    use super::use_memory_secrets;
+
+    #[test]
+    fn memory_secrets_under_test_or_when_asked() {
+        assert!(use_memory_secrets(true, false));
+        assert!(use_memory_secrets(false, true));
+        assert!(!use_memory_secrets(false, false));
     }
 }

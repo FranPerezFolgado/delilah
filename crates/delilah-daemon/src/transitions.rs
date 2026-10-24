@@ -92,6 +92,14 @@ impl AppState {
                 format!("{key} {}", l.pick("ha fallado", "failed")),
                 reason.clone(),
             ),
+            (TaskStatus::SetupFailed { reason }, _) => (
+                format!("{key} {}", l.pick("el setup ha fallado", "setup failed")),
+                match reason.as_str() {
+                    "cancelled" => l.pick("cancelado", "cancelled").to_string(),
+                    "interrupted" => l.pick("interrumpido", "interrupted").to_string(),
+                    other => other.to_string(),
+                },
+            ),
             _ => return,
         };
         self.notifier.send(title, body);
@@ -113,6 +121,7 @@ mod tests {
             agent_program: None,
             claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new(key);

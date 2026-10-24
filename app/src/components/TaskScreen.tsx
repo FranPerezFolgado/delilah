@@ -21,11 +21,12 @@ import { PreviewControl } from "./PreviewControl";
 import { PhaseBadge } from "./PhaseBadge";
 import { SessionChain } from "./SessionChain";
 import { headerPhaseOf } from "../phases";
-import { sessionStatus } from "./sessionLabels";
+import { isSetupRunning, kindLabel, sessionStatus } from "./sessionLabels";
 import { statusIcon } from "./status";
 import { PrView } from "./PrView";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
+import { SetupBanner } from "./SetupBanner";
 import { TerminalPane } from "./TerminalPane";
 
 interface Props {
@@ -47,6 +48,8 @@ interface Props {
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
   asks: InboxItem[];
+  /** The task's base-stale warnings, shown above the tabs until dismissed. */
+  notices: InboxItem[];
   /** Where those questions sit, next to the session's terminal. */
   askPosition: AskPosition;
   onChanged: () => void;
@@ -60,7 +63,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert, onOpenTask }: Props) {
+export function TaskScreen({ owner, task, spec, project, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -273,6 +276,19 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
       .then(onChanged)
       .catch((e) => setError((e as Error).message));
 
+  const [editing, setEditing] = useState<string | null>(null);
+  const saveTitle = () => {
+    const title = (editing ?? "").trim();
+    setEditing(null);
+    if (!task || !title || title === task.title) return;
+    api.updateTask(owner, { title }).then(onChanged).catch((e) => setError((e as Error).message));
+  };
+  const restoreTitle = () =>
+    task?.previous_title &&
+    api
+      .updateTask(owner, { title: task.previous_title })
+      .then(onChanged)
+      .catch((e) => setError((e as Error).message));
   const [autopilotBusy, setAutopilotBusy] = useState(false);
   const setAutopilotMode = (action: "on" | "off") => {
     setAutopilotBusy(true);
@@ -526,7 +542,34 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
         {task && status ? (
           <>
             <span className="mono muted">{owner}</span>
-            <h1 data-tauri-drag-region className="trunc">{task.title}</h1>
+            {editing === null ? (
+              <h1
+                data-tauri-drag-region
+                className="trunc"
+                title={t("Clic para renombrar")}
+                onClick={() => setEditing(task.title)}
+              >
+                {task.title}
+              </h1>
+            ) : (
+              <input
+                autoFocus
+                aria-label={t("Título de la tarea")}
+                value={editing}
+                onChange={(e) => setEditing(e.target.value)}
+                onBlur={() => setEditing(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveTitle();
+                  else if (e.key === "Escape") setEditing(null);
+                }}
+              />
+            )}
+            {task.previous_title && (
+              <span className="muted trunc">
+                {t("Antes: {title}", { title: task.previous_title })}{" "}
+                <button className="saving-off" onClick={restoreTitle}>{t("Restaurar")}</button>
+              </span>
+            )}
             <span className="head-pills">
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
@@ -608,6 +651,19 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
       >
         <div className="tmain">
           {task && <SessionChain task={task} sessions={sessions} onOpenSession={showSession} onChanged={onChanged} />}
+          {notices.map((n) => (
+            <div key={n.notice} className="ebar warn base-stale">
+              <span style={{ flex: 1 }}>{n.text}</span>
+              {n.notice != null && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}
+                >
+                  {t("Descartar")}
+                </button>
+              )}
+            </div>
+          ))}
           <div className="etabs" role="tablist">
             <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
             {sessions.map((s) => {
@@ -617,9 +673,9 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                   key={s.id}
                   id={sessionTab(s.id)}
                   label={s.label}
-                  title={`${s.label} · ${s.kind === "shell" ? t("terminal") : "Claude"} · ${st.label}`}
-                  icon={s.kind === "shell" ? "console" : st.icon}
-                  iconClass={s.kind === "shell" ? "" : st.cls}
+                  title={`${s.label} · ${kindLabel(s)} · ${st.label}`}
+                  icon={s.kind === "claude" ? st.icon : "console"}
+                  iconClass={s.kind === "claude" ? st.cls : ""}
                   shown={shown}
                   onActivate={activate}
                   onClose={s.primary ? undefined : close}
@@ -709,6 +765,9 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
                   .catch((e) => setError((e as Error).message));
               return (
                 <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                  {s.kind === "setup" && s.live && task && (
+                    <SetupBanner task={task} running={isSetupRunning(sessions)} onChanged={onChanged} />
+                  )}
                   {!asConversation && s.read_only && s.kind === "claude" && s.live && (
                     <div className="ebar warn">
                       <Icon name="lock" />
@@ -853,7 +912,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
               <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>
                 {keyOf("quick-open")}
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Actualizar")} aria-label={t("Actualizar el árbol")}>
+              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Refrescar")} aria-label={t("Actualizar el árbol")}>
                 <Icon name="refresh" />
               </button>
               <button className="btn btn-ghost icon-btn" onClick={toggleTree} title={t("Ocultar ({key})", { key: keyOf("toggle-tree") })} aria-label={t("Ocultar el árbol")}>

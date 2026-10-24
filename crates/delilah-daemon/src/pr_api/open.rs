@@ -38,6 +38,12 @@ async fn source_of(
             "no-workspace",
         )
     })?;
+    if !ws.has_branch() {
+        return Err(ApiError::unprocessable(
+            app.lang()
+                .pick("la tarea aún no tiene rama", "the task has no branch yet"),
+        ));
+    }
     let repo = repo.unwrap_or(".");
     let repos = ws.repos();
     let dir = repos
@@ -489,6 +495,29 @@ mod tests {
         let body = json!({ "title": "  " });
         let (s, _) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_branchless_task_cannot_open_a_pr_and_nothing_is_claimed() {
+        let gh = opening_gh();
+        let (router, app, _dir) = git_setup(gh.clone(), &["first"]).await;
+        let key = TaskKey::new("PROJ-1");
+        let (root, mut ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        ws.branch = String::new();
+        app.store.save_workspace(&key, &root, &ws).await.unwrap();
+        let body = json!({ "title": "T" });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+        let msg = v["error"].as_str().unwrap();
+        assert!(
+            msg == "la tarea aún no tiene rama" || msg == "the task has no branch yet",
+            "{msg}"
+        );
+        assert!(
+            pr_loop::claim(&app, &key).is_some(),
+            "the claim was not left"
+        );
+        assert!(gh.calls().iter().all(|c| c[..2] != ["pr", "create"]));
     }
 
     #[tokio::test]

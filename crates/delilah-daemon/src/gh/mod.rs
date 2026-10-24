@@ -122,10 +122,12 @@ pub trait Gh: Send + Sync {
     ) -> BoxFuture<'_, Result<String, GhError>>;
 }
 
-/// The real `gh`: the binary is `DELILAH_GH_BIN` or `gh`, found on the login shell's
-/// PATH with a clean environment, as agents get.
+/// The real `gh`: the binary is `program` (`DELILAH_GH_BIN`, from `Config`) or `gh`,
+/// found on the login shell's PATH with a clean environment, as agents get.
 #[derive(Default)]
-pub struct CliGh;
+pub struct CliGh {
+    pub program: Option<PathBuf>,
+}
 
 impl Gh for CliGh {
     fn run(
@@ -135,8 +137,8 @@ impl Gh for CliGh {
         stdin: Option<String>,
     ) -> BoxFuture<'_, Result<String, GhError>> {
         let dir = dir.map(Path::to_path_buf);
+        let bin = self.program.clone().unwrap_or_else(|| "gh".into());
         Box::pin(async move {
-            let bin = std::env::var_os("DELILAH_GH_BIN").unwrap_or_else(|| "gh".into());
             let mut cmd = Command::new(bin);
             cmd.args(&args).env_clear();
             for (k, v) in delilah_agents::env::agent_env() {

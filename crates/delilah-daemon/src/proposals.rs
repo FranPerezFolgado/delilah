@@ -768,6 +768,7 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "prompt".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await
@@ -817,6 +818,7 @@ mod tests {
             agent_program: Some(fake),
             claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         project_and_conversation(&app).await;
@@ -827,6 +829,7 @@ mod tests {
                 path: repo.clone(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
                 preview_command: None,
             })
             .await

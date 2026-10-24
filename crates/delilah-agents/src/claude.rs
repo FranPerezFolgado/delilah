@@ -9,6 +9,10 @@ use serde_json::{Value, json};
 /// Hook events Delilah listens to.
 /// How long AskUserQuestion may wait for an answer from Delilah: a day.
 pub const ASK_TIMEOUT_SECS: u64 = 86_400;
+/// The tools the branch guard looks at.
+pub const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
+/// The guard hook's own timeout: a little over its curl's `-m 15`.
+pub const GUARD_TIMEOUT_SECS: u64 = 20;
 
 const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
@@ -426,6 +430,7 @@ pub fn settings(
     permission: Permission,
     extra_dirs: &[&Path],
     allowed_tools: &[String],
+    guard: bool,
 ) -> Value {
     let post = post_command(daemon_url, "/hooks/claude", task, session);
     let mut hooks: serde_json::Map<String, Value> = HOOK_EVENTS
@@ -442,13 +447,23 @@ pub fn settings(
         "curl -sS -m 86400 -X POST -H 'content-type: application/json' --data-binary @- \
          '{daemon_url}/hooks/claude/ask?task={task}&session={session}' 2>/dev/null || true"
     );
-    hooks.insert(
-        "PreToolUse".into(),
-        json!([{
-            "matcher": "AskUserQuestion",
-            "hooks": [{ "type": "command", "command": ask, "timeout": ASK_TIMEOUT_SECS }]
-        }]),
-    );
+    let mut pre_tool_use = vec![json!({
+        "matcher": "AskUserQuestion",
+        "hooks": [{ "type": "command", "command": ask, "timeout": ASK_TIMEOUT_SECS }]
+    })];
+    // A task without a branch gets one before an edit or a commit lands (see the
+    // daemon's branching.rs); an empty answer lets the tool through.
+    if guard {
+        let command = format!(
+            "curl -sS -m 15 -X POST -H 'content-type: application/json' --data-binary @- \
+             '{daemon_url}/hooks/claude/guard?task={task}&session={session}' 2>/dev/null || true"
+        );
+        pre_tool_use.push(json!({
+            "matcher": GUARD_MATCHER,
+            "hooks": [{ "type": "command", "command": command, "timeout": GUARD_TIMEOUT_SECS }]
+        }));
+    }
+    hooks.insert("PreToolUse".into(), Value::Array(pre_tool_use));
     let mut status_line =
         json!({ "type": "command", "command": format!("sh '{}'", status_script.display()) });
     if let Some(padding) = padding {
@@ -513,6 +528,7 @@ pub fn status_script(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn write_settings(
     path: &Path,
     daemon_url: &str,
@@ -521,6 +537,7 @@ pub fn write_settings(
     permission: Permission,
     extra_dirs: &[&Path],
     allowed_tools: &[String],
+    guard: bool,
 ) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -544,6 +561,7 @@ pub fn write_settings(
         permission,
         extra_dirs,
         allowed_tools,
+        guard,
     );
     std::fs::write(path, serde_json::to_vec_pretty(&settings)?)?;
     Ok(path.to_path_buf())
@@ -674,6 +692,7 @@ mod tests {
             Permission::Default,
             &[],
             &[],
+            false,
         );
         for event in HOOK_EVENTS {
             let command = s["hooks"][event][0]["hooks"][0]["command"]
@@ -694,6 +713,34 @@ mod tests {
                 .contains("/hooks/claude/ask?task=PROJ-1&session=sess-1")
         );
         assert_eq!(ask["hooks"][0]["timeout"], ASK_TIMEOUT_SECS);
+        // Without the guard, nothing else is hooked on PreToolUse.
+        assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_guard_adds_a_second_pre_tool_use_hook() {
+        let s = settings(
+            "http://127.0.0.1:7420",
+            "LIBRE-1",
+            "sess-1",
+            Path::new("/tmp/statusline-sess-1.sh"),
+            None,
+            Permission::Default,
+            &[],
+            &[],
+            true,
+        );
+        let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 2);
+        assert_eq!(pre[0]["matcher"], "AskUserQuestion");
+        assert_eq!(pre[1]["matcher"], "Edit|Write|MultiEdit|NotebookEdit|Bash");
+        let command = pre[1]["hooks"][0]["command"].as_str().unwrap();
+        assert!(command.contains("curl -sS -m 15"), "{command}");
+        assert!(
+            command.contains("/hooks/claude/guard?task=LIBRE-1&session=sess-1"),
+            "{command}"
+        );
+        assert!(command.ends_with("|| true"), "{command}");
     }
 
     #[test]
@@ -974,6 +1021,7 @@ mod tests {
                 p,
                 &[extra],
                 &[],
+                false,
             )
         };
         let dont_ask = s(Permission::DontAsk);
@@ -1033,6 +1081,7 @@ mod tests {
                 p,
                 &[],
                 &rules,
+                false,
             )
         };
         assert_eq!(

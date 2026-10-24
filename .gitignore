@@ -4,6 +4,9 @@
 .claude/settings.local.json
 /app/node_modules/
 /app/dist/
+/app/playwright-report/
+/app/test-results/
+/app/.vitest/
 /app/src-tauri/target/
 /app/src-tauri/gen/
 /app/src-tauri/binaries/

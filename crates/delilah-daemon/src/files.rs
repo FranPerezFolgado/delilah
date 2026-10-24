@@ -416,7 +416,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

@@ -194,6 +194,7 @@ mod tests {
             claude_bin: "claude".into(),
             agent_program: Some(bin.clone()),
             claude_projects: home.join("projects"),
+            ..Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

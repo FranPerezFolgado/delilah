@@ -1,6 +1,6 @@
 //! Sessions alive in this daemon right now, by session id.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -57,6 +57,11 @@ pub struct Live {
 }
 
 impl Live {
+    /// Whether what a viewer types reaches the process: not for a setup's output.
+    pub fn accepts_input(&self) -> bool {
+        self.kind != SessionKind::Setup
+    }
+
     pub fn state(&self) -> LiveState {
         *self.state.lock().unwrap()
     }
@@ -120,6 +125,8 @@ impl Live {
 #[derive(Default)]
 pub struct Sessions {
     live: Mutex<HashMap<String, Live>>,
+    /// Setup sessions the user cancelled, until their end is handled.
+    cancelled: Mutex<HashSet<String>>,
     events: Events,
 }
 
@@ -127,6 +134,7 @@ impl Sessions {
     pub fn new(events: Events) -> Self {
         Self {
             live: Mutex::default(),
+            cancelled: Mutex::default(),
             events,
         }
     }
@@ -147,10 +155,9 @@ impl Sessions {
             runtime: runtime.into(),
             started: Arc::new(Notify::new()),
             viewers: Arc::default(),
-            state: Arc::new(Mutex::new(if kind == SessionKind::Shell {
-                LiveState::Working
-            } else {
-                LiveState::Starting
+            state: Arc::new(Mutex::new(match kind {
+                SessionKind::Shell | SessionKind::Setup => LiveState::Working,
+                SessionKind::Claude => LiveState::Starting,
             })),
             conversation: Arc::default(),
             convo: Arc::default(),
@@ -164,6 +171,17 @@ impl Sessions {
             .insert(id.to_string(), live.clone());
         self.events.emit(Topic::Sessions);
         live
+    }
+
+    /// Notes that the user cancelled this (setup) session, so its end is told from a
+    /// failure.
+    pub fn mark_cancelled(&self, id: &str) {
+        self.cancelled.lock().unwrap().insert(id.to_string());
+    }
+
+    /// Whether it was cancelled; forgets the mark.
+    pub fn take_cancelled(&self, id: &str) -> bool {
+        self.cancelled.lock().unwrap().remove(id)
     }
 
     pub fn get(&self, id: &str) -> Option<Live> {

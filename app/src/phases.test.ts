@@ -10,7 +10,7 @@ const task = (status: TaskStatus, phase: string | null = null): Task => ({
   workflow: "feature",
   phase,
   status,
-  saving_mode: false,
+  saving_mode: false, title_source: "initial", previous_title: null, branch_error: null,
   handoff: null,
 });
 
@@ -86,10 +86,20 @@ describe("headerPhaseOf", () => {
 });
 
 describe("whereOf", () => {
-  it("starts in a worktree unless the checkout was chosen, as the daemon does", () => {
+  const mode = (workspace: "checkout" | "worktree") => ({ settings: { workspace } }) as never;
+  it("a saved choice wins; without one, the project's setting; without that, a worktree, as the daemon does", () => {
     expect(whereOf(true)).toBe("checkout");
     expect(whereOf(false)).toBe("worktree");
     expect(whereOf(null)).toBe("worktree");
     expect(whereOf(undefined)).toBe("worktree");
+    expect(whereOf(null, { settings: { workspace: null } } as never)).toBe("worktree");
+    expect(whereOf(null, mode("worktree"))).toBe("worktree");
+    expect(whereOf(null, mode("checkout"))).toBe("checkout");
+    expect(whereOf(true, mode("worktree"))).toBe("checkout");
+  });
+  it("the new-task form passes its own fallback (checkout) for a project with no setting", () => {
+    expect(whereOf(null, { settings: { workspace: null } } as never, "checkout")).toBe("checkout");
+    expect(whereOf(null, mode("worktree"), "checkout")).toBe("worktree");
+    expect(whereOf(false, undefined, "checkout")).toBe("worktree");
   });
 });

@@ -6,7 +6,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | a7118d8 | |
-| WP-02 | 2 | 2A | done | 2 | | verdict ADJUST (decision 49) |
+| WP-02 | 2 | 2A | done | 2 | | verdict ADJUST (decision 67) |
 | WP-03 | 3 | 3A | done | 1 | 7a74a83 | |
 | WP-04 | 3 | 3A | done | 1 | 95b1959 | |
 | WP-05 | 4 | 4A | done | 1 | dfd483e | |
@@ -24,27 +24,27 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12G | 5 | 5D | done | 1 | 2e6af70 | re-review fixes |
 | WP-13 | 5 | 5B | done | 1 | 626cd52 | |
 | WP-14 | 6 | 6A | done | 1 | 8e3f0a9 | |
-| WP-15 | 6 | 6B | done | 1 | cf8c546 | go (decision 49) |
+| WP-15 | 6 | 6B | done | 1 | cf8c546 | go (decision 67) |
 | WP-16 | 7 | 7A | done | 1 | | T037–T039 now (stream.rs); T040 after WP-15 |
 | WP-17 | 7 | 7A | done | 1 | 49220b6 | |
-| WP-18 | 7 | 7B | done | 1 | | go (decision 49) |
-| WP-19 | 7 | 7C | done | 1 | | go (decision 49) |
-| WP-20 | 7 | 7C | done | 1 | ee3b3da | go (decision 49) |
-| WP-21 | 7 | 7D | done | 1 | 9d0e3cc | go (decision 49) |
+| WP-18 | 7 | 7B | done | 1 | | go (decision 67) |
+| WP-19 | 7 | 7C | done | 1 | | go (decision 67) |
+| WP-20 | 7 | 7C | done | 1 | ee3b3da | go (decision 67) |
+| WP-21 | 7 | 7D | done | 1 | 9d0e3cc | go (decision 67) |
 | WP-21F | 7 | 7F | done | 1 | | UI/CLI review fixes |
 | WP-19F | 7 | 7G | done | 1 | | review fixes (init wait CRITICAL) |
 | WP-22F | 8 | 8F | done | 1 | | permission rule security |
 | WP-19G | 7 | 7H | done | 1 | | fix round 2 |
 | WP-22G | 8 | 8G | done | 1 | | allowlist for remembered rules (user decision) |
-| WP-22 | 8 | 8A | done | 1 | | go (decision 49) |
+| WP-22 | 8 | 8A | done | 1 | | go (decision 67) |
 | WP-22H | 8 | 8H | done | 1 | | in-session file/WebFetch rule matching |
-| WP-23 | 8 | 8B | done | 1 | | go (decision 49) |
-| WP-24 | 8 | 8C | done | 1 | | go (decision 49) |
+| WP-23 | 8 | 8B | done | 1 | | go (decision 67) |
+| WP-24 | 8 | 8C | done | 1 | | go (decision 67) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
-| WP-26 | 9 | 9A | done | 1 | | go (decision 49) |
-| WP-27 | 9 | 9B | done | 1 | | go (decision 49) |
-| WP-28 | 9 | 9B | done | 1 | | go (decision 49) |
-| WP-29 | 9 | 9B | done | 1 | | go (decision 49) |
+| WP-26 | 9 | 9A | done | 1 | | go (decision 67) |
+| WP-27 | 9 | 9B | done | 1 | | go (decision 67) |
+| WP-28 | 9 | 9B | done | 1 | | go (decision 67) |
+| WP-29 | 9 | 9B | done | 1 | | go (decision 67) |
 | WP-26F | 9 | 9F | done | 1 | | runtime switch settle (flake + product) |
 | WP-30 | 10 | 10A | implementing | 0 | | |
 | WP-31 | 10 | 10B | pending | 0 | | |

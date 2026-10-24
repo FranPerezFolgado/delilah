@@ -164,7 +164,7 @@ in a fixture workspace, with a clean env. Findings go to
 > accepted but unverified (hidden in chat mode). d2 is yes, but the default is not
 > `--permission-prompts host`: the flag is **`--permission-prompt-tool stdio`**, and
 > without it Claude denies by itself. The same flag adds AskUserQuestion to the `-p` tools
-> (d3). No `Stop` fires after an interrupt (e). Verdict: adjust, decision 49.
+> (d3). No `Stop` fires after an interrupt (e). Verdict: adjust, decision 67.
 
 ## R8. Chat-mode permissions (option C), assuming R7-d2 is "yes" (it is, with `--permission-prompt-tool stdio`)
 

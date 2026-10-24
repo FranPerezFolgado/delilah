@@ -17,6 +17,18 @@ pub fn spawn(app: AppState) {
     });
 }
 
+/// Catches up the free tasks' names and branches; once at daemon start.
+pub async fn recover_branches(app: &AppState) {
+    match app.store.list_tasks().await {
+        Ok(tasks) => {
+            for task in tasks {
+                crate::branching::recover(app, &task).await;
+            }
+        }
+        Err(e) => tracing::warn!("scheduler: {e}"),
+    }
+}
+
 pub async fn tick(app: &AppState) {
     let tasks = match app.store.list_tasks().await {
         Ok(tasks) => tasks,
@@ -26,6 +38,7 @@ pub async fn tick(app: &AppState) {
         resume_if_due(app, &task).await;
         crate::autopilot::recover(app, &task);
         crate::handoff::recover(app, &task).await;
+        crate::branching::recover(app, &task).await;
     }
 }
 
@@ -55,7 +68,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
-            claude_projects: crate::config::Config::scratch_projects(),
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
