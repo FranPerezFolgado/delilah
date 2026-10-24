@@ -48,6 +48,8 @@ interface Props {
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
   asks: InboxItem[];
+  /** The task's base-stale warnings, shown above the tabs until dismissed. */
+  notices: InboxItem[];
   /** Where those questions sit, next to the session's terminal. */
   askPosition: AskPosition;
   onChanged: () => void;
@@ -61,7 +63,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosition, onChanged, onNewTask, onConvert, onOpenTask }: Props) {
+export function TaskScreen({ owner, task, spec, project, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -616,6 +618,19 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
       >
         <div className="tmain">
           {task && <SessionChain task={task} sessions={sessions} onOpenSession={showSession} onChanged={onChanged} />}
+          {notices.map((n) => (
+            <div key={n.notice} className="ebar warn base-stale">
+              <span style={{ flex: 1 }}>{n.text}</span>
+              {n.notice != null && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}
+                >
+                  {t("Descartar")}
+                </button>
+              )}
+            </div>
+          ))}
           <div className="etabs" role="tablist">
             <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
             {sessions.map((s) => {

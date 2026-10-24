@@ -350,7 +350,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot" | "base-stale";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -396,6 +396,8 @@ export interface InboxItem {
   ask?: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
   /** The PR notice behind a pr-* item. */
   pr?: { notice: number; url: string; repo: string };
+  /** The pr_notices row behind a base-stale item: dismiss it with `dismissNotice`. */
+  notice?: number;
 }
 
 /** Where a session's questions with options sit, next to its terminal. */
@@ -409,6 +411,10 @@ export function parseAskPosition(v: unknown): AskPosition {
 
 /** The kinds that block an agent until you act: they count in the badge. */
 export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-blocked"];
+
+/** The stale-base warnings of one task, for its screen's banner. */
+export const baseStaleNotices = (inbox: InboxItem[], task: string): InboxItem[] =>
+  inbox.filter((i) => i.task === task && i.kind === "base-stale");
 
 export interface FolderInspection {
   path: string;

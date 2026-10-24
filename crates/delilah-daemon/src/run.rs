@@ -9,13 +9,15 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
-use delilah_git::{GitOptions, WorkspaceSpec};
+use delilah_git::{Deadline, FetchOutcome, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::ApiError;
+use crate::events::Topic;
 use crate::state::AppState;
 use crate::store::BacklogChange;
+use crate::store_prs::NewNotice;
 use crate::store_sessions::{SessionKind, SessionRecord, project_of};
 
 /// How long a new session may show the folder-trust dialog before we stop watching.
@@ -23,6 +25,79 @@ const TRUST_WATCH: Duration = Duration::from_secs(60);
 
 /// Added to the system prompt of an idea conversation.
 const IDEA_PROMPT: &str = "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode.";
+
+use crate::store_prs::KIND_BASE_STALE;
+
+/// Logs where each repo's task branch started (the ref and the commit), and warns in
+/// the inbox for each repo whose fetch failed. Never fails the start. The warning's
+/// cause is the moment of the start (a branchless task has no branch yet), so a
+/// warning dismissed at one start still shows at the next.
+async fn report_bases(app: &AppState, key: &TaskKey, project: &str, bases: &[RepoBase]) {
+    let started = format!("start {}", chrono::Utc::now().to_rfc3339());
+    let mut warned = false;
+    for b in bases {
+        tracing::info!(task = %key, repo = %b.repo, base = %b.refname, sha = b.sha.as_deref().unwrap_or("-"), fetch = ?b.fetch, "task branch base");
+        let FetchOutcome::Failed(reason) = &b.fetch else {
+            continue;
+        };
+        let reason = short_reason(reason);
+        let reason = reason.as_str();
+        let name = if b.repo == "." { project } else { &b.repo };
+        let sha7: String = b.start().chars().take(7).collect();
+        let text = format!(
+            "{} {name} ({reason}); {} {} @ {sha7} {}",
+            app.lang().pick("No se pudo actualizar", "Could not update"),
+            app.lang()
+                .pick("la rama empieza en", "the branch starts at"),
+            b.refname,
+            app.lang()
+                .pick("y puede ir atrasada.", "and may be behind."),
+        );
+        let notice = NewNotice {
+            repo: b.repo.clone(),
+            kind: KIND_BASE_STALE.into(),
+            cause: started.clone(),
+            text,
+            detail: Some(serde_json::json!({
+                "refname": b.refname, "sha": b.sha, "reason": reason
+            })),
+        };
+        match app.store.insert_notice(key, &notice).await {
+            Ok(new) => warned |= new,
+            Err(e) => tracing::warn!(task = %key, "cannot record the stale base: {e}"),
+        }
+    }
+    if warned {
+        app.emit(Topic::Inbox);
+    }
+}
+
+/// Git's stderr cut to what a notice can show: the first `fatal:`/`error:` line (else
+/// the first non-empty one), no control characters, no credentials in URLs, at most
+/// 200 chars.
+fn short_reason(stderr: &str) -> String {
+    let mut lines = stderr.lines().map(str::trim).filter(|l| !l.is_empty());
+    let line = lines
+        .clone()
+        .find(|l| l.starts_with("fatal:") || l.starts_with("error:"))
+        .or_else(|| lines.next())
+        .unwrap_or("");
+    let mut out = String::new();
+    let mut rest = line;
+    // `scheme://user:secret@host` → `scheme://host`
+    while let Some(at) = rest.find("://") {
+        out.push_str(&rest[..at + 3]);
+        rest = &rest[at + 3..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '/' || c == '\'' || c == '"')
+            .unwrap_or(rest.len());
+        if let Some(cred) = rest[..end].rfind('@') {
+            rest = &rest[cred + 1..];
+        }
+    }
+    out.push_str(rest);
+    out.chars().filter(|c| !c.is_control()).take(200).collect()
+}
 
 /// How a Claude session is launched, by what it is: a conversation never asks
 /// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
@@ -336,16 +411,19 @@ pub async fn start_run(
         allow_file_protocol: app.config.allow_file_protocol,
     };
     let root = project.path.clone();
+    let deadline = Deadline::after(delilah_git::NETWORK_LIMIT);
     let created = tokio::task::spawn_blocking(move || {
         if in_checkout {
-            delilah_git::use_checkout(&root, &spec, &opts).map(|(ws, prev)| (ws, Some(prev)))
+            delilah_git::use_checkout(&root, &spec, &opts, deadline)
+                .map(|(ws, prev, bases)| (ws, Some(prev), bases))
         } else {
-            delilah_git::create_workspace(&root, &spec, &opts).map(|ws| (ws, None))
+            delilah_git::create_workspace(&root, &spec, &opts, deadline)
+                .map(|(ws, bases)| (ws, None, bases))
         }
     })
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
-    let (ws, previous) = match created {
+    let (ws, previous, bases) = match created {
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
@@ -393,6 +471,7 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
+    report_bases(&app, &key, &project.name, &bases).await;
     let launch = AgentLaunch {
         free: req.free,
         prompt,
@@ -1122,7 +1201,13 @@ mod tests {
         let opts = GitOptions {
             allow_file_protocol: true,
         };
-        let ws = delilah_git::create_workspace(&project.path, &spec, &opts).unwrap();
+        let (ws, _) = delilah_git::create_workspace(
+            &project.path,
+            &spec,
+            &opts,
+            Deadline::after(Duration::from_secs(30)),
+        )
+        .unwrap();
         for sub in &subs {
             let out = std::process::Command::new("git")
                 .arg("-C")
@@ -1224,6 +1309,330 @@ mod tests {
     fn run(key: &str) -> RunRequest {
         serde_json::from_value(serde_json::json!({ "key": key, "title": "", "project": "web" }))
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_worktree_task_on_a_repo_project_starts_at_the_fresh_remote_head() {
+        let app = app().await;
+        let home = app.config.home.clone();
+        let sh = |dir: &std::path::Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=T", "-c", "user.email=t@d.invalid"])
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let origin = home.join("origin.git");
+        let repo = home.join("repo");
+        let other = home.join("other");
+        std::fs::create_dir_all(&home).unwrap();
+        sh(
+            &home,
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                origin.to_str().unwrap(),
+            ],
+        );
+        sh(
+            &home,
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                repo.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        sh(&repo, &["add", "."]);
+        sh(&repo, &["commit", "-qm", "init"]);
+        sh(&repo, &["push", "-q", "origin", "HEAD:main"]);
+        // The remote moves on after the clone.
+        sh(
+            &home,
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(other.join("b.txt"), "b\n").unwrap();
+        sh(&other, &["add", "."]);
+        sh(&other, &["commit", "-qm", "ahead"]);
+        sh(&other, &["push", "-q", "origin", "HEAD:main"]);
+        let remote_head = sh(&other, &["rev-parse", "HEAD"]);
+        let folder_head = sh(&repo, &["rev-parse", "HEAD"]);
+        let folder_main = sh(&repo, &["rev-parse", "refs/heads/main"]);
+
+        let agent = home.join("agent.sh");
+        std::fs::write(&agent, "#!/bin/sh\nexec sleep 5\n").unwrap();
+        std::fs::set_permissions(&agent, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let mut app = app;
+        app.config = Arc::new(crate::config::Config {
+            agent_program: Some(agent),
+            ..(*app.config).clone()
+        });
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "fresh".into(),
+                path: repo.clone(),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+
+        let mut req = run("PROJ-9");
+        req.project = "fresh".into();
+        req.title = "Fresh".into();
+        req.in_checkout = Some(false);
+        let started = start_run(State(app.clone()), Json(req)).await;
+        if let Err(e) = &started {
+            panic!("start failed: {} {}", e.status, e.message);
+        }
+
+        let ws = app.config.workspaces_dir().join("PROJ-9");
+        assert_eq!(sh(&ws, &["rev-parse", "HEAD"]), remote_head);
+        // The project folder is untouched: same commit, same branch, `main` not moved.
+        assert_eq!(sh(&repo, &["rev-parse", "HEAD"]), folder_head);
+        assert_eq!(sh(&repo, &["branch", "--show-current"]), "main");
+        assert_eq!(sh(&repo, &["rev-parse", "refs/heads/main"]), folder_main);
+        assert_ne!(folder_main, remote_head);
+    }
+
+    /// A one-commit repo project "stale" in the app's home, with `origin` set to
+    /// `origin` when given; the agent is a fake that just sleeps.
+    async fn repo_project(origin: Option<&str>) -> AppState {
+        let mut app = app().await;
+        let home = app.config.home.clone();
+        let repo = home.join("stale-repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let sh = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=T", "-c", "user.email=t@d.invalid"])
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        sh(&["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "init"]);
+        if let Some(origin) = origin {
+            sh(&["remote", "add", "origin", origin]);
+            // What a past fetch left behind.
+            sh(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        }
+        let agent = home.join("agent.sh");
+        std::fs::write(&agent, "#!/bin/sh\nexec sleep 5\n").unwrap();
+        std::fs::set_permissions(&agent, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        app.config = Arc::new(crate::config::Config {
+            agent_program: Some(agent),
+            ..(*app.config).clone()
+        });
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "stale".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        app
+    }
+
+    async fn start_stale(app: &AppState, key: &str, in_checkout: bool) {
+        let mut req = run(key);
+        req.project = "stale".into();
+        req.title = "Stale".into();
+        req.in_checkout = Some(in_checkout);
+        if let Err(e) = start_run(State(app.clone()), Json(req)).await {
+            panic!("start failed: {} {}", e.status, e.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_starts_the_task_and_leaves_a_base_stale_notice() {
+        let app = repo_project(Some("/nonexistent")).await;
+        start_stale(&app, "PROJ-8", false).await;
+
+        let notices = app.store.open_notices().await.unwrap();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        let n = &notices[0];
+        assert_eq!(n.task_key, "PROJ-8");
+        assert_eq!((n.kind.as_str(), n.repo.as_str()), ("base-stale", "."));
+        assert!(n.cause.starts_with("start "), "{}", n.cause);
+        assert!(n.text.contains("stale"), "{}", n.text);
+        assert!(n.text.contains("origin/main @ "), "{}", n.text);
+        assert!(
+            n.text.contains("/nonexistent") || n.text.contains("fetch"),
+            "{}",
+            n.text
+        );
+    }
+
+    #[test]
+    fn short_reason_keeps_the_fatal_line_without_credentials() {
+        let stderr = "remote: noise\nfatal: unable to access 'https://bob:s3cret@host.example/r.git/': \x1b[31mtimeout\n\nPlease make sure you have the correct access rights\n";
+        assert_eq!(
+            short_reason(stderr),
+            "fatal: unable to access 'https://host.example/r.git/': [31mtimeout"
+        );
+        assert_eq!(
+            short_reason("ssh://git@host/x and http://h/y"),
+            "ssh://host/x and http://h/y"
+        );
+        assert_eq!(short_reason(&"x".repeat(500)).len(), 200);
+        assert_eq!(short_reason(""), "");
+    }
+
+    #[tokio::test]
+    async fn a_parent_start_warns_only_for_the_repo_whose_fetch_failed() {
+        let app = app().await;
+        let key = TaskKey::new("PROJ-5");
+        app.store
+            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .await
+            .unwrap();
+        let base = |repo: &str, fetch| RepoBase {
+            repo: repo.into(),
+            refname: "origin/main".into(),
+            sha: Some("0123456789abcdef".into()),
+            fetch,
+        };
+        let bases = [
+            base(".", FetchOutcome::Fetched),
+            base("svc-payments", FetchOutcome::Fetched),
+            base(
+                "svc-billing",
+                FetchOutcome::Failed("fatal: no route".into()),
+            ),
+            base("svc-local", FetchOutcome::NoRemote),
+        ];
+
+        let logs = crate::logs::LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(logs.clone())
+            .with_ansi(false)
+            .finish();
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            report_bases(&app, &key, "platform", &bases).await;
+        }
+
+        // Every repo's base is logged, warned or not.
+        let lines = logs.tail(50);
+        for repo in [
+            "repo=.",
+            "repo=svc-payments",
+            "repo=svc-billing",
+            "repo=svc-local",
+        ] {
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("task branch base") && l.contains(repo)),
+                "{repo} in {lines:?}"
+            );
+        }
+
+        let notices = app.store.open_notices().await.unwrap();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].repo, "svc-billing");
+        assert!(
+            notices[0].text.contains("svc-billing (fatal: no route)"),
+            "{}",
+            notices[0].text
+        );
+        // Dismissed, it comes back at the next start: the cause is the start's moment,
+        // not swallowed by the unique index.
+        assert!(app.store.resolve_notice(notices[0].id).await.unwrap());
+        report_bases(&app, &key, "platform", &bases).await;
+        assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
+        assert!(
+            notices[0].text.contains("origin/main @ 0123456"),
+            "{}",
+            notices[0].text
+        );
+    }
+
+    #[tokio::test]
+    async fn no_remote_leaves_no_notice_in_either_mode() {
+        let app = repo_project(None).await;
+        start_stale(&app, "PROJ-7", false).await;
+        assert!(app.store.open_notices().await.unwrap().is_empty());
+
+        let app = repo_project(None).await;
+        start_stale(&app, "PROJ-6", true).await;
+        assert!(app.store.open_notices().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_taken_branch_in_checkout_mode_gets_a_fresh_one() {
+        // The free-name logic picks `-2`, so the start is re-based (and warns) rather
+        // than switching to the existing branch.
+        let app = repo_project(Some("/nonexistent")).await;
+        let repo = app.config.home.join("stale-repo");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["branch", "feature/PROJ-6"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        start_stale(&app, "PROJ-6", true).await;
+        let notices = app.store.open_notices().await.unwrap();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].kind, "base-stale");
+    }
+
+    #[tokio::test]
+    async fn a_successful_fetch_leaves_no_notice() {
+        let app = repo_project(None).await;
+        let home = app.config.home.clone();
+        let origin = home.join("good-origin.git");
+        let run_git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        };
+        run_git(&[
+            "clone",
+            "-q",
+            "--bare",
+            home.join("stale-repo").to_str().unwrap(),
+            origin.to_str().unwrap(),
+        ]);
+        run_git(&[
+            "-C",
+            home.join("stale-repo").to_str().unwrap(),
+            "remote",
+            "add",
+            "origin",
+            origin.to_str().unwrap(),
+        ]);
+        start_stale(&app, "PROJ-5", false).await;
+        assert!(app.store.open_notices().await.unwrap().is_empty());
     }
 
     async fn backlog_task(app: &AppState, key: &str) -> TaskKey {

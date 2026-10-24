@@ -195,6 +195,37 @@ describe("InboxView proposal item", () => {
   });
 });
 
+describe("InboxView base-stale", () => {
+  const stale: InboxItem = {
+    kind: "base-stale",
+    task: "PROJ-1",
+    title: "Reintentos",
+    session: null,
+    text: "No se pudo actualizar r (sin red); se usó main",
+    since: null,
+    notice: 9,
+  };
+  const viewStale = (onChanged = () => {}) =>
+    render(<InboxView items={[stale]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("shows the label and the text, with no PR actions", () => {
+    viewStale();
+    expect(screen.getByText("Branch may be behind")).toBeTruthy();
+    expect(screen.getByText("No se pudo actualizar r (sin red); se usó main")).toBeTruthy();
+    expect(screen.queryByText("View PR")).toBeNull();
+    expect(screen.queryByText("Ask the agent to fix it")).toBeNull();
+  });
+
+  it("dismisses the notice by its id", async () => {
+    const dis = vi.spyOn(api, "dismissNotice").mockResolvedValue(null);
+    const onChanged = vi.fn();
+    viewStale(onChanged);
+    fireEvent.click(screen.getByText("Discard"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(dis).toHaveBeenCalledWith(9);
+  });
+});
+
 describe("InboxView branch item", () => {
   const branch: InboxItem = { ...item, kind: "branch", text: "no remote", pr: undefined };
 

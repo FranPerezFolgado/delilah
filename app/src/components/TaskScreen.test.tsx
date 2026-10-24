@@ -1,19 +1,20 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "updateTask" ? updateTask : name === "setAutopilot" ? setAutopilot : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "updateTask" ? updateTask : name === "setAutopilot" ? setAutopilot : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -56,6 +57,7 @@ function head(t?: Task, s?: SpecSummary) {
       project={t ? undefined : project}
       sessions={[]}
       asks={[]}
+      notices={[]}
       askPosition="right"
       onChanged={() => {}}
     />,
@@ -112,7 +114,7 @@ describe("TaskScreen conversation sessions", () => {
   const open = (s: Session) => {
     sessionFor("@web").active = sessionTab(s.id);
     return render(
-      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
     );
   };
 
@@ -151,7 +153,7 @@ describe("TaskScreen conversation sessions", () => {
   const openWithAsk = (s: Session, ask: InboxItem = pendingAsk, onOpenTask?: (k: string) => void) => {
     sessionFor("@web").active = sessionTab(s.id);
     return render(
-      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[ask]} askPosition="right" onChanged={() => {}} onConvert={() => {}} onOpenTask={onOpenTask} />,
+      <TaskScreen owner="@web" project={project} sessions={[s]} asks={[ask]} notices={[]} askPosition="right" onChanged={() => {}} onConvert={() => {}} onOpenTask={onOpenTask} />,
     );
   };
 
@@ -183,6 +185,7 @@ describe("TaskScreen saving mode", () => {
         task={{ ...task(status), saving_mode: on }}
         sessions={[]}
         asks={[]}
+        notices={[]}
         askPosition="right"
         onChanged={() => {}}
       />,
@@ -265,6 +268,7 @@ describe("TaskScreen follows the primary session", () => {
       task={{ ...task({ type: "running" }), key: owner, saving_mode: true }}
       sessions={sessions}
       asks={[]}
+      notices={[]}
       askPosition="right"
       onChanged={() => {}}
     />
@@ -282,6 +286,35 @@ describe("TaskScreen follows the primary session", () => {
     const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
     rerender(screenOf("PROJ-2", [sess("c", true)]));
     expect(selected()).toBe("Tarea");
+  });
+});
+
+describe("TaskScreen base-stale banner", () => {
+  const stale: InboxItem = {
+    kind: "base-stale",
+    task: "PROJ-1",
+    title: "A task",
+    session: null,
+    text: "No se pudo actualizar r (sin red); se usó main",
+    since: null,
+    notice: 9,
+  };
+  const screenWith = (notices: InboxItem[], onChanged = () => {}) =>
+    render(<TaskScreen owner="PROJ-1" task={task({ type: "running" })} sessions={[]} asks={[]} notices={notices} askPosition="right" onChanged={onChanged} />);
+
+  it("shows the notice text and dismisses it", async () => {
+    dismissNotice.mockClear();
+    const onChanged = vi.fn();
+    const { getByText } = screenWith([stale], onChanged);
+    expect(getByText("No se pudo actualizar r (sin red); se usó main")).toBeTruthy();
+    fireEvent.click(getByText("Descartar"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(dismissNotice).toHaveBeenCalledWith(9);
+  });
+
+  it("has no banner without notices", () => {
+    const { container } = screenWith([]);
+    expect(container.querySelector(".base-stale")).toBeNull();
   });
 });
 

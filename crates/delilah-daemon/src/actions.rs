@@ -370,7 +370,9 @@ mod tests {
         };
         let opts = GitOptions::default();
         let ws = if in_checkout {
-            let (ws, previous) = delilah_git::use_checkout(repo, &spec, &opts).unwrap();
+            let deadline = delilah_git::Deadline::after(std::time::Duration::from_secs(30));
+            let (ws, previous, _) =
+                delilah_git::use_checkout(repo, &spec, &opts, deadline).unwrap();
             app.store.save_workspace(&key, repo, &ws).await.unwrap();
             app.store
                 .set_checkout_previous(&key, &previous)
@@ -378,7 +380,14 @@ mod tests {
                 .unwrap();
             ws
         } else {
-            let ws = delilah_git::create_workspace(repo, &spec, &opts).unwrap();
+            let ws = delilah_git::create_workspace(
+                repo,
+                &spec,
+                &opts,
+                delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+            )
+            .unwrap()
+            .0;
             app.store.save_workspace(&key, repo, &ws).await.unwrap();
             ws
         };
@@ -416,7 +425,13 @@ mod tests {
             kind: delilah_core::ProjectKind::Repo,
             submodules: vec![],
         };
-        let ws = delilah_git::create_workspace(repo, &spec, &GitOptions::default()).unwrap();
+        let (ws, _) = delilah_git::create_workspace(
+            repo,
+            &spec,
+            &GitOptions::default(),
+            delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+        )
+        .unwrap();
         app.store.save_workspace(&key, repo, &ws).await.unwrap();
         app.store
             .apply_event(
@@ -841,7 +856,13 @@ mod tests {
             submodules: vec![],
         };
         let opts = GitOptions::default();
-        let mut ws = delilah_git::create_workspace(repo, &spec, &opts).unwrap();
+        let (mut ws, _) = delilah_git::create_workspace(
+            repo,
+            &spec,
+            &opts,
+            delilah_git::Deadline::after(delilah_git::NETWORK_LIMIT),
+        )
+        .unwrap();
         delilah_git::apply_branch(&ws.path, "feature/PROJ-1", &opts).unwrap();
         ws.branch = "feature/PROJ-1".into();
         app.store.save_workspace(&key, repo, &ws).await.unwrap();
