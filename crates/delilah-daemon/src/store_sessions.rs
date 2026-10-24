@@ -275,6 +275,37 @@ impl Store {
         Ok(())
     }
 
+    /// Puts an adopted session back as the project's, as `original` was before
+    /// [`adopt_session`](Self::adopt_session) (a start that did not get its agent).
+    pub async fn unadopt_session(&self, original: &SessionRecord) -> Result<(), StoreError> {
+        sqlx::query(
+            "UPDATE sessions SET task_key = ?, project = ?, is_primary = ?, read_only = ?,
+             label = ? WHERE id = ?",
+        )
+        .bind(
+            project_of(&original.task)
+                .is_none()
+                .then_some(&original.task),
+        )
+        .bind(project_of(&original.task))
+        .bind(original.primary)
+        .bind(original.read_only)
+        .bind(&original.label)
+        .bind(&original.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Deletes a session's record, as if it had never been created (a start that failed).
+    pub async fn forget_session(&self, id: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM sessions WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_read_only(&self, id: &str, read_only: bool) -> Result<(), StoreError> {
         sqlx::query("UPDATE sessions SET read_only = ? WHERE id = ?")
             .bind(read_only)
@@ -613,6 +644,24 @@ mod tests {
                 "card": "ask", "outcome": null
             })
         );
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_session_is_gone() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .await
+            .unwrap();
+        store
+            .create_session(&session("a", SessionKind::Claude, true))
+            .await
+            .unwrap();
+        store.forget_session("a").await.unwrap();
+        assert!(store.session("a").await.unwrap().is_none());
+        assert!(store.primary_session("PROJ-1").await.unwrap().is_none());
+        // Forgetting what is not there is not an error.
+        store.forget_session("a").await.unwrap();
     }
 
     #[tokio::test]

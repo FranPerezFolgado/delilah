@@ -29,6 +29,27 @@ pub async fn claude_hook(
     Query(q): Query<HookQuery>,
     Json(hook): Json<Value>,
 ) -> StatusCode {
+    apply_hook(app, q, hook).await
+}
+
+/// What a chat-mode agent's stream says when it hits the usage limit, as the `StopFailure`
+/// hook would say it (which print mode was never seen to send): the one place a limit
+/// pauses a task, whichever of the two reports it first. A second report finds the task
+/// already paused and changes nothing.
+pub(crate) async fn limit_hit_from_stream(app: &AppState, task: &str, session: &str) {
+    let hook = serde_json::json!({
+        "hook_event_name": "StopFailure",
+        "error": "rate_limit",
+        "source": "stream",
+    });
+    let q = HookQuery {
+        task: task.to_string(),
+        session: Some(session.to_string()),
+    };
+    apply_hook(app.clone(), q, hook).await;
+}
+
+async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
     if !is_owner_name(&q.task) {
         return StatusCode::BAD_REQUEST;
     }

@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::claude::{self, Launch};
 use crate::pty::PtySession;
 use crate::stream::{StreamEvent, StreamSession};
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 /// Columns and rows an agent's terminal starts with.
 const PTY_COLS: u16 = 120;
@@ -63,7 +63,8 @@ pub fn spawn(launch: &Launch, kind: RuntimeKind) -> std::io::Result<Runtime> {
     spawn_logged(launch, kind, None)
 }
 
-/// As [`spawn`], also appending the terminal output to the `log` file (PTY only).
+/// As [`spawn`], also appending the terminal output (a PTY) or the stderr (a stream) to
+/// the `log` file.
 pub fn spawn_logged(
     launch: &Launch,
     kind: RuntimeKind,
@@ -72,19 +73,21 @@ pub fn spawn_logged(
     spawn_with_events(launch, kind, log).map(|(runtime, _)| runtime)
 }
 
-/// As [`spawn_logged`], also returning, for a stream runtime, the receiver subscribed
-/// before the first line is read, so the Init event can't be missed. `None` for a PTY.
+/// As [`spawn_logged`], also returning, for a stream runtime, the lossless events
+/// (see [`StreamSession::take_events`]), complete from the first line. `None` for a PTY.
 pub fn spawn_with_events(
     launch: &Launch,
     kind: RuntimeKind,
     log: Option<PathBuf>,
-) -> std::io::Result<(Runtime, Option<broadcast::Receiver<StreamEvent>>)> {
+) -> std::io::Result<(Runtime, Option<mpsc::UnboundedReceiver<StreamEvent>>)> {
     match kind {
         RuntimeKind::Pty => PtySession::spawn(claude::command(launch), PTY_COLS, PTY_ROWS, log)
             .map(|pty| (Runtime::Pty(pty), None)),
         RuntimeKind::Stream => {
-            let (session, rx) = StreamSession::spawn(claude::stream_command(launch))?;
-            Ok((Runtime::Stream(Arc::new(session)), Some(rx)))
+            let (session, _live) =
+                StreamSession::spawn_logged(claude::stream_command(launch), log)?;
+            let events = session.take_events();
+            Ok((Runtime::Stream(Arc::new(session)), events))
         }
     }
 }
@@ -338,7 +341,7 @@ mod tests {
         }
     }
 
-    async fn next(rx: &mut broadcast::Receiver<StreamEvent>) -> StreamEvent {
+    async fn next(rx: &mut mpsc::UnboundedReceiver<StreamEvent>) -> StreamEvent {
         tokio::time::timeout(Duration::from_secs(10), rx.recv())
             .await
             .unwrap()
@@ -351,7 +354,6 @@ mod tests {
         let launch = stream_launch(&tmp, &tmp);
         let (rt, rx) = spawn_with_events(&launch, RuntimeKind::Stream, None).unwrap();
         let mut rx = rx.unwrap();
-        assert!(matches!(next(&mut rx).await, StreamEvent::Init { .. }));
         assert!(rt.as_pty().is_none());
         assert!(rt.as_stream().is_some());
         assert!(rt.same(&rt.clone()));
@@ -360,6 +362,8 @@ mod tests {
         other.kill().unwrap();
 
         rt.send_prompt("hola\x1b").await.unwrap();
+        // The agent says hello (init) once it has read the first message.
+        assert!(matches!(next(&mut rx).await, StreamEvent::Init { .. }));
         loop {
             if matches!(next(&mut rx).await, StreamEvent::TurnResult { .. }) {
                 break;
@@ -367,11 +371,8 @@ mod tests {
         }
 
         rt.send_prompt("WAIT").await.unwrap();
-        loop {
-            if matches!(next(&mut rx).await, StreamEvent::TextDelta { .. }) {
-                break;
-            }
-        }
+        // Text is not on the lossless channel: the turn's init says it started.
+        assert!(matches!(next(&mut rx).await, StreamEvent::Init { .. }));
         rt.stop().await.unwrap();
         loop {
             if matches!(next(&mut rx).await, StreamEvent::TurnResult { .. }) {

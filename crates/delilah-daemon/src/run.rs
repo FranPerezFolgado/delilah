@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
-use delilah_agents::runtime::{self, RuntimeKind};
+use delilah_agents::runtime::{self, Runtime, RuntimeKind};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
@@ -318,12 +318,9 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
-    // A chat-mode agent can fail to come up: its task stays in the starting state until it
-    // has, so the start can be undone.
-    let chat = adopted.is_none() && app.store.get_task(&key).await?.is_some_and(|t| t.chat_mode);
-    if !chat {
-        app.transition(&key, Event::WorkspaceReady).await?;
-    }
+    // The task stays in the starting state until its agent is spawned (and, in chat mode,
+    // has been given its first message only after that), so a start that fails can be
+    // undone whatever the runtime: see `rollback_start`.
 
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
@@ -351,34 +348,72 @@ pub async fn start_run(
     };
     let prompt = point_to_notes(&app, &key, prompt, notes.as_deref());
 
-    if let Some(mut session) = adopted {
-        // The project's Claude becomes the task's: it goes on with its conversation,
-        // now able to edit, on the task's branch.
-        if let Some(live) = app.sessions.get(&session.id) {
-            let _ = live.runtime.kill();
-            live.runtime.wait().await;
-        }
-        app.store
-            .adopt_session(&session.id, &req.key, app.lang().pick("Principal", "Main"))
-            .await?;
-        session.task = req.key.clone();
-        session.primary = true;
-        session.read_only = false;
-        session.label = app.lang().pick("Principal", "Main").into();
-        launch_session(&app, &session, &ws.path, None, true).await?;
-        app.emit(crate::events::Topic::Sessions);
-    } else {
-        let (session, prompt) = first_session(&app, &req.key, saving_mode, autopilot, prompt);
-        app.store.create_session(&session).await?;
-        if let Err(e) = launch_session(&app, &session, &ws.path, Some(&prompt), false).await {
-            if chat {
-                undo_chat_start(&app, &key, &session, existing, &e.message).await;
+    let (session, restore, launch_prompt, resume) = match adopted {
+        Some(original) => {
+            // The project's Claude becomes the task's: it goes on with its conversation,
+            // now able to edit, on the task's branch.
+            let mut session = original.clone();
+            if let Some(live) = app.sessions.get(&session.id) {
+                let _ = live.runtime.kill();
+                live.runtime.wait().await;
             }
-            return Err(e);
+            let label = app.lang().pick("Principal", "Main");
+            let adopted = app.store.adopt_session(&session.id, &req.key, label).await;
+            session.task = req.key.clone();
+            session.primary = true;
+            session.read_only = false;
+            session.label = label.into();
+            if let Err(e) = adopted {
+                let reason = e.to_string();
+                rollback_start(&app, &key, &session, Some(&original), existing, &reason).await;
+                return Err(e.into());
+            }
+            (session, Some(original), None, true)
         }
+        None => {
+            let (session, prompt) = first_session(&app, &req.key, saving_mode, autopilot, prompt);
+            if let Err(e) = app.store.create_session(&session).await {
+                let reason = e.to_string();
+                rollback_start(&app, &key, &session, None, existing, &reason).await;
+                return Err(e.into());
+            }
+            (session, None, Some(prompt), false)
+        }
+    };
+    // A chat-mode agent can fail to come up, and the start is then undone: it is spawned,
+    // then the task is running, then it gets its first message (so the hooks it fires land
+    // on a running task, and until then the start can still be undone). A terminal agent
+    // has its prompt on the command line and, as ever, a task that runs even if it fails
+    // to spawn: its session is there to reopen.
+    let chat = runtime_kind(&app, &session).await? == RuntimeKind::Stream;
+    if !chat {
+        app.transition(&key, Event::WorkspaceReady).await?;
+    }
+    let launched = async {
+        let spawned = spawn_session(
+            &app,
+            &session,
+            &ws.path,
+            launch_prompt.as_deref(),
+            resume,
+            FIRST_TURN_TIMEOUT,
+        )
+        .await?;
+        if chat && let Err(e) = app.transition(&key, Event::WorkspaceReady).await {
+            spawned.discard(&app).await;
+            return Err(ApiError::from(e));
+        }
+        spawned.send_first(&app).await
+    }
+    .await;
+    if let Err(e) = launched {
         if chat {
-            app.transition(&key, Event::WorkspaceReady).await?;
+            rollback_start(&app, &key, &session, restore.as_ref(), existing, &e.message).await;
         }
+        return Err(e);
+    }
+    if restore.is_some() {
+        app.emit(crate::events::Topic::Sessions);
     }
 
     let task = app
@@ -436,8 +471,15 @@ async fn abort_start(
     existing: Option<Task>,
     reason: &str,
 ) -> Result<(), ApiError> {
+    // Only a task still preparing its workspace can go back to the backlog; one that
+    // already runs (its agent failed on the first message) fails.
+    let preparing = app
+        .store
+        .get_task(key)
+        .await?
+        .is_some_and(|t| t.status == TaskStatus::PreparingWorkspace);
     match existing {
-        Some(task) => {
+        Some(task) if preparing => {
             app.transition(
                 key,
                 Event::StartAborted {
@@ -465,7 +507,7 @@ async fn abort_start(
                 tracing::warn!(task = %key, "cannot put chat mode back: {e}");
             }
         }
-        None => {
+        _ => {
             app.transition(
                 key,
                 Event::Fail {
@@ -478,22 +520,29 @@ async fn abort_start(
     Ok(())
 }
 
-/// A chat-mode agent that never came up: undoes the start so the task can be started
-/// again (the app offers the terminal). The session and the workspace go; the task goes
-/// back to where [`abort_start`] puts it.
-async fn undo_chat_start(
+/// A start whose agent did not come up, whatever the runtime: forgets the session (or, for
+/// an adopted conversation, gives it back to its project as `restore` was), releases the
+/// workspace and puts the task where [`abort_start`] does, so it can be started again (the
+/// app offers the terminal for a chat-mode one).
+async fn rollback_start(
     app: &AppState,
     key: &TaskKey,
     session: &SessionRecord,
+    restore: Option<&SessionRecord>,
     existing: Option<Task>,
     reason: &str,
 ) {
-    if let Err(e) = sqlx::query("DELETE FROM sessions WHERE id = ?")
-        .bind(&session.id)
-        .execute(&app.store.pool)
-        .await
-    {
-        tracing::warn!(task = %key, "cannot forget the session: {e}");
+    if let Some(live) = app.sessions.get(&session.id) {
+        let _ = live.runtime.kill();
+        live.runtime.wait().await;
+        app.sessions.remove_if_same(&session.id, &live.runtime);
+    }
+    let undone = match restore {
+        Some(original) => app.store.unadopt_session(original).await,
+        None => app.store.forget_session(&session.id).await,
+    };
+    if let Err(e) = undone {
+        tracing::warn!(task = %key, "cannot undo the session: {e}");
     }
     if let Err(e) = crate::archive::release_workspace(app, key, true).await {
         tracing::warn!(task = %key, "cannot release the workspace: {}", e.message());
@@ -568,8 +617,15 @@ fn first_session(
     (session, prompt)
 }
 
-/// How long a chat-mode agent has to say hello (its `Init` line) before the start fails.
-const INIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a chat-mode agent has, after its first message, to show any sign of work (its
+/// `Init` line, a message, a result) before the start fails. The real CLI prints nothing
+/// to stdout but hook lines until it has read that message.
+const FIRST_TURN_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long a freshly spawned chat-mode agent must stay alive before it counts as up when
+/// there is nothing to wait for (no first message to send): an agent that dies on its
+/// flags or its login does so well within it.
+const SETTLE: Duration = Duration::from_millis(700);
 
 /// Whether a session runs on a stream (chat mode) rather than a terminal: only a
 /// task's Claude sessions do, when the task has the flag. Project sessions and idea
@@ -597,8 +653,9 @@ pub(crate) async fn runtime_kind(
 
 /// Starts a session in a daemon-owned PTY (or, for a chat-mode task, a stream-json
 /// process): Claude (new, or resumed with `--resume` on the same id) or the user's
-/// login shell, in the task's workspace. A stream session is started once the agent
-/// has said hello, and gets the prompt then. Boxed, so the handoffs can take it (and
+/// login shell, in the task's workspace. A stream session gets the prompt on stdin once
+/// it has stayed alive for a moment, and is up when it shows signs of work on it (or,
+/// with no prompt, when it is still alive). Boxed, so the handoffs can take it (and
 /// tests replace it) as a [`crate::handoff::Launcher`].
 pub fn launch_session<'a>(
     app: &'a AppState,
@@ -613,7 +670,7 @@ pub fn launch_session<'a>(
         workspace,
         prompt,
         resume,
-        INIT_TIMEOUT,
+        FIRST_TURN_TIMEOUT,
     ))
 }
 
@@ -623,8 +680,116 @@ pub(crate) async fn launch_session_with(
     workspace: &std::path::Path,
     prompt: Option<&str>,
     resume: bool,
-    init_timeout: Duration,
+    first_turn_timeout: Duration,
 ) -> Result<(), ApiError> {
+    spawn_session(app, session, workspace, prompt, resume, first_turn_timeout)
+        .await?
+        .send_first(app)
+        .await
+}
+
+/// A spawned session that has not yet been given its first message (a stream one).
+pub(crate) struct Spawned {
+    id: String,
+    runtime: Runtime,
+    /// A chat-mode agent's first message and how it is watched; nothing for a terminal
+    /// (it has its prompt on the command line) or a resume without a prompt.
+    first: Option<(String, StreamStart)>,
+    timeout: Duration,
+}
+
+/// Whether the process shows signs of work: the pump's word on it.
+struct StreamStart {
+    started: tokio::sync::oneshot::Receiver<crate::stream_events::Started>,
+    up: bool,
+}
+
+enum Wait {
+    Up,
+    Exited,
+    TimedOut,
+}
+
+impl StreamStart {
+    async fn wait(&mut self, limit: Duration) -> Wait {
+        if self.up {
+            return Wait::Up;
+        }
+        match tokio::time::timeout(limit, &mut self.started).await {
+            Ok(Ok(crate::stream_events::Started::Up)) => {
+                self.up = true;
+                Wait::Up
+            }
+            // Exited, or the pump ended without a word (the process is gone).
+            Ok(_) => Wait::Exited,
+            Err(_) => Wait::TimedOut,
+        }
+    }
+}
+
+impl Spawned {
+    /// Stops the process and forgets the live session.
+    pub(crate) async fn discard(&self, app: &AppState) {
+        let _ = self.runtime.kill();
+        self.runtime.wait().await;
+        app.sessions.remove_if_same(&self.id, &self.runtime);
+    }
+
+    /// Gives a chat-mode agent its first message and waits for it to show signs of work:
+    /// the real CLI says nothing (not even its `system/init`) before it. An agent that
+    /// exits or stays silent fails the start; any failure leaves no session behind.
+    pub(crate) async fn send_first(mut self, app: &AppState) -> Result<(), ApiError> {
+        let Some((prompt, mut start)) = self.first.take() else {
+            return Ok(());
+        };
+        let sent = self
+            .runtime
+            .send_prompt(&prompt)
+            .await
+            .map_err(|e| ApiError::internal(format!("cannot send the first message: {e}")));
+        let failure = match sent {
+            Err(e) => Some(e),
+            Ok(()) => match start.wait(self.timeout).await {
+                Wait::Up => None,
+                Wait::Exited | Wait::TimedOut => Some(start_failure(&self.runtime).await),
+            },
+        };
+        match failure {
+            Some(e) => {
+                self.discard(app).await;
+                Err(e)
+            }
+            None => Ok(()),
+        }
+    }
+}
+
+/// The error of a chat-mode agent that did not come up: what it said on stderr.
+async fn start_failure(runtime: &Runtime) -> ApiError {
+    let _ = runtime.kill();
+    runtime.wait().await;
+    let tail = runtime
+        .as_stream()
+        .map(|s| start_error_tail(&s.stderr_tail()))
+        .unwrap_or_default();
+    let tail = match tail.trim() {
+        "" => "claude printed nothing before it stopped",
+        tail => tail,
+    };
+    ApiError::unprocessable(format!("chat mode could not start: {tail}"))
+}
+
+/// Starts the session's process and registers it, but a chat-mode agent is not given its
+/// first message yet: that is [`Spawned::send_first`]. For a stream session, fails if the
+/// process does not stay alive for a moment.
+pub(crate) async fn spawn_session(
+    app: &AppState,
+    session: &SessionRecord,
+    workspace: &std::path::Path,
+    prompt: Option<&str>,
+    resume: bool,
+    first_turn_timeout: Duration,
+) -> Result<Spawned, ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume =
         resume && claude::has_conversation_in(&app.config.claude_projects, workspace, &session.id);
@@ -714,32 +879,25 @@ pub(crate) async fn launch_session_with(
         tracing::info!(session = %id, "session exited");
     });
 
-    if let (Some(events), Some(stream)) = (events, runtime.as_stream()) {
+    let mut spawned = Spawned {
+        id: session.id.clone(),
+        runtime: runtime.clone(),
+        first: None,
+        timeout: first_turn_timeout,
+    };
+    if let Some(events) = events {
         let started = crate::stream_events::spawn_pump(app, &session.id, &session.task, events);
-        let up = matches!(
-            tokio::time::timeout(init_timeout, started).await,
-            Ok(Ok(crate::stream_events::Started::Init))
-        );
-        if !up {
-            let _ = runtime.kill();
-            runtime.wait().await;
-            let tail = start_error_tail(&stream.stderr_tail());
-            let tail = match tail.trim() {
-                "" => "claude printed nothing before it stopped",
-                tail => tail,
-            };
-            return Err(ApiError::unprocessable(format!(
-                "chat mode could not start: {tail}"
-            )));
+        let mut start = StreamStart { started, up: false };
+        // An agent that dies on its flags or login does so at once; it says nothing else
+        // until it has a message.
+        if let Wait::Exited = start.wait(first_turn_timeout.min(SETTLE)).await {
+            let e = start_failure(&runtime).await;
+            spawned.discard(app).await;
+            return Err(e);
         }
-        if let Some(prompt) = prompt {
-            runtime
-                .send_prompt(prompt)
-                .await
-                .map_err(|e| ApiError::internal(format!("cannot send the first message: {e}")))?;
-        }
+        spawned.first = prompt.map(|p| (p.to_string(), start));
     }
-    Ok(())
+    Ok(spawned)
 }
 
 /// How a session is listed in claude.ai under Remote Control: the task (or project)
@@ -1562,12 +1720,14 @@ mod tests {
         (app, ws)
     }
 
-    /// Says hello like a stream agent, saves its arguments and its first message.
+    /// Acts like the real stream agent: saves its arguments, says nothing but a hook line
+    /// until it reads its first message, saves it and then prints its `system/init`.
     fn hello_script(home_args: &str) -> String {
         format!(
             "printf '%s\\n' \"$@\" > '{home_args}/args.txt'\n\
-             echo '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"sess-1\"}}'\n\
+             echo '{{\"type\":\"system\",\"subtype\":\"hook_started\"}}'\n\
              read line; printf '%s' \"$line\" > '{home_args}/stdin.txt'\n\
+             echo '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"sess-1\"}}'\n\
              sleep 5"
         )
     }
@@ -1615,6 +1775,26 @@ mod tests {
             "no positional prompt: {args}"
         );
         let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn the_stderr_of_a_stream_agent_goes_to_the_session_log() {
+        let script = "echo 'to the log' >&2\nread line\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"sess-1\"}'\nsleep 5";
+        let (app, ws) = chat_app(script, true).await;
+        launch_session_with(
+            &app,
+            &session("PROJ-1", "Main"),
+            &ws,
+            Some("hi"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        let log = app.config.task_dir("PROJ-1").join("claude-sess-1.log");
+        assert_eq!(read_when_there(log).await, "to the log\n");
+        let _ = app.sessions.get("sess-1").unwrap().runtime.kill();
     }
 
     #[tokio::test]
@@ -1697,13 +1877,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_agent_that_never_says_hello_times_out() {
+    async fn an_agent_that_stays_silent_after_the_first_message_times_out() {
         let (app, ws) = chat_app("sleep 5", true).await;
         let err = launch_session_with(
             &app,
             &session("PROJ-1", "Main"),
             &ws,
-            None,
+            Some("hi"),
             false,
             Duration::from_millis(300),
         )
@@ -1714,6 +1894,67 @@ mod tests {
             "{}",
             err.message
         );
+        // Nothing stays registered.
+        assert!(app.sessions.get("sess-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_exits_after_the_first_message_without_a_word_fails_the_start() {
+        let (app, ws) = chat_app("read line\necho 'boom' >&2\nexit 1", true).await;
+        let err = launch_session_with(
+            &app,
+            &session("PROJ-1", "Main"),
+            &ws,
+            Some("hi"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.message, "chat mode could not start: boom");
+        assert!(app.sessions.get("sess-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_relaunch_without_a_prompt_is_up_when_the_agent_stays_alive() {
+        let (app, ws) = chat_app("sleep 5", true).await;
+        let record = session("PROJ-1", "Main");
+        launch_session_with(&app, &record, &ws, None, false, Duration::from_secs(10))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let live = app.sessions.get("sess-1").expect("registered");
+        let _ = live.runtime.kill();
+        // And one that dies at once is not.
+        let (app, ws) = chat_app("exit 1", true).await;
+        let err = launch_session_with(&app, &record, &ws, None, false, Duration::from_secs(10))
+            .await
+            .unwrap_err();
+        assert!(err.message.starts_with("chat mode could not start:"));
+    }
+
+    #[tokio::test]
+    async fn a_first_message_that_cannot_be_sent_kills_the_agent_and_forgets_the_session() {
+        // The agent closes its stdin and stays up: typing the first message fails.
+        let (app, ws) = chat_app("exec 0<&-\nsleep 5", true).await;
+        let record = session("PROJ-1", "Main");
+        let launched = launch_session_with(
+            &app,
+            &record,
+            &ws,
+            Some("hi"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await;
+        let err = launched.unwrap_err();
+        assert!(
+            err.message.contains("cannot send the first message")
+                || err.message.starts_with("chat mode could not start"),
+            "{}",
+            err.message
+        );
+        assert!(app.sessions.get("sess-1").is_none(), "no live session left");
     }
 
     #[tokio::test]
@@ -1841,6 +2082,92 @@ mod tests {
             "the terminal agent ran"
         );
         let _ = live.runtime.kill();
+    }
+
+    /// A daemon with a git project `repo` whose agent (`claude`) runs `script`.
+    async fn chat_repo_app(script: &str) -> AppState {
+        use std::os::unix::fs::PermissionsExt;
+        let (app, _repo) = repo_app("exit 1").await;
+        let bin = app.config.home.join("fake-agent.sh");
+        std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = app.config.as_ref().clone();
+        config.agent_program = Some(bin);
+        AppState::new(app.store.clone(), config)
+    }
+
+    fn chat_run(key: &str) -> RunRequest {
+        let mut req = run(key);
+        req.title = "Chat".into();
+        req.project = "repo".into();
+        req.chat_mode = Some(true);
+        req.in_checkout = Some(false);
+        req
+    }
+
+    #[tokio::test]
+    async fn a_chat_mode_start_gives_the_first_message_to_a_running_task() {
+        let home = std::env::temp_dir().join(format!("delilah-chat-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let (status, Json(started)) = start_run(State(app.clone()), Json(chat_run("LIBRE-1")))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(started.chat_mode);
+        assert_eq!(started.status, TaskStatus::Running);
+        let stdin = read_when_there(home.join("stdin.txt")).await;
+        assert!(stdin.contains("/feature"), "{stdin}");
+        let live = app.sessions.primary("LIBRE-1").expect("a live session");
+        assert!(live.runtime.as_stream().is_some());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_chat_agent_that_dies_on_the_first_message_fails_the_task_and_leaves_no_session() {
+        let app = chat_repo_app("read line\necho 'no credit' >&2\nexit 1").await;
+        let err = start_run(State(app.clone()), Json(chat_run("LIBRE-1")))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message, "chat mode could not start: no credit");
+        let key = TaskKey::new("LIBRE-1");
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(task.status.name(), "failed");
+        assert!(
+            app.store
+                .primary_session("LIBRE-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(app.store.workspace(&key).await.unwrap().is_none());
+        assert!(app.sessions.primary("LIBRE-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_failed_chat_start_from_a_conversation_gives_it_back_to_its_project() {
+        let app = chat_repo_app("echo 'bad flag' >&2\nexit 2").await;
+        let original = SessionRecord {
+            id: "conv-1".into(),
+            ..session("@repo", "Claude 1")
+        };
+        let original = SessionRecord {
+            primary: false,
+            read_only: true,
+            ..original
+        };
+        app.store.create_session(&original).await.unwrap();
+        let mut req = chat_run("");
+        req.from_session = Some("conv-1".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(
+            err.message.starts_with("chat mode could not start:"),
+            "{}",
+            err.message
+        );
+        let after = app.store.session("conv-1").await.unwrap().unwrap();
+        assert_eq!(after, original, "still the project's, as it was");
     }
 
     #[tokio::test]

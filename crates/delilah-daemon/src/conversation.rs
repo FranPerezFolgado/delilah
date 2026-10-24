@@ -1556,7 +1556,7 @@ mod tests {
                 .sessions
                 .insert("conv", "@web", SessionKind::Claude, false, session.clone());
         live.set_idea(true);
-        crate::stream_events::spawn_pump(&f.app, "conv", "@web", session.subscribe());
+        crate::stream_events::spawn_pump(&f.app, "conv", "@web", session.take_events().unwrap());
 
         // A turn that hangs until it is interrupted.
         let (status, _) = f.send("WAIT here").await;

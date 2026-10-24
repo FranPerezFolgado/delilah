@@ -468,6 +468,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_live_stream_session_reports_the_stream_runtime() {
+        let (app, _) = task_with_two_sessions().await;
+        // The task's flag is off: it is the running process that says what it runs on.
+        for live in app.sessions.of_task("PROJ-1") {
+            let _ = live.runtime.kill();
+            live.runtime.wait().await;
+        }
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../delilah-agents/tests/fixtures/fake-claude-stream.sh"
+        );
+        let (stream, _rx) =
+            delilah_agents::stream::StreamSession::spawn(tokio::process::Command::new(script))
+                .unwrap();
+        let stream = Arc::new(stream);
+        app.sessions
+            .insert("main", "PROJ-1", SessionKind::Claude, true, stream.clone());
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        let runtime_of = |id: &str| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == id)
+                .map(|s| s["runtime"].clone())
+        };
+        assert_eq!(runtime_of("main"), Some(serde_json::json!("stream")));
+        // The other one is not running, and the task is not in chat mode.
+        assert_eq!(runtime_of("review"), Some(serde_json::json!("pty")));
+        stream.kill();
+    }
+
+    #[tokio::test]
     async fn an_extra_sessions_turns_do_not_move_the_task() {
         let (app, _) = task_with_two_sessions().await;
         call(
