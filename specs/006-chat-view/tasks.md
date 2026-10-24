@@ -224,8 +224,8 @@
 
 **Independent Test**: quickstart.md "Chat mode" steps 1, 2, 4 and 6.
 
-- [ ] T037 [US3] Write a fake `claude` script for tests in `crates/delilah-agents/tests/fixtures/fake-claude-stream.sh`. It prints a `system` init line, then for each stdin user line prints `stream_event` text deltas, an `assistant` message and a `result`. An `interrupt` control request produces a `result` with the interrupt shape found in the spike. A line containing `NEEDS_PERMISSION` produces a `control_request` `can_use_tool` and waits for the `control_response` before continuing. Shapes follow the spike findings (T003): the `interrupt` response is `control_response` `{subtype: success, request_id, response: {still_queued: []}}`, then a `user` message `[Request interrupted by user]` and a `result` `error_during_execution` (no `Stop` hook); a `can_use_tool` request has `request.{subtype, tool_name, tool_use_id, input, permission_suggestions}` and the answer is `control_response` `{response: {subtype: success, request_id, response: {behavior: allow, updatedInput}|{behavior: deny, message}}}`; the script also prints one `rate_limit_event` per turn; deltas are `stream_event` after a `message_start` carrying `message.id`. *(spike)*
-- [ ] T038 [US3] Write failing tests in a new `crates/delilah-agents/src/stream.rs` (tests module, using T037):
+- [X] T037 [US3] Write a fake `claude` script for tests in `crates/delilah-agents/tests/fixtures/fake-claude-stream.sh`. It prints a `system` init line, then for each stdin user line prints `stream_event` text deltas, an `assistant` message and a `result`. An `interrupt` control request produces a `result` with the interrupt shape found in the spike. A line containing `NEEDS_PERMISSION` produces a `control_request` `can_use_tool` and waits for the `control_response` before continuing. Shapes follow the spike findings (T003): the `interrupt` response is `control_response` `{subtype: success, request_id, response: {still_queued: []}}`, then a `user` message `[Request interrupted by user]` and a `result` `error_during_execution` (no `Stop` hook); a `can_use_tool` request has `request.{subtype, tool_name, tool_use_id, input, permission_suggestions}` and the answer is `control_response` `{response: {subtype: success, request_id, response: {behavior: allow, updatedInput}|{behavior: deny, message}}}`; the script also prints one `rate_limit_event` per turn; deltas are `stream_event` after a `message_start` carrying `message.id`. *(spike)*
+- [X] T038 [US3] Write failing tests in a new `crates/delilah-agents/src/stream.rs` (tests module, using T037):
   - `StreamSession::spawn(cmd)` yields `StreamEvent::Init`;
   - `send_user(text)` writes one JSON user line;
   - deltas arrive as `TextDelta { message, text }`, where `message` is the id of the preceding `message_start` (deltas carry no id of their own), and then `MessageDone { message }` *(spike)*;
@@ -237,7 +237,7 @@
   - unknown event types are skipped;
   - `kill`, `wait` and `has_exited` work;
   - stderr goes to the log.
-- [ ] T039 [US3] Implement T038 in `crates/delilah-agents/src/stream.rs`: tokio child process, stdin writer behind a mutex, stdout line reader into a `broadcast` of typed events, with the wire shapes kept private to this module.
+- [X] T039 [US3] Implement T038 in `crates/delilah-agents/src/stream.rs`: tokio child process, stdin writer behind a mutex, stdout line reader into a `broadcast` of typed events, with the wire shapes kept private to this module.
 - [ ] T040 [US3] Write failing tests and implement the stream runtime:
   - `Runtime::Stream(Arc<StreamSession>)` in `crates/delilah-agents/src/runtime.rs`: `send_prompt` → `send_user`, `stop` → `interrupt`, `as_pty` → `None`;
   - `RuntimeKind::Stream` in `runtime::spawn`;
