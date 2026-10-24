@@ -162,7 +162,7 @@
   - project sessions open in chat;
   - the task's view control calls `api.updateTask(key, {view})`.
 - [ ] T025 [US1] Implement T024 in `app/src/components/TaskScreen.tsx`: the starting view from `task.view`, the existing `terminals` set generalised into a per-session override for every Claude session, the switch in the session tab bar, and the view control in the task's settings area.
-- [ ] T026 [P] [US1] Write failing tests and implement the "Vista" select ("Chat" / "Terminal", default Chat) in `app/src/components/NewTaskDialog.tsx` and its test file, sent as `view` on create.
+- [X] T026 [P] [US1] Write failing tests and implement the "Vista" select ("Chat" / "Terminal", default Chat) in `app/src/components/NewTaskDialog.tsx` and its test file, sent as `view` on create.
 
 **Checkpoint**: US1 independently testable with quickstart "Chat view" 1–4 and 6. Contract review of `api.rs` ↔ `api.ts` for this phase.
 

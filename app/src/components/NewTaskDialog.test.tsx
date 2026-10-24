@@ -183,6 +183,38 @@ describe("NewTaskDialog autopilot", () => {
   });
 });
 
+describe("NewTaskDialog view", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const mount = (extra: Partial<React.ComponentProps<typeof NewTaskDialog>> = {}) =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} {...extra} />);
+
+  it("defaults to Chat and is sent with the run", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { getByLabelText, container } = mount();
+    expect((getByLabelText("Vista") as HTMLSelectElement).value).toBe("chat");
+    fireEvent.change(getByLabelText("Vista"), { target: { value: "terminal" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0]).toMatchObject({ view: "terminal" });
+  });
+
+  it("is sent when saving to the backlog", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { getByText } = mount();
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0]).toMatchObject({ view: "chat" });
+  });
+
+  it("starts from the view of a backlog task", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { getByLabelText } = mount({ draft: undefined, existing: { ...started, view: "terminal" } });
+    expect((getByLabelText("Vista") as HTMLSelectElement).value).toBe("terminal");
+  });
+});
+
 const branchProjects: Project[] = [{ name: "app", kind: "repo" } as Project];
 
 const proposal = (branch: string, source: BranchProposal["source"] = "claude"): BranchProposal => ({ branch, source });

@@ -155,6 +155,7 @@ export const EN: Record<string, string> = {
   "La sesión principal no se cierra: termina con la tarea (Marcar como hecha).": "The main session does not close: it ends with the task (Mark as done).",
   "Árbol de archivos ({key})": "File tree ({key})",
   "Proyecto": "Project",
+  "Vista": "View",
   "Arrancando…": "Starting…",
   "Cambios": "Changes",
   "Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.": "Closing “{label}” stops that Claude. Its conversation cannot be reopened from here.",

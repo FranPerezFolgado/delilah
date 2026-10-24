@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
+import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { t } from "../i18n";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 
@@ -53,6 +53,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const savingTouched = useRef(!!existing);
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
+  const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -192,6 +193,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: where === "checkout",
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
+        view,
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(branch.trim() ? { branch: "feature/" + branch.trim() } : {}),
@@ -220,6 +222,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: where === "checkout",
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
+        view,
       });
       onSaved(task);
     } catch (err) {
@@ -311,6 +314,15 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                   }}
                 />
                 <span>{t("Modo ahorro")}</span>
+              </label>
+            )}
+            {origin !== "claude" && (
+              <label className="field">
+                <span>{t("Vista")}</span>
+                <select className="input" value={view} onChange={(e) => setView(e.target.value as TaskView)}>
+                  <option value="chat">Chat</option>
+                  <option value="terminal">Terminal</option>
+                </select>
               </label>
             )}
             {origin !== "claude" && autopilotAllowed && (

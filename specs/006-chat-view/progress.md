@@ -14,9 +14,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 4 | 4B | verified | 1 | 2561634 | |
 | WP-05F | 4 | 4B | verified | 1 | 693ba38 | security fixes |
 | WP-06F | 4 | 4C | implementing | 0 | | architecture fixes |
-| WP-08 | 4 | 4C | verified | 1 | | |
+| WP-08 | 4 | 4C | verified | 1 | c3d82e0 | |
 | WP-09 | 4 | 4D | pending | 0 | | |
-| WP-11 | 4 | 4D | pending | 0 | | |
+| WP-11 | 4 | 4D | verified | 1 | | |
 | WP-10 | 4 | 4E | pending | 0 | | |
 | WP-12 | 5 | 5A | pending | 0 | | |
 | WP-13 | 5 | 5B | pending | 0 | | |
