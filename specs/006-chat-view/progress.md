@@ -26,7 +26,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-14 | 6 | 6A | implementing | 0 | | |
 | WP-15 | 6 | 6B | pending | 0 | | go (decision 49) |
 | WP-16 | 7 | 7A | implementing | 0 | | T037–T039 now (stream.rs); T040 after WP-15 |
-| WP-17 | 7 | 7A | implementing | 0 | | |
+| WP-17 | 7 | 7A | verified | 1 | | |
 | WP-18 | 7 | 7B | pending | 0 | | go (decision 49) |
 | WP-19 | 7 | 7C | pending | 0 | | go (decision 49) |
 | WP-20 | 7 | 7C | pending | 0 | | go (decision 49) |

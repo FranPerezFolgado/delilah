@@ -337,6 +337,12 @@ pub struct Task {
     /// How the app shows it (chat by default).
     #[serde(default)]
     pub view: TaskView,
+    /// Runtime of the task's Claude sessions: chat (stream-json) instead of the terminal.
+    #[serde(default)]
+    pub chat_mode: bool,
+    /// Permission rules granted with "allow always in this task".
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
 }
 
 impl Task {
@@ -355,6 +361,8 @@ impl Task {
             handoff: None,
             autopilot: None,
             view: TaskView::default(),
+            chat_mode: false,
+            allowed_tools: Vec::new(),
         }
     }
 
@@ -437,6 +445,24 @@ mod tests {
 
     fn at(hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 19, hour, min, 0).unwrap()
+    }
+
+    #[test]
+    fn chat_mode_and_allowed_tools_default_and_round_trip() {
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        assert!(!task.chat_mode);
+        assert!(task.allowed_tools.is_empty());
+        task.chat_mode = true;
+        task.allowed_tools = vec!["Bash(git status:*)".into()];
+        let back: Task = serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
+        assert_eq!(back, task);
+
+        let mut json =
+            serde_json::to_value(Task::new(TaskKey::new("PROJ-2"), "t", "feature")).unwrap();
+        json.as_object_mut().unwrap().remove("chat_mode");
+        json.as_object_mut().unwrap().remove("allowed_tools");
+        let old: Task = serde_json::from_value(json).unwrap();
+        assert!(!old.chat_mode && old.allowed_tools.is_empty());
     }
 
     #[test]

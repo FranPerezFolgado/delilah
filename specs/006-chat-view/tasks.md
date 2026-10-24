@@ -244,7 +244,7 @@
   - `claude::stream_command(&Launch)` in `crates/delilah-agents/src/claude.rs`: the same env and `--settings`, with `-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages` and `--session-id`/`--resume`, with no positional prompt (the first prompt goes on stdin), and with **`--permission-prompt-tool stdio`** (the flag that makes `can_use_tool` requests arrive and adds AskUserQuestion to the session's tools; not `--permission-prompts host`) *(spike)*.
 
   Add an args test like the existing `argv` tests.
-- [ ] T041 [P] [US3] Write failing tests and implement migration `crates/delilah-daemon/migrations/0017_chat_mode.sql`:
+- [X] T041 [P] [US3] Write failing tests and implement migration `crates/delilah-daemon/migrations/0017_chat_mode.sql`:
   - `chat_mode INTEGER NOT NULL DEFAULT 0` and `allowed_tools TEXT`;
   - `Task.chat_mode: bool` and `Task.allowed_tools: Vec<String>` (`#[serde(default)]`) in `crates/delilah-core/src/task.rs`;
   - store reads and writes, `set_chat_mode`, `add_allowed_tool` (dedupe) in `crates/delilah-daemon/src/store.rs`.
