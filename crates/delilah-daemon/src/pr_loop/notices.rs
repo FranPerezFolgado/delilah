@@ -320,6 +320,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let restarted = AppState::new(app.store.clone(), config)
             .with_gh(gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")));

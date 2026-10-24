@@ -182,8 +182,8 @@ impl Store {
         Ok(())
     }
 
-    /// Sets how the app shows a task, whatever state it is in.
-    pub async fn set_view(&self, key: &TaskKey, view: TaskView) -> Result<(), StoreError> {
+    /// Sets how the app shows a task, whatever state it is in; returns the task.
+    pub async fn set_view(&self, key: &TaskKey, view: TaskView) -> Result<Task, StoreError> {
         let updated = sqlx::query("UPDATE tasks SET view = ?, updated_at = ? WHERE key = ?")
             .bind(view.as_str())
             .bind(Utc::now().to_rfc3339())
@@ -193,7 +193,9 @@ impl Store {
         if updated.rows_affected() == 0 {
             return Err(StoreError::NotFound(key.clone()));
         }
-        Ok(())
+        self.get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))
     }
 
     /// Records the autopilot of a task, or clears it. Turning it on also turns saving

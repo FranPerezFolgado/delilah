@@ -111,6 +111,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);

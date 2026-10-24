@@ -21,6 +21,9 @@ pub struct Config {
     pub claude_bin: PathBuf,
     /// Program to run instead of `claude`; only tests set it.
     pub agent_program: Option<PathBuf>,
+    /// Claude's projects folder (`~/.claude/projects`), the only place a transcript is
+    /// read from; tests point it at a temp folder.
+    pub claude_projects: PathBuf,
 }
 
 /// The binary named by `DELILAH_CLAUDE_BIN`, or `claude` when unset or empty.
@@ -58,6 +61,13 @@ impl Config {
             .ok()
             .filter(|o| !o.is_empty());
         let claude_bin = claude_bin_from(std::env::var_os("DELILAH_CLAUDE_BIN"));
+        let claude_projects = match std::env::var_os("HOME") {
+            Some(user_home) => {
+                delilah_agents::transcript::projects_root_in(std::path::Path::new(&user_home))
+            }
+            // Nowhere to look: a folder that never exists, so no transcript is read.
+            None => home.join("no-claude-projects"),
+        };
         Ok(Self {
             home,
             addr,
@@ -66,7 +76,14 @@ impl Config {
             ui_origin,
             claude_bin,
             agent_program: None,
+            claude_projects,
         })
+    }
+
+    /// A fresh, empty projects folder path for one test (not created).
+    #[cfg(test)]
+    pub fn scratch_projects() -> PathBuf {
+        std::env::temp_dir().join(format!("delilah-projects-{}", uuid::Uuid::new_v4()))
     }
 
     pub fn database_path(&self) -> PathBuf {

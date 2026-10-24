@@ -3,27 +3,19 @@
 //! looks at the new bytes for a newline, never parses it.
 
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::Duration;
 
-use delilah_agents::transcript;
 use tokio::time::MissedTickBehavior;
 
+use delilah_agents::transcript;
+
+use crate::conversation::candidate_transcript;
 use crate::events::Topic;
 use crate::sessions::Live;
 use crate::state::AppState;
 use crate::store_sessions::SessionKind;
 
 pub const INTERVAL: Duration = Duration::from_secs(1);
-
-/// Last size seen per (sessions registry, session id). The registry is part of the key
-/// so that several daemons in one process (tests) never forget each other's sessions.
-static SEEN: Mutex<Vec<((usize, String), u64)>> = Mutex::new(Vec::new());
-
-fn registry(app: &AppState) -> usize {
-    std::sync::Arc::as_ptr(&app.sessions) as usize
-}
 
 pub fn spawn(app: AppState) {
     spawn_with(app, INTERVAL);
@@ -43,11 +35,10 @@ pub fn spawn_with(app: AppState, interval: Duration) {
 /// Checks every live Claude session and forgets the ones that are gone.
 pub async fn tick(app: &AppState) {
     let live = app.sessions.all();
-    let reg = registry(app);
-    {
-        let mut seen = SEEN.lock().unwrap();
-        seen.retain(|((r, id), _)| *r != reg || live.iter().any(|l| &l.id == id));
-    }
+    app.transcript_seen
+        .lock()
+        .unwrap()
+        .retain(|id, _| live.iter().any(|l| &l.id == id));
     for l in live {
         check(app, &l).await;
     }
@@ -62,27 +53,26 @@ pub fn poke(app: &AppState, session: &str) {
     tokio::spawn(async move { check(&app, &live).await });
 }
 
-async fn path_of(app: &AppState, live: &Live) -> Option<PathBuf> {
-    if let Some(path) = live.transcript() {
-        return Some(path);
-    }
-    let ws = crate::owners::workspace(app, &live.task).await.ok()?;
-    transcript::transcript_path(&ws.path, &live.id)
-}
-
 async fn check(app: &AppState, live: &Live) {
     if live.kind == SessionKind::Shell {
         return;
     }
-    let Some(path) = path_of(app, live).await else {
+    let Some(candidate) = candidate_transcript(app, &live.task, &live.id, Some(live)).await else {
         return;
     };
-    let size = std::fs::metadata(&path).map(|m| m.len()).ok();
-    let key = (registry(app), live.id.clone());
+    let path = transcript::within(&app.config.claude_projects, &candidate);
+    // Outside the projects folder: never read. Not there yet: counts as empty.
+    if path.is_none() && candidate.exists() {
+        return;
+    }
+    let size = path
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len());
     let before = {
-        let mut seen = SEEN.lock().unwrap();
-        match seen.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, last)) => {
+        let mut seen = app.transcript_seen.lock().unwrap();
+        match seen.get_mut(&live.id) {
+            Some(last) => {
                 let before = *last;
                 if let Some(size) = size {
                     *last = size;
@@ -92,21 +82,20 @@ async fn check(app: &AppState, live: &Live) {
             None => {
                 // First sight: the lines already there are not news (a file still to
                 // be created counts as empty, so its first line is).
-                seen.push((key, size.unwrap_or(0)));
+                seen.insert(live.id.clone(), size.unwrap_or(0));
                 None
             }
         }
     };
-    if let (Some(before), Some(size)) = (before, size)
+    if let (Some(before), Some(size), Some(path)) = (before, size, &path)
         && size > before
-        && has_newline_from(&path, before)
+        && has_newline_from(path, before)
     {
         app.events.emit(Topic::Conversations);
     }
 }
-
 /// Whether the file has a `\n` from `offset` on.
-fn has_newline_from(path: &PathBuf, offset: u64) -> bool {
+fn has_newline_from(path: &std::path::Path, offset: u64) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
         return false;
     };
@@ -126,6 +115,7 @@ fn has_newline_from(path: &PathBuf, offset: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    use std::path::PathBuf;
 
     use portable_pty::CommandBuilder;
 
@@ -145,6 +135,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }
@@ -155,7 +146,9 @@ mod tests {
         let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
         let id = uuid::Uuid::new_v4().to_string();
         let live = app.sessions.insert(&id, "@web", kind, false, pty);
-        let path = std::env::temp_dir().join(format!("delilah-tw-{id}.jsonl"));
+        let root = &app.config.claude_projects;
+        std::fs::create_dir_all(root).unwrap();
+        let path = root.join(format!("delilah-tw-{id}.jsonl"));
         std::fs::write(&path, content).unwrap();
         live.set_transcript(path.clone());
         (live, path)

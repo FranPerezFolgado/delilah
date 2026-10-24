@@ -298,6 +298,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -525,6 +526,7 @@ mod project_tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         app.store
@@ -589,6 +591,7 @@ mod project_tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);

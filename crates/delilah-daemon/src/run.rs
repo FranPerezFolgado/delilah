@@ -685,6 +685,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         };
         let mut conv = session("@web", "Idea");
@@ -726,6 +727,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "/usr/bin/false".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         // A folder that isn't there: any workspace for it fails, and no agent starts.
@@ -1252,6 +1254,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: Some(fake),
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);

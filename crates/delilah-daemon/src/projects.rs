@@ -333,6 +333,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = crate::api::router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::post("/api/v1/projects/inspect")
@@ -400,6 +401,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         };
         let app = crate::api::router(AppState::new(store, config));

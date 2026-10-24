@@ -395,7 +395,8 @@ fn check_autopilot(autopilot: Option<bool>, saving_mode: Option<bool>) -> Result
     }
 }
 
-/// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
+/// Edits a backlog task (title, notes, project, workflow, where; 409 once it has started)
+/// and, in any state, its view, saving mode and autopilot.
 async fn update_task(
     State(app): State<AppState>,
     Path(key): Path<String>,
@@ -426,8 +427,7 @@ async fn update_task(
         false => app.store.update_backlog_task(&key, &change).await?,
     };
     if let Some(view) = view.filter(|v| *v != task.view) {
-        app.store.set_view(&key, view).await?;
-        task.view = view;
+        task = app.store.set_view(&key, view).await?;
     }
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
@@ -450,7 +450,8 @@ async fn update_task(
     Ok(Json(task))
 }
 
-/// `PATCH /api/v1/tasks/{key}`: the backlog change plus saving mode.
+/// `PATCH /api/v1/tasks/{key}`: the backlog change (backlog only) plus saving mode,
+/// autopilot and `view`, which work in any state.
 #[derive(Debug, Deserialize)]
 struct UpdateTask {
     #[serde(flatten)]
@@ -663,6 +664,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
     }
@@ -677,6 +679,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         state
@@ -1262,6 +1265,7 @@ mod cors_tests {
             ui_origin: ui_origin.map(str::to_string),
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let req = Request::builder()
@@ -1311,6 +1315,7 @@ mod cors_tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = router(AppState::new(Store::in_memory().await.unwrap(), config));
         let mut req = Request::builder().method(method).uri(uri);

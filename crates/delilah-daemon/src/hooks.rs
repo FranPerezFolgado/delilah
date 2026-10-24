@@ -45,7 +45,7 @@ pub async fn claude_hook(
     };
     // Only a path that passed the check replaces the current one.
     if let Some(live) = &live
-        && let Some(path) = trusted_transcript(&hook)
+        && let Some(path) = trusted_transcript(&app, &hook)
     {
         live.set_transcript(path);
     }
@@ -155,9 +155,8 @@ pub async fn claude_hook(
 /// The transcript path a hook carries, only when it is absolute, ends in `.jsonl` and,
 /// once symlinks are resolved, is inside Claude's projects folder: it comes from the
 /// hook body, so it is not followed blindly. The path returned is the resolved one.
-fn trusted_transcript(hook: &Value) -> Option<std::path::PathBuf> {
-    let root = crate::conversation::projects_root()?;
-    trusted_transcript_in(&root, hook)
+fn trusted_transcript(app: &AppState, hook: &Value) -> Option<std::path::PathBuf> {
+    trusted_transcript_in(&app.config.claude_projects, hook)
 }
 
 fn trusted_transcript_in(root: &std::path::Path, hook: &Value) -> Option<std::path::PathBuf> {
@@ -242,6 +241,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(live.transcript(), None);
         let url = "/hooks/claude?task=PROJ-1&session=s-1";
         let hook = |path: &std::path::Path| json!({ "hook_event_name": "PostToolUse", "transcript_path": path });
-        let root = crate::conversation::projects_root().unwrap();
+        let root = state.config.claude_projects.clone();
         std::fs::create_dir_all(&root).unwrap();
         let file = |name: &str| {
             let path = root.join(format!("{}-{name}.jsonl", uuid::Uuid::new_v4()));
@@ -495,6 +495,7 @@ mod limit_tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");

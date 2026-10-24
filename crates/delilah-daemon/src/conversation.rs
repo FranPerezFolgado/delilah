@@ -56,35 +56,44 @@ async fn readable(app: &AppState, id: &str) -> Result<SessionRecord, ApiError> {
     Ok(record)
 }
 
-/// Claude's projects folder, the only place a transcript is read from.
-pub(crate) fn projects_root() -> Option<PathBuf> {
-    #[cfg(test)]
-    {
-        Some(std::env::temp_dir().join("delilah-test-projects"))
+/// Where the session's transcript is meant to be: the path its hooks reported, else the
+/// one Claude derives from the workspace and the session id (kept on the live session so
+/// it is derived once). Not checked: see [`resolve_transcript`].
+pub(crate) async fn candidate_transcript(
+    app: &AppState,
+    task: &str,
+    id: &str,
+    live: Option<&Live>,
+) -> Option<PathBuf> {
+    if let Some(path) = live.and_then(Live::transcript) {
+        return Some(path);
     }
-    #[cfg(not(test))]
-    {
-        let home = std::env::var_os("HOME")?;
-        Some(transcript::projects_root_in(std::path::Path::new(&home)))
+    let ws = crate::owners::workspace(app, task).await.ok()?;
+    let path = transcript::transcript_path(&ws.path, id)?;
+    if let Some(live) = live {
+        live.set_transcript(path.clone());
     }
+    Some(path)
 }
 
-/// Where the session's transcript is: the path its hooks reported, else the one Claude
-/// derives from the workspace and the session id. Resolved and checked against the
-/// projects folder at every read, so a link or file swapped after the hook is refused.
+/// The session's transcript, resolved and checked against Claude's projects folder at
+/// every read, so a link or file swapped after the hook is refused.
+pub(crate) async fn resolve_transcript(
+    app: &AppState,
+    task: &str,
+    id: &str,
+    live: Option<&Live>,
+) -> Option<PathBuf> {
+    let path = candidate_transcript(app, task, id, live).await?;
+    transcript::within(&app.config.claude_projects, &path)
+}
+
 async fn transcript_file(
     app: &AppState,
     record: &SessionRecord,
     live: Option<&Live>,
 ) -> Option<PathBuf> {
-    let path = match live.and_then(Live::transcript) {
-        Some(path) => path,
-        None => {
-            let ws = crate::owners::workspace(app, &record.task).await.ok()?;
-            transcript::transcript_path(&ws.path, &record.id)?
-        }
-    };
-    transcript::within(&projects_root()?, &path)
+    resolve_transcript(app, &record.task, &record.id, live).await
 }
 
 /// Largest transcript read at all (a bigger one is reported as missing).
@@ -581,6 +590,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         }
     }
@@ -758,8 +768,8 @@ mod tests {
         }
 
         /// Puts `bytes` where the live session's hooks say its transcript is.
-        fn transcript(live: &Live, bytes: &[u8]) -> PathBuf {
-            let root = projects_root().unwrap();
+        fn transcript(&self, live: &Live, bytes: &[u8]) -> PathBuf {
+            let root = self.app.config.claude_projects.clone();
             std::fs::create_dir_all(&root).unwrap();
             let path = root.join(format!("delilah-tr-{}.jsonl", uuid::Uuid::new_v4()));
             std::fs::write(&path, bytes).unwrap();
@@ -778,7 +788,7 @@ mod tests {
         let f = Fixture::new().await;
         let live = f.task_session().await;
         let bytes = fixture_bytes("basic");
-        Fixture::transcript(&live, &bytes);
+        f.transcript(&live, &bytes);
         f.app
             .store
             .add_entry(
@@ -810,7 +820,7 @@ mod tests {
     async fn a_cursor_returns_only_later_transcript_entries_and_all_stored_ones() {
         let f = Fixture::new().await;
         let live = f.task_session().await;
-        let path = Fixture::transcript(&live, &fixture_bytes("basic"));
+        let path = f.transcript(&live, &fixture_bytes("basic"));
         f.app
             .store
             .add_entry(
@@ -849,7 +859,7 @@ mod tests {
         let f = Fixture::new().await;
         let live = f.task_session().await;
         let lines: String = (0..600).map(assistant_line).collect();
-        Fixture::transcript(&live, lines.as_bytes());
+        f.transcript(&live, lines.as_bytes());
         let first = f.get_of("/api/v1/sessions/task1/conversation").await.1;
         assert_eq!(first["entries"].as_array().unwrap().len(), 500);
         assert_eq!(first["complete"], false);
@@ -867,8 +877,10 @@ mod tests {
     #[tokio::test]
     async fn a_missing_transcript_is_pending_before_the_first_turn_and_missing_after() {
         let f = Fixture::new().await;
-        let gone = projects_root()
-            .unwrap()
+        let gone = f
+            .app
+            .config
+            .claude_projects
             .join(format!("delilah-gone-{}.jsonl", uuid::Uuid::new_v4()));
         f.live.set_transcript(gone);
         f.app
@@ -890,7 +902,7 @@ mod tests {
         let f = Fixture::new().await;
         let live = f.task_session().await;
         let bytes = fixture_bytes("basic");
-        Fixture::transcript(&live, &bytes);
+        f.transcript(&live, &bytes);
         let mut off = 0;
         for _ in 0..3 {
             off += bytes[off..].iter().position(|b| *b == b'\n').unwrap() + 1;
@@ -913,7 +925,7 @@ mod tests {
     async fn tool_detail_gives_the_full_call_or_404() {
         let f = Fixture::new().await;
         let live = f.task_session().await;
-        Fixture::transcript(&live, &fixture_bytes("large"));
+        f.transcript(&live, &fixture_bytes("large"));
         let (status, body) = f
             .get_of("/api/v1/sessions/task1/conversation/tools/tl")
             .await;
@@ -931,7 +943,7 @@ mod tests {
     async fn a_transcript_outside_the_projects_folder_or_not_a_file_reads_as_missing() {
         let f = Fixture::new().await;
         let live = f.task_session().await;
-        let root = projects_root().unwrap();
+        let root = f.app.config.claude_projects.clone();
         std::fs::create_dir_all(&root).unwrap();
         let outside =
             std::env::temp_dir().join(format!("delilah-out-{}.jsonl", uuid::Uuid::new_v4()));
@@ -961,7 +973,7 @@ mod tests {
         bytes.extend_from_slice(b"\n");
         let cursor = bytes.len();
         bytes.extend_from_slice(assistant_line(7).as_bytes());
-        Fixture::transcript(&live, &bytes);
+        f.transcript(&live, &bytes);
         let body = f
             .get_of(&format!(
                 "/api/v1/sessions/task1/conversation?cursor={cursor}"
@@ -979,7 +991,7 @@ mod tests {
         let live = f.task_session().await;
         let mut bytes = b"not json at all\n".to_vec();
         bytes.extend_from_slice(&fixture_bytes("basic"));
-        Fixture::transcript(&live, &bytes);
+        f.transcript(&live, &bytes);
         let mut off = 0;
         for _ in 0..4 {
             off += bytes[off..].iter().position(|b| *b == b'\n').unwrap() + 1;
@@ -1006,7 +1018,7 @@ mod tests {
             "{{\"type\":\"assistant\",\"uuid\":\"a\",\"message\":{{\"id\":\"m\",\"role\":\"assistant\",\"content\":[{{\"type\":\"tool_use\",\"id\":\"tbig\",\"name\":\"Bash\",\"input\":{{\"command\":\"{big}\"}}}}]}}}}\n\
              {{\"type\":\"user\",\"uuid\":\"u\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tbig\",\"content\":\"{big}\"}}]}}}}\n"
         );
-        Fixture::transcript(&live, lines.as_bytes());
+        f.transcript(&live, lines.as_bytes());
         let (status, body) = f
             .get_of("/api/v1/sessions/task1/conversation/tools/tbig")
             .await;

@@ -620,6 +620,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
@@ -675,6 +676,7 @@ mod tests {
             ui_origin: None,
             claude_bin: "claude".into(),
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = delilah_core::TaskKey::new("PROJ-1");
@@ -840,6 +842,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
