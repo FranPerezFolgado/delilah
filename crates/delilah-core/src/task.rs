@@ -249,6 +249,33 @@ pub enum AutopilotState {
     Done,
 }
 
+/// How the app shows a task: the chat view or the raw terminal. Display only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskView {
+    #[default]
+    Chat,
+    Terminal,
+}
+
+impl TaskView {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskView::Chat => "chat",
+            TaskView::Terminal => "terminal",
+        }
+    }
+
+    /// `None` for anything but `chat` or `terminal`.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "chat" => Some(TaskView::Chat),
+            "terminal" => Some(TaskView::Terminal),
+            _ => None,
+        }
+    }
+}
+
 /// Where autopilot's final actions are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -307,6 +334,9 @@ pub struct Task {
     /// Autopilot, if on (`None` = off).
     #[serde(default)]
     pub autopilot: Option<Autopilot>,
+    /// How the app shows it (chat by default).
+    #[serde(default)]
+    pub view: TaskView,
 }
 
 impl Task {
@@ -324,6 +354,7 @@ impl Task {
             saving_mode: false,
             handoff: None,
             autopilot: None,
+            view: TaskView::default(),
         }
     }
 

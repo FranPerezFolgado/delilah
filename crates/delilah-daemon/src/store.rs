@@ -2,7 +2,9 @@ use std::path::Path;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use delilah_core::{Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TransitionError};
+use delilah_core::{
+    Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TaskView, TransitionError,
+};
 use serde::Serialize;
 use sqlx::Row;
 use sqlx::sqlite::{
@@ -102,7 +104,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, w.branch AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.view, w.branch AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -113,7 +115,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, w.branch AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.view, w.branch AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -170,6 +172,20 @@ impl Store {
             "UPDATE tasks SET saving_mode = ?1, autopilot = CASE WHEN ?1 THEN autopilot END, updated_at = ?2 WHERE key = ?3",
         )
             .bind(on)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
+    /// Sets how the app shows a task, whatever state it is in.
+    pub async fn set_view(&self, key: &TaskKey, view: TaskView) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET view = ?, updated_at = ? WHERE key = ?")
+            .bind(view.as_str())
             .bind(Utc::now().to_rfc3339())
             .bind(key.as_str())
             .execute(&self.pool)
@@ -309,7 +325,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, w.branch AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.view, w.branch AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -366,8 +382,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, view, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -380,6 +396,7 @@ async fn insert_task<'e>(
     .bind(task.saving_mode)
     .bind(task.handoff.as_ref().map(serde_json::to_string).transpose()?)
     .bind(task.autopilot.as_ref().map(serde_json::to_string).transpose()?)
+    .bind(task.view.as_str())
     .bind(&now)
     .bind(&now)
     .execute(executor)
@@ -404,6 +421,16 @@ pub struct BacklogChange {
     pub in_checkout: Option<bool>,
 }
 
+impl BacklogChange {
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.notes.is_none()
+            && self.project.is_none()
+            && self.workflow.is_none()
+            && self.in_checkout.is_none()
+    }
+}
+
 fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
     let status: String = row.try_get("status")?;
     Ok(Task {
@@ -425,6 +452,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
             .try_get::<Option<String>, _>("autopilot")?
             .map(|json| serde_json::from_str(&json))
             .transpose()?,
+        view: TaskView::parse(&row.try_get::<String, _>("view")?).unwrap_or_default(),
     })
 }
 

@@ -118,10 +118,10 @@
   - no live session means no events;
   - `poke(session)` (called from hooks) checks at once.
 - [X] T015 [US1] Implement T014: one daemon-wide loop (1 s) over `app.sessions`, remembering the last size per session and forgetting sessions that are gone. Start it with the daemon (`crates/delilah-daemon/src/main.rs` or wherever background loops start, next to the scheduler), and call `poke` from `claude_hook` in `crates/delilah-daemon/src/hooks.rs`.
-- [ ] T016 [P] [US1] Write failing tests and implement migration `crates/delilah-daemon/migrations/0016_task_view.sql` (`ALTER TABLE tasks ADD COLUMN view TEXT NOT NULL DEFAULT 'chat';`):
+- [X] T016 [P] [US1] Write failing tests and implement migration `crates/delilah-daemon/migrations/0016_task_view.sql` (`ALTER TABLE tasks ADD COLUMN view TEXT NOT NULL DEFAULT 'chat';`):
   - `Task.view: TaskView { Chat, Terminal }` (serde lowercase, default `Chat`) in `crates/delilah-core/src/task.rs`;
   - read and write in every task query in `crates/delilah-daemon/src/store.rs`, plus `set_view(key, view)`.
-- [ ] T017 [US1] Write failing tests in `crates/delilah-daemon/src/api.rs` (tests module): `POST /api/v1/tasks` accepts `view`; `PATCH /api/v1/tasks/{key}` with `{"view":"terminal"}` persists it and emits `tasks`; an invalid value gives 400. Then implement (`CreateTask.view`, the `update_task` field).
+- [X] T017 [US1] Write failing tests in `crates/delilah-daemon/src/api.rs` (tests module): `POST /api/v1/tasks` accepts `view`; `PATCH /api/v1/tasks/{key}` with `{"view":"terminal"}` persists it and emits `tasks`; an invalid value gives 400. Then implement (`CreateTask.view`, the `update_task` field).
 
 ### UI
 

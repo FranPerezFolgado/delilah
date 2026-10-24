@@ -1283,6 +1283,7 @@ mod tests {
                 autopilot: None,
                 workflow: None,
                 free: true,
+                view: None,
             },
         )
         .await

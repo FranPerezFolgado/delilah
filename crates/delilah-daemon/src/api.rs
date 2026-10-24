@@ -285,6 +285,18 @@ pub struct NewTask {
     pub autopilot: Option<bool>,
     /// Defaults to the project's workflow (`feature` without a project).
     pub workflow: Option<String>,
+    /// `chat` or `terminal`; absent, chat.
+    #[serde(default)]
+    pub view: Option<String>,
+}
+
+/// Parses a `view` from a request; anything but `chat` or `terminal` is a 400.
+fn parse_view(view: &str) -> Result<delilah_core::TaskView, ApiError> {
+    delilah_core::TaskView::parse(view).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "view must be \"chat\" or \"terminal\", not {view:?}"
+        ))
+    })
 }
 
 fn default_workflow() -> String {
@@ -340,6 +352,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         return Err(ApiError::bad_request("say what the task is about"));
     }
     check_autopilot(new.autopilot, new.saving_mode)?;
+    let view = new.view.as_deref().map(parse_view).transpose()?;
     let project = match &new.project {
         Some(name) => Some(app.store.project(name).await?),
         None => None,
@@ -360,6 +373,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
+    task.view = view.unwrap_or_default();
     task.saving_mode = match new.saving_mode {
         Some(on) => on,
         None => crate::handoff::saving_mode_preference(app).await,
@@ -391,8 +405,10 @@ async fn update_task(
         mut change,
         saving_mode,
         autopilot,
+        view,
     } = body;
     check_autopilot(autopilot, saving_mode)?;
+    let view = view.as_deref().map(parse_view).transpose()?;
     if let Some(title) = &mut change.title {
         *title = title.trim().to_string();
         if title.is_empty() {
@@ -400,7 +416,19 @@ async fn update_task(
         }
     }
     let key = TaskKey::new(key);
-    let mut task = app.store.update_backlog_task(&key, &change).await?;
+    // A view-only change works in any state; the rest edits the backlog.
+    let mut task = match view.is_some() && change.is_empty() {
+        true => app
+            .store
+            .get_task(&key)
+            .await?
+            .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?,
+        false => app.store.update_backlog_task(&key, &change).await?,
+    };
+    if let Some(view) = view.filter(|v| *v != task.view) {
+        app.store.set_view(&key, view).await?;
+        task.view = view;
+    }
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
     }
@@ -431,6 +459,8 @@ struct UpdateTask {
     saving_mode: Option<bool>,
     #[serde(default)]
     autopilot: Option<bool>,
+    #[serde(default)]
+    view: Option<String>,
 }
 
 async fn get_task(
@@ -661,6 +691,62 @@ mod tests {
             .await
             .unwrap();
         (router(state.clone()), state)
+    }
+
+    #[tokio::test]
+    async fn the_view_is_set_at_creation_and_by_patch_in_any_state() {
+        let (app, state) = app_with_project().await;
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "a", "project": "web"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["view"], "chat", "chat by default");
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "b", "project": "web", "view": "terminal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["view"], "terminal");
+
+        // Not a backlog task any more: the view still changes.
+        let key = TaskKey::new("LIBRE-1");
+        state
+            .store
+            .apply_event(&key, delilah_core::Event::Start, Utc::now())
+            .await
+            .unwrap();
+        let mut rx = state.events.subscribe();
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/LIBRE-1",
+            Some(json!({"view": "terminal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{task}");
+        assert_eq!(task["view"], "terminal");
+        assert_eq!(rx.try_recv().unwrap(), crate::events::Topic::Tasks);
+        let stored = state.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(stored.view, delilah_core::TaskView::Terminal);
+
+        for (method, uri, body) in [
+            ("PATCH", "/api/v1/tasks/LIBRE-1", json!({"view": "split"})),
+            (
+                "POST",
+                "/api/v1/tasks",
+                json!({"free": true, "title": "c", "view": "x"}),
+            ),
+        ] {
+            let (status, body) = call(&app, method, uri, Some(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        }
     }
 
     #[tokio::test]

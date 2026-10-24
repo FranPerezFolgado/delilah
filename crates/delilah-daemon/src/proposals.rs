@@ -226,6 +226,7 @@ async fn create_from_proposal(
         saving_mode: autopilot.then_some(true),
         autopilot: autopilot.then_some(true),
         workflow: None,
+        view: None,
     };
     let mut autopilot = autopilot;
     // Another conversation may take the key between allocating it and storing the
