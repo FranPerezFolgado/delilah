@@ -11,9 +11,9 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | WP-03 | 3 | 3A | done | 1 | d44308e | |
 | WP-04 | 4 | 4A | done | 1 | bf44eba | |
 | WP-05 | 5 | 5A | verified | 1 | 1b0ab31 | parallel with WP-06 |
-| WP-06 | 6 | 6A | implementing | 0 | | parallel with WP-05 |
+| WP-06 | 6 | 6A | verified | 1 | 58f7b40 | parallel with WP-05 |
 | WP-07 | 6 | 6A | verified | 1 | 5845a13 | started early, UI only |
-| WP-08 | 7 | 7A | pending | 0 | | |
+| WP-08 | 7 | 7A | implementing | 0 | | |
 | WP-09 | 7 | 7B | pending | 0 | | |
 | WP-10 | 7 | 7C | pending | 0 | | |
 
@@ -35,3 +35,5 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | 3 | spec | LOW | report_bases log line untested; T011 checks project folder only by HEAD != remote head | crates/delilah-daemon/src/run.rs |
 | 4 | spec | LOW | "Existing branch, no fetch" test uses `/nonexistent` (fails instantly) so it can't catch a regression that fetches; a hanging sshCommand would | crates/delilah-git/tests/workspace.rs |
 | 4 | spec | LOW | Existing arm: `rev-parse HEAD` `.unwrap_or_default()` can log an empty sha silently | crates/delilah-git/src/workspace.rs (use_checkout) |
+| 5 | spec | MEDIUM | US3 scenario 3 (submodules with different default branch names) has no parent-level test; correct by construction, `master` unit-tested in tests/base.rs | crates/delilah-git/tests/workspace.rs |
+| 5 | spec | LOW | Parent worktree: no test of a chosen submodule whose fetch fails or has no origin (empty-sha fallback path) | crates/delilah-git/tests/workspace.rs |

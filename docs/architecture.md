@@ -36,9 +36,9 @@ done or pending is in [status.md](status.md).
 
 | Path | What it is |
 |---|---|
-| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds and per-project settings (`project.rs`: `ProjectSettings`, validation, the `{ticket}`/`{slug}` branch template), branch-name rules (`branch.rs`: `slug`, `title_slug`, `compose`, `custom`, `fallback`). Pure, no I/O. |
-| `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`), the branch-name proposal (`branch_name.rs`) and the headless one-shot both share (`oneshot.rs`). |
-| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving, and branch names that are free (`branch_taken`, `free_branch`) (`workspace.rs`), what a branch changed (`changes.rs`), shared entries copied or linked into a worktree (`share.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
+| `crates/delilah-core` | Task model and state machine, SpecKit spec parsing (`spec.rs`), project kinds. Pure, no I/O. |
+| `crates/delilah-agents` | The Claude Code adapter: launch args, the settings file with hooks, the status line script, hook classification (`Signal`), PTY (`pty.rs`), clean environment with the login shell's PATH (`env.rs`), usage-limit detection (`limits.rs`), the read-only submodule suggestion (`suggest.rs`). |
+| `crates/delilah-git` | Git through the CLI: worktrees, selective submodule init, branches, checkout mode, archiving (`workspace.rs`), the fresh base of a task branch (`base.rs`), what a branch changed (`changes.rs`). Every git call runs with `core.hooksPath=/dev/null` and `core.fsmonitor=false` (`command.rs`), since agents write those repos and none of their hooks may run in the daemon. |
 | `crates/delilah-integrations` | Jira: Cloud (REST v3, ADF→Markdown), Server/Data Center (REST v2) and built-in sample data. |
 | `crates/delilah-daemon` | `delilahd`: API, hook server, scheduler, spec watcher, store. |
 | `crates/delilah-cli` | `delilah`: a client of the API (`DELILAH_URL`, default 127.0.0.1:7420). |
@@ -116,8 +116,8 @@ Four environment variables exist only for the end-to-end tests (read in `Config:
 - `conversation_entries`: session, time, kind (`user` / `claude` / `card`) and a JSON body.
 - `pull_requests`: one PR per (task, repo), with host, `owner/name`, number, URL, how it was linked (`detected`, `opened`, `pasted`), the last snapshot as JSON, the watermarks already notified (failed head, review and comment ids), `checked_at` and the last problem (`error`, `error_kind`).
 - `pr_unlinked`: URLs the user unlinked, never detected again for that task.
-- `pr_notices`: what the Bandeja shows for PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`), unique per (task, repo, kind, cause) and resolved rather than deleted. All three cascade when the task is deleted.
-- `projects`: name, path, kind, `settings` (JSON, migration 0016; `deny_unknown_fields`; an unreadable value falls back to the defaults with a warning) and `preview_command`.
+- `pr_notices`: what the Bandeja shows for PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`, `base-stale`), unique per (task, repo, kind, cause) and resolved rather than deleted. All three cascade when the task is deleted.
+- `projects`
 - `settings`
 
 ## Tasks
@@ -258,19 +258,11 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
 
 ## Workspaces
 
-- **Branch names:** `start_run` names the branch before the workspace exists.
-  - The name is, in this order: the request's `branch` (normalised by `delilah_core::branch::custom_for`; with a project template it is kept as typed, only made git-safe, by `sanitize_typed`); else the project's branch template, if it has one (`settings.branch`, optional: `{ticket}` is the key, `{slug}` is Claude's short proposal, or the title's `slug()` when Claude fails); else `branch_name::propose`: Claude with a 5 s limit, else `title_slug`, else `fallback(key)`. `compose` gives `feature/<short-name>` or `feature/<KEY>-<short-name>` (the `LIBRE-n` of a free task is left out).
-  - `branch_name::unique` then calls `delilah_git::free_branch` over every repo of the workspace (the repo, or each chosen submodule): a name is taken if `refs/heads/<name>` or `refs/remotes/*/<name>` exists (`branch_taken`), and `-2`… is tried. It applies in worktree and checkout mode alike, so an explicit `--branch` no longer switches to an existing branch.
-  - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field. With a project template it returns the template-expanded full branch, and the dialog first shows the instant guess `branchName(template, key, title)` (the TS mirror) until the answer arrives.
-  - `Task.branch` is read from `workspaces.branch` by a `LEFT JOIN`; a task with no workspace (backlog, archived) has none.
-
-- **Branchless start** (free `LIBRE-` tasks with no typed branch and no project template, `branching.rs`; every other start is named as in the previous item, decision 65):
-  - **Start:** a worktree is detached at the project's HEAD (the folder is still `workspaces/<KEY>`); checkout mode switches nothing and only records where each folder was (`previous`).
-  - **Trigger:** every `Working`/`TurnEnded` hook of the task (`on_activity`), the 30 s scheduler tick and the daemon start (`recover`), under the task's `BranchLocks` lock.
-  - **Steps:** *retitle* (once: `initial` → `spec`, the old title kept in `previous_title`) and then *ensure*: adopt the branch Spec Kit's hook made; else create it, named like the new spec folder (`apply_branch` keeps uncommitted files; a taken name becomes `-2`, `-3`); with only the guard and no spec folder, `slug(title)`. A parent gets the parent first, then each chosen submodule.
-  - **Failure:** `tasks.branch_error` and a Bandeja item `branch` with "Reintentar" (`POST /api/v1/tasks/{key}/branch`).
-  - **Guard:** a session of a free task gets a second `PreToolUse` hook (`Edit|Write|MultiEdit|NotebookEdit|Bash`, `curl -m 15` to `/hooks/claude/guard`). An edit outside `specs/` and `.specify/`, or Bash with `git commit/push/merge/rebase` or `gh pr create`, makes the branch first; if that fails the tool is denied with the reason. Best-effort: substring match on commands, symlinks not resolved.
-  - **Without a branch:** opening a PR is a 422, the PR loop skips the task, spec progress skips the branch match, archive and delete work.
+- **Fresh base** (`delilah_git::base`, for every new task branch, in both modes and per repo or submodule):
+  - `prepare_base` fetches `origin`, then `resolve_base` picks the default branch in this order: `origin/HEAD` target, `origin/main`, `origin/master`, `main`, `master`, `HEAD`. The branch starts at that commit's **sha**, so it has no upstream.
+  - The whole start shares one 30 s `Deadline` (all repos together; `git_with_timeout` in `command.rs`, with `GIT_TERMINAL_PROMPT=0`). A fetch that finished less than 5 s ago is reused, and fetches of the same repo are serialised by a per-repo lock keyed on the folder path.
+  - A failed fetch never blocks: the branch starts from the last known `origin` state and `run.rs::report_bases` raises a `base-stale` notice (none for a repo with no origin). It also logs each base ("task branch base").
+  - Local `main` is never fast-forwarded. In checkout mode an existing branch is used as it is (`Existing`, no fetch).
 - **Worktree mode** (in `workspaces/<KEY>/`):
   - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch, named as in Branch names below.
   - **Repo projects:** a plain worktree.

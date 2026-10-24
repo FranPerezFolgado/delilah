@@ -285,6 +285,13 @@ parent; one task at a time, with the checkout clean; archiving goes back to the
 branch you were on and keeps the task's branch; files left uncommitted stay in your
 folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
+The task's branch starts from `origin`'s default branch as Delilah has just fetched it
+(for a parent, each chosen submodule from its own), not from what your folder had
+checked out; your local `main` is not touched. An existing branch in your checkout is
+used as it is. If the fetch fails (offline, no access) the task starts anyway from the
+last known state and warns "Rama posiblemente atrasada": an item in the Bandeja and a
+banner on the task screen, with "Descartar". It never blocks the task, and archiving
+clears it.
 
 **The task's branch.** Delilah names it from the title: Claude proposes a short name
 and the branch is `feature/<short-name>`, or `feature/<KEY>-<short-name>` for a Jira

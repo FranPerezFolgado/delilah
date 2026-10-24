@@ -102,9 +102,9 @@
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T027 [P] Update `docs/architecture.md` (Workspaces: fetch + base resolution + sha start point + deadline + lock; `delilah-git` row mentions `base.rs`; `pr_notices` kinds include `base-stale`) and `docs/status.md` (built: fresh task bases; known limit: parent worktrees still need the network to init submodules).
-- [ ] T028 [P] Add a decision to `docs/decisions.md`: task branches start from `origin`'s default branch as just fetched, by sha (no upstream); a failed fetch warns and continues; local `main` is never fast-forwarded; per-project base out of scope; why `pr_notices` was reused.
-- [ ] T029 [P] Update `README.md`: where a new task's branch starts, and the "Rama posiblemente atrasada" warning.
+- [X] T027 [P] Update `docs/architecture.md` (Workspaces: fetch + base resolution + sha start point + deadline + lock; `delilah-git` row mentions `base.rs`; `pr_notices` kinds include `base-stale`) and `docs/status.md` (built: fresh task bases; known limit: parent worktrees still need the network to init submodules).
+- [X] T028 [P] Add a decision to `docs/decisions.md`: task branches start from `origin`'s default branch as just fetched, by sha (no upstream); a failed fetch warns and continues; local `main` is never fast-forwarded; per-project base out of scope; why `pr_notices` was reused.
+- [X] T029 [P] Update `README.md`: where a new task's branch starts, and the "Rama posiblemente atrasada" warning.
 - [ ] T030 Run the whole suite: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`; fix what fails.
 - [ ] T031 Walk `specs/005-fresh-base-branch/quickstart.md` in a preview (`scripts/preview.sh --fresh`, never 7420), scenarios 1–5.
 - [ ] T032 Bump the version 0.4.0 → 0.5.0 (minor: new backwards-compatible behaviour, additive API) in the four places listed in `docs/development.md#releasing` plus the lockfiles (`Cargo.lock`, `app/src-tauri/Cargo.lock`, `app/package-lock.json` as applicable), as its own commit `chore: bump version to 0.5.0`; re-check `main`'s version first.

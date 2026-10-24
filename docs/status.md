@@ -30,6 +30,9 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - The Bandeja, with replies, AskUserQuestion answers (with a configurable panel position) and review suggestions.
 - Live updates over WebSocket, the Dock badge, and notifications.
 
+**Fresh task bases:**
+- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 37.
+
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.
 - Free tasks (`LIBRE-n`), and a backlog with notes.
@@ -94,17 +97,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 
 ## Pending and known problems
 
-- **Branch guard is best-effort:** it matches substrings of Bash commands and does not resolve symlinks, so an unusual command can write before the branch exists.
-- **End-to-end tests, pending and known:**
-  - the UI quick-open test covers the file quick open (the UI has no task switcher);
-  - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
-  - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
-  - measured: API layer 57 s (including the build), UI layer 30 s; 10 consecutive full `scripts/e2e.sh` runs all green (78–105 s each), no flaky tests; the installed Delilah stayed untouched (same PID, health OK) and an interrupted run (Ctrl-C) leaves no daemons behind.
-- **Auto-update, pending:**
-  - the maintainer's key and secrets (T005 of `specs/005-app-auto-update`): until the public key replaces `REPLACE_WITH_UPDATER_PUBKEY`, `check.mjs` refuses to release;
-  - the first tagged release, which verifies the workflow end to end (draft lookups, asset name, relaunch into the new version, daemon and plugin version);
-  - next step: `vX.Y.Z-rc.N` tags published as GitHub prereleases (no `--latest`, so `releases/latest` and installed apps ignore them) to rehearse the pipeline. Needs the workflow to accept `-rc` tags and publish with `--prerelease`, and `check.mjs`, `manifest.mjs` and `versions.mjs` to accept the suffix. No update channel in the app: one fixed endpoint;
-  - third-party actions are pinned to major tags, not SHAs.
+- **Fresh bases, known limits:**
+  - parent worktrees still need the network to init submodules;
+  - the fetch lock is keyed on the folder path, so a worktree and its main checkout do not share it;
+  - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
+  - only `GIT_TERMINAL_PROMPT=0` is set, so ssh askpass and keychain dialogs are still possible, bounded by the 30 s deadline.
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);
