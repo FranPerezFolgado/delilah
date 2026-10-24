@@ -2441,4 +2441,110 @@ mod tests {
         );
         assert_eq!(remote_name(&session("@delilah", "Main")), "delilah · Main");
     }
+
+    /// A `claude` that is the fake stream agent.
+    fn fake_stream_script() -> String {
+        format!(
+            "exec bash {}/../delilah-agents/tests/fixtures/fake-claude-stream.sh",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    async fn gone(app: &AppState, id: &str) -> bool {
+        for _ in 0..100 {
+            if app.sessions.get(id).is_none() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_dies_mid_turn_is_exited_like_a_pty_and_can_be_resumed_in_either_mode() {
+        let (app, ws) = chat_app(&fake_stream_script(), true).await;
+        let record = session("PROJ-1", "Main");
+        launch_session_with(
+            &app,
+            &record,
+            &ws,
+            Some("NEEDS_PERMISSION"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        let live = app.sessions.get("sess-1").expect("live");
+        assert!(live.runtime.as_stream().is_some());
+        for _ in 0..100 {
+            if app.permissions.has_session("sess-1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(app.permissions.has_session("sess-1"), "the agent asked");
+        // The process dies mid-turn, with the ask pending.
+        let _ = live.runtime.kill();
+        assert!(gone(&app, "sess-1").await, "marked exited");
+        for _ in 0..100 {
+            if !app.permissions.has_session("sess-1") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(!app.permissions.has_session("sess-1"), "ask released");
+
+        // Resumed on a stream (the task is in chat mode)...
+        launch_session_with(&app, &record, &ws, None, true, Duration::from_secs(10))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let live = app.sessions.get("sess-1").expect("live again");
+        assert!(live.runtime.as_stream().is_some());
+        let _ = live.runtime.kill();
+        assert!(gone(&app, "sess-1").await);
+
+        // ...and in the terminal once the task is switched.
+        app.store
+            .set_chat_mode(&TaskKey::new("PROJ-1"), false)
+            .await
+            .unwrap();
+        launch_session_with(&app, &record, &ws, None, true, Duration::from_secs(10))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let live = app.sessions.get("sess-1").expect("live in a pty");
+        assert!(live.runtime.as_pty().is_some());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn resuming_a_chat_mode_task_after_a_restart_relaunches_its_primary_on_a_stream() {
+        let (app, ws) = chat_app(&fake_stream_script(), true).await;
+        let key = TaskKey::new("PROJ-1");
+        let workspace = delilah_git::Workspace {
+            path: ws.clone(),
+            branch: "b".into(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store
+            .save_workspace(&key, &ws, &workspace)
+            .await
+            .unwrap();
+        app.store
+            .create_session(&session("PROJ-1", "Main"))
+            .await
+            .unwrap();
+        // No live session: a fresh daemon.
+        assert!(app.sessions.get("sess-1").is_none());
+        crate::actions::continue_agent(&app, &key)
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let live = app.sessions.get("sess-1").expect("relaunched");
+        assert!(live.runtime.as_stream().is_some());
+        let _ = live.runtime.kill();
+    }
 }

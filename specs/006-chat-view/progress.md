@@ -37,13 +37,14 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19G | 7 | 7H | done | 1 | | fix round 2 |
 | WP-22G | 8 | 8G | verified | 1 | | allowlist for remembered rules (user decision) |
 | WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
+| WP-22H | 8 | 8H | implementing | 0 | | in-session file/WebFetch rule matching |
 | WP-23 | 8 | 8B | verified | 1 | | go (decision 49) |
 | WP-24 | 8 | 8C | verified | 1 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
 | WP-26 | 9 | 9A | verified | 1 | | go (decision 49) |
 | WP-27 | 9 | 9B | verified | 1 | | go (decision 49) |
 | WP-28 | 9 | 9B | verified | 1 | | go (decision 49) |
-| WP-29 | 9 | 9B | implementing | 0 | | go (decision 49) |
+| WP-29 | 9 | 9B | verified | 1 | | go (decision 49) |
 | WP-30 | 10 | 10A | pending | 0 | | |
 | WP-31 | 10 | 10B | pending | 0 | | |
 
@@ -51,6 +52,7 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 8 | tests | LOW | no daemon test asserts the deny message reaching the agent (trimmed reason / default) | crates/delilah-daemon/src/permissions.rs |
 | 8 | contract | MEDIUM | contracts/api.md + data-model.md stale for permissions (rule, 400/409, allow_always never a bare tool, card shape, PermissionAsk fields) → fix in WP-30 | specs/006-chat-view/contracts/api.md |
 | 8 | contract | LOW | answer: a failed reply returns 409 after the ask was taken → retry gets 404 (document or re-insert) | crates/delilah-daemon/src/permissions.rs:296 |
 | 8 | contract | LOW | CardBase.outcome allows values a permission card never has; no TS↔Rust round-trip fixture | app/src/api.ts:392 |
