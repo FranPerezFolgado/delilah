@@ -31,7 +31,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19 | 7 | 7C | verified | 1 | | go (decision 49) |
 | WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
 | WP-21 | 7 | 7D | verified | 1 | 9d0e3cc | go (decision 49) |
-| WP-21F | 7 | 7F | implementing | 0 | | UI/CLI review fixes |
+| WP-21F | 7 | 7F | verified | 1 | | UI/CLI review fixes |
+| WP-19F | 7 | 7G | implementing | 0 | | review fixes (init wait CRITICAL) |
 | WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |

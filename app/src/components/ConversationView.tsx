@@ -115,31 +115,52 @@ export function ConversationView({
   useEffect(() => {
     setWriting(new Map());
     if (!stream) return;
-    const ws = liveSocket(id);
-    ws.onmessage = (ev) => {
-      let m: { message?: string; text?: string; done?: boolean };
-      try {
-        m = JSON.parse(String(ev.data));
-      } catch {
-        return;
-      }
-      const msg = m.message;
-      if (!msg) return;
-      setWriting((cur) => {
-        const next = new Map(cur);
-        const old = next.get(msg);
-        if (m.done) {
-          if (old) next.set(msg, { ...old, seen: new Set(claudeIds.current) });
-          load();
-        } else if (m.text) {
-          next.set(msg, { text: (old?.text ?? "") + m.text });
+    let closed = false;
+    let ws: WebSocket | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = 1000;
+    const connect = () => {
+      const sock = liveSocket(id);
+      ws = sock;
+      sock.onmessage = (ev) => {
+        delay = 1000;
+        let m: { message?: string; text?: string; done?: boolean };
+        try {
+          m = JSON.parse(String(ev.data));
+        } catch {
+          return;
         }
-        return next;
-      });
+        const msg = m.message;
+        if (!msg) return;
+        setWriting((cur) => {
+          const next = new Map(cur);
+          const old = next.get(msg);
+          if (m.done) {
+            if (old) next.set(msg, { ...old, seen: new Set(claudeIds.current) });
+            load();
+          } else if (m.text) {
+            next.set(msg, { text: (old?.text ?? "") + m.text });
+          }
+          return next;
+        });
+      };
+      // The stream agent can restart under the same session id: reconnect with a backoff,
+      // except on 4409 (the session is not in chat mode).
+      sock.onclose = (ev) => {
+        if (closed || ev?.code === 4409) return;
+        timer = setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 10000);
+      };
     };
+    connect();
     return () => {
-      ws.onmessage = null;
-      ws.close();
+      closed = true;
+      clearTimeout(timer);
+      if (ws) {
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.close();
+      }
     };
   }, [id, stream, load]);
   useEffect(() => {

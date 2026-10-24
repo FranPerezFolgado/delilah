@@ -337,7 +337,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
             )}
             {origin !== "claude" && chatMode && (
               <div className="muted" style={{ fontSize: 12 }}>
-                {t("Sin terminal, y el agente no puede pedir permisos: solo usa las herramientas permitidas")}
+                {t("Experimental: sin terminal; los permisos se piden con tarjetas en la conversación.")}
               </div>
             )}
             {origin !== "claude" && autopilotAllowed && (

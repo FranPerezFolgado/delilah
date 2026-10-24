@@ -399,16 +399,25 @@ describe("ConversationView", () => {
 describe("ConversationView chat mode", () => {
   class FakeSocket {
     static last: FakeSocket;
+    static count = 0;
     onmessage: ((ev: { data: string }) => void) | null = null;
+    onclose: ((ev: { code: number }) => void) | null = null;
     close = vi.fn();
     constructor(public url: string) {
       FakeSocket.last = this;
+      FakeSocket.count++;
+    }
+    drop(code: number) {
+      act(() => this.onclose?.({ code }));
     }
     push(m: object) {
       act(() => this.onmessage?.({ data: JSON.stringify(m) }));
     }
   }
-  beforeEach(() => vi.stubGlobal("WebSocket", FakeSocket));
+  beforeEach(() => {
+    FakeSocket.count = 0;
+    vi.stubGlobal("WebSocket", FakeSocket);
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("grows a writing bubble from deltas and replaces it with the transcript entry", async () => {
@@ -462,6 +471,47 @@ describe("ConversationView chat mode", () => {
     FakeSocket.last = undefined as never;
     render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
     expect(FakeSocket.last).toBeUndefined();
+  });
+
+  describe("reconnection", () => {
+    const mount = () => render(<ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    beforeEach(() => {
+      vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("reconnects with a backoff after an abnormal close", async () => {
+      mount();
+      await waitFor(() => expect(FakeSocket.count).toBe(1));
+      FakeSocket.last.drop(1006);
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(FakeSocket.count).toBe(2);
+      FakeSocket.last.drop(1006);
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(FakeSocket.count).toBe(2);
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(FakeSocket.count).toBe(3);
+    });
+
+    it("handles a 4409 close quietly: no reconnect, no error", async () => {
+      const { container } = mount();
+      await waitFor(() => expect(FakeSocket.count).toBe(1));
+      FakeSocket.last.drop(4409);
+      act(() => void vi.advanceTimersByTime(30000));
+      expect(FakeSocket.count).toBe(1);
+      expect(container.querySelector(".error")).toBeNull();
+    });
+
+    it("does not reconnect after unmount", async () => {
+      const { unmount } = mount();
+      await waitFor(() => expect(FakeSocket.count).toBe(1));
+      const first = FakeSocket.last;
+      first.drop(1006);
+      unmount();
+      act(() => void vi.advanceTimersByTime(30000));
+      expect(FakeSocket.count).toBe(1);
+    });
   });
 });
 

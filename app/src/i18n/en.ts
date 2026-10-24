@@ -12,7 +12,7 @@ export const EN: Record<string, string> = {
   "experimental: modo chat": "experimental: chat mode",
   "Esta sesión va en modo chat: no hay terminal": "This session runs in chat mode: there is no terminal",
   "Modo chat (experimental)": "Chat mode (experimental)",
-  "Sin terminal, y el agente no puede pedir permisos: solo usa las herramientas permitidas": "No terminal, and the agent cannot ask for permissions: it only uses the allowed tools",
+  "Experimental: sin terminal; los permisos se piden con tarjetas en la conversación.": "Experimental: no terminal; permissions are asked with cards in the conversation.",
   "Iniciar en terminal": "Start in terminal",
   "Te espera": "Waiting for you",
   "Pausada": "Paused",

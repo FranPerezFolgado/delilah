@@ -381,7 +381,7 @@ describe("NewTaskDialog chat mode", () => {
     const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
     const { getByLabelText, getByText, container } = mount();
     fireEvent.click(getByLabelText("Modo chat (experimental)"));
-    expect(getByText(/Sin terminal/)).toBeTruthy();
+    expect(getByText(/los permisos se piden con tarjetas/)).toBeTruthy();
     fireEvent.click(getByText("Guardar en backlog"));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0].chat_mode).toBe(true);

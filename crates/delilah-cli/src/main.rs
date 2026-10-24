@@ -147,7 +147,7 @@ enum Command {
         /// Defaults to the project's workflow.
         #[arg(long)]
         workflow: Option<String>,
-        /// Run it as a chat session (the chat view) instead of a terminal.
+        /// Run the agent in chat mode (experimental): no terminal, the conversation is the only view.
         #[arg(long)]
         chat: bool,
         #[command(flatten)]
@@ -185,7 +185,7 @@ enum Command {
         /// Attach to the agent's terminal right away.
         #[arg(long)]
         attach: bool,
-        /// Run it as a chat session (the chat view) instead of a terminal.
+        /// Run the agent in chat mode (experimental): no terminal, the conversation is the only view.
         #[arg(long)]
         chat: bool,
         #[command(flatten)]
