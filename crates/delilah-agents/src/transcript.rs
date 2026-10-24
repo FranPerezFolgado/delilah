@@ -16,6 +16,14 @@ use similar::{ChangeTag, TextDiff};
 pub const MAX_TEXT: usize = 4096;
 /// Longest one-line summary, in characters.
 const MAX_SUMMARY: usize = 120;
+/// A diff is not computed when old and new text together exceed this many bytes.
+const MAX_DIFF_INPUT: usize = 256 * 1024;
+/// Most rows a diff keeps.
+const MAX_DIFF_ROWS: usize = 2000;
+/// Longest time spent computing one diff.
+const DIFF_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+/// Longest tool_use id or session id accepted from a request.
+pub const MAX_ID_LEN: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -105,6 +113,11 @@ pub struct Parsed {
     pub next_offset: u64,
     /// Lines or blocks that were not understood (unknown types, bad JSON).
     pub skipped: usize,
+    /// Results whose `tool_use` is not in the bytes read (it came before the offset):
+    /// `(tool_use_id, result cut like any entry's, is_error)`. A caller reading with a
+    /// cursor re-emits the earlier tool entry with its result (same id), so the client
+    /// replaces it by id instead of leaving the tool pending forever.
+    pub orphan_results: Vec<(String, Option<String>, bool)>,
 }
 
 /// The untruncated input and result of one tool call.
@@ -115,10 +128,28 @@ pub struct ToolDetail {
     pub is_error: bool,
 }
 
+/// Whether `s` is safe as a file name part: non-empty, at most `MAX_ID_LEN` characters
+/// of `[A-Za-z0-9_-]`.
+pub fn is_safe_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= MAX_ID_LEN
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Where Claude saves the transcript of `session_id` started in `workspace`
-/// (`None` without `$HOME`). The folder is named after the workspace path.
+/// (`None` without `$HOME`, or when `session_id` is not a plain id).
 pub fn transcript_path(workspace: &Path, session_id: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
+    transcript_path_in(Path::new(&home), workspace, session_id)
+}
+
+/// [`transcript_path`] under an explicit home directory. The folder is named after the
+/// workspace path.
+pub fn transcript_path_in(home: &Path, workspace: &Path, session_id: &str) -> Option<PathBuf> {
+    if !is_safe_id(session_id) {
+        return None;
+    }
     let dir = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
@@ -129,8 +160,7 @@ pub fn transcript_path(workspace: &Path, session_id: &str) -> Option<PathBuf> {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     Some(
-        Path::new(&home)
-            .join(".claude/projects")
+        home.join(".claude/projects")
             .join(folder)
             .join(format!("{session_id}.jsonl")),
     )
@@ -148,15 +178,25 @@ enum Item {
 
 /// Reads the complete lines of `bytes` from `from_offset` on. A last line without its
 /// `\n` is left for the next call (`next_offset` points at its start). A tool result
-/// fills the entry of its `tool_use` when both are in `bytes`.
+/// fills the entry of its `tool_use` when both are in `bytes`; one whose `tool_use` was
+/// before `from_offset` is listed in `orphan_results`.
 pub fn parse(bytes: &[u8], from_offset: u64) -> Parsed {
+    parse_page(bytes, from_offset, usize::MAX)
+}
+
+/// Like [`parse`], but stops after the line that brings the entries to `max_entries`
+/// or more; `next_offset` is then the start of the first line not read.
+pub fn parse_page(bytes: &[u8], from_offset: u64, max_entries: usize) -> Parsed {
     let mut pos = usize::try_from(from_offset)
         .unwrap_or(usize::MAX)
         .min(bytes.len());
     let mut entries: Vec<Entry> = Vec::new();
     let mut by_tool: HashMap<String, usize> = HashMap::new();
     let mut skipped = 0;
-    while let Some(nl) = bytes[pos..].iter().position(|b| *b == b'\n') {
+    let mut orphan_results = Vec::new();
+    while entries.len() < max_entries
+        && let Some(nl) = bytes[pos..].iter().position(|b| *b == b'\n')
+    {
         let line = &bytes[pos..pos + nl];
         pos += nl + 1;
         if line.iter().all(u8::is_ascii_whitespace) {
@@ -183,6 +223,9 @@ pub fn parse(bytes: &[u8], from_offset: u64) -> Parsed {
                 } => {
                     if let Some(i) = by_tool.get(&tool_use_id) {
                         fill_result(&mut entries[*i], &text, is_error);
+                    } else {
+                        let (cut, _) = truncate(&text, MAX_TEXT);
+                        orphan_results.push((tool_use_id, Some(cut), is_error));
                     }
                 }
             }
@@ -192,6 +235,7 @@ pub fn parse(bytes: &[u8], from_offset: u64) -> Parsed {
         entries,
         next_offset: pos as u64,
         skipped,
+        orphan_results,
     }
 }
 
@@ -429,15 +473,18 @@ fn new_tool(id: String, at: String, name: &str, tool_use_id: &str, input: &Value
             )
         })
         .map(str::to_string);
-    let diff = tool_diff(name, input);
+    let (diff, diff_cut) = match tool_diff(name, input) {
+        Some((rows, cut)) => (Some(rows), cut),
+        None => (None, false),
+    };
     let mut stored = input.clone();
-    let truncated = truncate_strings(&mut stored);
+    let truncated = truncate_strings(&mut stored) | diff_cut;
     Entry::Tool {
         id,
         at,
         tool: name.to_string(),
         tool_use_id: tool_use_id.to_string(),
-        summary: summary(name, &stored, None),
+        summary: summary(name, &stored, None, diff.as_deref()),
         input: stored,
         result: None,
         is_error: false,
@@ -455,11 +502,12 @@ fn fill_result(entry: &mut Entry, text: &str, error: bool) {
         result,
         is_error,
         truncated,
+        diff,
         ..
     } = entry
     {
         let (cut, was_cut) = truncate(text, MAX_TEXT);
-        *s = summary(tool, input, Some(text));
+        *s = summary(tool, input, Some(text), diff.as_deref());
         *result = Some(cut);
         *is_error = error;
         *truncated |= was_cut;
@@ -516,7 +564,7 @@ fn str_of<'a>(input: &'a Value, key: &str) -> &'a str {
 }
 
 /// The one-line summary of a tool call; `result` refines it once known.
-fn summary(name: &str, input: &Value, result: Option<&str>) -> String {
+fn summary(name: &str, input: &Value, result: Option<&str>, diff: Option<&[DiffRow]>) -> String {
     let text = match name {
         "Bash" => {
             let description = str_of(input, "description");
@@ -527,14 +575,28 @@ fn summary(name: &str, input: &Value, result: Option<&str>) -> String {
             }
             .to_string()
         }
-        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => str_of(input, "file_path").to_string(),
+        "Edit" | "MultiEdit" | "Write" => {
+            let path = str_of(input, "file_path");
+            match diff {
+                Some(rows) => {
+                    let count = |k| rows.iter().filter(|r| r.kind == k).count();
+                    format!(
+                        "{path} +{} \u{2212}{}",
+                        count(DiffKind::Add),
+                        count(DiffKind::Del)
+                    )
+                }
+                None => path.to_string(),
+            }
+        }
+        "NotebookEdit" => str_of(input, "file_path").to_string(),
         "Read" => {
             let path = str_of(input, "file_path");
             match (
                 input.get("offset").and_then(Value::as_u64),
                 input.get("limit").and_then(Value::as_u64),
             ) {
-                (Some(o), Some(l)) => format!("{path}:{o}-{}", o + l),
+                (Some(o), Some(l)) => format!("{path}:{o}-{}", o.saturating_add(l)),
                 (Some(o), None) => format!("{path}:{o}-"),
                 (None, Some(l)) => format!("{path}:1-{l}"),
                 _ => path.to_string(),
@@ -542,12 +604,18 @@ fn summary(name: &str, input: &Value, result: Option<&str>) -> String {
         }
         "Grep" | "Glob" => {
             let pattern = str_of(input, "pattern");
+            let place = str_of(input, "path");
+            let head = if place.is_empty() {
+                pattern.to_string()
+            } else {
+                format!("{pattern} in {place}")
+            };
             match result {
                 Some(r) => {
                     let n = r.lines().filter(|l| !l.trim().is_empty()).count();
-                    format!("{pattern} ({n})")
+                    format!("{head} ({n})")
                 }
-                None => pattern.to_string(),
+                None => head,
             }
         }
         "TodoWrite" => {
@@ -589,32 +657,42 @@ fn summary(name: &str, input: &Value, result: Option<&str>) -> String {
     one_line(&text)
 }
 
-fn tool_diff(name: &str, input: &Value) -> Option<Vec<DiffRow>> {
-    match name {
-        "Edit" => Some(diff_rows(
-            str_of(input, "old_string"),
-            str_of(input, "new_string"),
-        )),
-        "MultiEdit" => {
-            let edits = input.get("edits")?.as_array()?;
-            Some(
-                edits
-                    .iter()
-                    .flat_map(|e| diff_rows(str_of(e, "old_string"), str_of(e, "new_string")))
-                    .collect(),
-            )
+/// The diff of an edit tool and whether it was cut (too large, too many rows, or too
+/// slow to compute).
+fn tool_diff(name: &str, input: &Value) -> Option<(Vec<DiffRow>, bool)> {
+    let pairs: Vec<(&str, &str)> = match name {
+        "Edit" => vec![(str_of(input, "old_string"), str_of(input, "new_string"))],
+        "MultiEdit" => input
+            .get("edits")?
+            .as_array()?
+            .iter()
+            .map(|e| (str_of(e, "old_string"), str_of(e, "new_string")))
+            .collect(),
+        "Write" => vec![("", str_of(input, "content"))],
+        _ => return None,
+    };
+    let mut rows = Vec::new();
+    let mut cut = false;
+    for (old, new) in pairs {
+        if rows.len() >= MAX_DIFF_ROWS {
+            cut = true;
+            break;
         }
-        "Write" => Some(diff_rows("", str_of(input, "content"))),
-        _ => None,
+        cut |= diff_rows(old, new, &mut rows);
     }
+    Some((rows, cut))
 }
 
-/// Line diff of `old` to `new` with three lines of context; line numbers count from the
-/// start of each text.
-fn diff_rows(old: &str, new: &str) -> Vec<DiffRow> {
-    let diff = TextDiff::from_lines(old, new);
+/// Appends the line diff of `old` to `new` (three lines of context; line numbers count
+/// from the start of each text) to `rows`; whether it was cut.
+fn diff_rows(old: &str, new: &str, rows: &mut Vec<DiffRow>) -> bool {
+    if old.len() + new.len() > MAX_DIFF_INPUT {
+        return true;
+    }
+    let diff = TextDiff::configure()
+        .timeout(DIFF_TIMEOUT)
+        .diff_lines(old, new);
     let num = |n: usize| u32::try_from(n + 1).ok();
-    let mut rows = Vec::new();
     for group in diff.grouped_ops(3) {
         let (Some(first), Some(last)) = (group.first(), group.last()) else {
             continue;
@@ -637,7 +715,11 @@ fn diff_rows(old: &str, new: &str) -> Vec<DiffRow> {
         });
         for op in &group {
             for change in diff.iter_changes(op) {
-                let text = change.value().trim_end_matches(['\n', '\r']).to_string();
+                if rows.len() >= MAX_DIFF_ROWS {
+                    return true;
+                }
+                let text = change.value().trim_end_matches(['\n', '\r']);
+                let text = truncate(text, MAX_TEXT).0;
                 let (kind, old, new) = match change.tag() {
                     ChangeTag::Equal => (
                         DiffKind::Ctx,
@@ -656,7 +738,7 @@ fn diff_rows(old: &str, new: &str) -> Vec<DiffRow> {
             }
         }
     }
-    rows
+    false
 }
 
 #[cfg(test)]
@@ -912,7 +994,100 @@ mod tests {
 
     #[test]
     fn transcript_path_names_the_folder_after_the_workspace() {
-        let path = transcript_path(Path::new("/nonexistent/my.ws"), "abc").unwrap();
-        assert!(path.ends_with(".claude/projects/-nonexistent-my-ws/abc.jsonl"));
+        let home = Path::new("/h");
+        let path = transcript_path_in(home, Path::new("/nonexistent/my.ws"), "abc").unwrap();
+        assert_eq!(
+            path,
+            Path::new("/h/.claude/projects/-nonexistent-my-ws/abc.jsonl")
+        );
+    }
+
+    #[test]
+    fn transcript_path_refuses_ids_that_escape() {
+        let home = Path::new("/h");
+        let ws = Path::new("/w");
+        for bad in ["", "../x", "a/b", "a.b", &"x".repeat(MAX_ID_LEN + 1)] {
+            assert!(transcript_path_in(home, ws, bad).is_none(), "{bad}");
+        }
+        assert!(transcript_path_in(home, ws, "9f-A_1").is_some());
+    }
+
+    #[test]
+    fn edit_and_grep_summaries_carry_counts_and_path() {
+        let p = parse(&fixture("basic"), 0);
+        let Entry::Tool { summary, .. } = &p.entries[3] else {
+            panic!()
+        };
+        assert_eq!(summary, "/tmp/w/src/a.rs +2 \u{2212}1");
+        let grep = new_tool(
+            "i".into(),
+            "t".into(),
+            "Grep",
+            "x",
+            &serde_json::json!({"pattern": "foo", "path": "src"}),
+        );
+        let Entry::Tool { summary, .. } = &grep else {
+            panic!()
+        };
+        assert_eq!(summary, "foo in src");
+    }
+
+    #[test]
+    fn read_summary_does_not_overflow() {
+        let s = summary(
+            "Read",
+            &serde_json::json!({"file_path": "f", "offset": u64::MAX, "limit": 5}),
+            None,
+            None,
+        );
+        assert!(s.starts_with("f:"));
+    }
+
+    #[test]
+    fn huge_diffs_are_cut() {
+        let big = "x\n".repeat(MAX_DIFF_INPUT);
+        let (rows, cut) = tool_diff("Write", &serde_json::json!({"content": big})).unwrap();
+        assert!(cut && rows.is_empty());
+        let many: String = (0..5000).map(|i| format!("line {i}\n")).collect();
+        let (rows, cut) = tool_diff("Write", &serde_json::json!({"content": many})).unwrap();
+        assert!(cut);
+        assert!(rows.len() <= MAX_DIFF_ROWS);
+        let long = "y".repeat(MAX_TEXT * 2);
+        let (rows, _) = tool_diff("Write", &serde_json::json!({"content": long})).unwrap();
+        assert!(rows.iter().all(|r| r.text.len() <= MAX_TEXT));
+        let e = new_tool(
+            "i".into(),
+            "t".into(),
+            "Write",
+            "x",
+            &serde_json::json!({"file_path": "f", "content": "x\n".repeat(MAX_DIFF_INPUT)}),
+        );
+        assert!(matches!(
+            e,
+            Entry::Tool {
+                truncated: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_result_after_the_cursor_is_an_orphan() {
+        let bytes = fixture("basic");
+        let first = parse(&bytes, 0);
+        // Cut right after the Bash tool_use line (third line).
+        let mut off = 0usize;
+        for _ in 0..3 {
+            off += bytes[off..].iter().position(|b| *b == b'\n').unwrap() + 1;
+        }
+        let rest = parse(&bytes, off as u64);
+        assert!(first.orphan_results.is_empty());
+        let orphan = rest
+            .orphan_results
+            .iter()
+            .find(|o| o.0 == "tb")
+            .expect("orphan");
+        assert_eq!(orphan.1.as_deref(), Some("1 failed"));
+        assert!(orphan.2);
     }
 }

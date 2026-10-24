@@ -43,6 +43,11 @@ pub async fn claude_hook(
         Some(id) => app.sessions.get(id),
         None => app.sessions.primary(&q.task),
     };
+    if let Some(live) = &live
+        && let Some(path) = trusted_transcript(&hook)
+    {
+        live.set_transcript(path);
+    }
     // No live session (e.g. a hook from before a restart): treat it as the primary.
     let primary = live.as_ref().is_none_or(|l| l.primary);
     if signal == Signal::SessionStarted
@@ -141,6 +146,18 @@ pub async fn claude_hook(
         }
     }
     StatusCode::NO_CONTENT
+}
+
+/// The transcript path a hook carries, only when it is absolute, has no `..` and ends in
+/// `.jsonl`: it comes from the hook body, so it is not followed blindly.
+fn trusted_transcript(hook: &Value) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(hook.get("transcript_path")?.as_str()?);
+    let plain = path.is_absolute()
+        && path.extension().is_some_and(|e| e == "jsonl")
+        && !path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+    plain.then(|| path.to_path_buf())
 }
 
 pub async fn claude_statusline(
@@ -368,6 +385,43 @@ mod tests {
         post(&state, "/hooks/claude/statusline?task=PROJ-1", payload).await;
         let usage = state.latest_limits().unwrap();
         assert_eq!(usage["five_hour"]["used_percentage"], 82);
+    }
+
+    #[tokio::test]
+    async fn a_hook_sets_and_replaces_the_live_transcript_path() {
+        let state = running_task().await;
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let live = state.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+        assert_eq!(live.transcript(), None);
+        let url = "/hooks/claude?task=PROJ-1&session=s-1";
+        let hook =
+            |path: &str| json!({ "hook_event_name": "PostToolUse", "transcript_path": path });
+        post(&state, url, hook("/h/.claude/projects/p/a.jsonl")).await;
+        assert_eq!(
+            live.transcript(),
+            Some("/h/.claude/projects/p/a.jsonl".into())
+        );
+        post(&state, url, hook("/h/.claude/projects/p/b.jsonl")).await;
+        assert_eq!(
+            live.transcript(),
+            Some("/h/.claude/projects/p/b.jsonl".into())
+        );
+        // Not absolute, not a transcript, or climbing out: ignored.
+        for bad in ["rel/c.jsonl", "/etc/passwd", "/h/../etc/c.jsonl"] {
+            post(&state, url, hook(bad)).await;
+        }
+        assert_eq!(
+            live.transcript(),
+            Some("/h/.claude/projects/p/b.jsonl".into())
+        );
     }
 }
 

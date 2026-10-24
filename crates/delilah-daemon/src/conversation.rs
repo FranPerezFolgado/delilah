@@ -3,9 +3,14 @@
 //! from the session's own hooks and from the view's requests.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use std::collections::HashSet;
+use std::path::PathBuf;
+
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use chrono::{DateTime, Utc};
 use delilah_agents::claude::Signal;
+use delilah_agents::transcript::{self, Entry as TEntry};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -14,7 +19,7 @@ use crate::events::Topic;
 use crate::idea::{CardOutcome, card_outcome};
 use crate::sessions::{Live, LiveState};
 use crate::state::AppState;
-use crate::store_sessions::EntryKind;
+use crate::store_sessions::{EntryKind, SessionKind, SessionRecord};
 
 /// Longest message taken from the view (and longest first prompt), in characters.
 pub(crate) const MAX_MESSAGE_CHARS: usize = 16_000;
@@ -32,15 +37,107 @@ async fn ensure_conversation(app: &AppState, id: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// `GET /api/v1/sessions/{id}/conversation`
+/// Most transcript entries one call returns; `complete: false` tells there are more.
+const PAGE: usize = 500;
+
+/// The session's record, or the 404 / 409 of the contract: a conversation can be read
+/// from any Claude session, not from a shell.
+async fn readable(app: &AppState, id: &str) -> Result<SessionRecord, ApiError> {
+    let record = app
+        .store
+        .session(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
+    if record.kind == SessionKind::Shell {
+        return Err(ApiError::conflict("a shell session has no conversation"));
+    }
+    Ok(record)
+}
+
+/// Where the session's transcript is: the path its hooks reported, else the one Claude
+/// derives from the workspace and the session id.
+async fn transcript_file(
+    app: &AppState,
+    record: &SessionRecord,
+    live: Option<&Live>,
+) -> Option<PathBuf> {
+    if let Some(path) = live.and_then(Live::transcript) {
+        return Some(path);
+    }
+    let ws = crate::owners::workspace(app, &record.task).await.ok()?;
+    transcript::transcript_path(&ws.path, &record.id)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConversationQuery {
+    cursor: Option<String>,
+}
+
+fn at_of(entry: &Value) -> DateTime<Utc> {
+    entry["at"]
+        .as_str()
+        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map_or(DateTime::<Utc>::MIN_UTC, |at| at.with_timezone(&Utc))
+}
+
+/// `GET /api/v1/sessions/{id}/conversation`: the transcript's entries (after `cursor`,
+/// at most one page) merged by time with the entries the daemon stores (cards, messages
+/// from the view), which are always all returned.
+///
+/// A tool result that comes after the cursor while its tool call came before it is
+/// returned as an update: the tool entry again, with its result and the same id.
 pub async fn get(
     State(app): State<AppState>,
     Path(id): Path<String>,
+    Query(q): Query<ConversationQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    ensure_conversation(&app, &id).await?;
-    let mut entries = json!(app.store.entries(&id).await?);
+    let record = readable(&app, &id).await?;
+    let offset = match &q.cursor {
+        Some(c) => Some(
+            c.parse::<u64>()
+                .map_err(|_| ApiError::bad_request("the cursor is not a byte offset"))?,
+        ),
+        None => None,
+    };
+    let live = app.sessions.get(&id);
+    let mut entries: Vec<Value> = Vec::new();
+    let (cursor, complete, state) = match transcript_file(&app, &record, live.as_ref()).await {
+        Some(path) => match tokio::fs::read(&path).await {
+            Ok(bytes) => {
+                let from = offset.unwrap_or(0);
+                let page = transcript::parse_page(&bytes, from, PAGE);
+                let next = usize::try_from(page.next_offset).unwrap_or(usize::MAX);
+                let complete = !bytes.get(next..).is_some_and(|rest| rest.contains(&b'\n'));
+                if offset.is_some() && !page.orphan_results.is_empty() {
+                    let wanted: HashSet<&str> = page
+                        .orphan_results
+                        .iter()
+                        .map(|(id, _, _)| id.as_str())
+                        .collect();
+                    entries.extend(
+                        transcript::parse(&bytes, 0)
+                            .entries
+                            .iter()
+                            .filter(|e| {
+                                matches!(e, TEntry::Tool { tool_use_id, .. } if wanted.contains(tool_use_id.as_str()))
+                            })
+                            .filter_map(|e| serde_json::to_value(e).ok()),
+                    );
+                }
+                entries.extend(
+                    page.entries
+                        .iter()
+                        .filter_map(|e| serde_json::to_value(e).ok()),
+                );
+                (page.next_offset, complete, "present")
+            }
+            Err(_) => (offset.unwrap_or(0), true, missing(live.as_ref())),
+        },
+        None => (offset.unwrap_or(0), true, missing(live.as_ref())),
+    };
+    let mut stored = json!(app.store.entries(&id).await?);
     // Asks live in memory: a card whose ask is gone cannot be answered any more.
-    for entry in entries.as_array_mut().into_iter().flatten() {
+    for entry in stored.as_array_mut().into_iter().flatten() {
         if entry["kind"] == "card"
             && entry["outcome"] == "pending"
             && !entry["ask"]
@@ -49,12 +146,52 @@ pub async fn get(
         {
             entry["outcome"] = json!("withdrawn");
         }
+        // Ids are strings in the conversation: the row id.
+        entry["id"] = json!(entry["id"].to_string());
     }
-    let live = app.sessions.get(&id);
+    entries.extend(stored.as_array().cloned().unwrap_or_default());
+    entries.sort_by_cached_key(at_of);
     Ok(Json(json!({
         "entries": entries,
+        "cursor": cursor.to_string(),
+        "complete": complete,
+        "transcript": state,
         "activity": live.as_ref().and_then(Live::activity),
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
+        "runtime": "pty",
+    })))
+}
+
+/// A transcript file that is not there: expected until the session's first turn.
+fn missing(live: Option<&Live>) -> &'static str {
+    if live.is_some_and(|l| l.state() == LiveState::Starting) {
+        "pending"
+    } else {
+        "missing"
+    }
+}
+
+/// `GET /api/v1/sessions/{id}/conversation/tools/{tool_use_id}`: the whole input and
+/// result of one tool call, which entries only carry cut.
+pub async fn tool(
+    State(app): State<AppState>,
+    Path((id, tool_use_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let record = readable(&app, &id).await?;
+    let not_found = || ApiError::not_found(format!("no tool call {tool_use_id}"));
+    if !transcript::is_safe_id(&tool_use_id) {
+        return Err(not_found());
+    }
+    let live = app.sessions.get(&id);
+    let path = transcript_file(&app, &record, live.as_ref())
+        .await
+        .ok_or_else(not_found)?;
+    let bytes = tokio::fs::read(&path).await.map_err(|_| not_found())?;
+    let detail = transcript::tool_detail(&bytes, &tool_use_id).ok_or_else(not_found)?;
+    Ok(Json(json!({
+        "input": detail.input,
+        "result": detail.result.unwrap_or_default(),
+        "is_error": detail.is_error,
     })))
 }
 
@@ -457,20 +594,218 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_ensure_conversation_an_unknown_or_plain_session_is_refused() {
+    async fn an_unknown_session_is_not_found_and_a_shell_has_no_conversation() {
         let f = Fixture::new().await;
-        f.app
-            .store
-            .create_session(&record("plain", false))
-            .await
-            .unwrap();
+        let mut shell = record("sh", false);
+        shell.kind = SessionKind::Shell;
+        f.app.store.create_session(&shell).await.unwrap();
         let get = |id: &str| {
             Request::get(format!("/api/v1/sessions/{id}/conversation"))
                 .body(Body::empty())
                 .unwrap()
         };
         assert_eq!(f.call(get("nope")).await.0, StatusCode::NOT_FOUND);
-        assert_eq!(f.call(get("plain")).await.0, StatusCode::CONFLICT);
+        let (status, body) = f.call(get("sh")).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "a shell session has no conversation");
+    }
+
+    fn fixture_bytes(name: &str) -> Vec<u8> {
+        std::fs::read(format!(
+            "{}/../delilah-agents/tests/fixtures/transcripts/{name}.jsonl",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap()
+    }
+
+    fn assistant_line(n: usize) -> String {
+        format!(
+            "{{\"type\":\"assistant\",\"uuid\":\"x{n}\",\"timestamp\":\"2025-02-01T10:00:00.000Z\",\"message\":{{\"id\":\"m{n}\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"t{n}\"}}]}}}}\n"
+        )
+    }
+
+    impl Fixture {
+        /// A plain task session (not an idea one) with a live terminal.
+        async fn task_session(&self) -> Live {
+            self.app
+                .store
+                .create_session(&record("task1", false))
+                .await
+                .unwrap();
+            let mut cmd = CommandBuilder::new("sleep");
+            cmd.arg("30");
+            let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+            self.app
+                .sessions
+                .insert("task1", "@web", SessionKind::Claude, false, pty)
+        }
+
+        /// Puts `bytes` where the live session's hooks say its transcript is.
+        fn transcript(live: &Live, bytes: &[u8]) -> PathBuf {
+            let path =
+                std::env::temp_dir().join(format!("delilah-tr-{}.jsonl", uuid::Uuid::new_v4()));
+            std::fs::write(&path, bytes).unwrap();
+            live.set_transcript(path.clone());
+            path
+        }
+
+        async fn get_of(&self, uri: &str) -> (StatusCode, Value) {
+            self.call(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_task_session_merges_the_transcript_with_stored_entries() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let bytes = fixture_bytes("basic");
+        Fixture::transcript(&live, &bytes);
+        f.app
+            .store
+            .add_entry(
+                "task1",
+                EntryKind::User,
+                &json!({ "text": "mine", "state": "sent", "from": "view" }),
+            )
+            .await
+            .unwrap();
+        let (status, body) = f.get_of("/api/v1/sessions/task1/conversation").await;
+        assert_eq!(status, StatusCode::OK);
+        let entries = body["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 9);
+        assert_eq!(entries[0]["id"], "t:u1:0");
+        let last = entries.last().unwrap();
+        assert_eq!(
+            (last["kind"].as_str(), last["text"].as_str()),
+            (Some("user"), Some("mine"))
+        );
+        assert!(last["id"].is_string());
+        assert!(entries.iter().all(|e| e["id"].is_string()));
+        assert_eq!(body["cursor"], bytes.len().to_string());
+        assert_eq!(body["complete"], true);
+        assert_eq!(body["transcript"], "present");
+        assert_eq!(body["runtime"], "pty");
+    }
+
+    #[tokio::test]
+    async fn a_cursor_returns_only_later_transcript_entries_and_all_stored_ones() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let path = Fixture::transcript(&live, &fixture_bytes("basic"));
+        f.app
+            .store
+            .add_entry(
+                "task1",
+                EntryKind::User,
+                &json!({ "text": "mine", "state": "sent", "from": "view" }),
+            )
+            .await
+            .unwrap();
+        let first = f.get_of("/api/v1/sessions/task1/conversation").await.1;
+        let cursor = first["cursor"].as_str().unwrap().to_string();
+        let mut more = std::fs::read(&path).unwrap();
+        more.extend_from_slice(assistant_line(1).as_bytes());
+        std::fs::write(&path, more).unwrap();
+        let (status, body) = f
+            .get_of(&format!(
+                "/api/v1/sessions/task1/conversation?cursor={cursor}"
+            ))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let texts: Vec<_> = body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["text"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(texts, ["t1", "mine"]);
+        let bad = f
+            .get_of("/api/v1/sessions/task1/conversation?cursor=abc")
+            .await;
+        assert_eq!(bad.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn more_than_a_page_of_new_entries_is_incomplete() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let lines: String = (0..600).map(assistant_line).collect();
+        Fixture::transcript(&live, lines.as_bytes());
+        let first = f.get_of("/api/v1/sessions/task1/conversation").await.1;
+        assert_eq!(first["entries"].as_array().unwrap().len(), 500);
+        assert_eq!(first["complete"], false);
+        let cursor = first["cursor"].as_str().unwrap();
+        let second = f
+            .get_of(&format!(
+                "/api/v1/sessions/task1/conversation?cursor={cursor}"
+            ))
+            .await
+            .1;
+        assert_eq!(second["entries"].as_array().unwrap().len(), 100);
+        assert_eq!(second["complete"], true);
+    }
+
+    #[tokio::test]
+    async fn a_missing_transcript_is_pending_before_the_first_turn_and_missing_after() {
+        let f = Fixture::new().await;
+        let gone =
+            std::env::temp_dir().join(format!("delilah-gone-{}.jsonl", uuid::Uuid::new_v4()));
+        f.live.set_transcript(gone);
+        f.app
+            .store
+            .add_entry("conv", EntryKind::Claude, &json!({ "text": "hola" }))
+            .await
+            .unwrap();
+        let body = f.conversation().await;
+        assert_eq!(body["transcript"], "pending");
+        assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+        f.live.set_state(LiveState::Working);
+        let body = f.conversation().await;
+        assert_eq!(body["transcript"], "missing");
+        assert_eq!(body["entries"][0]["text"], "hola");
+    }
+
+    #[tokio::test]
+    async fn a_result_after_the_cursor_updates_the_earlier_tool_entry() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let bytes = fixture_bytes("basic");
+        Fixture::transcript(&live, &bytes);
+        let mut off = 0;
+        for _ in 0..3 {
+            off += bytes[off..].iter().position(|b| *b == b'\n').unwrap() + 1;
+        }
+        let body = f
+            .get_of(&format!("/api/v1/sessions/task1/conversation?cursor={off}"))
+            .await
+            .1;
+        let bash = body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["tool_use_id"] == "tb")
+            .expect("the tool entry again");
+        assert_eq!(bash["result"], "1 failed");
+        assert_eq!(bash["id"], "t:a2:0");
+    }
+
+    #[tokio::test]
+    async fn tool_detail_gives_the_full_call_or_404() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        Fixture::transcript(&live, &fixture_bytes("large"));
+        let (status, body) = f
+            .get_of("/api/v1/sessions/task1/conversation/tools/tl")
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["input"]["command"], "cat big");
+        assert_eq!(body["result"].as_str().unwrap().len(), 20000);
+        assert_eq!(body["is_error"], false);
+        for id in ["nope", "a.b"] {
+            let uri = format!("/api/v1/sessions/task1/conversation/tools/{id}");
+            assert_eq!(f.get_of(&uri).await.0, StatusCode::NOT_FOUND, "{id}");
+        }
     }
 
     #[tokio::test]

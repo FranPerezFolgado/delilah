@@ -132,6 +132,10 @@ pub fn router(state: AppState) -> Router {
             get(crate::conversation::get),
         )
         .route(
+            "/api/v1/sessions/{id}/conversation/tools/{tool_use_id}",
+            get(crate::conversation::tool),
+        )
+        .route(
             "/api/v1/sessions/{id}/messages",
             post(crate::conversation::send),
         )

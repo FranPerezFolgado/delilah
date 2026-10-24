@@ -97,21 +97,21 @@
 
 ### Backend
 
-- [ ] T009 [US1] Write failing tests in `crates/delilah-daemon/src/hooks.rs` (tests module): a hook carrying `transcript_path` stores it on the live session (`Live::transcript()`), and a later hook with another path replaces it.
-- [ ] T010 [US1] Implement T009: `transcript: Mutex<Option<PathBuf>>` on `Live` in `crates/delilah-daemon/src/sessions.rs`, set in `claude_hook` in `crates/delilah-daemon/src/hooks.rs`.
-- [ ] T011 [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module, a temp HOME with a transcript copied from the fixtures), for `GET /api/v1/sessions/{id}/conversation`:
+- [X] T009 [US1] Write failing tests in `crates/delilah-daemon/src/hooks.rs` (tests module): a hook carrying `transcript_path` stores it on the live session (`Live::transcript()`), and a later hook with another path replaces it.
+- [X] T010 [US1] Implement T009: `transcript: Mutex<Option<PathBuf>>` on `Live` in `crates/delilah-daemon/src/sessions.rs`, set in `claude_hook` in `crates/delilah-daemon/src/hooks.rs`.
+- [X] T011 [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module, a temp HOME with a transcript copied from the fixtures), for `GET /api/v1/sessions/{id}/conversation`:
   - on a task session (not an idea one), the response holds `entries` from the transcript plus stored entries merged by `at`, with `cursor`, `transcript: "present"`, `complete: true` and `runtime: "pty"`;
   - `?cursor=<c>` returns only later transcript entries, plus all stored entries;
   - more than 500 new entries gives `complete: false`;
   - a missing file gives `transcript: "pending"` for a live session that has not had a turn, and `"missing"` otherwise, with the stored entries still returned;
   - a shell session gets 409 `a shell session has no conversation`;
   - ids are strings.
-- [ ] T012 [US1] Implement T011 in `crates/delilah-daemon/src/conversation.rs`:
+- [X] T012 [US1] Implement T011 in `crates/delilah-daemon/src/conversation.rs`:
   - resolve the path (`Live::transcript()`, else `transcript::transcript_path`);
   - read from the cursor offset and `parse`;
   - merge with stored entries, whose ids are now strings;
   - drop the `conversation = 1` guard for reading.
-- [ ] T013 [US1] Write failing tests and implement `GET /api/v1/sessions/{id}/conversation/tools/{tool_use_id}` (full input and result, 404 when unknown) in `crates/delilah-daemon/src/conversation.rs`, with the route in `crates/delilah-daemon/src/api.rs`.
+- [X] T013 [US1] Write failing tests and implement `GET /api/v1/sessions/{id}/conversation/tools/{tool_use_id}` (full input and result, 404 when unknown) in `crates/delilah-daemon/src/conversation.rs`, with the route in `crates/delilah-daemon/src/api.rs`.
 - [ ] T014 [US1] Write failing tests in a new `crates/delilah-daemon/src/transcript_watch.rs` (tests module, short interval injected):
   - appending a complete line to a live session's transcript emits `Topic::Conversations` within one interval;
   - appending only a partial line emits nothing until it is completed;

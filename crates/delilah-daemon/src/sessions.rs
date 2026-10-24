@@ -1,6 +1,7 @@
 //! Sessions alive in this daemon right now, by session id.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -48,6 +49,8 @@ pub struct Live {
     pub conversation: Arc<AtomicBool>,
     /// What a conversation's view shows of the turn in progress.
     pub convo: Arc<Mutex<ConvoState>>,
+    /// Where Claude saves this session's transcript, as its latest hook said.
+    transcript: Arc<Mutex<Option<PathBuf>>>,
     events: Events,
 }
 
@@ -69,6 +72,15 @@ impl Live {
 
     pub fn set_idea(&self, conversation: bool) {
         self.conversation.store(conversation, Ordering::Relaxed);
+    }
+
+    /// The transcript path the latest hook carried, if any.
+    pub fn transcript(&self) -> Option<PathBuf> {
+        self.transcript.lock().unwrap().clone()
+    }
+
+    pub fn set_transcript(&self, path: PathBuf) {
+        *self.transcript.lock().unwrap() = Some(path);
     }
 
     pub fn activity(&self) -> Option<String> {
@@ -140,6 +152,7 @@ impl Sessions {
             })),
             conversation: Arc::default(),
             convo: Arc::default(),
+            transcript: Arc::default(),
             events: self.events.clone(),
         };
         self.live
