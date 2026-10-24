@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::{
-    sqlite::{SqliteConnectOptions, SqliteConnection},
     ConnectOptions, Connection,
+    sqlite::{SqliteConnectOptions, SqliteConnection},
 };
 
 const KEEP: usize = 3;
@@ -46,7 +46,9 @@ pub async fn before_open(home: &Path, db: &Path, current: &str) {
         let target = backups.join(&name);
         if !target.exists() {
             match copy(db, &backups, &target).await {
-                Ok(()) => tracing::info!(copy = %target.display(), "kept a copy of the database before upgrading"),
+                Ok(()) => {
+                    tracing::info!(copy = %target.display(), "kept a copy of the database before upgrading")
+                }
                 Err(e) => tracing::warn!("could not back up the database to {name}: {e}"),
             }
         }
@@ -188,7 +190,12 @@ mod tests {
     async fn fresh_install_makes_no_copy() {
         let dir = tempfile::TempDir::new().unwrap();
         before_open(dir.path(), &dir.path().join("delilah.db"), "0.5.0").await;
-        assert!(!dir.path().join("backups").join("delilah-unknown.db").exists());
+        assert!(
+            !dir.path()
+                .join("backups")
+                .join("delilah-unknown.db")
+                .exists()
+        );
     }
 
     #[tokio::test]

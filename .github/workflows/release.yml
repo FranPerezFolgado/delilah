@@ -95,9 +95,10 @@ jobs:
           test -f "$sig" || { echo "missing $sig; did the build sign the app?" >&2; exit 1; }
           out="$RUNNER_TEMP/latest.json"
           node scripts/release/manifest.mjs --write "$out" "$GITHUB_REF_NAME" "$sig" notes.md "$GITHUB_REPOSITORY"
-          # gh falls back to draft releases by tag.
-          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -qx 'Delilah.app.tar.gz' || {
-            echo "release $GITHUB_REF_NAME has no asset named Delilah.app.tar.gz" >&2
+          # gh falls back to draft releases by tag. tauri-action uploads the local
+          # Delilah.app.tar.gz as Delilah_aarch64.app.tar.gz (ASSET in manifest.mjs).
+          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -qx 'Delilah_aarch64.app.tar.gz' || {
+            echo "release $GITHUB_REF_NAME has no asset named Delilah_aarch64.app.tar.gz" >&2
             exit 1
           }
           gh release upload "$GITHUB_REF_NAME" "$out" --clobber

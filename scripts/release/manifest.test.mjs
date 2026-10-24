@@ -23,7 +23,7 @@ test("manifest matches the contract", () => {
     platforms: {
       "darwin-aarch64": {
         signature: "SIG",
-        url: "https://github.com/FranPerezFolgado/delilah/releases/download/v0.5.0/Delilah.app.tar.gz",
+        url: "https://github.com/FranPerezFolgado/delilah/releases/download/v0.5.0/Delilah_aarch64.app.tar.gz",
       },
     },
   });
@@ -42,7 +42,7 @@ test("validateManifest accepts a good manifest", () => {
 test("validateManifest flags version, draft url and empty signature", () => {
   const m = good();
   m.version = "1.2.4";
-  m.platforms["darwin-aarch64"].url = "https://github.com/o/r/releases/download/untagged-abc/Delilah.app.tar.gz";
+  m.platforms["darwin-aarch64"].url = "https://github.com/o/r/releases/download/untagged-abc/Delilah_aarch64.app.tar.gz";
   m.platforms["darwin-aarch64"].signature = " ";
   assert.equal(validateManifest(m, { tag: "v1.2.3", repo: "o/r" }).length, 3);
 });
@@ -55,7 +55,7 @@ test("buildChecked builds from a tag and trims the signature", () => {
   const m = buildChecked({ tag: "v1.2.3", signature: " sig\n", notes: "n", repo: "o/r", pubDate: "2026-01-01T00:00:00Z" });
   assert.equal(m.version, "1.2.3");
   assert.equal(m.platforms["darwin-aarch64"].signature, "sig");
-  assert.equal(m.platforms["darwin-aarch64"].url, "https://github.com/o/r/releases/download/v1.2.3/Delilah.app.tar.gz");
+  assert.equal(m.platforms["darwin-aarch64"].url, "https://github.com/o/r/releases/download/v1.2.3/Delilah_aarch64.app.tar.gz");
 });
 
 test("buildChecked rejects an empty signature", () => {
