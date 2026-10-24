@@ -124,11 +124,31 @@ pub async fn proposal(
     Query(q): Query<ProposalQuery>,
 ) -> Result<Json<Proposal>, ApiError> {
     let key = known_task(&app, &key).await?;
-    let rows = app.store.prs_of(&key).await?;
+    Ok(Json(build_proposal(&app, &key, q.repo).await?))
+}
+
+/// The title and body a PR of `repo` (default `.`) would start from. Errors with reason
+/// `has-pr` or `no-commits` when there is nothing to open. Shared with the autopilot.
+pub(crate) async fn proposal_for(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+) -> Result<(String, String), ApiError> {
+    let p = build_proposal(app, key, repo.map(str::to_string)).await?;
+    Ok((p.title, p.body))
+}
+
+async fn build_proposal(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<String>,
+) -> Result<Proposal, ApiError> {
+    let q = ProposalQuery { repo };
+    let rows = app.store.prs_of(key).await?;
     let has_open = |label: &str| rows.iter().any(|r| r.repo == label && is_open(r));
     let mut candidates = vec![q.repo.clone().unwrap_or_else(|| ".".into())];
     if candidates[0] == "."
-        && let Some((_, ws)) = app.store.workspace(&key).await?
+        && let Some((_, ws)) = app.store.workspace(key).await?
     {
         // A parent has no "." repo: the default is its first submodule without a PR
         // that has commits to open one with.
@@ -146,14 +166,14 @@ pub async fn proposal(
     let mut empty = None;
     let mut picked = None;
     for candidate in &candidates {
-        let (repo, branch, dir, labels) = source_of(&app, &key, Some(candidate)).await?;
+        let (repo, branch, dir, labels) = source_of(app, key, Some(candidate)).await?;
         if has_open(&repo) {
             return Err(ApiError::conflict_reason(
                 format!("{repo} already has an open PR"),
                 "has-pr",
             ));
         }
-        let commits = commits_of(&app, &dir, &branch).await?;
+        let commits = commits_of(app, &dir, &branch).await?;
         if commits.subjects.is_empty() {
             empty.get_or_insert((branch, commits.base));
         } else {
@@ -169,7 +189,7 @@ pub async fn proposal(
         ));
     };
     let mut body = String::new();
-    if let Some(link) = jira_link(&app, &key).await {
+    if let Some(link) = jira_link(app, key).await {
         body.push_str(&format!("Jira: {link}\n\n"));
     }
     for subject in &commits.subjects {
@@ -177,18 +197,18 @@ pub async fn proposal(
     }
     let title = app
         .store
-        .get_task(&key)
+        .get_task(key)
         .await?
         .map(|t| t.title)
         .unwrap_or_default();
-    Ok(Json(Proposal {
+    Ok(Proposal {
         repo,
         title,
         body: body.trim_end().to_string(),
         base: commits.base,
         needs_push: commits.needs_push,
         repos: labels.into_iter().filter(|l| !has_open(l)).collect(),
-    }))
+    })
 }
 
 /// Pushes `branch` from `dir` unless the remote has it already.
@@ -211,13 +231,12 @@ async fn create_and_link(
     app: &AppState,
     key: &TaskKey,
     (repo, dir, branch): (String, &FsPath, &str),
-    req: &OpenRequest,
-    title: &str,
+    (title, body, draft): (&str, &str, bool),
 ) -> Result<PrRow, ApiError> {
     let base = base_of(app, dir).await?;
     let url = app
         .gh
-        .pr_create(dir, branch, &base, title, &req.body, req.draft)
+        .pr_create(dir, branch, &base, title, body, draft)
         .await
         .map_err(|e| ApiError::conflict(e.to_string()))?;
     let pr = parse_pr_url(&url)
@@ -230,24 +249,27 @@ async fn create_and_link(
     Ok(pr_loop::link_known(app, key, repo, pr, &snapshot, "opened").await?)
 }
 
-/// `POST /tasks/{key}/prs`: pushes the branch if needed, creates the PR and links it.
-pub async fn open(
-    State(app): State<AppState>,
-    Path(key): Path<String>,
-    Json(req): Json<OpenRequest>,
-) -> Result<(StatusCode, Json<PrView>), ApiError> {
-    let key = known_task(&app, &key).await?;
-    let title = req.title.trim();
+/// Pushes the task's branch if needed, creates the PR and links it as `opened`. Shared by
+/// `POST /tasks/{key}/prs` and the autopilot; `has-pr` conflict if the repo has an open PR.
+pub(crate) async fn open_for(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<PrRow, ApiError> {
+    let title = title.trim();
     if title.is_empty() {
         return Err(ApiError::bad_request("the PR needs a title"));
     }
-    let (repo, branch, dir, _) = source_of(&app, &key, req.repo.as_deref()).await?;
+    let (repo, branch, dir, _) = source_of(app, key, repo).await?;
     // Keeps a detection from linking the PR twice while it is being opened; the link
     // is an upsert anyway, so a check already running is not waited for.
-    let _claim = pr_loop::claim(&app, &key);
+    let _claim = pr_loop::claim(app, key);
     if app
         .store
-        .prs_of(&key)
+        .prs_of(key)
         .await?
         .iter()
         .any(|r| r.repo == repo && is_open(r))
@@ -257,8 +279,26 @@ pub async fn open(
             "has-pr",
         ));
     }
-    push_if_needed(&app, &dir, &branch).await?;
-    let row = create_and_link(&app, &key, (repo, &dir, &branch), &req, title).await?;
+    push_if_needed(app, &dir, &branch).await?;
+    create_and_link(app, key, (repo, &dir, &branch), (title, body, draft)).await
+}
+
+/// `POST /tasks/{key}/prs`: opens the PR of the task's branch (see [`open_for`]).
+pub async fn open(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<OpenRequest>,
+) -> Result<(StatusCode, Json<PrView>), ApiError> {
+    let key = known_task(&app, &key).await?;
+    let row = open_for(
+        &app,
+        &key,
+        req.repo.as_deref(),
+        &req.title,
+        &req.body,
+        req.draft,
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(PrView::from(&row))))
 }
 
@@ -372,6 +412,37 @@ mod tests {
         )
         .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn open_for_pushes_creates_a_draft_and_links_it_as_opened() {
+        let gh = opening_gh();
+        let (_router, app, _dir) = git_setup(gh.clone(), &["first"]).await;
+        let key = TaskKey::new("PROJ-1");
+        let Ok(row) = open_for(&app, &key, None, "My PR", "the body", true).await else {
+            panic!("open_for failed");
+        };
+        assert_eq!(row.linked_by, "opened");
+        assert_eq!(row.url, PR_URL);
+        let calls = gh.calls();
+        let args = calls
+            .iter()
+            .find(|c| c.starts_with(&["pr".into(), "create".into()]))
+            .unwrap();
+        assert!(args.iter().any(|a| a == "--draft"), "{args:?}");
+        assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn open_for_is_a_has_pr_conflict_when_a_pr_is_open() {
+        let (_router, app, _dir) = git_setup(opening_gh(), &["first"]).await;
+        let key = TaskKey::new("PROJ-1");
+        assert!(open_for(&app, &key, None, "One", "", false).await.is_ok());
+        let Err(err) = open_for(&app, &key, None, "Two", "", false).await else {
+            panic!("a second open PR must conflict");
+        };
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("has-pr"));
     }
 
     #[tokio::test]

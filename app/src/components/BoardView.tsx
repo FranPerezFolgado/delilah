@@ -1,6 +1,7 @@
 import { statusLabel, type PrSummary, type SpecSummary, type Task } from "../api";
 import { BOARD_COLUMNS, boardColumnOf } from "../phases";
 import { Icon } from "./Icon";
+import { AutopilotMark } from "./AutopilotMark";
 import { PrBadge } from "./PrBadge";
 import { statusIcon } from "./status";
 import { t } from "../i18n";
@@ -66,6 +67,7 @@ function Card({ task, spec, pr, onOpen }: { task: Task; spec?: SpecSummary; pr?:
       <span className="kcard-top">
         <span className="mono muted">{task.key}</span>
         {pr && <PrBadge pr={pr} />}
+        <AutopilotMark autopilot={task.autopilot} />
         <span className={`kcard-status ${cls}`} title={statusLabel(task.status)}>
           <Icon name={icon} />
           {task.status.type !== "done" && task.status.type !== "running" && <span>{statusLabel(task.status)}</span>}

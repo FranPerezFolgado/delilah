@@ -80,6 +80,8 @@ svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-widt
 .error { color: var(--err); font-size: 12px; }
 .notice { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--bd); }
 .notice.pause { background: var(--pausebg); }
+.notice.err { background: var(--elev); align-items: flex-start; }
+.setup-reason { margin: 6px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 11px; padding: 8px; border-radius: 6px; border: 1px solid var(--bd); }
 .notice.wait { background: var(--accbg); }
 
 .history { display: flex; flex-direction: column; }
@@ -388,13 +390,16 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .where-opt input { margin: 2px 0 0; accent-color: var(--acc); }
 /* A tall dialog scrolls; its parts never get squeezed. */
 .dialog > * { flex-shrink: 0; }
-.where-opt > span { min-width: 0; }
+.where-opt { min-width: 0; text-align: left; }
+.where-opt > span { min-width: 0; overflow-wrap: anywhere; }
+.dialog { text-align: left; }
 .where-opt .mono { word-break: break-all; }
 .chev-btn { width: 18px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent;
   color: var(--tx3); cursor: pointer; padding: 0 0 0 4px; }
 .chev-btn:hover { color: var(--tx); }
 .phead-main { padding-left: 2px; }
 .pcount { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--tx3); }
+.pcount.c-wait { color: var(--acc); }
 .pgroup .srow { padding-left: 24px; }
 
 /* Help › Ver logs */
@@ -440,6 +445,11 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .menu .c-err { color: var(--err); }
 .backlog-task { max-width: 720px; }
 .backlog-task textarea { resize: vertical; font: inherit; }
+
+/* Project settings screen */
+.dialog.settings { width: 640px; }
+.settings .shared-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
+.settings .picks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
 /* Questions with a preview / proposal, and the idea conversation */
 .ask-preview { max-height: 60vh; overflow: auto; border: 1px solid var(--bd); border-radius: 6px; padding: 8px 12px; background: var(--panel); }
@@ -498,3 +508,23 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 
 .pr-group { display: flex; flex-direction: column; gap: 8px; }
 .pr-group-title { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
+
+/* Update notice: a slim banner above the main views */
+.update-notice { margin: 12px 12px 0; }
+.update-notice .grow { flex: 1; }
+.update-notice .update-body { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.update-notice .update-row { display: flex; align-items: center; gap: 12px; }
+.update-notice .update-notes { max-height: 220px; overflow-y: auto; font-size: 12.5px; }
+.update-notice .update-progress { flex: 1; height: 6px; }
+
+/* Autopilot: the mark in the header and on the card, and the paused banner. */
+.autopilot-pill { border-color: var(--acc); color: var(--tx); }
+.autopilot-pill svg.i { width: 12px; height: 12px; }
+.autopilot-pill.autopilot-paused { border-color: var(--pause); color: var(--pause); }
+.autopilot-pill.autopilot-done { border-color: var(--done); color: var(--done); }
+.autopilot-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-basis: 100%; padding: 6px 10px;
+  border: 1px solid var(--pause); border-radius: 6px; font-size: 12.5px; }
+
+.preview-ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.preview-ctl .preview-err { color: var(--tx3); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-setting { display: flex; flex-direction: column; gap: 4px; font-size: 12px; max-width: 520px; }

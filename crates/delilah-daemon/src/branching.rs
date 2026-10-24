@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::extract::{Path as UrlPath, State};
-use delilah_core::{ProjectKind, Task, TaskKey, TitleSource};
+use delilah_core::{Project, ProjectKind, Task, TaskKey, TitleSource};
 use delilah_git::{GitOptions, Workspace};
 use serde_json::{Value, json};
 
@@ -80,36 +80,22 @@ pub(crate) async fn new_spec_folder(app: &AppState, key: &TaskKey) -> Option<(St
     find_new_spec(&ws, &at_start)
 }
 
-/// A branch name from a title: lower-case ASCII (accents folded), runs of other
-/// characters as `-`, at most 4 words and 40 characters. `task` when nothing is left.
+/// A branch name from a title: the shared slug (lower-case ASCII, accents folded, at
+/// most 40 characters) cut to its first 4 words. `task` when nothing is left.
 pub(crate) fn slug(title: &str) -> String {
-    let folded: String = title
-        .chars()
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
-            'á' | 'à' | 'â' | 'ä' | 'ã' | 'å' => 'a',
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'í' | 'ì' | 'î' | 'ï' => 'i',
-            'ó' | 'ò' | 'ô' | 'ö' | 'õ' => 'o',
-            'ú' | 'ù' | 'û' | 'ü' => 'u',
-            'ñ' => 'n',
-            'ç' => 'c',
-            c => c,
-        })
-        .collect();
-    let words: Vec<&str> = folded
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|w| !w.is_empty())
+    let slug = delilah_core::slug(title)
+        .split('-')
         .take(4)
-        .collect();
-    let mut slug = words.join("-");
-    slug.truncate(40);
-    let slug = slug.trim_matches('-');
-    if slug.is_empty() {
-        "task".into()
-    } else {
-        slug.into()
-    }
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() { "task".into() } else { slug }
+}
+
+/// Whether a starting task begins without a branch (decision 65): a free task whose
+/// request typed no branch, in a project with no branch template. Everything else is
+/// named at start (typed branch, then template, then the proposal).
+pub(crate) fn starts_branchless(project: &Project, key: &TaskKey, typed: bool) -> bool {
+    is_free(key) && !typed && !crate::branch_name::has_template(project)
 }
 
 /// Whether the task still has something to take from its first analysis: a free task
@@ -204,29 +190,14 @@ fn adopted(
 /// main one and each chosen submodule) has: local or remote-tracking. `-2`, `-3`…
 /// otherwise.
 fn free_name(ws: &Workspace, wanted: &str, opts: &GitOptions) -> Result<String, String> {
-    let repos = spec_repos(ws);
-    let mut name = wanted.to_string();
-    let mut n = 1;
-    loop {
-        let mut taken = false;
-        for (label, dir) in &repos {
-            if delilah_git::branch_exists(dir, &name, opts).map_err(|e| format!("{label}: {e}"))? {
-                taken = true;
-                break;
-            }
-        }
-        if !taken {
-            return Ok(name);
-        }
-        n += 1;
-        name = format!("{wanted}-{n}");
-    }
+    let dirs: Vec<PathBuf> = spec_repos(ws).into_iter().map(|(_, dir)| dir).collect();
+    delilah_git::free_branch(&dirs, wanted, opts).map_err(|e| e.to_string())
 }
 
 /// Puts `dir` on `branch`: switches to it when the repo has it already (left by the user
 /// or by a partial run), starts it at the current commit otherwise.
 fn bring_onto(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), delilah_git::GitError> {
-    if delilah_git::branch_exists(dir, branch, opts)? {
+    if delilah_git::branch_taken(dir, branch, opts)? {
         delilah_git::switch_branch(dir, branch, opts)
     } else {
         delilah_git::apply_branch(dir, branch, opts)
@@ -666,7 +637,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..Config::test_defaults()
         };
         AppState::new(Store::in_memory().await.unwrap(), config)
     }
@@ -910,7 +883,8 @@ mod tests {
         assert_eq!(slug(""), "task");
         let long = slug("abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz");
         assert!(long.len() <= 40 && !long.ends_with('-'), "{long}");
-        assert_eq!(long, "abcdefghijklmnopqrstuvwxyz-abcdefghijklm");
+        // The shared slug cuts at the last whole word that fits in 40.
+        assert_eq!(long, "abcdefghijklmnopqrstuvwxyz");
         assert_eq!(slug("x".repeat(60).as_str()).len(), 40);
         // A cut that lands on a separator leaves no trailing dash.
         assert_eq!(slug(&format!("{} b", "a".repeat(39))), "a".repeat(39));
@@ -1016,6 +990,11 @@ mod tests {
         let app = app().await;
         let (key, root) = real_task(&app, "LIBRE-1", &[]).await;
         git(&root, &["branch", "005-y"]);
+        // The shared free-name check reads remote-tracking refs through the configured remotes.
+        git(
+            &root,
+            &["remote", "add", "origin", "https://example.invalid/r.git"],
+        );
         git(
             &root,
             &["update-ref", "refs/remotes/origin/005-y-2", "HEAD"],

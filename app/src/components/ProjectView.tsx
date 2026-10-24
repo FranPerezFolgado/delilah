@@ -1,7 +1,8 @@
-import type { Project, Session, SessionKind } from "../api";
+import { useEffect, useState } from "react";
+import { api, type Project, Session, SessionKind } from "../api";
 import { keyOf } from "../shortcuts";
 import { Icon } from "./Icon";
-import { sessionStatus } from "./sessionLabels";
+import { kindLabel, sessionStatus } from "./sessionLabels";
 import { t } from "../i18n";
 
 interface Props {
@@ -16,6 +17,20 @@ interface Props {
 
 /** A project's first tab: its checkout, and sessions to ask about the code without a task. */
 export function ProjectView({ project, sessions, onOpenSession, onNewSession, onNewTask, onNewIdea }: Props) {
+  const saved = project.preview_command ?? "";
+  const [command, setCommand] = useState(saved);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => setCommand(saved), [saved]);
+  const saveCommand = async () => {
+    const next = command.trim();
+    if (next === saved) return;
+    setError(null);
+    try {
+      await api.updateProject(project.name, { preview_command: next === "" ? null : next });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
   return (
     <div className="view-body">
       <div className="muted" style={{ fontSize: 12 }}>
@@ -46,6 +61,17 @@ export function ProjectView({ project, sessions, onOpenSession, onNewSession, on
           </button>
         )}
       </div>
+      <label className="project-setting">
+        {t("Comando de preview")}
+        <input
+          className="input mono"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          onBlur={saveCommand}
+          onKeyDown={(e) => e.key === "Enter" && saveCommand()}
+        />
+        {error && <span className="muted">{error}</span>}
+      </label>
       {sessions.length > 0 && (
         <div>
           <div className="sec" style={{ marginBottom: 8 }}>{t("Sesiones")}</div>
@@ -55,9 +81,9 @@ export function ProjectView({ project, sessions, onOpenSession, onNewSession, on
               return (
                 <div className="row" key={s.id} style={{ gridTemplateColumns: "1fr auto auto", alignItems: "center" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Icon name={s.kind === "shell" ? "console" : st.icon} className={st.cls} />
+                    <Icon name={s.kind !== "claude" ? "console" : st.icon} className={st.cls} />
                     <b style={{ fontWeight: 600 }}>{s.label}</b>
-                    <span className="muted">{s.kind === "shell" ? t("terminal") : s.read_only ? t("Claude · solo lectura") : "Claude"}</span>
+                    <span className="muted">{kindLabel(s, s.read_only ? t("Claude · solo lectura") : "Claude")}</span>
                   </span>
                   <span className={`pill ${st.cls}`} style={{ height: 18, fontSize: 11 }}>{st.label}</span>
                   <button className="btn btn-ghost" onClick={() => onOpenSession(s.id)}>{t("Abrir")}</button>

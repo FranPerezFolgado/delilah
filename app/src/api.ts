@@ -11,7 +11,9 @@ export type TaskStatus =
   | { type: "waiting-for-user" }
   | { type: "paused-by-limit"; resume_at: string }
   | { type: "done" }
-  | { type: "failed"; reason: string };
+  | { type: "failed"; reason: string }
+  // The workspace setup failed, was cancelled or interrupted; reason is the end of its output.
+  | { type: "setup-failed"; reason: string };
 
 /** The steps of a saving-mode task, each in its own session. */
 export type Step = "plan" | "implement" | "review";
@@ -22,6 +24,24 @@ export interface Handoff {
   to: Step;
   stage: HandoffStage;
   error?: string;
+}
+
+/** Autopilot on a task: where it is, and why it stopped if paused. */
+export interface Autopilot {
+  state: "running" | "paused" | "done";
+  stage?: "preview" | "opening_pr";
+  reason?: string;
+  since: string;
+  nudged?: Step;
+  review_session?: string;
+}
+
+/** A task's preview process (the project's preview command). */
+export interface PreviewView {
+  state: "starting" | "running" | "failed";
+  url?: string;
+  error?: string;
+  started_at: string;
 }
 
 export interface Task {
@@ -35,8 +55,12 @@ export interface Task {
   notes?: string | null;
   /** Backlog: where it will work once started (checkout or worktree); null if not chosen. */
   in_checkout?: boolean | null;
+  /** The branch of the task's workspace; absent without a workspace (read-only). */
+  branch?: string | null;
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
+  /** Autopilot: null when off. */
+  autopilot?: Autopilot | null;
   handoff: Handoff | null;
   /** Who set the title: the first one, the analysis's feature name, or the user. */
   title_source: "initial" | "spec" | "manual";
@@ -53,11 +77,49 @@ export interface EventRecord {
 
 export type ProjectKind = "parent" | "repo";
 
+export type WorkspaceMode = "checkout" | "worktree";
+export type SharedMode = "copy" | "link";
+
+export interface SharedEntry {
+  path: string;
+  /** null: decided by the kind of entry when it is used. */
+  mode: SharedMode | null;
+}
+
+export interface ProjectSettings {
+  /** null: not chosen, so a worktree. */
+  workspace: WorkspaceMode | null;
+  /** Branch template (needs {ticket}); null: Delilah proposes a descriptive name. */
+  branch: string | null;
+  shared: SharedEntry[];
+  setup: string | null;
+  submodules: { always: string[]; never: string[] };
+}
+
+/** Body of a 422 from the settings endpoint: one message per invalid field. */
+export interface SettingsError {
+  error: string;
+  fields: { field: string; code: string; message: string }[];
+}
+
+/** The effective settings of a project with nothing configured. */
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  workspace: null,
+  branch: null,
+  shared: [],
+  setup: null,
+  submodules: { always: [], never: [] },
+};
+
 export interface Project {
   name: string;
   path: string;
   kind: ProjectKind;
   workflow: string;
+  /** Effective settings, defaults included. */
+  settings: ProjectSettings;
+  /** Command that serves a task's workspace as a preview; null or absent: none. */
+  preview_command?: string | null;
 }
 
 export interface Submodule {
@@ -87,6 +149,8 @@ export interface NewBacklogTask {
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -97,6 +161,8 @@ export interface BacklogChange {
   project?: string;
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
 }
 
 export interface RunRequest {
@@ -112,10 +178,19 @@ export interface RunRequest {
   in_checkout?: boolean;
   /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
   saving_mode?: boolean;
+  /** Implies saving mode. */
+  autopilot?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
   from_session?: string;
+  /** Full branch name (`feature/...`); empty or absent lets the daemon choose. */
+  branch?: string;
+}
+
+export interface BranchProposal {
+  branch: string | null;
+  source: "claude" | "title" | "key";
 }
 
 export type JiraMode = "sample" | "cloud" | "data-center";
@@ -187,7 +262,7 @@ export interface SubmoduleSuggestion {
   reason: string;
 }
 
-export type SessionKind = "claude" | "shell";
+export type SessionKind = "claude" | "shell" | "setup";
 export type SessionState = "starting" | "working" | "waiting" | "paused";
 
 /** A terminal in a task's workspace: its primary Claude, extra Claudes or shells. */
@@ -275,7 +350,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "branch";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -389,6 +464,8 @@ export class ApiError extends Error {
     readonly reason?: string,
     /** When a paused task resumes (a 409 that is a pause, not any other conflict). */
     readonly resumeAt?: string,
+    /** A 422 from the settings endpoint: one message per invalid field. */
+    readonly fields: SettingsError["fields"] = [],
   ) {
     super(message);
   }
@@ -407,7 +484,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at);
+    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at, Array.isArray(data?.fields) ? data.fields : []);
   return data as T;
 }
 
@@ -418,13 +495,22 @@ export const api = {
   tasks: () => request<Task[]>("/api/v1/tasks"),
   events: (key: string) => request<EventRecord[]>(`/api/v1/tasks/${key}/events`),
   projects: () => request<Project[]>("/api/v1/projects"),
-  submodules: (project: string) => request<Submodule[]>(`/api/v1/projects/${project}/submodules`),
+  /** `all` includes the `never` submodules (the settings screen edits the rules). */
+  submodules: (project: string, opts: { all?: boolean } = {}) =>
+    request<Submodule[]>(`/api/v1/projects/${project}/submodules${opts.all ? "?all=true" : ""}`),
   suggestSubmodules: (project: string, t: { key: string; title: string; components: string[]; description?: string }) =>
     post<{ submodules: SubmoduleSuggestion[]; model: string }>(`/api/v1/projects/${project}/suggest-submodules`, t),
+  proposeBranch: (
+    project: string,
+    t: { key?: string; title: string; notes?: string; free: boolean; submodules: string[] },
+  ) => post<BranchProposal>(`/api/v1/projects/${project}/branch-name`, t),
   addProject: (p: { path: string; kind: ProjectKind; name?: string }) => post<Project>("/api/v1/projects", p),
   inspectFolder: (path: string) => post<FolderInspection>("/api/v1/projects/inspect", { path }),
-  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string }) =>
+  updateProject: (name: string, change: { name?: string; path?: string; kind?: ProjectKind; workflow?: string; preview_command?: string | null }) =>
     request<Project>(`/api/v1/projects/${name}`, { method: "PATCH", body: JSON.stringify(change) }),
+  /** Saves the whole settings; a 422 throws an ApiError with `fields`. */
+  updateProjectSettings: (name: string, settings: ProjectSettings) =>
+    request<Project>(`/api/v1/projects/${name}/settings`, { method: "PUT", body: JSON.stringify(settings) }),
   deleteProject: (name: string) => request<null>(`/api/v1/projects/${name}`, { method: "DELETE" }),
   run: (req: RunRequest) => post<Task>("/api/v1/runs", req),
   createTask: (task: NewBacklogTask) => post<Task>("/api/v1/tasks", task),
@@ -434,13 +520,22 @@ export const api = {
   deleteTask: (key: string, force = false) =>
     request<null>(`/api/v1/tasks/${key}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   resume: (key: string) => post<Task>(`/api/v1/tasks/${key}/resume`),
+  setupRetry: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/retry`),
+  setupSkip: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/skip`),
+  setupCancel: (key: string) => post<Task>(`/api/v1/tasks/${key}/setup/cancel`),
   done: (key: string) => post<Task>(`/api/v1/tasks/${key}/done`),
   /** Retries applying the branch derived from the spec; branch_error says if it failed again. */
   retryBranch: (key: string) => post<Task>(`/api/v1/tasks/${key}/branch`),
   archive: (key: string, force = false) => post<Task>(`/api/v1/tasks/${key}/archive${force ? "?force=true" : ""}`),
   /** Moves the task to a phase; only the user can move it back. */
   setPhase: (key: string, phase: SpecPhase) => post<Task>(`/api/v1/tasks/${key}/phase`, { phase }),
+  /** The task's preview, or null when it has none. */
+  getPreview: (key: string) => request<PreviewView | null>(`/api/v1/tasks/${key}/preview`),
+  /** Starts it. 409 `no-preview-command` / `no-workspace` / `running`; 422 when it can't be spawned. */
+  startPreview: (key: string) => post<PreviewView>(`/api/v1/tasks/${key}/preview`),
+  stopPreview: (key: string) => request<null>(`/api/v1/tasks/${key}/preview`, { method: "DELETE" }),
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
   dismissReviewHint: (key: string) => post<null>(`/api/v1/tasks/${key}/review-hint/dismiss`),
@@ -475,7 +570,8 @@ export const api = {
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
-  answerAsk: (id: string, answers: Record<string, string>) => post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, { answers }),
+  answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
+    post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, launch ? { answers, launch } : { answers }),
   conversation: (id: string) => request<Conversation>(`/api/v1/sessions/${id}/conversation`),
   sendMessage: (id: string, text: string) => post<ConversationEntry>(`/api/v1/sessions/${id}/messages`, { text }),
   removeMessage: (id: string, entry: number) =>
@@ -555,6 +651,8 @@ export const statusLabel = (s: TaskStatus): string => {
       return t("Hecha");
     case "failed":
       return t("Fallida");
+    case "setup-failed":
+      return t("Setup fallido");
   }
 };
 

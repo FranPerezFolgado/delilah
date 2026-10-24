@@ -41,7 +41,9 @@ pub(crate) async fn task_with_workspace(
         allow_file_protocol: false,
         notify: false,
         ui_origin: None,
+        claude_bin: "claude".into(),
         agent_program: None,
+        ..crate::config::Config::test_defaults()
     };
     let app = AppState::new(Store::in_memory().await.unwrap(), config).with_gh(gh);
     let key = TaskKey::new("PROJ-1");
@@ -51,6 +53,8 @@ pub(crate) async fn task_with_workspace(
             path: "/parent".into(),
             kind: ProjectKind::Repo,
             workflow: "feature".into(),
+            settings: Default::default(),
+            preview_command: None,
         })
         .await
         .unwrap();

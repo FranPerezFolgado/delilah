@@ -15,9 +15,9 @@ vi.mock("./SpecPanel", () => ({ SpecPanel: () => null }));
 
 const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, title_source: "initial", previous_title: null, branch_error: null, handoff: null };
 
-const show = () =>
+const show = (tk: Task = task) =>
   render(
-    <TaskView task={task} sessions={[]} onOpenSession={() => {}} onNewSession={async () => {}} onChanged={() => {}} onViewChanges={() => {}} />,
+    <TaskView task={tk} sessions={[]} onOpenSession={() => {}} onNewSession={async () => {}} onChanged={() => {}} onViewChanges={() => {}} />,
   );
 
 beforeEach(() => setLanguage("es"));
@@ -49,5 +49,25 @@ describe("step-started history label", () => {
     setLanguage("en");
     expect(stepLabel("plan")).toBe("Spec and plan");
     expect(t("Paso a {step} (sesión nueva)", { step: stepLabel("review") })).toBe("Moved to Review (new session)");
+  });
+});
+
+describe("TaskView branch", () => {
+  beforeEach(() => {
+    setLanguage("en");
+    events.mockResolvedValue([]);
+  });
+
+  it("shows the branch in monospace with its label", () => {
+    const { getByText, container } = show({ ...task, branch: "feature/K-1-do-it" });
+    const branch = getByText("feature/K-1-do-it");
+    expect(branch.className).toContain("mono");
+    expect(container.textContent).toContain("Branch");
+  });
+
+  it("shows nothing when the task has no branch", () => {
+    const { container } = show(task);
+    expect(container.textContent).not.toContain("Branch");
+    expect(container.querySelector("[data-testid=task-branch]")).toBeNull();
   });
 });

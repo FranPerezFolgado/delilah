@@ -39,6 +39,20 @@ delilah new SIGNAL-13 --project signal --title "Feed cache" --notes "Look at the
 delilah new --free --project signal --title "Try a lighter JSON parser"   # named LIBRE-n
 delilah run SIGNAL-13     # starts the backlog task in its project; its notes reach the agent
 
+delilah new SIGNAL-14 --project signal --title "Feed cache" --worktree   # --checkout or --worktree; neither: the project's setting
+delilah run SIGNAL-13 --checkout   # same flags; neither: the backlog task's choice, else the project's setting
+
+# Per-project settings (see "Project settings" below)
+delilah project show signal                          # effective settings, defaults marked
+delilah project set signal workspace worktree        # checkout | worktree
+delilah project set signal branch 'feature/{ticket}-{slug}'
+delilah project set signal setup 'npm ci'
+delilah project set signal shared add .env --copy    # --copy | --link; neither: automatic
+delilah project set signal shared rm .env
+delilah project set signal submodules always add svc-common   # always|never add|rm <path>
+delilah project unset signal setup                   # back to the default
+delilah setup retry|skip|cancel SIGNAL-13            # when a task's setup failed or is running
+
 delilah ls                 # tasks and their state
 delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
@@ -84,6 +98,8 @@ daemon on 750N and its UI on http://localhost:150N, with state in
 that UI in with `DELILAH_UI_ORIGIN`, and the UI finds it through
 `VITE_DELILAH_URL`. `--fresh` starts empty, `--no-ui` runs only the daemon,
 `--notify` turns notifications on. Ctrl-C stops both.
+
+**End-to-end tests.** `scripts/e2e.sh` runs the API/CLI and UI flows against a fake Claude, safe next to the installed app (see docs/development.md).
 
 The bundle carries `delilahd` inside (`Delilah.app/Contents/MacOS/delilahd`). When
 the installed app opens, it installs a LaunchAgent
@@ -131,6 +147,25 @@ fails, the Bandeja shows it with "Reintentar"; after a restart Delilah finishes 
 re-offers it. In Settings: "Modo ahorro por defecto" (new tasks) and "Guardar notas
 antes de cambiar de sesión" (on by default). Needs the spec files: without a
 `specs/` folder there are no handoffs.
+
+**Autopilot.** A task can run on its own up to the PR: "Autopiloto" (next to "Modo
+ahorro", which it turns on; a toggle on a running task, `--autopilot` /
+`--no-autopilot` in `delilah run` and `new`, `delilah autopilot <KEY> on|off|resume`).
+Only for tasks on the spec workflow. The implementation starts without asking, the
+review runs the project's checks, and when it reports the branch ready Delilah starts
+the project's preview (if it has one) and opens a draft PR with your `gh`. A step that
+stalls gets one nudge; questions that have an option marked "(Recommended)" are
+answered for you. Anything else (a permission prompt in the task's session, a question without a
+recommendation, a blocked review, a failure) pauses it: the header shows "Autopiloto en
+pausa" with the reason, and the Bandeja offers "Reanudar autopiloto" or "Seguir a
+mano". On the idea card, "Crear y lanzar en autopiloto" creates the task and starts it.
+Delilah pushes and opens the PR without asking again, so turn it on only where that is
+what you want. It never merges.
+
+**Task previews.** A project can have a preview command (field in the project view;
+for Delilah itself, `scripts/preview.sh`). "Lanzar" in a task's header runs it in the
+task's workspace, shows the URL it prints and "Parar" stops it; it also stops when the
+task ends. A restart of the daemon does not bring a preview back.
 
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
@@ -199,6 +234,50 @@ that Claude into a free task's primary session, keeping its conversation: the ta
 works in your checkout, the folder the conversation belongs to. A project session can
 also propose tasks (see "Nueva tarea con Claude" below).
 
+**Project settings.** In Proyectos, "Ajustes" on a project opens its settings.
+They are personal to your Delilah (stored by the daemon, nothing is written in the
+repo) and the same ones can be edited with `delilah project show|set|unset`.
+Whatever is not set keeps its default, which `show` marks.
+
+- **Dónde trabaja** (workspace mode): checkout or worktree, for new tasks. Unset by
+  default, and then tasks run in a worktree (as before this feature). A task started
+  without saying where follows it (CLI, ideas, "Crear y lanzar en autopiloto"); the
+  new task form preselects it, or the checkout when the project has none, and a
+  backlog task keeps the choice you saved on it. `delilah project show` prints
+  `worktree (default)` when unset.
+  `--checkout` / `--worktree` on `delilah new` and `delilah run` override it.
+- **Rama** (branch template, optional): empty by default, and then Delilah proposes a
+  descriptive name for each task (`feature/PROJ-12-retry-payments`). With a template,
+  e.g. `fix/{ticket}-{slug}`, the template decides the format: `{ticket}` is the key
+  and `{slug}` is Claude's short proposal (the title made safe for a branch name if
+  Claude fails: lower case, no accents, hyphens, at most 40 characters). If the slug
+  comes out empty the `/`, `-`, `_` and `.` around it are dropped. The "Rama" field of
+  the new task form shows the branch the task will get and you can edit it; what you
+  type wins over the template. `delilah project unset <name> branch` goes back to the
+  proposal.
+- **Archivos compartidos**: files or folders of the checkout that a **worktree**
+  needs but git does not carry (`.env`, `node_modules`). Each is copied or linked
+  (a symlink to the original); "Automático" links folders and copies files. What
+  already exists in the worktree is left alone, and a missing source or an unsafe
+  path (outside the project, or inside `.git`) is skipped and noted in the task's
+  `workspace.log` without stopping the task.
+- **Comando de preparación** (setup): a command (e.g. `npm ci`) that runs once in a
+  new worktree, after the shared entries and before the agent starts. It runs in
+  your login shell with a 10 minute limit, as a read-only "Setup" tab of the task
+  with its full output (also in `tasks/<KEY>/`). If it succeeds the agent starts.
+  If it fails, times out or is cancelled, the task stops as `setup-failed` with the
+  end of the output, and offers "Reintentar setup", "Lanzar sin setup" and "Cancelar setup" (a
+  running setup can be cancelled too; the whole process group is stopped). The same
+  from the terminal: `delilah setup retry|skip|cancel <KEY>`. If the daemon restarts
+  during a setup, the task shows it as interrupted and can be retried. A failed
+  setup task can be archived. Checkout tasks do not run the setup.
+- **Submódulos siempre / nunca incluidos** (parents): "always" ones are added to
+  every run; "never" ones are not offered in the new task form's picker. A rule
+  that names a submodule that no longer exists is rejected with an error pointing
+  at the settings.
+
+Errors in the form appear next to the field (and as `field: message` in the CLI).
+
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
 and starts `/feature <what you want to do>`). The agent works either **in your
 checkout** (default: a branch in your folder, or in the chosen submodules of a
@@ -207,14 +286,29 @@ branch you were on and keeps the task's branch; files left uncommitted stay in y
 folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
 
-**Branch and name from the analysis.** A free task starts without a branch of its own
+**The task's branch.** Delilah names it from the title: Claude proposes a short name
+and the branch is `feature/<short-name>`, or `feature/<KEY>-<short-name>` for a Jira
+ticket (a free task's `LIBRE-n` is left out). If Claude does not answer in time, the
+name comes from the title, and failing that from the key. The start dialog has a
+"Rama" field that fills in the proposal about a second after you stop typing the
+title; type your own name there and it is kept, or empty it to let Delilah choose.
+A name already used (as a local branch or on a remote, in any repo of the task) gets
+`-2`, `-3`…: a branch is never reused. `delilah run --branch <name>` is cleaned up
+the same way (`feature/` added once, spaces and accents turned into `-`/letters). The
+branch shows on the task's screen and stays the same for the whole task. The one
+exception is a free task with no branch typed in a project without a template: see
+the next paragraph.
+
+**Branch and name from the analysis.** A free task started with no branch typed and in a
+project without a branch template starts without a branch of its own
 (in a worktree, detached at your project's HEAD; in your checkout, nothing is
 switched). Once the agent writes the spec, the task takes the spec's title (the task
 screen shows "Antes: ..." with "Restaurar", and you can edit the title in place at any
 time) and a branch named like the spec folder (`005-my-feature`), also in the chosen
 submodules of a parent. If the agent edits code or commits before that, Delilah makes
 the branch first. If it cannot, the Bandeja shows it with "Reintentar". Without a
-branch, "Abrir PR" is refused. Jira tasks keep `feature/<KEY>` and the ticket's title.
+branch, "Abrir PR" is refused. A typed branch, a project's template, and Jira tasks follow the paragraph above
+(and keep the ticket's title).
 
 **Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
 and Libre (after choosing the project), and on the project's screen and its "+".
@@ -227,7 +321,10 @@ open questions). "Crear" puts the task in the project's **backlog** with that br
 its notes, and its history says "Creada desde la conversación «name»"; you review or
 edit it and start it as any other. The conversation stays open and keeps its history,
 also after restarting Delilah. Project sessions ("Preguntar a Claude") can create
-tasks the same way; a task's own sessions cannot.
+tasks the same way; a task's own sessions cannot. In the sidebar a project's ideas
+appear as one "Ideas" row (with their count, highlighted when one is waiting for you)
+that opens the waiting idea, else the last one shown, else the newest; on the project's
+screen each idea is a tab.
 
 **A task's screen.** As in Orca, a task opens with tabs in the middle and the
 project tree on the right (⌘B shows or hides it). The tabs are the task itself
@@ -280,6 +377,49 @@ any text without a translation.
 **Help.** Ayuda › Ver logs (⌘⇧L) shows the daemon's last lines live, to see what is
 going on while testing.
 
+## Resource usage
+
+Delilah adds little on top of the agents themselves: a small Rust daemon and a Tauri
+window that uses the system WebKit, with no bundled Chromium. Measured on 2026-10-23 on
+an M4 Pro (12 cores, 24 GB, macOS 26.3.1) with Claude Code 2.1.292. RSS and CPU come
+from `ps`, sampled every 5 s and summed over each process tree (100% CPU = one core).
+The script is [scripts/sample-resources.py](scripts/sample-resources.py).
+
+**Delilah with 12 agents running** (2 min, app window open, live updates flowing):
+
+| Process | Processes | RSS avg | RSS max | CPU avg | CPU p95 |
+|---|---:|---:|---:|---:|---:|
+| `delilahd` (daemon) | 1 | 18 MB | 23 MB | 1.1% | 1.8% |
+| `delilah-app` + its WebKit processes | 4 | 177 MB | 278 MB | 8.0% | 16.2% |
+| **Delilah's own overhead** | 5 | **~195 MB** | | **~9%** | |
+| The 12 agents (Claude Code + MCP servers, builds, tools) | 111 | 2.55 GB | 3.2 GB | 54% | 104% |
+
+The agents account for over 90% of the memory, about 210 MB each. That is the same
+`claude` binary every client runs, so what changes from one client to another is the
+shell around it.
+
+**Other clients' shells**, each opened on this repo and sampled for 60 s:
+
+| Client | Engine | RSS avg | CPU avg | App size | Measured |
+|---|---|---:|---:|---:|---|
+| **Delilah** (daemon + app) | Rust + system WebKit | **~195 MB** | **~9%** | **26 MB** | with 12 agents running |
+| Zed | Rust, native GPU UI | 180 MB | 1.6% | 175 MB | idle, no agent session |
+| Orca 1.4 | Electron | ~600 MB | 1.9% | 642 MB | idle (a restored `claude` left out) |
+| Claude desktop | Electron | 829 MB | 35% | 615 MB | with 4 Claude Code sessions |
+| VS Code | Electron | 914 MB | 12% | 1.4 GB | idle, no Claude extension |
+| Cursor | Electron | 1.29 GB | 64% | 1.0 GB | idle; indexing just after opening |
+
+Delilah was measured under load and the others mostly idle, so this is unfavourable
+to Delilah. Only Zed is in the same range, and Zed is an editor, not an orchestrator. In
+Zed and VS Code an agent session adds its adapter or extension on top. Orca keeps a
+background daemon (~22 MB) after you quit it, as `delilahd` does.
+
+**Disk.** Most of the disk goes to the workspaces, not to Delilah: each task is a full
+worktree with its own build output. With six Rust workspaces `~/.delilah` took 32 GB,
+almost all of it `target/` dirs (4.7 to 17 GB each). Task files take 147 MB and the
+database under 5 MB. Any client that isolates tasks in worktrees pays this cost;
+archiving a finished task (`delilah archive`) removes its workspace and frees it.
+
 ## Installing on another Mac
 
 Delilah is not signed, so the simplest way is to build it on the Mac that will use
@@ -323,6 +463,19 @@ cambios", to review the branch) and plain terminals with your login shell. A usa
 limit hit by any of them pauses the task; after the reset the primary and the
 paused ones carry on. A session that stopped (the daemon restarted, the process
 ended) can be reopened: Claude picks its conversation back up with `--resume`.
+
+## Actualizaciones
+
+Delilah se actualiza sola desde las versiones publicadas en GitHub. Un aviso dice que
+hay una versión nueva y cuántas sesiones abiertas (terminales incluidas) se
+interrumpirían al reiniciar. Nunca instala sin que lo confirmes: "Actualizar" lo hace
+ya, "Más tarde" oculta esa versión hasta la próxima comprobación manual o el próximo
+arranque, y "Cuando terminen" espera a que no quede ninguna sesión abierta. Comprueba
+a los 10 s de arrancar y cada 6 h; también desde el menú (Buscar actualizaciones…) y
+desde Ajustes › Actualizaciones (Buscar ahora). Las versiones de desarrollo (`tauri dev`,
+previews) no se actualizan. Antes de migrar tras un cambio de versión se guarda una copia
+de la base de datos en `~/.delilah/backups/`. Cómo publicar una versión:
+[docs/development.md](docs/development.md#releasing).
 
 ## Design
 

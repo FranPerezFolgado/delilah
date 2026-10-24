@@ -26,6 +26,7 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   "pr-review": { label: "Comentarios en la PR", icon: "review", cls: "c-wait" },
   "pr-blocked": { label: "No se pudo archivar", icon: "failed", cls: "c-err" },
   branch: { label: "Rama sin crear", icon: "failed", cls: "c-err" },
+  autopilot: { label: "Autopiloto en pausa", icon: "pause", cls: "c-pause" },
 };
 
 interface Props {
@@ -237,6 +238,16 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
           <button className="btn" disabled={busy} onClick={() => act(() => api.resume(item.task))}>
             {t("Reanudar ahora")}
           </button>
+        )}
+        {item.kind === "autopilot" && (
+          <>
+            <button className="btn btn-p" disabled={busy} onClick={() => act(() => api.setAutopilot(item.task, "resume"))}>
+              {t("Reanudar autopiloto")}
+            </button>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.setAutopilot(item.task, "off"))}>
+              {t("Seguir a mano")}
+            </button>
+          </>
         )}
         {item.kind === "handoff" && (
           <HandoffActions

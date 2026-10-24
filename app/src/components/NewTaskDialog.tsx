@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
+import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
+import { branchName } from "../branchName";
 import { t } from "../i18n";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 
@@ -34,8 +35,6 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [origin, setOrigin] = useState<"jira" | "libre" | "claude">(
     fromSession || existing?.key.startsWith("LIBRE-") ? "libre" : "jira",
   );
-  // In the project's checkout (a branch there), or isolated in a worktree.
-  const [where, setWhere] = useState<Where>(existing ? whereOf(existing.in_checkout) : "checkout");
   const [key, setKey] = useState(existing?.key ?? draft?.key ?? "");
   const [title, setTitle] = useState(existing?.title ?? draft?.title ?? "");
   const [notes, setNotes] = useState(existing?.notes ?? "");
@@ -46,11 +45,19 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     (draft?.components.length ? projects.find((p) => p.kind === "parent") : undefined) ??
     projects[0];
   const [projectName, setProjectName] = useState(preferred?.name ?? "");
+  // In the project's checkout (a branch there), or isolated in a worktree: a backlog
+  // task's saved choice, else the project's default (a worktree for a saved task, the
+  // checkout for a new one when it has none) until the user picks one.
+  const unsetWhere: Where = existing ? "worktree" : "checkout";
+  const [where, setWhere] = useState<Where>(whereOf(existing?.in_checkout, preferred, unsetWhere));
+  const whereTouched = useRef(existing?.in_checkout != null);
   const [submodules, setSubmodules] = useState<Submodule[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   // Each step in a fresh session: a backlog task keeps its choice, a new one starts from the preference.
   const [savingMode, setSavingMode] = useState(existing?.saving_mode ?? false);
   const savingTouched = useRef(!!existing);
+  // Autopilot implies saving mode: ticked and locked while it is on.
+  const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -58,6 +65,37 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
+  const always = project?.kind === "parent" ? project.settings.submodules.always : [];
+  const never = project?.kind === "parent" ? project.settings.submodules.never : [];
+  // "always" is in every selection and "never" in none (the daemon enforces both too).
+  const withRules = (paths: string[]) => [...always, ...paths.filter((p) => !always.includes(p) && !never.includes(p))];
+
+  useEffect(() => {
+    if (!whereTouched.current && project) setWhere(whereOf(null, project, unsetWhere));
+  }, [project?.name]);
+
+  // Only the spec workflow has autopilot; a custom prompt runs outside it.
+  const workflow = prompt.trim() ? "prompt" : (existing?.workflow ?? project?.workflow);
+  const autopilotAllowed = workflow === "feature";
+  const autopilotOn = autopilot && autopilotAllowed;
+  // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
+  const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
+  // The branch name: proposed while the developer hasn't touched it. With the project's
+  // own template it is that template's branch; `feature/` stays a fixed prefix only when
+  // the name has none of its own (no template, or one that starts with `feature/`).
+  const template = project?.settings.branch?.trim() || null;
+  const prefixed = !template || template.startsWith("feature/");
+  // A free task in a project without a template starts without a branch: the first
+  // analysis creates it, so nothing is proposed (nor sent) unless the user types one.
+  const analysisNames = origin === "libre" && !template;
+  const fieldOf = (full: string) => (prefixed ? full.replace(/^feature\//, "") : full);
+  const fullOf = (value: string) => (prefixed ? "feature/" + value : value);
+  const [branch, setBranch] = useState("");
+  // The field holds a name the daemon proposed (or the user typed), not just our instant guess.
+  const sureRef = useRef(false);
+  const [edited, setEdited] = useState(false);
+  const editedRef = useRef(false);
+  const [branchHint, setBranchHint] = useState<"loading" | BranchProposal["source"] | null>(null);
 
   useEffect(() => {
     if (savingTouched.current) return;
@@ -74,9 +112,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     api
       .submodules(project.name)
       .then((subs) => {
-        setSubmodules(subs);
+        setSubmodules(subs.filter((s) => !never.includes(s.path)));
         const wanted = draft?.components ?? [];
-        setPicked(subs.filter((s) => wanted.includes(s.name) || wanted.includes(s.path)).map((s) => s.path));
+        const present = subs.map((s) => s.path);
+        setPicked(withRules(subs.filter((s) => wanted.includes(s.name) || wanted.includes(s.path)).map((s) => s.path)).filter((p) => present.includes(p)));
       })
       .catch((e) => setError(e.message));
   }, [project?.name, project?.kind]);
@@ -86,6 +125,63 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Proposal for the branch, debounced 1 s; an answer to an older request is dropped.
+  const pickedKey = picked.join("\n");
+  useEffect(() => {
+    const ticket = existing ? existing.key : origin === "jira" ? key.trim() : "";
+    if (analysisNames && !editedRef.current) {
+      sureRef.current = false;
+      setBranch("");
+      setBranchHint(null);
+      return;
+    }
+    if (!projectName || !title.trim() || editedRef.current) {
+      setBranchHint(null);
+      return;
+    }
+    // With a template, the name it gives is known at once; the daemon's proposal replaces it.
+    if (template) {
+      sureRef.current = false;
+      setBranch(fieldOf(branchName(template, ticket || "LIBRE-?", title)));
+    }
+    let stale = false;
+    setBranchHint("loading");
+    const timer = setTimeout(() => {
+      api
+        .proposeBranch(projectName, {
+          ...(ticket ? { key: ticket } : {}),
+          title: title.trim(),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+          free: origin === "libre",
+          submodules: picked,
+        })
+        .then((res) => {
+          if (stale || editedRef.current) return;
+          sureRef.current = !!res.branch;
+          if (res.branch || !template) setBranch(res.branch ? fieldOf(res.branch) : "");
+          setBranchHint(res.branch ? res.source : null);
+        })
+        .catch(() => {
+          if (!stale) setBranchHint(null);
+        });
+    }, 1000);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [projectName, key, title, notes, origin, pickedKey, edited, template, analysisNames]);
+
+  const editBranch = (value: string) => {
+    // Raw value in state (a typed space must stay); trimmed only to decide and on submit.
+    const v = prefixed ? value.replace(/^feature\//, "") : value;
+    const has = v.trim() !== "";
+    editedRef.current = has;
+    sureRef.current = has;
+    setEdited(has);
+    setBranch(v);
+    if (has) setBranchHint(null);
+  };
 
   // A quick read-only Claude pass over the parent's code picks the submodules.
   const suggest = async () => {
@@ -100,7 +196,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         description: draft?.description,
       });
       setSuggested(res.submodules);
-      setPicked(res.submodules.map((s) => s.path));
+      setPicked(withRules(res.submodules.map((s) => s.path)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -108,7 +204,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     }
   };
 
-  const toggle = (path: string) => setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
+  const toggle = (path: string) => !always.includes(path) && setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,9 +229,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode,
+        saving_mode: savingMode || autopilotOn,
+        ...autopilotField,
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
+        ...(branch.trim() && (!template || sureRef.current) ? { branch: fullOf(branch.trim()) } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
         // A custom prompt runs outside the /feature workflow.
         ...(prompt.trim() ? { workflow: "prompt", prompt: prompt.trim() } : {}),
@@ -159,7 +257,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode,
+        saving_mode: savingMode || autopilotOn,
+        ...autopilotField,
       });
       onSaved(task);
     } catch (err) {
@@ -238,18 +337,35 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
               </label>
             )}
-            {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={setWhere} project={project} />}
+            {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
             {origin !== "claude" && (
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
                 <input
                   type="checkbox"
-                  checked={savingMode}
+                  checked={savingMode || autopilotOn}
+                  disabled={autopilotOn}
                   onChange={(e) => {
                     savingTouched.current = true;
                     setSavingMode(e.target.checked);
                   }}
                 />
                 <span>{t("Modo ahorro")}</span>
+              </label>
+            )}
+            {origin !== "claude" && autopilotAllowed && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
+                <input
+                  type="checkbox"
+                  checked={autopilot}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      savingTouched.current = true;
+                      setSavingMode(true);
+                    }
+                    setAutopilot(e.target.checked);
+                  }}
+                />
+                <span>{t("Autopiloto")}</span>
               </label>
             )}
             {origin !== "claude" && project?.kind === "parent" && (
@@ -264,7 +380,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <div className="choices">
                   {submodules.map((s) => (
                     <label key={s.path} className={`choice mono ${picked.includes(s.path) ? "on" : ""}`}>
-                      <input type="checkbox" checked={picked.includes(s.path)} onChange={() => toggle(s.path)} />
+                      <input type="checkbox" checked={picked.includes(s.path)} onChange={() => toggle(s.path)}
+                        disabled={always.includes(s.path)} title={always.includes(s.path) ? t("Siempre incluido (ajustes del proyecto)") : undefined} />
                       {s.path}
                     </label>
                   ))}
@@ -279,6 +396,22 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                   </ul>
                 )}
               </div>
+            )}
+            {origin !== "claude" && (
+              <label className="field">
+                <span>
+                  {t("Rama")}
+                  {branchHint && (
+                    <span className="muted" style={{ fontSize: 11.5, fontWeight: 400, marginLeft: 8 }}>
+                      {branchHint === "loading" ? t("Proponiendo…") : branchHint === "claude" ? t("propuesta por Claude") : branchHint === "title" ? t("a partir del título") : t("a partir de la clave")}
+                    </span>
+                  )}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {prefixed && <span className="mono muted">feature/</span>}
+                  <input className="input mono" style={{ flex: 1 }} aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={analysisNames ? t("la creará el análisis") : t("automática si la dejas vacía")} />
+                </span>
+              </label>
             )}
             {origin !== "claude" && !fromSession && (
             <label className="field">

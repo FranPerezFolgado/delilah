@@ -4,10 +4,10 @@ use std::process::Command;
 use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, GitError, GitOptions, Workspace, WorkspaceSpec, apply_branch, archive_workspace,
-    branch_exists, branch_tip, changes, check_merged, check_repos, check_workspace,
-    commit_subjects, create_workspace, current_branch, delete_branch, fetch, file_diff,
-    leave_checkout, list_submodules, needs_push, push_branch, remove_workspace, repo_root,
-    spec_dirs, switch_branch, use_checkout,
+    branch_taken, branch_tip, changes, check_merged, check_repos, check_workspace, commit_subjects,
+    create_workspace, current_branch, delete_branch, fetch, file_diff, free_branch, leave_checkout,
+    list_submodules, needs_push, push_branch, remove_workspace, repo_root, spec_dirs,
+    switch_branch, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -825,21 +825,6 @@ fn apply_branch_keeps_uncommitted_files_and_refuses_an_existing_name() {
 }
 
 #[test]
-fn branch_exists_sees_local_and_remote_tracking_branches() {
-    let (_tmp, repo, _remote) = pr_repo();
-    let o = GitOptions::default();
-    assert!(branch_exists(&repo, "main", &o).unwrap());
-    assert!(!branch_exists(&repo, "feature/x", &o).unwrap());
-    run(&repo, &["checkout", "-b", "feature/x"]);
-    run(&repo, &["push", "origin", "feature/x"]);
-    run(&repo, &["checkout", "main"]);
-    run(&repo, &["branch", "-D", "feature/x"]);
-    // Only origin/feature/x is left.
-    assert!(branch_exists(&repo, "feature/x", &o).unwrap());
-    assert!(!branch_exists(&repo, "x", &o).unwrap());
-}
-
-#[test]
 fn switch_branch_goes_to_an_existing_branch_keeping_uncommitted_files() {
     let fx = Fixture::new();
     let repo = fx.repo();
@@ -883,4 +868,53 @@ fn a_parent_branch_made_in_the_parent_repo_is_checked_before_archiving() {
     assert!(ws.path.exists());
     archive_workspace(&fx.parent(), &ws, true, &opts()).unwrap();
     assert!(!ws.path.exists());
+}
+
+#[test]
+fn branch_taken_sees_local_and_remote_branches() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    assert!(!branch_taken(&repo, "feature/x", &opts).unwrap());
+    run(&repo, &["branch", "feature/x"]);
+    assert!(branch_taken(&repo, "feature/x", &opts).unwrap());
+    assert!(!branch_taken(&repo, "feature", &opts).unwrap());
+
+    // Only on the remote, after a fetch.
+    run(&repo, &["push", "origin", "feature/x:feature/y"]);
+    run(&repo, &["fetch", "origin"]);
+    assert!(branch_taken(&repo, "feature/y", &opts).unwrap());
+    let _ = remote;
+}
+
+#[test]
+fn branch_taken_handles_remote_names_with_a_slash() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    run(
+        &repo,
+        &["remote", "add", "team/origin", remote.to_str().unwrap()],
+    );
+    run(&repo, &["push", "team/origin", "main:feature/z"]);
+    run(&repo, &["fetch", "team/origin"]);
+    assert!(branch_taken(&repo, "feature/z", &opts).unwrap());
+    assert!(!branch_taken(&repo, "origin/feature/z", &opts).unwrap());
+}
+
+#[test]
+fn free_branch_suffixes_until_free_in_every_dir() {
+    let (_t1, a, _r1) = pr_repo();
+    let (_t2, b, _r2) = pr_repo();
+    let opts = GitOptions::default();
+    let dirs = vec![a.clone(), b.clone()];
+    assert_eq!(free_branch(&dirs, "feature/x", &opts).unwrap(), "feature/x");
+    run(&b, &["branch", "feature/x"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-2"
+    );
+    run(&a, &["branch", "feature/x-2"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-3"
+    );
 }

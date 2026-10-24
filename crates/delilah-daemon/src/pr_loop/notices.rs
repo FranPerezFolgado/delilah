@@ -318,7 +318,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
             agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let restarted = AppState::new(app.store.clone(), config)
             .with_gh(gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")));

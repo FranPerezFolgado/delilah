@@ -80,7 +80,7 @@ export function ChangesView({ owner, onEdit }: Props) {
           </span>
         )}
         <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={load} disabled={loading}>
-          <Icon name="refresh" /> {t("Actualizar")}
+          <Icon name="refresh" /> {t("Refrescar")}
         </button>
       </div>
       {error && <div className="error selectable" style={{ padding: "12px 20px" }}>{error}</div>}
