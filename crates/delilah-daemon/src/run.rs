@@ -520,7 +520,7 @@ pub fn launch_session(
         session.primary,
         Arc::clone(&pty),
     );
-    live.set_conversation(session.conversation);
+    live.set_idea(session.conversation);
     let remote_control = session.kind == SessionKind::Claude && app.remote_control();
     tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
 

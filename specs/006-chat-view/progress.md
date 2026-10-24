@@ -7,8 +7,8 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | a7118d8 | |
 | WP-02 | 2 | 2A | implementing | 1 | | T002 done; waiting for the user to run the scenarios (T003/T004) |
-| WP-03 | 3 | 3A | implementing | 0 | | |
-| WP-04 | 3 | 3A | verified | 1 | | |
+| WP-03 | 3 | 3A | verified | 1 | | |
+| WP-04 | 3 | 3A | verified | 1 | 95b1959 | |
 | WP-05 | 4 | 4A | pending | 0 | | |
 | WP-06 | 4 | 4B | pending | 0 | | |
 | WP-07 | 4 | 4B | pending | 0 | | |
@@ -41,3 +41,11 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+
+## Notes for later packages
+
+- WP-04: `parse(bytes, offset)` drops a tool_result whose tool_use is before the cursor → WP-05/06 must re-read from an earlier offset or use `tool_detail` to fill a tool that was pending.
+- WP-04: `parse_message` ids are `t:<message.id>:<n>` with `at` = now (no line uuid) — not file-stable.
+- WP-04: diff rows use `kind`; ChangesView's TS type uses `type` → WP-08 maps or defines its own type.
+- WP-04: no Delilah-specific injected-text marker exists yet; injected prefixes skipped are Claude's own (system-reminder, hooks, command tags).
+- WP-02: spike `permission` uses `--permission-prompt-tool stdio` by default; `--prompt-tool none` to test the default.

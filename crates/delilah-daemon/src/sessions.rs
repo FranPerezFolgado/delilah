@@ -63,11 +63,11 @@ impl Live {
         }
     }
 
-    pub fn is_conversation(&self) -> bool {
+    pub fn is_idea(&self) -> bool {
         self.conversation.load(Ordering::Relaxed)
     }
 
-    pub fn set_conversation(&self, conversation: bool) {
+    pub fn set_idea(&self, conversation: bool) {
         self.conversation.store(conversation, Ordering::Relaxed);
     }
 

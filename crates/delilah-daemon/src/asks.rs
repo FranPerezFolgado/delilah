@@ -19,9 +19,9 @@ use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
 
 use crate::api::ApiError;
-use crate::conversation::{Card, CardOutcome};
 use crate::events::Topic;
 use crate::hooks::HookQuery;
+use crate::idea::{Card, CardOutcome};
 use crate::proposals::{self, Proposal};
 use crate::sessions::LiveState;
 use crate::state::AppState;
@@ -145,7 +145,7 @@ impl Drop for Pending<'_> {
         {
             let app = self.app.clone();
             runtime.spawn(async move {
-                crate::conversation::card_withdraw_if_pending(&app, &session, &ask.id).await;
+                crate::idea::card_withdraw_if_pending(&app, &session, &ask.id).await;
             });
         }
     }
@@ -204,7 +204,7 @@ pub async fn hook(
         .insert(id.clone(), (ask.clone(), tx));
     if let Some(session) = &q.session {
         let card = Card::pending(&ask.id, &ask.questions, ask.proposal.clone());
-        crate::conversation::card_added(&app, session, &card).await;
+        crate::idea::card_added(&app, session, &card).await;
     }
     let _pending = Pending { app: &app, id };
 
@@ -239,8 +239,7 @@ pub async fn hook(
             if let Some(session) = &q.session
                 && outcome.is_err()
             {
-                crate::conversation::card_outcome(&app, session, &ask.id, CardOutcome::Terminal)
-                    .await;
+                crate::idea::card_outcome(&app, session, &ask.id, CardOutcome::Terminal).await;
             }
             Json(json!({}))
         }
@@ -294,7 +293,7 @@ pub async fn answer(
     let mut answers = answer.answers;
     let reply = proposals::on_answer(&app, &ask, &mut answers, launch.as_deref()).await;
     if let Some(session) = &ask.session {
-        crate::conversation::card_answered(
+        crate::idea::card_answered(
             &app,
             session,
             &ask.id,
@@ -319,7 +318,7 @@ pub async fn release(
         return Err(ApiError::not_found("that question is no longer waiting"));
     }
     if let Some(session) = ask.and_then(|a| a.session) {
-        crate::conversation::card_outcome(&app, &session, &id, CardOutcome::Terminal).await;
+        crate::idea::card_outcome(&app, &session, &id, CardOutcome::Terminal).await;
     }
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)

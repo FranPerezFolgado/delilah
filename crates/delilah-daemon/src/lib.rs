@@ -14,6 +14,7 @@ mod files;
 pub mod gh;
 mod handoff;
 mod hooks;
+mod idea;
 pub mod inbox;
 mod jira;
 pub mod lang;

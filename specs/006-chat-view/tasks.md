@@ -55,7 +55,7 @@
 
 **Purpose**: separate idea-only logic from the composer, and the tolerant parser every story uses. No behaviour change.
 
-- [ ] T005 Move idea-conversation-only logic out of `crates/delilah-daemon/src/conversation.rs` into a new `crates/delilah-daemon/src/idea.rs`: the Nueva tarea / proposal card handling, the read-only flag and their hook handling. Rename `Live::is_conversation`/`set_conversation` in `crates/delilah-daemon/src/sessions.rs` to `is_idea`/`set_idea`, and update every caller. Pure move: every existing test passes unchanged (moved with its code).
+- [X] T005 Move idea-conversation-only logic out of `crates/delilah-daemon/src/conversation.rs` into a new `crates/delilah-daemon/src/idea.rs`: the Nueva tarea / proposal card handling, the read-only flag and their hook handling. Rename `Live::is_conversation`/`set_conversation` in `crates/delilah-daemon/src/sessions.rs` to `is_idea`/`set_idea`, and update every caller. Pure move: every existing test passes unchanged (moved with its code).
 - [X] T006 [P] Write the fixtures in `crates/delilah-agents/tests/fixtures/transcripts/`:
   - `basic.jsonl`: user prompt, assistant text, Bash `tool_use` + `tool_result`, Edit with old/new strings, Read, Grep, TodoWrite, final text;
   - `unknown.jsonl`: unknown line `type`, unknown content block type, extra fields everywhere;

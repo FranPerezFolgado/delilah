@@ -73,7 +73,7 @@ pub async fn claude_hook(
         .clone()
         .or_else(|| live.as_ref().map(|l| l.id.clone()));
     if let Some(id) = &session_id
-        && crate::conversation::is_conversation(&app, id).await
+        && crate::idea::is_idea(&app, id).await
     {
         crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
     }
