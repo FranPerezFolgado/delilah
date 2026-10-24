@@ -19,7 +19,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-11 | 5 | 5A | verified | 1 | 84d80e4 | CHK016, CHK033-035 left open |
 | WP-12 | 5 | 5B | verified | 1 | 10e3de5 | full checks green (tauri not run: sidecar binary missing in worktree); quickstart 1-5,7 pass via API, 6 partial (gh needs GitHub remote; stale fixture worktree), UI not checked (no browser) |
 | WP-M | 6 | 6A | verified | 1 | 0e2c006 | merge origin/main (185 commits), combine branch naming with decisions 37/49, migration → 0017 |
-| WP-MF | 6 | 6F | verified | 1 | PENDING | merge review fixes M1–M6; started_branchless column in 0017 |
+| WP-MF | 6 | 6F | verified | 1 | c0a0c68 | merge review fixes M1–M6; started_branchless column in 0017 |
 
 ## Open findings
 
