@@ -864,7 +864,7 @@ mod tests {
         let conv = app.store.session("conv").await.unwrap().unwrap();
         assert_eq!(conv.task, "@web");
         for live in app.sessions.of_task(&key) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
     }
 

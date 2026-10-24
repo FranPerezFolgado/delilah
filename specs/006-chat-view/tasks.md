@@ -211,8 +211,8 @@
   - `enum Runtime { Pty(Arc<PtySession>) }`; the `Stream` arm comes in T040;
   - move `sanitize_prompt` and `prompt_bytes` from `crates/delilah-daemon/src/actions.rs` into it, with their tests;
   - add `runtime::spawn(&Launch, RuntimeKind::Pty) -> Runtime`, wrapping `claude::command` and `PtySession::spawn`.
-- [ ] T035 Replace `Live.pty` with `Live.runtime` in `crates/delilah-daemon/src/sessions.rs` (`remove_if_same` compares runtimes). Move every caller: `actions.rs` (`type_prompt` → `runtime.send_prompt`, plus kill/has_exited), `archive.rs`, `projects.rs`, `proposals.rs`, `session_api.rs`, `scheduler.rs`, `handoff.rs`, `inbox.rs`, `conversation.rs` (`stop` → `runtime.stop()`), `terminal.rs` (`as_pty()`), and `run.rs`, where `launch_session` calls `runtime::spawn` and the trust dialog runs only when `as_pty()` is `Some`. Update the test helpers that build `Live` with a fake PTY.
-- [ ] T036 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets`: everything is green with no test changed beyond construction helpers.
+- [X] T035 Replace `Live.pty` with `Live.runtime` in `crates/delilah-daemon/src/sessions.rs` (`remove_if_same` compares runtimes). Move every caller: `actions.rs` (`type_prompt` → `runtime.send_prompt`, plus kill/has_exited), `archive.rs`, `projects.rs`, `proposals.rs`, `session_api.rs`, `scheduler.rs`, `handoff.rs`, `inbox.rs`, `conversation.rs` (`stop` → `runtime.stop()`), `terminal.rs` (`as_pty()`), and `run.rs`, where `launch_session` calls `runtime::spawn` and the trust dialog runs only when `as_pty()` is `Some`. Update the test helpers that build `Live` with a fake PTY.
+- [X] T036 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets`: everything is green with no test changed beyond construction helpers.
 
 **Checkpoint**: no behaviour change; the PTY path is untouched for users.
 

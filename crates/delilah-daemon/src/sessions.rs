@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use delilah_agents::pty::PtySession;
+use delilah_agents::runtime::Runtime;
 use serde::Serialize;
 use tokio::sync::Notify;
 
@@ -39,7 +39,7 @@ pub struct Live {
     pub task: String,
     pub kind: SessionKind,
     pub primary: bool,
-    pub pty: Arc<PtySession>,
+    pub runtime: Runtime,
     /// Fired by the agent's SessionStart hook.
     pub started: Arc<Notify>,
     /// Clients attached to the terminal right now.
@@ -137,14 +137,14 @@ impl Sessions {
         task: &str,
         kind: SessionKind,
         primary: bool,
-        pty: Arc<PtySession>,
+        runtime: impl Into<Runtime>,
     ) -> Live {
         let live = Live {
             id: id.to_string(),
             task: task.to_string(),
             kind,
             primary,
-            pty,
+            runtime: runtime.into(),
             started: Arc::new(Notify::new()),
             viewers: Arc::default(),
             state: Arc::new(Mutex::new(if kind == SessionKind::Shell {
@@ -196,11 +196,11 @@ impl Sessions {
             .any(|l| l.viewers.load(Ordering::Relaxed) > 0)
     }
 
-    /// Removes the entry only if it is still `pty`, so a reopened session is never
+    /// Removes the entry only if it is still `runtime`, so a reopened session is never
     /// dropped by its previous process exiting.
-    pub fn remove_if_same(&self, id: &str, pty: &Arc<PtySession>) {
+    pub fn remove_if_same(&self, id: &str, runtime: &Runtime) {
         let mut live = self.live.lock().unwrap();
-        if live.get(id).is_some_and(|l| Arc::ptr_eq(&l.pty, pty)) {
+        if live.get(id).is_some_and(|l| l.runtime.same(runtime)) {
             live.remove(id);
             // Stopped: its tab shows "Reabrir", and a permission it asked for is gone.
             self.events.emit(Topic::Sessions);

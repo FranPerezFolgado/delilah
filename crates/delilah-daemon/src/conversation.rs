@@ -654,8 +654,8 @@ pub async fn stop(
         .sessions
         .get(&id)
         .ok_or_else(|| ApiError::conflict("the session is not running"))?;
-    live.pty
-        .write(b"\x1b")
+    live.runtime
+        .stop()
         .map_err(|e| ApiError::internal(e.to_string()))?;
     live.set_state(LiveState::Waiting);
     live.reset_turn_state();
@@ -2178,7 +2178,7 @@ mod tests {
             .sessions
             .insert("conv", "@web", SessionKind::Claude, false, pty);
         for _ in 0..100 {
-            if live.pty.write(b"x").is_err() {
+            if live.runtime.as_pty().unwrap().write(b"x").is_err() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -2196,7 +2196,10 @@ mod tests {
             .await
             .unwrap();
         let live = dead_terminal(&f).await;
-        assert!(live.pty.write(b"x").is_err(), "the terminal must be dead");
+        assert!(
+            live.runtime.as_pty().unwrap().write(b"x").is_err(),
+            "the terminal must be dead"
+        );
         let (status, _) = f.send("now").await;
         assert!(!status.is_success(), "{status}");
         let entries = f.app.store.entries("conv").await.unwrap();

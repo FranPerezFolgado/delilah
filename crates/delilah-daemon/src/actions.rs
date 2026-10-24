@@ -1,7 +1,6 @@
 //! Things the user asks of a task: resume it, mark it done, archive it, delete it.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -43,7 +42,7 @@ pub async fn done(
     let key = TaskKey::new(key);
     let task = app.transition(&key, Event::MarkDone).await?;
     for live in app.sessions.of_task(key.as_str()) {
-        let _ = live.pty.kill();
+        let _ = live.runtime.kill();
     }
     Ok(Json(task))
 }
@@ -173,11 +172,13 @@ pub async fn usage(State(app): State<AppState>) -> Json<Option<UsageReport>> {
 pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiError> {
     let live = app.sessions.of_task(key.as_str());
     for session in live.iter().filter(|l| l.kind == SessionKind::Claude) {
-        if (session.primary || session.state() == LiveState::Paused) && !session.pty.has_exited() {
+        if (session.primary || session.state() == LiveState::Paused)
+            && !session.runtime.has_exited()
+        {
             type_prompt(session, continue_prompt(app.lang())).await?;
         }
     }
-    if live.iter().any(|l| l.primary && !l.pty.has_exited()) {
+    if live.iter().any(|l| l.primary && !l.runtime.has_exited()) {
         return Ok(());
     }
     let primary = app
@@ -199,20 +200,14 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
     )
 }
 
-pub use delilah_agents::runtime::{prompt_bytes, sanitize_prompt};
+pub use delilah_agents::runtime::sanitize_prompt;
 
 /// Writes a message into an agent's terminal as if the user typed it.
 pub async fn type_prompt(session: &Live, text: &str) -> Result<(), ApiError> {
     session
-        .pty
-        .write(&prompt_bytes(text))
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    // Sent apart, after any paste is closed, so the TUI takes it as Enter rather
-    // than as one more character of the text.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    session
-        .pty
-        .write(b"\r")
+        .runtime
+        .send_prompt(text)
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     session.set_state(LiveState::Working);
     Ok(())
@@ -239,6 +234,7 @@ pub async fn resume_if_due(app: &AppState, task: &Task) {
 
 #[cfg(test)]
 mod tests {
+    use delilah_agents::runtime::prompt_bytes;
     use super::*;
     use crate::archive::{ArchivePartial, LeftoverBranch};
 

@@ -64,7 +64,20 @@ pub fn spawn_logged(
     }
 }
 
+impl From<Arc<PtySession>> for Runtime {
+    fn from(pty: Arc<PtySession>) -> Self {
+        Runtime::Pty(pty)
+    }
+}
+
 impl Runtime {
+    /// Whether both handles are the same running agent.
+    pub fn same(&self, other: &Runtime) -> bool {
+        match (self, other) {
+            (Runtime::Pty(a), Runtime::Pty(b)) => Arc::ptr_eq(a, b),
+        }
+    }
+
     /// Types `text` as the user would and sends it: the text (a bracketed paste when
     /// it has several lines), a pause, then Enter apart, after any paste is closed.
     pub async fn send_prompt(&self, text: &str) -> std::io::Result<()> {

@@ -23,8 +23,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12F | 5 | 5C | done | 1 | 806cfd7 | review fixes |
 | WP-12G | 5 | 5D | done | 1 | 2e6af70 | re-review fixes |
 | WP-13 | 5 | 5B | done | 1 | 626cd52 | |
-| WP-14 | 6 | 6A | verified | 1 | | |
-| WP-15 | 6 | 6B | implementing | 0 | | go (decision 49) |
+| WP-14 | 6 | 6A | verified | 1 | 8e3f0a9 | |
+| WP-15 | 6 | 6B | verified | 1 | | go (decision 49) |
 | WP-16 | 7 | 7A | implementing | 0 | | T037–T039 now (stream.rs); T040 after WP-15 |
 | WP-17 | 7 | 7A | verified | 1 | 49220b6 | |
 | WP-18 | 7 | 7B | pending | 0 | | go (decision 49) |
@@ -46,6 +46,8 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 7 | migration | LOW | add_allowed_tool: bad JSON reads empty then overwritten; warning lacks task key; exact-string dedupe accepts empty/whitespace rules (trim/reject at API in WP-22) | crates/delilah-daemon/src/store.rs:226 |
+| 7 | migration | LOW | downgrade after 0016/0017 needs DB backup — mention in release notes | crates/delilah-daemon/migrations/0017_chat_mode.sql |
 | 5 | architecture | LOW | WP-12G adds a process-wide static NOT_FOUND map (session, tool_use_id) → same smell as the old SEEN static; move to AppState | crates/delilah-daemon/src/conversation.rs |
 | 5 | ui | LOW | UI rendering not verified in a browser (scroll-follow, Edit diff + Abrir en el editor, Chat/Terminal switch, Vista select, idea Nueva tarea); API-level US1/US2 verified | app/ |
 | 5 | spec | LOW | research.md R5 stale: code hides only delivered user entries (doc'd in contracts) — update R5 in docs phase | specs/006-chat-view/research.md |

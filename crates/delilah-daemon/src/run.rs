@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
+use delilah_agents::runtime::{self, Runtime, RuntimeKind};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
@@ -377,8 +378,8 @@ pub async fn start_run(
         // The project's Claude becomes the task's: it goes on with its conversation,
         // now able to edit, on the task's branch.
         if let Some(live) = app.sessions.get(&session.id) {
-            let _ = live.pty.kill();
-            live.pty.wait().await;
+            let _ = live.runtime.kill();
+            live.runtime.wait().await;
         }
         app.store
             .adopt_session(&session.id, &req.key, app.lang().pick("Principal", "Main"))
@@ -481,7 +482,10 @@ pub fn launch_session(
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
-    let cmd = match session.kind {
+    let log = task_dir.join(format!("{}-{}.log", session.kind.name(), session.id));
+    let spawn_error =
+        |e: std::io::Error| ApiError::internal(format!("cannot start the session: {e}"));
+    let runtime = match session.kind {
         SessionKind::Claude => {
             let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
             let settings = claude::write_settings(
@@ -494,7 +498,7 @@ pub fn launch_session(
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
-            claude::command(&claude::Launch {
+            let launch = claude::Launch {
                 workspace,
                 session_id: &session.id,
                 settings: &settings,
@@ -506,35 +510,37 @@ pub fn launch_session(
                 append_system_prompt,
                 remote_control: remote_name.as_deref(),
                 program: app.config.agent_program.as_deref(),
-            })
+            };
+            runtime::spawn_logged(&launch, RuntimeKind::Pty, Some(log)).map_err(spawn_error)?
         }
-        SessionKind::Shell => shell_command(workspace),
+        SessionKind::Shell => PtySession::spawn(shell_command(workspace), 120, 40, Some(log))
+            .map(Runtime::Pty)
+            .map_err(spawn_error)?,
     };
-    let log = task_dir.join(format!("{}-{}.log", session.kind.name(), session.id));
-    let pty = PtySession::spawn(cmd, 120, 40, Some(log))
-        .map_err(|e| ApiError::internal(format!("cannot start the session: {e}")))?;
     let live = app.sessions.insert(
         &session.id,
         &session.task,
         session.kind,
         session.primary,
-        Arc::clone(&pty),
+        runtime.clone(),
     );
     live.set_idea(session.conversation);
     let remote_control = session.kind == SessionKind::Claude && app.remote_control();
     tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
 
-    if session.kind == SessionKind::Claude {
+    if session.kind == SessionKind::Claude
+        && let Some(pty) = runtime.as_pty()
+    {
         tokio::spawn(accept_trust_dialog(
-            Arc::clone(&pty),
+            Arc::clone(pty),
             Arc::clone(&live.started),
         ));
     }
     let sessions = Arc::clone(&app.sessions);
     let id = session.id.clone();
     tokio::spawn(async move {
-        pty.wait().await;
-        sessions.remove_if_same(&id, &pty);
+        runtime.wait().await;
+        sessions.remove_if_same(&id, &runtime);
         tracing::info!(session = %id, "session exited");
     });
     Ok(())
@@ -1332,7 +1338,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         for live in app.sessions.of_task(&key) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         assert!(
             args.contains(&format!("{})", path.display())),

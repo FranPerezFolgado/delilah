@@ -701,8 +701,8 @@ async fn try_start<L: Launcher>(
         .filter(|_| !relaunch)
         .and_then(|s| app.sessions.get(&s.id))
     {
-        let _ = live.pty.kill();
-        let _ = tokio::time::timeout(KILL_WAIT, live.pty.wait()).await;
+        let _ = live.runtime.kill();
+        let _ = tokio::time::timeout(KILL_WAIT, live.runtime.wait()).await;
     }
     if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false) {
         if !relaunch && let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await

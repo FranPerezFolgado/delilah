@@ -47,8 +47,8 @@ pub(crate) struct Outcome {
 /// repos from here on.
 pub(crate) async fn stop_sessions(app: &AppState, key: &TaskKey) {
     for live in app.sessions.of_task(key.as_str()) {
-        let _ = live.pty.kill();
-        live.pty.wait().await;
+        let _ = live.runtime.kill();
+        live.runtime.wait().await;
     }
 }
 

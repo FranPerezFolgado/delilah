@@ -52,7 +52,10 @@ pub async fn session_terminal(
 fn upgrade(ws: WebSocketUpgrade, live: Live) -> Response {
     ws.on_upgrade(move |socket| async move {
         live.viewers.fetch_add(1, Ordering::Relaxed);
-        pump(socket, live.pty).await;
+        // WP-19 answers an agent without a terminal with a 409 before this point.
+        if let Some(pty) = live.runtime.as_pty() {
+            pump(socket, Arc::clone(pty)).await;
+        }
         live.viewers.fetch_sub(1, Ordering::Relaxed);
     })
 }

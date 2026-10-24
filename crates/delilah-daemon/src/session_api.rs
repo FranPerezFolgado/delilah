@@ -184,8 +184,8 @@ pub async fn allow_edits(
     app.store.set_read_only(&id, false).await?;
     record.read_only = false;
     if let Some(live) = app.sessions.get(&id) {
-        let _ = live.pty.kill();
-        live.pty.wait().await;
+        let _ = live.runtime.kill();
+        live.runtime.wait().await;
     }
     let ws = crate::owners::workspace(&app, &record.task).await?;
     launch_session(&app, &record, &ws.path, None, true)?;
@@ -210,7 +210,7 @@ pub async fn close(
         ));
     }
     if let Some(live) = app.sessions.get(&id) {
-        let _ = live.pty.kill();
+        let _ = live.runtime.kill();
     }
     app.store.close_session(&id).await?;
     app.emit(Topic::Sessions);
@@ -230,7 +230,11 @@ pub async fn reopen(
         .await?
         .filter(|r| !r.closed)
         .ok_or_else(|| ApiError::not_found(format!("session {id} does not exist or was closed")))?;
-    if app.sessions.get(&id).is_some_and(|l| !l.pty.has_exited()) {
+    if app
+        .sessions
+        .get(&id)
+        .is_some_and(|l| !l.runtime.has_exited())
+    {
         return Err(ApiError::conflict("the session is already running"));
     }
     relaunch(&app, &record, None).await?;
@@ -258,7 +262,10 @@ pub(crate) async fn relaunch(
 }
 
 fn view(app: &AppState, record: SessionRecord) -> SessionView {
-    let live = app.sessions.get(&record.id).filter(|l| !l.pty.has_exited());
+    let live = app
+        .sessions
+        .get(&record.id)
+        .filter(|l| !l.runtime.has_exited());
     SessionView {
         live: live.is_some(),
         state: live.map(|l| l.state()),
@@ -575,7 +582,7 @@ mod project_tests {
 
         let id = session["id"].as_str().unwrap();
         if let Some(live) = app.sessions.get(id) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }
@@ -628,7 +635,7 @@ mod project_tests {
         assert_eq!(s["label"], "Idea");
         assert_eq!(s["read_only"], false);
         if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }
@@ -650,7 +657,7 @@ mod project_tests {
         assert_eq!(s["label"], "Claude 1");
         assert_eq!(s["read_only"], true);
         if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }
@@ -666,7 +673,7 @@ mod project_tests {
         assert_eq!(status, StatusCode::CREATED, "{s}");
         assert_eq!(s["label"], "Idea");
         if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }
@@ -689,7 +696,7 @@ mod project_tests {
             json!({ "text": "an idea", "state": "sent", "from": "view" })
         );
         if let Some(live) = app.sessions.get(id) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }
@@ -707,7 +714,7 @@ mod project_tests {
         let entries = app.store.entries(id).await.unwrap();
         assert_eq!(entries[0].body["text"], "an[31m idea");
         if let Some(live) = app.sessions.get(id) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         let long = "x".repeat(MAX_PROMPT_CHARS + 1);
         let (status, body) = call(
@@ -737,7 +744,7 @@ mod project_tests {
         .await;
         assert_eq!(status, StatusCode::CONFLICT, "{body}");
         if let Some(live) = app.sessions.get(&id) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }
