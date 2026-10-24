@@ -1,6 +1,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+// Name of the updater archive on the release: tauri-action uploads the local
+// bundle/macos/Delilah.app.tar.gz under this name (it adds the arch).
+export const ASSET = "Delilah_aarch64.app.tar.gz";
+
 // Builds the update manifest (latest.json) the installed apps read.
 export function manifest({ version, notes, pubDate, signature, repo }) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`version must be X.Y.Z without a leading "v": ${version}`);
@@ -11,7 +15,7 @@ export function manifest({ version, notes, pubDate, signature, repo }) {
     platforms: {
       "darwin-aarch64": {
         signature,
-        url: `https://github.com/${repo}/releases/download/v${version}/Delilah.app.tar.gz`,
+        url: `https://github.com/${repo}/releases/download/v${version}/${ASSET}`,
       },
     },
   };
@@ -24,7 +28,7 @@ export function validateManifest(json, { tag, repo }) {
   if (json.version !== tag.replace(/^v/, "")) problems.push(`version ${json.version} does not match tag ${tag}`);
   const p = json.platforms?.["darwin-aarch64"];
   if (!p) return [...problems, "missing platform darwin-aarch64"];
-  const suffix = `/releases/download/${tag}/Delilah.app.tar.gz`;
+  const suffix = `/releases/download/${tag}/${ASSET}`;
   if (typeof p.url !== "string" || !p.url.endsWith(suffix)) problems.push(`url ${p.url} does not end with ${suffix}`);
   else if (repo && !p.url.startsWith(`https://github.com/${repo}/`)) problems.push(`url ${p.url} is not from ${repo}`);
   if (typeof p.signature !== "string" || !p.signature.trim()) problems.push("empty signature");

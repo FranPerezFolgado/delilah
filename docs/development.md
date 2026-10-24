@@ -180,7 +180,8 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    notes (the tag message, else the `feat`/`fix` subjects since the last tag),
    builds with tauri-action and uploads a **draft** release (`includeUpdaterJson:
    false`), builds `latest.json` itself with `manifest.mjs --write` from the local
-   `.sig`, checks the `Delilah.app.tar.gz` asset, uploads with `--clobber` and only
+   `.sig`, checks the `Delilah_aarch64.app.tar.gz` asset (tauri-action's name for the
+   local `Delilah.app.tar.gz`), uploads with `--clobber` and only
    then publishes it (`gh release edit --draft=false --latest`). A failed run leaves
    at most a draft; re-running the same tag is safe. tauri-action's own
    `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 62).
