@@ -86,7 +86,7 @@ impl Permissions {
     }
 
     /// Keeps the ask unless the session already has [`MAX_PENDING`] waiting.
-    fn insert(&self, ask: PermissionAsk) -> bool {
+    pub(crate) fn insert(&self, ask: PermissionAsk) -> bool {
         let mut pending = self.pending.lock().unwrap();
         if pending
             .values()
@@ -101,7 +101,7 @@ impl Permissions {
     }
 
     /// Takes the ask off the list, so only one answer can ever act on it.
-    fn take(&self, id: &str) -> Option<PermissionAsk> {
+    pub(crate) fn take(&self, id: &str) -> Option<PermissionAsk> {
         self.pending.lock().unwrap().remove(id)
     }
 
@@ -234,6 +234,7 @@ pub async fn on_request(
         format!("{}: {}", ask.tool, ask.summary)
     };
     let request_id = ask.request_id.clone();
+    let tool = ask.tool.clone();
     if !app.permissions.insert(ask) {
         tracing::warn!(%session, "too many permissions waiting; denying");
         let denial = Decision::Deny {
@@ -251,6 +252,7 @@ pub async fn on_request(
         since: Utc::now(),
     };
     let _ = app.store.set_attention(session, Some(&attention)).await;
+    crate::autopilot::on_permission(app, &TaskKey::new(task), session, &tool).await;
     app.emit(Topic::Inbox);
     app.emit(Topic::Conversations);
 }

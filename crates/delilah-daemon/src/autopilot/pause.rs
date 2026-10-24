@@ -35,6 +35,20 @@ pub(crate) async fn on_attention(app: &AppState, key: &TaskKey, session: &str, c
     }
 }
 
+/// A chat-mode permission ask of the task's primary session: autopilot cannot answer it,
+/// so it pauses with "necesita permiso: <tool>" and the ask waits in the inbox. Same
+/// no-ops as [`on_attention`].
+pub(crate) async fn on_permission(app: &AppState, key: &TaskKey, session: &str, tool: &str) {
+    if !is_task(key) {
+        return;
+    }
+    let primary = crate::handoff::primary_session(app, key).await;
+    if primary.is_some_and(|p| p.id == session) {
+        let prefix = app.lang().pick("necesita permiso", "needs permission");
+        pause(app, key, format!("{prefix}: {tool}")).await;
+    }
+}
+
 /// Pauses a running autopilot: records why and when, writes it to the history, tells
 /// the inbox and sends one notification (none when the app is listening). The session
 /// and the task's phase are left alone. A paused, done or absent autopilot is not
@@ -614,6 +628,33 @@ mod tests {
             .ok()
             .unwrap();
         assert!(launched.lock().unwrap().is_empty());
+        assert_eq!(
+            autopilot_of(&app, &key).await.state,
+            AutopilotState::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn a_permission_ask_pauses_autopilot_with_the_tool_in_the_reason() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        app.lang.set(Lang::En);
+        on_permission(&app, &key, "rev-1", "Bash").await;
+        let a = autopilot_of(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused);
+        assert_eq!(a.reason.as_deref(), Some("needs permission: Bash"));
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        app.lang.set(Lang::Es);
+        on_permission(&app, &key, "rev-1", "Edit").await;
+        assert_eq!(
+            autopilot_of(&app, &key).await.reason.as_deref(),
+            Some("necesita permiso: Edit")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_permission_ask_of_another_session_leaves_autopilot_running() {
+        let (app, key, _dir) = ready_task(gh("[]"), None).await;
+        on_permission(&app, &key, "side", "Bash").await;
         assert_eq!(
             autopilot_of(&app, &key).await.state,
             AutopilotState::Running

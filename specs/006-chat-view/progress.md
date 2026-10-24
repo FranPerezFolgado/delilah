@@ -37,10 +37,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19G | 7 | 7H | done | 1 | | fix round 2 |
 | WP-22G | 8 | 8G | verified | 1 | | allowlist for remembered rules (user decision) |
 | WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
-| WP-23 | 8 | 8B | implementing | 0 | | go (decision 49) |
-| WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
+| WP-23 | 8 | 8B | verified | 1 | | go (decision 49) |
+| WP-24 | 8 | 8C | implementing | 0 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
-| WP-26 | 9 | 9A | pending | 0 | | go (decision 49) |
+| WP-26 | 9 | 9A | implementing | 0 | | go (decision 49) |
 | WP-27 | 9 | 9B | verified | 1 | | go (decision 49) |
 | WP-28 | 9 | 9B | pending | 0 | | go (decision 49) |
 | WP-29 | 9 | 9B | pending | 0 | | go (decision 49) |

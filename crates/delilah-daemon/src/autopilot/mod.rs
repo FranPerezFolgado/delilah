@@ -39,7 +39,7 @@ pub(crate) use api::act;
 pub(crate) use ask::answer_question;
 pub(crate) use finish::{finish, recover};
 pub(crate) use notes::{autopilot_plan_note, outcome_path, prepare_step};
-pub(crate) use pause::{on_attention, pause, stall};
+pub(crate) use pause::{on_attention, on_permission, pause, stall};
 
 /// Whether the task is on autopilot and not paused or done.
 pub(crate) fn is_running(task: &Task) -> bool {

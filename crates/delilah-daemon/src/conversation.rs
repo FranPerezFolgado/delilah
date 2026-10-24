@@ -400,6 +400,14 @@ pub async fn get(
         }
     }
     entries.extend(stored);
+    // Permission asks live in memory too: a card while one waits, none once answered.
+    entries.extend(
+        app.permissions
+            .list()
+            .into_iter()
+            .filter(|a| a.session == id)
+            .map(|a| permission_card(&a)),
+    );
     if let Ok(ws) = crate::owners::workspace(&app, &record.task).await {
         for entry in &mut entries {
             relativize_path(entry, &ws.path);
@@ -415,6 +423,22 @@ pub async fn get(
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
         "runtime": runtime,
     })))
+}
+
+/// The card a waiting permission shows as. Built on every read, never stored.
+fn permission_card(ask: &crate::permissions::PermissionAsk) -> Value {
+    json!({
+        "id": format!("perm:{}", ask.id),
+        "at": ask.at,
+        "kind": "card",
+        "ask_kind": "permission",
+        "ask": ask.id,
+        "tool": ask.tool,
+        "summary": ask.summary,
+        "suggestion": ask.suggestion,
+        "rule": ask.rule,
+        "outcome": "pending",
+    })
 }
 
 /// Stores, in the card tied to `tool_use_id`, when its tool call was made.
@@ -878,6 +902,33 @@ mod tests {
     use crate::store::Store;
     use crate::store_sessions::{SessionKind, SessionRecord};
 
+    #[tokio::test]
+    async fn a_waiting_permission_is_a_card_until_it_is_answered() {
+        let f = Fixture::new().await;
+        let ask = f.permission_ask().await;
+        let entries = f.entries().await;
+        let card = entries
+            .iter()
+            .find(|e| e["ask_kind"] == "permission")
+            .expect("a permission card");
+        assert_eq!(card["id"], "perm:ask-1");
+        assert_eq!(card["kind"], "card");
+        assert_eq!(card["ask"], "ask-1");
+        assert_eq!(card["tool"], "Bash");
+        assert_eq!(card["summary"], "npm test");
+        assert_eq!(card["rule"], "Bash(npm test)");
+        assert_eq!(card["suggestion"], json!([{ "type": "setMode" }]));
+        assert_eq!(card["outcome"], "pending");
+        assert!(card["at"].as_str().is_some());
+        f.app.permissions.take(&ask).unwrap();
+        assert!(
+            f.entries()
+                .await
+                .iter()
+                .all(|e| e["ask_kind"] != "permission")
+        );
+    }
+
     const HOOK: &str = "/hooks/claude?task=@web&session=conv";
 
     fn config() -> Config {
@@ -1004,6 +1055,24 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             String::from_utf8_lossy(&std::fs::read(&self.typed).unwrap_or_default()).into_owned()
+        }
+
+        async fn permission_ask(&self) -> String {
+            let ask = crate::permissions::PermissionAsk {
+                id: "ask-1".into(),
+                request_id: "r-1".into(),
+                task: "@web".into(),
+                session: "conv".into(),
+                tool: "Bash".into(),
+                input: json!({ "command": "npm test" }),
+                suggestion: Some(json!([{ "type": "setMode" }])),
+                rule: Some("Bash(npm test)".into()),
+                summary: "npm test".into(),
+                at: Utc::now(),
+            };
+            let id = ask.id.clone();
+            assert!(self.app.permissions.insert(ask));
+            id
         }
 
         async fn entries(&self) -> Vec<Value> {
