@@ -160,10 +160,29 @@ pub fn transcript_path_in(home: &Path, workspace: &Path, session_id: &str) -> Op
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     Some(
-        home.join(".claude/projects")
+        projects_root_in(home)
             .join(folder)
             .join(format!("{session_id}.jsonl")),
     )
+}
+
+/// Where Claude keeps every project's transcripts under `home`.
+pub fn projects_root_in(home: &Path) -> PathBuf {
+    home.join(".claude/projects")
+}
+
+/// `path` resolved (symlinks followed) when it is inside `root` once resolved too;
+/// `None` when it is elsewhere or does not exist. Callers use the returned path.
+pub fn within(root: &Path, path: &Path) -> Option<PathBuf> {
+    let root = root.canonicalize().ok()?;
+    let path = path.canonicalize().ok()?;
+    path.starts_with(&root).then_some(path)
+}
+
+/// Whether `line` mentions `id` anywhere: a cheap test before parsing it as JSON.
+pub fn line_mentions(line: &[u8], id: &str) -> bool {
+    let id = id.as_bytes();
+    !id.is_empty() && line.windows(id.len()).any(|w| w == id)
 }
 
 /// Something one line yields: an entry, or the result of an earlier tool call.
@@ -271,6 +290,9 @@ pub fn parse_message(message: &Value) -> Vec<Entry> {
 pub fn tool_detail(bytes: &[u8], tool_use_id: &str) -> Option<ToolDetail> {
     let mut detail: Option<ToolDetail> = None;
     for line in bytes.split(|b| *b == b'\n') {
+        if !line_mentions(line, tool_use_id) {
+            continue;
+        }
         let Ok(value) = serde_json::from_slice::<Value>(line) else {
             continue;
         };

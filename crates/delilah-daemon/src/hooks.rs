@@ -43,6 +43,7 @@ pub async fn claude_hook(
         Some(id) => app.sessions.get(id),
         None => app.sessions.primary(&q.task),
     };
+    // Only a path that passed the check replaces the current one.
     if let Some(live) = &live
         && let Some(path) = trusted_transcript(&hook)
     {
@@ -151,16 +152,26 @@ pub async fn claude_hook(
     StatusCode::NO_CONTENT
 }
 
-/// The transcript path a hook carries, only when it is absolute, has no `..` and ends in
-/// `.jsonl`: it comes from the hook body, so it is not followed blindly.
+/// The transcript path a hook carries, only when it is absolute, ends in `.jsonl` and,
+/// once symlinks are resolved, is inside Claude's projects folder: it comes from the
+/// hook body, so it is not followed blindly. The path returned is the resolved one.
 fn trusted_transcript(hook: &Value) -> Option<std::path::PathBuf> {
+    let root = crate::conversation::projects_root()?;
+    trusted_transcript_in(&root, hook)
+}
+
+fn trusted_transcript_in(root: &std::path::Path, hook: &Value) -> Option<std::path::PathBuf> {
     let path = std::path::Path::new(hook.get("transcript_path")?.as_str()?);
     let plain = path.is_absolute()
         && path.extension().is_some_and(|e| e == "jsonl")
         && !path
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir));
-    plain.then(|| path.to_path_buf())
+    if !plain {
+        return None;
+    }
+    let resolved = delilah_agents::transcript::within(root, path)?;
+    resolved.is_file().then_some(resolved)
 }
 
 pub async fn claude_statusline(
@@ -262,6 +273,32 @@ mod tests {
             .await
             .unwrap()
             .status()
+    }
+
+    fn scratch() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("delilah-tp-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_hook_transcript_must_resolve_inside_the_projects_root() {
+        let base = scratch();
+        let root = base.join("projects");
+        std::fs::create_dir_all(root.join("p")).unwrap();
+        let inside = root.join("p/s.jsonl");
+        std::fs::write(&inside, "{}\n").unwrap();
+        let outside = base.join("secret.jsonl");
+        std::fs::write(&outside, "{}\n").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("p/link.jsonl")).unwrap();
+        let hook = |p: &std::path::Path| json!({ "transcript_path": p });
+
+        assert!(trusted_transcript_in(&root, &hook(&inside)).is_some());
+        assert!(trusted_transcript_in(&root, &hook(&outside)).is_none());
+        assert!(trusted_transcript_in(&root, &hook(&root.join("p/link.jsonl"))).is_none());
+        assert!(trusted_transcript_in(&root, &hook(&root.join("p/none.jsonl"))).is_none());
+        assert!(trusted_transcript_in(&root, &hook(&root.join("p/../../secret.jsonl"))).is_none());
+        assert!(trusted_transcript_in(&root, &hook(std::path::Path::new("rel.jsonl"))).is_none());
     }
 
     #[tokio::test]
@@ -405,26 +442,35 @@ mod tests {
         );
         assert_eq!(live.transcript(), None);
         let url = "/hooks/claude?task=PROJ-1&session=s-1";
-        let hook =
-            |path: &str| json!({ "hook_event_name": "PostToolUse", "transcript_path": path });
-        post(&state, url, hook("/h/.claude/projects/p/a.jsonl")).await;
-        assert_eq!(
-            live.transcript(),
-            Some("/h/.claude/projects/p/a.jsonl".into())
-        );
-        post(&state, url, hook("/h/.claude/projects/p/b.jsonl")).await;
-        assert_eq!(
-            live.transcript(),
-            Some("/h/.claude/projects/p/b.jsonl".into())
-        );
-        // Not absolute, not a transcript, or climbing out: ignored.
-        for bad in ["rel/c.jsonl", "/etc/passwd", "/h/../etc/c.jsonl"] {
+        let hook = |path: &std::path::Path| json!({ "hook_event_name": "PostToolUse", "transcript_path": path });
+        let root = crate::conversation::projects_root().unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let file = |name: &str| {
+            let path = root.join(format!("{}-{name}.jsonl", uuid::Uuid::new_v4()));
+            std::fs::write(&path, "{}\n").unwrap();
+            path.canonicalize().unwrap()
+        };
+        let (a, b) = (file("a"), file("b"));
+        post(&state, url, hook(&a)).await;
+        assert_eq!(live.transcript(), Some(a));
+        post(&state, url, hook(&b)).await;
+        assert_eq!(live.transcript(), Some(b.clone()));
+        // Not absolute, not a transcript, climbing out, outside the projects folder or a
+        // link to a file outside it: ignored, and the current path stays.
+        let outside = scratch().join("x.jsonl");
+        std::fs::write(&outside, "{}\n").unwrap();
+        let link = root.join(format!("{}-link.jsonl", uuid::Uuid::new_v4()));
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        for bad in [
+            std::path::Path::new("rel/c.jsonl"),
+            std::path::Path::new("/etc/passwd"),
+            &root.join("../etc/c.jsonl"),
+            &outside,
+            &link,
+        ] {
             post(&state, url, hook(bad)).await;
+            assert_eq!(live.transcript(), Some(b.clone()), "{bad:?}");
         }
-        assert_eq!(
-            live.transcript(),
-            Some("/h/.claude/projects/p/b.jsonl".into())
-        );
     }
 }
 

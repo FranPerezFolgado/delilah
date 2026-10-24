@@ -6,6 +6,8 @@ use axum::Json;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt};
+
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
@@ -54,18 +56,85 @@ async fn readable(app: &AppState, id: &str) -> Result<SessionRecord, ApiError> {
     Ok(record)
 }
 
+/// Claude's projects folder, the only place a transcript is read from.
+pub(crate) fn projects_root() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        Some(std::env::temp_dir().join("delilah-test-projects"))
+    }
+    #[cfg(not(test))]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(transcript::projects_root_in(std::path::Path::new(&home)))
+    }
+}
+
 /// Where the session's transcript is: the path its hooks reported, else the one Claude
-/// derives from the workspace and the session id.
+/// derives from the workspace and the session id. Resolved and checked against the
+/// projects folder at every read, so a link or file swapped after the hook is refused.
 async fn transcript_file(
     app: &AppState,
     record: &SessionRecord,
     live: Option<&Live>,
 ) -> Option<PathBuf> {
-    if let Some(path) = live.and_then(Live::transcript) {
-        return Some(path);
+    let path = match live.and_then(Live::transcript) {
+        Some(path) => path,
+        None => {
+            let ws = crate::owners::workspace(app, &record.task).await.ok()?;
+            transcript::transcript_path(&ws.path, &record.id)?
+        }
+    };
+    transcript::within(&projects_root()?, &path)
+}
+
+/// Largest transcript read at all (a bigger one is reported as missing).
+const MAX_FILE: u64 = 256 * 1024 * 1024;
+/// Most bytes one page reads past its cursor.
+const WINDOW: u64 = 8 * 1024 * 1024;
+/// Most bytes of a tool call's input or result in the detail response.
+const MAX_DETAIL: usize = 1_000_000;
+
+/// The transcript opened, only when it is a regular file of a readable size.
+async fn open_transcript(path: &std::path::Path) -> Option<(tokio::fs::File, u64)> {
+    // Checked before opening: opening a FIFO would block.
+    let ok = |m: &std::fs::Metadata| m.is_file() && m.len() <= MAX_FILE;
+    if !tokio::fs::metadata(path).await.ok().is_some_and(|m| ok(&m)) {
+        return None;
     }
-    let ws = crate::owners::workspace(app, &record.task).await.ok()?;
-    transcript::transcript_path(&ws.path, &record.id)
+    let file = tokio::fs::File::open(path).await.ok()?;
+    let meta = file.metadata().await.ok()?;
+    ok(&meta).then_some((file, meta.len()))
+}
+
+/// Up to `WINDOW` bytes from `from` on.
+async fn read_window(file: &mut tokio::fs::File, from: u64) -> std::io::Result<Vec<u8>> {
+    file.seek(std::io::SeekFrom::Start(from)).await?;
+    let mut bytes = Vec::new();
+    file.take(WINDOW).read_to_end(&mut bytes).await?;
+    Ok(bytes)
+}
+
+/// The lines among the first `upto` bytes that mention any of `ids`, newline included;
+/// the rest of the file is never held in memory.
+async fn lines_mentioning(
+    file: tokio::fs::File,
+    upto: u64,
+    ids: &[&str],
+) -> std::io::Result<Vec<u8>> {
+    let mut reader = tokio::io::BufReader::new(file.take(upto));
+    let (mut out, mut line) = (Vec::new(), Vec::new());
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await? == 0 {
+            return Ok(out);
+        }
+        if ids.iter().any(|id| transcript::line_mentions(&line, id)) {
+            out.extend_from_slice(&line);
+            if !line.ends_with(b"\n") {
+                out.push(b'\n');
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,38 +170,59 @@ pub async fn get(
     };
     let live = app.sessions.get(&id);
     let mut entries: Vec<Value> = Vec::new();
-    let (cursor, complete, state) = match transcript_file(&app, &record, live.as_ref()).await {
-        Some(path) => match tokio::fs::read(&path).await {
-            Ok(bytes) => {
-                let from = offset.unwrap_or(0);
-                let page = transcript::parse_page(&bytes, from, PAGE);
-                let next = usize::try_from(page.next_offset).unwrap_or(usize::MAX);
-                let complete = !bytes.get(next..).is_some_and(|rest| rest.contains(&b'\n'));
-                if offset.is_some() && !page.orphan_results.is_empty() {
-                    let wanted: HashSet<&str> = page
-                        .orphan_results
-                        .iter()
-                        .map(|(id, _, _)| id.as_str())
-                        .collect();
-                    entries.extend(
-                        transcript::parse(&bytes, 0)
-                            .entries
+    let path = transcript_file(&app, &record, live.as_ref()).await;
+    let opened = match &path {
+        Some(path) => open_transcript(path).await,
+        None => None,
+    };
+    let (cursor, complete, state) = match opened {
+        Some((mut file, len)) => {
+            let from = offset.unwrap_or(0).min(len);
+            match read_window(&mut file, from).await {
+                Ok(window) => {
+                    let page = transcript::parse_page(&window, 0, PAGE);
+                    let mut next = usize::try_from(page.next_offset).unwrap_or(usize::MAX);
+                    let more_file = from + (window.len() as u64) < len;
+                    // A line longer than the window cannot be read whole: skip past it.
+                    if next == 0 && more_file && !window.contains(&b'\n') {
+                        next = window.len();
+                    }
+                    let complete =
+                        !more_file && !window.get(next..).is_some_and(|rest| rest.contains(&b'\n'));
+                    if offset.is_some() && !page.orphan_results.is_empty() {
+                        let wanted: HashSet<&str> = page
+                            .orphan_results
                             .iter()
-                            .filter(|e| {
-                                matches!(e, TEntry::Tool { tool_use_id, .. } if wanted.contains(tool_use_id.as_str()))
-                            })
+                            .map(|(id, _, _)| id.as_str())
+                            .collect();
+                        let ids: Vec<&str> = wanted.iter().copied().collect();
+                        // The earlier tool calls, found among the bytes before the cursor,
+                        // then the page's own lines so their results fill them in.
+                        if let Some((reopened, _)) = open_transcript(path.as_deref().unwrap()).await
+                            && let Ok(mut before) = lines_mentioning(reopened, from, &ids).await
+                        {
+                            before.extend_from_slice(&window[..next.min(window.len())]);
+                            entries.extend(
+                                transcript::parse(&before, 0)
+                                    .entries
+                                    .iter()
+                                    .filter(|e| {
+                                        matches!(e, TEntry::Tool { tool_use_id, .. } if wanted.contains(tool_use_id.as_str()))
+                                    })
+                                    .filter_map(|e| serde_json::to_value(e).ok()),
+                            );
+                        }
+                    }
+                    entries.extend(
+                        page.entries
+                            .iter()
                             .filter_map(|e| serde_json::to_value(e).ok()),
                     );
+                    (from + next as u64, complete, "present")
                 }
-                entries.extend(
-                    page.entries
-                        .iter()
-                        .filter_map(|e| serde_json::to_value(e).ok()),
-                );
-                (page.next_offset, complete, "present")
+                Err(_) => (offset.unwrap_or(0), true, missing(live.as_ref())),
             }
-            Err(_) => (offset.unwrap_or(0), true, missing(live.as_ref())),
-        },
+        }
         None => (offset.unwrap_or(0), true, missing(live.as_ref())),
     };
     let mut stored = json!(app.store.entries(&id).await?);
@@ -186,13 +276,40 @@ pub async fn tool(
     let path = transcript_file(&app, &record, live.as_ref())
         .await
         .ok_or_else(not_found)?;
-    let bytes = tokio::fs::read(&path).await.map_err(|_| not_found())?;
-    let detail = transcript::tool_detail(&bytes, &tool_use_id).ok_or_else(not_found)?;
+    let (file, len) = open_transcript(&path).await.ok_or_else(not_found)?;
+    // Only the lines that mention the call are parsed.
+    let lines = lines_mentioning(file, len, &[tool_use_id.as_str()])
+        .await
+        .map_err(|_| not_found())?;
+    let detail = transcript::tool_detail(&lines, &tool_use_id).ok_or_else(not_found)?;
+    let (result, cut_result) = cap_text(detail.result.unwrap_or_default());
+    // An input too big for the response is given as its JSON text, cut.
+    let (input, cut_input) = match serde_json::to_string(&detail.input) {
+        Ok(text) if text.len() > MAX_DETAIL => {
+            let (text, _) = cap_text(text);
+            (json!(text), true)
+        }
+        _ => (detail.input, false),
+    };
     Ok(Json(json!({
-        "input": detail.input,
-        "result": detail.result.unwrap_or_default(),
+        "input": input,
+        "result": result,
         "is_error": detail.is_error,
+        "truncated": cut_result || cut_input,
     })))
+}
+
+/// `text` cut to `MAX_DETAIL` bytes (at a character boundary), and whether it was.
+fn cap_text(mut text: String) -> (String, bool) {
+    if text.len() <= MAX_DETAIL {
+        return (text, false);
+    }
+    let mut end = MAX_DETAIL;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    (text, true)
 }
 
 #[derive(Debug, Deserialize)]
@@ -642,8 +759,9 @@ mod tests {
 
         /// Puts `bytes` where the live session's hooks say its transcript is.
         fn transcript(live: &Live, bytes: &[u8]) -> PathBuf {
-            let path =
-                std::env::temp_dir().join(format!("delilah-tr-{}.jsonl", uuid::Uuid::new_v4()));
+            let root = projects_root().unwrap();
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join(format!("delilah-tr-{}.jsonl", uuid::Uuid::new_v4()));
             std::fs::write(&path, bytes).unwrap();
             live.set_transcript(path.clone());
             path
@@ -749,8 +867,9 @@ mod tests {
     #[tokio::test]
     async fn a_missing_transcript_is_pending_before_the_first_turn_and_missing_after() {
         let f = Fixture::new().await;
-        let gone =
-            std::env::temp_dir().join(format!("delilah-gone-{}.jsonl", uuid::Uuid::new_v4()));
+        let gone = projects_root()
+            .unwrap()
+            .join(format!("delilah-gone-{}.jsonl", uuid::Uuid::new_v4()));
         f.live.set_transcript(gone);
         f.app
             .store
@@ -806,6 +925,95 @@ mod tests {
             let uri = format!("/api/v1/sessions/task1/conversation/tools/{id}");
             assert_eq!(f.get_of(&uri).await.0, StatusCode::NOT_FOUND, "{id}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_transcript_outside_the_projects_folder_or_not_a_file_reads_as_missing() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let root = projects_root().unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let outside =
+            std::env::temp_dir().join(format!("delilah-out-{}.jsonl", uuid::Uuid::new_v4()));
+        std::fs::write(&outside, fixture_bytes("basic")).unwrap();
+        let link = root.join(format!("delilah-link-{}.jsonl", uuid::Uuid::new_v4()));
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let dir = root.join(format!("delilah-dir-{}.jsonl", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        live.set_state(LiveState::Working);
+        for path in [outside, link, dir] {
+            live.set_transcript(path);
+            let (status, body) = f.get_of("/api/v1/sessions/task1/conversation").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(body["transcript"], "missing");
+            assert!(body["entries"].as_array().unwrap().is_empty());
+            let uri = "/api/v1/sessions/task1/conversation/tools/ta";
+            assert_eq!(f.get_of(uri).await.0, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cursor_read_does_not_need_the_bytes_before_it() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let prefix = vec![b'\xff'; 4096];
+        let mut bytes = prefix.clone();
+        bytes.extend_from_slice(b"\n");
+        let cursor = bytes.len();
+        bytes.extend_from_slice(assistant_line(7).as_bytes());
+        Fixture::transcript(&live, &bytes);
+        let body = f
+            .get_of(&format!(
+                "/api/v1/sessions/task1/conversation?cursor={cursor}"
+            ))
+            .await
+            .1;
+        assert_eq!(body["entries"][0]["text"], "t7");
+        assert_eq!(body["cursor"], bytes.len().to_string());
+        assert_eq!(body["complete"], true);
+    }
+
+    #[tokio::test]
+    async fn an_orphan_result_finds_its_tool_call_among_unparseable_earlier_lines() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let mut bytes = b"not json at all\n".to_vec();
+        bytes.extend_from_slice(&fixture_bytes("basic"));
+        Fixture::transcript(&live, &bytes);
+        let mut off = 0;
+        for _ in 0..4 {
+            off += bytes[off..].iter().position(|b| *b == b'\n').unwrap() + 1;
+        }
+        let body = f
+            .get_of(&format!("/api/v1/sessions/task1/conversation?cursor={off}"))
+            .await
+            .1;
+        let bash = body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["tool_use_id"] == "tb")
+            .expect("the tool entry again");
+        assert_eq!(bash["result"], "1 failed");
+    }
+
+    #[tokio::test]
+    async fn tool_detail_is_capped_at_a_megabyte() {
+        let f = Fixture::new().await;
+        let live = f.task_session().await;
+        let big = "x".repeat(MAX_DETAIL + 10);
+        let lines = format!(
+            "{{\"type\":\"assistant\",\"uuid\":\"a\",\"message\":{{\"id\":\"m\",\"role\":\"assistant\",\"content\":[{{\"type\":\"tool_use\",\"id\":\"tbig\",\"name\":\"Bash\",\"input\":{{\"command\":\"{big}\"}}}}]}}}}\n\
+             {{\"type\":\"user\",\"uuid\":\"u\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"tbig\",\"content\":\"{big}\"}}]}}}}\n"
+        );
+        Fixture::transcript(&live, lines.as_bytes());
+        let (status, body) = f
+            .get_of("/api/v1/sessions/task1/conversation/tools/tbig")
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["result"].as_str().unwrap().len(), MAX_DETAIL);
+        assert!(body["input"].as_str().unwrap().len() <= MAX_DETAIL);
+        assert_eq!(body["truncated"], true);
     }
 
     #[tokio::test]
