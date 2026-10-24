@@ -186,7 +186,8 @@ function Item({ item, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem 
       )}
 
       <div className="inbox-actions">
-        {s && s.live && (
+        {/* A chat-mode ask has no terminal: its card is the way to answer. */}
+        {s && s.live && !item.permission && (
           <button className={`btn ${item.kind === "permission" ? "btn-p" : ""}`} onClick={() => onOpenTask(item.task, s.id)}>
             <Icon name="console" /> {item.kind === "permission" ? t("Responder en su terminal") : t("Abrir la sesión")}
           </button>

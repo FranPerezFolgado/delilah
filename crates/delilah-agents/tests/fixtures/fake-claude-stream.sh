@@ -8,6 +8,8 @@
 #   - a line containing WAIT starts the turn (message_start + one delta) and then hangs until
 #     an `interrupt` control request arrives;
 #   - a line containing NEEDS_PERMISSION asks `can_use_tool` and waits for the control_response;
+#     (EDIT_A / EDIT_B ask for an Edit of src/a.rs / src/b.rs, FETCH_A / FETCH_B for a
+#     WebFetch of docs.rs / example.com; ECHO_DENY makes a denial's message show in the result);
 #   - a line containing UNKNOWN_EVENT prints a line of an unknown type before the turn;
 #   - a line containing STDERR_NOISE writes to stderr;
 #   - a line containing LIMIT runs a turn that hits the usage limit: a rate_limit_event with a
@@ -65,7 +67,12 @@ while IFS= read -r line; do
     continue
   fi
   if [[ "$line" == *NEEDS_PERMISSION* ]]; then
-    echo '{"type":"control_request","request_id":"perm-1","request":{"subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"toolu_1","input":{"command":"npm --version"},"permission_suggestions":[{"behavior":"allow","type":"addRules"}]}}'
+    tool=Bash input='{"command":"npm --version"}'
+    [[ "$line" == *EDIT_A* ]] && tool=Edit input='{"file_path":"src/a.rs"}'
+    [[ "$line" == *EDIT_B* ]] && tool=Edit input='{"file_path":"src/b.rs"}'
+    [[ "$line" == *FETCH_A* ]] && tool=WebFetch input='{"url":"https://docs.rs/serde"}'
+    [[ "$line" == *FETCH_B* ]] && tool=WebFetch input='{"url":"https://example.com/x"}'
+    printf '{"type":"control_request","request_id":"perm-1","request":{"subtype":"can_use_tool","tool_name":"%s","tool_use_id":"toolu_1","input":%s,"permission_suggestions":[{"behavior":"allow","type":"addRules"}]}}\n' "$tool" "$input"
     while IFS= read -r reply; do
       [[ "$reply" == *'"control_response"'* ]] && break
     done
@@ -74,7 +81,11 @@ while IFS= read -r line; do
       finish_turn "$id" "allowed"
     else
       echo '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"denied","is_error":true}]}}'
-      finish_turn "$id" "denied"
+      if [[ "$line" == *ECHO_DENY* ]]; then
+        finish_turn "$id" "denied: $(printf '%s' "$reply" | sed -E 's/.*"message":"([^"]*)".*/\1/')"
+      else
+        finish_turn "$id" "denied"
+      fi
     fi
     continue
   fi

@@ -33,13 +33,13 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-21 | 7 | 7D | done | 1 | 9d0e3cc | go (decision 49) |
 | WP-21F | 7 | 7F | done | 1 | | UI/CLI review fixes |
 | WP-19F | 7 | 7G | done | 1 | | review fixes (init wait CRITICAL) |
-| WP-22F | 8 | 8F | verified | 1 | | permission rule security |
+| WP-22F | 8 | 8F | done | 1 | | permission rule security |
 | WP-19G | 7 | 7H | done | 1 | | fix round 2 |
-| WP-22G | 8 | 8G | verified | 1 | | allowlist for remembered rules (user decision) |
-| WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
-| WP-22H | 8 | 8H | implementing | 0 | | in-session file/WebFetch rule matching |
-| WP-23 | 8 | 8B | verified | 1 | | go (decision 49) |
-| WP-24 | 8 | 8C | verified | 1 | | go (decision 49) |
+| WP-22G | 8 | 8G | done | 1 | | allowlist for remembered rules (user decision) |
+| WP-22 | 8 | 8A | done | 1 | | go (decision 49) |
+| WP-22H | 8 | 8H | done | 1 | | in-session file/WebFetch rule matching |
+| WP-23 | 8 | 8B | done | 1 | | go (decision 49) |
+| WP-24 | 8 | 8C | done | 1 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
 | WP-26 | 9 | 9A | verified | 1 | | go (decision 49) |
 | WP-27 | 9 | 9B | verified | 1 | | go (decision 49) |

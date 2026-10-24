@@ -215,6 +215,18 @@ describe("InboxView permission items", () => {
     expect(answer).toHaveBeenCalledWith("s1", "p1", "deny", "");
   });
 
+  it("offers no terminal button for a chat-mode ask, but does for a terminal one", () => {
+    const { unmount } = render(
+      <InboxView items={[perm]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />,
+    );
+    expect(screen.queryByText("Answer in its terminal")).toBeNull();
+    unmount();
+    render(
+      <InboxView items={[{ ...perm, permission: undefined }]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />,
+    );
+    expect(screen.getByText("Answer in its terminal")).toBeTruthy();
+  });
+
   it("shows the rule next to allow always", () => {
     const withRule = { ...perm, permission: { ...perm.permission!, rule: "Bash(npm test)" } };
     render(<InboxView items={[withRule]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);

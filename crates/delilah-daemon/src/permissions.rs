@@ -180,6 +180,15 @@ async fn clear_attention(app: &AppState, session: &str) {
     }
 }
 
+/// The line the inbox shows for an ask: `Tool: summary`.
+fn attention_text(ask: &PermissionAsk) -> String {
+    if ask.summary.is_empty() {
+        ask.tool.clone()
+    } else {
+        format!("{}: {}", ask.tool, ask.summary)
+    }
+}
+
 /// A `can_use_tool` request arrived. Quick by design (the pump awaits it): it answers by
 /// itself when a rule allows the call, else keeps the ask and returns.
 pub async fn on_request(
@@ -199,12 +208,16 @@ pub async fn on_request(
         Ok(Some(t)) => t.allowed_tools,
         _ => Vec::new(),
     };
+    let workspace = crate::owners::workspace(app, task)
+        .await
+        .map(|w| w.path)
+        .unwrap_or_default();
     let allowed = rules.iter().any(|r| {
         if !delilah_agents::claude::is_safe_allow_rule(r) {
             tracing::warn!(%task, "ignoring the stored rule `{r}`: it is not specific enough");
             return false;
         }
-        rule_matches(r, &tool, &input)
+        rule_matches(r, &tool, &input, &workspace)
     });
     if allowed {
         if let Err(e) = reply(app, session, &request_id, Decision::Allow { input }).await {
@@ -212,10 +225,6 @@ pub async fn on_request(
         }
         return;
     }
-    let workspace = crate::owners::workspace(app, task)
-        .await
-        .map(|w| w.path)
-        .unwrap_or_default();
     let ask = PermissionAsk {
         id: uuid::Uuid::new_v4().to_string(),
         request_id,
@@ -228,11 +237,7 @@ pub async fn on_request(
         suggestion,
         at: Utc::now(),
     };
-    let text = if ask.summary.is_empty() {
-        ask.tool.clone()
-    } else {
-        format!("{}: {}", ask.tool, ask.summary)
-    };
+    let text = attention_text(&ask);
     let request_id = ask.request_id.clone();
     let tool = ask.tool.clone();
     if !app.permissions.insert(ask) {
@@ -324,9 +329,24 @@ pub async fn answer(
         }
         app.emit(Topic::Tasks);
     }
-    clear_attention(&app, &session).await;
-    if allowed && let Some(live) = app.sessions.get(&session) {
-        live.set_state(LiveState::Working);
+    // Other asks of the session still wait: attention moves to the next one, the state stays.
+    let next = app
+        .permissions
+        .list()
+        .into_iter()
+        .find(|a| a.session == session);
+    if let Some(next) = next {
+        let attention = Attention {
+            kind: AttentionKind::Permission,
+            text: attention_text(&next),
+            since: next.at,
+        };
+        let _ = app.store.set_attention(&session, Some(&attention)).await;
+    } else {
+        clear_attention(&app, &session).await;
+        if allowed && let Some(live) = app.sessions.get(&session) {
+            live.set_state(LiveState::Working);
+        }
     }
     app.emit(Topic::Inbox);
     app.emit(Topic::Conversations);
@@ -449,8 +469,10 @@ pub fn validate_rule(
 }
 
 /// Whether an allow rule covers this call: `Tool` covers any use of the tool;
-/// `Bash(<prefix>:*)` a command that starts with the prefix; `Bash(<command>)` exactly it.
-pub fn rule_matches(rule: &str, tool: &str, input: &Value) -> bool {
+/// `Bash(<prefix>:*)` a command that starts with the prefix; `Bash(<command>)` exactly it;
+/// `Edit(<file>)` (any file tool) that file, relative to `workspace` (`<dir>/**`: inside
+/// that dir); `WebFetch(domain:<host>)` exactly that host. Anything else does not match.
+pub fn rule_matches(rule: &str, tool: &str, input: &Value, workspace: &std::path::Path) -> bool {
     let rule = rule.trim();
     if rule.is_empty() {
         return false;
@@ -461,7 +483,37 @@ pub fn rule_matches(rule: &str, tool: &str, input: &Value) -> bool {
     let Some(content) = rest.strip_suffix(')') else {
         return false;
     };
-    if name != tool || tool != "Bash" {
+    if name != tool {
+        return false;
+    }
+    if delilah_agents::claude::PATH_TOOLS.contains(&tool) {
+        let Some(file) = relative_file(input, workspace) else {
+            return false;
+        };
+        let content = content.trim();
+        if std::path::Path::new(&file)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return false;
+        }
+        return match content.strip_suffix("/**") {
+            Some(dir) => {
+                !dir.is_empty() && file.strip_prefix(dir).is_some_and(|t| t.starts_with('/'))
+            }
+            None => file == content,
+        };
+    }
+    if tool == "WebFetch" {
+        let Some(domain) = content.trim().strip_prefix("domain:") else {
+            return false;
+        };
+        return input["url"]
+            .as_str()
+            .and_then(url_host)
+            .is_some_and(|h| !domain.is_empty() && h == domain.to_ascii_lowercase());
+    }
+    if tool != "Bash" {
         return false;
     }
     let Some(command) = input["command"].as_str().map(str::trim) else {
@@ -554,11 +606,16 @@ mod tests {
 
         /// Makes the agent ask and feeds its request through `on_request`.
         async fn ask(&mut self) -> Option<PermissionAsk> {
+            self.ask_with("NEEDS_PERMISSION").await
+        }
+
+        /// The same, with the user line the fake agent reads (its markers pick the tool).
+        async fn ask_with(&mut self, line: &str) -> Option<PermissionAsk> {
             self.live
                 .runtime
                 .as_stream()
                 .unwrap()
-                .send_user("NEEDS_PERMISSION")
+                .send_user(line)
                 .await
                 .unwrap();
             loop {
@@ -1001,6 +1058,9 @@ mod tests {
 
     #[test]
     fn rules_match_a_tool_or_a_bash_prefix() {
+        fn rule_matches(rule: &str, tool: &str, input: &Value) -> bool {
+            super::rule_matches(rule, tool, input, std::path::Path::new("/ws"))
+        }
         let bash = |c: &str| json!({ "command": c });
         assert!(rule_matches("Read", "Read", &json!({})));
         assert!(!rule_matches("Read", "Write", &json!({})));
@@ -1051,5 +1111,204 @@ mod tests {
         assert!(rule_matches("Bash(ls -la)", "Bash", &bash("ls -la")));
         assert!(!rule_matches("Bash(ls -la)", "Bash", &bash("ls -la /")));
         assert!(!rule_matches("Bash(:*)", "Bash", &bash("ls")));
+    }
+
+    #[test]
+    fn file_and_web_fetch_rules_match_what_rule_to_add_writes() {
+        let ws = std::path::Path::new("/ws");
+        let m = |r: &str, t: &str, i: Value| rule_matches(r, t, &i, ws);
+        assert!(m(
+            "Edit(src/a.rs)",
+            "Edit",
+            json!({ "file_path": "/ws/src/a.rs" })
+        ));
+        assert!(m(
+            "Edit(src/a.rs)",
+            "Edit",
+            json!({ "file_path": "src/a.rs" })
+        ));
+        assert!(!m(
+            "Edit(src/a.rs)",
+            "Edit",
+            json!({ "file_path": "/ws/src/b.rs" })
+        ));
+        assert!(!m(
+            "Edit(src/a.rs)",
+            "Write",
+            json!({ "file_path": "/ws/src/a.rs" })
+        ));
+        assert!(!m(
+            "Edit(src/a.rs)",
+            "Edit",
+            json!({ "file_path": "/ws/../etc/a.rs" })
+        ));
+        assert!(!m("Edit(src/a.rs)", "Edit", json!({})));
+        assert!(m("Grep(src)", "Grep", json!({ "path": "/ws/src" })));
+        assert!(m(
+            "Edit(src/**)",
+            "Edit",
+            json!({ "file_path": "/ws/src/x/a.rs" })
+        ));
+        assert!(!m(
+            "Edit(src/**)",
+            "Edit",
+            json!({ "file_path": "/ws/srcx/a.rs" })
+        ));
+        assert!(!m(
+            "Edit(src/**)",
+            "Edit",
+            json!({ "file_path": "/ws/src/../etc/a" })
+        ));
+        let fetch = |url: &str| json!({ "url": url });
+        assert!(m(
+            "WebFetch(domain:docs.rs)",
+            "WebFetch",
+            fetch("https://docs.rs/serde")
+        ));
+        assert!(m(
+            "WebFetch(domain:docs.rs)",
+            "WebFetch",
+            fetch("https://DOCS.rs/x")
+        ));
+        assert!(!m(
+            "WebFetch(domain:docs.rs)",
+            "WebFetch",
+            fetch("https://evil.docs.rs/x")
+        ));
+        assert!(!m(
+            "WebFetch(domain:docs.rs)",
+            "WebFetch",
+            fetch("https://evil.com/docs.rs")
+        ));
+        assert!(!m("WebFetch(domain:docs.rs)", "WebFetch", json!({})));
+        assert!(!m("Task(x)", "Task", json!({})));
+    }
+
+    async fn second_session_ask(f: &Fixture) {
+        let ask = PermissionAsk {
+            id: "second".into(),
+            request_id: "perm-2".into(),
+            task: "PROJ-1".into(),
+            session: "s-1".into(),
+            tool: "Edit".into(),
+            input: json!({}),
+            suggestion: None,
+            rule: None,
+            summary: "src/z.rs".into(),
+            at: Utc::now() + chrono::Duration::seconds(1),
+        };
+        assert!(f.app.permissions.insert(ask));
+    }
+
+    #[tokio::test]
+    async fn answering_one_ask_keeps_the_state_while_others_wait() {
+        let mut f = Fixture::new().await;
+        f.app
+            .store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "s-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "chat".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: None,
+            })
+            .await
+            .unwrap();
+        let ask = f.ask().await.unwrap();
+        second_session_ask(&f).await;
+        let status = f
+            .post(
+                &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
+                json!({ "decision": "allow_once" }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(f.live.state(), LiveState::Waiting);
+        let a = f.app.store.attention("s-1").await.unwrap().unwrap();
+        assert_eq!(a.kind, AttentionKind::Permission);
+        assert_eq!(a.text, "Edit: src/z.rs");
+        // The last one answered: attention clears and the agent works again.
+        f.app.permissions.take("second");
+        let ask = f.ask().await.unwrap();
+        f.post(
+            &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
+            json!({ "decision": "allow_once" }),
+        )
+        .await;
+        assert_eq!(f.live.state(), LiveState::Working);
+        assert_eq!(f.app.store.attention("s-1").await.ok().flatten(), None);
+    }
+
+    #[tokio::test]
+    async fn allow_always_on_a_file_or_a_url_is_not_asked_again_in_the_same_session() {
+        for (marker, tool, rule, first, same, other) in [
+            (
+                "NEEDS_PERMISSION EDIT_A",
+                "Edit",
+                "Edit(src/a.rs)",
+                json!({ "file_path": "src/a.rs" }),
+                "NEEDS_PERMISSION EDIT_A",
+                "NEEDS_PERMISSION EDIT_B",
+            ),
+            (
+                "NEEDS_PERMISSION FETCH_A",
+                "WebFetch",
+                "WebFetch(domain:docs.rs)",
+                json!({ "url": "https://docs.rs/serde" }),
+                "NEEDS_PERMISSION FETCH_A",
+                "NEEDS_PERMISSION FETCH_B",
+            ),
+        ] {
+            let mut f = Fixture::new().await;
+            let ask = f.ask_with(marker).await.unwrap();
+            assert_eq!(ask.tool, tool);
+            assert_eq!(ask.input, first);
+            f.app
+                .permissions
+                .pending
+                .lock()
+                .unwrap()
+                .get_mut(&ask.id)
+                .unwrap()
+                .rule = Some(rule.into());
+            let status = f
+                .post(
+                    &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
+                    json!({ "decision": "allow_always" }),
+                )
+                .await;
+            assert_eq!(status, StatusCode::NO_CONTENT);
+            assert_eq!(f.turn_text().await, "allowed");
+            assert!(f.ask_with(same).await.is_none(), "{tool}: not asked again");
+            assert_eq!(f.turn_text().await, "allowed");
+            assert!(
+                f.ask_with(other).await.is_some(),
+                "{tool}: another target asks"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_agent_gets_the_trimmed_reason_or_the_default_denial() {
+        for (reason, expected) in [
+            (json!("  no way  "), "no way"),
+            (json!("   "), DEFAULT_DENIAL),
+            (Value::Null, DEFAULT_DENIAL),
+        ] {
+            let mut f = Fixture::new().await;
+            let ask = f.ask_with("NEEDS_PERMISSION ECHO_DENY").await.unwrap();
+            let status = f
+                .post(
+                    &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
+                    json!({ "decision": "deny", "reason": reason }),
+                )
+                .await;
+            assert_eq!(status, StatusCode::NO_CONTENT);
+            assert_eq!(f.turn_text().await, format!("denied: {expected}"));
+        }
     }
 }
