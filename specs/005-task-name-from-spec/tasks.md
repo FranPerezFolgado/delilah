@@ -64,8 +64,8 @@ None: no new dependencies.
 
 ### Git layer
 
-- [ ] T022 [P] [US2] Write failing tests in `crates/delilah-git/src/workspace.rs`: `create_workspace` with `branch: None` for a repo makes a detached worktree and no branch; for a parent leaves the chosen submodules detached; `use_checkout` with `branch: None` refuses a dirty folder, switches nothing and returns `previous` including `"."` for a parent; `leave_checkout` puts the parent back too; `apply_branch(dir, name)` = `checkout -b` keeping uncommitted files, error if it exists; `branch_exists(dir, name)` sees local and remote-tracking branches; with `branch: Some(..)` everything behaves as before.
-- [ ] T023 [US2] Implement T022 in `crates/delilah-git/src/workspace.rs`: `WorkspaceSpec.branch: Option<String>`, `apply_branch`, `branch_exists`; update callers of `WorkspaceSpec` (`run.rs`, tests).
+- [X] T022 [P] [US2] Write failing tests in `crates/delilah-git/src/workspace.rs`: `create_workspace` with `branch: None` for a repo makes a detached worktree and no branch; for a parent leaves the chosen submodules detached; `use_checkout` with `branch: None` refuses a dirty folder, switches nothing and returns `previous` including `"."` for a parent; `leave_checkout` puts the parent back too; `apply_branch(dir, name)` = `checkout -b` keeping uncommitted files, error if it exists; `branch_exists(dir, name)` sees local and remote-tracking branches; with `branch: Some(..)` everything behaves as before.
+- [X] T023 [US2] Implement T022 in `crates/delilah-git/src/workspace.rs`: `WorkspaceSpec.branch: Option<String>`, `apply_branch`, `branch_exists`; update callers of `WorkspaceSpec` (`run.rs`, tests).
 
 ### Daemon
 

@@ -8,9 +8,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01 | 2 | 2A | done | 1 | b9cd4b4 | archived = Done/Failed with no workspace row; also touched delilah-core lib.rs (re-export) |
 | WP-02 | 2 | 2A | done | 1 | 8286607 | |
 | WP-03 | 2 | 2B | done | 1 | c472b6b | proposals.rs untouched (goes through build_task) |
-| WP-04 | 3 | 3A | verified | 1 | PENDING | store.rename_from_spec added (atomic, WHERE initial) |
+| WP-04 | 3 | 3A | verified | 1 | bd30a70 | store.rename_from_spec added (atomic, WHERE initial) |
 | WP-05 | 3 | 3A | verified | 1 | 2b5996b | run early with 2A (no deps) |
-| WP-06 | 4 | 4A | implementing | 0 | | run alongside WP-04 (no shared files) |
+| WP-06 | 4 | 4A | verified | 1 | PENDING | parent root not dirty-checked in branchless use_checkout (submodules only) |
 | WP-10 | 4 | 4A | verified | 1 | 98a3637 | run early; alerts.ts allowed by user |
 | WP-07 | 4 | 4B | pending | 0 | | |
 | WP-09 | 4 | 4B | pending | 0 | | |
@@ -35,3 +35,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | 2 | architecture | LOW | BranchLocks never shrinks; Initial-for-free duplicated in api.rs/run.rs; start_run overwrites spec_dirs baseline on a second start; recover_branches blocks startup; tick/recover_branches loop duplicated | branching.rs, api.rs:332, run.rs:232,305, main.rs:59, scheduler.rs:20 |
 | 2 | spec-compliance | MEDIUM | T012 untested: no test that start_run/build_task create free tasks initial and Jira manual, or that spec_dirs_at_start is recorded (incl. submodules) | crates/delilah-daemon/src/run.rs, api.rs |
 | 2 | spec-compliance | LOW | set_spec_dirs_at_start failure at run.rs:311 returns after save_workspace without Fail/StartAborted (task stuck Starting) | crates/delilah-daemon/src/run.rs:311 |
+| 3 | contract | MEDIUM | retryBranch client/InboxView call POST /api/v1/tasks/{key}/branch before the route exists (lands in WP-08, same release) | app/src/api.ts:439 |
+| 3 | contract | LOW | 409 for renaming an archived task not stated in contracts/api.md; BacklogChange comment in api.ts still says backlog-only | contracts/api.md, app/src/api.ts:93 |
+| 3 | spec-compliance | LOW | title-only PATCH with an unchanged title still makes a spec title manual and clears previous_title (API/CLI) | crates/delilah-daemon/src/api.rs:369 |
+| 3 | spec-compliance | LOW | title editable / Restaurar shown on archived tasks (409 on save) | app/src/components/TaskScreen.tsx:518-545 |
+| 3 | spec-compliance | LOW | untested: PATCH archived → 409 at API level; retitle no-op on a Jira task with a new spec folder; title from a submodule's spec | api.rs, branching.rs |

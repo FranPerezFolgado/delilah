@@ -346,7 +346,7 @@ mod tests {
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
             path: app.config.workspaces_dir().join(key.as_str()),
-            branch: format!("feature/{key}"),
+            branch: Some(format!("feature/{key}")),
             kind: delilah_core::ProjectKind::Repo,
             submodules: vec![],
         };

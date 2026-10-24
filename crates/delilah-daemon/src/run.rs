@@ -240,10 +240,11 @@ pub async fn start_run(
 
     let spec = WorkspaceSpec {
         path: app.config.workspaces_dir().join(&req.key),
-        branch: req
-            .branch
-            .clone()
-            .unwrap_or_else(|| format!("feature/{}", req.key)),
+        branch: Some(
+            req.branch
+                .clone()
+                .unwrap_or_else(|| format!("feature/{}", req.key)),
+        ),
         kind: project.kind,
         submodules: req.submodules.clone(),
     };

@@ -7,8 +7,8 @@ mod workspace;
 pub use changes::{ChangeKind, Changes, FileChange, base_commit, changes, file_diff, repo_files};
 pub use command::{GitError, GitOptions};
 pub use workspace::{
-    Submodule, Workspace, WorkspaceSpec, archive_workspace, branch_tip, changed_paths,
-    check_merged, check_repos, check_workspace, commit_subjects, create_workspace, current_branch,
-    delete_branch, fetch, is_sha, leave_checkout, list_submodules, needs_push, push_branch,
-    remove_workspace, repo_root, spec_dirs, use_checkout,
+    Submodule, Workspace, WorkspaceSpec, apply_branch, archive_workspace, branch_exists,
+    branch_tip, changed_paths, check_merged, check_repos, check_workspace, commit_subjects,
+    create_workspace, current_branch, delete_branch, fetch, is_sha, leave_checkout,
+    list_submodules, needs_push, push_branch, remove_workspace, repo_root, spec_dirs, use_checkout,
 };
