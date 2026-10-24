@@ -46,7 +46,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         tracing::warn!("could not write the Delilah plugin: {e}");
     }
+    let version = env!("CARGO_PKG_VERSION");
+    delilah_daemon::upgrade::before_open(&config.home, &config.database_path(), version).await;
     let store = Store::open(&config.database_path()).await?;
+    if let Err(e) = delilah_daemon::upgrade::after_open(&config.home, version) {
+        tracing::warn!("could not record the version: {e}");
+    }
     // The pending asks lived in the previous process: their cards cannot be answered.
     match store.withdraw_pending_cards().await {
         Ok(0) => {}

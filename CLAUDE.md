@@ -41,9 +41,8 @@ Decide the level yourself from what the change does (semver):
 Bump from the version on `main` (re-check it if `main` moved before merging),
 in the four places listed in [docs/development.md](docs/development.md#releasing)
 plus the lockfiles (`scripts/bump-version.sh <level> --commit` does both), as its own commit
-`chore: bump version to X.Y.Z`, and say
-in the PR which level you picked and why. Tagging and building stay as in the
-release steps.
+`chore: bump version to X.Y.Z`, and say in the PR which level you picked and why. Tagging,
+building and publishing are `make release` on `main` and the tag workflow, as in the release steps.
 
 ## Ground rules
 

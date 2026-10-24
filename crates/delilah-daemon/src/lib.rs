@@ -49,3 +49,4 @@ pub mod store_sessions;
 mod store_settings;
 mod terminal;
 mod transitions;
+pub mod upgrade;

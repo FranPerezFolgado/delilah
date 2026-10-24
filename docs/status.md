@@ -82,6 +82,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 **End-to-end tests:**
 - `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Local only, no CI. See [development.md](development.md#end-to-end-tests).
 
+**Auto-update** (0.8.0):
+- Tauri updater against GitHub Releases: a notice with the open-session count, "Más tarde" / "Cuando terminen", menu item and Ajustes › Actualizaciones; release builds only.
+- The daemon copies the database to `backups/` before migrating after a version change.
+- `make release` / `make release-dry-run` and the tag workflow `.github/workflows/release.yml`.
+
 ## Pending and known problems
 
 - **End-to-end tests, pending and known:**
@@ -89,6 +94,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
   - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
   - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
   - measured: API layer 57 s (including the build), UI layer 30 s; 10 consecutive full `scripts/e2e.sh` runs all green (78–105 s each), no flaky tests; the installed Delilah stayed untouched (same PID, health OK) and an interrupted run (Ctrl-C) leaves no daemons behind.
+- **Auto-update, pending:**
+  - the maintainer's key and secrets (T005 of `specs/005-app-auto-update`): until the public key replaces `REPLACE_WITH_UPDATER_PUBKEY`, `check.mjs` refuses to release;
+  - the first tagged release, which verifies the workflow end to end (draft lookups, asset name, relaunch into the new version, daemon and plugin version);
+  - next step: `vX.Y.Z-rc.N` tags published as GitHub prereleases (no `--latest`, so `releases/latest` and installed apps ignore them) to rehearse the pipeline. Needs the workflow to accept `-rc` tags and publish with `--prerelease`, and `check.mjs`, `manifest.mjs` and `versions.mjs` to accept the suffix. No update channel in the app: one fixed endpoint;
+  - third-party actions are pinned to major tags, not SHAs.
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);

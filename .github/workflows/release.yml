@@ -1,0 +1,108 @@
+# Release: runs when a tag vX.Y.Z is pushed (made by `make release`).
+# Needs repository secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# (the updater signing key and its password); GITHUB_TOKEN is provided by Actions.
+# Builds and signs the app, uploads a draft release, and only promotes it to
+# published (and latest) once everything before it has passed.
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+concurrency: release-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # actions/checkout can turn an annotated tag into a lightweight one
+      # (actions/checkout#290); refetch so the tag message is available.
+      - name: Fetch tags
+        run: git fetch --force --tags origin
+
+      - name: Tag must be on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "tag $GITHUB_REF_NAME is not on main" >&2
+            exit 1
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            app/src-tauri -> target
+
+      - name: Pre-release checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node scripts/release/check.mjs "${GITHUB_REF_NAME#v}" --require-secrets
+
+      - name: Release notes
+        id: notes
+        run: |
+          node scripts/release/notes.mjs "$GITHUB_REF_NAME" > notes.md
+          delim="NOTES_$(openssl rand -hex 16)"
+          {
+            echo "body<<$delim"
+            cat notes.md
+            echo
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: app
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: Delilah ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          # tauri-action would write draft-time (untagged-*) asset URLs; we build
+          # latest.json ourselves in the next step.
+          includeUpdaterJson: false
+
+      - name: Build and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sig="app/src-tauri/target/release/bundle/macos/Delilah.app.tar.gz.sig"
+          test -f "$sig" || { echo "missing $sig; did the build sign the app?" >&2; exit 1; }
+          out="$RUNNER_TEMP/latest.json"
+          node scripts/release/manifest.mjs --write "$out" "$GITHUB_REF_NAME" "$sig" notes.md "$GITHUB_REPOSITORY"
+          # gh falls back to draft releases by tag.
+          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -qx 'Delilah.app.tar.gz' || {
+            echo "release $GITHUB_REF_NAME has no asset named Delilah.app.tar.gz" >&2
+            exit 1
+          }
+          gh release upload "$GITHUB_REF_NAME" "$out" --clobber
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
