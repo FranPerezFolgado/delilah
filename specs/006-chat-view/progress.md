@@ -23,22 +23,22 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12F | 5 | 5C | done | 1 | 806cfd7 | review fixes |
 | WP-12G | 5 | 5D | done | 1 | 2e6af70 | re-review fixes |
 | WP-13 | 5 | 5B | done | 1 | 626cd52 | |
-| WP-14 | 6 | 6A | pending | 0 | | gated by spike |
-| WP-15 | 6 | 6B | pending | 0 | | gated by spike |
-| WP-16 | 7 | 7A | pending | 0 | | gated by spike |
-| WP-17 | 7 | 7A | pending | 0 | | gated by spike |
-| WP-18 | 7 | 7B | pending | 0 | | gated by spike |
-| WP-19 | 7 | 7C | pending | 0 | | gated by spike |
-| WP-20 | 7 | 7C | pending | 0 | | gated by spike |
-| WP-21 | 7 | 7D | pending | 0 | | gated by spike |
-| WP-22 | 8 | 8A | pending | 0 | | gated by spike |
-| WP-23 | 8 | 8B | pending | 0 | | gated by spike |
-| WP-24 | 8 | 8C | pending | 0 | | gated by spike |
+| WP-14 | 6 | 6A | implementing | 0 | | |
+| WP-15 | 6 | 6B | pending | 0 | | go (decision 49) |
+| WP-16 | 7 | 7A | implementing | 0 | | T037–T039 now (stream.rs); T040 after WP-15 |
+| WP-17 | 7 | 7A | implementing | 0 | | |
+| WP-18 | 7 | 7B | pending | 0 | | go (decision 49) |
+| WP-19 | 7 | 7C | pending | 0 | | go (decision 49) |
+| WP-20 | 7 | 7C | pending | 0 | | go (decision 49) |
+| WP-21 | 7 | 7D | pending | 0 | | go (decision 49) |
+| WP-22 | 8 | 8A | pending | 0 | | go (decision 49) |
+| WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
+| WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
-| WP-26 | 9 | 9A | pending | 0 | | gated by spike |
-| WP-27 | 9 | 9B | pending | 0 | | gated by spike |
-| WP-28 | 9 | 9B | pending | 0 | | gated by spike |
-| WP-29 | 9 | 9B | pending | 0 | | gated by spike |
+| WP-26 | 9 | 9A | pending | 0 | | go (decision 49) |
+| WP-27 | 9 | 9B | pending | 0 | | go (decision 49) |
+| WP-28 | 9 | 9B | pending | 0 | | go (decision 49) |
+| WP-29 | 9 | 9B | pending | 0 | | go (decision 49) |
 | WP-30 | 10 | 10A | pending | 0 | | |
 | WP-31 | 10 | 10B | pending | 0 | | |
 
