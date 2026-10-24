@@ -6,7 +6,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | a7118d8 | |
-| WP-02 | 2 | 2A | implementing | 1 | | T002 done; waiting for the user to run the scenarios (T003/T004) |
+| WP-02 | 2 | 2A | done | 2 | | verdict ADJUST (decision 49) |
 | WP-03 | 3 | 3A | done | 1 | 7a74a83 | |
 | WP-04 | 3 | 3A | done | 1 | 95b1959 | |
 | WP-05 | 4 | 4A | done | 1 | dfd483e | |
@@ -34,7 +34,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-22 | 8 | 8A | pending | 0 | | gated by spike |
 | WP-23 | 8 | 8B | pending | 0 | | gated by spike |
 | WP-24 | 8 | 8C | pending | 0 | | gated by spike |
-| WP-25 | 8 | 8D | pending | 0 | | only if d2=no |
+| WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
 | WP-26 | 9 | 9A | pending | 0 | | gated by spike |
 | WP-27 | 9 | 9B | pending | 0 | | gated by spike |
 | WP-28 | 9 | 9B | pending | 0 | | gated by spike |

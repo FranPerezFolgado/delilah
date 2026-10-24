@@ -159,7 +159,14 @@ in a fixture workspace, with a clean env. Findings go to
 | g | `--include-partial-messages` deltas (`stream_event` `content_block_delta` `text_delta`) arrive with a message id to attach them to | Live text (FR-016) | Live text shows per complete message only, recorded |
 | h | `--remote-control` with `-p` | Kept | Hidden in chat mode, said in the UI |
 
-## R8. Chat-mode permissions (option C), assuming R7-d2 is "yes"
+> **Spike result (2026-10-24, claude 2.1.292, [spike](../../docs/spikes/2026-10-24-claude-stream.md))**:
+> a, b, c, d1, e, d3, g yes; f no (status line never runs in `-p`; use `rate_limit_event`); h
+> accepted but unverified (hidden in chat mode). d2 is yes, but the default is not
+> `--permission-prompts host`: the flag is **`--permission-prompt-tool stdio`**, and
+> without it Claude denies by itself. The same flag adds AskUserQuestion to the `-p` tools
+> (d3). No `Stop` fires after an interrupt (e). Verdict: adjust, decision 49.
+
+## R8. Chat-mode permissions (option C), assuming R7-d2 is "yes" (it is, with `--permission-prompt-tool stdio`)
 
 - **Decision**:
   - `StreamSession` turns each `can_use_tool` request into a typed

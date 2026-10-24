@@ -11,6 +11,8 @@
 
 **Gate**: Phase 2 (the spike) decides Phases 6–9. If it says **drop**, delete Phases 6–9 from this file, record the decision, and go to Phase 10. If it says **adjust**, rewrite the affected tasks of Phases 6–9 to the fallbacks in research.md R7 before starting them.
 
+**Verdict (T004, 2026-10-24)**: **adjust** ([decision 49](../../docs/decisions.md), [spike](../../docs/spikes/2026-10-24-claude-stream.md)). Chat mode runs with `--permission-prompt-tool stdio`; limits come from `rate_limit_event`; interrupt ends the turn from `result`; Remote Control is hidden in chat mode; **T059 is dropped**. Changed tasks are marked *(spike)* below.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 ## Phase 1: Setup
@@ -41,11 +43,11 @@
   - `trust`: a brand-new folder;
   - `ask`: a prompt that makes Claude call AskUserQuestion, with Delilah's blocking ask hook answering it (does the PreToolUse ask hook work in print mode?);
   - `remote`: `--remote-control <name>`.
-- [ ] T003 [US5] Run the spike scenarios on the personal Mac (clean env, never from inside a Delilah agent's env) and write `docs/spikes/2026-10-2x-claude-stream.md`, in the style of `docs/spikes/2026-10-19-claude-pty.md`. Cover:
+- [X] T003 [US5] Run the spike scenarios on the personal Mac (clean env, never from inside a Delilah agent's env) and write `docs/spikes/2026-10-2x-claude-stream.md`, in the style of `docs/spikes/2026-10-19-claude-pty.md`. Cover:
   - the Claude version;
   - a table for R7 a–h with the result and evidence: hook names seen; whether the transcript is written in print mode and whether stream `assistant`/`user` messages match transcript lines; `control_request` shapes (`can_use_tool` fields, `permission_suggestions`); interrupt behaviour and which hooks fire; AskUserQuestion through the ask hook in print mode; status line runs or not; delta event shapes with their message id;
   - the gotchas.
-- [ ] T004 [US5] Add the verdict to `docs/decisions.md` (Agents section): go / adjust (which fallbacks of R7 apply) / drop for US3–US4, and why. Update Phases 6–9 of this file to match (see **Gate**).
+- [X] T004 [US5] Add the verdict to `docs/decisions.md` (Agents section): go / adjust (which fallbacks of R7 apply) / drop for US3–US4, and why. Update Phases 6–9 of this file to match (see **Gate**).
 
 **Checkpoint**: verdict recorded; Phases 6–9 match it.
 
@@ -222,11 +224,12 @@
 
 **Independent Test**: quickstart.md "Chat mode" steps 1, 2, 4 and 6.
 
-- [ ] T037 [US3] Write a fake `claude` script for tests in `crates/delilah-agents/tests/fixtures/fake-claude-stream.sh`. It prints a `system` init line, then for each stdin user line prints `stream_event` text deltas, an `assistant` message and a `result`. An `interrupt` control request produces a `result` with the interrupt shape found in the spike. A line containing `NEEDS_PERMISSION` produces a `control_request` `can_use_tool` and waits for the `control_response` before continuing. Shapes follow the spike findings (T003).
+- [ ] T037 [US3] Write a fake `claude` script for tests in `crates/delilah-agents/tests/fixtures/fake-claude-stream.sh`. It prints a `system` init line, then for each stdin user line prints `stream_event` text deltas, an `assistant` message and a `result`. An `interrupt` control request produces a `result` with the interrupt shape found in the spike. A line containing `NEEDS_PERMISSION` produces a `control_request` `can_use_tool` and waits for the `control_response` before continuing. Shapes follow the spike findings (T003): the `interrupt` response is `control_response` `{subtype: success, request_id, response: {still_queued: []}}`, then a `user` message `[Request interrupted by user]` and a `result` `error_during_execution` (no `Stop` hook); a `can_use_tool` request has `request.{subtype, tool_name, tool_use_id, input, permission_suggestions}` and the answer is `control_response` `{response: {subtype: success, request_id, response: {behavior: allow, updatedInput}|{behavior: deny, message}}}`; the script also prints one `rate_limit_event` per turn; deltas are `stream_event` after a `message_start` carrying `message.id`. *(spike)*
 - [ ] T038 [US3] Write failing tests in a new `crates/delilah-agents/src/stream.rs` (tests module, using T037):
   - `StreamSession::spawn(cmd)` yields `StreamEvent::Init`;
   - `send_user(text)` writes one JSON user line;
-  - deltas arrive as `TextDelta { message, text }` and then `MessageDone { message }`;
+  - deltas arrive as `TextDelta { message, text }`, where `message` is the id of the preceding `message_start` (deltas carry no id of their own), and then `MessageDone { message }` *(spike)*;
+  - a `rate_limit_event` becomes `RateLimit { five_hour, seven_day }` (percent and reset epoch, converted from the fractional `utilization`) *(spike)*;
   - `TurnResult` arrives at the end of the turn;
   - `interrupt()` writes the interrupt control request and the process stays alive for the next `send_user`;
   - a `can_use_tool` request becomes `PermissionRequest { request_id, tool, input, suggestion }`;
@@ -238,7 +241,7 @@
 - [ ] T040 [US3] Write failing tests and implement the stream runtime:
   - `Runtime::Stream(Arc<StreamSession>)` in `crates/delilah-agents/src/runtime.rs`: `send_prompt` → `send_user`, `stop` → `interrupt`, `as_pty` → `None`;
   - `RuntimeKind::Stream` in `runtime::spawn`;
-  - `claude::stream_command(&Launch)` in `crates/delilah-agents/src/claude.rs`: the same env and `--settings`, with `-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages` and `--session-id`/`--resume`, with no positional prompt (the first prompt goes on stdin), and with the R7 adjustments from the spike.
+  - `claude::stream_command(&Launch)` in `crates/delilah-agents/src/claude.rs`: the same env and `--settings`, with `-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages` and `--session-id`/`--resume`, with no positional prompt (the first prompt goes on stdin), and with **`--permission-prompt-tool stdio`** (the flag that makes `can_use_tool` requests arrive and adds AskUserQuestion to the session's tools; not `--permission-prompts host`) *(spike)*.
 
   Add an args test like the existing `argv` tests.
 - [ ] T041 [P] [US3] Write failing tests and implement migration `crates/delilah-daemon/migrations/0017_chat_mode.sql`:
@@ -250,7 +253,7 @@
   - project sessions and idea conversations always launch a PTY;
   - a stream process that exits before `Init` makes the start fail with `chat mode could not start: <stderr tail>`, and the task is left startable;
   - saving-mode handoffs and the usage-limit resume of a chat-mode task relaunch in stream with `--resume`.
-- [ ] T043 [US3] Implement T042 in `crates/delilah-daemon/src/run.rs`: `launch_session` passes the kind from the task's flag to `runtime::spawn`, and the stream path waits for `Init` (with a timeout) before reporting started. No other `if chat_mode` branches.
+- [ ] T043 [US3] Implement T042 in `crates/delilah-daemon/src/run.rs`: `launch_session` passes the kind from the task's flag to `runtime::spawn`, and the stream path waits for `Init` (with a timeout) before reporting started. `RateLimit` events feed the same `limits` state as the status line hook does for PTY sessions, since the status line never runs in print mode *(spike)*. No other `if chat_mode` branches.
 - [ ] T044 [US3] Write failing tests in `crates/delilah-daemon/src/api.rs` and `crates/delilah-daemon/src/session_api.rs` (tests modules):
   - `POST /api/v1/tasks` accepts `chat_mode`;
   - task JSON has `chat_mode` and `allowed_tools`;
@@ -264,10 +267,10 @@
   - a PTY session closes with code 4409 and the reason `not in chat mode`.
 
   Then implement, and add the route in `crates/delilah-daemon/src/api.rs`.
-- [ ] T047 [US3] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): `POST …/stop` on a stream session calls `interrupt`, keeps the session live, records a `marker: stopped`, and the next message starts a turn. Then implement (the runtime `stop()` already branches, so add the marker for both runtimes).
+- [ ] T047 [US3] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): `POST …/stop` on a stream session calls `interrupt`, keeps the session live, records a `marker: stopped`, and the next message starts a turn. No `Stop` hook fires after an interrupt, so the daemon ends the turn from the `TurnResult` (`error_during_execution`) and sets the session idle, as it does for ESC in the PTY *(spike)*. Then implement (the runtime `stop()` already branches, so add the marker for both runtimes).
 - [ ] T048 [P] [US3] Write failing tests and implement `--chat` on `delilah new` and `delilah run` (create body `chat_mode: true`) in `crates/delilah-cli/src/main.rs`. `delilah attach` on a 409 prints the API message and exits 1.
 - [ ] T049 [US3] Update `app/src/api.ts`: `Task.chat_mode`, `Task.allowed_tools`, `Session.runtime`, create with `chat_mode`, and `liveSocket(id)`. Write failing tests in `app/src/components/ConversationView.test.tsx`: on a stream session, deltas from a mocked socket render a "writing" bubble that grows, and it is replaced when the transcript entry for that message arrives. Then implement it in `app/src/components/ConversationView.tsx`.
-- [ ] T050 [US3] Write failing tests and implement in `app/src/components/TaskScreen.tsx` and its test: for a `runtime: "stream"` session, the Terminal switch is disabled with the tooltip "Esta sesión va en modo chat: no hay terminal". The task header shows an "experimental: modo chat" mark. Remote Control is hidden for chat-mode tasks if the spike found it unsupported (R7-h).
+- [ ] T050 [US3] Write failing tests and implement in `app/src/components/TaskScreen.tsx` and its test: for a `runtime: "stream"` session, the Terminal switch is disabled with the tooltip "Esta sesión va en modo chat: no hay terminal". The task header shows an "experimental: modo chat" mark. Remote Control is hidden for chat-mode tasks (the spike could not confirm `--remote-control` works with `-p`, R7-h) *(spike)*.
 - [ ] T051 [P] [US3] Write failing tests and implement in `app/src/components/NewTaskDialog.tsx` and its test: a "Modo chat (experimental)" switch, off by default, with a one-line warning, sent as `chat_mode`. Do the same in the start dialog if it is a separate component (check where `autopilot` is offered and mirror it). If a start fails with `chat mode could not start`, offer "Iniciar en terminal", which retries with `chat_mode` off.
 
 **Checkpoint**: US3 without permission cards works with the fake script and in a preview. Contract review (task and session fields, live socket, 409s).
@@ -276,7 +279,7 @@
 
 ## Phase 8: User Story 3 — Permissions in chat mode (Priority: P2, FR-020)
 
-**Goal**: "¿Permitir?" cards in the conversation and the Bandeja (allow once, always in this task, deny with a reason), with the fallback the spike chose.
+**Goal**: "¿Permitir?" cards in the conversation and the Bandeja (allow once, always in this task, deny with a reason), through the control protocol with `--permission-prompt-tool stdio` (spike: d2 is yes, so R8 stands as written).
 
 **Independent Test**: quickstart.md "Chat mode" step 3.
 
@@ -293,9 +296,9 @@
 - [ ] T056 [US3] Write failing tests in `crates/delilah-daemon/src/inbox.rs` and `crates/delilah-daemon/src/conversation.rs` (tests modules): the inbox lists permission asks as kind `permission` (tool, summary, suggestion); the conversation includes a `card` with `ask_kind: "permission"` at the request's time, and it disappears when answered. Then implement.
 - [ ] T057 [US3] Write failing tests in `crates/delilah-daemon/src/autopilot.rs` (tests module): an autopilot task in chat mode pauses into the Bandeja on a permission ask, with the reason "necesita permiso: <tool>". Then implement.
 - [ ] T058 [US3] Update `app/src/api.ts` (permission card entry, inbox kind, `api.answerPermission`). Write failing tests and implement `app/src/components/PermissionCard.tsx` with its test: the tool and an input summary; "Permitir una vez", "Permitir siempre en esta tarea" (with the rule shown) and "Denegar" (an optional reason field). Render it from `ConversationView.tsx` and `InboxView.tsx`, and add tests in both.
-- [ ] T059 [US3] Only if the spike's d2 was "no": replace T052–T055's control-protocol path with the fallback the spike chose, and update this task list first:
+- [ ] T059 [US3] ~~DROPPED (spike d2 = yes with `--permission-prompt-tool stdio`; no fallback needed).~~ ~~Only if the spike's d2 was "no": replace T052–T055's control-protocol path with the fallback the spike chose, and update this task list first:
   - `--permission-prompt-tool` with a stdio MCP server `delilah mcp-permission` in `crates/delilah-cli` that calls the daemon; or
-  - `--permission-prompts none` with the task's allow list, refusals shown as tool errors in the chat, and "Pasar a terminal" offered.
+  - `--permission-prompts none` with the task's allow list, refusals shown as tool errors in the chat, and "Pasar a terminal" offered.~~
 
 **Checkpoint**: US3 complete. Security review of the permission flow (rules written into settings, and the reply endpoint).
 
