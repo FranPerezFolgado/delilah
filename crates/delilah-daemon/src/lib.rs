@@ -22,6 +22,7 @@ mod live;
 pub mod logs;
 pub mod notify;
 mod owners;
+pub mod permissions;
 pub mod phases;
 pub mod pr_api;
 pub mod pr_loop;

@@ -187,6 +187,7 @@ pub async fn allow_edits(
     app.store.set_read_only(&id, false).await?;
     record.read_only = false;
     if let Some(live) = app.sessions.get(&id) {
+        crate::permissions::release_session(&app, &id).await;
         let _ = live.runtime.kill();
         live.runtime.wait().await;
     }
@@ -213,6 +214,7 @@ pub async fn close(
         ));
     }
     if let Some(live) = app.sessions.get(&id) {
+        crate::permissions::release_session(&app, &id).await;
         let _ = live.runtime.kill();
     }
     app.store.close_session(&id).await?;
@@ -278,21 +280,30 @@ async fn view(app: &AppState, record: SessionRecord) -> SessionView {
         .sessions
         .get(&record.id)
         .filter(|l| !l.runtime.has_exited());
-    let stream = match &live {
+    SessionView {
+        runtime: runtime_name(app, &record, live.as_ref()).await,
+        live: live.is_some(),
+        state: live.map(|l| l.state()),
+        record,
+    }
+}
+
+/// `"stream"` or `"pty"`: what the session runs now, or what a launch would use.
+pub(crate) async fn runtime_name(
+    app: &AppState,
+    record: &SessionRecord,
+    live: Option<&crate::sessions::Live>,
+) -> &'static str {
+    let stream = match live.filter(|l| !l.runtime.has_exited()) {
         Some(l) => l.runtime.as_stream().is_some(),
         None => {
-            crate::run::runtime_kind(app, &record)
+            crate::run::runtime_kind(app, record)
                 .await
                 .unwrap_or(delilah_agents::runtime::RuntimeKind::Pty)
                 == delilah_agents::runtime::RuntimeKind::Stream
         }
     };
-    SessionView {
-        live: live.is_some(),
-        state: live.map(|l| l.state()),
-        runtime: if stream { "stream" } else { "pty" },
-        record,
-    }
+    if stream { "stream" } else { "pty" }
 }
 
 #[cfg(test)]

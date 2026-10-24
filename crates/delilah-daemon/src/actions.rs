@@ -147,6 +147,7 @@ pub async fn delete(
     }
 
     app.asks.release_task(key.as_str());
+    crate::permissions::release_task(&app, key.as_str()).await;
     crate::phases::drop_hint(&app, key.as_str());
     app.specs.lock().unwrap().remove(key.as_str());
     let dir = app.config.task_dir(key.as_str());

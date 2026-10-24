@@ -40,6 +40,8 @@ pub struct AppState {
     pub events: Events,
     /// AskUserQuestion questions waiting for an answer from Delilah.
     pub asks: Arc<crate::asks::Asks>,
+    /// Permissions a chat-mode agent waits on (see `permissions.rs`).
+    pub permissions: Arc<crate::permissions::Permissions>,
     /// The language Delilah speaks in (see `lang.rs`); Spanish until `main` reads
     /// the preference.
     pub lang: crate::lang::Current,
@@ -90,6 +92,7 @@ impl AppState {
             specs: Arc::default(),
             events,
             asks: Arc::default(),
+            permissions: Arc::default(),
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             transcript_seen: Arc::default(),

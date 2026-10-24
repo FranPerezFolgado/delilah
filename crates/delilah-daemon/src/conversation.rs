@@ -293,10 +293,6 @@ pub async fn get(
         }
         // Ids are strings in the conversation: the row id.
         entry["id"] = json!(entry["id"].to_string());
-        // A marker is stored as a "claude" entry with a `marker` field.
-        if entry["kind"] == "claude" && entry.get("marker").is_some() {
-            entry["kind"] = json!("marker");
-        }
     }
     let mut stored: Vec<Value> = stored.as_array().cloned().unwrap_or_default();
     // The transcript has the same messages as the stored ones: hidden once it is there
@@ -394,6 +390,7 @@ pub async fn get(
             None => shown.push(entry),
         }
     }
+    let runtime = crate::session_api::runtime_name(&app, &record, live.as_ref()).await;
     let mut entries = shown;
     for card in &mut stored {
         if card["kind"] == "card"
@@ -416,7 +413,7 @@ pub async fn get(
         "transcript": state,
         "activity": live.as_ref().and_then(Live::activity),
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
-        "runtime": "pty",
+        "runtime": runtime,
     })))
 }
 
@@ -671,13 +668,13 @@ pub async fn stop(
         .stop()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    crate::permissions::release_session(&app, &id).await;
     if live.runtime.as_stream().is_none() {
         turn_interrupted(&app, &live).await;
     }
-    // A marker is a "claude" entry with a `marker` field, shown as a `marker` (see `get`).
     if let Err(e) = app
         .store
-        .add_entry(&id, EntryKind::Claude, &json!({ "marker": "stopped" }))
+        .add_entry(&id, EntryKind::Marker, &json!({ "marker": "stopped" }))
         .await
     {
         tracing::warn!(session = %id, "cannot record the stop: {e}");
@@ -1115,6 +1112,20 @@ mod tests {
         assert_eq!(body["complete"], true);
         assert_eq!(body["transcript"], "present");
         assert_eq!(body["runtime"], "pty");
+    }
+
+    #[tokio::test]
+    async fn the_conversation_reports_the_sessions_real_runtime() {
+        let f = Fixture::new().await;
+        let mut task =
+            delilah_core::Task::new(delilah_core::TaskKey::new("PROJ-1"), "t", "feature");
+        task.chat_mode = true;
+        f.app.store.create_task(&task).await.unwrap();
+        let mut rec = record("chat1", false);
+        rec.task = "PROJ-1".into();
+        f.app.store.create_session(&rec).await.unwrap();
+        let (_, body) = f.get_of("/api/v1/sessions/chat1/conversation").await;
+        assert_eq!(body["runtime"], "stream");
     }
 
     #[tokio::test]

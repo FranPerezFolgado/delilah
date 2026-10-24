@@ -283,16 +283,16 @@
 
 **Independent Test**: quickstart.md "Chat mode" step 3.
 
-- [ ] T052 [US3] Write failing tests in a new `crates/delilah-daemon/src/permissions.rs` (tests module, with the fake script's `NEEDS_PERMISSION`):
+- [X] T052 [US3] Write failing tests in a new `crates/delilah-daemon/src/permissions.rs` (tests module, with the fake script's `NEEDS_PERMISSION`):
   - a `PermissionRequest` creates a `PermissionAsk`, emits `inbox` and `conversations`, and sets the session to waiting (`NeedsUser`-like attention);
   - `answer(ask, AllowOnce)` replies allow with the original input;
   - `AllowAlways` also appends the suggestion (or the tool name) to `tasks.allowed_tools`;
   - `Deny{reason}` replies deny with the reason, or "El usuario lo ha denegado" when there is none;
   - a later request matching an allowed rule is answered at once with no ask;
   - stop, kill and runtime switch release pending asks as denied ("sesión detenida").
-- [ ] T053 [US3] Implement T052 in `crates/delilah-daemon/src/permissions.rs`: its own registry, a subscriber per stream session started from `launch_session`'s stream path, and rule matching (`Tool` and `Bash(<prefix>:*)` as Claude writes them).
-- [ ] T054 [US3] Write failing tests and implement `allowed_tools` in the session settings: `claude::settings(..)` in `crates/delilah-agents/src/claude.rs` takes the task's extra allow rules and puts them in `permissions.allow` for task sessions. The `Permission::DontAsk` list is unchanged.
-- [ ] T055 [US3] Write failing tests and implement `POST /api/v1/sessions/{id}/permissions/{ask}` (`allow_once|allow_always|deny`, `reason`; 204; 404 when gone) in `crates/delilah-daemon/src/permissions.rs`, with the route in `crates/delilah-daemon/src/api.rs`.
+- [X] T053 [US3] Implement T052 in `crates/delilah-daemon/src/permissions.rs`: its own registry, a subscriber per stream session started from `launch_session`'s stream path, and rule matching (`Tool` and `Bash(<prefix>:*)` as Claude writes them).
+- [X] T054 [US3] Write failing tests and implement `allowed_tools` in the session settings: `claude::settings(..)` in `crates/delilah-agents/src/claude.rs` takes the task's extra allow rules and puts them in `permissions.allow` for task sessions. The `Permission::DontAsk` list is unchanged.
+- [X] T055 [US3] Write failing tests and implement `POST /api/v1/sessions/{id}/permissions/{ask}` (`allow_once|allow_always|deny`, `reason`; 204; 404 when gone) in `crates/delilah-daemon/src/permissions.rs`, with the route in `crates/delilah-daemon/src/api.rs`.
 - [ ] T056 [US3] Write failing tests in `crates/delilah-daemon/src/inbox.rs` and `crates/delilah-daemon/src/conversation.rs` (tests modules): the inbox lists permission asks as kind `permission` (tool, summary, suggestion); the conversation includes a `card` with `ask_kind: "permission"` at the request's time, and it disappears when answered. Then implement.
 - [ ] T057 [US3] Write failing tests in `crates/delilah-daemon/src/autopilot.rs` (tests module): an autopilot task in chat mode pauses into the Bandeja on a permission ask, with the reason "necesita permiso: <tool>". Then implement.
 - [ ] T058 [US3] Update `app/src/api.ts` (permission card entry, inbox kind, `api.answerPermission`). Write failing tests and implement `app/src/components/PermissionCard.tsx` with its test: the tool and an input summary; "Permitir una vez", "Permitir siempre en esta tarea" (with the rule shown) and "Denegar" (an optional reason field). Render it from `ConversationView.tsx` and `InboxView.tsx`, and add tests in both.

@@ -46,6 +46,7 @@ pub(crate) struct Outcome {
 /// Stops the task's sessions and waits until they are gone, so nothing writes to its
 /// repos from here on.
 pub(crate) async fn stop_sessions(app: &AppState, key: &TaskKey) {
+    crate::permissions::release_task(app, key.as_str()).await;
     for live in app.sessions.of_task(key.as_str()) {
         let _ = live.runtime.kill();
         live.runtime.wait().await;

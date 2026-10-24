@@ -214,7 +214,8 @@ pub fn stream_command(launch: &Launch) -> tokio::process::Command {
 
 /// Settings for one session: every hook posts its JSON to the daemon, and the status
 /// line runs `status_script` (see [`status_script`]). Lives outside the repo and is
-/// passed with `--settings`.
+/// passed with `--settings`. `allowed_tools` are the task's extra allow rules.
+#[allow(clippy::too_many_arguments)]
 pub fn settings(
     daemon_url: &str,
     task: &str,
@@ -223,6 +224,7 @@ pub fn settings(
     padding: Option<&Value>,
     permission: Permission,
     extra_dirs: &[&Path],
+    allowed_tools: &[String],
 ) -> Value {
     let post = post_command(daemon_url, "/hooks/claude", task, session);
     let mut hooks: serde_json::Map<String, Value> = HOOK_EVENTS
@@ -255,6 +257,17 @@ pub fn settings(
     if permission == Permission::DontAsk {
         settings["permissions"] =
             json!({ "allow": dont_ask_allow(extra_dirs), "deny": DONT_ASK_DENY });
+    } else if permission == Permission::Default {
+        // The rules the user chose with "always allow" in this task. Only a session
+        // that may edit gets them: a read-only one never gains a write through them.
+        let allow: Vec<&str> = allowed_tools
+            .iter()
+            .map(|r| r.trim())
+            .filter(|r| !r.is_empty())
+            .collect();
+        if !allow.is_empty() {
+            settings["permissions"] = json!({ "allow": allow });
+        }
     }
     settings
 }
@@ -306,6 +319,7 @@ pub fn write_settings(
     session: &str,
     permission: Permission,
     extra_dirs: &[&Path],
+    allowed_tools: &[String],
 ) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -328,6 +342,7 @@ pub fn write_settings(
         user.as_ref().and_then(|u| u.get("padding")),
         permission,
         extra_dirs,
+        allowed_tools,
     );
     std::fs::write(path, serde_json::to_vec_pretty(&settings)?)?;
     Ok(path.to_path_buf())
@@ -456,6 +471,7 @@ mod tests {
             Path::new("/tmp/statusline-sess-1.sh"),
             None,
             Permission::Default,
+            &[],
             &[],
         );
         for event in HOOK_EVENTS {
@@ -756,6 +772,7 @@ mod tests {
                 None,
                 p,
                 &[extra],
+                &[],
             )
         };
         let dont_ask = s(Permission::DontAsk);
@@ -790,6 +807,39 @@ mod tests {
         );
         assert!(s(Permission::Plan).get("permissions").is_none());
         assert!(s(Permission::Default).get("permissions").is_none());
+    }
+
+    #[test]
+    fn a_tasks_allowed_tools_go_into_the_allow_list_of_an_editing_session_only() {
+        let rules = vec![
+            "Bash(npm install:*)".to_string(),
+            " Read ".to_string(),
+            "  ".to_string(),
+        ];
+        let s = |p| {
+            settings(
+                "http://x",
+                "T-1",
+                "s",
+                Path::new("/tmp/s.sh"),
+                None,
+                p,
+                &[],
+                &rules,
+            )
+        };
+        assert_eq!(
+            s(Permission::Default)["permissions"]["allow"],
+            json!(["Bash(npm install:*)", "Read"])
+        );
+        assert!(s(Permission::Default)["permissions"].get("deny").is_none());
+        assert!(s(Permission::Plan).get("permissions").is_none());
+        let dont_ask = s(Permission::DontAsk);
+        assert!(
+            !dont_ask["permissions"]["allow"]
+                .to_string()
+                .contains("npm install")
+        );
     }
 
     #[test]

@@ -31,7 +31,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19 | 7 | 7C | verified | 1 | | go (decision 49) |
 | WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
 | WP-21 | 7 | 7D | verified | 1 | 9d0e3cc | go (decision 49) |
-| WP-22 | 8 | 8A | implementing | 0 | | go (decision 49) |
+| WP-21F | 7 | 7F | implementing | 0 | | UI/CLI review fixes |
+| WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
@@ -46,6 +47,12 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 7 | spec | LOW | MessageDone sent per assistant content block (done can precede more deltas of the same message id) | crates/delilah-agents/src/stream.rs:318 |
+| 7 | contract | LOW | live.rs drops lagged deltas silently (tolerable; document) ; client has no 4409 test | crates/delilah-daemon/src/live.rs:55 |
+| 7 | contract | LOW | start-failure retry matches error text by substring; a machine-readable code would be sturdier | app/src/components/NewTaskDialog.tsx:415 |
+| 7 | architecture | LOW | LaunchFuture/HRTB plumbing; handoff can block up to INIT_TIMEOUT 30 s on a chat-mode relaunch | crates/delilah-daemon/src/handoff.rs:29 |
+| 7 | architecture | LOW | runtime_kind looks up the store per launch and infers project sessions by naming; store runtime kind on the session record | crates/delilah-daemon/src/run.rs:577 |
+| 7 | architecture | LOW | conversation::stop branches on as_stream(); turn_interrupted lives in stream_events (circular intent) | crates/delilah-daemon/src/conversation.rs:674 |
 | 6 | architecture | MEDIUM | stop() runs outside live.typing: ESC/interrupt can land mid send_prompt (pre-existing); decide + comment in WP-19 (T047) | crates/delilah-daemon/src/conversation.rs:657 |
 | 6 | architecture | LOW | test helpers `as_pty().unwrap()` become latent panics with Stream fixtures; send_prompt 300 ms not injectable in tests | crates/delilah-daemon/src/conversation.rs:2181 |
 | 6 | architecture | LOW | terminal upgrade() silently opens/closes for non-PTY; WP-19 must 409 before on_upgrade and drop the fallback | crates/delilah-daemon/src/terminal.rs:55 |

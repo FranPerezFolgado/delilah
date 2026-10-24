@@ -2,7 +2,7 @@
 //!
 //! Task states (working, waiting…) still come from the hooks, which fire in stream mode
 //! too; the pump only handles what the hooks do not carry (the end of an interrupted
-//! turn, rate limits). More arms (permission requests) go in [`handle`].
+//! turn, rate limits). Permission requests go to `permissions.rs`.
 
 use delilah_agents::runtime::Runtime;
 use delilah_agents::stream::{LimitWindow, StreamEvent};
@@ -103,6 +103,20 @@ async fn handle(app: &AppState, task: &str, session: &str, event: StreamEvent) {
             if let Some(live) = app.sessions.get(session) {
                 crate::conversation::turn_interrupted(app, &live).await;
             }
+        }
+        // Answered later, from the API: the pump must not wait for the user.
+        StreamEvent::PermissionRequest {
+            request_id,
+            tool,
+            input,
+            suggestion,
+        } => {
+            crate::permissions::on_request(app, task, session, request_id, tool, input, suggestion)
+                .await;
+        }
+        // Nobody listens any more: what was asked of it cannot be answered.
+        StreamEvent::Exited { .. } => {
+            crate::permissions::release_session(app, session).await;
         }
         _ => {}
     }

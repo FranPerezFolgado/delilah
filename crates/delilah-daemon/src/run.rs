@@ -641,6 +641,16 @@ pub(crate) async fn launch_session_with(
     let (runtime, events) = match session.kind {
         SessionKind::Claude => {
             let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
+            // The rules "always allow" added to the task, read now so a new session has them.
+            let allowed_tools = match project_of(&session.task) {
+                Some(_) => Vec::new(),
+                None => app
+                    .store
+                    .get_task(&TaskKey::new(&session.task))
+                    .await?
+                    .map(|t| t.allowed_tools)
+                    .unwrap_or_default(),
+            };
             let settings = claude::write_settings(
                 &task_dir.join(format!("claude-{}.json", session.id)),
                 &app.config.url(),
@@ -648,6 +658,7 @@ pub(crate) async fn launch_session_with(
                 &session.id,
                 permission,
                 &[task_dir.as_path()],
+                &allowed_tools,
             )
             .map_err(|e| ApiError::internal(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
