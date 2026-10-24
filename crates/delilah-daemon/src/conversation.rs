@@ -656,6 +656,7 @@ pub async fn stop(
         .ok_or_else(|| ApiError::conflict("the session is not running"))?;
     live.runtime
         .stop()
+        .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     live.set_state(LiveState::Waiting);
     live.reset_turn_state();

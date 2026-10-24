@@ -23,14 +23,14 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12F | 5 | 5C | done | 1 | 806cfd7 | review fixes |
 | WP-12G | 5 | 5D | done | 1 | 2e6af70 | re-review fixes |
 | WP-13 | 5 | 5B | done | 1 | 626cd52 | |
-| WP-14 | 6 | 6A | verified | 1 | 8e3f0a9 | |
-| WP-15 | 6 | 6B | verified | 1 | cf8c546 | go (decision 49) |
-| WP-16 | 7 | 7A | implementing | 0 | | T037–T039 now (stream.rs); T040 after WP-15 |
+| WP-14 | 6 | 6A | done | 1 | 8e3f0a9 | |
+| WP-15 | 6 | 6B | done | 1 | cf8c546 | go (decision 49) |
+| WP-16 | 7 | 7A | verified | 1 | | T037–T039 now (stream.rs); T040 after WP-15 |
 | WP-17 | 7 | 7A | verified | 1 | 49220b6 | |
-| WP-18 | 7 | 7B | pending | 0 | | go (decision 49) |
+| WP-18 | 7 | 7B | implementing | 0 | | go (decision 49) |
 | WP-19 | 7 | 7C | pending | 0 | | go (decision 49) |
-| WP-20 | 7 | 7C | verified | 1 | | go (decision 49) |
-| WP-21 | 7 | 7D | pending | 0 | | go (decision 49) |
+| WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
+| WP-21 | 7 | 7D | implementing | 0 | | go (decision 49) |
 | WP-22 | 8 | 8A | pending | 0 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
@@ -46,6 +46,9 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 6 | architecture | MEDIUM | stop() runs outside live.typing: ESC/interrupt can land mid send_prompt (pre-existing); decide + comment in WP-19 (T047) | crates/delilah-daemon/src/conversation.rs:657 |
+| 6 | architecture | LOW | test helpers `as_pty().unwrap()` become latent panics with Stream fixtures; send_prompt 300 ms not injectable in tests | crates/delilah-daemon/src/conversation.rs:2181 |
+| 6 | architecture | LOW | terminal upgrade() silently opens/closes for non-PTY; WP-19 must 409 before on_upgrade and drop the fallback | crates/delilah-daemon/src/terminal.rs:55 |
 | 7 | migration | LOW | add_allowed_tool: bad JSON reads empty then overwritten; warning lacks task key; exact-string dedupe accepts empty/whitespace rules (trim/reject at API in WP-22) | crates/delilah-daemon/src/store.rs:226 |
 | 7 | migration | LOW | downgrade after 0016/0017 needs DB backup — mention in release notes | crates/delilah-daemon/migrations/0017_chat_mode.sql |
 | 5 | architecture | LOW | WP-12G adds a process-wide static NOT_FOUND map (session, tool_use_id) → same smell as the old SEEN static; move to AppState | crates/delilah-daemon/src/conversation.rs |
@@ -96,3 +99,4 @@ Mode: format=markdown commits=yes autonomy=auto
 - WP-04: diff rows use `kind`; ChangesView's TS type uses `type` → WP-08 maps or defines its own type.
 - WP-04: no Delilah-specific injected-text marker exists yet; injected prefixes skipped are Claude's own (system-reminder, hooks, command tags).
 - WP-02: spike `permission` uses `--permission-prompt-tool stdio` by default; `--prompt-tool none` to test the default.
+- WP-20: CLI sends chat_mode on POST /api/v1/tasks AND POST /api/v1/runs → WP-18 must accept it on both; README needs --chat (WP-30).

@@ -238,7 +238,7 @@
   - `kill`, `wait` and `has_exited` work;
   - stderr goes to the log.
 - [X] T039 [US3] Implement T038 in `crates/delilah-agents/src/stream.rs`: tokio child process, stdin writer behind a mutex, stdout line reader into a `broadcast` of typed events, with the wire shapes kept private to this module.
-- [ ] T040 [US3] Write failing tests and implement the stream runtime:
+- [X] T040 [US3] Write failing tests and implement the stream runtime:
   - `Runtime::Stream(Arc<StreamSession>)` in `crates/delilah-agents/src/runtime.rs`: `send_prompt` → `send_user`, `stop` → `interrupt`, `as_pty` → `None`;
   - `RuntimeKind::Stream` in `runtime::spawn`;
   - `claude::stream_command(&Launch)` in `crates/delilah-agents/src/claude.rs`: the same env and `--settings`, with `-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages` and `--session-id`/`--resume`, with no positional prompt (the first prompt goes on stdin), and with **`--permission-prompt-tool stdio`** (the flag that makes `can_use_tool` requests arrive and adds AskUserQuestion to the session's tools; not `--permission-prompts host`) *(spike)*.

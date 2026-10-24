@@ -1,4 +1,4 @@
-//! What an agent session runs on. Today a pseudo-terminal; the stream arm comes later.
+//! What an agent session runs on: a pseudo-terminal or a stream-json pipe (chat mode).
 //! An enum, not a trait object: the PTY-only operations (resize, attach, scrollback)
 //! get a clear "not available" answer from [`Runtime::as_pty`].
 
@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use crate::claude::{self, Launch};
 use crate::pty::PtySession;
+use crate::stream::{StreamEvent, StreamSession};
+use tokio::sync::broadcast;
 
 /// Columns and rows an agent's terminal starts with.
 const PTY_COLS: u16 = 120;
@@ -18,11 +20,13 @@ const ENTER_DELAY: Duration = Duration::from_millis(300);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeKind {
     Pty,
+    Stream,
 }
 
 #[derive(Clone)]
 pub enum Runtime {
     Pty(Arc<PtySession>),
+    Stream(Arc<StreamSession>),
 }
 
 /// `text` with line ends normalised and every control character dropped but newline
@@ -46,20 +50,41 @@ pub fn prompt_bytes(text: &str) -> Vec<u8> {
     format!("\x1b[200~{text}\x1b[201~").into_bytes()
 }
 
+/// Starts a terminal running `cmd` (a shell, say) at the standard size.
+pub fn spawn_pty(
+    cmd: portable_pty::CommandBuilder,
+    log: Option<PathBuf>,
+) -> std::io::Result<Runtime> {
+    PtySession::spawn(cmd, PTY_COLS, PTY_ROWS, log).map(Runtime::Pty)
+}
+
 /// Starts the agent for `launch` on the given runtime.
 pub fn spawn(launch: &Launch, kind: RuntimeKind) -> std::io::Result<Runtime> {
     spawn_logged(launch, kind, None)
 }
 
-/// As [`spawn`], also appending the terminal output to the `log` file.
+/// As [`spawn`], also appending the terminal output to the `log` file (PTY only).
 pub fn spawn_logged(
     launch: &Launch,
     kind: RuntimeKind,
     log: Option<PathBuf>,
 ) -> std::io::Result<Runtime> {
+    spawn_with_events(launch, kind, log).map(|(runtime, _)| runtime)
+}
+
+/// As [`spawn_logged`], also returning, for a stream runtime, the receiver subscribed
+/// before the first line is read, so the Init event can't be missed. `None` for a PTY.
+pub fn spawn_with_events(
+    launch: &Launch,
+    kind: RuntimeKind,
+    log: Option<PathBuf>,
+) -> std::io::Result<(Runtime, Option<broadcast::Receiver<StreamEvent>>)> {
     match kind {
-        RuntimeKind::Pty => {
-            PtySession::spawn(claude::command(launch), PTY_COLS, PTY_ROWS, log).map(Runtime::Pty)
+        RuntimeKind::Pty => PtySession::spawn(claude::command(launch), PTY_COLS, PTY_ROWS, log)
+            .map(|pty| (Runtime::Pty(pty), None)),
+        RuntimeKind::Stream => {
+            let (session, rx) = StreamSession::spawn(claude::stream_command(launch))?;
+            Ok((Runtime::Stream(Arc::new(session)), Some(rx)))
         }
     }
 }
@@ -70,11 +95,19 @@ impl From<Arc<PtySession>> for Runtime {
     }
 }
 
+impl From<Arc<StreamSession>> for Runtime {
+    fn from(stream: Arc<StreamSession>) -> Self {
+        Runtime::Stream(stream)
+    }
+}
+
 impl Runtime {
     /// Whether both handles are the same running agent.
     pub fn same(&self, other: &Runtime) -> bool {
         match (self, other) {
             (Runtime::Pty(a), Runtime::Pty(b)) => Arc::ptr_eq(a, b),
+            (Runtime::Stream(a), Runtime::Stream(b)) => Arc::ptr_eq(a, b),
+            _ => false,
         }
     }
 
@@ -87,25 +120,32 @@ impl Runtime {
                 tokio::time::sleep(ENTER_DELAY).await;
                 pty.write(b"\r")
             }
+            Runtime::Stream(stream) => stream.send_user(&sanitize_prompt(text)).await,
         }
     }
 
-    /// Interrupts what the agent is doing (ESC).
-    pub fn stop(&self) -> std::io::Result<()> {
+    /// Interrupts what the agent is doing) (ESC, or an interrupt request on a stream).
+    pub async fn stop(&self) -> std::io::Result<()> {
         match self {
             Runtime::Pty(pty) => pty.write(b"\x1b"),
+            Runtime::Stream(stream) => stream.interrupt().await,
         }
     }
 
     pub fn kill(&self) -> std::io::Result<()> {
         match self {
             Runtime::Pty(pty) => pty.kill(),
+            Runtime::Stream(stream) => {
+                stream.kill();
+                Ok(())
+            }
         }
     }
 
     pub fn has_exited(&self) -> bool {
         match self {
             Runtime::Pty(pty) => pty.has_exited(),
+            Runtime::Stream(stream) => stream.has_exited(),
         }
     }
 
@@ -113,6 +153,9 @@ impl Runtime {
     pub async fn wait(&self) {
         match self {
             Runtime::Pty(pty) => pty.wait().await,
+            Runtime::Stream(stream) => {
+                stream.wait().await;
+            }
         }
     }
 
@@ -121,6 +164,16 @@ impl Runtime {
     pub fn as_pty(&self) -> Option<&Arc<PtySession>> {
         match self {
             Runtime::Pty(pty) => Some(pty),
+            Runtime::Stream(_) => None,
+        }
+    }
+
+    /// The stream session, to subscribe to its events and answer permissions; `None`
+    /// for a terminal.
+    pub fn as_stream(&self) -> Option<&Arc<StreamSession>> {
+        match self {
+            Runtime::Stream(stream) => Some(stream),
+            Runtime::Pty(_) => None,
         }
     }
 }
@@ -228,7 +281,7 @@ mod tests {
     async fn stop_writes_escape() {
         let (rt, out) = capture(1);
         settle().await;
-        rt.stop().unwrap();
+        rt.stop().await.unwrap();
         assert_eq!(finished(&rt, &out).await, b"\x1b");
     }
 
@@ -259,6 +312,88 @@ mod tests {
         let pty = PtySession::spawn(CommandBuilder::new("true"), 80, 24, None).unwrap();
         let rt = Runtime::Pty(Arc::clone(&pty));
         assert!(Arc::ptr_eq(rt.as_pty().unwrap(), &pty));
+        rt.wait().await;
+    }
+
+    fn stream_launch<'a>(settings: &'a std::path::Path, ws: &'a std::path::Path) -> Launch<'a> {
+        static FAKE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let program = FAKE.get_or_init(|| {
+            PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/fake-claude-stream.sh"
+            ))
+        });
+        Launch {
+            workspace: ws,
+            session_id: "abc",
+            settings,
+            prompt: None,
+            resume: false,
+            extra_dirs: &[],
+            permission: claude::Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
+            remote_control: None,
+            program: Some(program),
+        }
+    }
+
+    async fn next(rx: &mut broadcast::Receiver<StreamEvent>) -> StreamEvent {
+        tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stream_runtime_spawns_prompts_stops_and_kills() {
+        let tmp = std::env::temp_dir();
+        let launch = stream_launch(&tmp, &tmp);
+        let (rt, rx) = spawn_with_events(&launch, RuntimeKind::Stream, None).unwrap();
+        let mut rx = rx.unwrap();
+        assert!(matches!(next(&mut rx).await, StreamEvent::Init { .. }));
+        assert!(rt.as_pty().is_none());
+        assert!(rt.as_stream().is_some());
+        assert!(rt.same(&rt.clone()));
+        let (other, _) = spawn_with_events(&launch, RuntimeKind::Stream, None).unwrap();
+        assert!(!rt.same(&other));
+        other.kill().unwrap();
+
+        rt.send_prompt("hola\x1b").await.unwrap();
+        loop {
+            if matches!(next(&mut rx).await, StreamEvent::TurnResult { .. }) {
+                break;
+            }
+        }
+
+        rt.send_prompt("WAIT").await.unwrap();
+        loop {
+            if matches!(next(&mut rx).await, StreamEvent::TextDelta { .. }) {
+                break;
+            }
+        }
+        rt.stop().await.unwrap();
+        loop {
+            if matches!(next(&mut rx).await, StreamEvent::TurnResult { .. }) {
+                break;
+            }
+        }
+        assert!(!rt.has_exited());
+
+        rt.kill().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), rt.wait())
+            .await
+            .unwrap();
+        assert!(rt.has_exited());
+    }
+
+    #[tokio::test]
+    async fn pty_spawn_has_no_initial_receiver() {
+        let mut cmd = CommandBuilder::new("true");
+        cmd.arg("x");
+        let pty = PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let rt = Runtime::from(pty);
+        assert!(rt.as_stream().is_none());
         rt.wait().await;
     }
 }

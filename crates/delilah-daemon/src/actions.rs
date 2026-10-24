@@ -234,9 +234,9 @@ pub async fn resume_if_due(app: &AppState, task: &Task) {
 
 #[cfg(test)]
 mod tests {
-    use delilah_agents::runtime::prompt_bytes;
     use super::*;
     use crate::archive::{ArchivePartial, LeftoverBranch};
+    use delilah_agents::runtime::prompt_bytes;
 
     use std::path::{Path as FsPath, PathBuf};
 

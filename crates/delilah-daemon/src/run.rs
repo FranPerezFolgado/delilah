@@ -8,7 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
-use delilah_agents::runtime::{self, Runtime, RuntimeKind};
+use delilah_agents::runtime::{self, RuntimeKind};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{GitOptions, WorkspaceSpec};
 use serde::Deserialize;
@@ -513,9 +513,9 @@ pub fn launch_session(
             };
             runtime::spawn_logged(&launch, RuntimeKind::Pty, Some(log)).map_err(spawn_error)?
         }
-        SessionKind::Shell => PtySession::spawn(shell_command(workspace), 120, 40, Some(log))
-            .map(Runtime::Pty)
-            .map_err(spawn_error)?,
+        SessionKind::Shell => {
+            runtime::spawn_pty(shell_command(workspace), Some(log)).map_err(spawn_error)?
+        }
     };
     let live = app.sessions.insert(
         &session.id,
@@ -528,6 +528,8 @@ pub fn launch_session(
     let remote_control = session.kind == SessionKind::Claude && app.remote_control();
     tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
 
+    // Only terminals: a stream session skips the trust dialog, as print mode does not
+    // wait on it (spike d1, decision 49).
     if session.kind == SessionKind::Claude
         && let Some(pty) = runtime.as_pty()
     {

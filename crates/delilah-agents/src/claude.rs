@@ -1,5 +1,6 @@
 //! Claude Code adapter. Findings behind these choices: `docs/spikes/2026-10-19-claude-pty.md`.
 
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use portable_pty::CommandBuilder;
@@ -124,60 +125,89 @@ pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
     crate::transcript::transcript_path(workspace, session_id).is_some_and(|path| path.is_file())
 }
 
+/// The arguments both runtimes share: the session, folders, settings, permission mode,
+/// plugin and system prompt. `remote_control` is left out in chat mode (it has no terminal).
+fn shared_args(launch: &Launch, with_remote_control: bool) -> Vec<OsString> {
+    let mut args: Vec<OsString> = Vec::new();
+    if launch.resume {
+        args.extend(["--resume".into(), launch.session_id.into()]);
+    } else {
+        args.extend(["--session-id".into(), launch.session_id.into()]);
+    }
+    // `--add-dir` takes several values: keep another option after it so it never
+    // swallows the prompt.
+    for dir in launch.extra_dirs {
+        args.extend(["--add-dir".into(), dir.into()]);
+    }
+    // The name is always given: `--remote-control` alone would take the prompt as one.
+    if let Some(name) = launch.remote_control.filter(|_| with_remote_control) {
+        args.extend(["--remote-control".into(), name.into()]);
+    }
+    args.extend(["--settings".into(), launch.settings.into()]);
+    match launch.permission {
+        Permission::Default => {}
+        Permission::Plan => {
+            args.extend(["--permission-mode".into(), "plan".into()]);
+        }
+        Permission::DontAsk => {
+            args.extend(["--permission-mode".into(), "dontAsk".into()]);
+            // A cloned repo's own settings must not widen the allow list.
+            args.extend(["--setting-sources".into(), "user".into()]);
+            // Nor may the project's or user's MCP servers reach an idea conversation.
+            args.push("--strict-mcp-config".into());
+        }
+    }
+    if let Some(dir) = launch.plugin_dir {
+        args.extend(["--plugin-dir".into(), dir.into()]);
+    }
+    if let Some(text) = launch.append_system_prompt {
+        args.extend(["--append-system-prompt".into(), text.into()]);
+    }
+    args
+}
+
+fn program<'a>(launch: &Launch<'a>) -> &'a OsStr {
+    launch.program.map_or(OsStr::new("claude"), Path::as_os_str)
+}
+
 pub fn command(launch: &Launch) -> CommandBuilder {
-    let mut cmd = match launch.program {
-        Some(program) => CommandBuilder::new(program),
-        None => CommandBuilder::new("claude"),
-    };
+    let mut cmd = CommandBuilder::new(program(launch));
     cmd.env_clear();
     for (key, value) in crate::env::agent_env() {
         cmd.env(key, value);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-
-    if launch.resume {
-        cmd.args(["--resume", launch.session_id]);
-    } else {
-        cmd.args(["--session-id", launch.session_id]);
-    }
-    // `--add-dir` takes several values: keep another option after it so it never
-    // swallows the prompt.
-    for dir in launch.extra_dirs {
-        cmd.arg("--add-dir");
-        cmd.arg(dir);
-    }
-    // The name is always given: `--remote-control` alone would take the prompt as one.
-    if let Some(name) = launch.remote_control {
-        cmd.args(["--remote-control", name]);
-    }
-    cmd.arg("--settings");
-    cmd.arg(launch.settings);
-    match launch.permission {
-        Permission::Default => {}
-        Permission::Plan => {
-            cmd.args(["--permission-mode", "plan"]);
-        }
-        Permission::DontAsk => {
-            cmd.args(["--permission-mode", "dontAsk"]);
-            // A cloned repo's own settings must not widen the allow list.
-            cmd.args(["--setting-sources", "user"]);
-            // Nor may the project's or user's MCP servers reach an idea conversation.
-            cmd.arg("--strict-mcp-config");
-        }
-    }
-    if let Some(dir) = launch.plugin_dir {
-        cmd.arg("--plugin-dir");
-        cmd.arg(dir);
-    }
-    if let Some(text) = launch.append_system_prompt {
-        cmd.args(["--append-system-prompt", text]);
-    }
+    cmd.args(shared_args(launch, true));
     if let Some(prompt) = launch.prompt {
         // After `--`, so a prompt starting with `-` is never read as an option.
         cmd.args(["--", prompt]);
     }
     cmd.cwd(launch.workspace);
+    cmd
+}
+
+/// The command for chat mode: the same environment and arguments, speaking stream-json
+/// on stdin and stdout. No positional prompt (the first prompt goes on stdin after the
+/// init line, also in `launch.prompt`) and no Remote Control. `--permission-prompt-tool
+/// stdio` makes `can_use_tool` requests arrive and adds AskUserQuestion to the tools.
+pub fn stream_command(launch: &Launch) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(program(launch));
+    cmd.env_clear();
+    cmd.envs(crate::env::agent_env());
+    cmd.args([
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--permission-prompt-tool",
+        "stdio",
+    ]);
+    cmd.args(shared_args(launch, false));
+    cmd.current_dir(launch.workspace);
     cmd
 }
 
@@ -603,6 +633,51 @@ mod tests {
 
     fn has_pair(args: &[String], flag: &str, value: &str) -> bool {
         args.windows(2).any(|w| w[0] == flag && w[1] == value)
+    }
+
+    #[test]
+    fn stream_command_has_the_stream_flags_and_no_prompt_nor_remote_control() {
+        let l = Launch {
+            prompt: Some("hola"),
+            remote_control: Some("PROJ-1"),
+            permission: Permission::Plan,
+            ..launch()
+        };
+        let cmd = stream_command(&l);
+        let std = cmd.as_std();
+        assert_eq!(std.get_program(), "claude");
+        let args: Vec<String> = std
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-p",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-prompt-tool",
+                "stdio",
+                "--session-id",
+                "abc",
+                "--settings",
+                "/tmp/s.json",
+                "--permission-mode",
+                "plan"
+            ]
+        );
+        assert_eq!(std.get_current_dir(), Some(Path::new("/tmp/ws")));
+        let resumed = stream_command(&Launch {
+            resume: true,
+            program: Some(Path::new("/x/fake")),
+            ..launch()
+        });
+        assert_eq!(resumed.as_std().get_program(), "/x/fake");
+        assert!(resumed.as_std().get_args().any(|a| a == "--resume"));
     }
 
     #[test]
