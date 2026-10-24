@@ -53,6 +53,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/tasks/{key}/terminal", get(terminal::task_terminal))
         .route(
+            "/api/v1/tasks/{key}/runtime",
+            post(crate::runtime_api::set_runtime),
+        )
+        .route(
             "/api/v1/tasks/{key}/sessions",
             get(session_api::list_for_task).post(session_api::open),
         )

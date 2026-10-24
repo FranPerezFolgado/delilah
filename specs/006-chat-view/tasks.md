@@ -310,13 +310,13 @@
 
 **Independent Test**: quickstart.md "Chat mode" step 5.
 
-- [ ] T060 [US4] Write failing tests in a new `crates/delilah-daemon/src/runtime_api.rs` (tests module, with the fake PTY and the fake stream):
+- [X] T060 [US4] Write failing tests in a new `crates/delilah-daemon/src/runtime_api.rs` (tests module, with the fake PTY and the fake stream):
   - `POST /api/v1/tasks/{key}/runtime {"mode":"terminal"}` on an idle chat-mode task sets `chat_mode = 0`, kills the stream sessions and relaunches them as PTY with `--resume`, then returns 204;
   - `{"mode":"chat"}` does the reverse;
   - while a session is working, or has a pending question or permission ask, it returns 409 `wait for the turn to end or press Detener`;
   - the same mode is a no-op 204;
   - `tasks` and `sessions` are emitted.
-- [ ] T061 [US4] Implement T060 in `crates/delilah-daemon/src/runtime_api.rs`, with the route in `crates/delilah-daemon/src/api.rs`, reusing `launch_session` with `resume = true`.
+- [X] T061 [US4] Implement T060 in `crates/delilah-daemon/src/runtime_api.rs`, with the route in `crates/delilah-daemon/src/api.rs`, reusing `launch_session` with `resume = true`.
 - [X] T062 [P] [US4] Write failing tests and implement `delilah runtime <task> chat|terminal` in `crates/delilah-cli/src/main.rs`, printing the 409 message on refusal.
 - [ ] T063 [US4] Write failing tests and implement in `app/src/components/TaskScreen.tsx` and its test: "Pasar a terminal" on a chat-mode task and "Pasar a modo chat" on a PTY task, both calling `api.setRuntime`. A 409 shows its message. After switching to the terminal, the Terminal switch is enabled. Add `api.setRuntime` in `app/src/api.ts`.
 - [ ] T064 [US4] Write failing tests in `crates/delilah-daemon/src/run.rs` (tests module): a stream process that dies mid-turn marks the session as exited, like a PTY that exits, and the task can be resumed in either mode. A daemon restart (the existing restart-resume path) relaunches a chat-mode task's live session in stream. Then implement any gaps.
