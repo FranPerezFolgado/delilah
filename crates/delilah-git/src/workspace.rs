@@ -494,6 +494,9 @@ fn checkout_dirs(root: &Path, spec: &WorkspaceSpec) -> Result<Vec<(String, PathB
     }
 }
 
+/// Per folder of a checkout-mode workspace, the branch (or commit) it was on.
+pub type Previous = Vec<(String, String)>;
+
 /// Puts the task's branch in the project's own checkout instead of a worktree:
 /// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
 /// while there are uncommitted changes (before any fetch). A new branch starts at the
@@ -506,7 +509,7 @@ pub fn use_checkout(
     spec: &WorkspaceSpec,
     opts: &GitOptions,
     deadline: Deadline,
-) -> Result<(Workspace, Vec<(String, String)>, Vec<RepoBase>), GitError> {
+) -> Result<(Workspace, Previous, Vec<RepoBase>), GitError> {
     if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
         return Err(GitError::InvalidBranch(spec.branch.clone()));
     }
@@ -518,10 +521,7 @@ pub fn use_checkout(
             });
         }
     }
-    if spec.branch.is_none() && spec.kind == ProjectKind::Parent {
-        dirs.push((".".into(), root.to_path_buf()));
-    }
-    let mut previous: Vec<(String, String)> = Vec::new();
+    let mut previous: Previous = Vec::new();
     let mut bases: Vec<RepoBase> = Vec::new();
     for (location, dir) in &dirs {
         let was = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"], opts)
@@ -544,15 +544,14 @@ pub fn use_checkout(
         )
         .is_ok();
         let switched = if exists {
-            git(dir, &["checkout", "-q", &spec.branch], opts).map(|_| {
-                let sha = git(dir, &["rev-parse", "HEAD"], opts).unwrap_or_default();
-                RepoBase {
+            git(dir, &["checkout", "-q", &spec.branch], opts)
+                .and_then(|_| git(dir, &["rev-parse", "HEAD"], opts))
+                .map(|sha| RepoBase {
                     repo: location.clone(),
                     refname: spec.branch.clone(),
                     sha,
                     fetch: FetchOutcome::Existing,
-                }
-            })
+                })
         } else {
             let base = prepare_base(dir, location, opts, deadline);
             let start = if base.sha.is_empty() {
@@ -570,14 +569,18 @@ pub fn use_checkout(
         let base = match switched {
             Ok(base) => base,
             Err(e) => {
-                // Leave nothing half-switched behind.
-                for (loc, back) in &previous {
+                // Leave nothing half-switched behind, and no branch this call made.
+                for ((loc, back), base) in previous.iter().zip(&bases) {
                     let d = if loc == "." {
                         root.to_path_buf()
                     } else {
                         root.join(loc)
                     };
-                    let _ = git(&d, &["checkout", "-q", back], opts);
+                    if git(&d, &["checkout", "-q", back], opts).is_ok()
+                        && base.fetch != FetchOutcome::Existing
+                    {
+                        let _ = git(&d, &["branch", "-D", &spec.branch], opts);
+                    }
                 }
                 return Err(e);
             }

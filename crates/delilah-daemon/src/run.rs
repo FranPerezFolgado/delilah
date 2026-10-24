@@ -26,18 +26,27 @@ const TRUST_WATCH: Duration = Duration::from_secs(60);
 /// Added to the system prompt of an idea conversation.
 const IDEA_PROMPT: &str = "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode.";
 
-/// The `pr_notices.kind` of "the branch started from a base that could not be refreshed".
-pub(crate) const KIND_BASE_STALE: &str = "base-stale";
+use crate::store_prs::KIND_BASE_STALE;
 
 /// Logs where each repo's task branch started (the ref and the commit), and warns in
-/// the inbox for each repo whose fetch failed. Never fails the start.
-async fn report_bases(app: &AppState, key: &TaskKey, project: &str, bases: &[RepoBase]) {
+/// the inbox for each repo whose fetch failed. Never fails the start. The warning's
+/// cause is the branch, which is new at every start, so a warning dismissed at one
+/// start still shows at the next.
+async fn report_bases(
+    app: &AppState,
+    key: &TaskKey,
+    project: &str,
+    branch: &str,
+    bases: &[RepoBase],
+) {
     let mut warned = false;
     for b in bases {
         tracing::info!(task = %key, repo = %b.repo, base = %b.refname, sha = %b.sha, fetch = ?b.fetch, "task branch base");
         let FetchOutcome::Failed(reason) = &b.fetch else {
             continue;
         };
+        let reason = short_reason(reason);
+        let reason = reason.as_str();
         let name = if b.repo == "." { project } else { &b.repo };
         let sha7: String = b.sha.chars().take(7).collect();
         let text = format!(
@@ -52,7 +61,7 @@ async fn report_bases(app: &AppState, key: &TaskKey, project: &str, bases: &[Rep
         let notice = NewNotice {
             repo: b.repo.clone(),
             kind: KIND_BASE_STALE.into(),
-            cause: "start".into(),
+            cause: branch.into(),
             text,
             detail: Some(serde_json::json!({
                 "refname": b.refname, "sha": b.sha, "reason": reason
@@ -66,6 +75,33 @@ async fn report_bases(app: &AppState, key: &TaskKey, project: &str, bases: &[Rep
     if warned {
         app.emit(Topic::Inbox);
     }
+}
+
+/// Git's stderr cut to what a notice can show: the first `fatal:`/`error:` line (else
+/// the first non-empty one), no control characters, no credentials in URLs, at most
+/// 200 chars.
+fn short_reason(stderr: &str) -> String {
+    let mut lines = stderr.lines().map(str::trim).filter(|l| !l.is_empty());
+    let line = lines
+        .clone()
+        .find(|l| l.starts_with("fatal:") || l.starts_with("error:"))
+        .or_else(|| lines.next())
+        .unwrap_or("");
+    let mut out = String::new();
+    let mut rest = line;
+    // `scheme://user:secret@host` → `scheme://host`
+    while let Some(at) = rest.find("://") {
+        out.push_str(&rest[..at + 3]);
+        rest = &rest[at + 3..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '/' || c == '\'' || c == '"')
+            .unwrap_or(rest.len());
+        if let Some(cred) = rest[..end].rfind('@') {
+            rest = &rest[cred + 1..];
+        }
+    }
+    out.push_str(rest);
+    out.chars().filter(|c| !c.is_control()).take(200).collect()
 }
 
 /// How a Claude session is launched, by what it is: a conversation never asks
@@ -440,8 +476,16 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
-    app.transition(&key, Event::WorkspaceReady).await?;
-    report_bases(&app, &key, &project.name, &bases).await;
+    report_bases(&app, &key, &project.name, &ws.branch, &bases).await;
+    let launch = AgentLaunch {
+        free: req.free,
+        prompt,
+        custom_prompt: req.prompt.is_some(),
+        notes,
+        adopted,
+        saving_mode,
+        autopilot,
+    };
 
     // A new worktree gets the shared entries and then the setup; the project's own
     // checkout gets neither.
@@ -1427,10 +1471,18 @@ mod tests {
         assert_eq!(notices.len(), 1, "{notices:?}");
         let n = &notices[0];
         assert_eq!(n.task_key, "PROJ-8");
-        assert_eq!(
-            (n.kind.as_str(), n.repo.as_str(), n.cause.as_str()),
-            ("base-stale", ".", "start")
-        );
+        assert_eq!((n.kind.as_str(), n.repo.as_str()), ("base-stale", "."));
+        // The cause is the branch, new at every start: a dismissed warning comes back
+        // on the next start instead of being swallowed by the unique index.
+        let branch = app
+            .store
+            .workspace(&TaskKey::new("PROJ-8"))
+            .await
+            .unwrap()
+            .unwrap()
+            .1
+            .branch;
+        assert_eq!(n.cause, branch);
         assert!(n.text.contains("stale"), "{}", n.text);
         assert!(n.text.contains("origin/main @ "), "{}", n.text);
         assert!(
@@ -1438,6 +1490,21 @@ mod tests {
             "{}",
             n.text
         );
+    }
+
+    #[test]
+    fn short_reason_keeps_the_fatal_line_without_credentials() {
+        let stderr = "remote: noise\nfatal: unable to access 'https://bob:s3cret@host.example/r.git/': \x1b[31mtimeout\n\nPlease make sure you have the correct access rights\n";
+        assert_eq!(
+            short_reason(stderr),
+            "fatal: unable to access 'https://host.example/r.git/': [31mtimeout"
+        );
+        assert_eq!(
+            short_reason("ssh://git@host/x and http://h/y"),
+            "ssh://host/x and http://h/y"
+        );
+        assert_eq!(short_reason(&"x".repeat(500)).len(), 200);
+        assert_eq!(short_reason(""), "");
     }
 
     #[tokio::test]

@@ -116,8 +116,8 @@ Four environment variables exist only for the end-to-end tests (read in `Config:
 - `conversation_entries`: session, time, kind (`user` / `claude` / `card`) and a JSON body.
 - `pull_requests`: one PR per (task, repo), with host, `owner/name`, number, URL, how it was linked (`detected`, `opened`, `pasted`), the last snapshot as JSON, the watermarks already notified (failed head, review and comment ids), `checked_at` and the last problem (`error`, `error_kind`).
 - `pr_unlinked`: URLs the user unlinked, never detected again for that task.
-- `pr_notices`: what the Bandeja shows for PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`, `base-stale`), unique per (task, repo, kind, cause) and resolved rather than deleted. All three cascade when the task is deleted.
-- `projects`
+- `pr_notices`: what the Bandeja shows for a task's PRs (`ci-failed`, `changes-requested`, `comments`, `archive-blocked`, `archive-partial`) and for its start (`base-stale`, `store_prs::KIND_BASE_STALE`), unique per (task, repo, kind, cause) and resolved rather than deleted. Unlinking or replacing a PR resolves that repo's notices except `base-stale`. All three cascade when the task is deleted.
+- `projects`: name, path, kind, `settings` (JSON, migration 0016; `deny_unknown_fields`; an unreadable value falls back to the defaults with a warning) and `preview_command`.
 - `settings`
 
 ## Tasks
@@ -260,9 +260,9 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
 
 - **Fresh base** (`delilah_git::base`, for every new task branch, in both modes and per repo or submodule):
   - `prepare_base` fetches `origin`, then `resolve_base` picks the default branch in this order: `origin/HEAD` target, `origin/main`, `origin/master`, `main`, `master`, `HEAD`. The branch starts at that commit's **sha**, so it has no upstream.
-  - The whole start shares one 30 s `Deadline` (all repos together; `git_with_timeout` in `command.rs`, with `GIT_TERMINAL_PROMPT=0`). A fetch that finished less than 5 s ago is reused, and fetches of the same repo are serialised by a per-repo lock keyed on the folder path.
-  - A failed fetch never blocks: the branch starts from the last known `origin` state and `run.rs::report_bases` raises a `base-stale` notice (none for a repo with no origin). It also logs each base ("task branch base").
-  - Local `main` is never fast-forwarded. In checkout mode an existing branch is used as it is (`Existing`, no fetch).
+  - The whole start shares one 30 s `Deadline` (all repos together; `git_with_timeout` in `command.rs`, with `GIT_TERMINAL_PROMPT=0`; on timeout it kills git's process group, and it never waits on a pipe that a descendant keeps open past the deadline). A fetch that finished less than 5 s ago is reused, and fetches of the same repo are serialised by a per-repo lock keyed on the folder path.
+  - A failed fetch never blocks: the branch starts from the last known `origin` state and `run.rs::report_bases` raises a `base-stale` notice (none for a repo with no origin). Its cause is the branch, new at every start, so a warning dismissed once still shows at a later start; its text carries git's `fatal:` line cut to 200 chars, without credentials in URLs (`short_reason`). It also logs each base ("task branch base").
+  - Local `main` is never fast-forwarded. A start always gets a free branch name (see Branch names), so it always starts fresh; `use_checkout` still switches to an existing branch as it is (`Existing`, no fetch) if it is ever given one. A failed checkout-mode start goes back to the previous branches and deletes the branches it created.
 - **Worktree mode** (in `workspaces/<KEY>/`):
   - **Parent projects:** a worktree of the parent, with only the chosen submodules initialised, all on the same branch, named as in Branch names below.
   - **Repo projects:** a plain worktree.

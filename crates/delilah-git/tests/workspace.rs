@@ -5,9 +5,10 @@ use std::time::Duration;
 use delilah_core::ProjectKind;
 use delilah_git::{
     ChangeKind, Deadline, FetchOutcome, GitError, GitOptions, RepoBase, Workspace, WorkspaceSpec,
-    archive_workspace, branch_tip, changes, check_merged, check_repos, check_workspace,
-    commit_subjects, create_workspace, delete_branch, fetch, file_diff, leave_checkout,
-    list_submodules, needs_push, push_branch, remove_workspace, repo_root, use_checkout,
+    archive_workspace, branch_taken, branch_tip, changes, check_merged, check_repos,
+    check_workspace, commit_subjects, create_workspace, delete_branch, fetch, file_diff,
+    free_branch, leave_checkout, list_submodules, needs_push, push_branch, remove_workspace,
+    repo_root, use_checkout,
 };
 use tempfile::TempDir;
 
@@ -764,7 +765,8 @@ fn a_dirty_checkout_fails_before_any_fetch() {
     let r = use_checkout(&repo, &checkout_spec("feature/X-3"), &opts(), dl());
 
     assert!(matches!(r, Err(GitError::Dirty { .. })));
-    assert!(started.elapsed() < Duration::from_secs(5));
+    // Well under the 30 s deadline a fetch to that host could take.
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 // --- parent projects: a fresh base per repo ---
@@ -803,6 +805,41 @@ fn parent_workspace_starts_the_parent_and_submodules_fresh() {
     assert_eq!(base_of(&bases, "svc-payments").sha, pay_head);
 }
 
+#[test]
+fn parent_workspace_starts_each_submodule_from_its_own_default_branch() {
+    let fx = Fixture::new();
+    let bill_remote = fx.root.join("env/remotes/svc-billing.git");
+    git(&bill_remote, &["branch", "-m", "main", "master"]);
+    git(&bill_remote, &["symbolic-ref", "HEAD", "refs/heads/master"]);
+    let bill_head = git(&bill_remote, &["rev-parse", "master"]);
+    let pay_head = advance_remote(
+        &fx.root.join("env/remotes/svc-payments.git"),
+        "fresh.txt",
+        "Fresh",
+    );
+
+    let (ws, bases) = create_workspace(
+        &fx.parent(),
+        &fx.spec(&["svc-payments", "svc-billing"]),
+        &opts(),
+        dl(),
+    )
+    .unwrap();
+
+    let bill = base_of(&bases, "svc-billing");
+    assert_eq!(bill.refname, "origin/master", "{bill:?}");
+    assert_eq!(bill.sha, bill_head);
+    assert_eq!(base_of(&bases, "svc-payments").refname, "origin/main");
+    assert_eq!(
+        git(&ws.path.join("svc-billing"), &["rev-parse", "HEAD"]),
+        bill_head
+    );
+    assert_eq!(
+        git(&ws.path.join("svc-payments"), &["rev-parse", "HEAD"]),
+        pay_head
+    );
+}
+
 fn parent_checkout_spec(parent: &Path, subs: &[&str]) -> WorkspaceSpec {
     WorkspaceSpec {
         path: parent.to_path_buf(),
@@ -838,6 +875,46 @@ fn parent_checkout_falls_back_per_submodule_when_one_fetch_fails() {
         git(&parent.join("svc-payments"), &["rev-parse", "HEAD"]),
         pay_head
     );
+}
+
+#[test]
+fn parent_checkout_starts_a_submodule_with_no_origin_from_its_own_main() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let bill = parent.join("svc-billing");
+    let local = git(&bill, &["rev-parse", "HEAD"]);
+    git(&bill, &["remote", "remove", "origin"]);
+
+    let spec = parent_checkout_spec(&parent, &["svc-payments", "svc-billing"]);
+    let (_, _, bases) = use_checkout(&parent, &spec, &opts(), dl()).unwrap();
+
+    let b = base_of(&bases, "svc-billing");
+    assert_eq!(b.fetch, FetchOutcome::NoRemote, "{b:?}");
+    assert_eq!(git(&bill, &["branch", "--show-current"]), "feature/PROJ-9");
+    assert_eq!(git(&bill, &["rev-parse", "HEAD"]), local);
+    assert_eq!(base_of(&bases, "svc-payments").fetch, FetchOutcome::Fetched);
+}
+
+#[test]
+fn a_failed_parent_checkout_leaves_no_branch_behind() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let pay = parent.join("svc-payments");
+    let pay_was = git(&pay, &["rev-parse", "HEAD"]);
+    // svc-billing can't switch: its index is locked.
+    let bill_git = git(
+        &parent.join("svc-billing"),
+        &["rev-parse", "--absolute-git-dir"],
+    );
+    std::fs::write(Path::new(&bill_git).join("index.lock"), "").unwrap();
+
+    let spec = parent_checkout_spec(&parent, &["svc-payments", "svc-billing"]);
+    assert!(use_checkout(&parent, &spec, &opts(), dl()).is_err());
+
+    assert_eq!(git(&pay, &["rev-parse", "HEAD"]), pay_was);
+    assert_eq!(git(&pay, &["branch", "--list", "feature/PROJ-9"]), "");
 }
 
 #[test]

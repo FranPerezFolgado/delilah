@@ -412,6 +412,10 @@ export function parseAskPosition(v: unknown): AskPosition {
 /** The kinds that block an agent until you act: they count in the badge. */
 export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-blocked"];
 
+/** The stale-base warnings of one task, for its screen's banner. */
+export const baseStaleNotices = (inbox: InboxItem[], task: string): InboxItem[] =>
+  inbox.filter((i) => i.task === task && i.kind === "base-stale");
+
 export interface FolderInspection {
   path: string;
   name: string;

@@ -447,7 +447,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             "ci-failed" => ItemKind::PrFailed,
             "changes-requested" | "comments" => ItemKind::PrReview,
             KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
-            crate::run::KIND_BASE_STALE => ItemKind::BaseStale,
+            crate::store_prs::KIND_BASE_STALE => ItemKind::BaseStale,
             _ => continue,
         };
         let Some(t) = task(&n.task_key) else {
@@ -463,7 +463,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         {
             continue;
         }
-        if n.kind == crate::run::KIND_BASE_STALE {
+        if n.kind == crate::store_prs::KIND_BASE_STALE {
             items.push(InboxItem {
                 kind,
                 task: n.task_key,

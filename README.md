@@ -287,8 +287,8 @@ folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
 The task's branch starts from `origin`'s default branch as Delilah has just fetched it
 (for a parent, each chosen submodule from its own), not from what your folder had
-checked out; your local `main` is not touched. An existing branch in your checkout is
-used as it is. If the fetch fails (offline, no access) the task starts anyway from the
+checked out; your local `main` is not touched. A name that is already taken gets `-2`
+(see below), so the task never lands on an old branch. If the fetch fails (offline, no access) the task starts anyway from the
 last known state and warns "Rama posiblemente atrasada": an item in the Bandeja and a
 banner on the task screen, with "Descartar". It never blocks the task, and archiving
 clears it.

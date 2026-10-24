@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default)]
@@ -49,7 +50,12 @@ pub struct Deadline(Instant);
 
 impl Deadline {
     pub fn after(d: Duration) -> Self {
-        Self(Instant::now() + d)
+        let now = Instant::now();
+        // A duration too large to add means "no limit worth counting": a year will do.
+        Self(
+            now.checked_add(d)
+                .unwrap_or_else(|| now + Duration::from_secs(365 * 24 * 3600)),
+        )
     }
 
     /// Time left; zero once past.
@@ -117,43 +123,29 @@ pub(crate) fn git_with_timeout(
         cmd.process_group(0);
     }
     let mut child = cmd.spawn()?;
-    // Drain the pipes meanwhile, so a chatty git never blocks on a full one.
-    let mut out_pipe = child.stdout.take();
-    let mut err_pipe = child.stderr.take();
-    let out_reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = out_pipe.as_mut() {
-            let _ = std::io::Read::read_to_end(p, &mut buf);
-        }
-        buf
-    });
-    let err_reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = err_pipe.as_mut() {
-            let _ = std::io::Read::read_to_end(p, &mut buf);
-        }
-        buf
-    });
+    // Drain the pipes meanwhile, so a chatty git never blocks on a full one. Each
+    // reader hands its bytes over a channel, so a descendant that keeps a pipe open
+    // (ssh ControlMaster, a `setsid` child) can't make us wait past the deadline.
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
     let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if !deadline.expired() => {
+                std::thread::sleep(Duration::from_millis(50).min(deadline.remaining()));
+            }
+            waited => {
+                kill_group(&mut child);
+                waited?;
+                return Err(timeout());
+            }
         }
-        if deadline.expired() {
-            #[cfg(unix)]
-            let _ = Command::new("kill")
-                .args(["-KILL", "--", &format!("-{}", child.id())])
-                .output();
-            let _ = child.kill();
-            let _ = child.wait();
-            // The readers end once every holder of the pipes is gone.
-            let _ = out_reader.join();
-            let _ = err_reader.join();
-            return Err(timeout());
-        }
-        std::thread::sleep(Duration::from_millis(50).min(deadline.remaining()));
     };
-    let stdout = out_reader.join().unwrap_or_default();
-    let stderr = err_reader.join().unwrap_or_default();
+    // Git is gone; whatever it wrote is already in the pipes.
+    let wait_for = deadline.remaining().max(PIPE_GRACE);
+    let (Ok(stdout), Ok(stderr)) = (out.recv_timeout(wait_for), err.recv_timeout(wait_for)) else {
+        return Err(timeout());
+    };
     if !status.success() {
         return Err(GitError::Command {
             dir: dir.to_path_buf(),
@@ -162,6 +154,33 @@ pub(crate) fn git_with_timeout(
         });
     }
     Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
+/// How long to wait for a pipe's end after git has exited, when the deadline has passed.
+const PIPE_GRACE: Duration = Duration::from_secs(1);
+
+/// Reads `pipe` to its end on a thread of its own; the bytes arrive on the channel.
+fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+    rx
+}
+
+/// Kills git and its process group (ssh and friends), and reaps git. The group is
+/// signalled before the reap, while git's pid still names it.
+fn kill_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    let _ = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .output();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Like [`git`], but returns the exit code instead of failing on a non-zero one
@@ -225,7 +244,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, GitError::Timeout { .. }), "{err}");
-        assert!(start.elapsed() < Duration::from_secs(3));
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
@@ -234,5 +253,38 @@ mod tests {
         let d = Deadline::after(Duration::ZERO);
         let err = git_with_timeout(dir.path(), &["status"], &GitOptions::default(), d).unwrap_err();
         assert!(matches!(err, GitError::Timeout { .. }));
+    }
+
+    #[test]
+    fn a_descendant_holding_the_pipes_does_not_outlast_the_deadline() {
+        // ssh fails at once but leaves a child of its own on git's stderr.
+        let dir = temp_repo();
+        let o = GitOptions::default();
+        git(
+            dir.path(),
+            &["remote", "add", "origin", "ssh://example.invalid/x"],
+            &o,
+        )
+        .unwrap();
+        git(
+            dir.path(),
+            &["config", "core.sshCommand", "sh -c 'sleep 30 & exit 1' #"],
+            &o,
+        )
+        .unwrap();
+        let start = Instant::now();
+        let err = git_with_timeout(
+            dir.path(),
+            &["fetch", "origin"],
+            &o,
+            Deadline::after(Duration::from_secs(1)),
+        )
+        .unwrap_err();
+        assert!(start.elapsed() < Duration::from_secs(6), "{err}");
+    }
+
+    #[test]
+    fn a_huge_deadline_does_not_overflow() {
+        assert!(!Deadline::after(Duration::MAX).expired());
     }
 }

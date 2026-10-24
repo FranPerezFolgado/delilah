@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { api, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { api, baseStaleNotices, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
@@ -356,7 +356,7 @@ export function App() {
                   project={project}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
-                  notices={inbox.filter((i) => i.task === owner && i.kind === "base-stale")}
+                  notices={baseStaleNotices(inbox, owner)}
                   askPosition={askPosition}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
