@@ -335,6 +335,17 @@ mod tests {
         key: &str,
         in_checkout: bool,
     ) -> delilah_git::Workspace {
+        started_on(app, repo, key, in_checkout, Some(format!("feature/{key}"))).await
+    }
+
+    /// Like [`started`], with the branch given (`None`: the task has none yet).
+    async fn started_on(
+        app: &AppState,
+        repo: &FsPath,
+        key: &str,
+        in_checkout: bool,
+        branch: Option<String>,
+    ) -> delilah_git::Workspace {
         let key = TaskKey::new(key);
         app.store
             .create_task(&Task::new(key.clone(), "x", "feature"))
@@ -346,7 +357,7 @@ mod tests {
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
             path: app.config.workspaces_dir().join(key.as_str()),
-            branch: Some(format!("feature/{key}")),
+            branch,
             kind: delilah_core::ProjectKind::Repo,
             submodules: vec![],
         };
@@ -466,6 +477,49 @@ mod tests {
         );
         assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
         assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).contains("PROJ-1"));
+    }
+
+    #[tokio::test]
+    async fn a_branchless_worktree_goes_away_clean_and_is_refused_dirty_unless_forced() {
+        let (app, repo) = setup().await;
+        let ws = started_on(&app, &repo, "PROJ-1", false, None).await;
+        assert!(!ws.has_branch());
+        std::fs::write(ws.path.join("notes.txt"), "wip\n").unwrap();
+        let err = delete_task(&app, "PROJ-1", false).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT, "{}", err.message);
+        assert!(ws.path.exists());
+        assert!(
+            app.store
+                .workspace(&TaskKey::new("PROJ-1"))
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        assert_eq!(
+            delete_task(&app, "PROJ-1", true).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert!(!ws.path.exists());
+
+        let ws = started_on(&app, &repo, "PROJ-2", false, None).await;
+        assert_eq!(
+            delete_task(&app, "PROJ-2", false).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert!(!ws.path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_branchless_checkout_task_goes_back_to_the_previous_branch() {
+        let (app, repo) = setup().await;
+        started_on(&app, &repo, "PROJ-1", true, None).await;
+        assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
+        assert_eq!(
+            delete_task(&app, "PROJ-1", false).await.ok(),
+            Some(StatusCode::NO_CONTENT)
+        );
+        assert_eq!(git(&repo, &["branch", "--show-current"]), "main");
     }
 
     #[tokio::test]

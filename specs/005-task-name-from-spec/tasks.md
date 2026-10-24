@@ -83,9 +83,9 @@ None: no new dependencies.
 
 ### Compatibility
 
-- [ ] T035 [P] [US2] Write failing tests and implement in `crates/delilah-daemon/src/specs.rs`: with `branch == ""`, `find_spec_dir` skips the branch-name match and `changed_paths` (no git error, returns the key-named folder if any).
-- [ ] T036 [P] [US2] Write failing tests and implement in `crates/delilah-daemon/src/pr_api/open.rs` and `crates/delilah-daemon/src/pr_loop/mod.rs`: opening a PR for a branchless task → 422 "la tarea aún no tiene rama" / "the task has no branch yet"; the PR loop skips branchless tasks.
-- [ ] T037 [P] [US2] Write failing tests and implement in `crates/delilah-daemon/src/archive.rs` (and `delilah-git` `archive_workspace` if needed): archiving and deleting a branchless worktree task (clean → removed; dirty → refused unless force) and a branchless checkout task (goes back to `previous`, including the parent).
+- [X] T035 [P] [US2] Write failing tests and implement in `crates/delilah-daemon/src/specs.rs`: with `branch == ""`, `find_spec_dir` skips the branch-name match and `changed_paths` (no git error, returns the key-named folder if any).
+- [X] T036 [P] [US2] Write failing tests and implement in `crates/delilah-daemon/src/pr_api/open.rs` and `crates/delilah-daemon/src/pr_loop/mod.rs`: opening a PR for a branchless task → 422 "la tarea aún no tiene rama" / "the task has no branch yet"; the PR loop skips branchless tasks.
+- [X] T037 [P] [US2] Write failing tests and implement in `crates/delilah-daemon/src/archive.rs` (and `delilah-git` `archive_workspace` if needed): archiving and deleting a branchless worktree task (clean → removed; dirty → refused unless force) and a branchless checkout task (goes back to `previous`, including the parent).
 
 ### Bandeja
 

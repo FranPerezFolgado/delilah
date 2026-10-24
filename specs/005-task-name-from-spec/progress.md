@@ -8,12 +8,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01 | 2 | 2A | done | 1 | b9cd4b4 | archived = Done/Failed with no workspace row; also touched delilah-core lib.rs (re-export) |
 | WP-02 | 2 | 2A | done | 1 | 8286607 | |
 | WP-03 | 2 | 2B | done | 1 | c472b6b | proposals.rs untouched (goes through build_task) |
-| WP-04 | 3 | 3A | verified | 1 | bd30a70 | store.rename_from_spec added (atomic, WHERE initial) |
-| WP-05 | 3 | 3A | verified | 1 | 2b5996b | run early with 2A (no deps) |
-| WP-06 | 4 | 4A | verified | 1 | PENDING | parent root not dirty-checked in branchless use_checkout (submodules only) |
+| WP-04 | 3 | 3A | done | 1 | bd30a70 | store.rename_from_spec added (atomic, WHERE initial) |
+| WP-05 | 3 | 3A | done | 1 | 2b5996b | run early with 2A (no deps) |
+| WP-06 | 4 | 4A | verified | 1 | 5e05d63 | parent root not dirty-checked in branchless use_checkout (submodules only) |
 | WP-10 | 4 | 4A | verified | 1 | 98a3637 | run early; alerts.ts allowed by user |
-| WP-07 | 4 | 4B | pending | 0 | | |
-| WP-09 | 4 | 4B | pending | 0 | | |
+| WP-07 | 4 | 4B | implementing | 0 | | |
+| WP-09 | 4 | 4B | verified | 1 | PENDING | no delilah-git change needed |
 | WP-08 | 4 | 4C | pending | 0 | | |
 | WP-11 | 5 | 5A | pending | 0 | | |
 | WP-12 | 5 | 5B | pending | 0 | | quickstart walk via ui-verifier |
@@ -40,3 +40,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | spec-compliance | LOW | title-only PATCH with an unchanged title still makes a spec title manual and clears previous_title (API/CLI) | crates/delilah-daemon/src/api.rs:369 |
 | 3 | spec-compliance | LOW | title editable / Restaurar shown on archived tasks (409 on save) | app/src/components/TaskScreen.tsx:518-545 |
 | 3 | spec-compliance | LOW | untested: PATCH archived → 409 at API level; retitle no-op on a Jira task with a new spec folder; title from a submodule's spec | api.rs, branching.rs |
+| 3 | ui-verifier | MEDIUM | No browser tools: header edit, Escape, Antes/Restaurar not checked in a real browser (API behaviour + auto-rename verified in preview; vitest passes) | app/src/components/TaskScreen.tsx |

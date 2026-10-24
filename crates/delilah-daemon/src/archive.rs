@@ -118,6 +118,10 @@ pub(crate) async fn archive_workspace(
         let Some(dir) = Workspace::home_of(&root, label) else {
             continue;
         };
+        // A task that never got a branch has none to delete.
+        if !ws.has_branch() {
+            continue;
+        }
         let leftover = LeftoverBranch {
             repo: label.clone(),
             branch: ws.branch.clone(),
