@@ -183,7 +183,7 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    `.sig`, checks the `Delilah.app.tar.gz` asset, uploads with `--clobber` and only
    then publishes it (`gh release edit --draft=false --latest`). A failed run leaves
    at most a draft; re-running the same tag is safe. tauri-action's own
-   `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 61).
+   `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 62).
 5. Installed apps check for it within 6 h (or at once with "Buscar actualizaciones…").
 
 **Rehearsal:** `make release-dry-run VERSION=X.Y.Z` (`scripts/release.sh`) runs the
@@ -210,7 +210,7 @@ and the lockfile refresh; for tests only).
    reinstall with a new key.
 
 **Bootstrap:** the updater only exists from the first release with it. Install that
-release (0.7.0) by hand, once per Mac: download the `.dmg` from the GitHub release,
+release (0.8.0) by hand, once per Mac: download the `.dmg` from the GitHub release,
 copy `Delilah.app` to `/Applications` and run
 `xattr -dr com.apple.quarantine /Applications/Delilah.app` (it is not signed with an
 Apple identity). From then on it updates itself.

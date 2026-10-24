@@ -328,7 +328,7 @@ restarts the existing daemon with the new binary (as in any install), which rewr
   - `alerts.ts`: Dock badge and notifications while the app is open.
   - `platform.ts`: the only Tauri imports, all dynamic, so the UI runs in a plain browser.
 - **Components:**
-  - `Sidebar`, `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
+  - `Sidebar` (a project's idea conversations share one "Ideas" row; `ideas.ts` `ideaToOpen` picks which one it opens), `InboxView` (Bandeja), `BoardView`, `TaskScreen` (tabs: task, sessions, Cambios, files) and `TaskView`;
   - `PrView` (the PR tab), `PrBadge`, `OpenPrDialog`, `ProjectSettings` (the settings screen), `SetupBanner`, `SpecPanel`, `ChangesView`, `FileTree`, `TerminalPane` (xterm.js), `JiraView`, `ProjectsView`, `ProjectView`;
   - `NewTaskDialog`, `BacklogTaskView`, `SettingsView`, `LogsView`, `QuickOpen` (⌘P), `AskCard`, `ProposalCard`, `AutopilotMark`, `PreviewControl`, `Markdown`.
 - **Editor:** `editor/` holds CodeMirror 6 and per-task tab state, kept in localStorage.

@@ -434,20 +434,26 @@ only if the answer arrived or the user typed. A blank template is not saved: the
 and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
 `branch.empty`.
 
+**59. The sidebar groups only idea conversations into "Ideas" (2026-10-23).** Read-only
+Claude sessions and terminals keep their own rows, their purpose differs. The "Ideas" row
+opens the waiting idea, else the one the project's screen last showed, else the newest;
+"newest" relies on the daemon listing sessions in creation order, since `Session` has no
+timestamp.
+
 ## Updates
 
-**59. Updates through the Tauri updater and GitHub Releases on the public repo (2026-10-24).**
+**60. Updates through the Tauri updater and GitHub Releases on the public repo (2026-10-24).**
 The app checks the latest release's `latest.json` and verifies the signature against
 a key baked into the build. The repo is public so no token ships in the app.
 - **Ruled out:** Sparkle (a second updater beside Tauri's, for the same job); a private repo with a token in the app (it would have to be embedded in every install).
 
-**60. Updates need the user's confirmation, with a session warning (2026-10-24).**
+**61. Updates need the user's confirmation, with a session warning (2026-10-24).**
 The notice says how many sessions are open and offers "Más tarde" and "Cuando
 terminen" (polls every 10 s). The count includes shell terminals on purpose: the
 relaunch restarts the daemon and stops them too.
 - **Ruled out:** a silent update, which would kill running agents without warning.
 
-**61. A release is a tag pushed to GitHub Actions; `make release` is the manual entry point (2026-10-24).**
+**62. A release is a tag pushed to GitHub Actions; `make release` is the manual entry point (2026-10-24).**
 The signing key lives in repository secrets, so a build never needs it on a Mac.
 `make release` bumps if needed, tags and pushes. The workflow builds as a draft and
 builds `latest.json` itself from the local `.sig`: tauri-action's own would carry
@@ -455,11 +461,11 @@ temporary `untagged-*` draft URLs. It publishes only after the asset is checked,
 failure leaves at most a draft.
 - **Ruled out:** a local-only release script (the key on the Mac, uploads by hand, nothing to re-run).
 
-**62. No Apple signing or notarisation for now (2026-10-24).**
+**63. No Apple signing or notarisation for now (2026-10-24).**
 Updates are authenticated by the Tauri key alone. The first install still clears the
 quarantine flag by hand. Revisit if Delilah is installed on Macs beyond the owner's.
 
-**63. A best-effort copy of the database before migrating (2026-10-24).**
+**64. A best-effort copy of the database before migrating (2026-10-24).**
 When the version changes, the daemon copies the database to `backups/delilah-<prev>.db`
 (keeps 3) before the migrations run, because they cannot be undone. A failed copy only
 warns: it must not stop Delilah from starting. A downgrade is treated like an upgrade.

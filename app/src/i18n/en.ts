@@ -417,6 +417,8 @@ export const EN: Record<string, string> = {
   "Guardando…": "Saving…",
   "Nueva tarea con Claude": "New task with Claude",
   "Nueva tarea con Claude en {name}": "New task with Claude in {name}",
+  "Ideas": "Ideas",
+  "Ideas de {name} ({n})": "Ideas in {name} ({n})",
   "Con Claude": "With Claude",
   "Tu idea": "Your idea",
   "Opcional: cuéntale a Claude qué quieres conseguir y lo convertís juntos en una tarea.": "Optional: tell Claude what you want to achieve and you will turn it into a task together.",
