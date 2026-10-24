@@ -856,7 +856,13 @@ mod tests {
             submodules: vec![],
         };
         let opts = GitOptions::default();
-        let mut ws = delilah_git::create_workspace(repo, &spec, &opts).unwrap();
+        let (mut ws, _) = delilah_git::create_workspace(
+            repo,
+            &spec,
+            &opts,
+            delilah_git::Deadline::after(delilah_git::NETWORK_LIMIT),
+        )
+        .unwrap();
         delilah_git::apply_branch(&ws.path, "feature/PROJ-1", &opts).unwrap();
         ws.branch = "feature/PROJ-1".into();
         app.store.save_workspace(&key, repo, &ws).await.unwrap();

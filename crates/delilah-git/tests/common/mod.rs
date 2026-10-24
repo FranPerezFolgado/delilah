@@ -41,7 +41,7 @@ impl Fixture {
     pub fn spec(&self, submodules: &[&str]) -> WorkspaceSpec {
         WorkspaceSpec {
             path: self.root.join("workspaces/PROJ-1234"),
-            branch: BRANCH.into(),
+            branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
             submodules: submodules.iter().map(|s| s.to_string()).collect(),
         }
@@ -64,7 +64,7 @@ impl Fixture {
     pub fn repo_spec(&self) -> WorkspaceSpec {
         WorkspaceSpec {
             path: self.root.join("workspaces/SIGNAL-12"),
-            branch: "feature/SIGNAL-12".into(),
+            branch: Some("feature/SIGNAL-12".into()),
             kind: ProjectKind::Repo,
             submodules: vec![],
         }

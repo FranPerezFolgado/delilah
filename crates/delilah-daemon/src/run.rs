@@ -30,15 +30,10 @@ use crate::store_prs::KIND_BASE_STALE;
 
 /// Logs where each repo's task branch started (the ref and the commit), and warns in
 /// the inbox for each repo whose fetch failed. Never fails the start. The warning's
-/// cause is the branch, which is new at every start, so a warning dismissed at one
-/// start still shows at the next.
-async fn report_bases(
-    app: &AppState,
-    key: &TaskKey,
-    project: &str,
-    branch: &str,
-    bases: &[RepoBase],
-) {
+/// cause is the moment of the start (a branchless task has no branch yet), so a
+/// warning dismissed at one start still shows at the next.
+async fn report_bases(app: &AppState, key: &TaskKey, project: &str, bases: &[RepoBase]) {
+    let started = format!("start {}", chrono::Utc::now().to_rfc3339());
     let mut warned = false;
     for b in bases {
         tracing::info!(task = %key, repo = %b.repo, base = %b.refname, sha = b.sha.as_deref().unwrap_or("-"), fetch = ?b.fetch, "task branch base");
@@ -61,7 +56,7 @@ async fn report_bases(
         let notice = NewNotice {
             repo: b.repo.clone(),
             kind: KIND_BASE_STALE.into(),
-            cause: branch.into(),
+            cause: started.clone(),
             text,
             detail: Some(serde_json::json!({
                 "refname": b.refname, "sha": b.sha, "reason": reason
@@ -476,7 +471,7 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
-    report_bases(&app, &key, &project.name, &ws.branch, &bases).await;
+    report_bases(&app, &key, &project.name, &bases).await;
     let launch = AgentLaunch {
         free: req.free,
         prompt,
@@ -1484,17 +1479,7 @@ mod tests {
         let n = &notices[0];
         assert_eq!(n.task_key, "PROJ-8");
         assert_eq!((n.kind.as_str(), n.repo.as_str()), ("base-stale", "."));
-        // The cause is the branch, new at every start: a dismissed warning comes back
-        // on the next start instead of being swallowed by the unique index.
-        let branch = app
-            .store
-            .workspace(&TaskKey::new("PROJ-8"))
-            .await
-            .unwrap()
-            .unwrap()
-            .1
-            .branch;
-        assert_eq!(n.cause, branch);
+        assert!(n.cause.starts_with("start "), "{}", n.cause);
         assert!(n.text.contains("stale"), "{}", n.text);
         assert!(n.text.contains("origin/main @ "), "{}", n.text);
         assert!(
@@ -1550,7 +1535,7 @@ mod tests {
             .finish();
         {
             let _guard = tracing::subscriber::set_default(subscriber);
-            report_bases(&app, &key, "platform", "feature/PROJ-5-x", &bases).await;
+            report_bases(&app, &key, "platform", &bases).await;
         }
 
         // Every repo's base is logged, warned or not.
@@ -1577,6 +1562,11 @@ mod tests {
             "{}",
             notices[0].text
         );
+        // Dismissed, it comes back at the next start: the cause is the start's moment,
+        // not swallowed by the unique index.
+        assert!(app.store.resolve_notice(notices[0].id).await.unwrap());
+        report_bases(&app, &key, "platform", &bases).await;
+        assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
         assert!(
             notices[0].text.contains("origin/main @ 0123456"),
             "{}",

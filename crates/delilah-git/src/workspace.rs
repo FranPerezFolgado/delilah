@@ -185,10 +185,12 @@ pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
 ///
 /// - `parent`: a worktree detached at the parent's fresh `origin` default branch, with
 ///   only `submodules` initialised, each on a new `branch` that starts at its own
-///   fresh `origin` default. Branches and PRs live in the submodules.
+///   fresh `origin` default (detached there when `branch` is `None`). Branches and
+///   PRs live in the submodules.
 /// - `repo`: a worktree of the repo on a new `branch` that starts at `origin`'s default
-///   branch, fetched first (bounded by `deadline`). No local branch moves and the new
-///   branch has no upstream. A failed fetch falls back to the last known `origin`.
+///   branch, fetched first (bounded by `deadline`); detached there when `branch` is
+///   `None`, so the branch made later starts fresh too. No local branch moves and the
+///   new branch has no upstream. A failed fetch falls back to the last known `origin`.
 ///
 /// Also returns the base each repo started from (`.` is the parent for `parent`).
 pub fn create_workspace(
@@ -215,19 +217,26 @@ pub fn create_workspace(
             }
             let base = prepare_base(root, ".", opts, deadline);
             let start = base.start().to_string();
-            git(
-                root,
-                &[
-                    "worktree",
-                    "add",
-                    "--no-track",
-                    "-b",
-                    &spec.branch,
-                    &ws_path,
-                    &start,
-                ],
-                opts,
-            )?;
+            match &spec.branch {
+                Some(branch) => git(
+                    root,
+                    &[
+                        "worktree",
+                        "add",
+                        "--no-track",
+                        "-b",
+                        branch,
+                        &ws_path,
+                        &start,
+                    ],
+                    opts,
+                )?,
+                None => git(
+                    root,
+                    &["worktree", "add", "--detach", &ws_path, &start],
+                    opts,
+                )?,
+            };
             bases.push(base);
         }
         ProjectKind::Parent => {
@@ -285,11 +294,16 @@ fn init_submodules(
         let dir = ws.join(sub);
         let base = prepare_base(&dir, sub, opts, deadline);
         let start = base.start().to_string();
-        git(
-            &dir,
-            &["checkout", "-q", "--no-track", "-b", &spec.branch, &start],
-            opts,
-        )?;
+        // Without a branch the submodule is detached at its fresh base, where the
+        // branch made later starts.
+        match &spec.branch {
+            Some(branch) => git(
+                &dir,
+                &["checkout", "-q", "--no-track", "-b", branch, &start],
+                opts,
+            )?,
+            None => git(&dir, &["checkout", "-q", "--detach", &start], opts)?,
+        };
         bases.push(base);
     }
     Ok(bases)
@@ -489,17 +503,21 @@ pub type Previous = Vec<(String, String)>;
 /// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
 /// while there are uncommitted changes (before any fetch). A new branch starts at the
 /// fresh `origin` default branch (see [`prepare_base`]) with no upstream; one that
-/// already exists is switched to as it is, never moved. Returns the workspace, per
-/// folder the branch (or commit) it was on, to go back there when the task is archived,
-/// and the base each folder's branch started from.
+/// already exists is switched to as it is, never moved. With no branch it switches
+/// and fetches nothing, and a parent's own checkout (`"."`) is recorded too, as a hook
+/// may switch it. Returns the workspace, per folder the branch (or commit) it was on,
+/// to go back there when the task is archived, and the base each folder's branch
+/// started from (none without a branch).
 pub fn use_checkout(
     root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
     deadline: Deadline,
 ) -> Result<(Workspace, Previous, Vec<RepoBase>), GitError> {
-    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
-        return Err(GitError::InvalidBranch(spec.branch.clone()));
+    if let Some(branch) = &spec.branch
+        && git(root, &["check-ref-format", "--branch", branch], opts).is_err()
+    {
+        return Err(GitError::InvalidBranch(branch.clone()));
     }
     let mut dirs = checkout_dirs(root, spec)?;
     for (location, dir) in &dirs {
@@ -509,8 +527,13 @@ pub fn use_checkout(
             });
         }
     }
+    if spec.branch.is_none() && spec.kind == ProjectKind::Parent {
+        dirs.push((".".into(), root.to_path_buf()));
+    }
     let mut previous: Previous = Vec::new();
     let mut bases: Vec<RepoBase> = Vec::new();
+    // The folders where this call created the branch, to delete it on a rollback.
+    let mut created: Vec<PathBuf> = Vec::new();
     for (location, dir) in &dirs {
         let was = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"], opts)
             .ok()
@@ -532,11 +555,11 @@ pub fn use_checkout(
         )
         .is_ok();
         let switched = if exists {
-            git(dir, &["checkout", "-q", &spec.branch], opts)
+            git(dir, &["checkout", "-q", branch], opts)
                 .and_then(|_| git(dir, &["rev-parse", "HEAD"], opts))
                 .map(|sha| RepoBase {
                     repo: location.clone(),
-                    refname: spec.branch.clone(),
+                    refname: branch.clone(),
                     sha: Some(sha),
                     fetch: FetchOutcome::Existing,
                 })
@@ -545,7 +568,7 @@ pub fn use_checkout(
             let start = base.start().to_string();
             git(
                 dir,
-                &["checkout", "-q", "--no-track", "-b", &spec.branch, &start],
+                &["checkout", "-q", "--no-track", "-b", branch, &start],
                 opts,
             )
             .map(|_| base)
@@ -554,21 +577,23 @@ pub fn use_checkout(
             Ok(base) => base,
             Err(e) => {
                 // Leave nothing half-switched behind, and no branch this call made.
-                for ((loc, back), base) in previous.iter().zip(&bases) {
+                for (loc, back) in &previous {
                     let d = if loc == "." {
                         root.to_path_buf()
                     } else {
                         root.join(loc)
                     };
-                    if git(&d, &["checkout", "-q", back], opts).is_ok()
-                        && base.fetch != FetchOutcome::Existing
-                    {
-                        let _ = git(&d, &["branch", "-D", &spec.branch], opts);
-                    }
+                    let _ = git(&d, &["checkout", "-q", back], opts);
+                }
+                for d in &created {
+                    let _ = git(d, &["branch", "-D", branch], opts);
                 }
                 return Err(e);
             }
         };
+        if base.fetch != FetchOutcome::Existing {
+            created.push(dir.clone());
+        }
         bases.push(base);
         previous.push((location.clone(), was));
     }

@@ -470,14 +470,33 @@ When the version changes, the daemon copies the database to `backups/delilah-<pr
 (keeps 3) before the migrations run, because they cannot be undone. A failed copy only
 warns: it must not stop Delilah from starting. A downgrade is treated like an upgrade.
 
+## Task name and branch from the analysis
+
+**65. The branch of a free task comes from the first analysis; the title is replaced once
+(2026-10-24).** Supersedes #37 and #49 only for a free task with no typed branch and no
+project template. Precedence at a start: a branch typed in the request, then the
+project's template (#49), then, for a free task, no branch at all (this decision), else
+#37's proposal (Jira tasks, `feature/<KEY>-<short-name>`). Only that third case is
+branchless; the others behave as before. A free task used to start on
+`feature/<short-name>` (#37 dropped the `LIBRE-n` from the name, which Spec Kit's own
+branch then duplicated). Now it starts without a branch and takes
+the one named like the spec folder ([research](../specs/005-task-name-from-spec/research.md)).
+- **Scope of the branch steps:** only a task that *started* branchless (a durable mark, `workspaces.started_branchless`) gets adopt/create/guard/retry. A free task that started on a typed or template branch keeps it for good (#37: never switched or renamed): even if Spec Kit's hook checks out its own branch, Delilah touches no git for it; only the retitle below applies to it.
+- **Baseline:** the spec folders present at start are read after the shared entries are linked, and again (union) when the setup command ends, so a shared or generated folder is not mistaken for the analysis.
+- **Branch:** adopted if Spec Kit's `before_specify` hook made it, else created by Delilah from the spec folder; the task's title as a slug only when the guard needs a branch and there is no spec yet. A taken name gets `-2`, `-3`. A provisional branch renamed later was ruled out: the hook would have created a second one.
+- **The worktree folder keeps the key** (`workspaces/<KEY>`): moving it under a running agent was ruled out. Jira tasks (`feature/<KEY>-<short-name>`) and tasks started before keep their branch.
+- **Guard:** a PreToolUse hook makes the branch before the first code edit, commit, push, merge, rebase or PR, so nothing lands on the base. Failing closed (deny with the reason) was chosen over letting the edit through. It is best-effort: substring match on commands, symlinks not resolved; a full shell parser was judged not worth it.
+- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restaurar" brings it back. Any manual edit (`title_source = manual`) is final.
+
 ## Fresh task bases
 
-**65. Task branches start from `origin`'s default branch, just fetched.** Before, a
+**66. Task branches start from `origin`'s default branch, just fetched.** Before, a
 branch started from whatever the folder had checked out, often a stale `main`.
 - Delilah fetches `origin` and starts the branch at the resolved default's **sha**, so it has no upstream to pull or push by mistake. The default is `origin/HEAD`'s target, then `origin/main`, `origin/master`, `main`, `master`, `HEAD`.
 - **A failed fetch warns and continues:** the task starts from the last known `origin` state, with a `base-stale` notice. A repo with no origin gets none. One 30 s deadline covers the whole start.
 - **Local `main` is never fast-forwarded:** it is the user's, and may hold unpushed work.
 - **Ruled out:** a per-project base branch (out of scope for now); blocking the start on a failed fetch (offline work must still start).
-- **Why `pr_notices` was reused** for the warning: it already gives a Bandeja item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the branch, so each start can warn again.
+- **Why `pr_notices` was reused** for the warning: it already gives a Bandeja item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the moment of the start, so each start can warn again.
 - **The warning notifies but does not block:** it raises a desktop notification like any new item, and is not in `BLOCKING`, since the task goes on.
 - **The repo's own config is trusted during the fetch** (`core.sshCommand`, credential helpers, `insteadOf`): it is the same config the user's own `git fetch` runs, and an agent able to write it can already run anything as the user. What Delilah adds is that nothing may ask: no terminal prompt, no askpass, no interactive credential helper, and a 30 s limit.
+- **A branchless start (65)** gets the fresh base too: its worktree, and each chosen submodule, is detached there, so the branch the first analysis makes starts from it. A branchless start in checkout mode fetches and switches nothing (the folder is the user's, and #65 leaves it as it is), so its branch starts from where the folder is.

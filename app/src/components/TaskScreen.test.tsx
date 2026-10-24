@@ -8,12 +8,13 @@ import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "updateTask" ? updateTask : name === "setAutopilot" ? setAutopilot : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -314,5 +315,49 @@ describe("TaskScreen base-stale banner", () => {
   it("has no banner without notices", () => {
     const { container } = screenWith([]);
     expect(container.querySelector(".base-stale")).toBeNull();
+  });
+});
+
+describe("TaskScreen editable title", () => {
+  const edit = (t: Task) => {
+    const h = head(t);
+    fireEvent.click(h.querySelector("h1")!);
+    return screen.getByRole("textbox") as HTMLInputElement;
+  };
+
+  it("saves the new title with Enter", () => {
+    const input = edit(task({ type: "running" }));
+    fireEvent.change(input, { target: { value: "Better name" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { title: "Better name" });
+  });
+
+  it("cancels with Escape", () => {
+    const input = edit(task({ type: "running" }));
+    fireEvent.change(input, { target: { value: "Other" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(document.querySelector("h1")!.textContent).toBe("A task");
+  });
+
+  it("refuses an empty title", () => {
+    const input = edit(task({ type: "running" }));
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it("offers to restore the previous title", () => {
+    const h = head({ ...task({ type: "running" }), title_source: "spec", previous_title: "Old name" });
+    expect(h.textContent).toContain("Antes: Old name");
+    fireEvent.click(screen.getByText("Restaurar"));
+    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { title: "Old name" });
+  });
+
+  it("shows no restore without a previous title", () => {
+    const h = head(task({ type: "running" }));
+    expect(h.textContent).not.toContain("Antes:");
+    expect(screen.queryByText("Restaurar")).toBeNull();
   });
 });

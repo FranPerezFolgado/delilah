@@ -21,6 +21,7 @@ const SAYS: Record<InboxKind, string> = {
   "pr-review": "comentarios en la PR",
   "pr-blocked": "no se pudo archivar",
   "base-stale": "rama posiblemente atrasada",
+  branch: "no se pudo crear la rama",
   autopilot: "autopiloto en pausa",
 };
 

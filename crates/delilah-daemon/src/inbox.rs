@@ -314,14 +314,8 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         });
         if let Some(err) = t.branch_error.as_ref().filter(|_| !t.status.is_terminal()) {
             items.push(InboxItem {
-                kind: ItemKind::Branch,
-                task: key.to_string(),
-                title: t.title.clone(),
-                session: None,
                 text: Some(err.clone()),
-                since: None,
-                ask: None,
-                pr: None,
+                ..InboxItem::new(ItemKind::Branch, key.to_string(), t.title.clone())
             });
         }
         for (kind, text, event) in found.into_iter().chain(review) {

@@ -226,6 +226,38 @@ describe("InboxView base-stale", () => {
   });
 });
 
+describe("InboxView branch item", () => {
+  const branch: InboxItem = { ...item, kind: "branch", text: "no remote", pr: undefined };
+
+  it("shows the error and retries the branch", async () => {
+    const retry = vi.spyOn(api, "retryBranch").mockResolvedValue({} as Task);
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    expect(screen.getByText("The branch could not be created: no remote")).toBeTruthy();
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(retry).toHaveBeenCalledWith("PROJ-1");
+  });
+
+  it.each([404, 409])("refreshes the list when the retry gets a %i, and keeps the error", async (status) => {
+    vi.spyOn(api, "retryBranch").mockRejectedValue(new ApiError("the task is on its branch already", status));
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("the task is on its branch already")).toBeTruthy();
+  });
+
+  it("does not refresh on other failures of the retry", async () => {
+    vi.spyOn(api, "retryBranch").mockRejectedValue(new ApiError("boom", 500));
+    const onChanged = vi.fn();
+    render(<InboxView items={[branch]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+});
+
 describe("InboxView autopilot items", () => {
   const ap: InboxItem = { ...item, kind: "autopilot", text: "The review keeps failing", pr: undefined };
   const viewAp = (onChanged = () => {}) =>

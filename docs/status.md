@@ -31,7 +31,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - Live updates over WebSocket, the Dock badge, and notifications.
 
 **Fresh task bases:**
-- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 65.
+- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 66.
 
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.
@@ -101,7 +101,9 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
   - parent worktrees still need the network to init submodules;
   - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
   - git and ssh never prompt (no terminal, no askpass, `credential.interactive=never`), but a macOS keychain access dialog raised by a credential helper still can, bounded by the 30 s deadline;
-  - the fetch lock lives in the git crate (process-wide), not in the daemon's state.
+  - the fetch lock lives in the git crate (process-wide), not in the daemon's state;
+  - a branchless task in checkout mode is not rebased: its branch starts from where the folder is (decision 66).
+- **Branch guard is best-effort:** it matches substrings of Bash commands and does not resolve symlinks, so an unusual command can write before the branch exists.
 - **End-to-end tests, pending and known:**
   - the UI quick-open test covers the file quick open (the UI has no task switcher);
   - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
