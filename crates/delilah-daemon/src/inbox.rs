@@ -145,6 +145,8 @@ pub enum ItemKind {
     SuggestReview,
     /// Archiving the task left a PR behind (blocked or partial).
     PrBlocked,
+    /// A task's branch started from a base that could not be refreshed.
+    BaseStale,
     Paused,
     Failed,
 }
@@ -172,6 +174,9 @@ pub struct InboxItem {
     /// The PR notice this item stands for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr: Option<InboxPr>,
+    /// The notice this item stands for, when it has no PR (e.g. a stale base).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -228,6 +233,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 proposal: ask.proposal,
             }),
             pr: None,
+            notice: None,
         });
     }
 
@@ -263,6 +269,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             since: Some(attention.since),
             ask: None,
             pr: None,
+            notice: None,
         });
     }
 
@@ -315,6 +322,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 since: last_event(&app, t, event).await,
                 ask: None,
                 pr: None,
+                notice: None,
             });
         }
     }
@@ -378,6 +386,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             since: None,
             ask: None,
             pr: None,
+            notice: None,
         });
     }
 
@@ -429,6 +438,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             since: None,
             ask: None,
             pr: None,
+            notice: None,
         });
     }
 
@@ -437,6 +447,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             "ci-failed" => ItemKind::PrFailed,
             "changes-requested" | "comments" => ItemKind::PrReview,
             KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
+            crate::run::KIND_BASE_STALE => ItemKind::BaseStale,
             _ => continue,
         };
         let Some(t) = task(&n.task_key) else {
@@ -450,6 +461,20 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
             && t.status.is_terminal()
             && app.store.workspace(&t.key).await?.is_none()
         {
+            continue;
+        }
+        if n.kind == crate::run::KIND_BASE_STALE {
+            items.push(InboxItem {
+                kind,
+                task: n.task_key,
+                title: t.title.clone(),
+                session: None,
+                text: Some(n.text),
+                since: Some(n.created_at),
+                ask: None,
+                pr: None,
+                notice: Some(n.id),
+            });
             continue;
         }
         // An unlinked PR resolves its notices; one still open without its PR is stale.
@@ -471,6 +496,7 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
                 url: pr.url.clone(),
                 repo: n.repo,
             }),
+            notice: None,
         });
     }
 
@@ -810,6 +836,95 @@ mod tests {
         let json = serde_json::to_value(failed).unwrap();
         assert_eq!(json["kind"], "pr-failed");
         assert_eq!(json["pr"]["notice"], pr.notice);
+    }
+
+    async fn stale_task() -> AppState {
+        use crate::store_prs::NewNotice;
+        let app = app_with_pr_task().await;
+        // No PR: a stale base is about the task, not a PR.
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        app.store.unlink_pr(row.id).await.unwrap();
+        app.store
+            .insert_notice(
+                &key,
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: "base-stale".into(),
+                    cause: "start".into(),
+                    text: "stale text".into(),
+                    detail: None,
+                },
+            )
+            .await
+            .unwrap();
+        app
+    }
+
+    #[tokio::test]
+    async fn a_base_stale_notice_is_an_item_without_pr_until_dismissed() {
+        let app = stale_task().await;
+        let Ok(Json(items)) = list(State(app.clone())).await else {
+            panic!("the inbox failed");
+        };
+        let stale: Vec<_> = items
+            .iter()
+            .filter(|i| i.kind == ItemKind::BaseStale)
+            .collect();
+        assert_eq!(stale.len(), 1, "{items:?}");
+        let item = stale[0];
+        let id = app.store.open_notices().await.unwrap()[0].id;
+        assert_eq!(item.notice, Some(id));
+        assert!(item.pr.is_none());
+        assert_eq!(item.text.as_deref(), Some("stale text"));
+        let json = serde_json::to_value(item).unwrap();
+        assert_eq!(json["kind"], "base-stale");
+        assert_eq!(json["notice"], id);
+        assert!(json.get("pr").is_none());
+
+        let status = crate::pr_api::dismiss(State(app.clone()), axum::extract::Path(id))
+            .await
+            .map_err(|e| e.status);
+        assert_eq!(status, Ok(axum::http::StatusCode::NO_CONTENT));
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        assert!(
+            items.iter().all(|i| i.kind != ItemKind::BaseStale),
+            "{items:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn archiving_resolves_the_base_stale_notice_and_other_items_have_no_notice_key() {
+        let app = stale_task().await;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        app.store
+            .apply_event(&key, delilah_core::Event::MarkDone, chrono::Utc::now())
+            .await
+            .unwrap();
+        let Ok(Json(items)) = list(State(app.clone())).await else {
+            panic!("the inbox failed");
+        };
+        assert!(
+            items.iter().all(|i| i.kind != ItemKind::BaseStale),
+            "{items:?}"
+        );
+        app.store.resolve_all_notices_of_task(&key).await.unwrap();
+        assert!(app.store.open_notices().await.unwrap().is_empty());
+
+        let plain = InboxItem {
+            kind: ItemKind::Waiting,
+            task: "PROJ-1".into(),
+            title: "t".into(),
+            session: None,
+            text: None,
+            since: None,
+            ask: None,
+            pr: None,
+            notice: None,
+        };
+        assert!(serde_json::to_value(plain).unwrap().get("notice").is_none());
     }
 
     #[tokio::test]

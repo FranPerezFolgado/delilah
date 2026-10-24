@@ -389,7 +389,6 @@ impl Store {
 
     /// Adds a notice unless the same (task, repo, kind, cause) exists; whether it was
     /// new.
-    #[allow(dead_code)] // used by the API in the next packages
     pub(crate) async fn insert_notice(
         &self,
         key: &TaskKey,

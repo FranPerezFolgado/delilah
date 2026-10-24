@@ -10,7 +10,7 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | WP-02 | 2 | 2A | done | 1 | ec9e4ce | |
 | WP-03 | 3 | 3A | done | 1 | d44308e | |
 | WP-04 | 4 | 4A | done | 1 | bf44eba | |
-| WP-05 | 5 | 5A | implementing | 0 | | parallel with WP-06 |
+| WP-05 | 5 | 5A | verified | 1 | 1b0ab31 | parallel with WP-06 |
 | WP-06 | 6 | 6A | implementing | 0 | | parallel with WP-05 |
 | WP-07 | 6 | 6A | verified | 1 | 5845a13 | started early, UI only |
 | WP-08 | 7 | 7A | pending | 0 | | |
