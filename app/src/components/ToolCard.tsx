@@ -19,7 +19,9 @@ export function ToolCard({ entry, sessionId, onOpenFile }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const input = full?.input ?? entry.input;
+  // A truncated or malformed tool_use line may come without an input object.
+  const raw: unknown = full?.input ?? entry.input;
+  const input: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const result = full ? full.result : entry.result;
   const pending = entry.result === null;
   const truncated = entry.truncated && !full;
@@ -76,7 +78,8 @@ export function ToolCard({ entry, sessionId, onOpenFile }: Props) {
       case "Read": {
         const offset = typeof input.offset === "number" ? input.offset : null;
         const limit = typeof input.limit === "number" ? input.limit : null;
-        const range = offset === null && limit === null ? null : `${offset ?? 1}-${limit === null ? "" : (offset ?? 1) + limit}`;
+        // `offset` is the first line read, `limit` how many: 10 and 5 are lines 10-14.
+        const range = offset === null && limit === null ? null : `${offset ?? 1}-${limit === null ? "" : (offset ?? 1) + limit - 1}`;
         return (
           <div className="tool-path">
             <span className="mono selectable trunc">{path}</span>

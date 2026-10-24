@@ -42,6 +42,10 @@ delilah run SIGNAL-13     # starts the backlog task in its project; its notes re
 delilah new SIGNAL-14 --project signal --title "Feed cache" --worktree   # --checkout or --worktree; neither: the project's setting
 delilah run SIGNAL-13 --checkout   # same flags; neither: the backlog task's choice, else the project's setting
 
+# Chat mode (experimental): the agent runs without a terminal, the conversation is the only view
+delilah run SIGNAL-15 --project signal --title "Feed tags" --chat   # also on `delilah new`
+delilah runtime SIGNAL-15 terminal   # move a task's agent to the terminal and back (chat | terminal)
+
 # Per-project settings (see "Project settings" below)
 delilah project show signal                          # effective settings, defaults marked
 delilah project set signal workspace worktree        # checkout | worktree
@@ -167,9 +171,36 @@ for Delilah itself, `scripts/preview.sh`). "Lanzar" in a task's header runs it i
 task's workspace, shows the URL it prints and "Parar" stops it; it also stops when the
 task ends. A restart of the daemon does not bring a preview back.
 
+**Chat view and chat mode (experimental).** Every Claude session of a task has a Chat /
+Terminal switch above its tabs; the chat shows your messages, Claude's replies, tool
+cards (commands, diffs, file reads; click one for its full input and result), question
+cards and a text field, and queues what you write while Claude works ("Detener"
+interrupts). The "Vista" field of a task (and of the new task dialog) only sets which one
+opens first.
+
+Chat mode goes further: with "Modo chat (experimental)" in the new task dialog or
+`--chat` on `delilah new` / `delilah run`, the task's Claude runs without a terminal
+(`claude -p` with a stream), so its text appears as it is written. Hooks still drive
+the task's state, the Bandeja, usage-limit pauses, saving mode, autopilot and the PR
+flow. There is no terminal in that mode (`delilah attach` says so). "Pasar a terminal"
+in the task header (or `delilah runtime <KEY> terminal`; `chat` goes back) restarts the
+agent in the other runtime with `--resume`, keeping the conversation; it is refused
+while the agent works or waits for you (wait, or press "Detener"). Project sessions and
+idea conversations always use the terminal.
+
+When a chat-mode agent needs a permission it shows a "¿Permitir?" card (also in the
+Bandeja) with the tool and what it will do: "Permitir una vez", "Denegar" (with an
+optional reason that Claude is told) or "Permitir siempre en esta tarea". The last one is
+remembered per task, for all its sessions (autopilot included), and only for bounded
+rules: a command from a short list of safe ones (`git status`, `ls`, `cargo test`…) with
+plain arguments inside the workspace (no quoting, chaining, `-exec`-style flags or paths
+outside it), otherwise that exact command; the exact file for an edit; the exact host for
+a web fetch. When no safe rule exists the card offers only "Permitir una vez". Anything
+else asks again.
+
 **Bandeja.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
-it right there), a permission it needs (answered in its terminal), a failed turn,
+it right there), a permission it needs (answered in its terminal, or with the "¿Permitir?" card for a task in chat mode), a failed turn,
 tasks ready for review, paused by the usage limit (with "Reanudar ahora") or failed.
 Each item opens the task on the right tab. The sidebar counts what blocks an
 agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,

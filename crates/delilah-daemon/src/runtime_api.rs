@@ -7,7 +7,7 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use delilah_core::TaskKey;
+use delilah_core::{TaskKey, TaskView};
 use serde::Deserialize;
 
 use crate::api::ApiError;
@@ -44,12 +44,13 @@ async fn set_runtime_with(
     body: SetRuntime,
     settle: Duration,
 ) -> Result<StatusCode, ApiError> {
-    let chat = match body.mode.as_str() {
-        "chat" => true,
-        "terminal" => false,
-        other => {
+    // The same words as the task's view; the runtime is `chat_mode`.
+    let chat = match TaskView::parse(&body.mode) {
+        Some(view) => view == TaskView::Chat,
+        None => {
             return Err(ApiError::bad_request(format!(
-                "unknown mode {other:?}: use \"chat\" or \"terminal\""
+                "unknown mode {:?}: use \"chat\" or \"terminal\"",
+                body.mode
             )));
         }
     };

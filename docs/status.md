@@ -40,6 +40,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
 - "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). The sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea. See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md), [#59](decisions.md).
 
+**Chat view and chat mode (experimental):**
+- Every Claude session of a task or project has a chat view next to the terminal (the "Vista" of the task and a Chat / Terminal switch per session): your messages, Claude's text, tool cards (Bash, Edit/Write diffs, Read, Glob…, the full input and result on demand) and question cards, built from the session's transcript; a text field with queued messages and "Detener". `tasks.view` only sets what opens first.
+- Chat mode runs a task's Claude on `claude -p` with stream-json in and out instead of a PTY (`delilah new/run --chat`, "Modo chat (experimental)" in the dialogs, `tasks.chat_mode`). Claude's text appears live over `GET /sessions/{id}/live`; hooks still drive states, phases, Bandeja, usage limits (from `rate_limit_event`), saving mode, autopilot and the PR flow. No terminal in that mode (409 on the terminal routes, `delilah attach` says why).
+- "¿Permitir?" cards (conversation and Bandeja) answered by Delilah: "Permitir una vez", "Permitir siempre en esta tarea" (only when a bounded rule exists; remembered in `tasks.allowed_tools`, see [ADR-001](adr/ADR-001-chat-mode-allow-always-allowlist.md)) and "Denegar" with a reason. Bash prefix rules are applied only by the daemon, only to chat-mode requests, and only for bounded arguments.
+- Switch between chat mode and the terminal keeping the conversation (`delilah runtime <KEY> chat|terminal`, "Pasar a terminal" / "Pasar a modo chat"), refused while the agent works or waits. See decisions [#67](decisions.md) and [architecture.md](architecture.md#chat-mode).
+
 **PR loop:**
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
 - A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
@@ -115,11 +121,19 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
   - next step: `vX.Y.Z-rc.N` tags published as GitHub prereleases (no `--latest`, so `releases/latest` and installed apps ignore them) to rehearse the pipeline. Needs the workflow to accept `-rc` tags and publish with `--prerelease`, and `check.mjs`, `manifest.mjs` and `versions.mjs` to accept the suffix. No update channel in the app: one fixed endpoint;
   - third-party actions are pinned to major tags, not SHAs.
 - **Idea conversations, still missing:**
-  - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
+  - the idea conversation itself still runs in a PTY and shows no live text (chat mode covers task sessions only);
   - deleting conversations (the history is kept for good);
   - the usage-limit notice does not show in the conversation view;
   - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
   - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
+- **Chat mode, limits and known problems:**
+  - experimental: a stuck chat-mode agent has no terminal; switch back with `delilah runtime <KEY> terminal` (refused mid-turn: press "Detener" first);
+  - only task Claude sessions: project sessions, idea conversations and shells always use a PTY;
+  - the stream-json input protocol is thinly documented and may change between Claude versions; the transcript format is not a public contract (unknown lines are skipped);
+  - `Notification` and `StopFailure` hooks, and the `rate_limit_event` status when a limit is hit, were not observed in print mode; the status line does not run there; `--remote-control` is hidden;
+  - "Permitir siempre" is bounded on purpose (more prompts: `npm install x` is remembered only as that exact command); allowlisted prefixes take only workspace-relative paths (`is_safe_prefix_tail`), but `cargo`/`npm`/`go`/`make test|build` run the repo's own code; there is no view to review or revoke a task's remembered rules; rules stored before the allowlist that no longer pass are ignored;
+  - images show as a placeholder; thinking blocks and a sub-agent's inner steps are not shown;
+  - the API has no token: any local process without an `Origin` can type into a session or answer a permission.
 - **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).
 - **Saving mode, known problems:**
   - the old live session keeps `primary = true` in memory until it exits (~3 s);

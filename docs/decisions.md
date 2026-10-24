@@ -124,7 +124,7 @@ the task starts.
 
 **36. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
 of plan mode; a plugin passed to project-owned sessions.**
-- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY.
+- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY. (Done later as an opt-in chat mode for task sessions: see [#67](decisions.md).)
 - **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#34](decisions.md) for the allow list.
 - **A session-only plugin.** The `task-from-idea` skill ships in `<home>/plugins/delilah`, passed with `--plugin-dir` to project-owned sessions only (task sessions never get it), so nothing is installed in the user's Claude.
 - **Spike findings** (`specs/004-task-from-idea/research.md`, claude 2.1.292):

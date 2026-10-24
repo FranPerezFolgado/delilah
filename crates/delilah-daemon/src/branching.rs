@@ -423,13 +423,30 @@ pub(crate) async fn ensure_locked(
 const GUARD_BUDGET: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// Commands that publish or move work: they need the branch as much as an edit does.
-const GUARDED_COMMANDS: [&str; 5] = [
-    "git commit",
-    "git push",
-    "gh pr create",
-    "git merge",
-    "git rebase",
-];
+const GUARDED_GIT: [&str; 4] = ["commit", "push", "merge", "rebase"];
+
+/// Whether a shell command commits, pushes, merges, rebases or opens a PR, also behind
+/// git's global options (`git -C dir commit`, `git -c k=v commit`), extra spaces, quotes
+/// or a chain (`a && git commit`). It errs on the side of yes: the guard only makes the
+/// branch earlier.
+fn lands_work(command: &str) -> bool {
+    command
+        .split([';', '&', '|', '\n', '\r', '(', ')', '`'])
+        .any(|simple| {
+            let words: Vec<&str> = simple
+                .split_whitespace()
+                .map(|w| w.trim_matches(['\'', '"']))
+                .collect();
+            words.iter().enumerate().any(|(i, w)| {
+                let rest = &words[i + 1..];
+                match w.rsplit('/').next().unwrap_or(w) {
+                    "git" => rest.iter().any(|r| GUARDED_GIT.contains(r)),
+                    "gh" => rest.windows(2).any(|p| p == ["pr", "create"]),
+                    _ => false,
+                }
+            })
+        })
+}
 
 /// `a/./b/../c` as `a/c`, without touching the disk.
 fn normalize(path: &Path) -> PathBuf {
@@ -483,9 +500,7 @@ fn needs_branch(ws: &Workspace, hook: &Value) -> bool {
         Some("NotebookEdit") => input["notebook_path"]
             .as_str()
             .is_none_or(|f| is_repo_work(ws, f)),
-        Some("Bash") => input["command"]
-            .as_str()
-            .is_some_and(|c| GUARDED_COMMANDS.iter().any(|g| c.contains(g))),
+        Some("Bash") => input["command"].as_str().is_some_and(lands_work),
         _ => false,
     }
 }
@@ -1362,6 +1377,27 @@ mod tests {
             assert_eq!(on(&root), "mi-idea", "{tool} {input}");
             assert_eq!(on(&root.join("api")), "mi-idea");
             assert_eq!(ws_branch(&app, &key).await, "mi-idea");
+        }
+    }
+
+    #[test]
+    fn landing_commands_are_seen_behind_globals_spacing_and_chains() {
+        for yes in [
+            "git commit -m x",
+            "git -C api commit -m x",
+            "git -c user.name=x commit",
+            "git  commit",
+            "git\tcommit",
+            "/usr/bin/git push",
+            "cd api && git commit -am x",
+            "echo ok; git rebase main",
+            "gh -R o/r pr create --fill",
+            "'git' 'push'",
+        ] {
+            assert!(lands_work(yes), "{yes:?}");
+        }
+        for no in ["git status", "git diff --stat", "gh pr view", "echo commit"] {
+            assert!(!lands_work(no), "{no:?}");
         }
     }
 

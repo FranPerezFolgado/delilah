@@ -55,8 +55,10 @@ async fn relay(mut socket: WebSocket, mut events: broadcast::Receiver<StreamEven
                     Ok(StreamEvent::MessageDone { message, .. }) => {
                         json!({ "message": message, "done": true })
                     }
+                    // Deltas were dropped: the client drops its partial text and reloads.
+                    Err(RecvError::Lagged(_)) => json!({ "reset": true }),
                     Ok(StreamEvent::Exited { .. }) | Err(RecvError::Closed) => break,
-                    Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                    Ok(_) => continue,
                 };
                 if socket.send(Message::Text(text.to_string().into())).await.is_err() {
                     return;

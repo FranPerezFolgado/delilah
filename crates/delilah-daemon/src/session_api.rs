@@ -4,6 +4,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use delilah_agents::runtime::RuntimeKind;
 use delilah_core::TaskKey;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,7 @@ pub struct SessionView {
     pub state: Option<LiveState>,
     /// `"stream"` for a chat-mode agent, else `"pty"`: what is running, or what a
     /// launch would use (the task's flag; project sessions are always terminals).
-    pub runtime: &'static str,
+    pub runtime: RuntimeKind,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,7 +170,14 @@ async fn open_for(
             .await?;
     }
     app.emit(Topic::Sessions);
-    launch_session(app, &record, &ws.path, prompt, false).await?;
+    if let Err(e) = launch_session(app, &record, &ws.path, prompt, false).await {
+        // A chat-mode agent can fail to come up: no dead tab is left behind.
+        if let Err(err) = app.store.forget_session(&record.id).await {
+            tracing::warn!(session = %record.id, "cannot forget the failed session: {err}");
+        }
+        app.emit(Topic::Sessions);
+        return Err(e);
+    }
     Ok((StatusCode::CREATED, Json(view(app, record).await)))
 }
 
@@ -294,22 +302,19 @@ async fn view(app: &AppState, record: SessionRecord) -> SessionView {
     }
 }
 
-/// `"stream"` or `"pty"`: what the session runs now, or what a launch would use.
+/// What the session runs now, or what a launch would use.
 pub(crate) async fn runtime_name(
     app: &AppState,
     record: &SessionRecord,
     live: Option<&crate::sessions::Live>,
-) -> &'static str {
-    let stream = match live.filter(|l| !l.runtime.has_exited()) {
-        Some(l) => l.runtime.as_stream().is_some(),
-        None => {
-            crate::run::runtime_kind(app, record)
-                .await
-                .unwrap_or(delilah_agents::runtime::RuntimeKind::Pty)
-                == delilah_agents::runtime::RuntimeKind::Stream
-        }
-    };
-    if stream { "stream" } else { "pty" }
+) -> RuntimeKind {
+    match live.filter(|l| !l.runtime.has_exited()) {
+        Some(l) if l.runtime.as_stream().is_some() => RuntimeKind::Stream,
+        Some(_) => RuntimeKind::Pty,
+        None => crate::run::runtime_kind(app, record)
+            .await
+            .unwrap_or(RuntimeKind::Pty),
+    }
 }
 
 #[cfg(test)]
@@ -470,7 +475,7 @@ mod tests {
             conversation: false,
             step: None,
         };
-        assert_eq!(view(&app, project).await.runtime, "pty");
+        assert_eq!(view(&app, project).await.runtime, RuntimeKind::Pty);
     }
 
     #[tokio::test]

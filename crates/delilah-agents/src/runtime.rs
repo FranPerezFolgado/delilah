@@ -17,7 +17,9 @@ const PTY_ROWS: u16 = 40;
 /// Pause between the text and Enter, so the TUI takes the Enter as a key press.
 const ENTER_DELAY: Duration = Duration::from_millis(300);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// On the wire (`SessionView.runtime`): `"pty"` or `"stream"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RuntimeKind {
     Pty,
     Stream,

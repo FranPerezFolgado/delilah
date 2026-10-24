@@ -91,7 +91,15 @@ describe("ToolCard", () => {
     const r = setup(tool({ tool: "Read", summary: "leer", input: { file_path: "src/b.ts", offset: 10, limit: 5 }, result: "x" }));
     open(r, "leer");
     expect(r.getByText("src/b.ts")).toBeTruthy();
-    expect(r.getByText("10-15")).toBeTruthy();
+    expect(r.getByText("10-14")).toBeTruthy();
+  });
+
+  it("a tool call without an input still renders", () => {
+    for (const name of ["Bash", "Edit", "Read", "Grep", "TodoWrite", "Mystery"]) {
+      const r = setup(tool({ tool: name, summary: `sin ${name}`, input: null as unknown as Record<string, unknown>, result: "x" }));
+      open(r, `sin ${name}`);
+      r.unmount();
+    }
   });
 
   it("Grep and Glob show the pattern and the count", () => {

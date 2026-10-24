@@ -112,7 +112,9 @@ export function ConversationView({
   const [writing, setWriting] = useState<Map<string, { text: string; seen?: Set<string> }>>(() => new Map());
   const claudeIds = useRef<Set<string>>(new Set());
   claudeIds.current = new Set((conv?.entries ?? []).filter((e) => e.kind === "claude").map((e) => e.id));
-  const stream = session.runtime === "stream";
+  // Only a running chat agent has a live socket: a closed one answers 404, which would
+  // otherwise be retried forever.
+  const stream = session.runtime === "stream" && session.live;
   useEffect(() => {
     setWriting(new Map());
     if (!stream) return;
@@ -125,25 +127,33 @@ export function ConversationView({
       ws = sock;
       sock.onmessage = (ev) => {
         delay = 1000;
-        let m: { message?: string; text?: string; done?: boolean };
+        let m: { message?: string; text?: string; done?: boolean; reset?: boolean };
         try {
           m = JSON.parse(String(ev.data));
         } catch {
           return;
         }
+        // The daemon dropped deltas (a slow socket): the bubbles have gaps, the
+        // transcript has the text.
+        if (m.reset) {
+          setWriting(new Map());
+          load();
+          return;
+        }
         const msg = m.message;
         if (!msg) return;
+        const seen = m.done ? new Set(claudeIds.current) : undefined;
         setWriting((cur) => {
           const next = new Map(cur);
           const old = next.get(msg);
           if (m.done) {
-            if (old) next.set(msg, { ...old, seen: new Set(claudeIds.current) });
-            load();
+            if (old) next.set(msg, { ...old, seen });
           } else if (m.text) {
             next.set(msg, { text: (old?.text ?? "") + m.text });
           }
           return next;
         });
+        if (m.done) load();
       };
       // The stream agent can restart under the same session id: reconnect with a backoff,
       // except on 4409 (the session is not in chat mode).

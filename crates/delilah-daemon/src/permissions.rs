@@ -405,6 +405,10 @@ fn relative_file(input: &Value, workspace: &std::path::Path) -> Option<String> {
     if !path.is_absolute() {
         return Some(file.to_string());
     }
+    // Unknown workspace: an absolute path is not inside it (`strip_prefix("")` would say so).
+    if workspace.as_os_str().is_empty() {
+        return None;
+    }
     let canonical = workspace.canonicalize().ok();
     std::iter::once(workspace)
         .chain(canonical.as_deref())
@@ -469,7 +473,8 @@ pub fn validate_rule(
 }
 
 /// Whether an allow rule covers this call: `Tool` covers any use of the tool;
-/// `Bash(<prefix>:*)` a command that starts with the prefix; `Bash(<command>)` exactly it;
+/// `Bash(<prefix>:*)` a command that starts with the prefix followed by bounded arguments
+/// (`claude::is_safe_prefix_tail`); `Bash(<command>)` exactly it;
 /// `Edit(<file>)` (any file tool) that file, relative to `workspace` (`<dir>/**`: inside
 /// that dir); `WebFetch(domain:<host>)` exactly that host. Anything else does not match.
 pub fn rule_matches(rule: &str, tool: &str, input: &Value, workspace: &std::path::Path) -> bool {
@@ -523,11 +528,9 @@ pub fn rule_matches(rule: &str, tool: &str, input: &Value, workspace: &std::path
         Some(prefix) => {
             let prefix = prefix.trim();
             !prefix.is_empty()
-                && command.strip_prefix(prefix).is_some_and(|tail| {
-                    // The prefix is whole words, and nothing is chained after it.
-                    (tail.is_empty() || tail.starts_with(char::is_whitespace))
-                        && !tail.contains([';', '&', '|', '`', '$', '<', '>', '\n', '\r'])
-                })
+                && command
+                    .strip_prefix(prefix)
+                    .is_some_and(delilah_agents::claude::is_safe_prefix_tail)
         }
         None => command == content.trim(),
     }
@@ -1109,6 +1112,27 @@ mod tests {
                 "{chained}"
             );
         }
+        // Nor a flag that runs a program, nor a path out of the workspace.
+        for escape in [
+            ("Bash(go test:*)", "go test -exec /bin/sh ./..."),
+            (
+                "Bash(cargo test:*)",
+                "cargo test --config target.x.runner=sh",
+            ),
+            ("Bash(git diff:*)", "git diff --output=/Users/x/.zshrc"),
+            ("Bash(cat:*)", "cat ~/.ssh/id_rsa"),
+            ("Bash(cat:*)", "cat ../../secret"),
+        ] {
+            assert!(
+                !rule_matches(escape.0, "Bash", &bash(escape.1)),
+                "{escape:?}"
+            );
+        }
+        assert!(rule_matches(
+            "Bash(go test:*)",
+            "Bash",
+            &bash("go test -v ./...")
+        ));
         assert!(rule_matches("Bash(ls -la)", "Bash", &bash("ls -la")));
         assert!(!rule_matches("Bash(ls -la)", "Bash", &bash("ls -la /")));
         assert!(!rule_matches("Bash(:*)", "Bash", &bash("ls")));
@@ -1144,6 +1168,20 @@ mod tests {
             json!({ "file_path": "/ws/../etc/a.rs" })
         ));
         assert!(!m("Edit(src/a.rs)", "Edit", json!({})));
+        // An unknown workspace never makes an absolute path "inside" it.
+        assert!(!rule_matches(
+            "Edit(etc/passwd)",
+            "Edit",
+            &json!({ "file_path": "/etc/passwd" }),
+            std::path::Path::new("")
+        ));
+        assert_eq!(
+            relative_file(
+                &json!({ "file_path": "/etc/passwd" }),
+                std::path::Path::new("")
+            ),
+            None
+        );
         assert!(m("Grep(src)", "Grep", json!({ "path": "/ws/src" })));
         assert!(m(
             "Edit(src/**)",

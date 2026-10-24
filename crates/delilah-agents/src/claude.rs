@@ -294,6 +294,53 @@ const UNSAFE_BASH_HEADS: &[&str] = &[
     "osascript",
 ];
 
+/// Flags that make an allowlisted command run a program of the agent's choosing
+/// (`go test -exec sh`, `cargo test --config target.x.runner=…`, `npm test --script-shell`).
+const EXEC_FLAGS: &[&str] = &[
+    "-exec",
+    "--exec",
+    "-toolexec",
+    "--toolexec",
+    "-vettool",
+    "--vettool",
+    "--config",
+    "--script-shell",
+    "--ext-diff",
+    "--textconv",
+];
+
+/// Whether the arguments after a remembered Bash prefix stay bounded, checked by the daemon
+/// before it answers a request with a `Bash(<prefix>:*)` rule: whole words after the
+/// prefix, no chaining, substitution, redirection, quoting or globbing, no flag of
+/// [`EXEC_FLAGS`] (nor cargo's `-Z` or `+toolchain`), and every path relative and inside
+/// the workspace (no leading `/` or `~`, no `..`), so `cat ~/.ssh/id_rsa` or
+/// `git diff --output=../x` ask again.
+pub fn is_safe_prefix_tail(tail: &str) -> bool {
+    if !(tail.is_empty() || tail.starts_with(char::is_whitespace))
+        || tail.contains(SHELL_META)
+        || tail.contains(['\'', '"', '*', '?', '[', ']'])
+    {
+        return false;
+    }
+    tail.split_whitespace().all(|word| {
+        let (name, value) = match word.split_once('=') {
+            Some((name, value)) if word.starts_with('-') => (name, Some(value)),
+            _ => (word, None),
+        };
+        let escapes = |s: &str| {
+            s.starts_with(['/', '~']) || s.contains(":~") || s.split('/').any(|c| c == "..")
+        };
+        let flag = name.starts_with('-');
+        !(word.starts_with('+')
+            || EXEC_FLAGS.contains(&name)
+            || name.starts_with("-Z")
+            // A short flag with its value glued on (`-o/etc/x`) can't be told from a path.
+            || (flag && name.contains('/'))
+            || (!flag && escapes(name))
+            || value.is_some_and(escapes))
+    })
+}
+
 /// Characters that chain, substitute or redirect in a shell command (or break a rule).
 const SHELL_META: &[char] = &[
     '(', ')', '\n', '\r', ';', '&', '|', '`', '$', '<', '>', '{', '}', '!', '\\',
@@ -476,16 +523,26 @@ pub fn settings(
     } else if permission == Permission::Default {
         // The rules the user chose with "always allow" in this task. Only a session
         // that may edit gets them: a read-only one never gains a write through them.
+        // Bash prefix rules stay out: Claude would match any arguments after the prefix
+        // (`go test -exec sh`), so only the daemon applies them, with
+        // [`is_safe_prefix_tail`], when a chat-mode session asks.
         let allow: Vec<&str> = allowed_tools
             .iter()
             .map(|r| r.trim())
-            .filter(|r| is_safe_allow_rule(r))
+            .filter(|r| is_safe_allow_rule(r) && !is_bash_prefix_rule(r))
             .collect();
         if !allow.is_empty() {
             settings["permissions"] = json!({ "allow": allow });
         }
     }
     settings
+}
+
+/// `Bash(<prefix>:*)`.
+fn is_bash_prefix_rule(rule: &str) -> bool {
+    rule.strip_prefix("Bash(")
+        .and_then(|r| r.strip_suffix(')'))
+        .is_some_and(|c| c.trim_end().ends_with(":*"))
 }
 
 fn post_command(daemon_url: &str, path: &str, task: &str, session: &str) -> String {
@@ -1059,6 +1116,52 @@ mod tests {
     }
 
     #[test]
+    fn a_prefix_tail_stays_bounded() {
+        for ok in [
+            "",
+            " ./...",
+            " -p delilah-daemon --lib",
+            " -- --nocapture",
+            " --stat HEAD~3",
+            " -la src",
+            " -rn foo crates/x.rs",
+            " --output=out/diff.txt",
+            " -v -run TestX ./pkg/...",
+        ] {
+            assert!(is_safe_prefix_tail(ok), "{ok:?}");
+        }
+        for bad in [
+            "x",
+            " -exec /bin/sh",
+            " -exec sh",
+            " -toolexec=sh",
+            " -vettool=x",
+            " --config target.x.runner=\"sh\"",
+            " --config=build.rustc-wrapper=x",
+            " -Zunstable-options",
+            " +nightly",
+            " --script-shell=python",
+            " --ext-diff",
+            " -\"exec\" sh",
+            " -'exec' sh",
+            " ~/.ssh/id_rsa",
+            " /etc/passwd",
+            " ../../secret",
+            " src/../../x",
+            " --output=../x",
+            " --output=/Users/x/.zshrc",
+            " --output=~/x",
+            " -o/etc/x",
+            " .*",
+            " a; sh",
+            " $(id)",
+            " a > f",
+        ] {
+            assert!(!is_safe_prefix_tail(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
     fn a_tasks_allowed_tools_go_into_the_allow_list_of_an_editing_session_only() {
         let rules = vec![
             "Bash(npm test:*)".to_string(),
@@ -1086,7 +1189,7 @@ mod tests {
         };
         assert_eq!(
             s(Permission::Default)["permissions"]["allow"],
-            json!(["Bash(npm test:*)", "Bash(git status)"])
+            json!(["Bash(git status)"])
         );
         assert!(s(Permission::Default)["permissions"].get("deny").is_none());
         assert!(s(Permission::Plan).get("permissions").is_none());

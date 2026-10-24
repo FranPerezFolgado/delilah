@@ -483,6 +483,27 @@ describe("ConversationView chat mode", () => {
     expect(FakeSocket.last).toBeUndefined();
   });
 
+  it("does not open the socket on a chat session that is not running", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    render(<ConversationView session={session({ runtime: "stream", live: false })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(FakeSocket.count).toBe(0);
+  });
+
+  it("drops the partial text and reloads on a reset", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    const { getByTestId, queryByTestId } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    FakeSocket.last.push({ message: "m1", text: "Hel" });
+    expect(getByTestId("writing").textContent).toBe("Hel");
+    const calls = spy.mock.calls.length;
+    FakeSocket.last.push({ reset: true });
+    expect(queryByTestId("writing")).toBeNull();
+    await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThan(calls));
+  });
+
   describe("reconnection", () => {
     const mount = () => render(<ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
     beforeEach(() => {

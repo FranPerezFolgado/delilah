@@ -92,14 +92,17 @@ pub fn spawn_pump(
             let ended = matches!(event, StreamEvent::Exited { .. });
             // The start failing is undone by whoever waits for it: the error is not a turn.
             if !(failed && told) {
-                handle(&app, &task, &session, event).await;
+                handle(&app, &task, &session, runtime.as_ref(), event).await;
             }
             if ended {
                 break;
             }
         }
-        // However it ended, nobody is left to answer what the agent asked.
-        crate::permissions::release_session(&app, &session).await;
+        // However it ended, nobody is left to answer what the agent asked (unless the
+        // session already runs a new process, whose asks are not this pump's).
+        if owns(&app, &session, runtime.as_ref()) {
+            crate::permissions::release_session(&app, &session).await;
+        }
     });
     started_rx
 }
@@ -112,7 +115,23 @@ async fn process_exit(runtime: Option<&Runtime>) {
     }
 }
 
-async fn handle(app: &AppState, task: &str, session: &str, event: StreamEvent) {
+/// Whether the session still runs the pump's process (or has none): after a runtime
+/// switch or a relaunch on the same id, a late event of the old process must neither
+/// deny the new one's asks nor raise an ask answered to the wrong process.
+fn owns(app: &AppState, session: &str, runtime: Option<&Runtime>) -> bool {
+    match (runtime, app.sessions.get(session)) {
+        (Some(mine), Some(live)) => live.runtime.same(mine),
+        _ => true,
+    }
+}
+
+async fn handle(
+    app: &AppState,
+    task: &str,
+    session: &str,
+    runtime: Option<&Runtime>,
+    event: StreamEvent,
+) {
     match event {
         StreamEvent::RateLimit {
             five_hour,
@@ -143,12 +162,12 @@ async fn handle(app: &AppState, task: &str, session: &str, event: StreamEvent) {
             tool,
             input,
             suggestion,
-        } => {
+        } if owns(app, session, runtime) => {
             crate::permissions::on_request(app, task, session, request_id, tool, input, suggestion)
                 .await;
         }
         // Nobody listens any more: what was asked of it cannot be answered.
-        StreamEvent::Exited { .. } => {
+        StreamEvent::Exited { .. } if owns(app, session, runtime) => {
             crate::permissions::release_session(app, session).await;
         }
         _ => {}

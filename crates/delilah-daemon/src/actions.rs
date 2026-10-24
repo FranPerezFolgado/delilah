@@ -208,12 +208,14 @@ pub use delilah_agents::runtime::sanitize_prompt;
 
 /// Writes a message into an agent's terminal as if the user typed it.
 pub async fn type_prompt(session: &Live, text: &str) -> Result<(), ApiError> {
-    session
-        .runtime
-        .send_prompt(text)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    // Working before the write: a turn that fails at once (its result handled while the
+    // write returns) must not be overwritten by a late `Working`.
+    let before = session.state();
     session.set_state(LiveState::Working);
+    if let Err(e) = session.runtime.send_prompt(text).await {
+        session.set_state(before);
+        return Err(ApiError::internal(e.to_string()));
+    }
     Ok(())
 }
 
