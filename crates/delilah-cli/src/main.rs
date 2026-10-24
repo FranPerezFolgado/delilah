@@ -120,6 +120,31 @@ impl AutopilotAction {
     }
 }
 
+/// Where `delilah runtime <KEY>` moves a task's agent.
+#[derive(Clone, Copy, ValueEnum)]
+enum RuntimeMode {
+    /// Chat mode (experimental): no terminal, the conversation is the only view.
+    Chat,
+    /// The live terminal.
+    Terminal,
+}
+
+impl RuntimeMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Terminal => "terminal",
+        }
+    }
+
+    fn done_line(self, key: &str) -> String {
+        match self {
+            Self::Chat => format!("{key} now runs in chat mode."),
+            Self::Terminal => format!("{key} now runs in the terminal."),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Checks that the daemon is running.
@@ -195,6 +220,9 @@ enum Command {
     },
     /// Opens the live terminal of a task's agent (Ctrl-] detaches).
     Attach { key: String },
+    /// Moves a task's live agent between chat (experimental) and the terminal, keeping
+    /// the conversation. Refused while the agent works or waits for an answer.
+    Runtime { key: String, mode: RuntimeMode },
     /// Resumes a task paused by the usage limit now, without waiting for the reset.
     Resume { key: String },
     /// Turns a task's autopilot on or off, or resumes it when paused.
@@ -421,6 +449,13 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/resume"), &json!({}))?;
             println!("{} is {} again.", task.key, status_label(&task.status));
         }
+        Command::Runtime { key, mode } => {
+            api.post_empty(
+                &format!("/api/v1/tasks/{key}/runtime"),
+                &json!({ "mode": mode.name() }),
+            )?;
+            println!("{}", mode.done_line(&key));
+        }
         Command::Autopilot { key, action } => {
             let task: Task = api.post(
                 &format!("/api/v1/tasks/{key}/autopilot"),
@@ -558,6 +593,24 @@ impl Api {
                 .json(body)
                 .send(),
         )
+    }
+
+    /// A `POST` answered with no body (204).
+    fn post_empty(&self, path: &str, body: &impl serde::Serialize) -> Result<(), String> {
+        let res = self
+            .client
+            .post(format!("{}{path}", self.base))
+            .json(body)
+            .send()
+            .map_err(|e| self.unreachable(e))?;
+        let status = res.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        match res.json::<ErrorBody>() {
+            Ok(body) => Err(body.error),
+            Err(_) => Err(format!("daemon answered {status}")),
+        }
     }
 
     /// A `DELETE` answered with no body; the error keeps the daemon's flags.
@@ -745,5 +798,76 @@ mod tests {
         }
         assert!(Cli::try_parse_from(["delilah", "autopilot", "K-1", "maybe"]).is_err());
         assert!(Cli::try_parse_from(["delilah", "autopilot", "K-1"]).is_err());
+    }
+
+    #[test]
+    fn runtime_subcommand_takes_chat_or_terminal() {
+        for word in ["chat", "terminal"] {
+            let cli = Cli::try_parse_from(["delilah", "runtime", "K-1", word]).unwrap();
+            match cli.command {
+                Command::Runtime { key, mode } => {
+                    assert_eq!(key, "K-1");
+                    assert_eq!(mode.name(), word);
+                }
+                _ => panic!("not runtime"),
+            }
+        }
+        assert!(Cli::try_parse_from(["delilah", "runtime", "K-1", "gui"]).is_err());
+        assert!(Cli::try_parse_from(["delilah", "runtime", "K-1"]).is_err());
+        assert_eq!(
+            RuntimeMode::Chat.done_line("K-1"),
+            "K-1 now runs in chat mode."
+        );
+        assert_eq!(
+            RuntimeMode::Terminal.done_line("K-1"),
+            "K-1 now runs in the terminal."
+        );
+    }
+
+    #[test]
+    fn runtime_prints_the_409_message_and_accepts_204() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        fn serve(reply: &'static str) -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                s.write_all(reply.as_bytes()).unwrap();
+            });
+            base
+        }
+        let api = |base| Api {
+            client: Client::new(),
+            base,
+        };
+        let msg = "wait for the turn to end or press Detener";
+        let body = format!("{{\"error\":\"{msg}\"}}");
+        let reply: &'static str = Box::leak(
+            format!(
+                "HTTP/1.1 409 Conflict\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .into_boxed_str(),
+        );
+        let err = run(
+            &api(serve(reply)),
+            Cli::try_parse_from(["delilah", "runtime", "K-1", "chat"])
+                .unwrap()
+                .command,
+        )
+        .unwrap_err();
+        assert_eq!(err, msg);
+        let ok = run(
+            &api(serve(
+                "HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n",
+            )),
+            Cli::try_parse_from(["delilah", "runtime", "K-1", "terminal"])
+                .unwrap()
+                .command,
+        );
+        assert!(ok.is_ok());
     }
 }

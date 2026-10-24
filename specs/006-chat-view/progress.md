@@ -41,7 +41,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
 | WP-26 | 9 | 9A | pending | 0 | | go (decision 49) |
-| WP-27 | 9 | 9B | pending | 0 | | go (decision 49) |
+| WP-27 | 9 | 9B | verified | 1 | | go (decision 49) |
 | WP-28 | 9 | 9B | pending | 0 | | go (decision 49) |
 | WP-29 | 9 | 9B | pending | 0 | | go (decision 49) |
 | WP-30 | 10 | 10A | pending | 0 | | |
