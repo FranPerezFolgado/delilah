@@ -33,7 +33,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-21 | 7 | 7D | verified | 1 | 9d0e3cc | go (decision 49) |
 | WP-21F | 7 | 7F | verified | 1 | | UI/CLI review fixes |
 | WP-19F | 7 | 7G | verified | 1 | | review fixes (init wait CRITICAL) |
-| WP-22F | 8 | 8F | implementing | 0 | | permission rule security |
+| WP-22F | 8 | 8F | verified | 1 | | permission rule security |
+| WP-19G | 7 | 7H | implementing | 0 | | fix round 2 |
 | WP-22 | 8 | 8A | verified | 1 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
@@ -53,7 +54,6 @@ Mode: format=markdown commits=yes autonomy=auto
 | 7 | arch | LOW | PTY start failure still leaves a Running task + workspace + session row (rollback only for chat mode) | crates/delilah-daemon/src/run.rs |
 | 7 | tests | LOW | 700 ms settle can flake under load (a_failed_chat_start_from_a_conversation_gives_it_back_to_its_project once) | crates/delilah-daemon/src/run.rs |
 | 8 | security | LOW | rules read once at launch: a rule added later reaches running sessions only via daemon auto-allow (document) | crates/delilah-agents/src/claude.rs:260 |
-| 7 | spec | LOW | MessageDone sent per assistant content block (done can precede more deltas of the same message id) | crates/delilah-agents/src/stream.rs:318 |
 | 7 | contract | LOW | live.rs drops lagged deltas silently (tolerable; document) ; client has no 4409 test | crates/delilah-daemon/src/live.rs:55 |
 | 7 | contract | LOW | start-failure retry matches error text by substring; a machine-readable code would be sturdier | app/src/components/NewTaskDialog.tsx:415 |
 | 7 | architecture | LOW | LaunchFuture/HRTB plumbing; handoff can block up to INIT_TIMEOUT 30 s on a chat-mode relaunch | crates/delilah-daemon/src/handoff.rs:29 |

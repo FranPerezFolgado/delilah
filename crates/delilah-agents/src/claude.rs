@@ -212,6 +212,92 @@ pub fn stream_command(launch: &Launch) -> tokio::process::Command {
     cmd
 }
 
+/// First words of a Bash prefix rule that would hand over arbitrary execution.
+const UNSAFE_BASH_HEADS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "fish",
+    "env",
+    "sudo",
+    "doas",
+    "xargs",
+    "eval",
+    "exec",
+    "nohup",
+    "time",
+    "command",
+    "builtin",
+    "nice",
+    "timeout",
+    "watch",
+    "node",
+    "nodejs",
+    "python",
+    "python2",
+    "python3",
+    "ruby",
+    "perl",
+    "php",
+    "lua",
+    "deno",
+    "bun",
+    "npx",
+    "bunx",
+    "pnpx",
+    "osascript",
+];
+
+/// Characters that chain, substitute or redirect in a shell command (or break a rule).
+const SHELL_META: &[char] = &[
+    '(', ')', '\n', '\r', ';', '&', '|', '`', '$', '<', '>', '{', '}', '!', '\\',
+];
+
+/// Structural check of an allow rule before it is written into a session's settings:
+/// `Tool(content)` only (never a bare tool name, which would allow every use). For Bash,
+/// `<prefix>:*` with a plain prefix (no wildcard but the trailing one, no shell
+/// metacharacters, not an interpreter or wrapper) or one exact plain command. For other
+/// tools, content that is not just wildcards.
+pub fn is_safe_allow_rule(rule: &str) -> bool {
+    let rule = rule.trim();
+    let Some((tool, rest)) = rule.split_once('(') else {
+        return false;
+    };
+    let Some(content) = rest.strip_suffix(')') else {
+        return false;
+    };
+    if tool.is_empty()
+        || !tool
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        || content.trim().is_empty()
+        || content.contains(['(', ')', '\n', '\r'])
+    {
+        return false;
+    }
+    if tool != "Bash" {
+        let rest = content.trim();
+        let rest = rest.strip_prefix("domain:").unwrap_or(rest);
+        return !rest
+            .chars()
+            .all(|c| matches!(c, '*' | '/' | '.' | ':') || c.is_whitespace());
+    }
+    let (command, is_prefix) = match content.strip_suffix(":*") {
+        Some(prefix) => (prefix.trim(), true),
+        None => (content.trim(), false),
+    };
+    if command.is_empty() || command.contains('*') || command.contains(SHELL_META) {
+        return false;
+    }
+    let mut words = command.split_whitespace();
+    let head = words.next().unwrap_or_default();
+    let head = head.rsplit('/').next().unwrap_or(head);
+    // A wrapper or interpreter as the first word runs whatever follows (`node -e`, `sh -c`).
+    // An exact command is one specific line, so only a prefix is held to this.
+    !(is_prefix && UNSAFE_BASH_HEADS.contains(&head))
+}
+
 /// Settings for one session: every hook posts its JSON to the daemon, and the status
 /// line runs `status_script` (see [`status_script`]). Lives outside the repo and is
 /// passed with `--settings`. `allowed_tools` are the task's extra allow rules.
@@ -263,7 +349,7 @@ pub fn settings(
         let allow: Vec<&str> = allowed_tools
             .iter()
             .map(|r| r.trim())
-            .filter(|r| !r.is_empty())
+            .filter(|r| is_safe_allow_rule(r))
             .collect();
         if !allow.is_empty() {
             settings["permissions"] = json!({ "allow": allow });
@@ -813,7 +899,11 @@ mod tests {
     fn a_tasks_allowed_tools_go_into_the_allow_list_of_an_editing_session_only() {
         let rules = vec![
             "Bash(npm install:*)".to_string(),
-            " Read ".to_string(),
+            " Bash(git status) ".to_string(),
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Bash(sh:*)".to_string(),
+            "Bash(npm test; rm -rf /:*)".to_string(),
             "  ".to_string(),
         ];
         let s = |p| {
@@ -830,7 +920,7 @@ mod tests {
         };
         assert_eq!(
             s(Permission::Default)["permissions"]["allow"],
-            json!(["Bash(npm install:*)", "Read"])
+            json!(["Bash(npm install:*)", "Bash(git status)"])
         );
         assert!(s(Permission::Default)["permissions"].get("deny").is_none());
         assert!(s(Permission::Plan).get("permissions").is_none());
@@ -840,6 +930,53 @@ mod tests {
                 .to_string()
                 .contains("npm install")
         );
+    }
+
+    #[test]
+    fn only_specific_safe_rules_pass_is_safe_allow_rule() {
+        for ok in [
+            "Bash(npm install:*)",
+            "Bash(git status)",
+            "Bash(node script.js)",
+            "WebFetch(domain:example.com)",
+            "Edit(src/**)",
+            "mcp__srv__tool(read x)",
+        ] {
+            assert!(is_safe_allow_rule(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "Bash",
+            "Edit",
+            "WebFetch",
+            "Bash()",
+            "Bash(:*)",
+            "Bash(*)",
+            "Bash(npm*:*)",
+            "Bash(npm *:*)",
+            "Bash(npm install;:*)",
+            "Bash(a && b:*)",
+            "Bash(a | b:*)",
+            "Bash(echo `id`:*)",
+            "Bash(echo $(id):*)",
+            "Bash(a > f:*)",
+            "Bash(sh:*)",
+            "Bash(bash -c:*)",
+            "Bash(env:*)",
+            "Bash(sudo ls:*)",
+            "Bash(/usr/bin/env FOO=1:*)",
+            "Bash(node -e:*)",
+            "Bash(python -c:*)",
+            "Bash(xargs rm:*)",
+            "Bash(ls\nrm:*)",
+            "WebFetch(*)",
+            "WebFetch(domain:*)",
+            "Read(**)",
+            "Read(//**)",
+            "Read(  )",
+        ] {
+            assert!(!is_safe_allow_rule(bad), "{bad:?}");
+        }
     }
 
     #[test]

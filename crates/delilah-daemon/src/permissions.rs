@@ -33,6 +33,10 @@ pub const STOPPED_DENIAL: &str = "sesión detenida";
 /// A reason longer than this is cut.
 const MAX_REASON: usize = 1000;
 const MAX_SUMMARY: usize = 300;
+/// Asks one session may have waiting; beyond them the agent is told no.
+const MAX_PENDING: usize = 50;
+/// What the agent is told when it has too many asks waiting.
+const TOO_MANY_DENIAL: &str = "demasiados permisos pendientes; espera a que se respondan";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PermissionAsk {
@@ -45,8 +49,11 @@ pub struct PermissionAsk {
     pub tool: String,
     #[serde(skip)]
     pub input: Value,
-    /// What "always allow" would add: Claude's `permission_suggestions`, as sent.
+    /// Claude's `permission_suggestions`, as sent.
     pub suggestion: Option<Value>,
+    /// The exact rule "always allow" would add to the task, or null when there is none
+    /// that is safe to remember: then "always allow" is not offered (and answers 400).
+    pub rule: Option<String>,
     /// A line for a card or an inbox item: the command, the file, the URL.
     pub summary: String,
     pub at: DateTime<Utc>,
@@ -78,8 +85,19 @@ impl Permissions {
             .any(|a| a.session == session)
     }
 
-    fn insert(&self, ask: PermissionAsk) {
-        self.pending.lock().unwrap().insert(ask.id.clone(), ask);
+    /// Keeps the ask unless the session already has [`MAX_PENDING`] waiting.
+    fn insert(&self, ask: PermissionAsk) -> bool {
+        let mut pending = self.pending.lock().unwrap();
+        if pending
+            .values()
+            .filter(|a| a.session == ask.session)
+            .count()
+            >= MAX_PENDING
+        {
+            return false;
+        }
+        pending.insert(ask.id.clone(), ask);
+        true
     }
 
     /// Takes the ask off the list, so only one answer can ever act on it.
@@ -173,11 +191,22 @@ pub async fn on_request(
     input: Value,
     suggestion: Option<Value>,
 ) {
+    // A request after the session is gone must not leave an ask nobody can answer.
+    if app.sessions.get(session).is_none() {
+        return;
+    }
     let rules = match app.store.get_task(&TaskKey::new(task)).await {
         Ok(Some(t)) => t.allowed_tools,
         _ => Vec::new(),
     };
-    if rules.iter().any(|r| rule_matches(r, &tool, &input)) {
+    let allowed = rules.iter().any(|r| {
+        if !delilah_agents::claude::is_safe_allow_rule(r) {
+            tracing::warn!(%task, "ignoring the stored rule `{r}`: it is not specific enough");
+            return false;
+        }
+        rule_matches(r, &tool, &input)
+    });
+    if allowed {
         if let Err(e) = reply(app, session, &request_id, Decision::Allow { input }).await {
             tracing::warn!(%session, %tool, "cannot answer an allowed permission: {e}");
         }
@@ -189,6 +218,7 @@ pub async fn on_request(
         task: task.to_string(),
         session: session.to_string(),
         summary: summary(&tool, &input),
+        rule: rule_to_add(&tool, suggestion.as_ref(), &input),
         tool,
         input,
         suggestion,
@@ -199,7 +229,15 @@ pub async fn on_request(
     } else {
         format!("{}: {}", ask.tool, ask.summary)
     };
-    app.permissions.insert(ask);
+    let request_id = ask.request_id.clone();
+    if !app.permissions.insert(ask) {
+        tracing::warn!(%session, "too many permissions waiting; denying");
+        let denial = Decision::Deny {
+            message: TOO_MANY_DENIAL.into(),
+        };
+        let _ = reply(app, session, &request_id, denial).await;
+        return;
+    }
     if let Some(live) = app.sessions.get(session) {
         live.set_state(LiveState::Waiting);
     }
@@ -243,6 +281,12 @@ pub async fn answer(
     {
         return Err(gone());
     }
+    if body.decision == "allow_always" && app.permissions.get(&id).is_none_or(|a| a.rule.is_none())
+    {
+        return Err(ApiError::bad_request(
+            "no rule to remember for this request",
+        ));
+    }
     let ask = app.permissions.take(&id).ok_or_else(gone)?;
     let decision = if body.decision == "deny" {
         let reason = body.reason.as_deref().map(str::trim).unwrap_or_default();
@@ -254,24 +298,26 @@ pub async fn answer(
             },
         }
     } else {
-        if body.decision == "allow_always" {
-            for rule in rules_to_add(&ask.tool, ask.suggestion.as_ref()) {
-                if let Err(e) = app
-                    .store
-                    .add_allowed_tool(&TaskKey::new(&ask.task), &rule)
-                    .await
-                {
-                    tracing::warn!(task = %ask.task, "cannot remember the rule `{rule}`: {e}");
-                }
-            }
-            app.emit(Topic::Tasks);
-        }
         Decision::Allow {
             input: ask.input.clone(),
         }
     };
     let allowed = matches!(decision, Decision::Allow { .. });
     let result = reply(&app, &session, &ask.request_id, decision).await;
+    // Remembered only once the agent has the answer.
+    if result.is_ok()
+        && body.decision == "allow_always"
+        && let Some(rule) = &ask.rule
+    {
+        if let Err(e) = app
+            .store
+            .add_allowed_tool(&TaskKey::new(&ask.task), rule)
+            .await
+        {
+            tracing::warn!(task = %ask.task, "cannot remember the rule `{rule}`: {e}");
+        }
+        app.emit(Topic::Tasks);
+    }
     clear_attention(&app, &session).await;
     if allowed && let Some(live) = app.sessions.get(&session) {
         live.set_state(LiveState::Working);
@@ -282,10 +328,9 @@ pub async fn answer(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The rules "always allow" appends: those of Claude's suggestion for this very tool,
-/// else the tool's name. Trimmed, never empty.
-pub fn rules_to_add(tool: &str, suggestion: Option<&Value>) -> Vec<String> {
-    let mut rules: Vec<String> = Vec::new();
+/// The one rule "always allow" adds: the first that Claude's suggestion offers for this
+/// very tool and that passes [`validate_rule`]. Never a bare tool name.
+pub fn rule_to_add(tool: &str, suggestion: Option<&Value>, input: &Value) -> Option<String> {
     for s in suggestion.and_then(Value::as_array).into_iter().flatten() {
         if s["type"] != "addRules" || s["behavior"] != "allow" {
             continue;
@@ -294,20 +339,38 @@ pub fn rules_to_add(tool: &str, suggestion: Option<&Value>) -> Vec<String> {
             if r["toolName"].as_str() != Some(tool) {
                 continue;
             }
-            let rule = match r["ruleContent"].as_str().map(str::trim) {
-                Some(content) if !content.is_empty() => format!("{tool}({content})"),
-                _ => tool.to_string(),
-            };
-            if !rules.contains(&rule) {
-                rules.push(rule);
+            if let Some(content) = r["ruleContent"].as_str()
+                && let Some(rule) = validate_rule(tool, content, input)
+            {
+                return Some(rule);
             }
         }
     }
-    if rules.is_empty() {
-        rules.push(tool.to_string());
+    None
+}
+
+/// `Tool(content)` when the suggested content is safe to remember (see
+/// [`delilah_agents::claude::is_safe_allow_rule`]) and, for Bash, the command being
+/// approved starts with the prefix at a word boundary.
+pub fn validate_rule(tool: &str, content: &str, input: &Value) -> Option<String> {
+    let content = content.trim();
+    let rule = format!("{tool}({content})");
+    if !delilah_agents::claude::is_safe_allow_rule(&rule) {
+        return None;
     }
-    rules.retain(|r| !r.trim().is_empty());
-    rules
+    if tool == "Bash" {
+        let command = input["command"].as_str()?.trim();
+        let covered = match content.strip_suffix(":*") {
+            Some(prefix) => command
+                .strip_prefix(prefix.trim())
+                .is_some_and(|tail| tail.is_empty() || tail.starts_with(char::is_whitespace)),
+            None => command == content,
+        };
+        if !covered {
+            return None;
+        }
+    }
+    Some(rule)
 }
 
 /// Whether an allow rule covers this call: `Tool` covers any use of the tool;
@@ -529,19 +592,111 @@ mod tests {
     #[tokio::test]
     async fn allow_always_appends_the_rule_and_the_next_request_is_answered_at_once() {
         let mut f = Fixture::new().await;
-        // The fake agent's suggestion has no rules: the tool's name is what is kept.
         let ask = f.ask().await.unwrap();
-        f.post(
-            &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
-            json!({ "decision": "allow_always" }),
-        )
-        .await;
+        // The fake agent's suggestion has no rules; give the ask a safe one.
+        f.app
+            .permissions
+            .pending
+            .lock()
+            .unwrap()
+            .get_mut(&ask.id)
+            .unwrap()
+            .rule = Some("Bash(npm --version:*)".into());
+        let status = f
+            .post(
+                &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
+                json!({ "decision": "allow_always" }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
         assert_eq!(f.turn_text().await, "allowed");
         let task = f.app.store.get_task(&TaskKey::new("PROJ-1")).await.unwrap();
-        assert_eq!(task.unwrap().allowed_tools, ["Bash"]);
+        assert_eq!(task.unwrap().allowed_tools, ["Bash(npm --version:*)"]);
         // Same request again: no ask, the agent goes on by itself.
         assert!(f.ask().await.is_none());
         assert_eq!(f.turn_text().await, "allowed");
+    }
+
+    #[tokio::test]
+    async fn allow_always_without_a_rule_is_400_and_keeps_the_ask() {
+        let mut f = Fixture::new().await;
+        let ask = f.ask().await.unwrap();
+        assert!(ask.rule.is_none(), "no bare `Bash` fallback");
+        let uri = format!("/api/v1/sessions/s-1/permissions/{}", ask.id);
+        assert_eq!(
+            f.post(&uri, json!({ "decision": "allow_always" })).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert!(f.app.permissions.get(&ask.id).is_some());
+        let task = f.app.store.get_task(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert!(task.unwrap().allowed_tools.is_empty());
+        // allow_once still works.
+        assert_eq!(
+            f.post(&uri, json!({ "decision": "allow_once" })).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_reply_is_409_and_remembers_nothing() {
+        let mut f = Fixture::new().await;
+        let ask = f.ask().await.unwrap();
+        f.app
+            .permissions
+            .pending
+            .lock()
+            .unwrap()
+            .get_mut(&ask.id)
+            .unwrap()
+            .rule = Some("Bash(npm --version:*)".into());
+        f.app.sessions.remove_if_same("s-1", &f.live.runtime);
+        let status = f
+            .post(
+                &format!("/api/v1/sessions/s-1/permissions/{}", ask.id),
+                json!({ "decision": "allow_always" }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let task = f.app.store.get_task(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert!(task.unwrap().allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_request_for_a_gone_session_leaves_no_ask() {
+        let f = Fixture::new().await;
+        on_request(
+            &f.app,
+            "PROJ-1",
+            "nope",
+            "r-1".into(),
+            "Bash".into(),
+            json!({ "command": "ls" }),
+            None,
+        )
+        .await;
+        assert!(f.app.permissions.list().is_empty());
+    }
+
+    #[test]
+    fn a_session_holds_at_most_fifty_asks() {
+        let p = Permissions::default();
+        let ask = |session: &str| PermissionAsk {
+            id: uuid::Uuid::new_v4().to_string(),
+            request_id: "r".into(),
+            task: "T".into(),
+            session: session.into(),
+            tool: "Bash".into(),
+            input: json!({}),
+            suggestion: None,
+            rule: None,
+            summary: String::new(),
+            at: Utc::now(),
+        };
+        for _ in 0..MAX_PENDING {
+            assert!(p.insert(ask("a")));
+        }
+        assert!(!p.insert(ask("a")));
+        assert!(p.insert(ask("b")));
     }
 
     #[tokio::test]
@@ -593,24 +748,72 @@ mod tests {
     }
 
     #[test]
-    fn rules_come_from_the_suggestion_of_that_tool_or_fall_back_to_its_name() {
+    fn the_rule_comes_only_from_a_validated_suggestion_never_a_bare_tool() {
+        let bash = json!({ "command": "npm install left-pad" });
         let suggestion = json!([{
             "type": "addRules", "behavior": "allow", "destination": "localSettings",
             "rules": [
-                {"toolName": "Bash", "ruleContent": "npm install:*"},
+                {"toolName": "Bash", "ruleContent": "sh:*"},
                 {"toolName": "Write"},
                 {"toolName": "Bash", "ruleContent": "  "},
+                {"toolName": "Bash", "ruleContent": "npm install:*"},
             ]
         }]);
         assert_eq!(
-            rules_to_add("Bash", Some(&suggestion)),
-            ["Bash(npm install:*)", "Bash"]
+            rule_to_add("Bash", Some(&suggestion), &bash).as_deref(),
+            Some("Bash(npm install:*)")
         );
-        assert_eq!(rules_to_add("Read", Some(&suggestion)), ["Read"]);
-        assert_eq!(rules_to_add("Read", None), ["Read"]);
+        assert_eq!(rule_to_add("Write", Some(&suggestion), &json!({})), None);
+        assert_eq!(rule_to_add("Read", Some(&suggestion), &json!({})), None);
+        assert_eq!(rule_to_add("Bash", None, &bash), None);
         assert_eq!(
-            rules_to_add("Read", Some(&json!([{"type": "setMode"}]))),
-            ["Read"]
+            rule_to_add("Read", Some(&json!([{"type": "setMode"}])), &json!({})),
+            None
+        );
+    }
+
+    #[test]
+    fn validate_rule_checks_the_content_and_that_the_command_is_covered() {
+        let cmd = |c: &str| json!({ "command": c });
+        let ok = |t: &str, c: &str, i: &Value| validate_rule(t, c, i);
+        assert_eq!(
+            ok("Bash", " npm install:* ", &cmd("npm install x")).as_deref(),
+            Some("Bash(npm install:*)")
+        );
+        assert_eq!(
+            ok("Bash", "git status", &cmd("git status")).as_deref(),
+            Some("Bash(git status)")
+        );
+        // The prefix must cover the command, at a word boundary.
+        assert_eq!(ok("Bash", "npm install:*", &cmd("npm installer")), None);
+        assert_eq!(ok("Bash", "npm test:*", &cmd("npm install")), None);
+        assert_eq!(ok("Bash", "git status", &cmd("git status -s")), None);
+        assert_eq!(ok("Bash", "npm test:*", &json!({})), None);
+        for bad in [
+            "",
+            ":*",
+            "*",
+            "npm*:*",
+            "sh:*",
+            "node -e:*",
+            "python -c:*",
+            "env FOO=1:*",
+            "npm i; rm:*",
+            "npm i && x:*",
+            "a|b:*",
+            "x $(id):*",
+            "x `id`:*",
+            "a\nb:*",
+        ] {
+            assert_eq!(ok("Bash", bad, &cmd(bad)), None, "{bad:?}");
+        }
+        for bad in ["", "*", "**", "//**", "domain:*"] {
+            assert_eq!(ok("WebFetch", bad, &json!({})), None, "{bad:?}");
+            assert_eq!(ok("Read", bad, &json!({})), None, "{bad:?}");
+        }
+        assert_eq!(
+            ok("WebFetch", "domain:example.com", &json!({})).as_deref(),
+            Some("WebFetch(domain:example.com)")
         );
     }
 
@@ -653,6 +856,10 @@ mod tests {
             "npm install $(id)",
             "npm install x | sh",
             "npm install x\nls",
+            "npm install x`id`",
+            "npm install x\r\nls",
+            "FOO=1 npm install x",
+            "env npm install x",
         ] {
             assert!(
                 !rule_matches("Bash(npm install:*)", "Bash", &bash(chained)),
