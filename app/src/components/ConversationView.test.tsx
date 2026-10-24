@@ -318,4 +318,65 @@ describe("ConversationView", () => {
     await findByText("c");
     expect(log.scrollTop).toBe(1000);
   });
+
+  it("shows the composer for a live task session and sends with sendMessage", async () => {
+    const send = vi.spyOn(api, "sendMessage").mockResolvedValue(user(9, "x", "sent"));
+    const { findByText, getByLabelText, getByText } = setup(conv([at("t:1", "2026-01-01T00:00:01Z", "hola")]), session({ conversation: false, label: "claude" }));
+    await findByText("hola");
+    fireEvent.change(getByLabelText("Mensaje"), { target: { value: "sigue" } });
+    fireEvent.click(getByText("Enviar"));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("s1", "sigue"));
+  });
+
+  it("hides the composer for a closed session and for a shell", async () => {
+    const a = setup(conv([claude(1, "x")]), session({ closed: true, live: false, conversation: false }));
+    await a.findByText("x");
+    expect(a.queryByLabelText("Mensaje")).toBeNull();
+    cleanup();
+    const b = setup(conv([claude(1, "y")]), session({ kind: "shell" as Session["kind"] }));
+    await b.findByText("y");
+    expect(b.queryByLabelText("Mensaje")).toBeNull();
+  });
+
+  it("shows a queued entry with its string id and removes it", async () => {
+    const rm = vi.spyOn(api, "removeMessage").mockResolvedValue(null);
+    const q: ConversationEntry = { id: "m-abc", at: "", kind: "user", text: "luego", state: "queued", from: "view" };
+    const { findByText, getByLabelText } = setup(conv([q]), session({ state: "working", conversation: false }));
+    await findByText("en cola");
+    fireEvent.click(getByLabelText("Quitar mensaje"));
+    expect(rm).toHaveBeenCalledWith("s1", "m-abc");
+  });
+
+  it("answers an inline card of a task session through the reply API", async () => {
+    const ans = vi.spyOn(api, "answerAsk").mockResolvedValue(null as never);
+    const { findByText, container } = setup(conv([card(3)]), session({ conversation: false }));
+    fireEvent.click(await findByText("A"));
+    const submit = [...container.querySelectorAll("button")].find((b) => /Responder|Enviar|Crear/.test(b.textContent ?? "") && b.closest(".ask"));
+    if (submit) fireEvent.click(submit);
+    await waitFor(() => expect(ans).toHaveBeenCalled());
+  });
+
+  it("refetches on an inbox event and shows a card answered elsewhere as answered", async () => {
+    const spy = vi
+      .spyOn(api, "conversation")
+      .mockResolvedValueOnce(conv([card(3)], { cursor: "c1" }))
+      .mockResolvedValue(conv([card(3, { outcome: "answered", answer: { "¿Cuál?": "B" } })], { cursor: "c2" }));
+    const { findByText, container } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await findByText("¿Cuál?");
+    expect(container.querySelector(".ask")).toBeTruthy();
+    emit("inbox");
+    await findByText("¿Cuál?: B");
+    expect(container.querySelector(".ask")).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("orders mixed timestamp formats by instant, stable for equal ones", async () => {
+    const first = conv([at("t:1", "2026-01-01T00:00:00.500+00:00", "b"), at("t:2", "2026-01-01T00:00:00.000Z", "a")], { cursor: "c1" });
+    vi.spyOn(api, "conversation").mockResolvedValueOnce(conv([], { cursor: "c0" })).mockResolvedValue(first);
+    const { container, findByText } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await findByText("Cuéntale tu idea…");
+    emit("conversations");
+    await findByText("a");
+    expect([...container.querySelector(".conv-log")!.children].map((k) => k.textContent)).toEqual(["a", "b"]);
+  });
 });

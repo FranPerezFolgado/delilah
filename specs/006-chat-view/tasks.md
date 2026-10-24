@@ -189,8 +189,8 @@
   - for an idea session without a transcript, they are kept, as today.
 
   Then implement the merge rules (research R5).
-- [ ] T031 [US2] Write failing tests in `app/src/components/ConversationView.test.tsx`: the composer shows for a live task session (not only ideas) and sends with `api.sendMessage`; a queued entry shows "en cola" with a remove button using the string id; "Detener" calls `api.stopMessage`; a pending card renders `AskCard` inline and answering it calls the existing reply API. Then implement in `app/src/components/ConversationView.tsx`, removing the idea-only conditions.
-- [ ] T032 [US2] Check that the Bandeja (`app/src/components/InboxView.tsx`) and the inline card refresh each other on the `inbox` and `conversations` topics. Add a test in `app/src/components/ConversationView.test.tsx`: an `inbox` event re-fetches, and a card answered elsewhere shows as answered.
+- [X] T031 [US2] Write failing tests in `app/src/components/ConversationView.test.tsx`: the composer shows for a live task session (not only ideas) and sends with `api.sendMessage`; a queued entry shows "en cola" with a remove button using the string id; "Detener" calls `api.stopMessage`; a pending card renders `AskCard` inline and answering it calls the existing reply API. Then implement in `app/src/components/ConversationView.tsx`, removing the idea-only conditions.
+- [X] T032 [US2] Check that the Bandeja (`app/src/components/InboxView.tsx`) and the inline card refresh each other on the `inbox` and `conversations` topics. Add a test in `app/src/components/ConversationView.test.tsx`: an `inbox` event re-fetches, and a card answered elsewhere shows as answered.
 
 **Checkpoint**: US1 + US2 complete, a shippable increment. Contract review of the composer routes (`DELETE …/messages/{entry}` id type).
 

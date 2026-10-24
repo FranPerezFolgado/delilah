@@ -18,8 +18,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 4 | 4D | verified | 1 | c8157ed | |
 | WP-11 | 4 | 4D | verified | 1 | 5e51e60 | |
 | WP-10 | 4 | 4E | verified | 1 | c8157ed | run together with WP-09 (shared TaskScreen.tsx) |
-| WP-12 | 5 | 5A | verified | 1 | | |
-| WP-13 | 5 | 5B | pending | 0 | | |
+| WP-09F | 4 | 4F | implementing | 0 | | open-file path fix |
+| WP-12 | 5 | 5A | verified | 1 | e3f3c57 | |
+| WP-13 | 5 | 5B | verified | 1 | | |
 | WP-14 | 6 | 6A | pending | 0 | | gated by spike |
 | WP-15 | 6 | 6B | pending | 0 | | gated by spike |
 | WP-16 | 7 | 7A | pending | 0 | | gated by spike |

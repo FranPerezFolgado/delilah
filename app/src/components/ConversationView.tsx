@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Conversation, type ConversationEntry, type Session } from "../api";
+import {
+  api,
+  type Conversation,
+  type ConversationEntry,
+  type Session,
+} from "../api";
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
@@ -21,7 +26,15 @@ const noop = () => {};
  *  the stored entries (ids not starting with "t:") are replaced by the new set and the
  *  transcript ones are upserted by id (a tool re-sent with its result replaces the earlier
  *  one in place). The result is ordered by time, keeping the order of equal ones. */
-function merge(prev: ConversationEntry[], next: ConversationEntry[], incremental: boolean): ConversationEntry[] {
+/** Entries come with "…000Z" and "+00:00" stamps; compare instants, not strings. An
+ *  empty or unparsable stamp counts as 0, so those keep their arrival order. */
+const time = (at: string) => Date.parse(at) || 0;
+
+function merge(
+  prev: ConversationEntry[],
+  next: ConversationEntry[],
+  incremental: boolean,
+): ConversationEntry[] {
   if (!incremental) return next;
   const out = prev.filter((e) => e.id.startsWith("t:"));
   for (const e of next) {
@@ -31,13 +44,19 @@ function merge(prev: ConversationEntry[], next: ConversationEntry[], incremental
   }
   return out
     .map((e, i) => [e, i] as const)
-    .sort(([a, i], [b, j]) => (a.at < b.at ? -1 : a.at > b.at ? 1 : i - j))
+    .sort(([a, i], [b, j]) => time(a.at) - time(b.at) || i - j)
     .map(([e]) => e);
 }
 
 /** An idea conversation without a terminal: messages, Claude's replies, questions as
  *  cards and a field to write. Sending is allowed while Claude works (it queues). */
-export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen, onOpenFile }: Props) {
+export function ConversationView({
+  session,
+  onOpenTerminal,
+  onOpenTask,
+  onReopen,
+  onOpenFile,
+}: Props) {
   const [conv, setConv] = useState<Conversation | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +77,10 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
       (c) => {
         if (mine !== seq.current) return;
         cursor.current = c.cursor;
-        setConv((prev) => ({ ...c, entries: merge(prev?.entries ?? [], c.entries, !!from) }));
+        setConv((prev) => ({
+          ...c,
+          entries: merge(prev?.entries ?? [], c.entries, !!from),
+        }));
         setError(null);
         // More transcript is waiting: take it without waiting for an event.
         if (!c.complete) load();
@@ -103,8 +125,11 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
     }
   };
 
-  const guard = (p: Promise<unknown>) => p.then(load, (e) => setError((e as Error).message));
+  const guard = (p: Promise<unknown>) =>
+    p.then(load, (e) => setError((e as Error).message));
   const working = session.state === "working";
+  // Any open Claude session takes messages; a closed one is reopened first and a shell has no chat.
+  const canCompose = !session.closed && session.kind !== "shell";
 
   return (
     <div className="conv">
@@ -116,11 +141,16 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
-        {conv && conv.entries.length === 0 && conv.transcript === "present" && session.conversation && (
-          <div className="muted">{t("Cuéntale tu idea…")}</div>
-        )}
+        {conv &&
+          conv.entries.length === 0 &&
+          conv.transcript === "present" &&
+          session.conversation && (
+            <div className="muted">{t("Cuéntale tu idea…")}</div>
+          )}
         {conv && conv.entries.length === 0 && conv.transcript === "pending" && (
-          <div className="muted">{t("Esperando la conversación de Claude…")}</div>
+          <div className="muted">
+            {t("Esperando la conversación de Claude…")}
+          </div>
         )}
         {conv && conv.entries.length === 0 && conv.transcript === "missing" && (
           <div className="conv-notice">
@@ -158,11 +188,21 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
               </div>
             );
           }
-          if (e.kind === "tool") return <ToolCard key={e.id} entry={e} sessionId={id} onOpenFile={onOpenFile ?? noop} />;
+          if (e.kind === "tool")
+            return (
+              <ToolCard
+                key={e.id}
+                entry={e}
+                sessionId={id}
+                onOpenFile={onOpenFile ?? noop}
+              />
+            );
           if (e.kind === "marker") {
             return (
               <div key={e.id} className="conv-marker muted">
-                {e.marker === "compacted" ? t("Conversación compactada") : t("Detenida")}
+                {e.marker === "compacted"
+                  ? t("Conversación compactada")
+                  : t("Detenida")}
               </div>
             );
           }
@@ -170,7 +210,15 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
           return (
             <div key={e.id} className="conv-card">
               {pending ? (
-                <AskCard ask={{ id: e.ask, questions: e.questions, proposal: e.proposal }} onDone={load} onOpenTask={onOpenTask} />
+                <AskCard
+                  ask={{
+                    id: e.ask,
+                    questions: e.questions,
+                    proposal: e.proposal,
+                  }}
+                  onDone={load}
+                  onOpenTask={onOpenTask}
+                />
               ) : (
                 <div className="selectable">
                   {e.proposal && <b>{e.proposal.title}</b>}
@@ -197,8 +245,14 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
                       </a>
                     </div>
                   )}
-                  {e.outcome === "terminal" && <div className="muted">{t("Respondida en la terminal")}</div>}
-                  {e.outcome === "withdrawn" && <div className="muted">{t("Retirada")}</div>}
+                  {e.outcome === "terminal" && (
+                    <div className="muted">
+                      {t("Respondida en la terminal")}
+                    </div>
+                  )}
+                  {e.outcome === "withdrawn" && (
+                    <div className="muted">{t("Retirada")}</div>
+                  )}
                   {e.error && <div className="error">{e.error}</div>}
                 </div>
               )}
@@ -206,7 +260,9 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
           );
         })}
       </div>
-      {working && conv?.activity && <div className="conv-activity muted">{conv.activity}</div>}
+      {working && conv?.activity && (
+        <div className="conv-activity muted">{conv.activity}</div>
+      )}
       {conv?.needs_terminal && (
         <div className="conv-notice">
           {t("Claude espera en la terminal")}
@@ -223,30 +279,32 @@ export function ConversationView({ session, onOpenTerminal, onOpenTask, onReopen
         </div>
       )}
       {error && <div className="error selectable conv-notice">{error}</div>}
-      <div className="conv-compose">
-        <textarea
-          className="input"
-          rows={2}
-          placeholder={t("Escribe un mensaje…")}
-          aria-label={t("Mensaje")}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              send();
-            }
-          }}
-        />
-        <button className="btn btn-p" disabled={!text.trim()} onClick={send}>
-          {t("Enviar")}
-        </button>
-        {working && (
-          <button className="btn" onClick={() => guard(api.stopSession(id))}>
-            {t("Detener")}
+      {canCompose && (
+        <div className="conv-compose">
+          <textarea
+            className="input"
+            rows={2}
+            placeholder={t("Escribe un mensaje…")}
+            aria-label={t("Mensaje")}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+          <button className="btn btn-p" disabled={!text.trim()} onClick={send}>
+            {t("Enviar")}
           </button>
-        )}
-      </div>
+          {working && (
+            <button className="btn" onClick={() => guard(api.stopSession(id))}>
+              {t("Detener")}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
