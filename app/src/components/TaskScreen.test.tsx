@@ -380,6 +380,9 @@ describe("TaskScreen runtime switch", () => {
     r.rerender(screen1({ ...chatTask, chat_mode: false }, { ...stream, runtime: "pty" }));
     expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(false);
     expect(r.queryByRole("button", { name: "Pasar a terminal" })).toBeNull();
+    // And the terminal is what shows, not the chat the session no longer has.
+    expect(r.getByRole("button", { name: "Terminal" }).getAttribute("aria-pressed")).toBe("true");
+    expect(r.getByRole("button", { name: "Chat" }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("offers Pasar a modo chat on a PTY task, disabled while it runs", async () => {

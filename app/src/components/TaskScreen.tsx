@@ -506,7 +506,12 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, askPosi
     setError(null);
     api
       .setRuntime(owner, mode)
-      .then(onChanged, (err) => setError((err as Error).message))
+      .then(() => {
+        // The sessions come back in the new runtime: to the terminal, show it (the old
+        // choice was a chat the session no longer has); to chat, drop any override.
+        setViews(mode === "terminal" ? new Map(sessions.filter((x) => x.kind === "claude").map((x) => [x.id, "terminal" as ViewMode])) : new Map());
+        onChanged();
+      }, (err) => setError((err as Error).message))
       .finally(() => setSwitching(false));
   };
 

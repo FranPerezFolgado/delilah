@@ -156,6 +156,7 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
   nothing shows it registered.
 - Not observed: `Notification` and `StopFailure` in print mode, and the `rate_limit_event`
   `status` when a limit is hit.
+- **The switch to chat mode relaunches without a prompt**, and the real CLI says nothing until it gets a message, so the switch judges the agent healthy if it stays alive for 3 s; a later death is seen by the exit watcher and leaves the task in chat mode with no live session (resume or switch back).
 
 ## Workflows and tasks
 

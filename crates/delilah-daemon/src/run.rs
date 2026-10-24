@@ -756,6 +756,29 @@ pub fn launch_session<'a>(
     ))
 }
 
+/// [`launch_session`] with its own settle: how long a stream agent started without a
+/// prompt must stay alive to count as up.
+pub(crate) async fn launch_session_settled(
+    app: &AppState,
+    session: &SessionRecord,
+    workspace: &std::path::Path,
+    resume: bool,
+    settle: Duration,
+) -> Result<(), ApiError> {
+    spawn_session(
+        app,
+        session,
+        workspace,
+        None,
+        resume,
+        FIRST_TURN_TIMEOUT,
+        settle,
+    )
+    .await?
+    .send_first(app)
+    .await
+}
+
 pub(crate) async fn launch_session_with(
     app: &AppState,
     session: &SessionRecord,

@@ -41,17 +41,23 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-23 | 8 | 8B | done | 1 | | go (decision 49) |
 | WP-24 | 8 | 8C | done | 1 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |
-| WP-26 | 9 | 9A | verified | 1 | | go (decision 49) |
-| WP-27 | 9 | 9B | verified | 1 | | go (decision 49) |
-| WP-28 | 9 | 9B | verified | 1 | | go (decision 49) |
-| WP-29 | 9 | 9B | verified | 1 | | go (decision 49) |
-| WP-30 | 10 | 10A | pending | 0 | | |
+| WP-26 | 9 | 9A | done | 1 | | go (decision 49) |
+| WP-27 | 9 | 9B | done | 1 | | go (decision 49) |
+| WP-28 | 9 | 9B | done | 1 | | go (decision 49) |
+| WP-29 | 9 | 9B | done | 1 | | go (decision 49) |
+| WP-26F | 9 | 9F | done | 1 | | runtime switch settle (flake + product) |
+| WP-30 | 10 | 10A | implementing | 0 | | |
 | WP-31 | 10 | 10B | pending | 0 | | |
 
 ## Open findings
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 9 | tests | LOW | restart test drives continue_agent (lazy resume); no automatic relaunch at daemon start (by design) | crates/delilah-daemon/src/run.rs |
+| 9 | contract | MEDIUM | contracts/api.md /runtime stale (422 not 409 for chat start failure; missing 400/404/500, no-workspace 409, no-op, rollback, `sessions` event) → fix in WP-30 | specs/006-chat-view/contracts/api.md |
+| 9 | contract | LOW | malformed /runtime body gets axum plain-text 415/422 (app would JSON.parse it) | crates/delilah-daemon/src/runtime_api.rs |
+| 9 | contract | LOW | failing-relaunch test asserts !success, not 422 + message | crates/delilah-daemon/src/runtime_api.rs:327 |
+| 9 | contract | LOW | archived-but-not-done task still shows the switch button → 409 no workspace | app/src/components/TaskScreen.tsx:530 |
 | 8 | tests | LOW | no daemon test asserts the deny message reaching the agent (trimmed reason / default) | crates/delilah-daemon/src/permissions.rs |
 | 8 | contract | MEDIUM | contracts/api.md + data-model.md stale for permissions (rule, 400/409, allow_always never a bare tool, card shape, PermissionAsk fields) → fix in WP-30 | specs/006-chat-view/contracts/api.md |
 | 8 | contract | LOW | answer: a failed reply returns 409 after the ask was taken → retry gets 404 (document or re-insert) | crates/delilah-daemon/src/permissions.rs:296 |
