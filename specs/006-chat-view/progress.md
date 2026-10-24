@@ -7,9 +7,9 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | a7118d8 | |
 | WP-02 | 2 | 2A | implementing | 1 | | T002 done; waiting for the user to run the scenarios (T003/T004) |
-| WP-03 | 3 | 3A | verified | 1 | | |
-| WP-04 | 3 | 3A | verified | 1 | 95b1959 | |
-| WP-05 | 4 | 4A | pending | 0 | | |
+| WP-03 | 3 | 3A | done | 1 | 7a74a83 | |
+| WP-04 | 3 | 3A | done | 1 | 95b1959 | |
+| WP-05 | 4 | 4A | implementing | 0 | | |
 | WP-06 | 4 | 4B | pending | 0 | | |
 | WP-07 | 4 | 4B | pending | 0 | | |
 | WP-08 | 4 | 4C | pending | 0 | | |
@@ -41,6 +41,22 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 3 | spec | LOW | "Delilah's own injected text → skipped" (R3) not implemented; no marker exists yet | crates/delilah-agents/src/transcript.rs:313 |
+| 3 | spec | LOW | parse_message pairs results only within one message; stream-json sends tool_result in a separate user message (needs own pairing for FR-016) | crates/delilah-agents/src/transcript.rs:214 |
+| 3 | spec | LOW | untested: MultiEdit/Write diffs, Glob/NotebookEdit/Agent summaries, input truncation, tool_detail is_error, missing uuid/bad timestamp | crates/delilah-agents/src/transcript.rs |
+| 3 | security | MEDIUM | diff computed on untruncated old/new before truncation; no cap on rows/row length/time → CPU/memory on huge Write/Edit | crates/delilah-agents/src/transcript.rs:432 |
+| 3 | security | MEDIUM | transcript_path doesn't validate session_id (`../`) → arbitrary .jsonl read once served over HTTP; validate inside it | crates/delilah-agents/src/transcript.rs:120 |
+| 3 | security | LOW | Read summary `o + l` unchecked u64 add (debug panic) → saturating_add | crates/delilah-agents/src/transcript.rs:537 |
+| 3 | security | LOW | blocks.clone(), unbounded entries per call, tool_detail unbounded response | crates/delilah-agents/src/transcript.rs:326 |
+| 3 | security | LOW | path/tool/ids copied without length cap; path is untrusted, display-only | crates/delilah-agents/src/transcript.rs:422 |
+| 3 | architecture | MEDIUM | parse drops tool_result whose tool_use is before the cursor (no orphan results exposed, no two-chunk test) — decide in WP-05/06 | crates/delilah-agents/src/transcript.rs:152 |
+| 3 | architecture | MEDIUM | transcript_path is Claude-specific, reads $HOME and canonicalizes; hook path should win; take home as param | crates/delilah-agents/src/transcript.rs:120 |
+| 3 | architecture | MEDIUM | transcript.rs is 918 lines mixing parser, API Entry model and diff/summary; Entry carries daemon-only states (Queued/Sent/View) | crates/delilah-agents/src/transcript.rs:1 |
+| 3 | architecture | LOW | parse_message uses Utc::now() and t:<msg.id> ids, differing from parse | crates/delilah-agents/src/transcript.rs:201 |
+| 3 | architecture | LOW | tool_detail re-parses whole file per call, ignores isSidechain | crates/delilah-agents/src/transcript.rs:227 |
+| 3 | architecture | LOW | is_injected is a hard-coded prefix list | crates/delilah-agents/src/transcript.rs:313 |
+| 3 | architecture | LOW | rename half done: Live field still `conversation`, set_idea param named conversation | crates/delilah-daemon/src/sessions.rs:48 |
+| 3 | architecture | LOW | idea.rs emits Topic::Conversations; keep card↔tool_use dedupe in conversation.rs | crates/delilah-daemon/src/idea.rs |
 
 ## Notes for later packages
 
