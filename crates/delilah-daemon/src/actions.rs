@@ -378,7 +378,14 @@ mod tests {
                 .unwrap();
             ws
         } else {
-            let ws = delilah_git::create_workspace(repo, &spec, &opts).unwrap();
+            let ws = delilah_git::create_workspace(
+                repo,
+                &spec,
+                &opts,
+                delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+            )
+            .unwrap()
+            .0;
             app.store.save_workspace(&key, repo, &ws).await.unwrap();
             ws
         };

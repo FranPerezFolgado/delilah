@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
-use crate::command::{GitError, GitOptions, git, git_code};
+use crate::base::{RepoBase, prepare_base};
+use crate::command::{Deadline, GitError, GitOptions, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Submodule {
@@ -183,13 +184,18 @@ pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
 /// Creates the workspace of `root` (the parent or the repo) described by `spec`.
 ///
 /// - `parent`: a worktree detached at the parent's `HEAD`, with only `submodules`
-///   initialised, each on `branch` (detached when it is `None`). Branches and PRs live in the submodules.
-/// - `repo`: a worktree of the repo on a new `branch` (detached at `HEAD` when `None`).
+///   initialised, each on `branch`. Branches and PRs live in the submodules.
+/// - `repo`: a worktree of the repo on a new `branch` that starts at `origin`'s default
+///   branch, fetched first (bounded by `deadline`). No local branch moves and the new
+///   branch has no upstream. A failed fetch falls back to the last known `origin`.
+///
+/// Also returns the base each repo started from (empty for `parent` for now).
 pub fn create_workspace(
     root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
-) -> Result<Workspace, GitError> {
+    deadline: Deadline,
+) -> Result<(Workspace, Vec<RepoBase>), GitError> {
     if spec.path.exists() {
         return Err(GitError::WorkspaceExists(spec.path.clone()));
     }
@@ -200,23 +206,32 @@ pub fn create_workspace(
     }
     let ws_path = path_str(&spec.path);
 
+    let mut bases = Vec::new();
     match spec.kind {
         ProjectKind::Repo => {
             if !spec.submodules.is_empty() {
                 return Err(GitError::SubmodulesInRepo);
             }
-            match &spec.branch {
-                Some(branch) => git(
-                    root,
-                    &["worktree", "add", "-b", branch, &ws_path, "HEAD"],
-                    opts,
-                )?,
-                None => git(
-                    root,
-                    &["worktree", "add", "--detach", &ws_path, "HEAD"],
-                    opts,
-                )?,
+            let base = prepare_base(root, ".", opts, deadline);
+            let start = if base.sha.is_empty() {
+                base.refname.clone()
+            } else {
+                base.sha.clone()
             };
+            git(
+                root,
+                &[
+                    "worktree",
+                    "add",
+                    "--no-track",
+                    "-b",
+                    &spec.branch,
+                    &ws_path,
+                    &start,
+                ],
+                opts,
+            )?;
+            bases.push(base);
         }
         ProjectKind::Parent => {
             let known = list_submodules(root)?;
@@ -240,12 +255,13 @@ pub fn create_workspace(
         }
     }
 
-    Ok(Workspace {
+    let ws = Workspace {
         path: spec.path.clone(),
         branch: spec.branch.clone().unwrap_or_default(),
         kind: spec.kind,
         submodules: spec.submodules.clone(),
-    })
+    };
+    Ok((ws, bases))
 }
 
 fn init_submodules(ws: &Path, spec: &WorkspaceSpec, opts: &GitOptions) -> Result<(), GitError> {

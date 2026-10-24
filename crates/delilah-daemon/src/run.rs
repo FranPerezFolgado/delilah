@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
-use delilah_git::{GitOptions, WorkspaceSpec};
+use delilah_git::{Deadline, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -23,6 +23,13 @@ const TRUST_WATCH: Duration = Duration::from_secs(60);
 
 /// Added to the system prompt of an idea conversation.
 const IDEA_PROMPT: &str = "This is a Delilah idea conversation, shown in a chat view, not a terminal. Follow the task-from-idea skill from the first message. Ask with AskUserQuestion. Never use ExitPlanMode.";
+
+/// Logs where each repo's task branch started (the ref and the commit).
+async fn report_bases(_app: &AppState, key: &TaskKey, bases: &[RepoBase]) {
+    for b in bases {
+        tracing::info!(task = %key, repo = %b.repo, base = %b.refname, sha = %b.sha, fetch = ?b.fetch, "task branch base");
+    }
+}
 
 /// How a Claude session is launched, by what it is: a conversation never asks
 /// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
@@ -336,16 +343,19 @@ pub async fn start_run(
         allow_file_protocol: app.config.allow_file_protocol,
     };
     let root = project.path.clone();
+    let deadline = Deadline::after(Duration::from_secs(30));
     let created = tokio::task::spawn_blocking(move || {
         if in_checkout {
-            delilah_git::use_checkout(&root, &spec, &opts).map(|(ws, prev)| (ws, Some(prev)))
+            delilah_git::use_checkout(&root, &spec, &opts)
+                .map(|(ws, prev)| (ws, Some(prev), Vec::new()))
         } else {
-            delilah_git::create_workspace(&root, &spec, &opts).map(|ws| (ws, None))
+            delilah_git::create_workspace(&root, &spec, &opts, deadline)
+                .map(|(ws, bases)| (ws, None, bases))
         }
     })
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
-    let (ws, previous) = match created {
+    let (ws, previous, bases) = match created {
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
@@ -393,15 +403,8 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
-    let launch = AgentLaunch {
-        free: req.free,
-        prompt,
-        custom_prompt: req.prompt.is_some(),
-        notes,
-        adopted,
-        saving_mode,
-        autopilot,
-    };
+    app.transition(&key, Event::WorkspaceReady).await?;
+    report_bases(&app, &key, &bases).await;
 
     // A new worktree gets the shared entries and then the setup; the project's own
     // checkout gets neither.
@@ -1224,6 +1227,102 @@ mod tests {
     fn run(key: &str) -> RunRequest {
         serde_json::from_value(serde_json::json!({ "key": key, "title": "", "project": "web" }))
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_worktree_task_on_a_repo_project_starts_at_the_fresh_remote_head() {
+        let app = app().await;
+        let home = app.config.home.clone();
+        let sh = |dir: &std::path::Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=T", "-c", "user.email=t@d.invalid"])
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let origin = home.join("origin.git");
+        let repo = home.join("repo");
+        let other = home.join("other");
+        std::fs::create_dir_all(&home).unwrap();
+        sh(
+            &home,
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                origin.to_str().unwrap(),
+            ],
+        );
+        sh(
+            &home,
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                repo.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        sh(&repo, &["add", "."]);
+        sh(&repo, &["commit", "-qm", "init"]);
+        sh(&repo, &["push", "-q", "origin", "HEAD:main"]);
+        // The remote moves on after the clone.
+        sh(
+            &home,
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(other.join("b.txt"), "b\n").unwrap();
+        sh(&other, &["add", "."]);
+        sh(&other, &["commit", "-qm", "ahead"]);
+        sh(&other, &["push", "-q", "origin", "HEAD:main"]);
+        let remote_head = sh(&other, &["rev-parse", "HEAD"]);
+
+        let agent = home.join("agent.sh");
+        std::fs::write(&agent, "#!/bin/sh\nexec sleep 5\n").unwrap();
+        std::fs::set_permissions(&agent, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let mut app = app;
+        app.config = Arc::new(crate::config::Config {
+            agent_program: Some(agent),
+            ..(*app.config).clone()
+        });
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "fresh".into(),
+                path: repo.clone(),
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+            })
+            .await
+            .unwrap();
+
+        let mut req = run("PROJ-9");
+        req.project = "fresh".into();
+        req.title = "Fresh".into();
+        req.in_checkout = Some(false);
+        let started = start_run(State(app.clone()), Json(req)).await;
+        if let Err(e) = &started {
+            panic!("start failed: {} {}", e.status, e.message);
+        }
+
+        let ws = app.config.workspaces_dir().join("PROJ-9");
+        assert_eq!(sh(&ws, &["rev-parse", "HEAD"]), remote_head);
+        assert_ne!(
+            sh(&repo, &["rev-parse", "HEAD"]),
+            remote_head,
+            "the project folder is untouched"
+        );
     }
 
     async fn backlog_task(app: &AppState, key: &str) -> TaskKey {

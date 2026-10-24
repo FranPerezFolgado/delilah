@@ -350,7 +350,14 @@ mod tests {
                     kind: ProjectKind::Repo,
                     submodules: vec![],
                 };
-                create_workspace(&root, &spec, &opts()).unwrap()
+                create_workspace(
+                    &root,
+                    &spec,
+                    &opts(),
+                    delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+                )
+                .unwrap()
+                .0
             };
             let head = commit_and_push(&ws.path);
             app.store.save_workspace(&key, &root, &ws).await.unwrap();
@@ -616,7 +623,14 @@ mod tests {
             kind: ProjectKind::Parent,
             submodules: subs.iter().map(ToString::to_string).collect(),
         };
-        let ws = create_workspace(&root, &spec, &opts()).unwrap();
+        let ws = create_workspace(
+            &root,
+            &spec,
+            &opts(),
+            delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+        )
+        .unwrap()
+        .0;
         let mut prs = HashMap::new();
         for (i, sub) in subs.iter().enumerate() {
             let head = commit_and_push(&ws.path.join(sub));
