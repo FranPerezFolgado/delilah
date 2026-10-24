@@ -171,26 +171,31 @@ fn trusted_transcript_in(root: &std::path::Path, hook: &Value) -> Option<std::pa
     resolved.is_file().then_some(resolved)
 }
 
+/// Keeps the latest usage windows. A reading is sent every few seconds: only a new one
+/// is news. Shared by the status line hook (terminals) and the stream's rate-limit events.
+pub(crate) fn record_limits(app: &AppState, task: String, limits: Value) {
+    let changed = {
+        let mut usage = app.usage.lock().unwrap();
+        let changed = usage.as_ref().is_none_or(|u| u.rate_limits != limits);
+        *usage = Some(UsageReport {
+            at: Utc::now(),
+            task,
+            rate_limits: limits,
+        });
+        changed
+    };
+    if changed {
+        app.emit(Topic::Usage);
+    }
+}
+
 pub async fn claude_statusline(
     State(app): State<AppState>,
     Query(q): Query<HookQuery>,
     Json(payload): Json<Value>,
 ) -> StatusCode {
     if let Some(limits) = payload.get("rate_limits").filter(|v| v.is_object()) {
-        // The status line runs every few seconds: only a new reading is news.
-        let changed = {
-            let mut usage = app.usage.lock().unwrap();
-            let changed = usage.as_ref().is_none_or(|u| &u.rate_limits != limits);
-            *usage = Some(UsageReport {
-                at: Utc::now(),
-                task: q.task,
-                rate_limits: limits.clone(),
-            });
-            changed
-        };
-        if changed {
-            app.emit(Topic::Usage);
-        }
+        record_limits(&app, q.task, limits.clone());
     }
     StatusCode::NO_CONTENT
 }

@@ -248,13 +248,13 @@
   - `chat_mode INTEGER NOT NULL DEFAULT 0` and `allowed_tools TEXT`;
   - `Task.chat_mode: bool` and `Task.allowed_tools: Vec<String>` (`#[serde(default)]`) in `crates/delilah-core/src/task.rs`;
   - store reads and writes, `set_chat_mode`, `add_allowed_tool` (dedupe) in `crates/delilah-daemon/src/store.rs`.
-- [ ] T042 [US3] Write failing tests in `crates/delilah-daemon/src/run.rs` (tests module, with the program path pointed at the fake script):
+- [X] T042 [US3] Write failing tests in `crates/delilah-daemon/src/run.rs` (tests module, with the program path pointed at the fake script):
   - starting a task with `chat_mode` launches a `Runtime::Stream` with the prompt sent on stdin;
   - project sessions and idea conversations always launch a PTY;
   - a stream process that exits before `Init` makes the start fail with `chat mode could not start: <stderr tail>`, and the task is left startable;
   - saving-mode handoffs and the usage-limit resume of a chat-mode task relaunch in stream with `--resume`.
-- [ ] T043 [US3] Implement T042 in `crates/delilah-daemon/src/run.rs`: `launch_session` passes the kind from the task's flag to `runtime::spawn`, and the stream path waits for `Init` (with a timeout) before reporting started. `RateLimit` events feed the same `limits` state as the status line hook does for PTY sessions, since the status line never runs in print mode *(spike)*. No other `if chat_mode` branches.
-- [ ] T044 [US3] Write failing tests in `crates/delilah-daemon/src/api.rs` and `crates/delilah-daemon/src/session_api.rs` (tests modules):
+- [X] T043 [US3] Implement T042 in `crates/delilah-daemon/src/run.rs`: `launch_session` passes the kind from the task's flag to `runtime::spawn`, and the stream path waits for `Init` (with a timeout) before reporting started. `RateLimit` events feed the same `limits` state as the status line hook does for PTY sessions, since the status line never runs in print mode *(spike)*. No other `if chat_mode` branches.
+- [X] T044 [US3] Write failing tests in `crates/delilah-daemon/src/api.rs` and `crates/delilah-daemon/src/session_api.rs` (tests modules):
   - `POST /api/v1/tasks` accepts `chat_mode`;
   - task JSON has `chat_mode` and `allowed_tools`;
   - session JSON has `runtime: "pty"|"stream"` (live runtime, else the task's flag; project sessions are always `pty`).

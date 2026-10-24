@@ -46,6 +46,7 @@ mod store_prs;
 mod store_runs;
 pub mod store_sessions;
 mod store_settings;
+mod stream_events;
 mod terminal;
 pub mod transcript_watch;
 mod transitions;

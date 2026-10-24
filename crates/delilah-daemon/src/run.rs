@@ -93,6 +93,10 @@ pub struct RunRequest {
     /// A Claude session of the project to carry on as the task's primary one, with
     /// its conversation ("Convertir en tarea"). Implies a free task in the checkout.
     pub from_session: Option<String>,
+    /// Chat mode: the agent runs on a stream-json pipe, shown as a chat. Left out:
+    /// what a backlog task chose, else off.
+    #[serde(default)]
+    pub chat_mode: Option<bool>,
 }
 
 pub async fn start_run(
@@ -261,6 +265,9 @@ pub async fn start_run(
             if updated.saving_mode != saving_mode {
                 app.store.set_saving_mode(&key, saving_mode).await?;
             }
+            if let Some(chat) = req.chat_mode.filter(|&c| c != updated.chat_mode) {
+                app.store.set_chat_mode(&key, chat).await?;
+            }
             if updated.autopilot.is_some() != autopilot {
                 let value = autopilot.then(new_autopilot);
                 app.store.set_autopilot(&key, value.as_ref()).await?;
@@ -272,6 +279,7 @@ pub async fn start_run(
             task.project = Some(project.name.clone());
             task.saving_mode = saving_mode;
             task.autopilot = autopilot.then(new_autopilot);
+            task.chat_mode = req.chat_mode.unwrap_or(false);
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
             app.store.create_task(&task).await?;
             task.notes
@@ -388,12 +396,12 @@ pub async fn start_run(
         session.primary = true;
         session.read_only = false;
         session.label = app.lang().pick("Principal", "Main").into();
-        launch_session(&app, &session, &ws.path, None, true)?;
+        launch_session(&app, &session, &ws.path, None, true).await?;
         app.emit(crate::events::Topic::Sessions);
     } else {
         let (session, prompt) = first_session(&app, &req.key, saving_mode, autopilot, prompt);
         app.store.create_session(&session).await?;
-        launch_session(&app, &session, &ws.path, Some(&prompt), false)?;
+        launch_session(&app, &session, &ws.path, Some(&prompt), false).await?;
     }
 
     let task = app
@@ -465,27 +473,76 @@ fn first_session(
     (session, prompt)
 }
 
-/// Starts a session in a daemon-owned PTY: Claude (new, or resumed with `--resume`
-/// on the same id) or the user's login shell, in the task's workspace.
-pub fn launch_session(
+/// How long a chat-mode agent has to say hello (its `Init` line) before the start fails.
+const INIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Whether a session runs on a stream (chat mode) rather than a terminal: only a
+/// task's Claude sessions do, when the task has the flag. Project sessions and idea
+/// conversations are always terminals.
+pub(crate) async fn runtime_kind(
+    app: &AppState,
+    session: &SessionRecord,
+) -> Result<RuntimeKind, ApiError> {
+    if session.kind != SessionKind::Claude
+        || session.conversation
+        || project_of(&session.task).is_some()
+    {
+        return Ok(RuntimeKind::Pty);
+    }
+    let chat = app
+        .store
+        .get_task(&TaskKey::new(&session.task))
+        .await?
+        .is_some_and(|t| t.chat_mode);
+    Ok(match chat {
+        true => RuntimeKind::Stream,
+        false => RuntimeKind::Pty,
+    })
+}
+
+/// Starts a session in a daemon-owned PTY (or, for a chat-mode task, a stream-json
+/// process): Claude (new, or resumed with `--resume` on the same id) or the user's
+/// login shell, in the task's workspace. A stream session is started once the agent
+/// has said hello, and gets the prompt then. Boxed, so the handoffs can take it (and
+/// tests replace it) as a [`crate::handoff::Launcher`].
+pub fn launch_session<'a>(
+    app: &'a AppState,
+    session: &'a SessionRecord,
+    workspace: &'a std::path::Path,
+    prompt: Option<&'a str>,
+    resume: bool,
+) -> crate::handoff::LaunchFuture<'a> {
+    Box::pin(launch_session_with(
+        app,
+        session,
+        workspace,
+        prompt,
+        resume,
+        INIT_TIMEOUT,
+    ))
+}
+
+pub(crate) async fn launch_session_with(
     app: &AppState,
     session: &SessionRecord,
     workspace: &std::path::Path,
     prompt: Option<&str>,
     resume: bool,
+    init_timeout: Duration,
 ) -> Result<(), ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
     let resume = resume && claude::has_conversation(workspace, &session.id);
     // No control character reaches the agent's command line.
     let prompt = prompt.map(crate::actions::sanitize_prompt);
     let prompt = prompt.as_deref();
+    let kind = runtime_kind(app, session).await?;
     let task_dir = app.config.task_dir(&session.task);
     std::fs::create_dir_all(&task_dir)
         .map_err(|e| ApiError::internal(format!("cannot create {}: {e}", task_dir.display())))?;
     let log = task_dir.join(format!("{}-{}.log", session.kind.name(), session.id));
     let spawn_error =
         |e: std::io::Error| ApiError::internal(format!("cannot start the session: {e}"));
-    let runtime = match session.kind {
+    let (runtime, events) = match session.kind {
         SessionKind::Claude => {
             let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
             let settings = claude::write_settings(
@@ -502,7 +559,8 @@ pub fn launch_session(
                 workspace,
                 session_id: &session.id,
                 settings: &settings,
-                prompt,
+                // A stream agent gets its first prompt on stdin, after it is up.
+                prompt: prompt.filter(|_| kind == RuntimeKind::Pty),
                 resume,
                 extra_dirs: &[task_dir.as_path()],
                 permission,
@@ -511,11 +569,12 @@ pub fn launch_session(
                 remote_control: remote_name.as_deref(),
                 program: app.config.agent_program.as_deref(),
             };
-            runtime::spawn_logged(&launch, RuntimeKind::Pty, Some(log)).map_err(spawn_error)?
+            runtime::spawn_with_events(&launch, kind, Some(log)).map_err(spawn_error)?
         }
-        SessionKind::Shell => {
-            runtime::spawn_pty(shell_command(workspace), Some(log)).map_err(spawn_error)?
-        }
+        SessionKind::Shell => (
+            runtime::spawn_pty(shell_command(workspace), Some(log)).map_err(spawn_error)?,
+            None,
+        ),
     };
     let live = app.sessions.insert(
         &session.id,
@@ -525,8 +584,9 @@ pub fn launch_session(
         runtime.clone(),
     );
     live.set_idea(session.conversation);
-    let remote_control = session.kind == SessionKind::Claude && app.remote_control();
-    tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, "session started");
+    let remote_control =
+        session.kind == SessionKind::Claude && kind == RuntimeKind::Pty && app.remote_control();
+    tracing::info!(task = %session.task, session = %session.id, kind = session.kind.name(), resume, remote_control, chat = kind == RuntimeKind::Stream, "session started");
 
     // Only terminals: a stream session skips the trust dialog, as print mode does not
     // wait on it (spike d1, decision 49).
@@ -540,11 +600,38 @@ pub fn launch_session(
     }
     let sessions = Arc::clone(&app.sessions);
     let id = session.id.clone();
+    let watched = runtime.clone();
     tokio::spawn(async move {
-        runtime.wait().await;
-        sessions.remove_if_same(&id, &runtime);
+        watched.wait().await;
+        sessions.remove_if_same(&id, &watched);
         tracing::info!(session = %id, "session exited");
     });
+
+    if let (Some(events), Some(stream)) = (events, runtime.as_stream()) {
+        let started = crate::stream_events::spawn_pump(app, &session.id, &session.task, events);
+        let up = matches!(
+            tokio::time::timeout(init_timeout, started).await,
+            Ok(Ok(crate::stream_events::Started::Init))
+        );
+        if !up {
+            let _ = runtime.kill();
+            runtime.wait().await;
+            let tail = stream.stderr_tail();
+            let tail = match tail.trim() {
+                "" => "claude printed nothing before it stopped",
+                tail => tail,
+            };
+            return Err(ApiError::unprocessable(format!(
+                "chat mode could not start: {tail}"
+            )));
+        }
+        if let Some(prompt) = prompt {
+            runtime
+                .send_prompt(prompt)
+                .await
+                .map_err(|e| ApiError::internal(format!("cannot send the first message: {e}")))?;
+        }
+    }
     Ok(())
 }
 
@@ -1346,6 +1433,233 @@ mod tests {
             args.contains(&format!("{})", path.display())),
             "the prompt does not point to notes.md: {args}"
         );
+    }
+
+    /// A daemon whose `claude` is `script`, a task `PROJ-1` (chat mode as asked) and a
+    /// workspace folder for it.
+    async fn chat_app(script: &str, chat_mode: bool) -> (AppState, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let app = app().await;
+        let ws = app.config.home.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let bin = app.config.home.join("fake-claude.sh");
+        std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = app.config.as_ref().clone();
+        config.agent_program = Some(bin);
+        let app = AppState::new(app.store.clone(), config);
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        task.project = Some("web".into());
+        task.chat_mode = chat_mode;
+        app.store.create_task(&task).await.unwrap();
+        (app, ws)
+    }
+
+    /// Says hello like a stream agent, saves its arguments and its first message.
+    fn hello_script(home_args: &str) -> String {
+        format!(
+            "printf '%s\\n' \"$@\" > '{home_args}/args.txt'\n\
+             echo '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"sess-1\"}}'\n\
+             read line; printf '%s' \"$line\" > '{home_args}/stdin.txt'\n\
+             sleep 5"
+        )
+    }
+
+    async fn read_when_there(path: std::path::PathBuf) -> String {
+        for _ in 0..100 {
+            if let Ok(text) = std::fs::read_to_string(&path)
+                && !text.is_empty()
+            {
+                return text;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        String::new()
+    }
+
+    #[tokio::test]
+    async fn a_chat_mode_task_launches_a_stream_with_the_prompt_on_stdin() {
+        let home = std::env::temp_dir().join(format!("delilah-chat-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let (app, ws) = chat_app(&hello_script(&home.display().to_string()), true).await;
+        let record = session("PROJ-1", "Main");
+        launch_session_with(
+            &app,
+            &record,
+            &ws,
+            Some("do the thing"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        let live = app.sessions.get("sess-1").unwrap();
+        assert!(live.runtime.as_stream().is_some() && live.runtime.as_pty().is_none());
+        let stdin = read_when_there(home.join("stdin.txt")).await;
+        assert!(stdin.contains("do the thing"), "{stdin}");
+        let args = std::fs::read_to_string(home.join("args.txt")).unwrap();
+        assert!(
+            args.contains("stream-json") && args.contains("--session-id"),
+            "{args}"
+        );
+        assert!(
+            !args.contains("do the thing"),
+            "no positional prompt: {args}"
+        );
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn project_sessions_and_conversations_and_plain_tasks_launch_a_pty() {
+        let (app, ws) = chat_app("sleep 5", true).await;
+        // A project's Claude and an idea conversation.
+        let project = SessionRecord {
+            id: "p-1".into(),
+            ..session("@web", "Claude 1")
+        };
+        let idea = SessionRecord {
+            id: "i-1".into(),
+            conversation: true,
+            ..session("@web", "Idea")
+        };
+        // A conversation is a terminal even on a task that has the flag.
+        let task_idea = SessionRecord {
+            id: "t-1".into(),
+            conversation: true,
+            ..session("PROJ-1", "Idea")
+        };
+        for record in [&project, &idea, &task_idea] {
+            assert_eq!(
+                runtime_kind(&app, record)
+                    .await
+                    .map_err(|e| e.message)
+                    .unwrap(),
+                RuntimeKind::Pty
+            );
+        }
+        launch_session_with(&app, &project, &ws, None, false, Duration::from_secs(10))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let live = app.sessions.get("p-1").unwrap();
+        assert!(live.runtime.as_pty().is_some());
+        let _ = live.runtime.kill();
+
+        // Without the flag, a task's session is a terminal too.
+        let (app, _) = chat_app("sleep 5", false).await;
+        let main = session("PROJ-1", "Main");
+        assert_eq!(
+            runtime_kind(&app, &main)
+                .await
+                .map_err(|e| e.message)
+                .unwrap(),
+            RuntimeKind::Pty
+        );
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_exits_before_init_fails_the_start_with_its_stderr() {
+        let (app, ws) = chat_app("echo 'no such flag' >&2\nexit 2", true).await;
+        let err = launch_session_with(
+            &app,
+            &session("PROJ-1", "Main"),
+            &ws,
+            Some("hi"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.message, "chat mode could not start: no such flag");
+        // Nothing stays registered, and the task is as it was.
+        for _ in 0..100 {
+            if app.sessions.get("sess-1").is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(app.sessions.get("sess-1").is_none());
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_never_says_hello_times_out() {
+        let (app, ws) = chat_app("sleep 5", true).await;
+        let err = launch_session_with(
+            &app,
+            &session("PROJ-1", "Main"),
+            &ws,
+            None,
+            false,
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.message.starts_with("chat mode could not start:"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_relaunch_of_a_chat_mode_task_resumes_on_a_stream() {
+        let home = std::env::temp_dir().join(format!("delilah-chat-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let (app, ws) = chat_app(&hello_script(&home.display().to_string()), true).await;
+        // A saved conversation, so `--resume` is used. Claude keeps it under the real HOME.
+        let record = SessionRecord {
+            id: format!("resume-{}", uuid::Uuid::new_v4()),
+            ..session("PROJ-1", "Main")
+        };
+        let transcript = delilah_agents::transcript::transcript_path(&ws, &record.id).unwrap();
+        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        std::fs::write(&transcript, "{}\n").unwrap();
+        let launched = launch_session_with(
+            &app,
+            &record,
+            &ws,
+            Some("go on"),
+            true,
+            Duration::from_secs(10),
+        )
+        .await;
+        let args = read_when_there(home.join("args.txt")).await;
+        if let Some(live) = app.sessions.get(&record.id) {
+            assert!(live.runtime.as_stream().is_some());
+            let _ = live.runtime.kill();
+        }
+        let _ = std::fs::remove_dir_all(transcript.parent().unwrap());
+        launched.map_err(|e| e.message).unwrap();
+        assert!(
+            args.contains("--resume") && args.contains(&record.id),
+            "{args}"
+        );
+        assert!(args.contains("stream-json"), "{args}");
+    }
+
+    #[tokio::test]
+    async fn runs_accept_chat_mode_on_a_new_task() {
+        let app = app().await;
+        let mut req = run("PROJ-1");
+        req.title = "a".into();
+        req.chat_mode = Some(true);
+        // The start fails (no folder), but the task keeps the flag.
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(task.chat_mode);
     }
 
     #[test]

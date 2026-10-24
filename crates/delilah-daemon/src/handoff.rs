@@ -27,14 +27,24 @@ const KILL_WAIT: Duration = Duration::from_secs(3);
 /// What a handoff's session launch needs: the shared bound of the launcher, which
 /// tests replace with a stub.
 pub(crate) trait Launcher:
-    Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>
+    for<'a> Fn(&'a AppState, &'a SessionRecord, &'a Path, Option<&'a str>, bool) -> LaunchFuture<'a>
 {
 }
 
 impl<F> Launcher for F where
-    F: Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError>
+    F: for<'a> Fn(
+        &'a AppState,
+        &'a SessionRecord,
+        &'a Path,
+        Option<&'a str>,
+        bool,
+    ) -> LaunchFuture<'a>
 {
 }
+
+/// What a launch gives back: a stream session is up only once the agent said hello.
+pub(crate) type LaunchFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ApiError>> + Send + 'a>>;
 
 /// The handoffs' shared state, one per daemon (in `AppState`).
 #[derive(Default)]
@@ -704,7 +714,7 @@ async fn try_start<L: Launcher>(
         let _ = live.runtime.kill();
         let _ = tokio::time::timeout(KILL_WAIT, live.runtime.wait()).await;
     }
-    if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false) {
+    if let Err(e) = launch(app, &new, &ws.path, Some(&prompt), false).await {
         if !relaunch && let Err(undo) = app.store.undo_hand_over(key.as_str(), from, &new.id).await
         {
             tracing::warn!(task = %key, "cannot undo the handoff: {undo}");
@@ -857,16 +867,24 @@ mod tests {
 
     type Launched = Mutex<Vec<(SessionRecord, Option<String>)>>;
 
-    fn ok_launcher(
-        launched: &Launched,
-    ) -> impl Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError> + '_
-    {
-        move |_, s, _, prompt, _| {
+    fn ok_launcher(launched: &Launched) -> impl Launcher + '_ {
+        move |_: &AppState,
+              s: &SessionRecord,
+              _: &Path,
+              prompt: Option<&str>,
+              _|
+              -> LaunchFuture<'_> {
             launched
                 .lock()
                 .unwrap()
                 .push((s.clone(), prompt.map(str::to_string)));
-            Ok(())
+            Box::pin(std::future::ready(Ok(())))
+        }
+    }
+
+    fn failing_launcher() -> impl Launcher {
+        |_: &AppState, _: &SessionRecord, _: &Path, _: Option<&str>, _| -> LaunchFuture<'_> {
+            Box::pin(std::future::ready(Err(ApiError::internal("no claude"))))
         }
     }
 
@@ -1086,12 +1104,7 @@ mod tests {
     async fn a_launch_failure_restores_the_old_session_and_can_be_retried() {
         let (app, key) = setup().await;
         on_turn_ended(&app, &key).await;
-        let failing = |_: &AppState,
-                       _: &SessionRecord,
-                       _: &Path,
-                       _: Option<&str>,
-                       _: bool|
-         -> Result<(), ApiError> { Err(ApiError::internal("no claude")) };
+        let failing = failing_launcher();
         confirm_with(&app, &key, &failing).await.ok().unwrap();
 
         let h = handoff_of(&app, &key).await.unwrap();
@@ -1224,12 +1237,7 @@ mod tests {
 
         // If that launch fails the handoff is failed, and the session stays main.
         put_handoff(&app, &key, Step::Implement, HandoffStage::Starting).await;
-        let failing = |_: &AppState,
-                       _: &SessionRecord,
-                       _: &Path,
-                       _: Option<&str>,
-                       _: bool|
-         -> Result<(), ApiError> { Err(ApiError::internal("no claude")) };
+        let failing = failing_launcher();
         let task = app.store.get_task(&key).await.unwrap().unwrap();
         recover_with(&app, &task, &failing).await;
         let h = handoff_of(&app, &key).await.unwrap();
@@ -1271,12 +1279,7 @@ mod tests {
         set(&app, &key, h.to, HandoffStage::Starting, None).await;
         // ...and saving mode is turned off before it ends, then the launch fails.
         apply_saving_mode(&app, &key, false).await.ok().unwrap();
-        let failing = |_: &AppState,
-                       _: &SessionRecord,
-                       _: &Path,
-                       _: Option<&str>,
-                       _: bool|
-         -> Result<(), ApiError> { Err(ApiError::internal("no claude")) };
+        let failing = failing_launcher();
         start_with(&app, &key, h.to, &failing).await;
         let task = app.store.get_task(&key).await.unwrap().unwrap();
         assert!(!task.saving_mode);
@@ -1954,12 +1957,7 @@ mod tests {
         let (app, key) = setup().await;
         set_autopilot(&app, &key, delilah_core::AutopilotState::Running).await;
         no_save_notes(&app).await;
-        let failing = |_: &AppState,
-                       _: &SessionRecord,
-                       _: &Path,
-                       _: Option<&str>,
-                       _: bool|
-         -> Result<(), ApiError> { Err(ApiError::internal("no claude")) };
+        let failing = failing_launcher();
         on_turn_ended_with(&app, &key, &failing).await;
         let h = handoff_of(&app, &key).await.unwrap();
         assert_eq!(h.stage, HandoffStage::Failed);

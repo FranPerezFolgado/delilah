@@ -27,10 +27,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-15 | 6 | 6B | done | 1 | cf8c546 | go (decision 49) |
 | WP-16 | 7 | 7A | verified | 1 | | T037–T039 now (stream.rs); T040 after WP-15 |
 | WP-17 | 7 | 7A | verified | 1 | 49220b6 | |
-| WP-18 | 7 | 7B | implementing | 0 | | go (decision 49) |
-| WP-19 | 7 | 7C | pending | 0 | | go (decision 49) |
+| WP-18 | 7 | 7B | verified | 1 | | go (decision 49) |
+| WP-19 | 7 | 7C | implementing | 0 | | go (decision 49) |
 | WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
-| WP-21 | 7 | 7D | verified | 1 | | go (decision 49) |
+| WP-21 | 7 | 7D | verified | 1 | 9d0e3cc | go (decision 49) |
 | WP-22 | 8 | 8A | pending | 0 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
@@ -100,3 +100,4 @@ Mode: format=markdown commits=yes autonomy=auto
 - WP-04: no Delilah-specific injected-text marker exists yet; injected prefixes skipped are Claude's own (system-reminder, hooks, command tags).
 - WP-02: spike `permission` uses `--permission-prompt-tool stdio` by default; `--prompt-tool none` to test the default.
 - WP-20: CLI sends chat_mode on POST /api/v1/tasks AND POST /api/v1/runs → WP-18 must accept it on both; README needs --chat (WP-30).
+- WP-21: writing bubble is replaced heuristically (no message id on transcript claude entries) → add `message_id` to claude entries in transcript.rs + use it in ConversationView (fold into WP-19 or a fix).

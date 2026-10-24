@@ -335,11 +335,21 @@ async fn list_tasks(State(store): State<Store>) -> Result<Json<Vec<Task>>, ApiEr
     Ok(Json(store.list_tasks().await?))
 }
 
+/// `POST /tasks`: a [`NewTask`] and, on create only, whether it runs in chat mode.
+#[derive(Debug, Deserialize)]
+struct CreateTask {
+    #[serde(flatten)]
+    new: NewTask,
+    #[serde(default)]
+    chat_mode: bool,
+}
+
 async fn create_task(
     State(app): State<AppState>,
-    Json(new): Json<NewTask>,
+    Json(body): Json<CreateTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let task = build_task(&app, new).await?;
+    let mut task = build_task(&app, body.new).await?;
+    task.chat_mode = body.chat_mode;
     app.store.create_task(&task).await?;
     app.emit(crate::events::Topic::Tasks);
     Ok((StatusCode::CREATED, Json(task)))
@@ -913,6 +923,36 @@ mod tests {
         let (status, list) = call(&app, "GET", "/api/v1/tasks", None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(list.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_task_is_created_in_chat_mode_only_when_asked() {
+        let app = app().await;
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-1", "title": "Chat", "chat_mode": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(task["chat_mode"], true);
+        assert_eq!(task["allowed_tools"], json!([]));
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-2", "title": "Plain"})),
+        )
+        .await;
+        assert_eq!(task["chat_mode"], false);
+        let (_, list) = call(&app, "GET", "/api/v1/tasks", None).await;
+        assert!(
+            list.as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["chat_mode"] == true)
+        );
     }
 
     #[tokio::test]

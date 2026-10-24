@@ -198,6 +198,7 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
         Some(continue_prompt(app.lang())),
         true,
     )
+    .await
 }
 
 pub use delilah_agents::runtime::sanitize_prompt;

@@ -15,6 +15,8 @@ use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 const EVENT_BUFFER: usize = 1024;
+/// How many of the process's last stderr lines are kept, for an error message.
+const STDERR_TAIL: usize = 20;
 
 /// One rate-limit window: percent used (0-100) and when it resets (epoch seconds).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,6 +70,7 @@ pub struct StreamSession {
     kill: Arc<Notify>,
     exit: watch::Receiver<Option<Option<i32>>>,
     request_seq: AtomicU64,
+    stderr_tail: Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
 }
 
 impl StreamSession {
@@ -107,10 +110,17 @@ impl StreamSession {
             let _ = exit_tx.send(Some(code));
         });
 
-        tokio::spawn(async move {
+        let stderr_tail = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let tail = stderr_tail.clone();
+        let stderr_done = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 eprintln!("claude (stream) stderr: {line}");
+                let mut tail = tail.lock().unwrap();
+                if tail.len() == STDERR_TAIL {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
             }
         });
 
@@ -128,6 +138,8 @@ impl StreamSession {
                 Ok(v) => (*v).flatten(),
                 Err(_) => None,
             };
+            // So the stderr tail is complete by the time anyone hears of the exit.
+            let _ = stderr_done.await;
             let _ = tx.send(StreamEvent::Exited { code });
         });
 
@@ -137,8 +149,18 @@ impl StreamSession {
             kill,
             exit,
             request_seq: AtomicU64::new(0),
+            stderr_tail,
         };
         Ok((session, rx))
+    }
+
+    /// The last lines the process wrote to stderr, oldest first, joined by newlines.
+    pub fn stderr_tail(&self) -> String {
+        let tail = self.stderr_tail.lock().unwrap();
+        tail.iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
@@ -481,5 +503,14 @@ mod tests {
         s.send_user("STDERR_NOISE EXIT").await.unwrap();
         assert_eq!(s.wait().await, Some(3));
         assert_eq!(next(&mut rx).await, StreamEvent::Exited { code: Some(3) });
+    }
+
+    #[tokio::test]
+    async fn the_stderr_tail_is_complete_when_the_exit_is_reported() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo one >&2; echo two >&2; exit 2"]);
+        let (s, mut rx) = StreamSession::spawn(cmd).unwrap();
+        assert_eq!(next(&mut rx).await, StreamEvent::Exited { code: Some(2) });
+        assert_eq!(s.stderr_tail(), "one\ntwo");
     }
 }
