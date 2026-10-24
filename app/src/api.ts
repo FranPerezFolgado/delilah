@@ -350,7 +350,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "base-stale";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "autopilot" | "base-stale";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */

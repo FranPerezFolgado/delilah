@@ -26,6 +26,7 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   "pr-review": { label: "Comentarios en la PR", icon: "review", cls: "c-wait" },
   "pr-blocked": { label: "No se pudo archivar", icon: "failed", cls: "c-err" },
   "base-stale": { label: "Rama posiblemente atrasada", icon: "failed", cls: "c-pause" },
+  autopilot: { label: "Autopiloto en pausa", icon: "pause", cls: "c-pause" },
 };
 
 interface Props {

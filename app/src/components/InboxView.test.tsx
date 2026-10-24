@@ -225,3 +225,26 @@ describe("InboxView base-stale", () => {
     expect(dis).toHaveBeenCalledWith(9);
   });
 });
+
+describe("InboxView autopilot items", () => {
+  const ap: InboxItem = { ...item, kind: "autopilot", text: "The review keeps failing", pr: undefined };
+  const viewAp = (onChanged = () => {}) =>
+    render(<InboxView items={[ap]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("shows the reason and resumes autopilot", async () => {
+    const set = vi.spyOn(api, "setAutopilot").mockResolvedValue({} as Task);
+    const onChanged = vi.fn();
+    viewAp(onChanged);
+    expect(screen.getByText("The review keeps failing")).toBeTruthy();
+    fireEvent.click(screen.getByText("Resume autopilot"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(set).toHaveBeenCalledWith("PROJ-1", "resume");
+  });
+
+  it("turns autopilot off to carry on by hand", async () => {
+    const set = vi.spyOn(api, "setAutopilot").mockResolvedValue({} as Task);
+    viewAp();
+    fireEvent.click(screen.getByText("Carry on by hand"));
+    await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "off"));
+  });
+});

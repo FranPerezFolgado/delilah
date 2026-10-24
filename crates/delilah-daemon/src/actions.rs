@@ -425,7 +425,13 @@ mod tests {
             kind: delilah_core::ProjectKind::Repo,
             submodules: vec![],
         };
-        let ws = delilah_git::create_workspace(repo, &spec, &GitOptions::default()).unwrap();
+        let (ws, _) = delilah_git::create_workspace(
+            repo,
+            &spec,
+            &GitOptions::default(),
+            delilah_git::Deadline::after(std::time::Duration::from_secs(30)),
+        )
+        .unwrap();
         app.store.save_workspace(&key, repo, &ws).await.unwrap();
         app.store
             .apply_event(

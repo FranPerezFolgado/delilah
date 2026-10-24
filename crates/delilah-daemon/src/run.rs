@@ -1206,7 +1206,13 @@ mod tests {
         let opts = GitOptions {
             allow_file_protocol: true,
         };
-        let ws = delilah_git::create_workspace(&project.path, &spec, &opts).unwrap();
+        let (ws, _) = delilah_git::create_workspace(
+            &project.path,
+            &spec,
+            &opts,
+            Deadline::after(Duration::from_secs(30)),
+        )
+        .unwrap();
         for sub in &subs {
             let out = std::process::Command::new("git")
                 .arg("-C")
@@ -1386,6 +1392,8 @@ mod tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -1448,6 +1456,8 @@ mod tests {
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -1580,7 +1590,15 @@ mod tests {
         start_stale(&app, "PROJ-7", false).await;
         assert!(app.store.open_notices().await.unwrap().is_empty());
 
-        // Checkout mode with the branch already there: it is not re-based.
+        let app = repo_project(None).await;
+        start_stale(&app, "PROJ-6", true).await;
+        assert!(app.store.open_notices().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_taken_branch_in_checkout_mode_gets_a_fresh_one() {
+        // The free-name logic picks `-2`, so the start is re-based (and warns) rather
+        // than switching to the existing branch.
         let app = repo_project(Some("/nonexistent")).await;
         let repo = app.config.home.join("stale-repo");
         let out = std::process::Command::new("git")
@@ -1591,7 +1609,9 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
         start_stale(&app, "PROJ-6", true).await;
-        assert!(app.store.open_notices().await.unwrap().is_empty());
+        let notices = app.store.open_notices().await.unwrap();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert_eq!(notices[0].kind, "base-stale");
     }
 
     #[tokio::test]

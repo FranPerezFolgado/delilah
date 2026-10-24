@@ -1,18 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { InboxItem, Project, Session, SpecSummary, Task, TaskStatus } from "../api";
+import { DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));

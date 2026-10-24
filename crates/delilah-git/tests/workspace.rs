@@ -1017,3 +1017,52 @@ fn parent_checkout_judges_an_existing_branch_per_submodule() {
         ord_head
     );
 }
+
+#[test]
+fn branch_taken_sees_local_and_remote_branches() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    assert!(!branch_taken(&repo, "feature/x", &opts).unwrap());
+    run(&repo, &["branch", "feature/x"]);
+    assert!(branch_taken(&repo, "feature/x", &opts).unwrap());
+    assert!(!branch_taken(&repo, "feature", &opts).unwrap());
+
+    // Only on the remote, after a fetch.
+    run(&repo, &["push", "origin", "feature/x:feature/y"]);
+    run(&repo, &["fetch", "origin"]);
+    assert!(branch_taken(&repo, "feature/y", &opts).unwrap());
+    let _ = remote;
+}
+
+#[test]
+fn branch_taken_handles_remote_names_with_a_slash() {
+    let (_tmp, repo, remote) = pr_repo();
+    let opts = GitOptions::default();
+    run(
+        &repo,
+        &["remote", "add", "team/origin", remote.to_str().unwrap()],
+    );
+    run(&repo, &["push", "team/origin", "main:feature/z"]);
+    run(&repo, &["fetch", "team/origin"]);
+    assert!(branch_taken(&repo, "feature/z", &opts).unwrap());
+    assert!(!branch_taken(&repo, "origin/feature/z", &opts).unwrap());
+}
+
+#[test]
+fn free_branch_suffixes_until_free_in_every_dir() {
+    let (_t1, a, _r1) = pr_repo();
+    let (_t2, b, _r2) = pr_repo();
+    let opts = GitOptions::default();
+    let dirs = vec![a.clone(), b.clone()];
+    assert_eq!(free_branch(&dirs, "feature/x", &opts).unwrap(), "feature/x");
+    run(&b, &["branch", "feature/x"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-2"
+    );
+    run(&a, &["branch", "feature/x-2"]);
+    assert_eq!(
+        free_branch(&dirs, "feature/x", &opts).unwrap(),
+        "feature/x-3"
+    );
+}

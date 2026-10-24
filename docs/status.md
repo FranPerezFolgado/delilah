@@ -31,7 +31,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
 - Live updates over WebSocket, the Dock badge, and notifications.
 
 **Fresh task bases:**
-- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 37.
+- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 65.
 
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.

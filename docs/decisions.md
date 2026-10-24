@@ -348,9 +348,131 @@ files and git, which already hold everything the next phase needs.
 - **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
 - **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
 
+## Autopilot
+
+**38. Autopilot is a policy over saving mode, not a second engine (2026-10-22).** A task
+with autopilot runs plan → implement → review → draft PR by itself. `handoff.rs` keeps
+owning the step sessions, the persisted handoff and recovery; `autopilot/` only changes
+who confirms a handoff (`shape`), what each session is told, and what happens after the
+review. State is one nullable JSON column, `tasks.autopilot`, written before each side
+effect, so a restart repeats nothing; it implies saving mode.
+- **Ruled out:** a parallel state machine on the same hooks (two owners of the primary session, double starts); editing the user's global skills with an `--autopilot` argument (outside this repo; the session prompt already overrides their stops, and the skills can learn it later).
+
+**39. One nudge per step, and recommended answers inside the hook (2026-10-22).** This
+stretches #15 and #33 (Delilah never acts inside a phase): after a turn end that reaches
+no boundary, the primary session gets one typed nudge per step, and a second stall pauses.
+The workflow's approval stops are plain text, so without it nearly every plan step would
+pause; unlimited nudges could loop. A question whose every item has exactly one option
+labelled "(Recommended)" is answered in the AskUserQuestion hook (no inbox item, history
+`autopilot-answered`); any other question pauses. Delilah still never drives the
+workflow's own phases.
+
+**40. Autopilot pushes and opens a draft PR with the user's own `gh` (2026-10-22).** It
+does so without asking at that moment, like "Abrir PR" (#26): the user opted in per task,
+the PR is a draft, and nothing is merged. The stage `opening_pr` is persisted and PRs are
+re-detected first, so a restart never opens a second one.
+
+**41. The daemon owns previews, not the agent (2026-10-22).** A preview an agent starts
+outlives its session with nobody to stop it. The daemon runs the project's
+`preview_command` in the task's workspace, stops it with the task (done, failed, archived,
+deleted) and at shutdown, and keeps it in memory only: a restart does not adopt it. It
+runs in a login shell because launchd's PATH lacks cargo and npm, with the agents' clean
+environment, so the daemon's own variables (tokens) do not reach the dev server. The
+command is trusted user configuration: like an agent, it runs whatever it says, and what
+guards it is the API's Origin and loopback `Host` checks, not the route.
+
+**42. The PR body keeps loopback preview URLs, without userinfo, query or fragment
+(2026-10-22).** The spec wants the preview URL in the PR, and for this repo it is
+`localhost`. Credentials and tokens in a URL must not reach a possibly public PR, and
+neither must a tunnel or LAN URL: a non-loopback host leaves the line out.
+
+**43. The agent's own "(Recommended)" label is trusted; permission prompts are never
+answered (2026-10-22).** Automatic answers pick the option the agent marked. Accepted
+risk: a destructive option the agent marks as recommended would be picked. A permission
+prompt always pauses the autopilot instead.
+
+**44. Process groups are signalled with `/bin/kill -- -<pgid>` (2026-10-22).** The
+workspace forbids `unsafe`, so no `libc::killpg`. The waiter task owns the child; a
+delayed KILL is sent only if the leader has not been reaped, so a reused pid is never
+hit. Accepted cost: a child that ignores SIGTERM after its leader has exited is not
+killed.
+
+**45. Autopilot state changes are compare-and-set (2026-10-22).** `Store::update_autopilot`
+writes only if the stored value is still the one the closure saw, so a pause or "off"
+that came in during a finish (a preview wait takes minutes) is never overwritten. The
+finish's writes also check they still belong to the same review session.
+
+**46. "Can have autopilot" means a task on the `feature` (spec) workflow (2026-10-22).**
+Not a project session, not another workflow: without spec files there are no handoffs.
+Enforced on every entry point (task create, backlog, `PATCH`, the autopilot endpoint, the
+proposal card) with a 409 `not-spec-workflow`.
+
+**47. Recovering an interrupted finish needs `Autopilot.review_session` (2026-10-22).** It
+names the outcome file to read. Autopilots stored before the field existed do not
+auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
+
+**48. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
+project sessions create tasks, so a card is not tied to an idea conversation; only a
+closed session's card is refused.
+
+**49. The branch template is optional and sits between a typed name and Claude's proposal
+(2026-10-23).** Two features named branches: per-project settings (a `{ticket}`/`{slug}`
+template) and task branch names (Claude proposes a descriptive `feature/…` name, 37). They
+are combined, not chosen between. `ProjectSettings.branch` is `null` by default, which is
+exactly 37's behaviour. With a template, the template decides the format: `{ticket}` is the
+key (a free task's `LIBRE-n`), `{slug}` is Claude's short proposal, or the title's `slug()`
+when Claude fails or is slow (the call is skipped when the template has no `{slug}`).
+Precedence at a start: a branch typed in the request, then the template, then 37's
+proposal; every path goes through the `-2`, `-3` free-name logic. A typed branch is
+normalised by 37's `custom_for` when there is no template; with a template it is kept as
+typed (case, `/`, `.`, `_`) and only made safe for git (`sanitize_typed`), because the
+dialog fills the field with the template's full branch and slugging that again would turn
+`fix/PROJ-1-x` into `feature/fix-proj-1-x`. `POST …/branch-name` returns the
+template-expanded branch when there is a template, so the "Rama" field shows what will be
+used; the dialog shows the TypeScript mirror's guess until it answers and sends the field
+only if the answer arrived or the user typed. A blank template is not saved: the screen
+and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
+`branch.empty`.
+
+**59. The sidebar groups only idea conversations into "Ideas" (2026-10-23).** Read-only
+Claude sessions and terminals keep their own rows, their purpose differs. The "Ideas" row
+opens the waiting idea, else the one the project's screen last showed, else the newest;
+"newest" relies on the daemon listing sessions in creation order, since `Session` has no
+timestamp.
+
+## Updates
+
+**60. Updates through the Tauri updater and GitHub Releases on the public repo (2026-10-24).**
+The app checks the latest release's `latest.json` and verifies the signature against
+a key baked into the build. The repo is public so no token ships in the app.
+- **Ruled out:** Sparkle (a second updater beside Tauri's, for the same job); a private repo with a token in the app (it would have to be embedded in every install).
+
+**61. Updates need the user's confirmation, with a session warning (2026-10-24).**
+The notice says how many sessions are open and offers "Más tarde" and "Cuando
+terminen" (polls every 10 s). The count includes shell terminals on purpose: the
+relaunch restarts the daemon and stops them too.
+- **Ruled out:** a silent update, which would kill running agents without warning.
+
+**62. A release is a tag pushed to GitHub Actions; `make release` is the manual entry point (2026-10-24).**
+The signing key lives in repository secrets, so a build never needs it on a Mac.
+`make release` bumps if needed, tags and pushes. The workflow builds as a draft and
+builds `latest.json` itself from the local `.sig`: tauri-action's own would carry
+temporary `untagged-*` draft URLs. It publishes only after the asset is checked, so a
+failure leaves at most a draft.
+- **Ruled out:** a local-only release script (the key on the Mac, uploads by hand, nothing to re-run).
+
+**63. No Apple signing or notarisation for now (2026-10-24).**
+Updates are authenticated by the Tauri key alone. The first install still clears the
+quarantine flag by hand. Revisit if Delilah is installed on Macs beyond the owner's.
+
+**64. A best-effort copy of the database before migrating (2026-10-24).**
+When the version changes, the daemon copies the database to `backups/delilah-<prev>.db`
+(keeps 3) before the migrations run, because they cannot be undone. A failed copy only
+warns: it must not stop Delilah from starting. A downgrade is treated like an upgrade.
+
 ## Fresh task bases
 
-**37. Task branches start from `origin`'s default branch, just fetched.** Before, a
+**65. Task branches start from `origin`'s default branch, just fetched.** Before, a
 branch started from whatever the folder had checked out, often a stale `main`.
 - Delilah fetches `origin` and starts the branch at the resolved default's **sha**, so it has no upstream to pull or push by mistake. The default is `origin/HEAD`'s target, then `origin/main`, `origin/master`, `main`, `master`, `HEAD`.
 - **A failed fetch warns and continues:** the task starts from the last known `origin` state, with a `base-stale` notice. A repo with no origin gets none. One 30 s deadline covers the whole start.

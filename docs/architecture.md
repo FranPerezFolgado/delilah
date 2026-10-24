@@ -258,6 +258,12 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
 
 ## Workspaces
 
+- **Branch names:** `start_run` names the branch before the workspace exists.
+  - The name is, in this order: the request's `branch` (normalised by `delilah_core::branch::custom_for`; with a project template it is kept as typed, only made git-safe, by `sanitize_typed`); else the project's branch template, if it has one (`settings.branch`, optional: `{ticket}` is the key, `{slug}` is Claude's short proposal, or the title's `slug()` when Claude fails); else `branch_name::propose`: Claude with a 5 s limit, else `title_slug`, else `fallback(key)`. `compose` gives `feature/<short-name>` or `feature/<KEY>-<short-name>` (the `LIBRE-n` of a free task is left out).
+  - `branch_name::unique` then calls `delilah_git::free_branch` over every repo of the workspace (the repo, or each chosen submodule): a name is taken if `refs/heads/<name>` or `refs/remotes/*/<name>` exists (`branch_taken`), and `-2`… is tried. It applies in worktree and checkout mode alike, so an explicit `--branch` no longer switches to an existing branch.
+  - The start dialog asks `POST /api/v1/projects/{name}/branch-name` (1 s after the title stops changing, 10 s limit) to fill the "Rama" field. With a project template it returns the template-expanded full branch, and the dialog first shows the instant guess `branchName(template, key, title)` (the TS mirror) until the answer arrives.
+  - `Task.branch` is read from `workspaces.branch` by a `LEFT JOIN`; a task with no workspace (backlog, archived) has none.
+
 - **Fresh base** (`delilah_git::base`, for every new task branch, in both modes and per repo or submodule):
   - `prepare_base` fetches `origin`, then `resolve_base` picks the default branch in this order: `origin/HEAD` target, `origin/main`, `origin/master`, `main`, `master`, `HEAD`. The branch starts at that commit's **sha**, so it has no upstream.
   - The whole start shares one `Deadline` of `delilah_git::NETWORK_LIMIT` (30 s, all repos together; `git_with_timeout` in `command.rs`: on timeout it kills git's process group, and it never waits on a pipe that a descendant keeps open past the deadline). The local reads around the fetch (`has_origin`, `resolve_base`) get 5 s each of their own, so a fetch that used up the deadline still finds the last known `origin`.
