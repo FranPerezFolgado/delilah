@@ -199,26 +199,7 @@ pub async fn continue_agent(app: &AppState, key: &TaskKey) -> Result<(), ApiErro
     )
 }
 
-/// `text` with line ends normalised and every control character dropped but newline
-/// and tab: an ESC, Ctrl-C or Ctrl-D, or a paste marker, never reaches the terminal as
-/// a key press.
-pub fn sanitize_prompt(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .chars()
-        .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
-        .collect()
-}
-
-/// The bytes that type `text` into the TUI. Several lines go as a bracketed paste,
-/// or each newline would send the message early.
-fn prompt_bytes(text: &str) -> Vec<u8> {
-    let text = sanitize_prompt(text);
-    if !text.contains('\n') {
-        return text.into_bytes();
-    }
-    format!("\x1b[200~{text}\x1b[201~").into_bytes()
-}
+pub use delilah_agents::runtime::{prompt_bytes, sanitize_prompt};
 
 /// Writes a message into an agent's terminal as if the user typed it.
 pub async fn type_prompt(session: &Live, text: &str) -> Result<(), ApiError> {
@@ -260,13 +241,6 @@ pub async fn resume_if_due(app: &AppState, task: &Task) {
 mod tests {
     use super::*;
     use crate::archive::{ArchivePartial, LeftoverBranch};
-
-    #[test]
-    fn prompt_bytes_drop_control_characters_in_single_and_multi_line_text() {
-        assert_eq!(prompt_bytes("a\x1bb\x03\x04c"), b"abc");
-        assert_eq!(prompt_bytes("x\x1b[200~y"), b"x[200~y");
-        assert_eq!(prompt_bytes("a\x1b\nb"), b"\x1b[200~a\nb\x1b[201~".to_vec());
-    }
 
     use std::path::{Path as FsPath, PathBuf};
 
@@ -824,42 +798,5 @@ mod tests {
         let err = archive_task(&app, &key).await.unwrap_err();
         assert_eq!(err.status, StatusCode::CONFLICT);
         assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
-    }
-
-    #[test]
-    fn control_characters_in_one_line_are_dropped_too() {
-        assert_eq!(prompt_bytes("a\x1b[201~b\x07"), b"a[201~b");
-    }
-
-    #[test]
-    fn several_lines_go_as_one_paste() {
-        assert_eq!(
-            prompt_bytes("uno\r\ndos\nthree"),
-            b"\x1b[200~uno\ndos\nthree\x1b[201~"
-        );
-    }
-
-    #[test]
-    fn a_lone_carriage_return_is_a_new_line_too() {
-        assert_eq!(prompt_bytes("a\rb"), b"\x1b[200~a\nb\x1b[201~");
-    }
-
-    #[test]
-    fn a_trailing_new_line_stays_inside_the_paste() {
-        assert_eq!(prompt_bytes("a\n"), b"\x1b[200~a\n\x1b[201~");
-    }
-
-    #[test]
-    fn a_paste_marker_in_the_text_cannot_end_the_paste() {
-        assert_eq!(
-            prompt_bytes("a\x1b[201~\rb"),
-            b"\x1b[200~a[201~\nb\x1b[201~"
-        );
-        // Removing the marker must not leave another one behind.
-        assert_eq!(
-            prompt_bytes("a\x1b[20\x1b[201~1~\nb"),
-            b"\x1b[200~a[20[201~1~\nb\x1b[201~"
-        );
-        assert_eq!(prompt_bytes("a\tb\x07\nc"), b"\x1b[200~a\tb\nc\x1b[201~");
     }
 }

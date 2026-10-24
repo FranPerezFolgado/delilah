@@ -786,7 +786,15 @@ const ASK_PROMPT: &str = "Use the AskUserQuestion tool to ask me which colour I 
 
 fn ask_pty(ctx: &Ctx) -> Result<(), String> {
     let session = new_session();
-    let result = pty_turn(ctx, "pty-ask", &ctx.workspace, &session, false, ASK_PROMPT, 1);
+    let result = pty_turn(
+        ctx,
+        "pty-ask",
+        &ctx.workspace,
+        &session,
+        false,
+        ASK_PROMPT,
+        1,
+    );
     println!(
         "ask hook posts: {}",
         hooks(ctx)

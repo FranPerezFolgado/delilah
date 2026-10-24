@@ -202,12 +202,12 @@
 
 **Purpose**: `Live.pty` → `Live.runtime`, so chat mode can add a second runtime.
 
-- [ ] T033 Write failing tests in a new `crates/delilah-agents/src/runtime.rs` (tests module, a fake PTY command):
+- [X] T033 Write failing tests in a new `crates/delilah-agents/src/runtime.rs` (tests module, a fake PTY command):
   - `Runtime::Pty` `send_prompt(text)` writes the bracketed paste and then `\r`, with the same bytes as `actions::prompt_bytes`;
   - `stop()` writes ESC;
   - `kill`, `wait` and `has_exited` delegate;
   - `as_pty()` is `Some`.
-- [ ] T034 Implement T033 in `crates/delilah-agents/src/runtime.rs`:
+- [X] T034 Implement T033 in `crates/delilah-agents/src/runtime.rs`:
   - `enum Runtime { Pty(Arc<PtySession>) }`; the `Stream` arm comes in T040;
   - move `sanitize_prompt` and `prompt_bytes` from `crates/delilah-daemon/src/actions.rs` into it, with their tests;
   - add `runtime::spawn(&Launch, RuntimeKind::Pty) -> Runtime`, wrapping `claude::command` and `PtySession::spawn`.

@@ -310,7 +310,11 @@ pub async fn get(
     // an earlier one, and the call's own entry is dropped.
     let ask_at = |entry: &Value| {
         (entry["kind"] == "tool" && entry["tool"] == "AskUserQuestion")
-            .then(|| entry["tool_use_id"].as_str().map(|t| (t.to_string(), entry["at"].clone())))
+            .then(|| {
+                entry["tool_use_id"]
+                    .as_str()
+                    .map(|t| (t.to_string(), entry["at"].clone()))
+            })
             .flatten()
     };
     let mut ats: HashMap<String, Value> = entries.iter().filter_map(ask_at).collect();
@@ -1921,7 +1925,9 @@ mod tests {
         more.extend_from_slice(assistant_line(3).as_bytes());
         std::fs::write(&path, more).unwrap();
         let body = f
-            .get_of(&format!("/api/v1/sessions/task1/conversation?cursor={cursor}"))
+            .get_of(&format!(
+                "/api/v1/sessions/task1/conversation?cursor={cursor}"
+            ))
             .await
             .1;
         let entries = body["entries"].as_array().unwrap();
@@ -2121,7 +2127,13 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(card(&body, "ask-1")["at"], "2025-02-01T10:00:00.000Z");
-        let stored = f.app.store.card_entry("task1", "ask-1").await.unwrap().unwrap();
+        let stored = f
+            .app
+            .store
+            .card_entry("task1", "ask-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(stored.body["tool_at"], "2025-02-01T10:00:00.000Z");
         // A file that mentions the ids elsewhere would be found by a rescan.
         let late = ask_transcript("toolu_2").replace("2025-02-01", "2030-01-01");
@@ -2131,7 +2143,13 @@ mod tests {
         // The one not found is not looked for again while the file keeps its size...
         assert_ne!(card(&body, "ask-2")["at"], "2030-01-01T10:00:00.000Z");
         assert!(
-            f.app.store.card_entry("task1", "ask-2").await.unwrap().unwrap().body["tool_at"]
+            f.app
+                .store
+                .card_entry("task1", "ask-2")
+                .await
+                .unwrap()
+                .unwrap()
+                .body["tool_at"]
                 .is_null()
         );
     }
