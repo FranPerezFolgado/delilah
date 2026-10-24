@@ -204,6 +204,7 @@ pub fn command(launch: &Launch) -> CommandBuilder {
 /// Settings for one session: every hook posts its JSON to the daemon, and the status
 /// line runs `status_script` (see [`status_script`]). Lives outside the repo and is
 /// passed with `--settings`.
+#[allow(clippy::too_many_arguments)]
 pub fn settings(
     daemon_url: &str,
     task: &str,
