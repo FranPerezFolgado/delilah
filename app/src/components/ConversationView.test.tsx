@@ -430,6 +430,33 @@ describe("ConversationView chat mode", () => {
     await waitFor(() => expect(queryByTestId("writing")).toBeNull());
   });
 
+  it("replaces the bubble exactly when the claude entry of its message arrives", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    const { findByText, queryByTestId, getByTestId } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    FakeSocket.last.push({ message: "m1", text: "Hel" });
+    FakeSocket.last.push({ message: "m1", done: true });
+    // An entry of another message (even a new one) does not take the bubble's place.
+    spy.mockResolvedValue(conv([{ ...at("t:u0:0", "2025-01-01T00:00:00Z", "Other"), message_id: "m0" } as ConversationEntry], { cursor: "1" }));
+    emit("conversations");
+    await findByText("Other");
+    expect(getByTestId("writing").textContent).toBe("Hel");
+    spy.mockResolvedValue(
+      conv(
+        [
+          { ...at("t:u0:0", "2025-01-01T00:00:00Z", "Other"), message_id: "m0" } as ConversationEntry,
+          { ...at("t:u1:0", "2025-01-01T00:00:01Z", "Hello"), message_id: "m1" } as ConversationEntry,
+        ],
+        { cursor: "2" },
+      ),
+    );
+    emit("conversations");
+    await findByText("Hello", { selector: ".conv-claude:not(.conv-writing) *" });
+    await waitFor(() => expect(queryByTestId("writing")).toBeNull());
+  });
+
   it("does not open the socket on a pty session", async () => {
     vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
     FakeSocket.last = undefined as never;

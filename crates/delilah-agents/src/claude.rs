@@ -121,8 +121,9 @@ pub struct Launch<'a> {
 
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
 /// whether `--resume` will find it: a session closed before its first message has none.
-pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
-    crate::transcript::transcript_path(workspace, session_id).is_some_and(|path| path.is_file())
+pub fn has_conversation_in(projects_root: &Path, workspace: &Path, session_id: &str) -> bool {
+    crate::transcript::transcript_path_under(projects_root, workspace, session_id)
+        .is_some_and(|path| path.is_file())
 }
 
 /// The arguments both runtimes share: the session, folders, settings, permission mode,

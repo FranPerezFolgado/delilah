@@ -28,10 +28,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-16 | 7 | 7A | verified | 1 | | T037–T039 now (stream.rs); T040 after WP-15 |
 | WP-17 | 7 | 7A | verified | 1 | 49220b6 | |
 | WP-18 | 7 | 7B | verified | 1 | | go (decision 49) |
-| WP-19 | 7 | 7C | implementing | 0 | | go (decision 49) |
+| WP-19 | 7 | 7C | verified | 1 | | go (decision 49) |
 | WP-20 | 7 | 7C | verified | 1 | ee3b3da | go (decision 49) |
 | WP-21 | 7 | 7D | verified | 1 | 9d0e3cc | go (decision 49) |
-| WP-22 | 8 | 8A | pending | 0 | | go (decision 49) |
+| WP-22 | 8 | 8A | implementing | 0 | | go (decision 49) |
 | WP-23 | 8 | 8B | pending | 0 | | go (decision 49) |
 | WP-24 | 8 | 8C | pending | 0 | | go (decision 49) |
 | WP-25 | 8 | 8D | skipped | 0 | | d2 = yes, T059 dropped |

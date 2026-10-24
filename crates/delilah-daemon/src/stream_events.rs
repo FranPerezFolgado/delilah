@@ -1,9 +1,10 @@
 //! What a chat-mode (stream) session says, handled by one pump task per session.
 //!
 //! Task states (working, waiting…) still come from the hooks, which fire in stream mode
-//! too; the pump only handles what the hooks do not carry. More arms (turn results,
-//! permission requests) go in [`handle`].
+//! too; the pump only handles what the hooks do not carry (the end of an interrupted
+//! turn, rate limits). More arms (permission requests) go in [`handle`].
 
+use delilah_agents::runtime::Runtime;
 use delilah_agents::stream::{LimitWindow, StreamEvent};
 use serde_json::{Map, Value, json};
 use tokio::sync::{broadcast, oneshot};
@@ -32,11 +33,37 @@ pub fn spawn_pump(
     let app = app.clone();
     let session = session.to_string();
     let task = task.to_string();
+    // The process, to end the pump when it exits even if the `Exited` event was lost.
+    let runtime = app.sessions.get(&session).map(|live| live.runtime);
     tokio::spawn(async move {
+        // Once the process is gone, what it said last is still read; then the pump is done.
+        let mut gone = false;
         loop {
-            let event = match events.recv().await {
+            let event = if gone {
+                events.try_recv().map_err(|e| match e {
+                    broadcast::error::TryRecvError::Lagged(n) => {
+                        broadcast::error::RecvError::Lagged(n)
+                    }
+                    _ => broadcast::error::RecvError::Closed,
+                })
+            } else {
+                tokio::select! {
+                    event = events.recv() => event,
+                    () = process_exit(runtime.as_ref()) => {
+                        gone = true;
+                        continue;
+                    }
+                }
+            };
+            let event = match event {
                 Ok(event) => event,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    tracing::warn!(%session, missed, "the stream pump fell behind");
+                    if runtime.as_ref().is_some_and(Runtime::has_exited) {
+                        break;
+                    }
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => break,
             };
             let outcome = match &event {
@@ -47,9 +74,9 @@ pub fn spawn_pump(
             if let (Some(outcome), Some(tx)) = (outcome, started_tx.take()) {
                 let _ = tx.send(outcome);
             }
-            let exited = matches!(event, StreamEvent::Exited { .. });
-            handle(&app, &task, &session, event);
-            if exited {
+            let ended = matches!(event, StreamEvent::Exited { .. });
+            handle(&app, &task, &session, event).await;
+            if ended {
                 break;
             }
         }
@@ -57,13 +84,27 @@ pub fn spawn_pump(
     started_rx
 }
 
-fn handle(app: &AppState, task: &str, _session: &str, event: StreamEvent) {
-    if let StreamEvent::RateLimit {
-        five_hour,
-        seven_day,
-    } = event
-    {
-        rate_limit(app, task, five_hour, seven_day);
+/// Resolves when the process is gone; never for a pump without a process to watch.
+async fn process_exit(runtime: Option<&Runtime>) {
+    match runtime {
+        Some(runtime) => runtime.wait().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn handle(app: &AppState, task: &str, session: &str, event: StreamEvent) {
+    match event {
+        StreamEvent::RateLimit {
+            five_hour,
+            seven_day,
+        } => rate_limit(app, task, five_hour, seven_day),
+        // No `Stop` hook fires after an interrupt: its result is what ends the turn.
+        StreamEvent::TurnResult { subtype, .. } if subtype == "error_during_execution" => {
+            if let Some(live) = app.sessions.get(session) {
+                crate::conversation::turn_interrupted(app, &live).await;
+            }
+        }
+        _ => {}
     }
 }
 
@@ -95,6 +136,106 @@ fn rate_limit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::LiveState;
+    use crate::store_sessions::SessionKind;
+
+    async fn test_app() -> AppState {
+        AppState::new(
+            crate::store::Store::in_memory().await.unwrap(),
+            crate::config::Config {
+                home: std::env::temp_dir().join(format!("delilah-pump-{}", uuid::Uuid::new_v4())),
+                addr: crate::config::DEFAULT_ADDR.parse().unwrap(),
+                allow_file_protocol: false,
+                notify: false,
+                ui_origin: None,
+                agent_program: None,
+                claude_projects: crate::config::Config::scratch_projects(),
+                claude_bin: "claude".into(),
+            },
+        )
+    }
+
+    /// A chat-mode session "s-1" of PROJ-1 whose process is `program args`.
+    fn insert_stream(app: &AppState, program: &str, args: &[&str]) -> crate::sessions::Live {
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(args);
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        app.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            SessionKind::Claude,
+            true,
+            std::sync::Arc::new(session),
+        )
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_turn_ends_with_its_result_and_the_session_waits() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        live.set_state(LiveState::Working);
+        live.set_activity(Some("Leyendo x".into()));
+        let (tx, rx) = broadcast::channel(8);
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        // A normal result changes nothing: the Stop hook ends that turn.
+        tx.send(StreamEvent::TurnResult {
+            subtype: "success".into(),
+            is_error: false,
+            result: Some("ok".into()),
+        })
+        .unwrap();
+        tx.send(StreamEvent::TurnResult {
+            subtype: "error_during_execution".into(),
+            is_error: true,
+            result: None,
+        })
+        .unwrap();
+        for _ in 0..100 {
+            if live.state() == LiveState::Waiting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(live.activity(), None);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_lost_exit_event_does_not_leave_the_pump_running() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "true", &[]);
+        live.runtime.wait().await;
+        // A receiver that missed events, the `Exited` among them, with the sender kept.
+        let (tx, rx) = broadcast::channel(2);
+        for _ in 0..4 {
+            let _ = tx.send(StreamEvent::TextDelta {
+                message: "m".into(),
+                text: "x".into(),
+            });
+        }
+        let ended = spawn_pump(&app, "s-1", "PROJ-1", rx);
+        // The pump dropped its end of the start signal (it never sent one) when it ended.
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), ended)
+            .await
+            .expect("the pump ends");
+        assert!(result.is_err());
+        drop(tx);
+    }
+
+    #[tokio::test]
+    async fn the_pump_ends_when_the_process_does_even_if_no_event_says_so() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "true", &[]);
+        let (tx, rx) = broadcast::channel::<StreamEvent>(8);
+        let ended = spawn_pump(&app, "s-1", "PROJ-1", rx);
+        live.runtime.wait().await;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), ended)
+            .await
+            .expect("the pump ends with the process");
+        assert!(result.is_err(), "no start was ever signalled");
+        drop(tx);
+    }
 
     #[tokio::test]
     async fn a_rate_limit_event_feeds_the_usage_state_in_the_status_line_shape() {

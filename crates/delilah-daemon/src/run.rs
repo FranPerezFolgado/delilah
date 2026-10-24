@@ -310,43 +310,7 @@ pub async fn start_run(
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
-            // A backlog task stays in the backlog as it was, to be tried again.
-            match existing {
-                Some(task) => {
-                    app.transition(
-                        &key,
-                        Event::StartAborted {
-                            reason: reason.clone(),
-                        },
-                    )
-                    .await?;
-                    let undo = BacklogChange {
-                        title: Some(task.title),
-                        project: task.project,
-                        workflow: Some(task.workflow),
-                        notes: Some(task.notes.unwrap_or_default()),
-                        in_checkout: task.in_checkout,
-                    };
-                    if let Err(e) = app.store.update_backlog_task(&key, &undo).await {
-                        tracing::warn!(task = %key, "cannot put it back as it was: {e}");
-                    }
-                    if let Err(e) = app.store.set_saving_mode(&key, task.saving_mode).await {
-                        tracing::warn!(task = %key, "cannot put saving mode back: {e}");
-                    }
-                    if let Err(e) = app.store.set_autopilot(&key, task.autopilot.as_ref()).await {
-                        tracing::warn!(task = %key, "cannot put autopilot back: {e}");
-                    }
-                }
-                None => {
-                    app.transition(
-                        &key,
-                        Event::Fail {
-                            reason: reason.clone(),
-                        },
-                    )
-                    .await?;
-                }
-            }
+            abort_start(&app, &key, existing, &reason).await?;
             return Err(ApiError::unprocessable(reason));
         }
     };
@@ -354,7 +318,12 @@ pub async fn start_run(
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }
-    app.transition(&key, Event::WorkspaceReady).await?;
+    // A chat-mode agent can fail to come up: its task stays in the starting state until it
+    // has, so the start can be undone.
+    let chat = adopted.is_none() && app.store.get_task(&key).await?.is_some_and(|t| t.chat_mode);
+    if !chat {
+        app.transition(&key, Event::WorkspaceReady).await?;
+    }
 
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
@@ -401,7 +370,15 @@ pub async fn start_run(
     } else {
         let (session, prompt) = first_session(&app, &req.key, saving_mode, autopilot, prompt);
         app.store.create_session(&session).await?;
-        launch_session(&app, &session, &ws.path, Some(&prompt), false).await?;
+        if let Err(e) = launch_session(&app, &session, &ws.path, Some(&prompt), false).await {
+            if chat {
+                undo_chat_start(&app, &key, &session, existing, &e.message).await;
+            }
+            return Err(e);
+        }
+        if chat {
+            app.transition(&key, Event::WorkspaceReady).await?;
+        }
     }
 
     let task = app
@@ -410,6 +387,124 @@ pub async fn start_run(
         .await?
         .expect("task was just created");
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// Most of the agent's stderr that goes into the error of a failed start, and the longest line.
+const START_ERROR_MAX: usize = 2048;
+const START_ERROR_LINE_MAX: usize = 300;
+
+/// The agent's last stderr lines as they may be shown: long lines cut, API keys (`sk-…`)
+/// and bearer tokens hidden, the whole kept to its last [`START_ERROR_MAX`] bytes.
+fn start_error_tail(tail: &str) -> String {
+    let lines: Vec<String> = tail
+        .lines()
+        .map(|line| redact_secrets(&line.chars().take(START_ERROR_LINE_MAX).collect::<String>()))
+        .collect();
+    let joined = lines.join("\n");
+    if joined.len() <= START_ERROR_MAX {
+        return joined;
+    }
+    let mut from = joined.len() - START_ERROR_MAX;
+    while !joined.is_char_boundary(from) {
+        from += 1;
+    }
+    joined[from..].to_string()
+}
+
+fn redact_secrets(line: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut after_bearer = false;
+    for word in line.split(' ') {
+        let redacted = if after_bearer && !word.is_empty() {
+            "***".to_string()
+        } else if let Some(i) = word.find("sk-") {
+            format!("{}sk-***", &word[..i])
+        } else {
+            word.to_string()
+        };
+        after_bearer = word.eq_ignore_ascii_case("bearer");
+        out.push(redacted);
+    }
+    out.join(" ")
+}
+
+/// A start that did not get an agent: a backlog task goes back to the backlog as it was,
+/// to be tried again; any other task fails.
+async fn abort_start(
+    app: &AppState,
+    key: &TaskKey,
+    existing: Option<Task>,
+    reason: &str,
+) -> Result<(), ApiError> {
+    match existing {
+        Some(task) => {
+            app.transition(
+                key,
+                Event::StartAborted {
+                    reason: reason.to_string(),
+                },
+            )
+            .await?;
+            let undo = BacklogChange {
+                title: Some(task.title),
+                project: task.project,
+                workflow: Some(task.workflow),
+                notes: Some(task.notes.unwrap_or_default()),
+                in_checkout: task.in_checkout,
+            };
+            if let Err(e) = app.store.update_backlog_task(key, &undo).await {
+                tracing::warn!(task = %key, "cannot put it back as it was: {e}");
+            }
+            if let Err(e) = app.store.set_saving_mode(key, task.saving_mode).await {
+                tracing::warn!(task = %key, "cannot put saving mode back: {e}");
+            }
+            if let Err(e) = app.store.set_autopilot(key, task.autopilot.as_ref()).await {
+                tracing::warn!(task = %key, "cannot put autopilot back: {e}");
+            }
+            if let Err(e) = app.store.set_chat_mode(key, task.chat_mode).await {
+                tracing::warn!(task = %key, "cannot put chat mode back: {e}");
+            }
+        }
+        None => {
+            app.transition(
+                key,
+                Event::Fail {
+                    reason: reason.to_string(),
+                },
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// A chat-mode agent that never came up: undoes the start so the task can be started
+/// again (the app offers the terminal). The session and the workspace go; the task goes
+/// back to where [`abort_start`] puts it.
+async fn undo_chat_start(
+    app: &AppState,
+    key: &TaskKey,
+    session: &SessionRecord,
+    existing: Option<Task>,
+    reason: &str,
+) {
+    if let Err(e) = sqlx::query("DELETE FROM sessions WHERE id = ?")
+        .bind(&session.id)
+        .execute(&app.store.pool)
+        .await
+    {
+        tracing::warn!(task = %key, "cannot forget the session: {e}");
+    }
+    if let Err(e) = crate::archive::release_workspace(app, key, true).await {
+        tracing::warn!(task = %key, "cannot release the workspace: {}", e.message());
+    }
+    if let Err(e) = app.store.delete_workspace(key).await {
+        tracing::warn!(task = %key, "cannot forget the workspace: {e}");
+    }
+    if let Err(e) = abort_start(app, key, existing, reason).await {
+        tracing::warn!(task = %key, "cannot abort the start: {}", e.message());
+    }
+    app.emit(crate::events::Topic::Sessions);
 }
 
 /// The `saving-mode` preference: off unless the user turned it on.
@@ -531,7 +626,8 @@ pub(crate) async fn launch_session_with(
     init_timeout: Duration,
 ) -> Result<(), ApiError> {
     // Nothing to resume if Claude never got a first message: start it afresh.
-    let resume = resume && claude::has_conversation(workspace, &session.id);
+    let resume =
+        resume && claude::has_conversation_in(&app.config.claude_projects, workspace, &session.id);
     // No control character reaches the agent's command line.
     let prompt = prompt.map(crate::actions::sanitize_prompt);
     let prompt = prompt.as_deref();
@@ -616,7 +712,7 @@ pub(crate) async fn launch_session_with(
         if !up {
             let _ = runtime.kill();
             runtime.wait().await;
-            let tail = stream.stderr_tail();
+            let tail = start_error_tail(&stream.stderr_tail());
             let tail = match tail.trim() {
                 "" => "claude printed nothing before it stopped",
                 tail => tail,
@@ -1614,12 +1710,17 @@ mod tests {
         let home = std::env::temp_dir().join(format!("delilah-chat-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
         let (app, ws) = chat_app(&hello_script(&home.display().to_string()), true).await;
-        // A saved conversation, so `--resume` is used. Claude keeps it under the real HOME.
+        // A saved conversation, so `--resume` is used; kept under the daemon's projects folder.
+        let projects = home.join("projects");
+        let mut config = app.config.as_ref().clone();
+        config.claude_projects = projects.clone();
+        let app = AppState::new(app.store.clone(), config);
         let record = SessionRecord {
             id: format!("resume-{}", uuid::Uuid::new_v4()),
             ..session("PROJ-1", "Main")
         };
-        let transcript = delilah_agents::transcript::transcript_path(&ws, &record.id).unwrap();
+        let transcript =
+            delilah_agents::transcript::transcript_path_under(&projects, &ws, &record.id).unwrap();
         std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
         std::fs::write(&transcript, "{}\n").unwrap();
         let launched = launch_session_with(
@@ -1636,13 +1737,99 @@ mod tests {
             assert!(live.runtime.as_stream().is_some());
             let _ = live.runtime.kill();
         }
-        let _ = std::fs::remove_dir_all(transcript.parent().unwrap());
+        let _ = std::fs::remove_dir_all(&home);
         launched.map_err(|e| e.message).unwrap();
         assert!(
             args.contains("--resume") && args.contains(&record.id),
             "{args}"
         );
         assert!(args.contains("stream-json"), "{args}");
+    }
+
+    #[test]
+    fn the_start_error_is_short_and_hides_keys_and_tokens() {
+        let long = "x".repeat(1000);
+        let tail = start_error_tail(&format!(
+            "ANTHROPIC_API_KEY=sk-ant-abc123 failed\nAuthorization: Bearer eyJhbGci.zzz\n{long}"
+        ));
+        assert!(
+            !tail.contains("abc123") && !tail.contains("eyJhbGci"),
+            "{tail}"
+        );
+        assert!(tail.contains("ANTHROPIC_API_KEY=sk-***") && tail.contains("Bearer ***"));
+        let many = (0..100)
+            .map(|n| format!("line {n} {}", "y".repeat(280)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tail = start_error_tail(&many);
+        assert!(tail.len() <= START_ERROR_MAX, "{}", tail.len());
+        assert!(tail.ends_with(&"y".repeat(20)));
+        assert!(start_error_tail("x".repeat(1000).as_str()).len() <= START_ERROR_LINE_MAX);
+    }
+
+    #[tokio::test]
+    async fn a_chat_mode_start_that_fails_leaves_the_task_startable_in_the_terminal() {
+        use std::os::unix::fs::PermissionsExt;
+        let (app, _repo) = repo_app("exit 1").await;
+        let bin = app.config.home.join("fake-agent.sh");
+        let made = app.config.home.join("pty-started");
+        // A stream start dies at once; a terminal one leaves a file and stays up.
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *stream-json*) echo 'no stream here' >&2; exit 2;; esac\necho ran > '{}'\nsleep 5\n",
+                made.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = app.config.as_ref().clone();
+        config.agent_program = Some(bin);
+        let app = AppState::new(app.store.clone(), config);
+        let mut task = Task::new(TaskKey::new("LIBRE-1"), "Reintentos", "feature");
+        task.project = Some("repo".into());
+        task.in_checkout = Some(false);
+        task.chat_mode = true;
+        app.store.create_task(&task).await.unwrap();
+        let mut req = run("LIBRE-1");
+        req.project = "repo".into();
+        let mut retry = run("LIBRE-1");
+        retry.project = "repo".into();
+
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(
+            err.message.starts_with("chat mode could not start:"),
+            "{}",
+            err.message
+        );
+        let key = TaskKey::new("LIBRE-1");
+        let after = app.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(after, task, "back in the backlog, as it was");
+        assert!(app.store.workspace(&key).await.unwrap().is_none());
+        assert!(
+            app.store
+                .primary_session("LIBRE-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // The retry in the terminal (what "Iniciar en terminal" sends).
+        retry.chat_mode = Some(false);
+        let (status, Json(started)) = start_run(State(app.clone()), Json(retry))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(!started.chat_mode);
+        assert_eq!(started.status, TaskStatus::Running);
+        let live = app.sessions.primary("LIBRE-1").expect("a live session");
+        assert!(live.runtime.as_pty().is_some());
+        assert!(
+            !read_when_there(made).await.is_empty(),
+            "the terminal agent ran"
+        );
+        let _ = live.runtime.kill();
     }
 
     #[tokio::test]

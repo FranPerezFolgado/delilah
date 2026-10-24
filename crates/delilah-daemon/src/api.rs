@@ -15,7 +15,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
 use crate::{
-    actions, asks, changes, events, files, hooks, inbox, jira, preferences, projects, run,
+    actions, asks, changes, events, files, hooks, inbox, jira, live, preferences, projects, run,
     session_api, specs, terminal,
 };
 
@@ -97,6 +97,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/sessions/{id}/terminal",
             get(terminal::session_terminal),
         )
+        .route("/api/v1/sessions/{id}/live", get(live::session_live))
         .route("/api/v1/sessions/{id}/close", post(session_api::close))
         .route("/api/v1/sessions/{id}/reopen", post(session_api::reopen))
         .route(

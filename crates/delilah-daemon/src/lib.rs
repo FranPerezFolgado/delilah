@@ -18,6 +18,7 @@ mod idea;
 pub mod inbox;
 mod jira;
 pub mod lang;
+mod live;
 pub mod logs;
 pub mod notify;
 mod owners;

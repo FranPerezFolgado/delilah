@@ -81,6 +81,9 @@ pub enum Entry {
         id: String,
         at: String,
         text: String,
+        /// The assistant message this came from (`message.id`), when it has one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
     },
     Tool {
         id: String,
@@ -97,6 +100,9 @@ pub enum Entry {
         diff: Option<Vec<DiffRow>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<String>,
+        /// The assistant message this call came from (`message.id`), when it has one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
     },
     Marker {
         id: String,
@@ -147,6 +153,15 @@ pub fn transcript_path(workspace: &Path, session_id: &str) -> Option<PathBuf> {
 /// [`transcript_path`] under an explicit home directory. The folder is named after the
 /// workspace path.
 pub fn transcript_path_in(home: &Path, workspace: &Path, session_id: &str) -> Option<PathBuf> {
+    transcript_path_under(&projects_root_in(home), workspace, session_id)
+}
+
+/// [`transcript_path`] under an explicit projects folder (what the daemon configures).
+pub fn transcript_path_under(
+    projects_root: &Path,
+    workspace: &Path,
+    session_id: &str,
+) -> Option<PathBuf> {
     if !is_safe_id(session_id) {
         return None;
     }
@@ -160,7 +175,7 @@ pub fn transcript_path_in(home: &Path, workspace: &Path, session_id: &str) -> Op
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     Some(
-        projects_root_in(home)
+        projects_root
             .join(folder)
             .join(format!("{session_id}.jsonl")),
     )
@@ -186,6 +201,7 @@ pub fn line_mentions(line: &[u8], id: &str) -> bool {
 }
 
 /// Something one line yields: an entry, or the result of an earlier tool call.
+#[allow(clippy::large_enum_variant)]
 enum Item {
     Entry(Entry),
     Result {
@@ -419,6 +435,7 @@ fn message_items(message: &Value, uuid: &str, at: &str, skipped: &mut usize) -> 
                         id,
                         at,
                         text: text.to_string(),
+                        message_id: None,
                     }));
                 }
             }
@@ -455,8 +472,20 @@ fn message_items(message: &Value, uuid: &str, at: &str, skipped: &mut usize) -> 
                 truncated: false,
                 diff: None,
                 path: None,
+                message_id: None,
             })),
             _ => *skipped += 1,
+        }
+    }
+    // Which assistant message the entries came from, for a client to tell when the
+    // streamed text of that message has been replaced by its final entries.
+    if let Some(mid) = message.get("id").and_then(Value::as_str).filter(|_| !user) {
+        for item in &mut items {
+            if let Item::Entry(Entry::Claude { message_id, .. } | Entry::Tool { message_id, .. }) =
+                item
+            {
+                *message_id = Some(mid.to_string());
+            }
         }
     }
     items
@@ -513,6 +542,7 @@ fn new_tool(id: String, at: String, name: &str, tool_use_id: &str, input: &Value
         truncated,
         diff,
         path,
+        message_id: None,
     }
 }
 
@@ -1012,6 +1042,43 @@ mod tests {
         assert_eq!((a, ai), (b, bi));
         let user = parse_message(&serde_json::json!({"role": "user", "content": "hello"}));
         assert_eq!(kinds(&user), ["user"]);
+    }
+
+    #[test]
+    fn assistant_entries_carry_the_message_id_when_there_is_one() {
+        let message = serde_json::json!({
+            "id": "msg_1", "role": "assistant",
+            "content": [
+                {"type": "text", "text": "hola"},
+                {"type": "tool_use", "id": "tu1", "name": "Bash", "input": {"command": "ls"}}
+            ]
+        });
+        let entries = parse_message(&message);
+        assert!(matches!(&entries[0], Entry::Claude { message_id: Some(m), .. } if m == "msg_1"));
+        assert!(matches!(&entries[1], Entry::Tool { message_id: Some(m), .. } if m == "msg_1"));
+        let json = serde_json::to_value(&entries[0]).unwrap();
+        assert_eq!(json["message_id"], "msg_1");
+        // From a transcript line, and absent when the message has no id.
+        let line = serde_json::json!({
+            "type": "assistant", "uuid": "u1", "timestamp": "2026-01-01T00:00:00Z",
+            "message": message
+        });
+        let p = parse(format!("{line}\n").as_bytes(), 0);
+        assert!(matches!(&p.entries[0], Entry::Claude { message_id: Some(m), .. } if m == "msg_1"));
+        let none = parse_message(&serde_json::json!({"role": "assistant", "content": "x"}));
+        assert!(matches!(
+            &none[0],
+            Entry::Claude {
+                message_id: None,
+                ..
+            }
+        ));
+        assert!(
+            serde_json::to_value(&none[0])
+                .unwrap()
+                .get("message_id")
+                .is_none()
+        );
     }
 
     #[test]

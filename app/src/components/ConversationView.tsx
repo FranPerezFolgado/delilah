@@ -104,9 +104,10 @@ export function ConversationView({
 
   // Chat mode (stream runtime): the text of the messages being written, by message id, from
   // the live socket. A bubble goes away once its transcript entry is in the conversation.
-  // Entries do not carry the message id (their ids are `t:<line uuid>:<n>`), so besides an
-  // id of the form `t:<message id>:<n>` a finished bubble is replaced by the first claude
-  // entry that was not on screen when its `done` arrived.
+  // A claude entry carries the id of its message (`message_id`): the bubble goes away exactly
+  // when the entry of its message arrives. For an entry without one, besides an id of the
+  // form `t:<message id>:<n>` a finished bubble is replaced by the first claude entry that
+  // was not on screen when its `done` arrived.
   const [writing, setWriting] = useState<Map<string, { text: string; seen?: Set<string> }>>(() => new Map());
   const claudeIds = useRef<Set<string>>(new Set());
   claudeIds.current = new Set((conv?.entries ?? []).filter((e) => e.kind === "claude").map((e) => e.id));
@@ -146,7 +147,11 @@ export function ConversationView({
       let next: Map<string, { text: string; seen?: Set<string> }> | null = null;
       for (const [msg, w] of cur) {
         const arrived = (conv?.entries ?? []).some(
-          (e) => e.kind === "claude" && (e.id.startsWith(`t:${msg}:`) || (w.seen && !w.seen.has(e.id))),
+          (e) =>
+            e.kind === "claude" &&
+            (e.message_id !== undefined
+              ? e.message_id === msg
+              : e.id.startsWith(`t:${msg}:`) || (w.seen && !w.seen.has(e.id))),
         );
         if (arrived) (next ??= new Map(cur)).delete(msg);
       }

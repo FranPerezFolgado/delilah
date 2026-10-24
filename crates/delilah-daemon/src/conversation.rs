@@ -293,6 +293,10 @@ pub async fn get(
         }
         // Ids are strings in the conversation: the row id.
         entry["id"] = json!(entry["id"].to_string());
+        // A marker is stored as a "claude" entry with a `marker` field.
+        if entry["kind"] == "claude" && entry.get("marker").is_some() {
+            entry["kind"] = json!("marker");
+        }
     }
     let mut stored: Vec<Value> = stored.as_array().cloned().unwrap_or_default();
     // The transcript has the same messages as the stored ones: hidden once it is there
@@ -642,9 +646,18 @@ pub async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /api/v1/sessions/{id}/stop`: interrupts the current turn. Claude fires no
-/// hook after an ESC, so the session is put back to waiting here, its pending cards
-/// withdrawn. What was queued stays queued: it is typed at the next turn's end.
+/// `POST /api/v1/sessions/{id}/stop`: interrupts the current turn and records a
+/// "stopped" marker. A terminal fires no hook after an ESC, so the session is put back to
+/// waiting here, its pending cards withdrawn; a stream agent answers the interrupt with a
+/// `TurnResult` that does the same from [`turn_interrupted`] (setting the state here would
+/// race with a message sent before that result arrives). What was queued stays queued: it
+/// is typed at the next turn's end.
+///
+/// This does not take `live.typing`: Detener must be immediate, not wait behind a send.
+/// A stop that lands in the middle of one cannot leave its entries inconsistent: a message
+/// is recorded before it is typed, and one whose prompt never reaches the agent stays
+/// `sent` until a later prompt hook marks it stale (see `prompt_submitted`); queued ones
+/// stay queued, and the stream's writes are serialised by its stdin lock.
 pub async fn stop(
     State(app): State<AppState>,
     Path(id): Path<String>,
@@ -658,14 +671,30 @@ pub async fn stop(
         .stop()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    if live.runtime.as_stream().is_none() {
+        turn_interrupted(&app, &live).await;
+    }
+    // A marker is a "claude" entry with a `marker` field, shown as a `marker` (see `get`).
+    if let Err(e) = app
+        .store
+        .add_entry(&id, EntryKind::Claude, &json!({ "marker": "stopped" }))
+        .await
+    {
+        tracing::warn!(session = %id, "cannot record the stop: {e}");
+    }
+    app.emit(Topic::Conversations);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The turn was interrupted: the session waits again, nothing is pending on it.
+pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
     live.set_state(LiveState::Waiting);
     live.reset_turn_state();
-    for ask in app.asks.release_session(&id) {
-        card_outcome(&app, &id, &ask, CardOutcome::Withdrawn).await;
+    for ask in app.asks.release_session(&live.id) {
+        card_outcome(app, &live.id, &ask, CardOutcome::Withdrawn).await;
     }
-    let _ = app.store.set_attention(&id, None).await;
+    let _ = app.store.set_attention(&live.id, None).await;
     app.emit(Topic::Inbox);
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Types every queued message at once, joined by a blank line, and marks them sent.
@@ -1471,6 +1500,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stop_records_a_stopped_marker_in_the_conversation() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Working);
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let entries = f.entries().await;
+        let marker = entries.iter().find(|e| e["kind"] == "marker").unwrap();
+        assert_eq!(marker["marker"], "stopped");
+        assert!(marker["id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn stop_does_not_wait_for_a_message_being_typed() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Working);
+        let _typing = f.live.typing.lock().await;
+        let (status, _) = tokio::time::timeout(
+            Duration::from_secs(5),
+            f.post("/api/v1/sessions/conv/stop", json!({})),
+        )
+        .await
+        .expect("Detener is immediate");
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(f.live.state(), LiveState::Waiting);
+    }
+
+    #[tokio::test]
+    async fn stop_on_a_stream_interrupts_keeps_the_session_and_the_next_message_starts_a_turn() {
+        use delilah_agents::stream::StreamEvent;
+        let f = Fixture::new().await;
+        let _ = f.live.runtime.kill();
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../delilah-agents/tests/fixtures/fake-claude-stream.sh"
+        );
+        let (session, _rx) =
+            delilah_agents::stream::StreamSession::spawn(tokio::process::Command::new(script))
+                .unwrap();
+        let session = std::sync::Arc::new(session);
+        let mut events = session.subscribe();
+        let live =
+            f.app
+                .sessions
+                .insert("conv", "@web", SessionKind::Claude, false, session.clone());
+        live.set_idea(true);
+        crate::stream_events::spawn_pump(&f.app, "conv", "@web", session.subscribe());
+
+        // A turn that hangs until it is interrupted.
+        let (status, _) = f.send("WAIT here").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(live.state(), LiveState::Working);
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        // No Stop hook comes: the turn's result makes the session wait.
+        for _ in 0..100 {
+            if live.state() == LiveState::Waiting {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!session.has_exited(), "the session stays live");
+        let entries = f.entries().await;
+        assert!(
+            entries
+                .iter()
+                .any(|e| e["kind"] == "marker" && e["marker"] == "stopped")
+        );
+
+        // The next message starts a new turn.
+        let (status, _) = f.send("again").await;
+        assert_eq!(status, StatusCode::CREATED);
+        let started = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(StreamEvent::TextDelta { message, .. }) = events.recv().await
+                    && message == "msg_2"
+                {
+                    return;
+                }
+            }
+        })
+        .await;
+        assert!(started.is_ok(), "the second message got a turn");
+        session.kill();
+    }
+
+    #[tokio::test]
     async fn stop_refuses_a_session_that_is_not_a_conversation() {
         let f = Fixture::new().await;
         f.app
@@ -1693,7 +1810,8 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        // A task's own Claude messages live in its transcript, not in the store.
+        // A task's own Claude messages live in its transcript, not in the store (the stop
+        // marker does: it is in no transcript).
         let kinds: Vec<_> = f
             .app
             .store
@@ -1701,6 +1819,7 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
+            .filter(|e| e.body.get("marker").is_none())
             .map(|e| e.kind)
             .collect();
         assert_eq!(kinds, [EntryKind::User]);

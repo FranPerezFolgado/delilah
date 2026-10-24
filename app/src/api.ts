@@ -357,12 +357,14 @@ export interface ToolEntry {
   truncated: boolean;
   diff?: DiffRow[];
   path?: string;
+  /** The assistant message the call came from. */
+  message_id?: string;
 }
 
 /** One entry of a conversation. */
 export type ConversationEntry =
   | { id: string; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" | "terminal" }
-  | { id: string; at: string; kind: "claude"; text: string }
+  | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
   | ToolEntry
   | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" }
   | {

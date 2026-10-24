@@ -260,14 +260,14 @@
   - session JSON has `runtime: "pty"|"stream"` (live runtime, else the task's flag; project sessions are always `pty`).
 
   Then implement.
-- [ ] T045 [US3] Write failing tests in `crates/delilah-daemon/src/terminal.rs` (tests module): `GET /sessions/{id}/terminal` and `GET /tasks/{key}/terminal` on a stream session return 409 with the chat-mode message from contracts/api.md. Then implement via `as_pty()`.
-- [ ] T046 [US3] Write failing tests in a new `crates/delilah-daemon/src/live.rs` (tests module):
+- [X] T045 [US3] Write failing tests in `crates/delilah-daemon/src/terminal.rs` (tests module): `GET /sessions/{id}/terminal` and `GET /tasks/{key}/terminal` on a stream session return 409 with the chat-mode message from contracts/api.md. Then implement via `as_pty()`.
+- [X] T046 [US3] Write failing tests in a new `crates/delilah-daemon/src/live.rs` (tests module):
   - `GET /api/v1/sessions/{id}/live` on a stream session relays `{message, text}` deltas and `{message, done: true}` from the session's events;
   - nothing is replayed to a late client;
   - a PTY session closes with code 4409 and the reason `not in chat mode`.
 
   Then implement, and add the route in `crates/delilah-daemon/src/api.rs`.
-- [ ] T047 [US3] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): `POST …/stop` on a stream session calls `interrupt`, keeps the session live, records a `marker: stopped`, and the next message starts a turn. No `Stop` hook fires after an interrupt, so the daemon ends the turn from the `TurnResult` (`error_during_execution`) and sets the session idle, as it does for ESC in the PTY *(spike)*. Then implement (the runtime `stop()` already branches, so add the marker for both runtimes).
+- [X] T047 [US3] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): `POST …/stop` on a stream session calls `interrupt`, keeps the session live, records a `marker: stopped`, and the next message starts a turn. No `Stop` hook fires after an interrupt, so the daemon ends the turn from the `TurnResult` (`error_during_execution`) and sets the session idle, as it does for ESC in the PTY *(spike)*. Then implement (the runtime `stop()` already branches, so add the marker for both runtimes).
 - [X] T048 [P] [US3] Write failing tests and implement `--chat` on `delilah new` and `delilah run` (create body `chat_mode: true`) in `crates/delilah-cli/src/main.rs`. `delilah attach` on a 409 prints the API message and exits 1.
 - [X] T049 [US3] Update `app/src/api.ts`: `Task.chat_mode`, `Task.allowed_tools`, `Session.runtime`, create with `chat_mode`, and `liveSocket(id)`. Write failing tests in `app/src/components/ConversationView.test.tsx`: on a stream session, deltas from a mocked socket render a "writing" bubble that grows, and it is replaced when the transcript entry for that message arrives. Then implement it in `app/src/components/ConversationView.tsx`.
 - [X] T050 [US3] Write failing tests and implement in `app/src/components/TaskScreen.tsx` and its test: for a `runtime: "stream"` session, the Terminal switch is disabled with the tooltip "Esta sesión va en modo chat: no hay terminal". The task header shows an "experimental: modo chat" mark. Remote Control is hidden for chat-mode tasks (the spike could not confirm `--remote-control` works with `-p`, R7-h) *(spike)*.

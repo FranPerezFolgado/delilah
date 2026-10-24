@@ -10,13 +10,68 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 const EVENT_BUFFER: usize = 1024;
 /// How many of the process's last stderr lines are kept, for an error message.
 const STDERR_TAIL: usize = 20;
+/// The longest stdout line read (a message with a big tool result); a longer one is dropped.
+const STDOUT_LINE_MAX: usize = 16 * 1024 * 1024;
+/// The longest stderr line kept; a longer one is dropped.
+const STDERR_LINE_MAX: usize = 64 * 1024;
+
+/// One line read with a cap.
+#[derive(Debug, PartialEq, Eq)]
+enum Line {
+    Text(String),
+    /// Longer than the cap: skipped up to its newline.
+    TooLong,
+}
+
+/// Reads the next line, never holding more than `cap` bytes of it. `None` at the end.
+async fn read_line_capped<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    cap: usize,
+) -> io::Result<Option<Line>> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut too_long = false;
+    let mut any = false;
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            return Ok(any.then(|| finish(buf, too_long)));
+        }
+        any = true;
+        let (take, found) = match chunk.iter().position(|&b| b == b'\n') {
+            Some(i) => (i, true),
+            None => (chunk.len(), false),
+        };
+        if !too_long {
+            if buf.len() + take > cap {
+                too_long = true;
+                buf = Vec::new();
+            } else {
+                buf.extend_from_slice(&chunk[..take]);
+            }
+        }
+        reader.consume(take + usize::from(found));
+        if found {
+            return Ok(Some(finish(buf, too_long)));
+        }
+    }
+}
+
+fn finish(mut buf: Vec<u8>, too_long: bool) -> Line {
+    if too_long {
+        return Line::TooLong;
+    }
+    if buf.last() == Some(&b'\r') {
+        buf.pop();
+    }
+    Line::Text(String::from_utf8_lossy(&buf).into_owned())
+}
 
 /// One rate-limit window: percent used (0-100) and when it resets (epoch seconds).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -113,9 +168,9 @@ impl StreamSession {
         let stderr_tail = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
         let tail = stderr_tail.clone();
         let stderr_done = tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("claude (stream) stderr: {line}");
+            let mut reader = BufReader::new(stderr);
+            while let Ok(Some(line)) = read_line_capped(&mut reader, STDERR_LINE_MAX).await {
+                let Line::Text(line) = line else { continue };
                 let mut tail = tail.lock().unwrap();
                 if tail.len() == STDERR_TAIL {
                     tail.pop_front();
@@ -127,9 +182,10 @@ impl StreamSession {
         let tx = events.clone();
         let mut exit_rx = exit.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let mut reader = BufReader::new(stdout);
             let mut current = String::new();
-            while let Ok(Some(line)) = lines.next_line().await {
+            while let Ok(Some(line)) = read_line_capped(&mut reader, STDOUT_LINE_MAX).await {
+                let Line::Text(line) = line else { continue };
                 if let Some(event) = parse_line(&line, &mut current) {
                     let _ = tx.send(event);
                 }
@@ -294,6 +350,27 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[tokio::test]
+    async fn an_overlong_line_is_dropped_and_reading_resyncs_at_the_next_newline() {
+        let mut data = b"short\n".to_vec();
+        data.extend(std::iter::repeat_n(b'x', 100));
+        data.extend_from_slice(b"\nnext\nlast");
+        let mut reader = BufReader::with_capacity(8, &data[..]);
+        let mut got = Vec::new();
+        while let Some(line) = read_line_capped(&mut reader, 10).await.unwrap() {
+            got.push(line);
+        }
+        assert_eq!(
+            got,
+            [
+                Line::Text("short".into()),
+                Line::TooLong,
+                Line::Text("next".into()),
+                Line::Text("last".into()),
+            ]
+        );
+    }
 
     fn fake() -> Command {
         let script = concat!(
