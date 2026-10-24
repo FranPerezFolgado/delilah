@@ -183,13 +183,14 @@ pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
 
 /// Creates the workspace of `root` (the parent or the repo) described by `spec`.
 ///
-/// - `parent`: a worktree detached at the parent's `HEAD`, with only `submodules`
-///   initialised, each on `branch`. Branches and PRs live in the submodules.
+/// - `parent`: a worktree detached at the parent's fresh `origin` default branch, with
+///   only `submodules` initialised, each on a new `branch` that starts at its own
+///   fresh `origin` default. Branches and PRs live in the submodules.
 /// - `repo`: a worktree of the repo on a new `branch` that starts at `origin`'s default
 ///   branch, fetched first (bounded by `deadline`). No local branch moves and the new
 ///   branch has no upstream. A failed fetch falls back to the last known `origin`.
 ///
-/// Also returns the base each repo started from (empty for `parent` for now).
+/// Also returns the base each repo started from (`.` is the parent for `parent`).
 pub fn create_workspace(
     root: &Path,
     spec: &WorkspaceSpec,
@@ -242,15 +243,25 @@ pub fn create_workspace(
             {
                 return Err(GitError::UnknownSubmodule(unknown.clone()));
             }
+            let base = prepare_base(root, ".", opts, deadline);
+            let start = if base.sha.is_empty() {
+                "HEAD".to_string()
+            } else {
+                base.sha.clone()
+            };
             git(
                 root,
-                &["worktree", "add", "--detach", &ws_path, "HEAD"],
+                &["worktree", "add", "--detach", &ws_path, &start],
                 opts,
             )?;
-            if let Err(e) = init_submodules(&spec.path, spec, opts) {
-                // Leave nothing half-built behind.
-                let _ = git(root, &["worktree", "remove", "--force", &ws_path], opts);
-                return Err(e);
+            bases.push(base);
+            match init_submodules(&spec.path, spec, opts, deadline) {
+                Ok(subs) => bases.extend(subs),
+                Err(e) => {
+                    // Leave nothing half-built behind.
+                    let _ = git(root, &["worktree", "remove", "--force", &ws_path], opts);
+                    return Err(e);
+                }
             }
         }
     }
@@ -264,21 +275,36 @@ pub fn create_workspace(
     Ok((ws, bases))
 }
 
-fn init_submodules(ws: &Path, spec: &WorkspaceSpec, opts: &GitOptions) -> Result<(), GitError> {
+fn init_submodules(
+    ws: &Path,
+    spec: &WorkspaceSpec,
+    opts: &GitOptions,
+    deadline: Deadline,
+) -> Result<Vec<RepoBase>, GitError> {
     if spec.submodules.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut args = vec!["submodule", "update", "--init", "--"];
     args.extend(spec.submodules.iter().map(String::as_str));
     git(ws, &args, opts)?;
 
-    // Without a branch the submodules stay detached at their recorded commit.
-    if let Some(branch) = &spec.branch {
-        for sub in &spec.submodules {
-            git(&ws.join(sub), &["checkout", "-b", branch], opts)?;
-        }
+    let mut bases = Vec::new();
+    for sub in &spec.submodules {
+        let dir = ws.join(sub);
+        let base = prepare_base(&dir, sub, opts, deadline);
+        let start = if base.sha.is_empty() {
+            base.refname.clone()
+        } else {
+            base.sha.clone()
+        };
+        git(
+            &dir,
+            &["checkout", "-q", "--no-track", "-b", &spec.branch, &start],
+            opts,
+        )?;
+        bases.push(base);
     }
-    Ok(())
+    Ok(bases)
 }
 
 /// Removes the workspace. Refuses while the task's branch has uncommitted changes or

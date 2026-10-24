@@ -9,9 +9,9 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | WP-01 | 1 | 1A | done | 1 | 654fa24 | |
 | WP-02 | 2 | 2A | done | 1 | ec9e4ce | |
 | WP-03 | 3 | 3A | done | 1 | d44308e | |
-| WP-04 | 4 | 4A | implementing | 0 | | |
-| WP-05 | 5 | 5A | pending | 0 | | parallel with WP-06 |
-| WP-06 | 6 | 6A | pending | 0 | | parallel with WP-05 |
+| WP-04 | 4 | 4A | done | 1 | bf44eba | |
+| WP-05 | 5 | 5A | implementing | 0 | | parallel with WP-06 |
+| WP-06 | 6 | 6A | implementing | 0 | | parallel with WP-05 |
 | WP-07 | 6 | 6A | verified | 1 | 5845a13 | started early, UI only |
 | WP-08 | 7 | 7A | pending | 0 | | |
 | WP-09 | 7 | 7B | pending | 0 | | |
@@ -33,3 +33,5 @@ Plan: max parallel — WP-07 alongside WP-01..; WP-05 ∥ WP-06 after WP-04; pha
 | 2 | security | LOW | repo_lock map never pruned (negligible) | crates/delilah-git/src/base.rs |
 | 3 | spec | LOW | No repo-project test (`fx.repo_spec()`) that an existing folder / invalid branch still fail before the new fetch (code order is right) | crates/delilah-git/tests/workspace.rs |
 | 3 | spec | LOW | report_bases log line untested; T011 checks project folder only by HEAD != remote head | crates/delilah-daemon/src/run.rs |
+| 4 | spec | LOW | "Existing branch, no fetch" test uses `/nonexistent` (fails instantly) so it can't catch a regression that fetches; a hanging sshCommand would | crates/delilah-git/tests/workspace.rs |
+| 4 | spec | LOW | Existing arm: `rev-parse HEAD` `.unwrap_or_default()` can log an empty sha silently | crates/delilah-git/src/workspace.rs (use_checkout) |

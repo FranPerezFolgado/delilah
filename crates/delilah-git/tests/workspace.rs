@@ -766,3 +766,140 @@ fn a_dirty_checkout_fails_before_any_fetch() {
     assert!(matches!(r, Err(GitError::Dirty { .. })));
     assert!(started.elapsed() < Duration::from_secs(5));
 }
+
+// --- parent projects: a fresh base per repo ---
+
+fn base_of<'a>(bases: &'a [RepoBase], repo: &str) -> &'a RepoBase {
+    bases.iter().find(|b| b.repo == repo).unwrap()
+}
+
+#[test]
+fn parent_workspace_starts_the_parent_and_submodules_fresh() {
+    let fx = Fixture::new();
+    let pay_remote = fx.root.join("env/remotes/svc-payments.git");
+    let parent_remote = fx.root.join("env/remotes/parent.git");
+    let pay_head = advance_remote(&pay_remote, "fresh.txt", "Fresh");
+    let parent_head = advance_remote(&parent_remote, "fresh.txt", "Fresh");
+
+    let (ws, bases) =
+        create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts(), dl()).unwrap();
+
+    assert_eq!(git(&ws.path, &["rev-parse", "HEAD"]), parent_head);
+    assert_eq!(git(&ws.path, &["branch", "--show-current"]), "");
+    let pay = ws.path.join("svc-payments");
+    assert_eq!(git(&pay, &["rev-parse", "HEAD"]), pay_head);
+    assert_eq!(git(&pay, &["branch", "--show-current"]), BRANCH);
+    assert_eq!(upstream_of(&pay, BRANCH), None);
+    assert_eq!(
+        std::fs::read_dir(ws.path.join("svc-billing"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(bases.len(), 2);
+    assert_eq!(base_of(&bases, ".").fetch, FetchOutcome::Fetched);
+    assert_eq!(base_of(&bases, ".").sha, parent_head);
+    assert_eq!(base_of(&bases, "svc-payments").fetch, FetchOutcome::Fetched);
+    assert_eq!(base_of(&bases, "svc-payments").sha, pay_head);
+}
+
+fn parent_checkout_spec(parent: &Path, subs: &[&str]) -> WorkspaceSpec {
+    WorkspaceSpec {
+        path: parent.to_path_buf(),
+        branch: "feature/PROJ-9".into(),
+        kind: ProjectKind::Parent,
+        submodules: subs.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[test]
+fn parent_checkout_falls_back_per_submodule_when_one_fetch_fails() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let pay_head = advance_remote(
+        &fx.root.join("env/remotes/svc-payments.git"),
+        "fresh.txt",
+        "Fresh",
+    );
+    let bill = parent.join("svc-billing");
+    let old = git(&bill, &["rev-parse", "origin/main"]);
+    git(&bill, &["remote", "set-url", "origin", "/nonexistent"]);
+
+    let spec = parent_checkout_spec(&parent, &["svc-payments", "svc-billing"]);
+    let (_, _, bases) = use_checkout(&parent, &spec, &opts(), dl()).unwrap();
+
+    let b = base_of(&bases, "svc-billing");
+    assert!(matches!(b.fetch, FetchOutcome::Failed(_)), "{b:?}");
+    assert_eq!(git(&bill, &["rev-parse", "HEAD"]), old);
+    let p = base_of(&bases, "svc-payments");
+    assert_eq!(p.fetch, FetchOutcome::Fetched);
+    assert_eq!(
+        git(&parent.join("svc-payments"), &["rev-parse", "HEAD"]),
+        pay_head
+    );
+}
+
+#[test]
+fn parent_checkout_gives_the_parent_folder_no_branch_and_no_base() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let pay_head = advance_remote(
+        &fx.root.join("env/remotes/svc-payments.git"),
+        "fresh.txt",
+        "Fresh",
+    );
+    advance_remote(
+        &fx.root.join("env/remotes/parent.git"),
+        "fresh.txt",
+        "Fresh",
+    );
+    let parent_before = git(&parent, &["rev-parse", "HEAD"]);
+
+    let spec = parent_checkout_spec(&parent, &["svc-payments"]);
+    let (_, previous, bases) = use_checkout(&parent, &spec, &opts(), dl()).unwrap();
+
+    let pay = parent.join("svc-payments");
+    assert_eq!(git(&pay, &["branch", "--show-current"]), "feature/PROJ-9");
+    assert_eq!(git(&pay, &["rev-parse", "HEAD"]), pay_head);
+    assert_eq!(git(&parent, &["rev-parse", "HEAD"]), parent_before);
+    assert_eq!(git(&parent, &["branch", "--show-current"]), "main");
+    assert!(bases.iter().all(|b| b.repo != "."), "{bases:?}");
+    assert_eq!(previous.len(), 1);
+    // The parent folder was not fetched either.
+    assert_eq!(git(&parent, &["rev-parse", "origin/main"]), parent_before);
+}
+
+#[test]
+fn parent_checkout_judges_an_existing_branch_per_submodule() {
+    let fx = Fixture::new();
+    let parent = fx.parent();
+    git(&parent, &["submodule", "update", "--init", "-q"]);
+    let pay = parent.join("svc-payments");
+    git(&pay, &["branch", "feature/PROJ-9"]);
+    let pay_tip = git(&pay, &["rev-parse", "feature/PROJ-9"]);
+    let ord_head = advance_remote(
+        &fx.root.join("env/remotes/svc-orders.git"),
+        "fresh.txt",
+        "Fresh",
+    );
+    advance_remote(
+        &fx.root.join("env/remotes/svc-payments.git"),
+        "fresh.txt",
+        "Fresh",
+    );
+
+    let spec = parent_checkout_spec(&parent, &["svc-payments", "svc-orders"]);
+    let (_, _, bases) = use_checkout(&parent, &spec, &opts(), dl()).unwrap();
+
+    let p = base_of(&bases, "svc-payments");
+    assert_eq!(p.fetch, FetchOutcome::Existing);
+    assert_eq!(git(&pay, &["rev-parse", "HEAD"]), pay_tip);
+    let o = base_of(&bases, "svc-orders");
+    assert_eq!(o.fetch, FetchOutcome::Fetched);
+    assert_eq!(
+        git(&parent.join("svc-orders"), &["rev-parse", "HEAD"]),
+        ord_head
+    );
+}
