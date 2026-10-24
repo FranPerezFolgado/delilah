@@ -257,3 +257,13 @@ files and git, which already hold everything the next phase needs.
 - **Planning → implementation asks the user** (it also approves the tasks); the review starts on its own. Notes are saved with `/save-session` first (preference).
 - **Ruled out:** returning to the parent session (it carries the context we are shedding); cutting inside the orchestrate phase, one session per implementation phase, for now (pending in [status](status.md)).
 
+## Task name and branch from the analysis
+
+**34. The branch comes from the first analysis; the title is replaced once
+(2026-10-24).** A free task used to start on `feature/LIBRE-n`, a name that said
+nothing and that Spec Kit's own branch then duplicated. Now it starts without a
+branch and takes the one named like the spec folder ([research](../specs/005-task-name-from-spec/research.md)).
+- **Branch:** adopted if Spec Kit's `before_specify` hook made it, else created by Delilah from the spec folder; the task's title as a slug only when the guard needs a branch and there is no spec yet. A taken name gets `-2`, `-3`. A provisional branch renamed later was ruled out: the hook would have created a second one.
+- **The worktree folder keeps the key** (`workspaces/<KEY>`): moving it under a running agent was ruled out. Jira tasks and tasks started before keep `feature/<KEY>`.
+- **Guard:** a PreToolUse hook makes the branch before the first code edit, commit, push, merge, rebase or PR, so nothing lands on the base. Failing closed (deny with the reason) was chosen over letting the edit through. It is best-effort: substring match on commands, symlinks not resolved; a full shell parser was judged not worth it.
+- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restaurar" brings it back. Any manual edit (`title_source = manual`) is final.

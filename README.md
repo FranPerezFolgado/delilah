@@ -207,6 +207,15 @@ branch you were on and keeps the task's branch; files left uncommitted stay in y
 folder and never block it) or **isolated in a worktree**
 (several tasks in parallel without touching your folder).
 
+**Branch and name from the analysis.** A free task starts without a branch of its own
+(in a worktree, detached at your project's HEAD; in your checkout, nothing is
+switched). Once the agent writes the spec, the task takes the spec's title (the task
+screen shows "Antes: ..." with "Restaurar", and you can edit the title in place at any
+time) and a branch named like the spec folder (`005-my-feature`), also in the chosen
+submodules of a parent. If the agent edits code or commits before that, Delilah makes
+the branch first. If it cannot, the Bandeja shows it with "Reintentar". Without a
+branch, "Abrir PR" is refused. Jira tasks keep `feature/<KEY>` and the ticket's title.
+
 **Nueva tarea con Claude.** Third option in the "Nueva tarea" dialog, next to Jira
 and Libre (after choosing the project), and on the project's screen and its "+".
 Instead of a form you tell Claude your idea in a conversation view, without a

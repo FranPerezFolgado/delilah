@@ -14,8 +14,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-10 | 4 | 4A | verified | 1 | 98a3637 | run early; alerts.ts allowed by user |
 | WP-07 | 4 | 4B | verified | 1 | c808cb6 | ensure()+ensure_locked(); Activity waits while branch_error set |
 | WP-09 | 4 | 4B | verified | 1 | 407a9a3 | no delilah-git change needed |
-| WP-08 | 4 | 4C | verified | 1 | PENDING | guard on every free-task session outside start_run (returns at once once branched) |
-| WP-11 | 5 | 5A | pending | 0 | | |
+| WP-08 | 4 | 4C | verified | 1 | d792563 | guard on every free-task session outside start_run (returns at once once branched) |
+| WP-4F | 4 | 4F | implementing | 0 | | phase 4 review fixes (round 1) |
+| WP-11 | 5 | 5A | verified | 1 | PENDING | CHK016, CHK033-035 left open |
 | WP-12 | 5 | 5B | pending | 0 | | quickstart walk via ui-verifier |
 
 ## Open findings
@@ -43,3 +44,16 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | ui-verifier | MEDIUM | No browser tools: header edit, Escape, Antes/Restaurar not checked in a real browser (API behaviour + auto-rename verified in preview; vitest passes) | app/src/components/TaskScreen.tsx |
 | 4 | orchestrator | MEDIUM | A submodule that already has a branch with the chosen name fails apply_branch → branch_error instead of being switched to it (needs a delilah-git checkout-existing helper) | crates/delilah-daemon/src/branching.rs |
 | 4 | orchestrator | LOW | Sessions launched outside start_run (resume, extra sessions) get the guard hook for any free task even after the branch exists (R3 says they shouldn't); cost = one curl per edit/commit | crates/delilah-daemon/src/run.rs |
+| 4 | security | MEDIUM | Bash guard is a substring match: misses `git -C . commit`, `git -c k=v commit`, double spaces, /usr/bin/git, scripts/aliases; guard is best-effort (archive still refuses detached commits) | crates/delilah-daemon/src/branching.rs:~372,~440 |
+| 4 | security | LOW | specs/ .specify/ exemption is lexical: a symlink inside specs/ escapes the guard | crates/delilah-daemon/src/branching.rs:~408-428 |
+| 4 | security | LOW | task/session/daemon_url interpolated unescaped into single-quoted curl (pre-existing pattern; values are safe today) | crates/delilah-agents/src/claude.rs:229-265 |
+| 4 | security | LOW | /hooks/claude/guard unauthenticated like other hooks (any local process can trigger early branch creation; idempotent) | crates/delilah-daemon/src/hooks.rs:172-182 |
+| 4 | architecture | MEDIUM | retry axum handler + guard_reply hook JSON live in branching.rs (domain module imports axum/api); move to api/hooks | crates/delilah-daemon/src/branching.rs:483-534 |
+| 4 | architecture | MEDIUM | branching.rs ~600 non-test lines mixing locks, spec discovery, settle, guard policy, HTTP, retitle; split into branching/{settle,guard,spec} | crates/delilah-daemon/src/branching.rs |
+| 4 | architecture | MEDIUM | retitle/spec_title/new_spec_folder do sync fs reads on the async runtime on every Working/TurnEnded | crates/delilah-daemon/src/branching.rs:63,77,539-567 |
+| 4 | architecture | LOW | "caller holds the lock" only by doc comment (ensure_locked/retitle); stringly-typed Result<Option<String>,String>; launch_session vs launch_session_guarded decide guard with different rules; Initial-for-free duplicated | branching.rs:292-377, run.rs:432-447 |
+| 4 | contract | LOW | retry 200 that fails again gives no feedback; 404/409 messages English-only (not lang().pick); delilah show lacks previous_title; retry doesn't 409 archived tasks | InboxView.tsx:103-114, branching.rs:508-513, delilah-cli/src/main.rs:280-292 |
+| 4 | spec-compliance | LOW | "-2/-3" name chosen silently (spec: "and says so"); slug keeps a task key present in the title (FR-006) | crates/delilah-daemon/src/branching.rs:205 |
+| 4 | spec-compliance | LOW | on_activity spawned (not synchronous with the hook) so branch not guaranteed before next tool; adopted sessions miss R8 sentence | phases.rs:159-163, run.rs:373 |
+| 4 | spec-compliance | LOW | untested: checkout-mode free start via start_run; parent archive with descriptive branch | run.rs, archive.rs |
+| 4 | ui-verifier | LOW | E2E (API) 5/6 pass; Bandeja branch item not exercised end to end. `preview.sh --fresh` left a stale prunable LIBRE-2 worktree in fixtures/signal from an earlier preview (first detached worktree add failed once) | scripts/preview.sh / fixtures |

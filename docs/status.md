@@ -56,8 +56,14 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-21
 - The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
 
+**Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
+- Free tasks start without a branch; the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restaurar".
+- A guard hook makes the branch before the first edit outside `specs/` or a commit/push/PR; failures show in the Bandeja with "Reintentar".
+- The title is editable in the task screen on any non-archived task.
+
 ## Pending and known problems
 
+- **Branch guard is best-effort:** it matches substrings of Bash commands and does not resolve symlinks, so an unusual command can write before the branch exists.
 - **Idea conversations, still missing:**
   - streaming of Claude's text and a chat view for other sessions (only the idea conversation has one; the rest show the terminal);
   - deleting conversations (the history is kept for good);
