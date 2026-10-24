@@ -229,6 +229,9 @@ pub async fn start_run(
             task.project = Some(project.name.clone());
             task.saving_mode = saving_mode;
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
+            if crate::branching::is_free(&key) {
+                task.title_source = delilah_core::TitleSource::Initial;
+            }
             app.store.create_task(&task).await?;
             task.notes
         }
@@ -299,6 +302,14 @@ pub async fn start_run(
         }
     };
     app.store.save_workspace(&key, &project.path, &ws).await?;
+    if crate::branching::is_free(&key) {
+        // What the first analysis adds is told apart from what was already there.
+        let scanned = ws.clone();
+        let dirs = tokio::task::spawn_blocking(move || crate::branching::scan_spec_dirs(&scanned))
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        app.store.set_spec_dirs_at_start(&key, Some(&dirs)).await?;
+    }
     if let Some(previous) = &previous {
         app.store.set_checkout_previous(&key, previous).await?;
     }

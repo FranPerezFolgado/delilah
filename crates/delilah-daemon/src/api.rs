@@ -329,6 +329,9 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         .or_else(|| project.as_ref().map(|p| p.workflow.clone()))
         .unwrap_or_else(default_workflow);
     let mut task = Task::new(key, new.title.trim(), workflow);
+    if crate::branching::is_free(&task.key) {
+        task.title_source = delilah_core::TitleSource::Initial;
+    }
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
