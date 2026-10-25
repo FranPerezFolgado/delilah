@@ -9,7 +9,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 079f3d3 | Setup guards |
 | WP-02 | 2 | 2A | done | 1 | 7874870 | Client read types and calls (api.ts) |
-| WP-03 | 2 | 2A | done | 1 |  | Core events and created_at |
+| WP-03 | 2 | 2A | done | 1 | 87b9863 | Core events and created_at |
 | WP-04 | 2 | 2A | implementing | 1 |  | Route skeleton |
 | WP-05 | 2 | 2B | pending | 0 | | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | implementing | 1 |  | Checkout is the default workspace |
@@ -21,7 +21,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
-| WP-15 | 3 | 3A | implementing | 1 |  | Token guards and v2 tokens |
+| WP-15 | 3 | 3A | done | 1 |  | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | implementing | 1 |  | Vocabulary, relative time, icons |
 | WP-17 | 3 | 3B | pending | 0 | | Rename old tokens in TSX |
 | WP-18 | 3 | 3B | pending | 0 | | Kit: controls |
