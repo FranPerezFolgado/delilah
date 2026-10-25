@@ -71,7 +71,7 @@ export function SpecPanel({ task }: { task: Task }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <span className="sec">{t("Subtareas")}</span>
             <span className="bar" style={{ width: 120 }}>
-              <span style={{ width: `${(spec.done / spec.total) * 100}%`, background: spec.done === spec.total ? "var(--done)" : "var(--run)" }} />
+              <span style={{ width: `${(spec.done / spec.total) * 100}%`, background: spec.done === spec.total ? "var(--ok)" : "var(--run)" }} />
             </span>
             <span className="mono muted" style={{ fontSize: 11.5 }}>
               {spec.done}/{spec.total}

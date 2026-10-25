@@ -78,7 +78,7 @@ function Card({ task, spec, pr, onOpen }: { task: Task; spec?: SpecSummary; pr?:
       {showProgress && (
         <span className="kcard-progress">
           <span className="bar" style={{ flex: 1 }}>
-            <span style={{ width: `${(spec.done / spec.total) * 100}%`, background: spec.done === spec.total ? "var(--done)" : "var(--run)" }} />
+            <span style={{ width: `${(spec.done / spec.total) * 100}%`, background: spec.done === spec.total ? "var(--ok)" : "var(--run)" }} />
           </span>
           <span className="mono muted">
             {spec.done}/{spec.total}

@@ -55,10 +55,6 @@ const OLD_TOKENS = /--(?:acc|accbg|acctx|elev|done|pausebg|addbg|delbg|hunkbg)\b
  * must still violate (so the list cannot go stale) and must be deleted when its owner lands.
  */
 const PENDING_OLD_TOKENS: Record<string, string> = {
-  "components/SpecPanel.tsx": "WP-17 (T027 rename in TSX)",
-  "components/BoardView.tsx": "WP-17 (T027 rename in TSX)",
-  "components/StatusBar.tsx": "WP-17 (T027 rename in TSX)",
-  "editor/codemirror.ts": "WP-21 (T047 live editor theme)",
 };
 
 describe("no old token names", () => {

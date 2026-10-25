@@ -8,7 +8,7 @@ export function StatusBar({ online, active, usage }: { online: boolean; active: 
   return (
     <footer className="statusbar">
       <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span className="dot" style={{ background: online ? "var(--done)" : "var(--err)" }} />
+        <span className="dot" style={{ background: online ? "var(--ok)" : "var(--err)" }} />
         {online ? t("delilahd conectado") : t("delilahd sin conexión")}
       </span>
       <span>
@@ -18,7 +18,7 @@ export function StatusBar({ online, active, usage }: { online: boolean; active: 
         {usage ? (
           Object.entries(usage.rate_limits).map(([name, w]) => {
             const used = Math.round(w.used_percentage ?? 0);
-            const color = used >= 80 ? "var(--acc)" : "var(--tx3)";
+            const color = used >= 80 ? "var(--wait-tx)" : "var(--tx3)";
             const reset = w.resets_at
               ? new Date(w.resets_at * 1000).toLocaleString(locale(), { weekday: "short", hour: "2-digit", minute: "2-digit" })
               : null;
