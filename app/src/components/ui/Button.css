@@ -1,0 +1,16 @@
+.b { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; padding: 0 14px; border-radius: 7px; font-size: 13.5px; font-weight: 500; white-space: nowrap; text-decoration: none; border: 1px solid transparent; }
+.b-p { background: var(--primary); color: var(--primary-tx); }
+.b-p:hover:not(:disabled) { background: var(--primary-hov); }
+.b-s { background: var(--card); border-color: var(--bd2); color: var(--tx); }
+.b-s:hover:not(:disabled) { background: var(--hov); }
+.b-g { background: transparent; color: var(--tx2); }
+.b-g:hover:not(:disabled) { background: var(--hov); color: var(--tx); }
+.b-d { background: transparent; border-color: var(--err); color: var(--err); }
+.b-d:hover:not(:disabled) { background: var(--err-bg); }
+.b.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.b:disabled { opacity: 0.5; cursor: not-allowed; }
+.b .i, .ib .i { width: 16px; height: 16px; fill: none; stroke: currentColor; }
+.ib { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; border: 0; background: transparent; color: var(--tx2); }
+.ib:hover:not(:disabled) { background: var(--hov); color: var(--tx); }
+.ib[aria-pressed="true"] { background: var(--sel); color: var(--tx-strong); }
+.ib:disabled { opacity: 0.5; cursor: not-allowed; }

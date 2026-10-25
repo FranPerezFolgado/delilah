@@ -12,7 +12,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-03 | 2 | 2A | done | 1 | 87b9863 | Core events and created_at |
 | WP-04 | 2 | 2A | done | 1 | 8c35baa | Route skeleton |
 | WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
-| WP-06 | 2 | 2B | done | 1 |  | Checkout is the default workspace |
+| WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
 | WP-07 | 2 | 2B | implementing | 1 |  | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | implementing | 1 |  | PR check times, review comments, merge |
@@ -24,7 +24,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | implementing | 1 |  | Vocabulary, relative time, icons |
 | WP-17 | 3 | 3B | done | 1 | 1870515 | Rename old tokens in TSX |
-| WP-18 | 3 | 3B | implementing | 1 |  | Kit: controls |
+| WP-18 | 3 | 3B | done | 1 |  | Kit: controls |
 | WP-19 | 3 | 3B | implementing | 1 |  | Kit: lists, overlays, feedback |
 | WP-20 | 3 | 3B | pending | 0 | | Kit: status components |
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
@@ -74,3 +74,5 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 |-------|----------|----------|---------|------|
 | 3 | WP-15 | MEDIUM | Light `--tx3` (#6b6e75) on `--side` (#efefec) is 4.43:1 (KNOWN_LOW in tokens.test.ts). Fix: light `--tx3` → #686b72 (4.6:1) and drop the KNOWN_LOW entry. | app/src/styles.css, app/src/tokens.test.ts |
 | 1 | WP-01 | LOW | i18n coverage test never seen failing; the regex may pass vacuously. Check it finds literals. | app/src/i18n/coverage.test.ts |
+| 2 | WP-06 | MEDIUM | `delilah run`/`new` without --checkout/--worktree now use the checkout: update CLI help (WP-13) and docs decisions 16/57 + README (WP-57); say it in the PR. | crates/delilah-cli, docs |
+| 2 | WP-06 | LOW | Daemon tests `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` flaky under heavy load (pass alone). | crates/delilah-daemon |
