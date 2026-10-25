@@ -175,17 +175,19 @@ task ends. A restart of the daemon does not bring a preview back.
 Terminal switch above its tabs; the chat shows your messages, Claude's replies, tool
 cards (commands, diffs, file reads; click one for its full input and result), question
 cards and a text field, and queues what you write while Claude works ("Detener"
-interrupts). The "Vista" field of a task (and of the new task dialog) only sets which one
-opens first.
+interrupts). The switch is the only view control: what you pick is remembered as the
+task's view (the new task dialog's "Vista" sets the first one).
 
 Chat mode goes further: with "Modo chat (experimental)" in the new task dialog or
 `--chat` on `delilah new` / `delilah run`, the task's Claude runs without a terminal
 (`claude -p` with a stream), so its text appears as it is written. Hooks still drive
 the task's state, the Bandeja, usage-limit pauses, saving mode, autopilot and the PR
-flow. There is no terminal in that mode (`delilah attach` says so). "Pasar a terminal"
-in the task header (or `delilah runtime <KEY> terminal`; `chat` goes back) restarts the
-agent in the other runtime with `--resume`, keeping the conversation; it is refused
-while the agent works or waits for you (wait, or press "Detener"). Project sessions and
+flow. There is no terminal in that mode (`delilah attach` says so). "Terminal" in the
+switch (or `delilah runtime <KEY> terminal`) restarts the agent in a terminal with
+`--resume`, keeping the conversation; it is refused, with the reason next to the switch,
+while the agent works or waits for you (wait, answer, or press "Detener"). A terminal
+task offers "Probar modo chat (experimental)" in its chat view (or `delilah runtime <KEY>
+chat`) to go the other way. Project sessions and
 idea conversations always use the terminal.
 
 When a chat-mode agent needs a permission it shows a "¿Permitir?" card (also in the

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
+import { ApiError, DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
@@ -158,11 +158,10 @@ describe("TaskScreen conversation sessions", () => {
     expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
   });
 
-  it("disables the Terminal switch with a tooltip on a stream session", () => {
+  it("Terminal on a stream session asks for the switch instead of showing a terminal it has not", () => {
     const { queryByTestId, getByRole } = open({ ...conv, runtime: "stream" });
     const btn = getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.title).toBe("Esta sesión va en modo chat: no hay terminal");
+    expect(btn.title).toBe("Pasa la tarea a terminal: Claude sigue con la misma conversación");
     fireEvent.click(btn);
     expect(queryByTestId("terminal")).toBeNull();
     expect(queryByTestId("conversation")).not.toBeNull();
@@ -211,10 +210,11 @@ describe("TaskScreen conversation sessions", () => {
     expect(b.queryByTestId("terminal")).not.toBeNull();
   });
 
-  it("changes the task's view with the view control", () => {
+  it("remembers the view picked with the switch as the task's view, with no other view control", () => {
     updateTask.mockClear();
-    const { getByLabelText } = inTask(conv, "chat");
-    fireEvent.change(getByLabelText("Vista"), { target: { value: "terminal" } });
+    const r = inTask(conv, "chat");
+    expect(r.queryByLabelText("Vista")).toBeNull();
+    fireEvent.click(r.getByRole("button", { name: "Terminal" }));
     expect(updateTask).toHaveBeenCalledWith("PROJ-1", { view: "terminal" });
   });
 
@@ -451,27 +451,37 @@ describe("TaskScreen runtime switch", () => {
     runtime.result = () => Promise.resolve(null);
   });
 
-  it("offers Pasar a terminal on a chat-mode task and enables the Terminal switch after refetch", async () => {
-        sessionFor("PROJ-1").active = sessionTab("s1");
+  beforeEach(() => {
+    sessionFor("PROJ-1").active = sessionTab("s1");
+  });
+
+  it("has no runtime button in the header: Terminal on a chat-mode session switches the task", async () => {
     const r = render(screen1(chatTask, stream));
-    expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(r.getByRole("button", { name: "Pasar a terminal" }));
+    expect(r.queryByRole("button", { name: /Pasar a/ })).toBeNull();
+    const term = r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
+    expect(term.disabled).toBe(false);
+    expect(term.title).toContain("Pasa la tarea a terminal");
+    fireEvent.click(term);
     expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "terminal");
-    await waitFor(() => expect((r.getByRole("button", { name: "Pasar a terminal" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(false));
     r.rerender(screen1({ ...chatTask, chat_mode: false }, { ...stream, runtime: "pty" }));
-    expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(r.queryByRole("button", { name: "Pasar a terminal" })).toBeNull();
-    // And the terminal is what shows, not the chat the session no longer has.
+    // The terminal is what shows, not the chat the session no longer has.
     expect(r.getByRole("button", { name: "Terminal" }).getAttribute("aria-pressed")).toBe("true");
     expect(r.getByRole("button", { name: "Chat" }).getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("offers Pasar a modo chat on a PTY task, disabled while it runs", async () => {
+  it("Chat on a chat-mode session does not switch anything", () => {
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: "Chat" }));
+    expect(runtime.calls).not.toHaveBeenCalled();
+  });
+
+  it("offers Probar modo chat in the chat view of a PTY task, disabled while it switches", async () => {
     let done!: () => void;
     const pending = new Promise<null>((res) => (done = () => res(null)));
     runtime.result = () => pending;
     const r = render(screen1(task({ type: "running" }), { ...stream, runtime: "pty" }));
-    const btn = r.getByRole("button", { name: "Pasar a modo chat" }) as HTMLButtonElement;
+    const btn = r.getByRole("button", { name: "Probar modo chat (experimental)" }) as HTMLButtonElement;
     expect(btn.title).toContain("Experimental");
     fireEvent.click(btn);
     expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "chat");
@@ -480,10 +490,22 @@ describe("TaskScreen runtime switch", () => {
     await waitFor(() => expect(btn.disabled).toBe(false));
   });
 
-  it("shows the 409 message", async () => {
-    runtime.result = () => Promise.reject(new Error("wait for the turn to end or press Detener"));
+  it("does not offer Probar modo chat in the terminal view nor on a chat-mode task", () => {
+    const a = render(screen1({ ...task({ type: "running" }), view: "terminal" }, { ...stream, runtime: "pty" }));
+    expect(a.queryByRole("button", { name: "Probar modo chat (experimental)" })).toBeNull();
+    cleanup();
+    const b = render(screen1(chatTask, stream));
+    expect(b.queryByRole("button", { name: "Probar modo chat (experimental)" })).toBeNull();
+  });
+
+  it("shows a refused switch next to the Chat / Terminal switch", async () => {
+    runtime.result = () => Promise.reject(new ApiError("wait for the turn to end or press Detener", 409));
     const r = render(screen1(chatTask, stream));
-    fireEvent.click(r.getByRole("button", { name: "Pasar a terminal" }));
-    await waitFor(() => expect(r.getByText("wait for the turn to end or press Detener")).toBeTruthy());
+    fireEvent.click(r.getByRole("button", { name: "Terminal" }));
+    const alert = await r.findByRole("alert");
+    expect(alert.closest(".view-switch-wrap")).not.toBeNull();
+    expect(alert.textContent).toContain("Espera a que acabe el turno");
+    fireEvent.click(r.getByRole("button", { name: "Cerrar" }));
+    expect(r.queryByRole("alert")).toBeNull();
   });
 });

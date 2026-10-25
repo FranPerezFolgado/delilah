@@ -53,6 +53,15 @@ function merge(
     .map(([e]) => e);
 }
 
+/** Whether the transcript entry of a message being written is in the conversation. */
+function arrived(msg: string, w: { seen?: Set<string> }, entries: ConversationEntry[]): boolean {
+  return entries.some(
+    (e) =>
+      e.kind === "claude" &&
+      (e.message_id !== undefined ? e.message_id === msg : e.id.startsWith(`t:${msg}:`) || (!!w.seen && !w.seen.has(e.id))),
+  );
+}
+
 /** An idea conversation without a terminal: messages, Claude's replies, questions as
  *  cards and a field to write. Sending is allowed while Claude works (it queues). */
 export function ConversationView({
@@ -178,18 +187,14 @@ export function ConversationView({
     setWriting((cur) => {
       let next: Map<string, { text: string; seen?: Set<string> }> | null = null;
       for (const [msg, w] of cur) {
-        const arrived = (conv?.entries ?? []).some(
-          (e) =>
-            e.kind === "claude" &&
-            (e.message_id !== undefined
-              ? e.message_id === msg
-              : e.id.startsWith(`t:${msg}:`) || (w.seen && !w.seen.has(e.id))),
-        );
-        if (arrived) (next ??= new Map(cur)).delete(msg);
+        if (arrived(msg, w, conv?.entries ?? [])) (next ??= new Map(cur)).delete(msg);
       }
       return next ?? cur;
     });
   }, [conv]);
+  // Filtered at render too: between the entry arriving and the effect above dropping
+  // its bubble, one frame would show the message twice.
+  const shownWriting = [...writing].filter(([msg, w]) => !arrived(msg, w, conv?.entries ?? []));
 
   useEffect(() => {
     load();
@@ -197,7 +202,7 @@ export function ConversationView({
     return () => offs.forEach((off) => off());
   }, [load]);
 
-  const count = (conv?.entries.length ?? 0) + writing.size;
+  const count = (conv?.entries.length ?? 0) + shownWriting.length;
 
   useEffect(() => {
     const el = log.current;
@@ -364,7 +369,7 @@ export function ConversationView({
             </div>
           );
         })}
-        {[...writing].map(([msg, w]) => (
+        {shownWriting.map(([msg, w]) => (
           <div key={`w:${msg}`} className="conv-msg conv-claude conv-writing selectable" data-testid="writing">
             <Markdown text={w.text} remoteImages="click" />
           </div>

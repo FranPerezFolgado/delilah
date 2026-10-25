@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
+import { api, ApiError, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
@@ -70,6 +70,10 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
+  // Why the last runtime switch was refused, next to its button: the screen's error bar
+  // lives in the editor pane, out of sight while the conversation shows.
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  useEffect(() => setSwitchError(null), [owner]);
   const [closing, setClosing] = useState<string | null>(null);
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
@@ -519,16 +523,39 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
 
   const switchRuntime = (mode: "chat" | "terminal") => {
     setSwitching(true);
-    setError(null);
+    setSwitchError(null);
     api
       .setRuntime(owner, mode)
       .then(() => {
         // The sessions come back in the new runtime: to the terminal, show it (the old
         // choice was a chat the session no longer has); to chat, drop any override.
         setViews(mode === "terminal" ? new Map(sessions.filter((x) => x.kind === "claude").map((x) => [x.id, "terminal" as ViewMode])) : new Map());
+        rememberView(mode);
         onChanged();
-      }, (err) => setError((err as Error).message))
+      }, (err) =>
+        setSwitchError(
+          err instanceof ApiError && err.status === 409
+            ? t("Espera a que acabe el turno o a responder lo que pide, o pulsa Detener")
+            : (err as Error).message,
+        ))
       .finally(() => setSwitching(false));
+  };
+
+  // The task's view setting (FR-007) is whatever the user last picked with the switch.
+  const rememberView = (v: ViewMode) => {
+    if (task && task.view !== v) api.updateTask(owner, { view: v }).then(onChanged, () => {});
+  };
+  // The one Chat / Terminal switch: on a chat-mode session "Terminal" moves the task to
+  // the terminal (refused, with the reason next to the switch, while the agent is busy);
+  // otherwise it only changes the view.
+  const chooseView = (s: Session, v: ViewMode) => {
+    setSwitchError(null);
+    if (s.runtime === "stream" && v === "terminal") {
+      switchRuntime("terminal");
+      return;
+    }
+    showView(s.id, v);
+    rememberView(v);
   };
 
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
@@ -574,16 +601,6 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
               {phase && <PhaseBadge phase={phase} />}
               <AutopilotMark autopilot={task.autopilot} />
               {task.chat_mode && <span className="pill chat-mode-pill">{t("experimental: modo chat")}</span>}
-              {task.status.type !== "done" && (
-                <button
-                  className="btn btn-ghost saving-on"
-                  disabled={switching}
-                  title={task.chat_mode ? undefined : t("Experimental: la tarea sigue en modo chat, sin terminal")}
-                  onClick={() => switchRuntime(task.chat_mode ? "terminal" : "chat")}
-                >
-                  {task.chat_mode ? t("Pasar a terminal") : t("Pasar a modo chat")}
-                </button>
-              )}
               <PreviewControl taskKey={owner} project={task.project} status={task.status} />
               {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
                 <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
@@ -598,20 +615,6 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
                   )}
                 </span>
               )}
-              <select
-                className="input view-select"
-                aria-label={t("Vista")}
-                title={t("Vista")}
-                value={task.view === "terminal" ? "terminal" : "chat"}
-                onChange={(e) => {
-                  const v = e.target.value as ViewMode;
-                  setViews(new Map());
-                  api.updateTask(owner, { view: v }).then(onChanged, (err) => setError((err as Error).message));
-                }}
-              >
-                <option value="chat">Chat</option>
-                <option value="terminal">Terminal</option>
-              </select>
               <span className={`pill ${status.cls}`}>
                 <Icon name={status.icon} /> {statusLabel(task.status)}
               </span>
@@ -702,19 +705,27 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
               />
             ))}
             {shownClaude && (
-              <span className="segs view-switch" style={{ marginLeft: "auto", alignSelf: "center", marginRight: 8 }}>
-                {(["chat", "terminal"] as const).map((v) => (
-                  <button
-                    key={v}
-                    className={`seg ${viewOf(shownClaude) === v ? "on" : ""}`}
-                    aria-pressed={viewOf(shownClaude) === v}
-                    disabled={v === "terminal" && shownClaude.runtime === "stream"}
-                    title={v === "terminal" && shownClaude.runtime === "stream" ? t("Esta sesión va en modo chat: no hay terminal") : undefined}
-                    onClick={() => showView(shownClaude.id, v)}
-                  >
-                    {v === "chat" ? "Chat" : "Terminal"}
-                  </button>
-                ))}
+              <span className="view-switch-wrap" style={{ marginLeft: "auto", alignSelf: "center", marginRight: 8 }}>
+                {switchError && (
+                  <span className="switch-error selectable" role="alert">
+                    {switchError}
+                    <button className="saving-off" aria-label={t("Cerrar")} onClick={() => setSwitchError(null)}>×</button>
+                  </span>
+                )}
+                <span className="segs view-switch">
+                  {(["chat", "terminal"] as const).map((v) => (
+                    <button
+                      key={v}
+                      className={`seg ${viewOf(shownClaude) === v ? "on" : ""}`}
+                      aria-pressed={viewOf(shownClaude) === v}
+                      disabled={switching}
+                      title={v === "terminal" && shownClaude.runtime === "stream" ? t("Pasa la tarea a terminal: Claude sigue con la misma conversación") : undefined}
+                      onClick={() => viewOf(shownClaude) !== v && chooseView(shownClaude, v)}
+                    >
+                      {v === "chat" ? "Chat" : "Terminal"}
+                    </button>
+                  ))}
+                </span>
               </span>
             )}
           </div>
@@ -813,6 +824,13 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
                       </button>
                     </div>
                   )}
+                  {asConversation && task && !task.chat_mode && s.runtime === "pty" && s.live && task.status.type !== "done" && (
+                    <div className="try-chat-mode">
+                      <button className="btn btn-ghost" disabled={switching} onClick={() => switchRuntime("chat")} title={t("Experimental: la tarea sigue en modo chat, sin terminal")}>
+                        {t("Probar modo chat (experimental)")}
+                      </button>
+                    </div>
+                  )}
                   {/* Fixed order, placed by CSS: moving the questions never remounts the
                       terminal or loses an answer being written. */}
                   <div className={`tterm-body ask-${askPosition}`}>
@@ -820,7 +838,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
                     {asConversation ? (
                       <ConversationView
                         session={s}
-                        onOpenTerminal={() => showView(s.id, "terminal")}
+                        onOpenTerminal={() => chooseView(s, "terminal")}
                         onOpenFile={(path) => void openFile(path)}
                         onOpenTask={(key) => onOpenTask?.(key)}
                         onReopen={reopen}

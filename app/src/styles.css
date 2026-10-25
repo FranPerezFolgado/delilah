@@ -70,6 +70,9 @@ svg.i { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-widt
 .phase-pill { border-color: var(--acc); background: var(--accbg); color: var(--tx); padding-left: 2px; }
 .phase-pill .dot-step { width: 16px; height: 16px; font-size: 10px; border-color: var(--acc); background: var(--acc); color: var(--acctx); }
 .head-pills { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
+.view-switch-wrap { display: inline-flex; align-items: center; gap: 10px; }
+.try-chat-mode { display: flex; justify-content: flex-end; padding: 4px 12px 0; }
+.switch-error { display: inline-flex; align-items: center; gap: 6px; color: var(--err); font-size: 12px; max-width: 320px; }
 
 /* Views */
 .view-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px 12px; border-bottom: 1px solid var(--bd); }
@@ -117,8 +120,9 @@ textarea.input { height: 64px; padding: 8px 10px; resize: vertical; }
 .pane.on { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
 .pane-head { display: flex; align-items: center; gap: 8px; height: 32px; flex: none; padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--bd); background: var(--panel); font-size: 12px; cursor: pointer; }
-.pane-term { flex: 1; min-height: 0; padding: 6px 4px 4px 10px; overflow: hidden; }
-.pane-term .xterm { height: 100%; }
+/* The padding is xterm's own: the fit addon subtracts it, so the last row is not cut. */
+.pane-term { flex: 1; min-height: 0; overflow: hidden; }
+.pane-term .xterm { height: 100%; padding: 6px 4px 4px 10px; box-sizing: border-box; }
 .seg { border: 0; background: transparent; color: var(--tx3); font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; }
 .seg + .seg { border-left: 1px solid var(--bd2); }
 .seg.on { background: var(--sel); color: var(--tx); }
@@ -455,7 +459,7 @@ body.resizing iframe, body.resizing .xterm { pointer-events: none; }
 .ask-preview { max-height: 60vh; overflow: auto; border: 1px solid var(--bd); border-radius: 6px; padding: 8px 12px; background: var(--panel); }
 .ask-proposal h3 { margin: 0 0 8px; font-size: 14px; }
 .ask-created a { color: var(--acc); }
-.conv { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.conv { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .conv-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
 .conv-msg { max-width: 80%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--bd); background: var(--panel); white-space: pre-wrap; }
 .conv-user { align-self: flex-end; background: var(--accbg); border-color: var(--acc); }
