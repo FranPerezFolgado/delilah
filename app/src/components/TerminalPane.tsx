@@ -7,13 +7,15 @@ import { terminalUrl, type SessionKind } from "../api";
 import { actionFor } from "../shortcuts";
 import { AGENT_NEW_LINE, isAgentNewLineKey } from "../keys";
 import { t as tr } from "../i18n";
+import { cssVar, onSchemeChange } from "../theme";
 
-const THEME = {
-  background: "#0c0d0f",
-  foreground: "#e7e8ea",
-  cursor: "#f0a03c",
-  selectionBackground: "rgba(240,160,60,0.3)",
-};
+/** xterm's colours from the app's tokens, read when the scheme changes. */
+const xtermTheme = () => ({
+  background: cssVar("--term-bg"),
+  foreground: cssVar("--term-tx"),
+  cursor: cssVar("--tx-strong"),
+  selectionBackground: cssVar("--sel"),
+});
 // How long a pane's size must hold still before it claims it.
 const RESIZE_SETTLE_MS = 100;
 
@@ -48,7 +50,7 @@ export function TerminalPane({
       fontSize: 12,
       lineHeight: 1.15,
       cursorBlink: true,
-      theme: THEME,
+      theme: xtermTheme(),
       scrollback: 5000,
     });
     const fit = new FitAddon();
@@ -60,6 +62,9 @@ export function TerminalPane({
       // No WebGL: xterm falls back to its DOM renderer.
     }
     termRef.current = t;
+    const offScheme = onSchemeChange(() => {
+      t.options.theme = xtermTheme();
+    });
 
     const ws = new WebSocket(terminalUrl(sessionId));
     ws.binaryType = "arraybuffer";
@@ -138,6 +143,7 @@ export function TerminalPane({
       observer.disconnect();
       input.dispose();
       ws.close();
+      offScheme();
       t.dispose();
       termRef.current = null;
     };

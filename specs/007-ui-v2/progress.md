@@ -23,11 +23,11 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | implementing | 1 |  | Vocabulary, relative time, icons |
-| WP-17 | 3 | 3B | done | 1 |  | Rename old tokens in TSX |
+| WP-17 | 3 | 3B | done | 1 | 1870515 | Rename old tokens in TSX |
 | WP-18 | 3 | 3B | implementing | 1 |  | Kit: controls |
 | WP-19 | 3 | 3B | implementing | 1 |  | Kit: lists, overlays, feedback |
 | WP-20 | 3 | 3B | pending | 0 | | Kit: status components |
-| WP-21 | 3 | 3B | implementing | 1 |  | Live terminal and editor themes |
+| WP-21 | 3 | 3B | done | 1 |  | Live terminal and editor themes |
 | WP-22 | 3 | 3C | pending | 0 | | Kit barrel |
 | WP-23 | 4 | 4A | pending | 0 | | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | pending | 0 | | Logs view, statusbar, disconnected banner |
