@@ -34,7 +34,7 @@ pub async fn task_terminal(
         .sessions
         .primary(&key)
         .ok_or_else(|| ApiError::not_found(format!("task {key} has no running agent")))?;
-    Ok(upgrade(ws, live))
+    upgrade(ws, live)
 }
 
 pub async fn session_terminal(
@@ -46,16 +46,22 @@ pub async fn session_terminal(
         .sessions
         .get(&id)
         .ok_or_else(|| ApiError::not_found(format!("session {id} is not running")))?;
-    Ok(upgrade(ws, live))
+    upgrade(ws, live)
 }
 
-fn upgrade(ws: WebSocketUpgrade, live: Live) -> Response {
-    ws.on_upgrade(move |socket| async move {
+/// An agent in chat mode has no terminal: a 409, before the upgrade.
+fn upgrade(ws: WebSocketUpgrade, live: Live) -> Result<Response, ApiError> {
+    let Some(pty) = live.runtime.as_pty().map(Arc::clone) else {
+        return Err(ApiError::conflict(
+            "the session runs in chat mode: no terminal. Switch the task to the terminal with `delilah runtime <task> terminal` or from the app",
+        ));
+    };
+    Ok(ws.on_upgrade(move |socket| async move {
         live.viewers.fetch_add(1, Ordering::Relaxed);
         let accepts_input = live.accepts_input();
-        pump(socket, Arc::clone(&live.pty), accepts_input).await;
+        pump(socket, pty, accepts_input).await;
         live.viewers.fetch_sub(1, Ordering::Relaxed);
-    })
+    }))
 }
 
 async fn pump(mut socket: WebSocket, pty: Arc<PtySession>, accepts_input: bool) {
@@ -264,5 +270,39 @@ mod tests {
                 .await
                 .unwrap_err();
         assert!(err.to_string().contains("404"), "{err}");
+    }
+
+    fn insert_stream(state: &AppState, id: &str, task: &str) {
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        state.sessions.insert(
+            id,
+            task,
+            SessionKind::Claude,
+            true,
+            std::sync::Arc::new(session),
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chat_mode_session_has_no_terminal_and_answers_409() {
+        let (state, base) = serve().await;
+        insert_stream(&state, "s-9", "PROJ-9");
+        for path in ["tasks/PROJ-9/terminal", "sessions/s-9/terminal"] {
+            let err = tokio_tungstenite::connect_async(format!("{base}/api/v1/{path}"))
+                .await
+                .unwrap_err();
+            let tokio_tungstenite::tungstenite::Error::Http(res) = err else {
+                panic!("expected an HTTP refusal for {path}: {err}");
+            };
+            assert_eq!(res.status().as_u16(), 409, "{path}");
+            let body =
+                String::from_utf8_lossy(res.body().as_deref().unwrap_or_default()).into_owned();
+            assert!(
+                body.contains("the session runs in chat mode: no terminal. Switch the task to the terminal with `delilah runtime <task> terminal` or from the app"),
+                "{body}"
+            );
+        }
     }
 }

@@ -119,10 +119,12 @@ pub(crate) async fn cancel(app: &AppState, key: &TaskKey) -> Result<(), LaunchEr
         .sessions
         .of_task(key.as_str())
         .into_iter()
-        .find(|l| l.kind == SessionKind::Setup && !l.pty.has_exited())
+        .find(|l| l.kind == SessionKind::Setup && !l.runtime.has_exited())
         .ok_or(LaunchError::Unsupported("no setup is running"))?;
     app.sessions.mark_cancelled(&live.id);
-    stop(&live.pty).await;
+    if let Some(pty) = live.runtime.as_pty() {
+        stop(pty).await;
+    }
     Ok(())
 }
 
@@ -137,7 +139,7 @@ pub async fn recover_interrupted(app: &AppState) -> Result<(), LaunchError> {
             .sessions
             .of_task(task.key.as_str())
             .iter()
-            .any(|l| l.kind == SessionKind::Setup && !l.pty.has_exited());
+            .any(|l| l.kind == SessionKind::Setup && !l.runtime.has_exited());
         if running {
             continue;
         }
@@ -250,7 +252,10 @@ async fn finish(
     if timed_out {
         stop(pty).await;
     }
-    app.sessions.remove_if_same(session_id, pty);
+    app.sessions.remove_if_same(
+        session_id,
+        &delilah_agents::runtime::Runtime::from(Arc::clone(pty)),
+    );
     app.store.close_session(session_id).await?;
     app.emit(Topic::Sessions);
 
@@ -459,6 +464,9 @@ mod tests {
             adopted: None,
             saving_mode: false,
             autopilot: false,
+            existing: None,
+            first_turn_timeout: crate::run::FIRST_TURN_TIMEOUT,
+            settle: crate::run::SETTLE,
         }
     }
 

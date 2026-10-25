@@ -1,24 +1,45 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
+import { ApiError, DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
-const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+// A spy that returns a rejected promise reports it as unhandled: record the calls apart.
+const runtime = vi.hoisted(() => ({ calls: vi.fn(), result: (): Promise<unknown> => Promise.resolve(null) }));
+const setRuntime = vi.hoisted(() => (...a: unknown[]) => {
+  runtime.calls(...a);
+  return runtime.result();
+});
+const fileApi = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "updateTask" ? updateTask : name === "setAutopilot" ? setAutopilot : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setRuntime" ? setRuntime : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
-vi.mock("./ConversationView", () => ({ ConversationView: () => <div data-testid="conversation" /> }));
+vi.mock("./ConversationView", async () => {
+  const { ToolCard } = await vi.importActual<typeof import("./ToolCard")>("./ToolCard");
+  return {
+    // A tool entry as the daemon serves it: its path relative to the workspace.
+    ConversationView: (p: { onOpenFile: (path: string) => void }) => (
+      <div data-testid="conversation">
+        <ToolCard
+          sessionId="s1"
+          onOpenFile={p.onOpenFile}
+          entry={{ id: "t1", at: "", kind: "tool", tool: "Edit", tool_use_id: "tu1", summary: "a.rs", path: "src/a.rs", input: {}, result: "", is_error: false, truncated: false }}
+        />
+      </div>
+    ),
+  };
+});
 vi.mock("./FileTree", () => ({ FileTree: () => null }));
 vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
 vi.mock("./TaskView", () => ({ TaskView: () => null }));
@@ -92,6 +113,11 @@ describe("TaskScreen header phase", () => {
     expect(head(task({ type: "done" }), spec).querySelector(".phase-pill")).toBeNull();
   });
 
+  it("marks a chat-mode task as experimental", () => {
+    expect(head({ ...task({ type: "running" }), chat_mode: true }).textContent).toContain("experimental: modo chat");
+    expect(head(task({ type: "running" })).textContent).not.toContain("experimental: modo chat");
+  });
+
   it("shows no phase pill on the project screen", () => {
     expect(head().querySelector(".phase-pill")).toBeNull();
   });
@@ -125,20 +151,71 @@ describe("TaskScreen conversation sessions", () => {
     expect(container.querySelector(".tterm .ebar")).toBeNull();
   });
 
-  it("toggles to the terminal and back", () => {
-    const { queryByTestId, getByText } = open(conv);
-    fireEvent.click(getByText("Ver terminal"));
+  it("opens the file of a tool entry in the editor with its workspace-relative path", () => {
+    const { container, getByText } = open(conv);
+    fireEvent.click(container.querySelector(".tool-head")!);
+    fireEvent.click(getByText("Abrir en el editor"));
+    expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
+  });
+
+  it("Terminal on a stream session asks for the switch instead of showing a terminal it has not", () => {
+    const { queryByTestId, getByRole } = open({ ...conv, runtime: "stream" });
+    const btn = getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
+    expect(btn.title).toBe("Pasa la tarea a terminal: Claude sigue con la misma conversación");
+    fireEvent.click(btn);
+    expect(queryByTestId("terminal")).toBeNull();
+    expect(queryByTestId("conversation")).not.toBeNull();
+  });
+
+  it("toggles to the terminal and back with the Chat / Terminal switch", () => {
+    const { queryByTestId, getByRole } = open(conv);
+    fireEvent.click(getByRole("button", { name: "Terminal" }));
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
-    fireEvent.click(getByText("Ver conversación"));
+    fireEvent.click(getByRole("button", { name: "Chat" }));
     expect(queryByTestId("conversation")).not.toBeNull();
     expect(queryByTestId("terminal")).toBeNull();
   });
 
-  it("keeps the terminal for a plain session", () => {
+  it("opens a project session in chat even when it is not an idea conversation", () => {
     const { queryByTestId } = open({ ...conv, conversation: false });
+    expect(queryByTestId("conversation")).not.toBeNull();
+    expect(queryByTestId("terminal")).toBeNull();
+  });
+
+  it("always shows the terminal for a shell session, without the switch", () => {
+    const { queryByTestId, queryByRole } = open({ ...conv, kind: "shell", conversation: false });
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
+    expect(queryByRole("button", { name: "Chat" })).toBeNull();
+  });
+
+  const inTask = (s: Session, view?: "chat" | "terminal") => {
+    sessionFor("PROJ-1").active = sessionTab(s.id);
+    return render(
+      <TaskScreen owner="PROJ-1" task={{ ...task({ type: "running" }), view }} sessions={[{ ...s, task: "PROJ-1", conversation: false }]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />,
+    );
+  };
+
+  it("starts a task session in chat or terminal from task.view, and the switch overrides it", () => {
+    const a = inTask(conv, "chat");
+    expect(a.queryByTestId("conversation")).not.toBeNull();
+    cleanup();
+    const b = inTask(conv, "terminal");
+    expect(b.queryByTestId("terminal")).not.toBeNull();
+    expect(b.queryByTestId("conversation")).toBeNull();
+    fireEvent.click(b.getByRole("button", { name: "Chat" }));
+    expect(b.queryByTestId("conversation")).not.toBeNull();
+    fireEvent.click(b.getByRole("button", { name: "Terminal" }));
+    expect(b.queryByTestId("terminal")).not.toBeNull();
+  });
+
+  it("remembers the view picked with the switch as the task's view, with no other view control", () => {
+    updateTask.mockClear();
+    const r = inTask(conv, "chat");
+    expect(r.queryByLabelText("Vista")).toBeNull();
+    fireEvent.click(r.getByRole("button", { name: "Terminal" }));
+    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { view: "terminal" });
   });
 
   const pendingAsk = {
@@ -160,7 +237,7 @@ describe("TaskScreen conversation sessions", () => {
   it("has no ask-bar in conversation mode, but keeps it for a terminal session", () => {
     expect(openWithAsk(conv).container.querySelector(".ask-bar")).toBeNull();
     cleanup();
-    expect(openWithAsk({ ...conv, conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
+    expect(openWithAsk({ ...conv, kind: "shell", conversation: false }).container.querySelector(".ask-bar")).not.toBeNull();
   });
 
   it("shows a proposal ask beside the terminal and opens the created task", () => {
@@ -169,7 +246,7 @@ describe("TaskScreen conversation sessions", () => {
       ask: { id: "a2", questions: [], proposal: { title: "Nueva", brief: "b" } },
     } as unknown as InboxItem;
     const onOpenTask = vi.fn();
-    const { getByTestId, getByText, queryByTestId } = openWithAsk({ ...conv, conversation: false }, proposal, onOpenTask);
+    const { getByTestId, getByText, queryByTestId } = openWithAsk({ ...conv, kind: "shell", conversation: false }, proposal, onOpenTask);
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(getByTestId("askcard").getAttribute("data-proposal")).toBe("Nueva");
     fireEvent.click(getByText("open-created"));
@@ -359,5 +436,76 @@ describe("TaskScreen editable title", () => {
     const h = head(task({ type: "running" }));
     expect(h.textContent).not.toContain("Antes:");
     expect(screen.queryByText("Restaurar")).toBeNull();
+  });
+});
+
+describe("TaskScreen runtime switch", () => {
+  const stream: Session = { id: "s1", task: "PROJ-1", kind: "claude", label: "Main", primary: true, closed: false, live: true, read_only: false, step: null, state: "waiting", conversation: false, runtime: "stream" };
+  const screen1 = (t: Task, s: Session) => (
+    <TaskScreen owner="PROJ-1" task={t} sessions={[s]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />
+  );
+  const chatTask = { ...task({ type: "running" }), chat_mode: true };
+
+  beforeEach(() => {
+    runtime.calls.mockClear();
+    runtime.result = () => Promise.resolve(null);
+  });
+
+  beforeEach(() => {
+    sessionFor("PROJ-1").active = sessionTab("s1");
+  });
+
+  it("has no runtime button in the header: Terminal on a chat-mode session switches the task", async () => {
+    const r = render(screen1(chatTask, stream));
+    expect(r.queryByRole("button", { name: /Pasar a/ })).toBeNull();
+    const term = r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
+    expect(term.disabled).toBe(false);
+    expect(term.title).toContain("Pasa la tarea a terminal");
+    fireEvent.click(term);
+    expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "terminal");
+    await waitFor(() => expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(false));
+    r.rerender(screen1({ ...chatTask, chat_mode: false }, { ...stream, runtime: "pty" }));
+    // The terminal is what shows, not the chat the session no longer has.
+    expect(r.getByRole("button", { name: "Terminal" }).getAttribute("aria-pressed")).toBe("true");
+    expect(r.getByRole("button", { name: "Chat" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("Chat on a chat-mode session does not switch anything", () => {
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: "Chat" }));
+    expect(runtime.calls).not.toHaveBeenCalled();
+  });
+
+  it("offers Probar modo chat in the chat view of a PTY task, disabled while it switches", async () => {
+    let done!: () => void;
+    const pending = new Promise<null>((res) => (done = () => res(null)));
+    runtime.result = () => pending;
+    const r = render(screen1(task({ type: "running" }), { ...stream, runtime: "pty" }));
+    const btn = r.getByRole("button", { name: "Probar modo chat (experimental)" }) as HTMLButtonElement;
+    expect(btn.title).toContain("Experimental");
+    fireEvent.click(btn);
+    expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "chat");
+    expect(btn.disabled).toBe(true);
+    done();
+    await waitFor(() => expect(btn.disabled).toBe(false));
+  });
+
+  it("does not offer Probar modo chat in the terminal view nor on a chat-mode task", () => {
+    const a = render(screen1({ ...task({ type: "running" }), view: "terminal" }, { ...stream, runtime: "pty" }));
+    expect(a.queryByRole("button", { name: "Probar modo chat (experimental)" })).toBeNull();
+    cleanup();
+    const b = render(screen1(chatTask, stream));
+    expect(b.queryByRole("button", { name: "Probar modo chat (experimental)" })).toBeNull();
+  });
+
+  it("shows a refused switch next to the Chat / Terminal switch", async () => {
+    runtime.result = () => Promise.reject(new ApiError("wait for the turn to end or press Detener", 409));
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: "Terminal" }));
+    const alert = await r.findByRole("alert");
+    expect(alert.closest(".view-switch-wrap")).not.toBeNull();
+    expect(alert.textContent).toContain("Espera a que acabe el turno");
+    fireEvent.click(r.getByRole("button", { name: "Cerrar" }));
+    expect(r.queryByRole("alert")).toBeNull();
   });
 });

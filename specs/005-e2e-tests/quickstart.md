@@ -44,3 +44,44 @@ env.wait_until("fake got the answer", || env.record_for(&key).answers.first().cl
 
 UI: a new `app/e2e/<flow>.spec.ts` using the `e2e` fixture (`api`, `fixture()`,
 `scenario()`), as the existing specs do.
+
+## Chat mode (stream-json)
+
+When the daemon runs it with `--input-format stream-json` (`claude::stream_command`),
+the fake speaks the stream protocol of `docs/spikes/2026-10-24-claude-stream.md`
+(`crates/delilah-e2e/src/fake/stream.rs`): each user line on stdin plays the next entry
+of the scenario's `turns` (picked at the first message: a `[fake:<name>]` marker in it,
+else `<task>.json`, else `default.json`; once the turns run out it answers
+`Echo: <message>`). Every turn prints `system/init`, fires `UserPromptSubmit`, plays its
+steps, then a `rate_limit_event`, a `result` and the `Stop` hook; the user message, the
+assistant messages and the tool calls and results are appended to the transcript under
+the temp home, where the daemon reads the conversation. An `interrupt` is answered as
+the real CLI does. Steps of a turn:
+
+```json
+{"turns": [
+  [{"say": {"text": "Uno dos tres", "delay_ms": 250}}],
+  [{"tool": {"name": "Bash", "input": {"command": "ls -la"}, "output": "total 0"}},
+   {"say": {"text": "Hecho."}}],
+  [{"tool": {"name": "Bash", "input": {"command": "git diff HEAD"}, "ask": true,
+     "suggestions": [{"type": "addRules", "behavior": "allow",
+                      "rules": [{"toolName": "Bash", "ruleContent": "git diff:*"}]}]}}],
+  [{"sleep_ms": 500}, {"exit": 0}]
+]}
+```
+
+`say` streams the text as word deltas `delay_ms` apart, then the complete message. `tool`
+sends `can_use_tool` (unless `"ask": false`; `suggestions` default to the exact command)
+and waits for the `control_response`: allowed, the result is `output`; denied, the denial
+message, as an error. Each answer is kept in the record's `permissions`
+(`<fake_dir>/records/<session>.json`). Start a chat-mode task with `chat_mode: true` and a
+`prompt` carrying the marker in `POST /api/v1/runs`.
+
+Covered in `app/e2e/chat.spec.ts`: the chat view with live text that becomes the final
+message; permission cards in the chat and the inbox (allow once, deny with a reason);
+"allow always" storing the exact rule and a prefix rule (`Bash(git diff:*)`) that covers
+`git diff --stat` but not `git diff --output=../x`; the runtime switch from the session's
+Chat | Terminal switch (refused with a card waiting, then to the terminal and back with
+"Probar modo chat"); a stopped chat session not reconnecting to its live socket. The fake's
+stream mode itself: `crates/delilah-e2e/tests/fake_bin.rs` and the unit tests in
+`src/fake/stream.rs`.

@@ -66,10 +66,12 @@ function openFailingPr(dir: string, n: number, branch: string, title: string) {
 test("the PR tab shows the PR state, the failing check and the review comment", async ({ page, env, api, project }) => {
   const p = await project("repo");
   const title = `PR flow ${Date.now()}`;
-  const task = await api.post<{ key: string }>("/api/v1/runs", {
-    key: "", title, project: p.name, submodules: [], free: true,
+  // A free task starts without a branch unless given one (decision 65).
+  const branch = `feature/pr-flow-${Date.now()}`;
+  await api.post<{ key: string }>("/api/v1/runs", {
+    key: "", title, project: p.name, submodules: [], free: true, branch,
   });
-  openFailingPr(env.gh_dir, 7, `feature/${task.key}`, `PR for ${title}`);
+  openFailingPr(env.gh_dir, 7, branch, `PR for ${title}`);
 
   await page.goto("/");
   await page.getByRole("button", { name: /^Tareas/ }).click();

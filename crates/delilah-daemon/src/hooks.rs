@@ -29,6 +29,25 @@ pub async fn claude_hook(
     Query(q): Query<HookQuery>,
     Json(hook): Json<Value>,
 ) -> StatusCode {
+    apply_hook(app, q, hook).await
+}
+
+/// What a chat-mode agent's stream says when it hits the usage limit, as the `StopFailure`
+/// hook would say it (which print mode was never seen to send): the one place a limit
+/// pauses a task, whichever of the two reports it first. A second report finds the task
+/// already paused and changes nothing.
+pub(crate) async fn limit_hit_from_stream(app: &AppState, task: &str, session: &str) {
+    let hook = serde_json::json!({
+        "hook_event_name": "StopFailure",
+        "error": "rate_limit",
+        "source": "stream",
+    });
+    // Not logged raw: hooks.jsonl holds what the agent really posted, not what the
+    // daemon made up from the stream.
+    apply_signal(app.clone(), task, Some(session), Signal::TurnFailed, &hook).await;
+}
+
+async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
     if !is_owner_name(&q.task) {
         return StatusCode::BAD_REQUEST;
     }
@@ -37,12 +56,38 @@ pub async fn claude_hook(
     if let Err(e) = append_raw(&app, &q.task, &hook).await {
         tracing::warn!(task = %q.task, "cannot log hook: {e}");
     }
-
     let signal = claude::classify(&hook);
+    apply_signal(app, &q.task, q.session.as_deref(), signal, &hook).await;
+    StatusCode::NO_CONTENT
+}
+
+/// What a hook (or a stream event that stands for one) does to the session, the inbox and
+/// the task, without logging it.
+async fn apply_signal(
+    app: AppState,
+    task: &str,
+    session: Option<&str>,
+    signal: Signal,
+    hook: &Value,
+) {
+    let q = HookQuery {
+        task: task.to_string(),
+        session: session.map(str::to_string),
+    };
+    let hook = hook.clone();
     let live = match &q.session {
         Some(id) => app.sessions.get(id),
         None => app.sessions.primary(&q.task),
     };
+    // Only a path that passed the check replaces the current one.
+    if let Some(live) = &live
+        && let Some(path) = trusted_transcript(&app, &hook)
+    {
+        live.set_transcript(path);
+    }
+    if let Some(live) = &live {
+        crate::transcript_watch::poke(&app, &live.id);
+    }
     // No live session (e.g. a hook from before a restart): treat it as the primary.
     let primary = live.as_ref().is_none_or(|l| l.primary);
     if signal == Signal::SessionStarted
@@ -67,14 +112,12 @@ pub async fn claude_hook(
         });
     }
 
-    // An idea conversation also keeps its own history.
+    // A Claude session's conversation keeps its own state (an idea, its whole history).
     let session_id = q
         .session
         .clone()
         .or_else(|| live.as_ref().map(|l| l.id.clone()));
-    if let Some(id) = &session_id
-        && crate::conversation::is_conversation(&app, id).await
-    {
+    if let Some(id) = &session_id {
         crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
     }
 
@@ -140,7 +183,45 @@ pub async fn claude_hook(
             Err(e) => tracing::warn!(task = %q.task, "hook not applied: {e}"),
         }
     }
-    StatusCode::NO_CONTENT
+}
+
+/// The transcript path a hook carries, only when it is absolute, ends in `.jsonl` and,
+/// once symlinks are resolved, is inside Claude's projects folder: it comes from the
+/// hook body, so it is not followed blindly. The path returned is the resolved one.
+fn trusted_transcript(app: &AppState, hook: &Value) -> Option<std::path::PathBuf> {
+    trusted_transcript_in(&app.config.claude_projects, hook)
+}
+
+fn trusted_transcript_in(root: &std::path::Path, hook: &Value) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(hook.get("transcript_path")?.as_str()?);
+    let plain = path.is_absolute()
+        && path.extension().is_some_and(|e| e == "jsonl")
+        && !path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+    if !plain {
+        return None;
+    }
+    let resolved = delilah_agents::transcript::within(root, path)?;
+    resolved.is_file().then_some(resolved)
+}
+
+/// Keeps the latest usage windows. A reading is sent every few seconds: only a new one
+/// is news. Shared by the status line hook (terminals) and the stream's rate-limit events.
+pub(crate) fn record_limits(app: &AppState, task: String, limits: Value) {
+    let changed = {
+        let mut usage = app.usage.lock().unwrap();
+        let changed = usage.as_ref().is_none_or(|u| u.rate_limits != limits);
+        *usage = Some(UsageReport {
+            at: Utc::now(),
+            task,
+            rate_limits: limits,
+        });
+        changed
+    };
+    if changed {
+        app.emit(Topic::Usage);
+    }
 }
 
 pub async fn claude_statusline(
@@ -149,20 +230,7 @@ pub async fn claude_statusline(
     Json(payload): Json<Value>,
 ) -> StatusCode {
     if let Some(limits) = payload.get("rate_limits").filter(|v| v.is_object()) {
-        // The status line runs every few seconds: only a new reading is news.
-        let changed = {
-            let mut usage = app.usage.lock().unwrap();
-            let changed = usage.as_ref().is_none_or(|u| &u.rate_limits != limits);
-            *usage = Some(UsageReport {
-                at: Utc::now(),
-                task: q.task,
-                rate_limits: limits.clone(),
-            });
-            changed
-        };
-        if changed {
-            app.emit(Topic::Usage);
-        }
+        record_limits(&app, q.task, limits.clone());
     }
     StatusCode::NO_CONTENT
 }
@@ -258,6 +326,32 @@ mod tests {
             .await
             .unwrap()
             .status()
+    }
+
+    fn scratch() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("delilah-tp-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_hook_transcript_must_resolve_inside_the_projects_root() {
+        let base = scratch();
+        let root = base.join("projects");
+        std::fs::create_dir_all(root.join("p")).unwrap();
+        let inside = root.join("p/s.jsonl");
+        std::fs::write(&inside, "{}\n").unwrap();
+        let outside = base.join("secret.jsonl");
+        std::fs::write(&outside, "{}\n").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("p/link.jsonl")).unwrap();
+        let hook = |p: &std::path::Path| json!({ "transcript_path": p });
+
+        assert!(trusted_transcript_in(&root, &hook(&inside)).is_some());
+        assert!(trusted_transcript_in(&root, &hook(&outside)).is_none());
+        assert!(trusted_transcript_in(&root, &hook(&root.join("p/link.jsonl"))).is_none());
+        assert!(trusted_transcript_in(&root, &hook(&root.join("p/none.jsonl"))).is_none());
+        assert!(trusted_transcript_in(&root, &hook(&root.join("p/../../secret.jsonl"))).is_none());
+        assert!(trusted_transcript_in(&root, &hook(std::path::Path::new("rel.jsonl"))).is_none());
     }
 
     #[tokio::test]
@@ -384,6 +478,52 @@ mod tests {
         post(&state, "/hooks/claude/statusline?task=PROJ-1", payload).await;
         let usage = state.latest_limits().unwrap();
         assert_eq!(usage["five_hour"]["used_percentage"], 82);
+    }
+
+    #[tokio::test]
+    async fn a_hook_sets_and_replaces_the_live_transcript_path() {
+        let state = running_task().await;
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let live = state.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+        assert_eq!(live.transcript(), None);
+        let url = "/hooks/claude?task=PROJ-1&session=s-1";
+        let hook = |path: &std::path::Path| json!({ "hook_event_name": "PostToolUse", "transcript_path": path });
+        let root = state.config.claude_projects.clone();
+        std::fs::create_dir_all(&root).unwrap();
+        let file = |name: &str| {
+            let path = root.join(format!("{}-{name}.jsonl", uuid::Uuid::new_v4()));
+            std::fs::write(&path, "{}\n").unwrap();
+            path.canonicalize().unwrap()
+        };
+        let (a, b) = (file("a"), file("b"));
+        post(&state, url, hook(&a)).await;
+        assert_eq!(live.transcript(), Some(a));
+        post(&state, url, hook(&b)).await;
+        assert_eq!(live.transcript(), Some(b.clone()));
+        // Not absolute, not a transcript, climbing out, outside the projects folder or a
+        // link to a file outside it: ignored, and the current path stays.
+        let outside = scratch().join("x.jsonl");
+        std::fs::write(&outside, "{}\n").unwrap();
+        let link = root.join(format!("{}-link.jsonl", uuid::Uuid::new_v4()));
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        for bad in [
+            std::path::Path::new("rel/c.jsonl"),
+            std::path::Path::new("/etc/passwd"),
+            &root.join("../etc/c.jsonl"),
+            &outside,
+            &link,
+        ] {
+            post(&state, url, hook(bad)).await;
+            assert_eq!(live.transcript(), Some(b.clone()), "{bad:?}");
+        }
     }
 }
 

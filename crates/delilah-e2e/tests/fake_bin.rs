@@ -109,3 +109,97 @@ fn scenario_selection_failure_runs_stop_failure_and_exits_2() {
     assert_eq!(logged["hook_event_name"], "StopFailure");
     assert_eq!(logged["session_id"], "sess-2");
 }
+
+#[test]
+fn stream_mode_plays_turns_and_follows_the_permission_answer() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("fake");
+    std::fs::create_dir_all(fake.join("scenarios")).unwrap();
+    std::fs::write(fake.join("scenarios/default.json"), r#"{"steps":[]}"#).unwrap();
+    std::fs::write(
+        fake.join("scenarios/chat.json"),
+        json!({"turns": [[
+            {"tool": {"name": "Bash", "input": {"command": "ls -la"}, "output": "total 0"}},
+            {"say": {"text": "Hecho."}},
+        ]]})
+        .to_string(),
+    )
+    .unwrap();
+    let settings = dir.path().join("settings.json");
+    std::fs::write(&settings, r#"{"hooks":{}}"#).unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fake-claude"))
+        .args(["--fake-dir", fake.to_str().unwrap()])
+        .args([
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+        ])
+        .args([
+            "--permission-prompt-tool",
+            "stdio",
+            "--session-id",
+            "sess-s",
+            "--settings",
+        ])
+        .arg(&settings)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut next = || -> serde_json::Value {
+        serde_json::from_str(&stdout.next().expect("a line").unwrap()).unwrap()
+    };
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "user", "message": {"role": "user", "content": "hola [fake:chat]"}})
+    )
+    .unwrap();
+    let request = loop {
+        let v = next();
+        if v["type"] == "control_request" {
+            break v;
+        }
+    };
+    assert_eq!(request["request"]["subtype"], "can_use_tool");
+    assert_eq!(request["request"]["input"]["command"], "ls -la");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"type": "control_response", "response": {"subtype": "success",
+            "request_id": request["request_id"],
+            "response": {"behavior": "allow", "updatedInput": {"command": "ls -la"}}}})
+    )
+    .unwrap();
+    let mut seen = vec![];
+    loop {
+        let v = next();
+        let done = v["type"] == "result";
+        seen.push(v);
+        if done {
+            break;
+        }
+    }
+    let result = seen
+        .iter()
+        .find(|v| v["type"] == "user")
+        .expect("a tool result");
+    assert_eq!(result["message"]["content"][0]["content"], "total 0");
+    assert_eq!(result["message"]["content"][0]["is_error"], false);
+    assert_eq!(seen.last().unwrap()["result"], "Hecho.");
+    drop(stdin);
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+
+    let r = Record::load(&fake, "sess-s").unwrap();
+    assert_eq!(r.scenario, "chat");
+    assert_eq!(r.inputs, ["hola [fake:chat]"]);
+    assert_eq!(r.permissions[0]["response"]["behavior"], "allow");
+    assert_eq!(r.exited, Some(0));
+}

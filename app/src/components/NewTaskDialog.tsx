@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task } from "../api";
+import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
 import { t } from "../i18n";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
@@ -58,6 +58,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const savingTouched = useRef(!!existing);
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
+  const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
+  // Experimental: the agent runs headless, with no terminal.
+  const [chatMode, setChatMode] = useState(!!existing?.chat_mode);
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
@@ -206,8 +209,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
 
   const toggle = (path: string) => !always.includes(path) && setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (e: React.FormEvent | null, chat = chatMode) => {
+    e?.preventDefault();
     if (!project) return;
     setBusy(true);
     setError(null);
@@ -231,6 +234,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: where === "checkout",
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
+        view,
+        ...(chat || existing ? { chat_mode: chat } : {}),
         // A backlog task's notes as they read now ("" clears them).
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(branch.trim() && (!template || sureRef.current) ? { branch: fullOf(branch.trim()) } : {}),
@@ -259,6 +264,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: where === "checkout",
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
+        view,
+        ...(chatMode ? { chat_mode: true } : {}),
       });
       onSaved(task);
     } catch (err) {
@@ -352,6 +359,26 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <span>{t("Modo ahorro")}</span>
               </label>
             )}
+            {origin !== "claude" && (
+              <label className="field">
+                <span>{t("Vista")}</span>
+                <select className="input" value={view} onChange={(e) => setView(e.target.value as TaskView)}>
+                  <option value="chat">Chat</option>
+                  <option value="terminal">Terminal</option>
+                </select>
+              </label>
+            )}
+            {origin !== "claude" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={chatMode} onChange={(e) => setChatMode(e.target.checked)} />
+                <span>{t("Modo chat (experimental)")}</span>
+              </label>
+            )}
+            {origin !== "claude" && chatMode && (
+              <div className="muted" style={{ fontSize: 12 }}>
+                {t("Experimental: sin terminal; los permisos se piden con tarjetas en la conversación.")}
+              </div>
+            )}
             {origin !== "claude" && autopilotAllowed && (
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
                 <input
@@ -425,6 +452,19 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           </>
         )}
         {error && <div className="error selectable">{error}</div>}
+        {error && chatMode && error.includes("chat mode could not start") && (
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              setChatMode(false);
+              submit(null, false);
+            }}
+          >
+            {t("Iniciar en terminal")}
+          </button>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>{t("Cancelar")}</button>
           {origin !== "claude" && !fromSession && !existing && (

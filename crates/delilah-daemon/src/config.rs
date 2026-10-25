@@ -25,6 +25,9 @@ pub struct Config {
     pub claude_bin: PathBuf,
     /// Program to run instead of `claude` (`DELILAH_AGENT_BIN`); only tests set it.
     pub agent_program: Option<PathBuf>,
+    /// Claude's projects folder (`~/.claude/projects`), the only place a transcript is
+    /// read from; tests point it at a temp folder.
+    pub claude_projects: PathBuf,
     /// Program to run instead of `gh` (`DELILAH_GH_BIN`): tests and previews with a fake.
     pub gh_program: Option<PathBuf>,
     /// Secrets in memory instead of the Keychain (`DELILAH_SECRETS=memory`); tests only.
@@ -96,6 +99,13 @@ impl Config {
             },
         };
         let claude_bin = claude_bin_from(var_os("DELILAH_CLAUDE_BIN"));
+        let claude_projects = match var_os("HOME") {
+            Some(user_home) => {
+                delilah_agents::transcript::projects_root_in(std::path::Path::new(&user_home))
+            }
+            // Nowhere to look: a folder that never exists, so no transcript is read.
+            None => home.join("no-claude-projects"),
+        };
         Ok(Self {
             home,
             addr,
@@ -104,6 +114,7 @@ impl Config {
             ui_origin,
             claude_bin,
             agent_program,
+            claude_projects,
             gh_program,
             secrets_in_memory,
             jira_http_loopback,
@@ -132,6 +143,12 @@ impl Config {
         notes
     }
 
+    /// A fresh, empty projects folder path for one test (not created).
+    #[cfg(test)]
+    pub fn scratch_projects() -> PathBuf {
+        std::env::temp_dir().join(format!("delilah-projects-{}", uuid::Uuid::new_v4()))
+    }
+
     /// Defaults for unit tests to fill in with `..Config::test_defaults()`, so a new
     /// field does not touch every test that builds a `Config`.
     #[cfg(test)]
@@ -144,6 +161,7 @@ impl Config {
             ui_origin: None,
             claude_bin: PathBuf::from("claude"),
             agent_program: None,
+            claude_projects: Self::scratch_projects(),
             gh_program: None,
             secrets_in_memory: false,
             jira_http_loopback: false,

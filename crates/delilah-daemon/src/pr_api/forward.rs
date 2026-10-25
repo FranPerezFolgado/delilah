@@ -185,7 +185,9 @@ pub async fn forward(
     };
 
     match app.sessions.primary(key.as_str()) {
-        Some(live) if !live.pty.has_exited() => crate::actions::type_prompt(&live, &prompt).await?,
+        Some(live) if !live.runtime.has_exited() => {
+            crate::actions::type_prompt(&live, &prompt).await?
+        }
         _ => {
             let record = app
                 .store

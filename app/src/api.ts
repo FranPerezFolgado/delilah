@@ -61,6 +61,12 @@ export interface Task {
   saving_mode: boolean;
   /** Autopilot: null when off. */
   autopilot?: Autopilot | null;
+  /** How the task's agent is shown: the chat view or its terminal. */
+  view?: TaskView;
+  /** Experimental: the agent runs headless (stream-json) with no terminal. */
+  chat_mode?: boolean;
+  /** Tools a chat-mode agent may use without asking. */
+  allowed_tools?: string[];
   handoff: Handoff | null;
   /** Who set the title: the first one, the analysis's feature name, or the user. */
   title_source: "initial" | "spec" | "manual";
@@ -69,6 +75,8 @@ export interface Task {
   /** Why the branch could not be renamed, if it could not. */
   branch_error: string | null;
 }
+
+export type TaskView = "chat" | "terminal";
 
 export interface EventRecord {
   at: string;
@@ -151,6 +159,9 @@ export interface NewBacklogTask {
   saving_mode?: boolean;
   /** Implies saving mode. */
   autopilot?: boolean;
+  view?: TaskView;
+  /** Experimental chat mode: no terminal. */
+  chat_mode?: boolean;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -163,6 +174,7 @@ export interface BacklogChange {
   saving_mode?: boolean;
   /** Implies saving mode. */
   autopilot?: boolean;
+  view?: TaskView;
 }
 
 export interface RunRequest {
@@ -180,6 +192,9 @@ export interface RunRequest {
   saving_mode?: boolean;
   /** Implies saving mode. */
   autopilot?: boolean;
+  view?: TaskView;
+  /** Experimental chat mode: no terminal. */
+  chat_mode?: boolean;
   /** What the agent gets with the task; for a backlog task, "" clears its notes. */
   notes?: string;
   /** A project's Claude session to carry on as the task's primary one. */
@@ -282,6 +297,8 @@ export interface Session {
   conversation: boolean;
   /** The saving-mode step it works on, if any. */
   step: Step | null;
+  /** "stream": a chat-mode session with no terminal. Absent: "pty". */
+  runtime?: "pty" | "stream";
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -361,27 +378,99 @@ export interface AskQuestion {
   multiSelect?: boolean;
 }
 
-/** One entry of an idea conversation. */
+/** One row of a diff, as the daemon sends it (the Changes view's shape). */
+export interface DiffRow {
+  kind: "add" | "del" | "ctx" | "hunk";
+  old: number | null;
+  new: number | null;
+  text: string;
+}
+
+/** A tool call of the agent, with its result once it answered. */
+export interface ToolEntry {
+  id: string;
+  at: string;
+  kind: "tool";
+  tool: string;
+  tool_use_id: string;
+  summary: string;
+  input: Record<string, unknown>;
+  /** null while the tool has not answered. */
+  result: string | null;
+  is_error: boolean;
+  truncated: boolean;
+  diff?: DiffRow[];
+  path?: string;
+  /** The assistant message the call came from. */
+  message_id?: string;
+}
+
+/** One entry of a conversation. */
 export type ConversationEntry =
-  | { id: number; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" }
-  | { id: number; at: string; kind: "claude"; text: string }
-  | {
-      id: number;
-      at: string;
-      kind: "card";
-      ask: string;
-      questions: AskQuestion[];
-      proposal: { title: string; brief: string } | null;
-      outcome: "pending" | "answered" | "terminal" | "withdrawn";
-      answer: Record<string, string> | null;
-      task: string | null;
-      error: string | null;
-    };
+  | { id: string; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" | "terminal" }
+  | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
+  | ToolEntry
+  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" }
+  | QuestionCardEntry
+  | PermissionCardEntry;
+
+interface CardBase {
+  id: string;
+  at: string;
+  kind: "card";
+  ask: string;
+  outcome: "pending" | "answered" | "terminal" | "withdrawn";
+  tool_use_id?: string;
+}
+
+/** A question with options (or a proposal); the default card when ask_kind is absent. */
+export interface QuestionCardEntry extends CardBase {
+  ask_kind?: "question";
+  questions: AskQuestion[];
+  proposal: { title: string; brief: string } | null;
+  answer: Record<string, string> | null;
+  task: string | null;
+  error: string | null;
+}
+
+/** A permission ask of the agent; gone from the conversation once answered. */
+export interface PermissionCardEntry extends CardBase {
+  ask_kind: "permission";
+  tool: string;
+  summary: string;
+  suggestion: unknown;
+  /** The exact rule "allow always" would remember; null when there is none. */
+  rule: string | null;
+}
+
+export type PermissionDecision = "allow_once" | "allow_always" | "deny";
+
+/** A permission ask as the inbox carries it. */
+export interface PermissionAsk {
+  id: string;
+  tool: string;
+  summary: string;
+  suggestion: unknown;
+  rule: string | null;
+}
 
 export interface Conversation {
   entries: ConversationEntry[];
+  /** Resume point for the next call. */
+  cursor: string;
+  complete: boolean;
+  transcript: "present" | "pending" | "missing";
   activity: string | null;
   needs_terminal: boolean;
+  runtime: "pty" | "stream";
+}
+
+/** The untruncated input and result of one tool call. */
+export interface ToolDetail {
+  input: Record<string, unknown>;
+  result: string | null;
+  is_error: boolean;
+  truncated: boolean;
 }
 
 /** Something that waits on you, from any task. */
@@ -396,6 +485,8 @@ export interface InboxItem {
   ask?: { id: string; questions: AskQuestion[]; proposal?: { title: string; brief: string } | null };
   /** The PR notice behind a pr-* item. */
   pr?: { notice: number; url: string; repo: string };
+  /** The permission asked, for a permission item. */
+  permission?: PermissionAsk;
   /** The pr_notices row behind a base-stale item: dismiss it with `dismissNotice`. */
   notice?: number;
 }
@@ -541,6 +632,8 @@ export const api = {
   startPreview: (key: string) => post<PreviewView>(`/api/v1/tasks/${key}/preview`),
   stopPreview: (key: string) => request<null>(`/api/v1/tasks/${key}/preview`, { method: "DELETE" }),
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
+  /** Moves the task between chat mode and terminal; its sessions resume in the new runtime. */
+  setRuntime: (key: string, mode: "chat" | "terminal") => post<null>(`/api/v1/tasks/${key}/runtime`, { mode }),
   setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
@@ -578,9 +671,14 @@ export const api = {
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
     post<{ task: string | null; error?: string }>(`/api/v1/asks/${id}/answer`, launch ? { answers, launch } : { answers }),
-  conversation: (id: string) => request<Conversation>(`/api/v1/sessions/${id}/conversation`),
+  answerPermission: (sessionId: string, ask: string, decision: PermissionDecision, reason?: string) =>
+    post<null>(`/api/v1/sessions/${sessionId}/permissions/${encodeURIComponent(ask)}`, reason?.trim() ? { decision, reason: reason.trim() } : { decision }),
+  conversation: (id: string, cursor?: string) =>
+    request<Conversation>(`/api/v1/sessions/${id}/conversation${cursor ? `?${new URLSearchParams({ cursor })}` : ""}`),
+  toolDetail: (id: string, toolUseId: string) =>
+    request<ToolDetail>(`/api/v1/sessions/${id}/conversation/tools/${encodeURIComponent(toolUseId)}`),
   sendMessage: (id: string, text: string) => post<ConversationEntry>(`/api/v1/sessions/${id}/messages`, { text }),
-  removeMessage: (id: string, entry: number) =>
+  removeMessage: (id: string, entry: string) =>
     request<null>(`/api/v1/sessions/${id}/messages/${entry}`, { method: "DELETE" }),
   stopSession: (id: string) => post<null>(`/api/v1/sessions/${id}/stop`),
   releaseAsk: (id: string) => post<null>(`/api/v1/asks/${id}/release`),
@@ -672,3 +770,6 @@ export function ago(iso: string): string {
 }
 
 export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+
+/** The live text of a chat-mode session: deltas of the message being written, then `done`. */
+export const liveSocket = (sessionId: string) => new WebSocket(`${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/live`);

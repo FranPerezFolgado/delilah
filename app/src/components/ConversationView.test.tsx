@@ -1,11 +1,24 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { api, type Conversation, type ConversationEntry, type Session } from "../api";
 import { setLanguage } from "../i18n";
 import { ConversationView } from "./ConversationView";
 
-beforeEach(() => setLanguage("es"));
+const live = vi.hoisted(() => ({ handlers: new Map<string, Set<() => void>>() }));
+vi.mock("../live", () => ({
+  on: (topic: string, cb: () => void) => {
+    if (!live.handlers.has(topic)) live.handlers.set(topic, new Set());
+    live.handlers.get(topic)!.add(cb);
+    return () => live.handlers.get(topic)!.delete(cb);
+  },
+}));
+const emit = (topic: string) => act(() => live.handlers.get(topic)?.forEach((cb) => cb()));
+
+beforeEach(() => {
+  setLanguage("es");
+  live.handlers.clear();
+});
 
 afterEach(() => {
   cleanup();
@@ -17,15 +30,19 @@ const session = (over: Partial<Session> = {}): Session =>
 
 const conv = (entries: ConversationEntry[] = [], over: Partial<Conversation> = {}): Conversation => ({
   entries,
+  cursor: "0",
+  complete: true,
+  transcript: "present",
   activity: null,
   needs_terminal: false,
+  runtime: "stream",
   ...over,
 });
 
-const user = (id: number, text: string, state: "queued" | "sent" | "delivered" = "delivered"): ConversationEntry => ({ id, at: "", kind: "user", text, state, from: "view" });
-const claude = (id: number, text: string): ConversationEntry => ({ id, at: "", kind: "claude", text });
+const user = (id: number, text: string, state: "queued" | "sent" | "delivered" = "delivered"): ConversationEntry => ({ id: String(id), at: "", kind: "user", text, state, from: "view" });
+const claude = (id: number, text: string): ConversationEntry => ({ id: String(id), at: "", kind: "claude", text });
 const card = (id: number, over: object = {}): ConversationEntry => ({
-  id,
+  id: String(id),
   at: "",
   kind: "card",
   ask: "ask-1",
@@ -37,6 +54,22 @@ const card = (id: number, over: object = {}): ConversationEntry => ({
   error: null,
   ...over,
 });
+
+const tool = (id: string, at: string, over: Partial<Extract<ConversationEntry, { kind: "tool" }>> = {}): ConversationEntry => ({
+  id,
+  at,
+  kind: "tool",
+  tool: "Read",
+  tool_use_id: id.replace("t:", ""),
+  summary: "Leyó main.rs",
+  input: {},
+  result: null,
+  is_error: false,
+  truncated: false,
+  ...over,
+});
+const at = (id: string, at: string, text: string, kind: "user" | "claude" = "claude"): ConversationEntry =>
+  kind === "claude" ? { id, at, kind, text } : { id, at, kind, text, state: "delivered", from: "terminal" };
 
 function setup(c: Conversation, s = session(), cbs: Partial<Parameters<typeof ConversationView>[0]> = {}) {
   vi.spyOn(api, "conversation").mockResolvedValue(c);
@@ -63,7 +96,7 @@ describe("ConversationView", () => {
     const { findByText, getByLabelText } = setup(conv([user(4, "luego", "queued")]));
     await findByText("en cola");
     fireEvent.click(getByLabelText("Quitar mensaje"));
-    expect(rm).toHaveBeenCalledWith("s1", 4);
+    expect(rm).toHaveBeenCalledWith("s1", "4");
   });
 
   it("sends with Enviar and with cmd+enter, clears, and cannot send empty", async () => {
@@ -110,6 +143,16 @@ describe("ConversationView", () => {
     const { findByText } = setup(conv(), session({ live: false }), { onReopen });
     fireEvent.click(await findByText("Reabrir"));
     expect(onReopen).toHaveBeenCalled();
+  });
+
+  it("renders a permission card and answers it through the session", async () => {
+    const perm: ConversationEntry = { id: "perm:p1", at: "", kind: "card", ask_kind: "permission", ask: "p1", tool: "Bash", summary: "npm test", suggestion: null, rule: "Bash(npm test)", outcome: "pending" };
+    const answer = vi.spyOn(api, "answerPermission").mockResolvedValue(null);
+    const { findByText } = setup(conv([perm]));
+    expect(await findByText("npm test")).toBeTruthy();
+    expect(await findByText("Bash(npm test)")).toBeTruthy();
+    fireEvent.click(await findByText("Permitir una vez"));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("s1", "p1", "allow_once", undefined));
   });
 
   it("shows an answered card's task as a link", async () => {
@@ -201,4 +244,305 @@ describe("ConversationView", () => {
     fireEvent.click(await findByText("Reabrir"));
     expect(onReopen).toHaveBeenCalled();
   });
+
+  it("renders user, claude, tool and marker entries of a task session in order", async () => {
+    const entries: ConversationEntry[] = [
+      at("t:1", "2026-01-01T00:00:01Z", "haz esto", "user"),
+      at("t:2", "2026-01-01T00:00:02Z", "vale"),
+      tool("t:3", "2026-01-01T00:00:03Z"),
+      { id: "t:4", at: "2026-01-01T00:00:04Z", kind: "marker", marker: "compacted" },
+    ];
+    const { container, findByText } = setup(conv(entries), session({ conversation: false }));
+    await findByText("Leyó main.rs");
+    const kids = [...container.querySelector(".conv-log")!.children];
+    expect(kids.map((k) => k.className.split(" ")[0])).toEqual(["conv-msg", "conv-msg", "tool-card", "conv-marker"]);
+    expect(kids[0].textContent).toBe("haz esto");
+    expect(kids[3].textContent).toBeTruthy();
+  });
+
+  it("fetches again with the cursor on a conversations event and merges entries", async () => {
+    const first = conv([at("t:1", "2026-01-01T00:00:01Z", "uno"), tool("t:2", "2026-01-01T00:00:02Z"), user(5, "viejo")], { cursor: "c1" });
+    const second = conv(
+      [at("t:3", "2026-01-01T00:00:03Z", "tres"), tool("t:2", "2026-01-01T00:00:02Z", { result: "ok", summary: "Leyó main.rs (listo)" }), claude(6, "nuevo")],
+      { cursor: "c2" },
+    );
+    const spy = vi.spyOn(api, "conversation").mockResolvedValueOnce(first).mockResolvedValue(second);
+    const { container, findByText, queryByText } = render(
+      <ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("viejo");
+    emit("conversations");
+    await findByText("tres");
+    expect(spy).toHaveBeenLastCalledWith("s1", "c1");
+    expect(queryByText("viejo")).toBeNull();
+    expect(queryByText("Leyó main.rs")).toBeNull();
+    expect(container.querySelectorAll(".tool-card")).toHaveLength(1);
+    expect(container.textContent).toContain("uno");
+    expect(container.textContent).toContain("nuevo");
+  });
+
+  it("drops the earlier ask tool entry when its card arrives in a later poll", async () => {
+    const ask = tool("t:ask1", "2026-01-01T00:00:01Z", { tool: "AskUserQuestion", summary: "Preguntó" });
+    const first = conv([ask], { cursor: "c1" });
+    const second = conv([card(7, { tool_use_id: "ask1", at: "2026-01-01T00:00:01Z" })], { cursor: "c2" });
+    vi.spyOn(api, "conversation").mockResolvedValueOnce(first).mockResolvedValue(second);
+    const { container, findByText, queryByText } = render(
+      <ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("Preguntó");
+    emit("conversations");
+    await findByText("¿Cuál?");
+    expect(queryByText("Preguntó")).toBeNull();
+    expect(container.querySelectorAll(".tool-card")).toHaveLength(0);
+  });
+
+  it("fetches again right away when the answer is not complete", async () => {
+    const spy = vi
+      .spyOn(api, "conversation")
+      .mockResolvedValueOnce(conv([at("t:1", "2026-01-01T00:00:01Z", "uno")], { cursor: "c1", complete: false }))
+      .mockResolvedValue(conv([at("t:2", "2026-01-01T00:00:02Z", "dos")], { cursor: "c2" }));
+    const { findByText } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await findByText("dos");
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenLastCalledWith("s1", "c1");
+    await findByText("uno");
+  });
+
+  it("shows the waiting notice while the transcript is pending", async () => {
+    const { findByText } = setup(conv([], { transcript: "pending" }), session({ conversation: false }));
+    expect(await findByText("Esperando la conversación de Claude…")).toBeTruthy();
+  });
+
+  it("offers the terminal when there is no conversation to show", async () => {
+    const onOpenTerminal = vi.fn();
+    const { findByText, getByText } = setup(conv([], { transcript: "missing" }), session({ conversation: false }), { onOpenTerminal });
+    await findByText("No hay conversación que mostrar");
+    fireEvent.click(getByText("Abrir terminal"));
+    expect(onOpenTerminal).toHaveBeenCalled();
+  });
+
+  it("follows new entries only when the user was at the bottom", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValueOnce(conv([claude(1, "a")], { cursor: "c1" }));
+    const { container, findByText } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await findByText("a");
+    const log = container.querySelector(".conv-log") as HTMLDivElement;
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 100 });
+
+    log.scrollTop = 0;
+    fireEvent.scroll(log);
+    spy.mockResolvedValueOnce(conv([claude(2, "b")], { cursor: "c2" }));
+    emit("conversations");
+    await findByText("b");
+    expect(log.scrollTop).toBe(0);
+
+    log.scrollTop = 900;
+    fireEvent.scroll(log);
+    spy.mockResolvedValueOnce(conv([claude(2, "b"), claude(3, "c")], { cursor: "c3" }));
+    emit("conversations");
+    await findByText("c");
+    expect(log.scrollTop).toBe(1000);
+  });
+
+  it("shows the composer for a live task session and sends with sendMessage", async () => {
+    const send = vi.spyOn(api, "sendMessage").mockResolvedValue(user(9, "x", "sent"));
+    const { findByText, getByLabelText, getByText } = setup(conv([at("t:1", "2026-01-01T00:00:01Z", "hola")]), session({ conversation: false, label: "claude" }));
+    await findByText("hola");
+    fireEvent.change(getByLabelText("Mensaje"), { target: { value: "sigue" } });
+    fireEvent.click(getByText("Enviar"));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("s1", "sigue"));
+  });
+
+  it("hides the composer for a closed session and for a shell", async () => {
+    const a = setup(conv([claude(1, "x")]), session({ closed: true, live: false, conversation: false }));
+    await a.findByText("x");
+    expect(a.queryByLabelText("Mensaje")).toBeNull();
+    cleanup();
+    const b = setup(conv([claude(1, "y")]), session({ kind: "shell" as Session["kind"] }));
+    await b.findByText("y");
+    expect(b.queryByLabelText("Mensaje")).toBeNull();
+  });
+
+  it("shows a queued entry with its string id and removes it", async () => {
+    const rm = vi.spyOn(api, "removeMessage").mockResolvedValue(null);
+    const q: ConversationEntry = { id: "m-abc", at: "", kind: "user", text: "luego", state: "queued", from: "view" };
+    const { findByText, getByLabelText } = setup(conv([q]), session({ state: "working", conversation: false }));
+    await findByText("en cola");
+    fireEvent.click(getByLabelText("Quitar mensaje"));
+    expect(rm).toHaveBeenCalledWith("s1", "m-abc");
+  });
+
+  it("answers an inline card of a task session through the reply API", async () => {
+    const ans = vi.spyOn(api, "answerAsk").mockResolvedValue(null as never);
+    const { findByText, container } = setup(conv([card(3)]), session({ conversation: false }));
+    fireEvent.click(await findByText("A"));
+    const submit = [...container.querySelectorAll("button")].find((b) => /Responder|Enviar|Crear/.test(b.textContent ?? "") && b.closest(".ask"));
+    if (submit) fireEvent.click(submit);
+    await waitFor(() => expect(ans).toHaveBeenCalled());
+  });
+
+  it("refetches on an inbox event and shows a card answered elsewhere as answered", async () => {
+    const spy = vi
+      .spyOn(api, "conversation")
+      .mockResolvedValueOnce(conv([card(3)], { cursor: "c1" }))
+      .mockResolvedValue(conv([card(3, { outcome: "answered", answer: { "¿Cuál?": "B" } })], { cursor: "c2" }));
+    const { findByText, container } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await findByText("¿Cuál?");
+    expect(container.querySelector(".ask")).toBeTruthy();
+    emit("inbox");
+    await findByText("¿Cuál?: B");
+    expect(container.querySelector(".ask")).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("orders mixed timestamp formats by instant, stable for equal ones", async () => {
+    const first = conv([at("t:1", "2026-01-01T00:00:00.500+00:00", "b"), at("t:2", "2026-01-01T00:00:00.000Z", "a")], { cursor: "c1" });
+    vi.spyOn(api, "conversation").mockResolvedValueOnce(conv([], { cursor: "c0" })).mockResolvedValue(first);
+    const { container, findByText } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await findByText("Cuéntale tu idea…");
+    emit("conversations");
+    await findByText("a");
+    expect([...container.querySelector(".conv-log")!.children].map((k) => k.textContent)).toEqual(["a", "b"]);
+  });
 });
+
+describe("ConversationView chat mode", () => {
+  class FakeSocket {
+    static last: FakeSocket;
+    static count = 0;
+    onmessage: ((ev: { data: string }) => void) | null = null;
+    onclose: ((ev: { code: number }) => void) | null = null;
+    close = vi.fn();
+    constructor(public url: string) {
+      FakeSocket.last = this;
+      FakeSocket.count++;
+    }
+    drop(code: number) {
+      act(() => this.onclose?.({ code }));
+    }
+    push(m: object) {
+      act(() => this.onmessage?.({ data: JSON.stringify(m) }));
+    }
+  }
+  beforeEach(() => {
+    FakeSocket.count = 0;
+    vi.stubGlobal("WebSocket", FakeSocket);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("grows a writing bubble from deltas and replaces it with the transcript entry", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    const { findByText, queryByTestId, getByTestId } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(FakeSocket.last.url).toMatch(/\/api\/v1\/sessions\/s1\/live$/);
+    FakeSocket.last.push({ message: "m1", text: "Hel" });
+    expect(getByTestId("writing").textContent).toBe("Hel");
+    FakeSocket.last.push({ message: "m1", text: "lo" });
+    expect(getByTestId("writing").textContent).toBe("Hello");
+    FakeSocket.last.push({ message: "m1", done: true });
+    expect(queryByTestId("writing")).not.toBeNull();
+    spy.mockResolvedValue(conv([at("t:uuid1:0", "2025-01-01T00:00:00Z", "Hello")], { cursor: "1" }));
+    emit("conversations");
+    await findByText("Hello", { selector: ".conv-claude:not(.conv-writing) *" });
+    await waitFor(() => expect(queryByTestId("writing")).toBeNull());
+  });
+
+  it("replaces the bubble exactly when the claude entry of its message arrives", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    const { findByText, queryByTestId, getByTestId } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    FakeSocket.last.push({ message: "m1", text: "Hel" });
+    FakeSocket.last.push({ message: "m1", done: true });
+    // An entry of another message (even a new one) does not take the bubble's place.
+    spy.mockResolvedValue(conv([{ ...at("t:u0:0", "2025-01-01T00:00:00Z", "Other"), message_id: "m0" } as ConversationEntry], { cursor: "1" }));
+    emit("conversations");
+    await findByText("Other");
+    expect(getByTestId("writing").textContent).toBe("Hel");
+    spy.mockResolvedValue(
+      conv(
+        [
+          { ...at("t:u0:0", "2025-01-01T00:00:00Z", "Other"), message_id: "m0" } as ConversationEntry,
+          { ...at("t:u1:0", "2025-01-01T00:00:01Z", "Hello"), message_id: "m1" } as ConversationEntry,
+        ],
+        { cursor: "2" },
+      ),
+    );
+    emit("conversations");
+    await findByText("Hello", { selector: ".conv-claude:not(.conv-writing) *" });
+    await waitFor(() => expect(queryByTestId("writing")).toBeNull());
+  });
+
+  it("does not open the socket on a pty session", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    FakeSocket.last = undefined as never;
+    render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    expect(FakeSocket.last).toBeUndefined();
+  });
+
+  it("does not open the socket on a chat session that is not running", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    render(<ConversationView session={session({ runtime: "stream", live: false })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(FakeSocket.count).toBe(0);
+  });
+
+  it("drops the partial text and reloads on a reset", async () => {
+    const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+    const { getByTestId, queryByTestId } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    FakeSocket.last.push({ message: "m1", text: "Hel" });
+    expect(getByTestId("writing").textContent).toBe("Hel");
+    const calls = spy.mock.calls.length;
+    FakeSocket.last.push({ reset: true });
+    expect(queryByTestId("writing")).toBeNull();
+    await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThan(calls));
+  });
+
+  describe("reconnection", () => {
+    const mount = () => render(<ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    beforeEach(() => {
+      vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("reconnects with a backoff after an abnormal close", async () => {
+      mount();
+      await waitFor(() => expect(FakeSocket.count).toBe(1));
+      FakeSocket.last.drop(1006);
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(FakeSocket.count).toBe(2);
+      FakeSocket.last.drop(1006);
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(FakeSocket.count).toBe(2);
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(FakeSocket.count).toBe(3);
+    });
+
+    it("handles a 4409 close quietly: no reconnect, no error", async () => {
+      const { container } = mount();
+      await waitFor(() => expect(FakeSocket.count).toBe(1));
+      FakeSocket.last.drop(4409);
+      act(() => void vi.advanceTimersByTime(30000));
+      expect(FakeSocket.count).toBe(1);
+      expect(container.querySelector(".error")).toBeNull();
+    });
+
+    it("does not reconnect after unmount", async () => {
+      const { unmount } = mount();
+      await waitFor(() => expect(FakeSocket.count).toBe(1));
+      const first = FakeSocket.last;
+      first.drop(1006);
+      unmount();
+      act(() => void vi.advanceTimersByTime(30000));
+      expect(FakeSocket.count).toBe(1);
+    });
+  });
+});
+

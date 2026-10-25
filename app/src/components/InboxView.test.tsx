@@ -195,6 +195,46 @@ describe("InboxView proposal item", () => {
   });
 });
 
+describe("InboxView permission items", () => {
+  const perm: InboxItem = {
+    ...item,
+    kind: "permission",
+    session: { id: "s1", label: "main", primary: true, live: true },
+    text: "Bash: npm test",
+    pr: undefined,
+    permission: { id: "p1", tool: "Bash", summary: "npm test", suggestion: null, rule: null },
+  };
+
+  it("renders the card, without allow-always when there is no rule, and answers", async () => {
+    const answer = vi.spyOn(api, "answerPermission").mockResolvedValue(null);
+    const onChanged = vi.fn();
+    render(<InboxView items={[perm]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    expect(screen.queryByText("Always allow in this task")).toBeNull();
+    fireEvent.click(screen.getByText("Deny"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(answer).toHaveBeenCalledWith("s1", "p1", "deny", "");
+  });
+
+  it("offers no terminal button for a chat-mode ask, but does for a terminal one", () => {
+    const { unmount } = render(
+      <InboxView items={[perm]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />,
+    );
+    expect(screen.queryByText("Answer in its terminal")).toBeNull();
+    unmount();
+    render(
+      <InboxView items={[{ ...perm, permission: undefined }]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />,
+    );
+    expect(screen.getByText("Answer in its terminal")).toBeTruthy();
+  });
+
+  it("shows the rule next to allow always", () => {
+    const withRule = { ...perm, permission: { ...perm.permission!, rule: "Bash(npm test)" } };
+    render(<InboxView items={[withRule]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);
+    expect(screen.getByText("Always allow in this task")).toBeTruthy();
+    expect(screen.getByText("Bash(npm test)")).toBeTruthy();
+  });
+});
+
 describe("InboxView base-stale", () => {
   const stale: InboxItem = {
     kind: "base-stale",

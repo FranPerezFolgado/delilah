@@ -12,7 +12,7 @@ test("a started task appears on the board and goes from working to waiting", asy
   const dialog = page.getByRole("dialog", { name: "New task" });
   await dialog.getByRole("radio", { name: "Free task" }).click();
   await dialog.getByPlaceholder("Try a rates cache in svc-billing").fill(title);
-  await dialog.getByRole("combobox").selectOption({ label: `${p.name} · repo` });
+  await dialog.getByRole("combobox", { name: /^Project/ }).selectOption({ label: `${p.name} · repo` });
   await dialog.getByRole("button", { name: "Start" }).click();
   await expect(dialog).toBeHidden();
 

@@ -74,6 +74,8 @@ pub enum EntryKind {
     User,
     Claude,
     Card,
+    /// A line the daemon adds to the conversation, e.g. `{"marker": "stopped"}`.
+    Marker,
 }
 
 impl EntryKind {
@@ -82,6 +84,7 @@ impl EntryKind {
             Self::User => "user",
             Self::Claude => "claude",
             Self::Card => "card",
+            Self::Marker => "marker",
         }
     }
 
@@ -90,6 +93,7 @@ impl EntryKind {
             "user" => Some(Self::User),
             "claude" => Some(Self::Claude),
             "card" => Some(Self::Card),
+            "marker" => Some(Self::Marker),
             _ => None,
         }
     }
@@ -276,6 +280,37 @@ impl Store {
         Ok(())
     }
 
+    /// Puts an adopted session back as the project's, as `original` was before
+    /// [`adopt_session`](Self::adopt_session) (a start that did not get its agent).
+    pub async fn unadopt_session(&self, original: &SessionRecord) -> Result<(), StoreError> {
+        sqlx::query(
+            "UPDATE sessions SET task_key = ?, project = ?, is_primary = ?, read_only = ?,
+             label = ? WHERE id = ?",
+        )
+        .bind(
+            project_of(&original.task)
+                .is_none()
+                .then_some(&original.task),
+        )
+        .bind(project_of(&original.task))
+        .bind(original.primary)
+        .bind(original.read_only)
+        .bind(&original.label)
+        .bind(&original.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Deletes a session's record, as if it had never been created (a start that failed).
+    pub async fn forget_session(&self, id: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM sessions WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_read_only(&self, id: &str, read_only: bool) -> Result<(), StoreError> {
         sqlx::query("UPDATE sessions SET read_only = ? WHERE id = ?")
             .bind(read_only)
@@ -435,6 +470,35 @@ impl Store {
         Ok(entries)
     }
 
+    /// Puts messages claimed by `claim_queued` back in the queue (typing them failed).
+    pub async fn requeue_entries(&self, session: &str, ids: &[i64]) -> Result<(), StoreError> {
+        for id in ids {
+            sqlx::query(
+                "UPDATE conversation_entries SET body = json_set(body, '$.state', 'queued')
+                 WHERE id = ? AND session_id = ? AND kind = 'user'
+                 AND json_extract(body, '$.state') = 'sent'",
+            )
+            .bind(id)
+            .bind(session)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Deletes a user message recorded `sent` whose typing failed.
+    pub async fn discard_sent_entry(&self, session: &str, id: i64) -> Result<(), StoreError> {
+        sqlx::query(
+            "DELETE FROM conversation_entries WHERE id = ? AND session_id = ? AND kind = 'user'
+             AND json_extract(body, '$.state') = 'sent'",
+        )
+        .bind(id)
+        .bind(session)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Marks every card still `pending` as `withdrawn` (the asks live in memory only,
     /// so after a restart none of them can be answered); returns how many.
     pub async fn withdraw_pending_cards(&self) -> Result<u64, StoreError> {
@@ -491,6 +555,13 @@ fn entry_from_row(row: &SqliteRow) -> Result<Entry, StoreError> {
     let kind: String = row.try_get("kind")?;
     let at: String = row.try_get("at")?;
     let body: String = row.try_get("body")?;
+    let body: Value = serde_json::from_str(&body)?;
+    // Markers were first stored as `claude` entries with a `marker` field.
+    let kind = if kind == "claude" && body.get("marker").is_some() {
+        "marker".to_string()
+    } else {
+        kind
+    };
     Ok(Entry {
         id: row.try_get("id")?,
         at: DateTime::parse_from_rfc3339(&at)
@@ -498,7 +569,7 @@ fn entry_from_row(row: &SqliteRow) -> Result<Entry, StoreError> {
             .with_timezone(&Utc),
         kind: EntryKind::parse(&kind)
             .ok_or_else(|| StoreError::Corrupt(format!("unknown entry kind `{kind}`")))?,
-        body: serde_json::from_str(&body)?,
+        body,
     })
 }
 
@@ -578,6 +649,24 @@ mod tests {
                 "card": "ask", "outcome": null
             })
         );
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_session_is_gone() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .await
+            .unwrap();
+        store
+            .create_session(&session("a", SessionKind::Claude, true))
+            .await
+            .unwrap();
+        store.forget_session("a").await.unwrap();
+        assert!(store.session("a").await.unwrap().is_none());
+        assert!(store.primary_session("PROJ-1").await.unwrap().is_none());
+        // Forgetting what is not there is not an error.
+        store.forget_session("a").await.unwrap();
     }
 
     #[tokio::test]
@@ -882,6 +971,29 @@ mod tests {
         store.update_entry(first.id, &sent).await.unwrap();
         assert_eq!(store.entries("c").await.unwrap()[0].body, sent);
         assert!(store.queued_entries("c").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn markers_have_their_own_kind_and_old_ones_still_read() {
+        let store = Store::in_memory().await.unwrap();
+        with_project(&store).await;
+        store.create_session(&conversation("c")).await.unwrap();
+        let body = serde_json::json!({"marker": "stopped"});
+        store
+            .add_entry("c", EntryKind::Marker, &body)
+            .await
+            .unwrap();
+        // Written before `Marker` existed: a claude entry with a marker field.
+        store
+            .add_entry("c", EntryKind::Claude, &body)
+            .await
+            .unwrap();
+        let all = store.entries("c").await.unwrap();
+        assert!(
+            all.iter()
+                .all(|e| e.kind == EntryKind::Marker && e.body == body)
+        );
+        assert_eq!(serde_json::to_value(&all[0]).unwrap()["kind"], "marker");
     }
 
     #[tokio::test]

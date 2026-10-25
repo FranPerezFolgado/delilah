@@ -9,7 +9,52 @@ pub const MAX_SLEEP_MS: u64 = 5000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Scenario {
+    /// What a terminal (PTY) session plays.
+    #[serde(default)]
     pub steps: Vec<Step>,
+    /// What a chat-mode (stream-json) session plays: one list of steps per user turn, in
+    /// order; once they run out, each turn answers `Echo: <message>`.
+    #[serde(default)]
+    pub turns: Vec<Vec<StreamStep>>,
+}
+
+/// A step of a chat-mode turn.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamStep {
+    /// An assistant text message, streamed as word deltas `delay_ms` apart.
+    Say(Say),
+    /// A tool call: asks `can_use_tool` first (unless `ask` is false), then gives the
+    /// tool result (`output` when allowed, the denial message when not).
+    Tool(Tool),
+    SleepMs(u64),
+    /// The process exits with this code, without finishing the turn.
+    Exit(i32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Say {
+    pub text: String,
+    #[serde(default)]
+    pub delay_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Tool {
+    pub name: String,
+    pub input: serde_json::Value,
+    #[serde(default)]
+    pub output: String,
+    #[serde(default = "yes")]
+    pub ask: bool,
+    /// `permission_suggestions` of the request; left out: Claude's usual one, an
+    /// `addRules` with the exact command (Bash) or the bare tool.
+    #[serde(default)]
+    pub suggestions: Option<serde_json::Value>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -92,6 +137,13 @@ impl Scenario {
         for step in &mut s.steps {
             if let Step::SleepMs(ms) = step {
                 *ms = (*ms).min(MAX_SLEEP_MS);
+            }
+        }
+        for step in s.turns.iter_mut().flatten() {
+            match step {
+                StreamStep::SleepMs(ms) => *ms = (*ms).min(MAX_SLEEP_MS),
+                StreamStep::Say(say) => say.delay_ms = say.delay_ms.min(MAX_SLEEP_MS),
+                _ => {}
             }
         }
         Ok(s)
@@ -199,6 +251,26 @@ mod tests {
                 Step::Exit(3),
             ]
         );
+    }
+
+    #[test]
+    fn parses_stream_turns() {
+        let s = Scenario::parse(
+            r#"{"turns":[[{"say":{"text":"hi","delay_ms":99999}},
+            {"tool":{"name":"Bash","input":{"command":"ls"},"output":"a"}}],[{"exit":0}]]}"#,
+        )
+        .unwrap();
+        assert!(s.steps.is_empty());
+        assert_eq!(s.turns.len(), 2);
+        assert_eq!(
+            s.turns[0][0],
+            StreamStep::Say(Say {
+                text: "hi".into(),
+                delay_ms: MAX_SLEEP_MS
+            })
+        );
+        assert!(matches!(&s.turns[0][1], StreamStep::Tool(t) if t.ask && t.suggestions.is_none()));
+        assert_eq!(s.turns[1], vec![StreamStep::Exit(0)]);
     }
 
     #[test]

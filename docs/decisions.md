@@ -124,7 +124,7 @@ the task starts.
 
 **36. Idea conversations: a chat view over the PTY fed by hooks; `dontAsk` instead
 of plan mode; a plugin passed to project-owned sessions.**
-- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY.
+- **Chat view over the PTY.** The conversation is still an interactive Claude in a PTY, so `--resume`, hooks and the terminal fallback keep working. The view is built from hook events (`UserPromptSubmit`, `Stop`, the ask). Left for later: `stream-json`, which would give streaming text but replaces the PTY. (Done later as an opt-in chat mode for task sessions: see [#67](decisions.md).)
 - **`dontAsk`, not plan mode.** Plan mode asks to leave the plan, and read-only commands prompt. See [#34](decisions.md) for the allow list.
 - **A session-only plugin.** The `task-from-idea` skill ships in `<home>/plugins/delilah`, passed with `--plugin-dir` to project-owned sessions only (task sessions never get it), so nothing is installed in the user's Claude.
 - **Spike findings** (`specs/004-task-from-idea/research.md`, claude 2.1.292):
@@ -500,3 +500,27 @@ branch started from whatever the folder had checked out, often a stale `main`.
 - **The warning notifies but does not block:** it raises a desktop notification like any new item, and is not in `BLOCKING`, since the task goes on.
 - **The repo's own config is trusted during the fetch** (`core.sshCommand`, credential helpers, `insteadOf`): it is the same config the user's own `git fetch` runs, and an agent able to write it can already run anything as the user. What Delilah adds is that nothing may ask: no terminal prompt, no askpass, no interactive credential helper, and a 30 s limit.
 - **A branchless start (65)** gets the fresh base too: its worktree, and each chosen submodule, is detached there, so the branch the first analysis makes starts from it. A branchless start in checkout mode fetches and switches nothing (the folder is the user's, and #65 leaves it as it is), so its branch starts from where the folder is.
+
+**67. Chat mode (stream-json): go, adjusted (2026-10-24).** Spike on claude 2.1.292
+([docs/spikes/2026-10-24-claude-stream.md](spikes/2026-10-24-claude-stream.md)): hooks
+fire in `-p`, one process takes several turns and writes the transcript (stream
+`uuid`s equal transcript `uuid`s), `--resume` works PTY -> stream -> PTY, interrupt keeps
+the process up. So US3 and US4 go ahead, with these adjustments to research.md R7:
+- **Permissions: `--permission-prompt-tool stdio`**, not `--permission-prompts host`.
+  With it a not-allowed tool arrives as `control_request` `can_use_tool` (with
+  `permission_suggestions`) and `control_response` allow/deny works (R8 stands, no MCP
+  server, no allow-list-only fallback). Without it Claude denies by itself.
+- **AskUserQuestion** exists in a `-p` session only with that same flag; the blocking
+  PreToolUse ask hook then answers it as in the PTY, so question cards are unchanged.
+- **Usage limits from `rate_limit_event`**, because the status line never runs in
+  print mode (it does in the PTY). Its `utilization` is a fraction; resets are epoch
+  seconds, as in the status line.
+- **"Detener" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
+  interrupted turn (same as ESC, decision 36).
+- **Entries still come from the transcript**; the stream gives only live text. Deltas
+  carry no message id: it is the `message_start`'s `message.id`.
+- **Remote Control is hidden in chat mode**: `--remote-control` with `-p` was accepted but
+  nothing shows it registered.
+- Not observed: `Notification` and `StopFailure` in print mode, and the `rate_limit_event`
+  `status` when a limit is hit.
+- **The switch to chat mode relaunches without a prompt**, and the real CLI says nothing until it gets a message, so the switch judges the agent healthy if it stays alive for 3 s; a later death is seen by the exit watcher and leaves the task in chat mode with no live session (resume or switch back).

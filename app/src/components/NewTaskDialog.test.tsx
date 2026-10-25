@@ -183,6 +183,38 @@ describe("NewTaskDialog autopilot", () => {
   });
 });
 
+describe("NewTaskDialog view", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const mount = (extra: Partial<React.ComponentProps<typeof NewTaskDialog>> = {}) =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} {...extra} />);
+
+  it("defaults to Chat and is sent with the run", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { getByLabelText, container } = mount();
+    expect((getByLabelText("Vista") as HTMLSelectElement).value).toBe("chat");
+    fireEvent.change(getByLabelText("Vista"), { target: { value: "terminal" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0]).toMatchObject({ view: "terminal" });
+  });
+
+  it("is sent when saving to the backlog", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { getByText } = mount();
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0]).toMatchObject({ view: "chat" });
+  });
+
+  it("starts from the view of a backlog task", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { getByLabelText } = mount({ draft: undefined, existing: { ...started, view: "terminal" } });
+    expect((getByLabelText("Vista") as HTMLSelectElement).value).toBe("terminal");
+  });
+});
+
 const branchProjects: Project[] = [{ name: "app", kind: "repo", settings: DEFAULT_PROJECT_SETTINGS } as Project];
 
 const proposal = (branch: string, source: BranchProposal["source"] = "claude"): BranchProposal => ({ branch, source });
@@ -375,5 +407,51 @@ describe("NewTaskDialog branch field", () => {
     expect(setupBranch({ existing }).field()).toBeTruthy();
     cleanup();
     expect(setupBranch({ fromSession: { id: "s", label: "L" }, project: "app" }).field()).toBeTruthy();
+  });
+});
+
+describe("NewTaskDialog chat mode", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const mount = () =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
+
+  it("is off by default and sends no chat_mode", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { getByLabelText, container } = mount();
+    expect((getByLabelText("Modo chat (experimental)") as HTMLInputElement).checked).toBe(false);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].chat_mode).toBeUndefined();
+  });
+
+  it("shows a warning and sends chat_mode with the run and the backlog save", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { getByLabelText, getByText, container } = mount();
+    fireEvent.click(getByLabelText("Modo chat (experimental)"));
+    expect(getByText(/los permisos se piden con tarjetas/)).toBeTruthy();
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].chat_mode).toBe(true);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].chat_mode).toBe(true);
+  });
+
+  it("offers to start in the terminal when chat mode could not start", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi
+      .spyOn(api, "run")
+      .mockRejectedValueOnce(new Error("chat mode could not start: no claude"))
+      .mockResolvedValueOnce(started);
+    const { getByLabelText, getByText, container } = mount();
+    fireEvent.click(getByLabelText("Modo chat (experimental)"));
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => getByText("Iniciar en terminal"));
+    fireEvent.click(getByText("Iniciar en terminal"));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    expect(run.mock.calls[1][0].chat_mode).toBeFalsy();
   });
 });

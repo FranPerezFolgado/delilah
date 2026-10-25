@@ -175,9 +175,25 @@ pub struct InboxItem {
     /// The PR notice this item stands for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr: Option<InboxPr>,
+    /// A permission a chat-mode agent asks for, answered from here
+    /// (`POST /api/v1/sessions/{id}/permissions/{ask}`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission: Option<PermissionView>,
     /// The notice this item stands for, when it has no PR (e.g. a stale base).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PermissionView {
+    /// The ask's id: what the answer names.
+    pub id: String,
+    pub tool: String,
+    /// One line of the input: the command, the file, the URL.
+    pub summary: String,
+    pub suggestion: Option<Value>,
+    /// The rule "allow always" would remember; null: that button is not offered.
+    pub rule: Option<String>,
 }
 
 impl InboxItem {
@@ -192,6 +208,7 @@ impl InboxItem {
             since: None,
             ask: None,
             pr: None,
+            permission: None,
             notice: None,
         }
     }
@@ -251,12 +268,49 @@ pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, A
         });
     }
 
+    for ask in app.permissions.list() {
+        let Some(title) = owner_title(&ask.task, task(&ask.task)) else {
+            continue;
+        };
+        let Some(record) = app.store.session(&ask.session).await.ok().flatten() else {
+            continue;
+        };
+        asked.insert(ask.task.clone());
+        let text = if ask.summary.is_empty() {
+            ask.tool.clone()
+        } else {
+            format!("{}: {}", ask.tool, ask.summary)
+        };
+        items.push(InboxItem {
+            session: Some(ItemSession {
+                live: app.sessions.get(&record.id).is_some(),
+                id: record.id,
+                label: record.label,
+                primary: record.primary,
+            }),
+            text: Some(text),
+            since: Some(ask.at),
+            permission: Some(PermissionView {
+                id: ask.id,
+                tool: ask.tool,
+                summary: ask.summary,
+                suggestion: ask.suggestion,
+                rule: ask.rule,
+            }),
+            ..InboxItem::new(ItemKind::Permission, ask.task.clone(), title)
+        });
+    }
+
     for (s, attention) in app.store.attentions().await? {
         let Some(title) = owner_title(&s.task, task(&s.task).filter(|t| !t.status.is_terminal()))
         else {
             continue;
         };
         if asking.contains(&s.id) {
+            continue;
+        }
+        // A permission the registry holds is listed above, one item per ask.
+        if attention.kind == AttentionKind::Permission && app.permissions.has_session(&s.id) {
             continue;
         }
         let live = app.sessions.get(&s.id).is_some();
@@ -1090,6 +1144,56 @@ mod tests {
             text: "ok?".into(),
             since: now(),
         })
+    }
+
+    #[tokio::test]
+    async fn a_waiting_permission_ask_is_one_permission_item_with_its_details() {
+        let (app, _) = app_with_autopilot(None).await;
+        let attention = Attention {
+            kind: AttentionKind::Permission,
+            text: "Bash: npm test".into(),
+            since: now(),
+        };
+        app.store
+            .set_attention("plan-1", Some(&attention))
+            .await
+            .unwrap();
+        app.sessions.insert(
+            "plan-1",
+            "PROJ-1",
+            SessionKind::Claude,
+            true,
+            std::sync::Arc::new(
+                delilah_agents::stream::StreamSession::spawn(tokio::process::Command::new("cat"))
+                    .unwrap()
+                    .0,
+            ),
+        );
+        assert!(app.permissions.insert(crate::permissions::PermissionAsk {
+            id: "ask-1".into(),
+            request_id: "r-1".into(),
+            task: "PROJ-1".into(),
+            session: "plan-1".into(),
+            tool: "Bash".into(),
+            input: json!({ "command": "npm test" }),
+            suggestion: Some(json!([{ "type": "setMode" }])),
+            rule: Some("Bash(npm test)".into()),
+            summary: "npm test".into(),
+            at: now(),
+        }));
+        let Json(items) = list(State(app)).await.ok().unwrap();
+        assert_eq!(items.len(), 1, "the attention does not repeat the ask");
+        let value = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(value["kind"], "permission");
+        assert_eq!(value["session"]["id"], "plan-1");
+        assert_eq!(value["permission"]["id"], "ask-1");
+        assert_eq!(value["permission"]["tool"], "Bash");
+        assert_eq!(value["permission"]["summary"], "npm test");
+        assert_eq!(value["permission"]["rule"], "Bash(npm test)");
+        assert_eq!(
+            value["permission"]["suggestion"],
+            json!([{ "type": "setMode" }])
+        );
     }
 
     #[tokio::test]

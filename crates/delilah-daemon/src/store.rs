@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use delilah_core::{
-    Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TitleSource, TransitionError,
+    Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TaskView, TitleSource, TransitionError,
 };
 use serde::Serialize;
 use sqlx::Row;
@@ -104,7 +104,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, NULLIF(w.branch, '') AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -115,7 +115,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, NULLIF(w.branch, '') AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -195,6 +195,63 @@ impl Store {
             return Err(StoreError::NotFound(key.clone()));
         }
         Ok(())
+    }
+
+    /// Sets how the app shows a task, whatever state it is in; returns the task.
+    pub async fn set_view(&self, key: &TaskKey, view: TaskView) -> Result<Task, StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET view = ?, updated_at = ? WHERE key = ?")
+            .bind(view.as_str())
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        self.get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))
+    }
+
+    /// Sets the runtime of a task's Claude sessions (chat or terminal); returns the task.
+    pub async fn set_chat_mode(&self, key: &TaskKey, chat_mode: bool) -> Result<Task, StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET chat_mode = ?, updated_at = ? WHERE key = ?")
+            .bind(chat_mode)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        self.get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))
+    }
+
+    /// Adds a permission rule to the task's allowed tools (no duplicates); returns the task.
+    pub async fn add_allowed_tool(&self, key: &TaskKey, rule: &str) -> Result<Task, StoreError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT allowed_tools FROM tasks WHERE key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+        let mut tools = allowed_tools_from_json(json.as_deref());
+        if !tools.iter().any(|t| t == rule) {
+            tools.push(rule.to_string());
+            sqlx::query("UPDATE tasks SET allowed_tools = ?, updated_at = ? WHERE key = ?")
+                .bind(allowed_tools_json(&tools)?)
+                .bind(Utc::now().to_rfc3339())
+                .bind(key.as_str())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        self.get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))
     }
 
     /// Records where the title came from and the title it replaced (if any).
@@ -418,7 +475,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, NULLIF(w.branch, '') AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -475,8 +532,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, allowed_tools, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -492,6 +549,9 @@ async fn insert_task<'e>(
     .bind(task.title_source.name())
     .bind(&task.previous_title)
     .bind(&task.branch_error)
+    .bind(task.view.as_str())
+    .bind(task.chat_mode)
+    .bind(allowed_tools_json(&task.allowed_tools)?)
     .bind(&now)
     .bind(&now)
     .execute(executor)
@@ -514,6 +574,35 @@ pub struct BacklogChange {
     pub workflow: Option<String>,
     /// Where it will work once started: the project's checkout or a worktree.
     pub in_checkout: Option<bool>,
+}
+
+impl BacklogChange {
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.notes.is_none()
+            && self.project.is_none()
+            && self.workflow.is_none()
+            && self.in_checkout.is_none()
+    }
+}
+
+/// `None` (NULL) when there are no rules.
+fn allowed_tools_json(tools: &[String]) -> Result<Option<String>, StoreError> {
+    if tools.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::to_string(tools)?))
+}
+
+/// NULL is no rules; JSON that can't be read is logged and treated as no rules.
+fn allowed_tools_from_json(json: Option<&str>) -> Vec<String> {
+    let Some(json) = json else {
+        return Vec::new();
+    };
+    serde_json::from_str(json).unwrap_or_else(|err| {
+        tracing::warn!("allowed_tools is not a JSON list of strings, ignoring it: {err}");
+        Vec::new()
+    })
 }
 
 fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
@@ -544,6 +633,12 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         },
         previous_title: row.try_get("previous_title")?,
         branch_error: row.try_get("branch_error")?,
+        view: TaskView::parse(&row.try_get::<String, _>("view")?).unwrap_or_default(),
+        chat_mode: row.try_get("chat_mode")?,
+        allowed_tools: allowed_tools_from_json(
+            row.try_get::<Option<String>, _>("allowed_tools")?
+                .as_deref(),
+        ),
     })
 }
 
@@ -553,6 +648,86 @@ mod tests {
 
     fn task(key: &str) -> Task {
         Task::new(TaskKey::new(key), "Card retries", "feature")
+    }
+
+    #[tokio::test]
+    async fn chat_mode_and_allowed_tools_persist() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut chat = task("PROJ-1");
+        chat.chat_mode = true;
+        chat.allowed_tools = vec!["Read".into()];
+        store.create_task(&chat).await.unwrap();
+        assert_eq!(store.get_task(&key).await.unwrap(), Some(chat));
+        assert_eq!(store.list_tasks().await.unwrap()[0].allowed_tools, ["Read"]);
+
+        let t = store.set_chat_mode(&key, false).await.unwrap();
+        assert!(!t.chat_mode);
+        let t = store.add_allowed_tool(&key, "Bash(ls:*)").await.unwrap();
+        assert_eq!(t.allowed_tools, ["Read", "Bash(ls:*)"]);
+        let t = store.add_allowed_tool(&key, "Read").await.unwrap();
+        assert_eq!(t.allowed_tools, ["Read", "Bash(ls:*)"]);
+
+        let missing = TaskKey::new("NOPE-1");
+        assert!(matches!(
+            store.set_chat_mode(&missing, true).await,
+            Err(StoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.add_allowed_tool(&missing, "Read").await,
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn bad_allowed_tools_json_reads_as_empty() {
+        let store = Store::in_memory().await.unwrap();
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        sqlx::query("UPDATE tasks SET allowed_tools = 'not json'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let t = store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(t.allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn migration_0019_gives_defaults_to_existing_rows() {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = old
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 18)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (key, title, project, workflow, phase, status, created_at, updated_at)
+             VALUES ('OLD-1', 'Old', NULL, 'feature', 'backlog', '{\"type\":\"queued\"}', 'x', 'x')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = Store::connect(pool).await.unwrap();
+        let t = store
+            .get_task(&TaskKey::new("OLD-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!t.chat_mode);
+        assert!(t.allowed_tools.is_empty());
     }
 
     #[tokio::test]

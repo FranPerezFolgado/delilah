@@ -22,6 +22,7 @@ struct Entry {
 }
 
 /// The hooks of one settings file.
+#[derive(Default)]
 pub struct Hooks {
     entries: Vec<Entry>,
 }
@@ -294,6 +295,7 @@ mod tests {
             None,
             Permission::Default,
             &[],
+            &[],
             false,
         );
         for (event, groups) in s["hooks"].as_object_mut().unwrap() {
@@ -334,6 +336,7 @@ mod tests {
             Path::new("/bin/true"),
             None,
             Permission::Default,
+            &[],
             &[],
             false,
         );

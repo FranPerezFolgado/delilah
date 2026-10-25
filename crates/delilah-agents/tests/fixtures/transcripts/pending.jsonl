@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2025-01-01T10:00:01.000Z","sessionId":"s1","cwd":"/tmp/w","version":"2.0.0","isSidechain":false,"message":{"role":"user","content":"run"}}
+{"type":"assistant","uuid":"a1","parentUuid":null,"timestamp":"2025-01-01T10:00:02.000Z","sessionId":"s1","cwd":"/tmp/w","version":"2.0.0","isSidechain":false,"message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"tp","name":"Bash","input":{"command":"sleep 100"}}]}}

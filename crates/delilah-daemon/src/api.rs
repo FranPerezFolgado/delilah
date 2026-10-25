@@ -15,8 +15,8 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use crate::state::AppState;
 use crate::store::{EventRecord, Store, StoreError};
 use crate::{
-    actions, asks, changes, events, files, hooks, inbox, jira, preferences, projects, run,
-    session_api, specs, terminal,
+    actions, asks, changes, events, files, hooks, inbox, jira, live, permissions, preferences,
+    projects, run, session_api, specs, terminal,
 };
 
 /// Origins of the desktop app (Tauri) and of its dev server. Nothing else may call the
@@ -52,6 +52,10 @@ pub fn router(state: AppState) -> Router {
             get(list_events).post(post_event),
         )
         .route("/api/v1/tasks/{key}/terminal", get(terminal::task_terminal))
+        .route(
+            "/api/v1/tasks/{key}/runtime",
+            post(crate::runtime_api::set_runtime),
+        )
         .route(
             "/api/v1/tasks/{key}/sessions",
             get(session_api::list_for_task).post(session_api::open),
@@ -97,6 +101,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/sessions/{id}/terminal",
             get(terminal::session_terminal),
         )
+        .route("/api/v1/sessions/{id}/live", get(live::session_live))
         .route("/api/v1/sessions/{id}/close", post(session_api::close))
         .route("/api/v1/sessions/{id}/reopen", post(session_api::reopen))
         .route(
@@ -133,6 +138,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/sessions/{id}/conversation",
             get(crate::conversation::get),
+        )
+        .route(
+            "/api/v1/sessions/{id}/conversation/tools/{tool_use_id}",
+            get(crate::conversation::tool),
         )
         .route(
             "/api/v1/sessions/{id}/messages",
@@ -190,6 +199,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/branch", post(crate::branching::retry))
         .route("/api/v1/asks/{id}/answer", post(asks::answer))
         .route("/api/v1/asks/{id}/release", post(asks::release))
+        .route(
+            "/api/v1/sessions/{id}/permissions/{ask}",
+            post(permissions::answer),
+        )
         .with_state(state)
         .layer(cors)
         .layer(middleware::from_fn(move |req, next| {
@@ -290,6 +303,18 @@ pub struct NewTask {
     pub autopilot: Option<bool>,
     /// Defaults to the project's workflow (`feature` without a project).
     pub workflow: Option<String>,
+    /// `chat` or `terminal`; absent, chat.
+    #[serde(default)]
+    pub view: Option<String>,
+}
+
+/// Parses a `view` from a request; anything but `chat` or `terminal` is a 400.
+fn parse_view(view: &str) -> Result<delilah_core::TaskView, ApiError> {
+    delilah_core::TaskView::parse(view).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "view must be \"chat\" or \"terminal\", not {view:?}"
+        ))
+    })
 }
 
 fn default_workflow() -> String {
@@ -368,11 +393,21 @@ async fn list_tasks(State(store): State<Store>) -> Result<Json<Vec<Task>>, ApiEr
     Ok(Json(store.list_tasks().await?))
 }
 
+/// `POST /tasks`: a [`NewTask`] and, on create only, whether it runs in chat mode.
+#[derive(Debug, Deserialize)]
+struct CreateTask {
+    #[serde(flatten)]
+    new: NewTask,
+    #[serde(default)]
+    chat_mode: bool,
+}
+
 async fn create_task(
     State(app): State<AppState>,
-    Json(new): Json<NewTask>,
+    Json(body): Json<CreateTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let task = build_task(&app, new).await?;
+    let mut task = build_task(&app, body.new).await?;
+    task.chat_mode = body.chat_mode;
     app.store.create_task(&task).await?;
     app.emit(crate::events::Topic::Tasks);
     Ok((StatusCode::CREATED, Json(task)))
@@ -385,6 +420,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         return Err(ApiError::bad_request("say what the task is about"));
     }
     check_autopilot(new.autopilot, new.saving_mode)?;
+    let view = new.view.as_deref().map(parse_view).transpose()?;
     let project = match &new.project {
         Some(name) => Some(app.store.project(name).await?),
         None => None,
@@ -408,6 +444,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
+    task.view = view.unwrap_or_default();
     task.saving_mode = match new.saving_mode {
         Some(on) => on,
         None => crate::handoff::saving_mode_preference(app).await,
@@ -430,7 +467,8 @@ fn check_autopilot(autopilot: Option<bool>, saving_mode: Option<bool>) -> Result
 }
 
 /// Edits a backlog task (title, notes, project, workflow, where); 409 once it has started.
-/// The title alone can change on any task but an archived one.
+/// The title alone can change on any task but an archived one; the view, saving mode and
+/// autopilot change in any state.
 async fn update_task(
     State(app): State<AppState>,
     Path(key): Path<String>,
@@ -440,8 +478,10 @@ async fn update_task(
         mut change,
         saving_mode,
         autopilot,
+        view,
     } = body;
     check_autopilot(autopilot, saving_mode)?;
+    let view = view.as_deref().map(parse_view).transpose()?;
     if let Some(title) = &mut change.title {
         *title = title.trim().to_string();
         if title.is_empty() {
@@ -449,15 +489,26 @@ async fn update_task(
         }
     }
     let key = TaskKey::new(key);
-    // Only the title: any task but an archived one; the rest is for the backlog.
+    // A view-only change works in any state; a title alone, on any task but an archived
+    // one; the rest edits the backlog.
     let title_only = change.notes.is_none()
         && change.project.is_none()
         && change.workflow.is_none()
         && change.in_checkout.is_none();
-    let mut task = match &change.title {
-        Some(title) if title_only => app.store.set_title(&key, title).await?,
-        _ => app.store.update_backlog_task(&key, &change).await?,
+    let mut task = if view.is_some() && change.is_empty() {
+        app.store
+            .get_task(&key)
+            .await?
+            .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?
+    } else {
+        match &change.title {
+            Some(title) if title_only => app.store.set_title(&key, title).await?,
+            _ => app.store.update_backlog_task(&key, &change).await?,
+        }
     };
+    if let Some(view) = view.filter(|v| *v != task.view) {
+        task = app.store.set_view(&key, view).await?;
+    }
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
     }
@@ -479,7 +530,8 @@ async fn update_task(
     Ok(Json(task))
 }
 
-/// `PATCH /api/v1/tasks/{key}`: the backlog change plus saving mode.
+/// `PATCH /api/v1/tasks/{key}`: the backlog change (backlog only) plus saving mode,
+/// autopilot and `view`, which work in any state.
 #[derive(Debug, Deserialize)]
 struct UpdateTask {
     #[serde(flatten)]
@@ -488,6 +540,8 @@ struct UpdateTask {
     saving_mode: Option<bool>,
     #[serde(default)]
     autopilot: Option<bool>,
+    #[serde(default)]
+    view: Option<String>,
 }
 
 async fn get_task(
@@ -870,6 +924,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_view_is_set_at_creation_and_by_patch_in_any_state() {
+        let (app, state) = app_with_project().await;
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "a", "project": "web"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["view"], "chat", "chat by default");
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "b", "project": "web", "view": "terminal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["view"], "terminal");
+
+        // Not a backlog task any more: the view still changes.
+        let key = TaskKey::new("LIBRE-1");
+        state
+            .store
+            .apply_event(&key, delilah_core::Event::Start, Utc::now())
+            .await
+            .unwrap();
+        let mut rx = state.events.subscribe();
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/LIBRE-1",
+            Some(json!({"view": "terminal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{task}");
+        assert_eq!(task["view"], "terminal");
+        assert_eq!(rx.try_recv().unwrap(), crate::events::Topic::Tasks);
+        let stored = state.store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(stored.view, delilah_core::TaskView::Terminal);
+
+        for (method, uri, body) in [
+            ("PATCH", "/api/v1/tasks/LIBRE-1", json!({"view": "split"})),
+            (
+                "POST",
+                "/api/v1/tasks",
+                json!({"free": true, "title": "c", "view": "x"}),
+            ),
+        ] {
+            let (status, body) = call(&app, method, uri, Some(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        }
+    }
+
+    #[tokio::test]
     async fn saves_backlog_tasks_without_starting_them() {
         let (app, state) = app_with_project().await;
         let (status, task) = call(
@@ -1077,6 +1187,36 @@ mod tests {
         let (status, list) = call(&app, "GET", "/api/v1/tasks", None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(list.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_task_is_created_in_chat_mode_only_when_asked() {
+        let app = app().await;
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-1", "title": "Chat", "chat_mode": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(task["chat_mode"], true);
+        assert_eq!(task["allowed_tools"], json!([]));
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"key": "PROJ-2", "title": "Plain"})),
+        )
+        .await;
+        assert_eq!(task["chat_mode"], false);
+        let (_, list) = call(&app, "GET", "/api/v1/tasks", None).await;
+        assert!(
+            list.as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["chat_mode"] == true)
+        );
     }
 
     #[tokio::test]

@@ -1,10 +1,11 @@
 //! Sessions alive in this daemon right now, by session id.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use delilah_agents::pty::PtySession;
+use delilah_agents::runtime::Runtime;
 use serde::Serialize;
 use tokio::sync::Notify;
 
@@ -38,7 +39,7 @@ pub struct Live {
     pub task: String,
     pub kind: SessionKind,
     pub primary: bool,
-    pub pty: Arc<PtySession>,
+    pub runtime: Runtime,
     /// Fired by the agent's SessionStart hook.
     pub started: Arc<Notify>,
     /// Clients attached to the terminal right now.
@@ -48,6 +49,10 @@ pub struct Live {
     pub conversation: Arc<AtomicBool>,
     /// What a conversation's view shows of the turn in progress.
     pub convo: Arc<Mutex<ConvoState>>,
+    /// Where Claude saves this session's transcript, as its latest hook said.
+    transcript: Arc<Mutex<Option<PathBuf>>>,
+    /// Held while a message is decided on and typed, so two never interleave.
+    pub typing: Arc<tokio::sync::Mutex<()>>,
     events: Events,
 }
 
@@ -68,12 +73,21 @@ impl Live {
         }
     }
 
-    pub fn is_conversation(&self) -> bool {
+    pub fn is_idea(&self) -> bool {
         self.conversation.load(Ordering::Relaxed)
     }
 
-    pub fn set_conversation(&self, conversation: bool) {
+    pub fn set_idea(&self, conversation: bool) {
         self.conversation.store(conversation, Ordering::Relaxed);
+    }
+
+    /// The transcript path the latest hook carried, if any.
+    pub fn transcript(&self) -> Option<PathBuf> {
+        self.transcript.lock().unwrap().clone()
+    }
+
+    pub fn set_transcript(&self, path: PathBuf) {
+        *self.transcript.lock().unwrap() = Some(path);
     }
 
     pub fn activity(&self) -> Option<String> {
@@ -131,14 +145,14 @@ impl Sessions {
         task: &str,
         kind: SessionKind,
         primary: bool,
-        pty: Arc<PtySession>,
+        runtime: impl Into<Runtime>,
     ) -> Live {
         let live = Live {
             id: id.to_string(),
             task: task.to_string(),
             kind,
             primary,
-            pty,
+            runtime: runtime.into(),
             started: Arc::new(Notify::new()),
             viewers: Arc::default(),
             state: Arc::new(Mutex::new(match kind {
@@ -147,6 +161,8 @@ impl Sessions {
             })),
             conversation: Arc::default(),
             convo: Arc::default(),
+            transcript: Arc::default(),
+            typing: Arc::default(),
             events: self.events.clone(),
         };
         self.live
@@ -172,6 +188,11 @@ impl Sessions {
         self.live.lock().unwrap().get(id).cloned()
     }
 
+    /// Every live session.
+    pub fn all(&self) -> Vec<Live> {
+        self.live.lock().unwrap().values().cloned().collect()
+    }
+
     pub fn of_task(&self, task: &str) -> Vec<Live> {
         self.live
             .lock()
@@ -193,11 +214,11 @@ impl Sessions {
             .any(|l| l.viewers.load(Ordering::Relaxed) > 0)
     }
 
-    /// Removes the entry only if it is still `pty`, so a reopened session is never
+    /// Removes the entry only if it is still `runtime`, so a reopened session is never
     /// dropped by its previous process exiting.
-    pub fn remove_if_same(&self, id: &str, pty: &Arc<PtySession>) {
+    pub fn remove_if_same(&self, id: &str, runtime: &Runtime) {
         let mut live = self.live.lock().unwrap();
-        if live.get(id).is_some_and(|l| Arc::ptr_eq(&l.pty, pty)) {
+        if live.get(id).is_some_and(|l| l.runtime.same(runtime)) {
             live.remove(id);
             // Stopped: its tab shows "Reabrir", and a permission it asked for is gone.
             self.events.emit(Topic::Sessions);

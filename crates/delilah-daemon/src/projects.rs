@@ -274,7 +274,7 @@ pub async fn delete_project(
     }
     let owner = crate::store_sessions::project_owner(&name);
     for live in app.sessions.of_task(&owner) {
-        let _ = live.pty.kill();
+        let _ = live.runtime.kill();
     }
     app.store.delete_project(&name).await?;
     for topic in [
@@ -856,6 +856,7 @@ mod tests {
             notify: false,
             ui_origin: None,
             agent_program: None,
+            claude_projects: crate::config::Config::scratch_projects(),
             claude_bin: "claude".into(),
             ..crate::config::Config::test_defaults()
         };

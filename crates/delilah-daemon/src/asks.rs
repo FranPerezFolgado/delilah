@@ -19,9 +19,9 @@ use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
 
 use crate::api::ApiError;
-use crate::conversation::{Card, CardOutcome};
 use crate::events::Topic;
 use crate::hooks::HookQuery;
+use crate::idea::{Card, CardOutcome};
 use crate::proposals::{self, Proposal};
 use crate::sessions::LiveState;
 use crate::state::AppState;
@@ -145,7 +145,7 @@ impl Drop for Pending<'_> {
         {
             let app = self.app.clone();
             runtime.spawn(async move {
-                crate::conversation::card_withdraw_if_pending(&app, &session, &ask.id).await;
+                crate::idea::card_withdraw_if_pending(&app, &session, &ask.id).await;
             });
         }
     }
@@ -203,8 +203,12 @@ pub async fn hook(
         .unwrap()
         .insert(id.clone(), (ask.clone(), tx));
     if let Some(session) = &q.session {
-        let card = Card::pending(&ask.id, &ask.questions, ask.proposal.clone());
-        crate::conversation::card_added(&app, session, &card).await;
+        let mut card = Card::pending(&ask.id, &ask.questions, ask.proposal.clone());
+        card.tool_use_id = hook["tool_use_id"]
+            .as_str()
+            .filter(|t| delilah_agents::transcript::is_safe_id(t))
+            .map(str::to_string);
+        crate::idea::card_added(&app, session, &card).await;
     }
     let _pending = Pending { app: &app, id };
 
@@ -239,8 +243,7 @@ pub async fn hook(
             if let Some(session) = &q.session
                 && outcome.is_err()
             {
-                crate::conversation::card_outcome(&app, session, &ask.id, CardOutcome::Terminal)
-                    .await;
+                crate::idea::card_outcome(&app, session, &ask.id, CardOutcome::Terminal).await;
             }
             Json(json!({}))
         }
@@ -294,7 +297,7 @@ pub async fn answer(
     let mut answers = answer.answers;
     let reply = proposals::on_answer(&app, &ask, &mut answers, launch.as_deref()).await;
     if let Some(session) = &ask.session {
-        crate::conversation::card_answered(
+        crate::idea::card_answered(
             &app,
             session,
             &ask.id,
@@ -319,7 +322,7 @@ pub async fn release(
         return Err(ApiError::not_found("that question is no longer waiting"));
     }
     if let Some(session) = ask.and_then(|a| a.session) {
-        crate::conversation::card_outcome(&app, &session, &id, CardOutcome::Terminal).await;
+        crate::idea::card_outcome(&app, &session, &id, CardOutcome::Terminal).await;
     }
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
@@ -919,5 +922,62 @@ pub(crate) mod tests {
         assert_eq!(auto, manual);
         assert_eq!(auto["hookSpecificOutput"]["permissionDecision"], "allow");
         assert!(auto["hookSpecificOutput"]["updatedInput"]["questions"].is_array());
+    }
+
+    #[tokio::test]
+    async fn the_hooks_tool_use_id_is_stored_in_the_card() {
+        assert_eq!(stored_tool_use_id("toolu_42").await, "toolu_42");
+    }
+
+    #[tokio::test]
+    async fn an_unsafe_tool_use_id_is_not_stored() {
+        assert!(stored_tool_use_id("../x\"y").await.is_null());
+        assert!(stored_tool_use_id(&"a".repeat(129)).await.is_null());
+    }
+
+    /// The `tool_use_id` the card keeps for a hook that carried `id`.
+    async fn stored_tool_use_id(id: &str) -> Value {
+        let app = app().await;
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "web".into(),
+                path: "/w/web".into(),
+                kind: delilah_core::ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "s1".into(),
+                task: "@web".into(),
+                kind: crate::store_sessions::SessionKind::Claude,
+                label: "Claude".into(),
+                primary: false,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: None,
+            })
+            .await
+            .unwrap();
+        let mut hook = question();
+        hook["tool_use_id"] = json!(id);
+        let waiting = tokio::spawn({
+            let app = app.clone();
+            async move { call(&app, post("/hooks/claude/ask?task=@web&session=s1", hook)).await }
+        });
+        for _ in 0..100 {
+            if !app.store.entries("s1").await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let entries = app.store.entries("s1").await.unwrap();
+        assert_eq!(entries.len(), 1, "a task session gets its card too");
+        waiting.abort();
+        entries[0].body["tool_use_id"].clone()
     }
 }

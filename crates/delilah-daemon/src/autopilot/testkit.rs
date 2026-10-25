@@ -9,7 +9,6 @@ use delilah_core::{Autopilot, AutopilotStage, AutopilotState, Step, Task, TaskKe
 
 use super::outcome_path;
 use super::recover;
-use crate::api::ApiError;
 use crate::gh::fake::{FakeGh, PR_URL, REPO_VIEW, bare_snapshot};
 use crate::pr_testkit::{TempDir, git_repo_with_origin, task_with_workspace};
 use crate::state::AppState;
@@ -162,15 +161,18 @@ pub(crate) async fn stage_of(app: &AppState, key: &TaskKey) -> Option<AutopilotS
 
 pub(crate) type Launched = Mutex<Vec<(SessionRecord, Option<String>)>>;
 
-pub(crate) fn stub(
-    launched: &Launched,
-) -> impl Fn(&AppState, &SessionRecord, &Path, Option<&str>, bool) -> Result<(), ApiError> + '_ {
-    move |_, s, _, prompt, _| {
+pub(crate) fn stub(launched: &Launched) -> impl crate::handoff::Launcher + '_ {
+    move |_: &AppState,
+          s: &SessionRecord,
+          _: &Path,
+          prompt: Option<&str>,
+          _|
+          -> crate::handoff::LaunchFuture<'_> {
         launched
             .lock()
             .unwrap()
             .push((s.clone(), prompt.map(str::to_string)));
-        Ok(())
+        Box::pin(std::future::ready(Ok(())))
     }
 }
 

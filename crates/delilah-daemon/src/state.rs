@@ -40,11 +40,15 @@ pub struct AppState {
     pub events: Events,
     /// AskUserQuestion questions waiting for an answer from Delilah.
     pub asks: Arc<crate::asks::Asks>,
+    /// Permissions a chat-mode agent waits on (see `permissions.rs`).
+    pub permissions: Arc<crate::permissions::Permissions>,
     /// The language Delilah speaks in (see `lang.rs`); Spanish until `main` reads
     /// the preference.
     pub lang: crate::lang::Current,
     /// Tasks the inbox suggests moving to review (see `phases.rs`).
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Last size seen of each live session's transcript (see `transcript_watch.rs`).
+    pub(crate) transcript_seen: Arc<Mutex<HashMap<String, u64>>>,
     /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
     pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
     /// One lock per task for the branch and name triggers (see `branching.rs`).
@@ -97,8 +101,10 @@ impl AppState {
             specs: Arc::default(),
             events,
             asks: Arc::default(),
+            permissions: Arc::default(),
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
+            transcript_seen: Arc::default(),
             handoffs: Arc::default(),
             branching: Arc::default(),
             finishing: Arc::default(),

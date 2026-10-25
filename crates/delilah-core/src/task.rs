@@ -121,7 +121,8 @@ pub enum Event {
     Fail {
         reason: String,
     },
-    /// A backlog task could not get its workspace: it goes back to the backlog.
+    /// A start was undone (no workspace, or the agent did not come up): the task goes back
+    /// to the backlog, startable again. Only the start's rollback sends it.
     StartAborted {
         reason: String,
     },
@@ -306,6 +307,33 @@ pub enum AutopilotState {
     Done,
 }
 
+/// How the app shows a task: the chat view or the raw terminal. Display only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskView {
+    #[default]
+    Chat,
+    Terminal,
+}
+
+impl TaskView {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskView::Chat => "chat",
+            TaskView::Terminal => "terminal",
+        }
+    }
+
+    /// `None` for anything but `chat` or `terminal`.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "chat" => Some(TaskView::Chat),
+            "terminal" => Some(TaskView::Terminal),
+            _ => None,
+        }
+    }
+}
+
 /// Where autopilot's final actions are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -373,6 +401,15 @@ pub struct Task {
     /// Autopilot, if on (`None` = off).
     #[serde(default)]
     pub autopilot: Option<Autopilot>,
+    /// How the app shows it (chat by default).
+    #[serde(default)]
+    pub view: TaskView,
+    /// Runtime of the task's Claude sessions: chat (stream-json) instead of the terminal.
+    #[serde(default)]
+    pub chat_mode: bool,
+    /// Permission rules granted with "allow always in this task".
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
 }
 
 impl Task {
@@ -393,6 +430,9 @@ impl Task {
             previous_title: None,
             branch_error: None,
             autopilot: None,
+            view: TaskView::default(),
+            chat_mode: false,
+            allowed_tools: Vec::new(),
         }
     }
 
@@ -466,7 +506,9 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
         (S::PreparingWorkspace, Event::SetupFailed { reason }) => Ok(S::SetupFailed { reason }),
         (S::SetupFailed { .. }, Event::RetrySetup | Event::SkipSetup) => Ok(S::PreparingWorkspace),
         (s, Event::Fail { reason }) if !s.is_terminal() => Ok(S::Failed { reason }),
-        (S::PreparingWorkspace, Event::StartAborted { .. }) => Ok(S::Queued),
+        (S::PreparingWorkspace | S::Running | S::WaitingForUser, Event::StartAborted { .. }) => {
+            Ok(S::Queued)
+        }
         (S::Queued, Event::CreatedFromConversation { .. }) => Ok(S::Queued),
         _ => Err(invalid),
     }
@@ -480,6 +522,24 @@ mod tests {
 
     fn at(hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 19, hour, min, 0).unwrap()
+    }
+
+    #[test]
+    fn chat_mode_and_allowed_tools_default_and_round_trip() {
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        assert!(!task.chat_mode);
+        assert!(task.allowed_tools.is_empty());
+        task.chat_mode = true;
+        task.allowed_tools = vec!["Bash(git status:*)".into()];
+        let back: Task = serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
+        assert_eq!(back, task);
+
+        let mut json =
+            serde_json::to_value(Task::new(TaskKey::new("PROJ-2"), "t", "feature")).unwrap();
+        json.as_object_mut().unwrap().remove("chat_mode");
+        json.as_object_mut().unwrap().remove("allowed_tools");
+        let old: Task = serde_json::from_value(json).unwrap();
+        assert!(!old.chat_mode && old.allowed_tools.is_empty());
     }
 
     #[test]
@@ -525,9 +585,8 @@ mod tests {
         task.apply(aborted.clone()).unwrap();
         assert_eq!(task.status, TaskStatus::Queued);
 
-        // Only a start being prepared can be aborted.
+        // Only a start in progress can be aborted: not a task that is already back.
         assert!(task.apply(aborted.clone()).is_err());
-        assert!(running_task().apply(aborted).is_err());
 
         // And it can be started again.
         task.apply(Event::Start).unwrap();
@@ -604,6 +663,31 @@ mod tests {
         t.apply(Event::Start).unwrap();
         assert!(t.apply(Event::RetrySetup).is_err());
         assert!(t.apply(Event::SkipSetup).is_err());
+    }
+
+    #[test]
+    fn a_start_whose_agent_failed_after_the_task_ran_goes_back_to_the_backlog() {
+        let aborted = Event::StartAborted {
+            reason: "chat mode could not start".into(),
+        };
+        let mut task = running_task();
+        task.apply(aborted.clone()).unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+        // A hook may have moved it on before the rollback.
+        let mut waiting = running_task();
+        waiting.apply(Event::AgentAsked).unwrap();
+        waiting.apply(aborted.clone()).unwrap();
+        assert_eq!(waiting.status, TaskStatus::Queued);
+        // Finished or failed tasks stay as they are.
+        let mut done = running_task();
+        done.apply(Event::AgentFinished).unwrap();
+        assert!(done.apply(aborted.clone()).is_err());
+        let mut failed = running_task();
+        failed.apply(Event::Fail { reason: "x".into() }).unwrap();
+        assert!(failed.apply(aborted).is_err());
+        // And it starts again.
+        task.apply(Event::Start).unwrap();
+        assert_eq!(task.status, TaskStatus::PreparingWorkspace);
     }
 
     #[test]
