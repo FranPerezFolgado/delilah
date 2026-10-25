@@ -44,11 +44,11 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | pending | 0 | | Bandeja |
-| WP-38 | 6 | 6A | done | 1 |  | First run and board |
+| WP-38 | 6 | 6A | done | 1 | 8b4f80a | First run and board |
 | WP-39 | 6 | 6A | pending | 0 | | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
-| WP-42 | 7 | 7A | implementing | 1 |  | WherePicker |
+| WP-42 | 7 | 7A | done | 1 |  | WherePicker |
 | WP-43 | 7 | 7A | pending | 0 | | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | pending | 0 | | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
@@ -77,3 +77,5 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 2 | WP-06 | MEDIUM | `delilah run`/`new` without --checkout/--worktree now use the checkout: update CLI help (WP-13) and docs decisions 16/57 + README (WP-57); say it in the PR. | crates/delilah-cli, docs |
 | 2 | WP-06 | LOW | Daemon tests `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` flaky under heavy load (pass alone). | crates/delilah-daemon |
 | 3 | WP-19 | MEDIUM | ConfirmDialog uses `btn-danger`/`btn-p` classes instead of the kit `Button` (`.b-d`/`.b-p`); unify when the barrel lands (WP-22). | app/src/components/ui/ConfirmDialog.tsx |
+| 6 | WP-38 | HIGH | Board PR chips need `PrSummary.number` and Hecha cards need the task's finished date: neither exists in the API. Add both (daemon + api.ts) in a fix package, then wire `BoardView` props in App.tsx (WP-26 shell). | crates/delilah-daemon, app/src/api.ts, app/src/App.tsx |
+| 6 | WP-38 | LOW | «Responder» English key shadowed by legacy.ts merge order (harmless); clean in WP-55. | app/src/i18n/en |
