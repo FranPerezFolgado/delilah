@@ -104,7 +104,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -115,7 +115,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -475,7 +475,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -552,7 +552,7 @@ async fn insert_task<'e>(
     .bind(task.view.as_str())
     .bind(task.chat_mode)
     .bind(allowed_tools_json(&task.allowed_tools)?)
-    .bind(&now)
+    .bind(task.created_at.to_rfc3339())
     .bind(&now)
     .execute(executor)
     .await;
@@ -639,6 +639,15 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
             row.try_get::<Option<String>, _>("allowed_tools")?
                 .as_deref(),
         ),
+        created_at: {
+            let text: String = row.try_get("created_at")?;
+            DateTime::parse_from_rfc3339(&text)
+                .map(|t| t.with_timezone(&Utc))
+                .unwrap_or_else(|err| {
+                    tracing::warn!("created_at `{text}` is not a date, using now: {err}");
+                    Utc::now()
+                })
+        },
     })
 }
 
