@@ -155,7 +155,7 @@ pub struct RunRequest {
     #[serde(default)]
     pub free: bool,
     /// Work in the project's own checkout (a branch there) instead of a worktree.
-    /// Left out: what a backlog task chose, else the project's default workspace.
+    /// Left out: what a backlog task chose, else the project's default workspace, else the checkout.
     #[serde(default)]
     pub in_checkout: Option<bool>,
     /// Saving mode: each phase runs in a fresh session. Left out: what a backlog
@@ -265,7 +265,7 @@ pub(crate) async fn start_run_with(
     }
     let project = app.store.project(&req.project).await?;
     // The request wins, then what the backlog task chose, then the project's setting;
-    // with none of them, a worktree.
+    // with none of them, the checkout (decision 57 reversed).
     let in_checkout = req
         .in_checkout
         .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
@@ -273,7 +273,7 @@ pub(crate) async fn start_run_with(
             .settings
             .workspace
             .map(|m| m == delilah_core::WorkspaceMode::Checkout))
-        .unwrap_or(false);
+        .unwrap_or(true);
     let rules = &project.settings.submodules;
     if project.kind == ProjectKind::Parent && !(rules.always.is_empty() && rules.never.is_empty()) {
         let root = project.path.clone();
@@ -3494,7 +3494,7 @@ mod tests {
                 .uri("/api/v1/runs")
                 .header("content-type", "application/json")
                 .body(axum::body::Body::from(
-                    serde_json::json!({ "key": key, "title": "Idea", "project": "web", "free": free })
+                    serde_json::json!({ "key": key, "title": "Idea", "project": "web", "free": free, "in_checkout": false })
                         .to_string(),
                 ))
                 .unwrap();
@@ -4068,8 +4068,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_workspace_setting_and_no_choice_start_in_a_worktree() {
+    async fn no_choice_anywhere_works_in_the_checkout() {
         let (app, repo) = settings_app(settings(None)).await;
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(!logged(&app, "LIBRE-1"));
+        assert!(in_checkout(&app, "LIBRE-1", &repo).await);
+    }
+
+    #[tokio::test]
+    async fn a_saved_backlog_worktree_choice_wins_over_the_default() {
+        let (app, repo) = settings_app(settings(None)).await;
+        app.store
+            .create_task(&{
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                t.project = Some("web".into());
+                t.status = TaskStatus::Queued;
+                t.in_checkout = Some(false);
+                t
+            })
+            .await
+            .unwrap();
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(logged(&app, "LIBRE-1"));
+        assert!(!in_checkout(&app, "LIBRE-1", &repo).await);
+    }
+
+    #[tokio::test]
+    async fn the_project_setting_wins_over_the_default() {
+        let (app, repo) = settings_app(worktree_default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()

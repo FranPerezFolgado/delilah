@@ -12,7 +12,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-03 | 2 | 2A | done | 1 | 87b9863 | Core events and created_at |
 | WP-04 | 2 | 2A | done | 1 | 8c35baa | Route skeleton |
 | WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
-| WP-06 | 2 | 2B | implementing | 1 |  | Checkout is the default workspace |
+| WP-06 | 2 | 2B | done | 1 |  | Checkout is the default workspace |
 | WP-07 | 2 | 2B | implementing | 1 |  | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | implementing | 1 |  | PR check times, review comments, merge |
@@ -27,7 +27,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-18 | 3 | 3B | implementing | 1 |  | Kit: controls |
 | WP-19 | 3 | 3B | implementing | 1 |  | Kit: lists, overlays, feedback |
 | WP-20 | 3 | 3B | pending | 0 | | Kit: status components |
-| WP-21 | 3 | 3B | done | 1 |  | Live terminal and editor themes |
+| WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
 | WP-22 | 3 | 3C | pending | 0 | | Kit barrel |
 | WP-23 | 4 | 4A | pending | 0 | | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | pending | 0 | | Logs view, statusbar, disconnected banner |
