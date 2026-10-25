@@ -22,10 +22,10 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
-| WP-16 | 3 | 3A | implementing | 1 |  | Vocabulary, relative time, icons |
+| WP-16 | 3 | 3A | done | 1 |  | Vocabulary, relative time, icons |
 | WP-17 | 3 | 3B | done | 1 | 1870515 | Rename old tokens in TSX |
 | WP-18 | 3 | 3B | done | 1 | 15d2e53 | Kit: controls |
-| WP-19 | 3 | 3B | done | 1 |  | Kit: lists, overlays, feedback |
+| WP-19 | 3 | 3B | done | 1 | c1e9df2 | Kit: lists, overlays, feedback |
 | WP-20 | 3 | 3B | pending | 0 | | Kit: status components |
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
 | WP-22 | 3 | 3C | pending | 0 | | Kit barrel |
@@ -76,3 +76,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 1 | WP-01 | LOW | i18n coverage test never seen failing; the regex may pass vacuously. Check it finds literals. | app/src/i18n/coverage.test.ts |
 | 2 | WP-06 | MEDIUM | `delilah run`/`new` without --checkout/--worktree now use the checkout: update CLI help (WP-13) and docs decisions 16/57 + README (WP-57); say it in the PR. | crates/delilah-cli, docs |
 | 2 | WP-06 | LOW | Daemon tests `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` flaky under heavy load (pass alone). | crates/delilah-daemon |
+| 3 | WP-19 | MEDIUM | ConfirmDialog uses `btn-danger`/`btn-p` classes instead of the kit `Button` (`.b-d`/`.b-p`); unify when the barrel lands (WP-22). | app/src/components/ui/ConfirmDialog.tsx |

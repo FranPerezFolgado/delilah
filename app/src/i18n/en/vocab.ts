@@ -1,0 +1,17 @@
+export const EN: Record<string, string> = {
+  Backlog: "Backlog",
+  Trabajando: "Working",
+  "Te espera": "Waiting for you",
+  "En pausa": "Paused",
+  Hecha: "Done",
+  Error: "Error",
+  "Preparando el workspace": "Preparing the workspace",
+  "se reanuda a las {time}": "resumes at {time}",
+  Pregunta: "Question",
+  Permiso: "Permission",
+  Aviso: "Notice",
+  Borrador: "Draft",
+  Abierta: "Open",
+  "Checks fallan": "Checks failing",
+  Fusionada: "Merged",
+};

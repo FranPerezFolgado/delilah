@@ -28,12 +28,32 @@ const PATHS = {
   backlog: C + "M12 7.5V12l3 2",
 } as const;
 
-export type IconName = keyof typeof PATHS;
+/** The v2 set: viewBox 16, stroke 1.5 (the 24-box icons above are the older ones). */
+const PATHS16 = {
+  rail: "M2.5 3.5h11v9h-11zM6 3.5v9",
+  logs: "M2.5 3.5h11v9h-11zM5 6.5l2 1.5-2 1.5M8.5 10h2.5",
+  more: "M3.5 8h.01M8 8h.01M12.5 8h.01",
+  repo: "M4 2.5h8v11H4zM4 11h8M6.5 5h3",
+  pr: "M4.5 4.5v7M4.5 4.5a1.2 1.2 0 1 0 0-.01zM4.5 11.5a1.2 1.2 0 1 0 0 .01zM11.5 11.5a1.2 1.2 0 1 0 0 .01zM11.5 10.3V6.5a2 2 0 0 0-2-2H8M9.5 3l-1.7 1.5L9.5 6",
+  merge: "M4.5 4.5v7M4.5 4.5a1.2 1.2 0 1 0 0-.01zM4.5 11.5a1.2 1.2 0 1 0 0 .01zM11.5 9.5a1.2 1.2 0 1 0 0 .01zM4.5 8.5c0-2 1.5-2.5 3-2.5s4 .5 4 2.3",
+  check: "M3.5 8.5l3 3 6-6.5",
+  chevron: "M6 3.5L10.5 8 6 12.5",
+  filter: "M2.5 4h11M4.5 8h7M6.5 12h3",
+  external: "M9 2.5h4.5V7M13.5 2.5L7.5 8.5M11.5 9.5v4h-9v-9h4",
+  retry: "M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3",
+  priority: "M8 2.5v8M8 13.5v.01",
+  autopilot: "M2.5 9.5l11-6-4 10-2-4z",
+} as const;
+
+export type IconName = keyof typeof PATHS | keyof typeof PATHS16;
+
+const is16 = (n: IconName): n is keyof typeof PATHS16 => n in PATHS16;
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {
+  const small = is16(name);
   return (
-    <svg className={`i ${className ?? ""}`} viewBox="0 0 24 24" aria-hidden="true">
-      <path d={PATHS[name]} />
+    <svg className={`i ${className ?? ""}`} viewBox={small ? "0 0 16 16" : "0 0 24 24"} strokeWidth={small ? 1.5 : undefined} aria-hidden="true">
+      <path d={small ? PATHS16[name] : PATHS[name]} />
     </svg>
   );
 }
