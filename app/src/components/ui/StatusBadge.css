@@ -1,0 +1,13 @@
+.badge { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px;
+  font-size: 12px; font-weight: 500; white-space: nowrap; background: var(--neutral-bg); color: var(--neutral-tx); }
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 7px; background: var(--neutral); }
+.badge.run { background: var(--run-bg); color: var(--run-tx); }
+.badge.run::before { background: var(--run); }
+.badge.wait { background: var(--wait-bg); color: var(--wait-tx); }
+.badge.wait::before { background: var(--wait); }
+.badge.pause { background: var(--pause-bg); color: var(--pause-tx); }
+.badge.pause::before { background: var(--pause); }
+.badge.ok { background: var(--ok-bg); color: var(--ok-tx); }
+.badge.ok::before { background: var(--ok); }
+.badge.err { background: var(--err-bg); color: var(--err-tx); }
+.badge.err::before { background: var(--err); }
