@@ -1,0 +1,15 @@
+export const EN: Record<string, string> = {
+  Tarea: "Task",
+  Proyecto: "Project",
+  Cambios: "Changes",
+  PR: "PR",
+  "+ Sesión": "+ Session",
+  "Nueva sesión": "New session",
+  "Claude": "Claude",
+  "Terminal": "Terminal",
+  "Pestañas de la tarea": "Task tabs",
+  "Cerrar {name}": "Close {name}",
+  "›› {n} más": "›› {n} more",
+  "Pestañas fuera de vista": "Tabs out of view",
+  "sin guardar": "unsaved",
+};

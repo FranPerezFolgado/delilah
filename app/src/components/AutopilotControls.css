@@ -1,0 +1,3 @@
+.apc { display: inline-flex; align-items: center; gap: 8px; }
+.apc-paused { display: inline-flex; align-items: center; gap: 8px; color: var(--pause-tx); font-size: 13px; }
+.apc-reason { color: var(--tx3); font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
