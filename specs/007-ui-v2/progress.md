@@ -10,8 +10,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-01 | 1 | 1A | done | 1 | 079f3d3 | Setup guards |
 | WP-02 | 2 | 2A | done | 1 | 7874870 | Client read types and calls (api.ts) |
 | WP-03 | 2 | 2A | done | 1 | 87b9863 | Core events and created_at |
-| WP-04 | 2 | 2A | implementing | 1 |  | Route skeleton |
-| WP-05 | 2 | 2B | pending | 0 | | Pending permission waits; ended permission cards |
+| WP-04 | 2 | 2A | done | 1 |  | Route skeleton |
+| WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | implementing | 1 |  | Checkout is the default workspace |
 | WP-07 | 2 | 2B | pending | 0 | | created_at exposed and reopen |
 | WP-08 | 2 | 2B | pending | 0 | | Inbox store, ids, removal and new avisos |
@@ -21,13 +21,13 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
-| WP-15 | 3 | 3A | done | 1 |  | Token guards and v2 tokens |
+| WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | implementing | 1 |  | Vocabulary, relative time, icons |
-| WP-17 | 3 | 3B | pending | 0 | | Rename old tokens in TSX |
-| WP-18 | 3 | 3B | pending | 0 | | Kit: controls |
-| WP-19 | 3 | 3B | pending | 0 | | Kit: lists, overlays, feedback |
+| WP-17 | 3 | 3B | implementing | 1 |  | Rename old tokens in TSX |
+| WP-18 | 3 | 3B | implementing | 1 |  | Kit: controls |
+| WP-19 | 3 | 3B | implementing | 1 |  | Kit: lists, overlays, feedback |
 | WP-20 | 3 | 3B | pending | 0 | | Kit: status components |
-| WP-21 | 3 | 3B | pending | 0 | | Live terminal and editor themes |
+| WP-21 | 3 | 3B | implementing | 1 |  | Live terminal and editor themes |
 | WP-22 | 3 | 3C | pending | 0 | | Kit barrel |
 | WP-23 | 4 | 4A | pending | 0 | | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | pending | 0 | | Logs view, statusbar, disconnected banner |
@@ -72,3 +72,5 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 3 | WP-15 | MEDIUM | Light `--tx3` (#6b6e75) on `--side` (#efefec) is 4.43:1 (KNOWN_LOW in tokens.test.ts). Fix: light `--tx3` → #686b72 (4.6:1) and drop the KNOWN_LOW entry. | app/src/styles.css, app/src/tokens.test.ts |
+| 1 | WP-01 | LOW | i18n coverage test never seen failing; the regex may pass vacuously. Check it finds literals. | app/src/i18n/coverage.test.ts |

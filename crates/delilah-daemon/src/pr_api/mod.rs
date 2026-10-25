@@ -3,6 +3,7 @@
 
 mod dto;
 mod forward;
+pub mod merge;
 mod open;
 
 use axum::Json;

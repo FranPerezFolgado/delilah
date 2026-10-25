@@ -230,6 +230,24 @@ pub struct AskView {
 }
 
 /// `GET /api/v1/inbox`: most urgent first (what blocks an agent), newest first within.
+/// `POST /inbox/{id}/dismiss`.
+pub async fn dismiss(
+    State(_app): State<AppState>,
+    Path(_id): Path<String>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    Err(ApiError::not_implemented())
+}
+
+/// `POST /inbox/clear`: dismisses every non-blocking item, answers their ids.
+pub async fn clear(State(_app): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Err(ApiError::not_implemented())
+}
+
+/// `POST /inbox/restore`: undoes dismissals by id.
+pub async fn restore(State(_app): State<AppState>) -> Result<axum::http::StatusCode, ApiError> {
+    Err(ApiError::not_implemented())
+}
+
 pub async fn list(State(app): State<AppState>) -> Result<Json<Vec<InboxItem>>, ApiError> {
     let tasks = app.store.list_tasks().await?;
     let task = |key: &str| tasks.iter().find(|t| t.key.as_str() == key);

@@ -112,6 +112,21 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/projects/{name}/sessions",
             post(session_api::open_in_project),
         )
+        .route("/api/v1/tasks/{key}/reopen", post(actions::reopen))
+        .route(
+            "/api/v1/tasks/{key}/prs/{id}/merge",
+            post(crate::pr_api::merge::merge),
+        )
+        .route("/api/v1/tasks/{key}/setup", get(crate::setup::info))
+        .route("/api/v1/tasks/{key}/setup/log", get(crate::setup::log))
+        .route("/api/v1/inbox/{id}/dismiss", post(inbox::dismiss))
+        .route("/api/v1/inbox/clear", post(inbox::clear))
+        .route("/api/v1/inbox/restore", post(inbox::restore))
+        .route("/api/v1/jira/issues/{key}/subtasks", get(jira::subtasks))
+        .route(
+            "/api/v1/sessions/{id}/runtime",
+            post(crate::runtime_api::set_session_runtime),
+        )
         .route("/api/v1/tasks/{key}/resume", post(actions::resume))
         .route("/api/v1/tasks/{key}/done", post(actions::done))
         .route("/api/v1/tasks/{key}/archive", post(actions::archive))
@@ -275,6 +290,9 @@ pub struct Health {
     pub exe: Option<String>,
     #[serde(default)]
     pub exe_mtime: Option<u64>,
+    /// The absolute folder Delilah keeps its state in (`~/.delilah`).
+    #[serde(default)]
+    pub home: String,
 }
 
 /// A task saved without starting it: the backlog.
@@ -361,12 +379,13 @@ async fn accepted(app: &AppState, key: &TaskKey) -> Result<(StatusCode, Json<Tas
     Ok((StatusCode::ACCEPTED, Json(task)))
 }
 
-async fn health() -> Json<Health> {
+async fn health(State(app): State<AppState>) -> Json<Health> {
     let (exe, exe_mtime) = EXE.get_or_init(running_binary).clone();
     Json(Health {
         version: env!("CARGO_PKG_VERSION").into(),
         exe,
         exe_mtime,
+        home: app.config.home.display().to_string(),
     })
 }
 
@@ -613,6 +632,11 @@ impl ApiError {
         }
     }
 
+    /// A 501 for a route that is registered but not built yet.
+    pub fn not_implemented() -> Self {
+        Self::new(StatusCode::NOT_IMPLEMENTED, "not implemented yet")
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
@@ -764,6 +788,42 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         router(AppState::new(Store::in_memory().await.unwrap(), config))
+    }
+
+    #[tokio::test]
+    async fn health_tells_the_home_folder() {
+        let app = app().await;
+        let (status, body) = call(&app, "GET", "/api/v1/health", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let home = body["home"].as_str().unwrap();
+        assert!(std::path::Path::new(home).is_absolute());
+        assert!(home.contains("delilah-api-"));
+    }
+
+    #[tokio::test]
+    async fn every_new_route_is_registered() {
+        let app = app().await;
+        let ids = Some(json!({ "ids": [] }));
+        let routes = [
+            ("POST", "/api/v1/tasks/T-1/reopen", None),
+            ("POST", "/api/v1/tasks/T-1/prs/1/merge", None),
+            ("GET", "/api/v1/tasks/T-1/setup", None),
+            ("GET", "/api/v1/tasks/T-1/setup/log", None),
+            ("POST", "/api/v1/inbox/question%3AT-1%3Aa%3A1/dismiss", None),
+            ("POST", "/api/v1/inbox/clear", None),
+            ("POST", "/api/v1/inbox/restore", ids),
+            ("GET", "/api/v1/jira/issues/T-1/subtasks", None),
+            (
+                "POST",
+                "/api/v1/sessions/s1/runtime",
+                Some(json!({ "mode": "chat" })),
+            ),
+        ];
+        for (method, uri, body) in routes {
+            let (status, _) = call(&app, method, uri, body).await;
+            assert_ne!(status, StatusCode::NOT_FOUND, "{method} {uri}");
+            assert_ne!(status, StatusCode::METHOD_NOT_ALLOWED, "{method} {uri}");
+        }
     }
 
     /// The API with a `web` repo project registered (its folder is never touched).

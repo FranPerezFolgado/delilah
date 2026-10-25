@@ -130,6 +130,22 @@ pub(crate) async fn cancel(app: &AppState, key: &TaskKey) -> Result<(), LaunchEr
 
 /// At daemon start: a task still preparing its workspace has no setup running (they
 /// died with the previous daemon), so it stops as `setup-failed` ("interrupted").
+/// `GET /tasks/{key}/setup`: how the last setup run went.
+pub async fn info(
+    axum::extract::State(_app): axum::extract::State<AppState>,
+    axum::extract::Path(_key): axum::extract::Path<String>,
+) -> Result<axum::Json<serde_json::Value>, crate::api::ApiError> {
+    Err(crate::api::ApiError::not_implemented())
+}
+
+/// `GET /tasks/{key}/setup/log`: the whole log as plain text.
+pub async fn log(
+    axum::extract::State(_app): axum::extract::State<AppState>,
+    axum::extract::Path(_key): axum::extract::Path<String>,
+) -> Result<String, crate::api::ApiError> {
+    Err(crate::api::ApiError::not_implemented())
+}
+
 pub async fn recover_interrupted(app: &AppState) -> Result<(), LaunchError> {
     for task in app.store.list_tasks().await? {
         if task.status != TaskStatus::PreparingWorkspace {

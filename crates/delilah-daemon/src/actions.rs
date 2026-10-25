@@ -165,6 +165,14 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /tasks/{key}/reopen`: a done task waits for the user again.
+pub async fn reopen(
+    State(_app): State<AppState>,
+    Path(_key): Path<String>,
+) -> Result<Json<Task>, ApiError> {
+    Err(ApiError::not_implemented())
+}
+
 pub async fn usage(State(app): State<AppState>) -> Json<Option<UsageReport>> {
     Json(app.usage.lock().unwrap().clone())
 }

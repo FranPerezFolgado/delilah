@@ -165,6 +165,14 @@ pub async fn issues(
     Ok(Json(rows))
 }
 
+/// `GET /jira/issues/{key}/subtasks`.
+pub async fn subtasks(
+    State(_app): State<AppState>,
+    Path(_key): Path<String>,
+) -> Result<Json<Vec<JiraIssue>>, ApiError> {
+    Err(ApiError::not_implemented())
+}
+
 pub async fn issue(
     State(app): State<AppState>,
     Path(key): Path<String>,

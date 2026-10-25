@@ -30,6 +30,14 @@ pub struct SetRuntime {
     pub mode: String,
 }
 
+/// `POST /sessions/{id}/runtime`: switches one session between chat and terminal.
+pub async fn set_session_runtime(
+    State(_app): State<AppState>,
+    Path(_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    Err(ApiError::not_implemented())
+}
+
 pub async fn set_runtime(
     State(app): State<AppState>,
     Path(key): Path<String>,
