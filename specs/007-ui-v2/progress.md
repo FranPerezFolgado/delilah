@@ -29,7 +29,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-20 | 3 | 3B | done | 1 | 2f75ab4 | Kit: status components |
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
 | WP-22 | 3 | 3C | implementing | 1 |  | Kit barrel |
-| WP-23 | 4 | 4A | done | 1 |  | Connection, breakpoints, sidebar shortcut |
+| WP-23 | 4 | 4A | done | 1 | 48806d0 | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | pending | 0 | | Logs view, statusbar, disconnected banner |
 | WP-25 | 4 | 4B | pending | 0 | | Sidebar rewrite |
 | WP-26 | 4 | 4C | pending | 0 | | App shell |
@@ -44,7 +44,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | pending | 0 | | Bandeja |
-| WP-38 | 6 | 6A | implementing | 1 |  | First run and board |
+| WP-38 | 6 | 6A | done | 1 |  | First run and board |
 | WP-39 | 6 | 6A | pending | 0 | | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |

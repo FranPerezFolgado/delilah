@@ -1,0 +1,16 @@
+export const EN: Record<string, string> = {
+  Tareas: "Tasks",
+  "Nueva tarea": "New task",
+  "Filtrar por proyecto": "Filter by project",
+  Todos: "All",
+  "Todavía no hay tareas.": "No tasks yet.",
+  "Quitar el filtro de estado": "Clear the status filter",
+  "Estado: {status}": "Status: {status}",
+  "{n} más": "{n} more",
+  Responder: "Reply",
+  "Autopiloto en pausa": "Autopilot paused",
+  Autopiloto: "Autopilot",
+  "PR abierta por autopiloto": "PR opened by autopilot",
+  "Cargando las tareas": "Loading tasks",
+  "Sin tareas": "No tasks",
+};
