@@ -26,17 +26,17 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-17 | 3 | 3B | done | 1 | 1870515 | Rename old tokens in TSX |
 | WP-18 | 3 | 3B | done | 1 | 15d2e53 | Kit: controls |
 | WP-19 | 3 | 3B | done | 1 | c1e9df2 | Kit: lists, overlays, feedback |
-| WP-20 | 3 | 3B | done | 1 |  | Kit: status components |
+| WP-20 | 3 | 3B | done | 1 | 2f75ab4 | Kit: status components |
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
-| WP-22 | 3 | 3C | pending | 0 | | Kit barrel |
+| WP-22 | 3 | 3C | implementing | 1 |  | Kit barrel |
 | WP-23 | 4 | 4A | implementing | 1 |  | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | pending | 0 | | Logs view, statusbar, disconnected banner |
 | WP-25 | 4 | 4B | pending | 0 | | Sidebar rewrite |
 | WP-26 | 4 | 4C | pending | 0 | | App shell |
 | WP-27 | 4 | 4D | pending | 0 | | E2E selectors for the shell |
-| WP-28 | 5 | 5A | pending | 0 | | History sentences and AskCard |
+| WP-28 | 5 | 5A | implementing | 1 |  | History sentences and AskCard |
 | WP-29 | 5 | 5A | implementing | 1 |  | Header controls and tabs |
-| WP-30 | 5 | 5A | pending | 0 | | Cambios, PR and setup panels |
+| WP-30 | 5 | 5A | implementing | 1 |  | Cambios, PR and setup panels |
 | WP-31 | 5 | 5B | pending | 0 | | Task header |
 | WP-32 | 5 | 5B | pending | 0 | | Task tab |
 | WP-33 | 5 | 5B | pending | 0 | | Chat tab |
@@ -44,14 +44,14 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | pending | 0 | | Bandeja |
-| WP-38 | 6 | 6A | pending | 0 | | First run and board |
+| WP-38 | 6 | 6A | implementing | 1 |  | First run and board |
 | WP-39 | 6 | 6A | pending | 0 | | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | implementing | 1 |  | WherePicker |
 | WP-43 | 7 | 7A | pending | 0 | | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | pending | 0 | | Projects and project view |
-| WP-45 | 7 | 7A | implementing | 1 |  | Settings and auto-update preference |
+| WP-45 | 7 | 7A | done | 1 |  | Settings and auto-update preference |
 | WP-46 | 7 | 7B | pending | 0 | | Nueva tarea dialog |
 | WP-47 | 7 | 7B | pending | 0 | | Backlog task and project settings |
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |
