@@ -1,0 +1,6 @@
+.toast-host { position: fixed; left: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+.toast { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-radius: 10px; background: var(--dialog);
+  border: 1px solid var(--bd2); box-shadow: var(--shadow); color: var(--tx); font-size: 13.5px; }
+.toast-text { flex: 1; min-width: 0; }
+.toast-error { border-color: var(--err); }
+.toast-wait { border-color: var(--wait); }
