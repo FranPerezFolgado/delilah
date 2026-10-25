@@ -1,0 +1,9 @@
+.changes-summary { font-size: 12px; }
+.changes-filter { margin-left: auto; width: 180px; height: 28px; }
+.changes-error { padding: 12px 20px; }
+.changes-loading { padding: 16px 20px; }
+.changes-dir { display: flex; align-items: center; gap: 6px; padding: 6px 6px 2px; font-size: 11px; }
+.changes-dir .trunc { flex: 1; }
+.changes-dir .i { width: 12px; height: 12px; }
+.frow-name { flex: 1; }
+.diff-kind { margin-left: auto; flex: none; }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type PrProposal, type PullRequest } from "../api";
 import { t } from "../i18n";
+import { Button, Dialog } from "./ui";
+import "./PrView.css";
 
 interface Props {
   owner: string;
@@ -49,12 +51,6 @@ export function OpenPrDialog({ owner, onClose, onOpened }: Props) {
       .catch((e) => setError((e as Error).message));
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, busy]);
-
   const submit = async () => {
     if (!proposal) return;
     setBusy(true);
@@ -69,11 +65,21 @@ export function OpenPrDialog({ owner, onClose, onOpened }: Props) {
   };
 
   return (
-    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="dialog" role="dialog" aria-label={t("Abrir pull request")}>
-        <h2>{t("Abrir pull request")}</h2>
+    <Dialog
+      title={t("Abrir pull request")}
+      onClose={() => !busy && onClose()}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>{t("Cancelar")}</Button>
+          <Button variant="primary" disabled={busy || !proposal || !title.trim()} onClick={submit}>
+            {busy ? t("Abriendo…") : t("Abrir PR")}
+          </Button>
+        </>
+      }
+    >
+      <div className="open-pr">
         {proposal && (
-          <div className="muted" style={{ fontSize: 12.5 }}>
+          <div className="muted open-pr-base">
             {t("contra {base}", { base: proposal.base })}
             {proposal.needs_push && <> · {t("Se subirá la rama antes de abrirla")}</>}
           </div>
@@ -96,18 +102,12 @@ export function OpenPrDialog({ owner, onClose, onOpened }: Props) {
           <span>{t("Descripción")}</span>
           <textarea className="input pr-open-body" value={body} onChange={(e) => setBody(e.target.value)} disabled={!proposal} />
         </label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <label className="open-pr-draft">
           <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
           <span>{t("Borrador")}</span>
         </label>
         {error && <div className="error selectable">{error}</div>}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={onClose} disabled={busy}>{t("Cancelar")}</button>
-          <button type="button" className="btn btn-p" disabled={busy || !proposal || !title.trim()} onClick={submit}>
-            {busy ? t("Abriendo…") : t("Abrir PR")}
-          </button>
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

@@ -34,16 +34,16 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-25 | 4 | 4B | implementing | 1 |  | Sidebar rewrite |
 | WP-26 | 4 | 4C | pending | 0 | | App shell |
 | WP-27 | 4 | 4D | pending | 0 | | E2E selectors for the shell |
-| WP-28 | 5 | 5A | done | 1 |  | History sentences and AskCard |
+| WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
 | WP-29 | 5 | 5A | implementing | 1 |  | Header controls and tabs |
-| WP-30 | 5 | 5A | implementing | 1 |  | Cambios, PR and setup panels |
+| WP-30 | 5 | 5A | done | 1 |  | Cambios, PR and setup panels |
 | WP-31 | 5 | 5B | pending | 0 | | Task header |
-| WP-32 | 5 | 5B | pending | 0 | | Task tab |
+| WP-32 | 5 | 5B | implementing | 1 |  | Task tab |
 | WP-33 | 5 | 5B | pending | 0 | | Chat tab |
 | WP-34 | 5 | 5C | pending | 0 | | Task screen integration |
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
-| WP-37 | 6 | 6A | pending | 0 | | Bandeja |
+| WP-37 | 6 | 6A | implementing | 1 |  | Bandeja |
 | WP-38 | 6 | 6A | done | 1 | 8b4f80a | First run and board |
 | WP-39 | 6 | 6A | pending | 0 | | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |

@@ -72,4 +72,29 @@ describe("OpenPrDialog", () => {
     fireEvent.click(getByText("Open PR", { selector: "button" }));
     await waitFor(() => expect(open).toHaveBeenCalledWith("K-1", expect.objectContaining({ repo: "svc-b" })));
   });
+
+  it("is a modal dialog that closes on Esc and with Cancel", async () => {
+    vi.spyOn(api, "prProposal").mockResolvedValue(proposal);
+    const onClose = vi.fn();
+    const { findByDisplayValue, getByRole, getByText } = render(<OpenPrDialog owner="K-1" onClose={onClose} onOpened={() => {}} />);
+    await findByDisplayValue("Add retries");
+    const dialog = getByRole("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    fireEvent.click(getByText("Cancel"));
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not close on Esc while opening", async () => {
+    vi.spyOn(api, "prProposal").mockResolvedValue(proposal);
+    vi.spyOn(api, "openPr").mockReturnValue(new Promise(() => {}));
+    const onClose = vi.fn();
+    const { findByDisplayValue, getByRole, getByText } = render(<OpenPrDialog owner="K-1" onClose={onClose} onOpened={() => {}} />);
+    await findByDisplayValue("Add retries");
+    fireEvent.click(getByText("Open PR", { selector: "button" }));
+    await waitFor(() => expect(getByText("Opening…")).toBeTruthy());
+    fireEvent.keyDown(getByRole("dialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

@@ -1,0 +1,15 @@
+.pr-grow { flex: 1; }
+.pr-problem { border-color: var(--err); }
+.pr-problem-body { display: flex; flex-direction: column; gap: 4px; }
+.pr-problem-actions { display: flex; gap: 8px; margin-top: 6px; }
+.pr-card .pr-chip { display: inline-flex; padding: 0; border: 0; }
+.pr-checks .pr-dot.pr-ci-pending { background: var(--neutral); }
+.pr-checks li .mono { margin-left: auto; font-size: 11px; }
+.pr-comments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.pr-comments li { border-left: 2px solid var(--bd2); padding-left: 10px; }
+.pr-comment-head { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; }
+.pr-actions { display: flex; align-items: center; gap: 8px; }
+.pr-merge-note { font-size: 12px; }
+.open-pr { display: flex; flex-direction: column; gap: 10px; }
+.open-pr-base { font-size: 12.5px; }
+.open-pr-draft { display: flex; gap: 6px; align-items: center; }
