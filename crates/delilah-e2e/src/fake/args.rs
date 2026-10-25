@@ -23,6 +23,9 @@ pub struct FakeArgs {
     pub plugin_dir: Option<PathBuf>,
     pub append_system_prompt: Option<String>,
     pub prompt: Option<String>,
+    /// Chat mode: `--input-format stream-json` (the daemon's `claude::stream_command`).
+    /// The prompts then come on stdin as stream-json lines.
+    pub stream: bool,
     /// Options the fake does not know: recorded, never an error.
     pub unknown: Vec<String>,
 }
@@ -47,6 +50,7 @@ impl FakeArgs {
         let mut plugin_dir = None;
         let mut append_system_prompt = None;
         let mut prompt = None;
+        let mut stream = false;
         let mut unknown = Vec::new();
 
         while let Some(arg) = it.next() {
@@ -67,6 +71,7 @@ impl FakeArgs {
                 "--setting-sources" => setting_sources = Some(value("--setting-sources")?),
                 "--strict-mcp-config" => strict_mcp = true,
                 "--plugin-dir" => plugin_dir = Some(PathBuf::from(value("--plugin-dir")?)),
+                "--input-format" => stream = value("--input-format")? == "stream-json",
                 "--append-system-prompt" => {
                     append_system_prompt = Some(value("--append-system-prompt")?)
                 }
@@ -103,6 +108,7 @@ impl FakeArgs {
             plugin_dir,
             append_system_prompt,
             prompt,
+            stream,
             unknown,
         })
     }
@@ -246,6 +252,30 @@ mod tests {
     fn no_prompt_is_fine() {
         let a = parse(&["--session-id", "abc", "--settings", "/s"]).unwrap();
         assert_eq!(a.prompt, None);
+    }
+
+    #[test]
+    fn stream_mode_flags() {
+        let a = parse(&[
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
+            "--session-id",
+            "abc",
+            "--settings",
+            "/s",
+        ])
+        .unwrap();
+        assert!(a.stream);
+        assert_eq!(a.prompt, None);
+        let pty = parse(&["--session-id", "abc", "--settings", "/s"]).unwrap();
+        assert!(!pty.stream);
     }
 
     #[test]

@@ -22,6 +22,7 @@ struct Entry {
 }
 
 /// The hooks of one settings file.
+#[derive(Default)]
 pub struct Hooks {
     entries: Vec<Entry>,
 }

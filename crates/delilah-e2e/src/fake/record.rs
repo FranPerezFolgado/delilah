@@ -32,6 +32,10 @@ pub struct Record {
     pub hooks: Vec<HookResult>,
     pub answers: Vec<Value>,
     pub inputs: Vec<String>,
+    /// Chat mode: each `can_use_tool` asked and the `control_response` the daemon wrote
+    /// back (`{"tool", "input", "response"}`; `response` is null when none came).
+    #[serde(default)]
+    pub permissions: Vec<Value>,
     /// `None` while running, then the exit code.
     pub exited: Option<i32>,
 }
@@ -125,6 +129,7 @@ mod tests {
             }],
             answers: vec![json!({"q": "a"})],
             inputs: vec!["line".into()],
+            permissions: vec![],
             exited: None,
         }
     }

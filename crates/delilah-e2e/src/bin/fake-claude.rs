@@ -7,7 +7,7 @@ use std::process::exit;
 use delilah_e2e::fake::args::{FakeArgs, Mode};
 use delilah_e2e::fake::hooks::{Hooks, payload};
 use delilah_e2e::fake::record::Record;
-use delilah_e2e::fake::{run, scenario};
+use delilah_e2e::fake::{run, scenario, stream};
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -26,6 +26,35 @@ fn main() {
         .map(|p| p.display().to_string())
         .unwrap_or_default();
     let task = hooks.task();
+    if args.stream {
+        // Chat mode: the scenario is picked from the first message on stdin.
+        let mut record = Record {
+            args: argv,
+            mode: match args.mode {
+                Mode::New => "new",
+                Mode::Resume => "resume",
+            }
+            .to_string(),
+            session_id: args.session_id.clone(),
+            task,
+            cwd,
+            env: std::env::vars().collect(),
+            settings: args.settings.display().to_string(),
+            prompt: None,
+            scenario: String::new(),
+            steps_done: 0,
+            hooks: vec![],
+            answers: vec![],
+            inputs: vec![],
+            permissions: vec![],
+            exited: None,
+        };
+        let mut input = BufReader::new(std::io::stdin());
+        let mut out = std::io::stdout();
+        let code = stream::run(&mut record, &hooks, Some(&fake_dir), &mut input, &mut out);
+        let _ = out.flush();
+        exit(code);
+    }
     let (name, scenario) =
         match scenario::select(&fake_dir, args.prompt.as_deref(), task.as_deref()) {
             Ok(s) => s,
@@ -56,6 +85,7 @@ fn main() {
         hooks: vec![],
         answers: vec![],
         inputs: vec![],
+        permissions: vec![],
         exited: None,
     };
     let mut input = BufReader::new(std::io::stdin());

@@ -190,10 +190,10 @@ fn env_home(fake_dir: &Path) -> Option<std::path::PathBuf> {
 /// dashes>/<session>.jsonl`; the daemon passes `--resume` only if that file exists
 /// (`claude::has_conversation`). Written only when the record's `HOME` is absolute and
 /// is the Env's own temp home (`<fake_dir>/../home`), so the fake can never touch a
-/// real home; otherwise nothing is written.
-fn write_transcript(record: &Record, fake_dir: Option<&Path>) {
+/// real home; otherwise nothing is written. Returns the file's path when it is there.
+pub fn write_transcript(record: &Record, fake_dir: Option<&Path>) -> Option<std::path::PathBuf> {
     let (Some(home), Some(fake_dir)) = (record.env.get("HOME"), fake_dir) else {
-        return;
+        return None;
     };
     let home = Path::new(home);
     let id = &record.session_id;
@@ -203,13 +203,13 @@ fn write_transcript(record: &Record, fake_dir: Option<&Path>) {
         || id.contains('\\')
         || id.contains("..")
     {
-        return;
+        return None;
     }
     let (Ok(got), Some(want)) = (home.canonicalize(), env_home(fake_dir)) else {
-        return;
+        return None;
     };
     if want.canonicalize().ok().as_ref() != Some(&got) {
-        return;
+        return None;
     }
     let cwd = Path::new(&record.cwd);
     let dir = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
@@ -219,12 +219,14 @@ fn write_transcript(record: &Record, fake_dir: Option<&Path>) {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     let dir = got.join(".claude/projects").join(folder);
-    if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join(format!("{id}.jsonl")));
-    }
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join(format!("{id}.jsonl"));
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
+    Some(path)
 }
 
 /// Plays `scenario` and returns the exit code. `record` must already hold the
@@ -364,6 +366,7 @@ mod tests {
             hooks: vec![],
             answers: vec![],
             inputs: vec![],
+            permissions: vec![],
             exited: None,
         }
     }
@@ -474,7 +477,10 @@ mod tests {
         let fake = root.path().join("fake");
         run(
             &mut rec,
-            &Scenario { steps: vec![] },
+            &Scenario {
+                steps: vec![],
+                turns: vec![],
+            },
             &hooks,
             Some(&fake),
             &mut Cursor::new(vec![]),

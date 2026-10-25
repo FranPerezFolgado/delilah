@@ -18,7 +18,7 @@ test("answering an ask card in the inbox clears it and the task works again", as
   const dialog = page.getByRole("dialog", { name: "New task" });
   await dialog.getByRole("radio", { name: "Free task" }).click();
   await dialog.getByPlaceholder("Try a rates cache in svc-billing").fill(title);
-  await dialog.getByRole("combobox").selectOption({ label: `${p.name} · repo` });
+  await dialog.getByRole("combobox", { name: /^Project/ }).selectOption({ label: `${p.name} · repo` });
   await dialog.getByRole("button", { name: "Start" }).click();
   await expect(dialog).toBeHidden();
 
