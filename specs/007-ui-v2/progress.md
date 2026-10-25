@@ -28,7 +28,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-19 | 3 | 3B | done | 1 | c1e9df2 | Kit: lists, overlays, feedback |
 | WP-20 | 3 | 3B | done | 1 | 2f75ab4 | Kit: status components |
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
-| WP-22 | 3 | 3C | implementing | 1 |  | Kit barrel |
+| WP-22 | 3 | 3C | done | 1 |  | Kit barrel |
 | WP-23 | 4 | 4A | done | 1 | 48806d0 | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | implementing | 1 |  | Logs view, statusbar, disconnected banner |
 | WP-25 | 4 | 4B | implementing | 1 |  | Sidebar rewrite |
@@ -36,7 +36,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-27 | 4 | 4D | pending | 0 | | E2E selectors for the shell |
 | WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
 | WP-29 | 5 | 5A | implementing | 1 |  | Header controls and tabs |
-| WP-30 | 5 | 5A | done | 1 |  | Cambios, PR and setup panels |
+| WP-30 | 5 | 5A | done | 1 | 7220728 | Cambios, PR and setup panels |
 | WP-31 | 5 | 5B | pending | 0 | | Task header |
 | WP-32 | 5 | 5B | implementing | 1 |  | Task tab |
 | WP-33 | 5 | 5B | pending | 0 | | Chat tab |
@@ -45,11 +45,11 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | implementing | 1 |  | Bandeja |
 | WP-38 | 6 | 6A | done | 1 | 8b4f80a | First run and board |
-| WP-39 | 6 | 6A | pending | 0 | | Jira |
+| WP-39 | 6 | 6A | implementing | 1 |  | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
-| WP-43 | 7 | 7A | pending | 0 | | ProposalCard, delete task, Quick Open |
+| WP-43 | 7 | 7A | implementing | 1 |  | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | pending | 0 | | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | pending | 0 | | Nueva tarea dialog |
@@ -80,3 +80,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 6 | WP-38 | HIGH | Board PR chips need `PrSummary.number` and Hecha cards need the task's finished date: neither exists in the API. Add both (daemon + api.ts) in a fix package, then wire `BoardView` props in App.tsx (WP-26 shell). | crates/delilah-daemon, app/src/api.ts, app/src/App.tsx |
 | 6 | WP-38 | LOW | «Responder» English key shadowed by legacy.ts merge order (harmless); clean in WP-55. | app/src/i18n/en |
 | 7 | WP-42 | HIGH | `whereOf()` still falls back to "worktree" when unset (asserted in phases.test.ts); decision: unset = checkout. Fix whereOf + test in WP-47 (Backlog uses it). | whereOf file, app/src/phases.test.ts |
+| 5 | WP-30 | NOTE | WP-34 must wire `PrView onOpenTerminal`, `SetupBanner onOpenTerminal` and `onOpenSettings` in TaskScreen/TaskView; WP-36 e2e: PR `#n` moved into `.pr-chip`. Run vitest with `--no-cache` (stale glob for new en/ files). | app/src/components/TaskScreen.tsx |
