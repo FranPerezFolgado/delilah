@@ -46,6 +46,8 @@ export interface PreviewView {
 
 export interface Task {
   key: string;
+  /** When the task was created (RFC 3339). */
+  created_at?: string;
   title: string;
   project: string | null;
   workflow: string;
@@ -95,7 +97,7 @@ export interface SharedEntry {
 }
 
 export interface ProjectSettings {
-  /** null: not chosen, so a worktree. */
+  /** null: not chosen, so the checkout. */
   workspace: WorkspaceMode | null;
   /** Branch template (needs {ticket}); null: Delilah proposes a descriptive name. */
   branch: string | null;
@@ -262,6 +264,9 @@ export interface JiraIssue {
   url: string | null;
   /** Status of the Delilah task for this ticket, if any. */
   task_status?: string | null;
+  /** Children count; null for a sub-task itself. */
+  subtask_count?: number | null;
+  subtasks_done?: number | null;
 }
 
 export interface JiraConnect {
@@ -297,8 +302,14 @@ export interface Session {
   conversation: boolean;
   /** The saving-mode step it works on, if any. */
   step: Step | null;
-  /** "stream": a chat-mode session with no terminal. Absent: "pty". */
+  /** The live process's runtime, else the one it would launch with. "stream": chat mode, no terminal. */
   runtime?: "pty" | "stream";
+  /** What the next launch uses: `runtime_override`, else the task's chat mode. */
+  effective_runtime?: "pty" | "stream";
+  /** The stored per-session choice; null follows the task. */
+  runtime_override?: "pty" | "stream" | null;
+  last_activity_at?: string | null;
+  last_message?: string | null;
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -367,7 +378,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot" | "base-stale";
+  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot" | "base-stale" | "turn-done" | "pr-opened";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -441,6 +452,8 @@ export interface PermissionCardEntry extends CardBase {
   suggestion: unknown;
   /** The exact rule "allow always" would remember; null when there is none. */
   rule: string | null;
+  /** How it was answered; null while pending or when it ended without an answer. */
+  decision?: PermissionDecision | null;
 }
 
 export type PermissionDecision = "allow_once" | "allow_always" | "deny";
@@ -475,6 +488,8 @@ export interface ToolDetail {
 
 /** Something that waits on you, from any task. */
 export interface InboxItem {
+  /** `<kind>:<task>:<source>:<since ms>`; percent-encode it in a URL (`dismissInbox` does). */
+  id?: string;
   kind: InboxKind;
   task: string;
   title: string;
@@ -514,7 +529,15 @@ export interface FolderInspection {
   submodules: number;
 }
 
-export interface PrCheck { name: string; outcome: "pending" | "success" | "failure" | "neutral"; url: string | null }
+export interface PrCheck {
+  name: string;
+  outcome: "pending" | "success" | "failure" | "neutral";
+  url: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+export type MergeMethod = "merge" | "squash" | "rebase";
+export interface ReviewComment { author: string; path: string | null; line: number | null; body: string; at: string }
 export interface PrSnapshot {
   state: "open" | "merged" | "closed";
   draft: boolean;
@@ -525,6 +548,10 @@ export interface PrSnapshot {
   ci: "pending" | "success" | "failure" | "none";
   review_decision: "approved" | "changes-requested" | "review-required" | null;
   comments: number;
+  /** The newest 50. */
+  review_comments?: ReviewComment[];
+  /** What the repository allows; [] when unknown. */
+  merge_methods?: MergeMethod[];
 }
 export interface PullRequest {
   id: number;
@@ -551,6 +578,21 @@ export interface PrSummary {
   count: number;
 }
 
+/** The last run of a task's workspace setup (`GET …/setup`). */
+export interface SetupInfo {
+  command: string;
+  exit_code: number | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  cancelled: boolean;
+  timed_out: boolean;
+  tail: string;
+  log_bytes: number;
+}
+
+export interface Health { version: string; exe?: string | null; exe_mtime?: number | null; home: string }
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -568,6 +610,16 @@ export class ApiError extends Error {
   }
 }
 
+type RequestObserver = (ok: boolean, at: number) => void;
+const observers = new Set<RequestObserver>();
+
+/** Watches every request: `ok` is false on a network failure. Returns the unsubscribe. */
+export function onRequestResult(cb: RequestObserver): () => void {
+  observers.add(cb);
+  return () => void observers.delete(cb);
+}
+const notify = (ok: boolean) => observers.forEach((cb) => cb(ok, Date.now()));
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -576,8 +628,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: init?.body ? { "content-type": "application/json" } : undefined,
     });
   } catch {
+    notify(false);
     throw new ApiError(t("No se puede conectar con delilahd. ¿Está arrancado?"));
   }
+  notify(true);
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
@@ -588,7 +642,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: unknown = {}) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 
 export const api = {
-  health: () => request<{ version: string }>("/api/v1/health"),
+  health: () => request<Health>("/api/v1/health"),
+  reopen: (key: string) => post<Task>(`/api/v1/tasks/${key}/reopen`),
+  /** Merges a task's PR; `method` omitted: the daemon picks. */
+  mergePr: (key: string, id: number, method?: MergeMethod) =>
+    post<PullRequest>(`/api/v1/tasks/${key}/prs/${id}/merge`, method ? { method } : {}),
+  setupInfo: (key: string) => request<SetupInfo>(`/api/v1/tasks/${key}/setup`),
+  /** The whole setup log as text/plain, to open in a new tab or window. */
+  setupLogUrl: (key: string) => `${DAEMON_URL}/api/v1/tasks/${key}/setup/log`,
+  dismissInbox: (id: string) => post<null>(`/api/v1/inbox/${encodeURIComponent(id)}/dismiss`),
+  /** Dismisses every non-blocking item; returns their ids (for undo). */
+  clearInbox: () => post<{ ids: string[] }>("/api/v1/inbox/clear"),
+  restoreInbox: (ids: string[]) => post<null>("/api/v1/inbox/restore", { ids }),
+  jiraSubtasks: (key: string) => request<JiraIssue[]>(`/api/v1/jira/issues/${key}/subtasks`),
+  setSessionRuntime: (id: string, mode: "chat" | "terminal") => post<null>(`/api/v1/sessions/${id}/runtime`, { mode }),
   tasks: () => request<Task[]>("/api/v1/tasks"),
   events: (key: string) => request<EventRecord[]>(`/api/v1/tasks/${key}/events`),
   projects: () => request<Project[]>("/api/v1/projects"),

@@ -8,7 +8,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 079f3d3 | Setup guards |
-| WP-02 | 2 | 2A | implementing | 1 |  | Client read types and calls (api.ts) |
+| WP-02 | 2 | 2A | done | 1 |  | Client read types and calls (api.ts) |
 | WP-03 | 2 | 2A | implementing | 1 |  | Core events and created_at |
 | WP-04 | 2 | 2A | implementing | 1 |  | Route skeleton |
 | WP-05 | 2 | 2B | pending | 0 | | Pending permission waits; ended permission cards |
@@ -17,7 +17,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-08 | 2 | 2B | pending | 0 | | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | pending | 0 | | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | pending | 0 | | Setup failure detail and Jira subtasks |
-| WP-11 | 2 | 2B | done | 1 |  | Reveal in Finder (Tauri + platform.ts) |
+| WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |

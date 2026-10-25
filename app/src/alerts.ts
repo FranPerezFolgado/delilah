@@ -23,6 +23,8 @@ const SAYS: Record<InboxKind, string> = {
   "base-stale": "rama posiblemente atrasada",
   branch: "no se pudo crear la rama",
   autopilot: "autopiloto en pausa",
+  "turn-done": "terminó su turno",
+  "pr-opened": "PR abierta",
 };
 
 /** Coming back later than this does not jump anywhere: it is no longer "the" news. */

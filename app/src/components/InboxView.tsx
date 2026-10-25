@@ -29,6 +29,8 @@ const KINDS: Record<InboxKind, { label: string; icon: IconName; cls: string }> =
   "base-stale": { label: "Rama posiblemente atrasada", icon: "failed", cls: "c-pause" },
   branch: { label: "Rama sin crear", icon: "failed", cls: "c-err" },
   autopilot: { label: "Autopiloto en pausa", icon: "pause", cls: "c-pause" },
+  "turn-done": { label: "Terminó su turno", icon: "done", cls: "c-done" },
+  "pr-opened": { label: "PR abierta", icon: "review", cls: "c-done" },
 };
 
 interface Props {
