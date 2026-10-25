@@ -28,6 +28,7 @@ fn main() {
     #[cfg(not(debug_assertions))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
+        .invoke_handler(tauri::generate_handler![reveal_path])
         .menu(menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -108,6 +109,33 @@ fn main() {
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+/// Resolves `path` for «Mostrar en Finder»: canonicalised first (so `..` and symlinks are
+/// resolved before anything is judged), it must exist and lie under the canonical `$HOME`.
+fn validate_reveal(path: &str, home: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let home = home.canonicalize().map_err(|e| format!("home: {e}"))?;
+    let real = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(|e| format!("{path}: {e}"))?;
+    if real.starts_with(&home) {
+        Ok(real)
+    } else {
+        Err(format!("{path}: outside the home folder"))
+    }
+}
+
+/// Reveals a path in Finder. Refuses anything that is not under the user's home.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    let real = validate_reveal(&path, std::path::Path::new(&home))?;
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(real)
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| if s.success() { Ok(()) } else { Err(format!("open exited with {s}")) })
 }
 
 /// The usual macOS menus, minus "Close Window": in a terminal app Cmd+W closes the
@@ -194,4 +222,58 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         )?],
     )?;
     Menu::with_items(app, &[&app_menu, &edit, &window, &help])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_reveal;
+    use std::fs;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("delilah-reveal-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn plain_path_under_home_passes() {
+        let root = tmp("ok");
+        let home = root.join("home");
+        fs::create_dir_all(home.join("data")).unwrap();
+        let got = validate_reveal(home.join("data").to_str().unwrap(), &home).unwrap();
+        assert!(got.ends_with("data"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dotdot_out_of_home_is_refused() {
+        let root = tmp("dotdot");
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
+        let p = format!("{}/../other", home.display());
+        assert!(validate_reveal(&p, &home).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn symlink_pointing_outside_home_is_refused() {
+        let root = tmp("link");
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), home.join("link")).unwrap();
+        assert!(validate_reveal(home.join("link").to_str().unwrap(), &home).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_path_is_refused() {
+        let root = tmp("missing");
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        assert!(validate_reveal(home.join("nope").to_str().unwrap(), &home).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

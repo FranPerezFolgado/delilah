@@ -12,6 +12,14 @@ export async function pickFolder(title: string): Promise<string | null> {
   return typeof chosen === "string" ? chosen : null;
 }
 
+/** Reveals a file or folder in Finder («Mostrar en Finder»). The shell refuses anything
+ *  outside the user's home. No-op outside the desktop app. */
+export async function revealInFinder(path: string): Promise<void> {
+  if (!isDesktop) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("reveal_path", { path });
+}
+
 /** The count on the Dock icon; 0 clears it. */
 export async function setBadge(count: number): Promise<void> {
   if (!isDesktop) return;

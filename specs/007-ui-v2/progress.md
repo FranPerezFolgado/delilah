@@ -8,20 +8,20 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 079f3d3 | Setup guards |
-| WP-02 | 2 | 2A | pending | 0 | | Client read types and calls (api.ts) |
-| WP-03 | 2 | 2A | pending | 0 | | Core events and created_at |
-| WP-04 | 2 | 2A | pending | 0 | | Route skeleton |
+| WP-02 | 2 | 2A | implementing | 1 |  | Client read types and calls (api.ts) |
+| WP-03 | 2 | 2A | implementing | 1 |  | Core events and created_at |
+| WP-04 | 2 | 2A | implementing | 1 |  | Route skeleton |
 | WP-05 | 2 | 2B | pending | 0 | | Pending permission waits; ended permission cards |
-| WP-06 | 2 | 2B | pending | 0 | | Checkout is the default workspace |
+| WP-06 | 2 | 2B | implementing | 1 |  | Checkout is the default workspace |
 | WP-07 | 2 | 2B | pending | 0 | | created_at exposed and reopen |
 | WP-08 | 2 | 2B | pending | 0 | | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | pending | 0 | | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | pending | 0 | | Setup failure detail and Jira subtasks |
-| WP-11 | 2 | 2B | pending | 0 | | Reveal in Finder (Tauri + platform.ts) |
+| WP-11 | 2 | 2B | done | 1 |  | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
-| WP-15 | 3 | 3A | pending | 0 | | Token guards and v2 tokens |
+| WP-15 | 3 | 3A | implementing | 1 |  | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | pending | 0 | | Vocabulary, relative time, icons |
 | WP-17 | 3 | 3B | pending | 0 | | Rename old tokens in TSX |
 | WP-18 | 3 | 3B | pending | 0 | | Kit: controls |
