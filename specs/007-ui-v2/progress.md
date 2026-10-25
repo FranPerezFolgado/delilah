@@ -29,7 +29,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-20 | 3 | 3B | done | 1 | 2f75ab4 | Kit: status components |
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
 | WP-22 | 3 | 3C | implementing | 1 |  | Kit barrel |
-| WP-23 | 4 | 4A | implementing | 1 |  | Connection, breakpoints, sidebar shortcut |
+| WP-23 | 4 | 4A | done | 1 |  | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | pending | 0 | | Logs view, statusbar, disconnected banner |
 | WP-25 | 4 | 4B | pending | 0 | | Sidebar rewrite |
 | WP-26 | 4 | 4C | pending | 0 | | App shell |
@@ -51,7 +51,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-42 | 7 | 7A | implementing | 1 |  | WherePicker |
 | WP-43 | 7 | 7A | pending | 0 | | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | pending | 0 | | Projects and project view |
-| WP-45 | 7 | 7A | done | 1 |  | Settings and auto-update preference |
+| WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | pending | 0 | | Nueva tarea dialog |
 | WP-47 | 7 | 7B | pending | 0 | | Backlog task and project settings |
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |

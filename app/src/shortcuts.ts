@@ -14,7 +14,8 @@ export type ActionId =
   | "view-inbox"
   | "view-tasks"
   | "view-jira"
-  | "view-projects";
+  | "view-projects"
+  | "toggle-sidebar";
 
 export interface ActionDef {
   id: ActionId;
@@ -37,6 +38,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "view-tasks", label: "Ir a Tareas", group: "General", default: "Mod+1" },
   { id: "view-jira", label: "Ir a Jira", group: "General", default: "Mod+2" },
   { id: "view-projects", label: "Ir a Proyectos", group: "General", default: "Mod+3" },
+  { id: "toggle-sidebar", label: "Plegar barra lateral", group: "Ventana", default: "Mod+\\" },
 ];
 
 export type Bindings = Record<ActionId, string>;
