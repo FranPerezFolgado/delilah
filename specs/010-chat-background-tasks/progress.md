@@ -26,7 +26,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12 | 6 | 6B | done | 1 | b907202 | +sessions.rs (fallback token); any Init cancels held Stop |
 | WP-14 | 6 | 6B | done | 1 | 48410be | stop_task per running row after interrupt |
 | WP-16 | 6 | 6B | done | 1 | 76dea57 | |
-| WP-17 | 7 | 7A | done | 1 | f1e8492 | decision #87 |
+| WP-17 | 7 | 7A | done | 1 | f1e8492 | decision #88 |
 | WP-18 | 7 | 7B | done | 2 | 6fe29a1 | T058 pass; T059 pass after WP-18F (Detener re-run) |
 
 ## Open findings

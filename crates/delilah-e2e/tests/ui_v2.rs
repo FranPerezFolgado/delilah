@@ -118,7 +118,7 @@ fn a_pending_permission_makes_the_task_wait_and_the_answer_runs_it() {
     env.scenario(
         "perm",
         &json!({"turns": [[
-            {"tool": {"name": "Bash", "input": {"command": "ls -la"}, "output": "total 0"}},
+            {"tool": {"name": "Bash", "input": {"command": "ls -la"}, "output": "total 0", "auto": "ask"}},
             {"sleep_ms": 4000},
             {"say": {"text": "Hecho."}},
         ]]}),
@@ -756,7 +756,7 @@ fn a_session_with_a_turn_running_refuses_the_switch() {
     env.scenario(
         "busy2",
         &json!({"turns": [[
-            {"tool": {"name": "Bash", "input": {"command": "ls"}, "output": "x"}},
+            {"tool": {"name": "Bash", "input": {"command": "ls"}, "output": "x", "auto": "ask"}},
             {"sleep_ms": 3000},
             {"say": {"text": "ok"}},
         ]]}),

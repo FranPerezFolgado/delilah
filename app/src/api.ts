@@ -15,6 +15,8 @@ export type TaskStatus =
   // The workspace setup failed, was cancelled or interrupted; reason is the end of its output.
   | { type: "setup-failed"; reason: string };
 
+/** The `agent-permissions` preference: how task and project agents are launched. */
+export type AgentPermissions = "auto" | "default";
 /** The steps of a saving-mode task, each in its own session. */
 export type Step = "plan" | "implement" | "review";
 export type HandoffStage = "offered" | "saving" | "starting" | "failed" | "skipped";
@@ -786,6 +788,8 @@ export const api = {
     request<JiraIssue[]>(`/api/v1/jira/issues?who=${who}&progress=${progress}&sprint=${sprint}`),
   sessions: () => request<Session[]>("/api/v1/sessions"),
   preference: <T>(key: string) => request<T | null>(`/api/v1/preferences/${key}`),
+  // Rejects (400) a bad key, a value over 64 KiB, and for `agent-permissions` anything
+  // but "auto" | "default"; the stored value is kept.
   setPreference: (key: string, value: unknown) =>
     request<unknown>(`/api/v1/preferences/${key}`, { method: "PUT", body: JSON.stringify(value) }),
   openSession: (task: string, s: { kind: SessionKind; label?: string; prompt?: string }) =>
