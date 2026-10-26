@@ -12,10 +12,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04F | 2 | fix | done | 1 | b0a55dc | review fix: feature alias normalisation, projects.workflow migration; unknown workflow values now 400 |
 | WP-04F2 | 2 | fix | done | 1 | a5ba4b6 | 2nd fix round: UI autopilot check accepts "project" (interim until T037) |
 | WP-05 | 3 | 3A | done | 1 | 951e664 | +core workflow.rs, autopilot/api.rs; e2e autopilot+chat_permissions set preset per test (user); prompt+autopilot now 409 |
-| WP-06 | 4 | 4A | verified | 1 | 77f3857 | settings errors stay 422 (contract says 400); CLAUDE_CONFIG_DIR not honoured |
-| WP-07 | 4 | 4A | verified | 1 | | +legacy projects.workflow fallback fix (run.rs) |
-| WP-08 | 4 | 4A | verified | 1 | ecb0950 | SkillPicker {project,value,onChange}; start_message optional in TS |
-| WP-09 | 4 | 4B | verified | 1 | f1b269f | +SkillPicker onSkills callback |
+| WP-06 | 4 | 4A | done | 1 | 77f3857 | settings errors stay 422 (contract says 400); CLAUDE_CONFIG_DIR not honoured |
+| WP-07 | 4 | 4A | done | 1 | 225e616 | +legacy projects.workflow fallback fix (run.rs) |
+| WP-08 | 4 | 4A | done | 1 | ecb0950 | SkillPicker {project,value,onChange}; start_message optional in TS |
+| WP-09 | 4 | 4B | done | 1 | f1b269f | +SkillPicker onSkills callback |
 | WP-10 | 5 | 5A | pending | 0 | | |
 | WP-11 | 5 | 5A | pending | 0 | | |
 | WP-12 | 6 | 6A | pending | 0 | | |
@@ -51,3 +51,23 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | spec | MEDIUM | data-model table says request workflow project/feature → task's stored choice; code maps to Project (matches FR-007 "follow the project's workflow"); fix the table (→ WP-15) | data-model.md, run.rs ~L334 |
 | 3 | spec | LOW | backlog/CLI free LIBRE-n task now gets /feature <title> instead of /feature LIBRE-n (R4, deliberate); note in docs (→ WP-15) | run.rs |
 | 3 | spec | LOW | workflow prompt without prompt accepted if stored message; typed prompts now rendered as templates; misplaced doc comment | run.rs ~L335, e2e chat_permissions.rs:21 |
+| 4 | orchestrator | LOW | conversation::tests::a_message_sent_while_a_card_is_pending_is_queued failed once during WP-06, passes 3/3 and in WP-07's full run: likely flaky | crates/delilah-daemon/src/conversation.rs |
+| 4 | architecture | MEDIUM | "nothing" start fakes WaitingForUser with Event::AgentAsked inferred from launch_prompt/restore; `?` on that transition fails the start after spawn; prefer an explicit starts_idle / initial status | crates/delilah-daemon/src/run.rs:1010 |
+| 4 | architecture | MEDIUM | presets duplicated by hand in UI and daemon (review text, /feature, /orchestrate); speckit-official only in UI; serve from daemon or add a shared-fixture test | app/src/workflowPresets.ts:11, crates/delilah-daemon/src/lang.rs:40 |
+| 4 | architecture | LOW | legacy projects.workflow column now has no effect on new tasks; mark deprecated + record in decisions/status (WP-15) | crates/delilah-daemon/src/run.rs:326, projects.rs default_workflow |
+| 4 | architecture | LOW | skills handler reads $HOME itself instead of Config; test depends on real home ("zz-test-skill") | crates/delilah-daemon/src/projects.rs:346 |
+| 4 | architecture | LOW | SkillPicker fetches and reports skills upward (onSkills); fetch once in WorkflowEditor/useSkills and pass down (relevant for WP-11's three pickers) | app/src/components/SkillPicker.tsx:14 |
+| 4 | contract | MEDIUM | contracts/api.md says settings errors are 400 `{errors}`; code and client use 422 `{error, fields}` — fix the doc, keep 422 (WP-15) | specs/011-configurable-task-start/contracts/api.md |
+| 4 | contract | MEDIUM | PUT settings is whole-replace: an old client without `workflow` resets a configured workflow to builtin; keep it when the key is absent, or document | crates/delilah-daemon/src/projects.rs:154 |
+| 4 | contract | LOW | CLAUDE_CONFIG_DIR not honoured; spec fixes ~/.claude — note it as deliberate in research.md (WP-15) | crates/delilah-daemon/src/skills.rs |
+| 4 | contract | LOW | no daemon-level tests for workflow.placeholder_not_allowed / unbalanced_brace; unknown_placeholder message omits {spec_dir} for implement | crates/delilah-daemon/src/projects.rs:262 |
+| 4 | contract | LOW | HOME unset → scans relative .claude in daemon cwd; return project skills only | crates/delilah-daemon/src/projects.rs:347 |
+| 4 | contract | LOW | same-name skill listed once per source: check SkillPicker React keys | app/src/components/SkillPicker.tsx |
+| 4 | security | LOW | top-level .claude / skills / commands dirs and plugin installPath can be symlinks and are scanned outside the tree; check symlink_metadata before read_dir | crates/delilah-daemon/src/skills.rs:145 |
+| 4 | security | LOW | entry cap is per folder over 6 levels; add a global budget per list() call | crates/delilah-daemon/src/skills.rs:112 |
+| 4 | ui-verifier | MEDIUM | skill descriptions come back as ">" for YAML folded/literal descriptions (e.g. adr, adr-audit): frontmatter parser doesn't handle `>`/`|` blocks | crates/delilah-daemon/src/skills.rs |
+| 4 | ui-verifier | LOW | no browser tool in the run: US2 checked via API + unit tests only; error placement, warning and preset clicks need a visual pass (WP-16) | app/src/components/WorkflowEditor.tsx |
+| 4 | spec-compliance | MEDIUM | message/builtin start with a Jira key still appends "(the Jira ticket is at …/ticket.md)"; US2 AC2 expects `/fix PROJ-12` + notes pointer only — exempt message templates or amend the spec | crates/delilah-daemon/src/run.rs:831 |
+| 4 | spec-compliance | LOW | skills.rs skips symlinked skills (dotfile-managed ~/.claude/skills/* won't list); undocumented — record in decisions (WP-15) | crates/delilah-daemon/src/skills.rs:114 |
+| 4 | spec-compliance | LOW | WorkflowEditor help mentions only {ticket}; US2 says {ticket} and {title} ({task} valid too) | app/src/components/WorkflowEditor.tsx |
+| 4 | spec-compliance | LOW | after a "nothing" start the live session stays Starting while the task is WaitingForUser; transcript reports "pending" | crates/delilah-daemon/src/run.rs:1010 |
