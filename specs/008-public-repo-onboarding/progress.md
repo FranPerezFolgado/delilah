@@ -16,7 +16,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-08 | 3 | 3C | pending | 0 | | |
 | WP-10 | 4 | 4A | verified | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
 | WP-12 | 4 | 4A | implementing | 0 | | |
-| WP-11 | 4 | 4B | implementing | 0 | | |
+| WP-11 | 4 | 4B | verified | 1 | 842a9a7 | not verifiable until next tag; actions pinned by tag like the rest |
 | WP-13 | 4 | 4B | pending | 0 | | |
 | WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
 | WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
