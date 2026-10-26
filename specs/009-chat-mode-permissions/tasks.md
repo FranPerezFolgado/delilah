@@ -35,7 +35,7 @@ the current code. Record the failing run in `progress.md` before implementing.
 
 **Purpose**: confirm, against the real CLI, the behaviour every later task relies on.
 
-- [ ] T001 Extend `crates/delilah-agents/examples/claude_stream_spike.rs`:
+- [X] T001 Extend `crates/delilah-agents/examples/claude_stream_spike.rs`:
   - add a `--permission-mode <mode>` option, passed through to every `claude` it starts,
     PTY and stream;
   - add a `routine` scenario with `--permission-prompt-tool stdio` and a fresh
@@ -54,7 +54,7 @@ the current code. Record the failing run in `progress.md` before implementing.
     (`system/permission_denied`), or ran.
   - update the `//!` usage docs, and keep `cargo build -p delilah-agents --examples`
     green.
-- [ ] T002 Run the spike from a plain terminal (it spends tokens):
+- [X] T002 Run the spike from a plain terminal (it spends tokens):
   - `routine` with no mode, and `routine --permission-mode auto`;
   - one PTY run with no flag, to read the `permissionMode` it reports (the terminal
     baseline);

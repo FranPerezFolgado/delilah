@@ -42,6 +42,19 @@ answered every `can_use_tool` with deny and counted them.
     code and stderr), which FR-008 depends on;
   - that a terminal session with no flag reports auto, as the parity baseline.
 
+- **Spike result (2026-10-26, T002)**: confirmed, see
+  [the spike record](../../docs/spikes/2026-10-26-chat-permission-mode.md). Under the
+  chat-mode startup, no flag gives 11 of 11 `can_use_tool` asks; `--permission-mode
+  auto` gives 0 asks and 0 `permission_denied`, everything ran. A PTY with no flag
+  reports `permission_mode: "auto"` in its hook payloads (the baseline). Seven control
+  candidates (`rm -rf` canary, force push, write outside the workspace, `sudo -n`,
+  `curl | sh` twice, `rm -rf .git`) were all allowed in auto: none escalated, neither
+  as `can_use_tool` nor as `permission_denied`. A deny shows up as `tool_result`
+  `is_error` with the message given. An invalid mode exits 1 with `error: option
+  '--permission-mode <mode>' argument 'bogus' is invalid. Allowed choices are
+  acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.` on stderr; "auto
+  unavailable" could not be reproduced.
+
 ## R2. Where the terminal's "auto" comes from
 
 - `~/.claude/settings.json` has no `permissions.defaultMode`.
