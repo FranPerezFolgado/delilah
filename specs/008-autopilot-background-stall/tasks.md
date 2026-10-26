@@ -122,8 +122,8 @@ waits and no nudge or pause.
 
 **Independent Test**: T010 fails on the code from before T011–T012 and passes after.
 
-- [ ] T015 [US3] Prove SC-003. Check out the branch at the commit before T011 into a temporary worktree (`git worktree add`, then remove it), or revert T011–T012 locally without committing, and run `cargo test -p delilah-e2e --test autopilot autopilot_waits_on_background_work`. Confirm it fails with the nudge or pause, then confirm it passes on the branch head. Record both outcomes in `specs/008-autopilot-background-stall/progress.md`.
-- [ ] T016 [P] [US3] Check that the fixtures and the scenarios written by T001, T010 and T014 hold only field names and neutral values. That means no prompts, assistant messages, real ids, user paths or repo names: grep `crates/delilah-daemon/tests/fixtures/hooks/` and `crates/delilah-e2e/tests/autopilot.rs` for `/Users/`, `LIBRE-`, `PROJ-` and hex ids longer than 8 characters. Fix any hit.
+- [X] T015 [US3] Prove SC-003. Check out the branch at the commit before T011 into a temporary worktree (`git worktree add`, then remove it), or revert T011–T012 locally without committing, and run `cargo test -p delilah-e2e --test autopilot autopilot_waits_on_background_work`. Confirm it fails with the nudge or pause, then confirm it passes on the branch head. Record both outcomes in `specs/008-autopilot-background-stall/progress.md`.
+- [X] T016 [P] [US3] Check that the fixtures and the scenarios written by T001, T010 and T014 hold only field names and neutral values. That means no prompts, assistant messages, real ids, user paths or repo names: grep `crates/delilah-daemon/tests/fixtures/hooks/` and `crates/delilah-e2e/tests/autopilot.rs` for `/Users/`, `LIBRE-`, `PROJ-` and hex ids longer than 8 characters. Fix any hit.
 
 ---
 
