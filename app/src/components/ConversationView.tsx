@@ -309,6 +309,7 @@ export function ConversationView({
                 entry={e}
                 sessionId={id}
                 onOpenFile={onOpenFile ?? noop}
+                subagent={progress?.subagents.find((s) => s.tool_use_id === e.tool_use_id) ?? null}
               />
             );
           if (e.kind === "marker") {

@@ -78,10 +78,10 @@ self-started handling for its ending; both are kept separate so US4 can ship alo
 
 **Independent Test**: quickstart US2.
 
-- [ ] T026 [P] [US2] Write failing tests in `app/src/components/ToolCard.test.tsx`: an `Agent` card with a `subagent` prop (`state: running`) shows "en curso", a clock, "3 pasos" and the latest step; expanded it lists `recent` and "(+K anteriores)" when `steps > recent.length`; `completed` shows "Hecho · N pasos · M min", `failed` "Fallido"; without the prop it renders as today
-- [ ] T027 [US2] Implement T026 in `app/src/components/ToolCard.tsx` (+ `ToolCard.css`, English texts in `app/src/i18n/en/` for ToolCard strings, following the per-component file convention)
-- [ ] T028 [US2] Write failing tests in `app/src/components/ConversationView.test.tsx`: each Agent card gets the `progress.subagents` entry with its `tool_use_id`; two parallel sub-agents each show only their own steps; socket updates reach the right card
-- [ ] T029 [US2] Implement T028 in `app/src/components/ConversationView.tsx`
+- [X] T026 [P] [US2] Write failing tests in `app/src/components/ToolCard.test.tsx`: an `Agent` card with a `subagent` prop (`state: running`) shows "en curso", a clock, "3 pasos" and the latest step; expanded it lists `recent` and "(+K anteriores)" when `steps > recent.length`; `completed` shows "Hecho · N pasos · M min", `failed` "Fallido"; without the prop it renders as today
+- [X] T027 [US2] Implement T026 in `app/src/components/ToolCard.tsx` (+ `ToolCard.css`, English texts in `app/src/i18n/en/` for ToolCard strings, following the per-component file convention)
+- [X] T028 [US2] Write failing tests in `app/src/components/ConversationView.test.tsx`: each Agent card gets the `progress.subagents` entry with its `tool_use_id`; two parallel sub-agents each show only their own steps; socket updates reach the right card
+- [X] T029 [US2] Implement T028 in `app/src/components/ConversationView.tsx`
 
 **Checkpoint**: US1 + US2 work in a preview.
 

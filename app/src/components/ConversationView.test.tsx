@@ -481,6 +481,38 @@ describe("ConversationView chat mode", () => {
     expect(container.querySelector("[data-testid=working-indicator]")).toBeNull();
   });
 
+  it("gives each Agent card its own sub-agent progress, loaded and from the socket", async () => {
+    const sa = (id: string, steps: string[]) => ({
+      tool_use_id: id,
+      description: "d",
+      state: "running" as const,
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      steps: steps.length,
+      recent: steps.map((summary) => ({ tool: "Read", summary, at: "" })),
+    });
+    const agent = (id: string, at: string) => tool("t:" + id, at, { tool: "Agent", tool_use_id: id, summary: "Agente " + id });
+    vi.spyOn(api, "conversation").mockResolvedValue(
+      conv([agent("a1", "2025-01-01T00:00:01Z"), agent("a2", "2025-01-01T00:00:02Z")], {
+        progress: { turn: null, background: [], subagents: [sa("a1", ["uno-a"]), sa("a2", ["uno-b", "dos-b"])] },
+      }),
+    );
+    const { container, findAllByRole } = render(
+      <ConversationView session={session({ runtime: "stream", state: "working" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findAllByRole("group");
+    const heads = () => [...container.querySelectorAll(".tool-head")].map((h) => h.textContent!);
+    expect(heads()[0]).toContain("1 paso");
+    expect(heads()[0]).toContain("uno-a");
+    expect(heads()[1]).toContain("2 pasos");
+    expect(heads()[1]).toContain("dos-b");
+    expect(heads()[0]).not.toContain("-b");
+    FakeSocket.last.push({ progress: { turn: null, background: [], subagents: [sa("a1", ["uno-a", "nuevo-a"]), sa("a2", ["uno-b", "dos-b"])] } });
+    expect(heads()[0]).toContain("2 pasos");
+    expect(heads()[0]).toContain("nuevo-a");
+    expect(heads()[1]).not.toContain("nuevo-a");
+  });
+
   it("renders nothing for unknown and background-done markers", async () => {
     const mk = (id: string, marker: string) => ({ id, at: "2025-01-01T00:00:00Z", kind: "marker", marker }) as unknown as ConversationEntry;
     vi.spyOn(api, "conversation").mockResolvedValue(conv([mk("m1", "stopped"), mk("m2", "background-done"), mk("m3", "weird")]));
