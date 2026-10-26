@@ -576,6 +576,19 @@ describe("ConversationView chat mode", () => {
     expect(m.textContent).toContain('Background command "sleep 5" completed');
   });
 
+  it("renders a background-done marker with background info as a BackgroundDoneItem row", async () => {
+    const e = {
+      id: "m1", at: "2025-01-01T00:00:00Z", kind: "marker", marker: "background-done",
+      background: { source: "notification", kind: "agent", status: "completed", label: "WP-07 update", tool_uses: 2 },
+    } as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([e]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText(/Subagente terminado/);
+    expect(container.querySelector(".bg-done")!.textContent).toContain("WP-07 update · 2 herramientas");
+  });
+
   it("keeps the old activity line without progress", async () => {
     vi.spyOn(api, "conversation").mockResolvedValue(conv([], { activity: "old line" }));
     const { findByText, queryByTestId } = render(

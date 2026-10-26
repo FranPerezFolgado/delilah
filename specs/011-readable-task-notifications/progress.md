@@ -10,7 +10,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-03 | 2 | 2A | verified | 1 | | |
 | WP-04 | 2 | 2A | verified | 1 | | |
 | WP-05 | 3 | 3A | implementing | 0 | | |
-| WP-06 | 3 | 3A | implementing | 0 | | |
+| WP-06 | 3 | 3A | verified | 1 | | also edited i18n/en/ConversationView.ts (stale key moved), allowed |
 | WP-07 | 4 | 4A | pending | 0 | | |
 | WP-08 | 4 | 4A | pending | 0 | | |
 | WP-09 | 5 | 5A | pending | 0 | | |

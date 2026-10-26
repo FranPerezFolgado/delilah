@@ -1,0 +1,5 @@
+.bg-done { align-self: center; display: flex; align-items: baseline; gap: 6px; max-width: 100%; font-size: 12px; }
+.bg-done-icon { flex: none; }
+.bg-done-text { min-width: 0; overflow-wrap: anywhere; }
+.bg-done.ok .bg-done-icon { color: var(--ok-tx); }
+.bg-done.warn { color: var(--wait-tx); }

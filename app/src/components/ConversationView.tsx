@@ -10,6 +10,7 @@ import {
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
+import { BackgroundDoneItem } from "./BackgroundDoneItem";
 import { BackgroundStrip } from "./BackgroundStrip";
 import { Markdown } from "./Markdown";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -318,11 +319,11 @@ export function ConversationView({
           if (e.kind === "marker") {
             // Unknown markers show nothing.
             if (e.marker !== "compacted" && e.marker !== "stopped" && e.marker !== "background-done") return null;
+            if (e.marker === "background-done") return <BackgroundDoneItem key={e.id} entry={e} complete={conv.complete} />;
             return (
               <div key={e.id} className="conv-marker muted">
                 {e.marker === "compacted" && t("Conversación compactada")}
                 {e.marker === "stopped" && t("Detenida: detuviste a Claude.")}
-                {e.marker === "background-done" && (e.detail ? `${t("Tarea en segundo plano terminada")} · ${e.detail}` : t("Tarea en segundo plano terminada"))}
               </div>
             );
           }
