@@ -27,20 +27,17 @@ impl Lang {
     }
 }
 
-/// The Mac's language: Spanish if its first choice is, English otherwise.
+/// The Mac's language: Spanish if its first choice is, English otherwise or when it
+/// cannot be read. `LANG` is not consulted: the contract's system language on macOS is
+/// `AppleLanguages`, and the daemon's `LANG` (often `C` or unset under launchd) says
+/// nothing about what the user picked.
 pub fn system() -> Lang {
-    let preferred = std::process::Command::new("defaults")
+    let out = std::process::Command::new("defaults")
         .args(["read", "-g", "AppleLanguages"])
         .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
-        .and_then(|out| out.split('"').nth(1).map(str::to_string))
-        .or_else(|| std::env::var("LANG").ok().map(|l| l.to_lowercase()));
-    match preferred {
-        Some(code) if code.starts_with("es") => Lang::Es,
-        Some(_) => Lang::En,
-        None => Lang::Es,
-    }
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    resolve(None, &out)
 }
 
 /// From the `language` preference's value.
@@ -52,13 +49,34 @@ pub fn from_setting(value: Option<&str>) -> Lang {
     }
 }
 
+/// The first entry of `defaults read -g AppleLanguages` output, e.g. `(\n "es-ES",\n "en-US"\n)`
+/// (entries may be unquoted), lowercased; empty when there is none.
+fn first_language(apple_languages: &str) -> String {
+    let trim = |c: char| c == '(' || c == ')' || c == '"' || c == ',' || c.is_whitespace();
+    let inner = apple_languages.trim_start_matches(trim);
+    let end = inner.find(|c: char| c == '"' || c == ',' || c == ')' || c.is_whitespace());
+    inner[..end.unwrap_or(inner.len())].to_lowercase()
+}
+
+/// The language rule (contracts/language.md): "es"/"en" are explicit; anything else
+/// follows the first AppleLanguages entry, `es*` being Spanish and anything else
+/// (empty, garbage) English.
+fn resolve(pref: Option<&str>, apple_languages: &str) -> Lang {
+    match pref {
+        Some("en") => Lang::En,
+        Some("es") => Lang::Es,
+        _ if first_language(apple_languages).starts_with("es") => Lang::Es,
+        _ => Lang::En,
+    }
+}
+
 /// The daemon's current language, shared and cheap to read.
 #[derive(Clone)]
 pub struct Current(Arc<AtomicBool>);
 
 impl Default for Current {
     fn default() -> Self {
-        Self(Arc::new(AtomicBool::new(false)))
+        Self(Arc::new(AtomicBool::new(true)))
     }
 }
 
@@ -79,6 +97,51 @@ impl Current {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_is_english() {
+        assert_eq!(Current::default().get(), Lang::En);
+    }
+
+    // The table of contracts/language.md, mirrored in app/src-tauri/src/daemon.rs and
+    // app/src/i18n.test.ts.
+    fn apple(first: &str) -> String {
+        format!("(\n    \"{first}\",\n    \"en-US\"\n)")
+    }
+
+    #[test]
+    fn explicit_preference_wins() {
+        for langs in [
+            apple("es-ES"),
+            apple("en-US"),
+            String::new(),
+            "garbage".into(),
+        ] {
+            assert_eq!(resolve(Some("en"), &langs), Lang::En);
+            assert_eq!(resolve(Some("es"), &langs), Lang::Es);
+        }
+    }
+
+    #[test]
+    fn other_preferences_follow_the_system() {
+        for pref in [None, Some("auto"), Some("fr")] {
+            for (langs, want) in [
+                (apple("es-ES"), Lang::Es),
+                (apple("es-419"), Lang::Es),
+                (apple("ES"), Lang::Es),
+                (apple("en-US"), Lang::En),
+                (apple("fr-FR"), Lang::En),
+                (apple("ja-JP"), Lang::En),
+                ("(\n    es,\n    \"en-US\"\n)".to_string(), Lang::Es),
+                ("(\n    en,\n    \"es-ES\"\n)".to_string(), Lang::En),
+                ("es-ES".to_string(), Lang::Es),
+                (String::new(), Lang::En),
+                ("not a plist".to_string(), Lang::En),
+            ] {
+                assert_eq!(resolve(pref, &langs), want, "{pref:?} {langs:?}");
+            }
+        }
+    }
 
     #[test]
     fn an_explicit_choice_wins_over_the_system() {

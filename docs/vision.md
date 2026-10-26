@@ -1,8 +1,7 @@
 # Vision: where Delilah is going
 
-This page summarises the original design sketch, the
-[Delilah design doc](https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204)
-of 2026-10-19, in Spanish, as far as it still applies. It covers what was planned
+This page is the public summary of the original design sketch
+of 2026-10-19, as far as it still applies. It covers what was planned
 but **is not built yet**. Where the sketch and the code disagree, the code and
 [decisions.md](decisions.md) win: hooks go in `--settings` rather than
 `.claude/settings.local.json`, and questions go through AskUserQuestion rather
@@ -20,14 +19,14 @@ PR per submodule, linked to each other and to the ticket.
 
 **More agents.** One `AgentAdapter` trait, with the methods `launch`, `send`,
 `resume`, `install_hooks`, `sync_context` and `read_usage`, and implementations
-for Claude Code, Codex and Pi.
-- **Connecting:** a structured protocol where the agent offers one (ACP, Claude's `stream-json`, Codex JSON), with the PTY as the universal fallback.
+for Claude Code and other coding agents.
+- **Connecting:** a structured protocol where the agent offers one (ACP, Claude's `stream-json`, other agents' JSON streams), with the PTY as the universal fallback.
 - **Agents without hooks:** their state would be read from OSC 7501 terminal sequences, as Orca does.
 - **Compatibility:** keep a matrix of agent versions, because these CLIs change every month.
 
 **Portable context.** One source of skills, instructions, MCP servers and commands,
 translated into each agent's format when the workspace is prepared:
-- `SKILL.md` is shared with Codex;
+- `SKILL.md` is shared across agents;
 - `CLAUDE.md` maps to `AGENTS.md`;
 - MCP config is written per agent.
 
@@ -77,7 +76,7 @@ one more client:
 - **Scope:** see, answer and approve. Destructive actions stay on the desktop.
 
 Proposed but not decided:
-- a Bandeja-first mobile scope;
+- an Inbox-first mobile scope;
 - QR pairing.
 
 The user still has to say:
@@ -90,4 +89,4 @@ The user still has to say:
 - Linux and Windows too, or macOS only? (This decides notifications and installers.)
 - Which other workflows come after SpecKit?
 - Is it worth integrating the company's own autonomous agent as one more agent?
-- Does RTK work with Codex and Pi, or only with Claude?
+- Does RTK work with other agents, or only with Claude?

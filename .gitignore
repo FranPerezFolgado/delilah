@@ -2,6 +2,7 @@
 /fixtures/
 .DS_Store
 .claude/settings.local.json
+CLAUDE.local.md
 /app/node_modules/
 /app/dist/
 /app/playwright-report/

@@ -821,6 +821,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         project_and_conversation(&app).await;
         app.store.delete_project("web").await.unwrap();
         app.store

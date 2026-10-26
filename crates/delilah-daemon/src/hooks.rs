@@ -360,6 +360,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
+        state.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         state
             .store
@@ -691,6 +692,7 @@ mod limit_tests {
             ..crate::config::Config::test_defaults()
         };
         let state = AppState::new(Store::in_memory().await.unwrap(), config);
+        state.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         state
             .store
