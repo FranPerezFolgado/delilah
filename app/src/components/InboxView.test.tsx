@@ -5,6 +5,7 @@ import { api, ApiError, type Handoff, type InboxItem, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import * as platform from "../platform";
 import { InboxView } from "./InboxView";
+import { ToastHost, clearToasts } from "./ui";
 
 const item: InboxItem = {
   kind: "pr-failed",
@@ -163,8 +164,8 @@ describe("InboxView handoff item", () => {
   });
 
   it("shows no buttons while saving", async () => {
-    const { findByText, queryByText } = show({ to: "implement", stage: "saving" });
-    await findByText(/sesión nueva/);
+    const { queryByText } = show({ to: "implement", stage: "saving" });
+    await waitFor(() => expect(document.querySelector(".ac-text")?.textContent).toMatch(/sesión nueva/));
     await Promise.resolve();
     expect(queryByText("Seguir aquí")).toBeNull();
     expect(queryByText("Reintentar")).toBeNull();
@@ -251,7 +252,7 @@ describe("InboxView base-stale", () => {
   it("shows the label and the text, with no PR actions", () => {
     viewStale();
     expect(screen.getByText("Branch may be behind")).toBeTruthy();
-    expect(screen.getByText("No se pudo actualizar r (sin red); se usó main")).toBeTruthy();
+    expect(document.querySelector(".ac-text")?.textContent).toBe("No se pudo actualizar r (sin red); se usó main");
     expect(screen.queryByText("View PR")).toBeNull();
     expect(screen.queryByText("Ask the agent to fix it")).toBeNull();
   });
@@ -307,7 +308,7 @@ describe("InboxView autopilot items", () => {
     const set = vi.spyOn(api, "setAutopilot").mockResolvedValue({} as Task);
     const onChanged = vi.fn();
     viewAp(onChanged);
-    expect(screen.getByText("The review keeps failing")).toBeTruthy();
+    expect(document.querySelector(".ac-text")?.textContent).toBe("The review keeps failing");
     fireEvent.click(screen.getByText("Resume autopilot"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(set).toHaveBeenCalledWith("PROJ-1", "resume");
@@ -318,5 +319,75 @@ describe("InboxView autopilot items", () => {
     viewAp();
     fireEvent.click(screen.getByText("Carry on by hand"));
     await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "off"));
+  });
+});
+
+describe("InboxView list and detail", () => {
+  const notice = (n: number, extra: Partial<InboxItem> = {}): InboxItem => ({
+    kind: "turn-done",
+    task: "PROJ-1",
+    title: "Reintentos",
+    session: null,
+    text: `Done ${n}`,
+    since: null,
+    id: `turn-done:PROJ-1:s${n}:${n}`,
+    ...extra,
+  });
+  const renderView = (items: InboxItem[], onChanged = () => {}) =>
+    render(<InboxView items={items} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("lists by task in a listbox and shows the count and the selected detail", () => {
+    renderView([notice(1), notice(2), notice(3, { task: "PROJ-2", title: "Otra" })]);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getAllByRole("option").length).toBe(3);
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("option")[2]);
+    expect(screen.queryByText("1 of 2")).toBeNull();
+    expect(screen.getAllByText("Done 3").length).toBeGreaterThan(1);
+  });
+
+  it("moves the selection with the arrow keys", () => {
+    renderView([notice(1), notice(2)]);
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    expect(screen.getAllByRole("option")[1].getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("dismisses a notice with Quitar", async () => {
+    const dis = vi.spyOn(api, "dismissInbox").mockResolvedValue(null);
+    const onChanged = vi.fn();
+    renderView([notice(1)], onChanged);
+    fireEvent.click(screen.getByText("Remove"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(dis).toHaveBeenCalledWith("turn-done:PROJ-1:s1:1");
+  });
+
+  it("offers no Quitar on a blocking notice", () => {
+    renderView([{ ...item, id: "pr-failed:PROJ-1:7:1" }]);
+    expect(screen.queryByText("Remove")).toBeNull();
+  });
+
+  it("clears the notices and undoes it from the toast", async () => {
+    clearToasts();
+    vi.spyOn(api, "clearInbox").mockResolvedValue({ ids: ["a", "b"] });
+    const restore = vi.spyOn(api, "restoreInbox").mockResolvedValue(null);
+    render(<><InboxView items={[notice(1)]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} /><ToastHost /></>);
+    fireEvent.click(screen.getByText("Clear notices"));
+    fireEvent.click(await screen.findByText("Undo"));
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(["a", "b"]));
+    clearToasts();
+  });
+
+  it("disables Limpiar avisos when only blocking items remain", () => {
+    renderView([{ ...item, id: "pr-failed:PROJ-1:7:1" }]);
+    expect((screen.getByText("Clear notices") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the empty state with the latest activity", async () => {
+    vi.spyOn(api, "sessions").mockResolvedValue([
+      { id: "s", task: "PROJ-9", last_activity_at: new Date().toISOString(), last_message: "ran tests" } as never,
+    ]);
+    renderView([]);
+    expect(screen.getByText("Nothing is waiting for you")).toBeTruthy();
+    expect(await screen.findByText(/Last activity: PROJ-9 · ran tests · just now/)).toBeTruthy();
   });
 });
