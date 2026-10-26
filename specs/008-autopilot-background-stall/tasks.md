@@ -34,21 +34,21 @@ parts share no files and run in parallel.
 
 ### Fake Claude (delilah-e2e)
 
-- [ ] T004 [P] Write tests in `crates/delilah-e2e/src/fake/scenario.rs` (tests module) for the new scenario format. The `stop` string form parses as before. The object form parses `message` plus an optional `background` list. A malformed `stop` (e.g. a number, or an object without `message`) is an error that names the step. The `write` step parses `path` and `content`. `select` prefers `<task>.<command>.json` (prompt `/feature KEY …` → `KEY.feature.json`, `/orchestrate specs/x` → `KEY.orchestrate.json`) over `<task>.json`, falls back to `<task>.json` when it is missing, and skips the lookup for a prompt with no leading `/word`. Run them and see them fail.
-- [ ] T005 Implement in `crates/delilah-e2e/src/fake/scenario.rs`:
+- [X] T004 [P] Write tests in `crates/delilah-e2e/src/fake/scenario.rs` (tests module) for the new scenario format. The `stop` string form parses as before. The object form parses `message` plus an optional `background` list. A malformed `stop` (e.g. a number, or an object without `message`) is an error that names the step. The `write` step parses `path` and `content`. `select` prefers `<task>.<command>.json` (prompt `/feature KEY …` → `KEY.feature.json`, `/orchestrate specs/x` → `KEY.orchestrate.json`) over `<task>.json`, falls back to `<task>.json` when it is missing, and skips the lookup for a prompt with no leading `/word`. Run them and see them fail.
+- [X] T005 Implement in `crates/delilah-e2e/src/fake/scenario.rs`:
   - `Step::Stop(StopStep)`, with `StopStep::{Text(String), Full { message: String, background: Option<Vec<serde_json::Value>> }}` and a deserializer whose error names the `stop` step;
   - `Step::Write { path: String, content: String }`;
   - the `<task>.<command>.json` lookup in `select` (`<command>` = the prompt's leading `/word` without the slash; the joined name must pass `valid_name`).
 
   Make T004 green.
-- [ ] T006 Write tests in `crates/delilah-e2e/src/fake/run.rs` (tests module, using the existing `settings`/`logged` helpers):
+- [X] T006 Write tests in `crates/delilah-e2e/src/fake/run.rs` (tests module, using the existing `settings`/`logged` helpers):
   - a `stop` object with `background` logs a `Stop` payload whose `background_tasks` equals the list and whose `last_assistant_message` is the message;
   - the string form logs no `background_tasks`;
   - `write` creates `specs/k-1-x/tasks.md` (parents included) under the fake's cwd with the content;
   - `write` with an absolute path, a `..` component or an empty path prints an error and exits 2.
 
   Run them and see them fail.
-- [ ] T007 Implement in `crates/delilah-e2e/src/fake/hooks.rs` `payload::stop_with(session, cwd, message, background: Option<&[Value]>)` (`payload::stop` delegates with `None`), and play `Step::Stop`/`Step::Write` in `crates/delilah-e2e/src/fake/run.rs`. Make T006 green and keep `cargo test -p delilah-e2e --lib` green.
+- [X] T007 Implement in `crates/delilah-e2e/src/fake/hooks.rs` `payload::stop_with(session, cwd, message, background: Option<&[Value]>)` (`payload::stop` delegates with `None`), and play `Step::Stop`/`Step::Write` in `crates/delilah-e2e/src/fake/run.rs`. Make T006 green and keep `cargo test -p delilah-e2e --lib` green.
 - [X] T008 [P] Update `specs/005-e2e-tests/contracts/fake-claude.md` with the delta in `specs/008-autopilot-background-stall/contracts/fake-claude.md`: the lookup order, the `stop` object form, and the `write` step; add `background_tasks` to the `Stop` row of the payload table.
 
 **Checkpoint**: `cargo test -p delilah-agents` and `cargo test -p delilah-e2e --lib` green.
