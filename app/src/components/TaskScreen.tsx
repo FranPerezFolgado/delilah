@@ -49,6 +49,8 @@ interface Props {
   onOpenTask?: (key: string) => void;
   /** Opens a project's settings (the setup command lives there). */
   onOpenSettings?: (project: string) => void;
+  /** All tasks: a project's screen lists its active ones. */
+  tasks?: Task[];
   /** The task's open sessions: each one is a tab. */
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
@@ -68,7 +70,7 @@ const WATCH_MS = 3000;
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
+export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -655,6 +657,8 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
             <ProjectView
               project={project}
               sessions={sessions}
+              tasks={tasks}
+              onOpenTask={onOpenTask}
               onOpenSession={showSession}
               onNewSession={newSession}
               onNewIdea={() => newSession("claude", undefined, undefined, true)}

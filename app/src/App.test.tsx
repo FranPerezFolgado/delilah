@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { DEFAULT_PROJECT_SETTINGS } from "./api";
 import { setLanguage } from "./i18n";
 
+const mocked = vi.hoisted(() => ({ tasks: [] as unknown[], projects: [] as unknown[], deleteTask: vi.fn() }));
 const conn = vi.hoisted(() => ({ status: "up" as "up" | "down", lastOk: null as number | null, retry: () => {} }));
 vi.mock("./connection", () => ({ useConnection: () => conn }));
-vi.mock("./live", () => ({ connect: () => () => {}, on: () => () => {} }));
+vi.mock("./live", () => ({ connect: (cb?: (c: boolean) => void) => { cb?.(false); return () => {}; }, on: () => () => {} }));
 vi.mock("./alerts", () => ({ useDesktopAlerts: () => {} }));
 vi.mock("./useUpdates", () => ({
   useUpdates: () => ({ state: { phase: "idle" }, dispatch: () => {}, meta: { installed: false }, check: () => {} }),
@@ -19,8 +21,9 @@ vi.mock("./api", async (orig) => {
     onRequestResult: () => () => {},
     api: {
       ...real.api,
-      tasks: empty,
-      projects: empty,
+      tasks: () => Promise.resolve(mocked.tasks),
+      deleteTask: mocked.deleteTask,
+      projects: () => Promise.resolve(mocked.projects),
       sessions: empty,
       inbox: empty,
       prSummaries: empty,
@@ -38,6 +41,9 @@ beforeEach(() => {
   setLanguage("es");
   localStorage.clear();
   conn.status = "up";
+  mocked.tasks = [];
+  mocked.projects = [];
+  mocked.deleteTask.mockReset();
 });
 afterEach(cleanup);
 
@@ -83,5 +89,24 @@ describe("App shell", () => {
     await mount();
     expect(document.querySelector(".shell-content")!.classList.contains("is-offline")).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("App delete from the sidebar", () => {
+  it("deletes after the sidebar's own confirmation, with no second dialog", async () => {
+    mocked.tasks = [
+      { key: "PROJ-2", title: "PROJ-2", project: "web", workflow: "feature", phase: null, saving_mode: false, title_source: "initial", previous_title: null, branch_error: null, handoff: null, status: { type: "running" } },
+    ];
+    mocked.projects = [{ name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS }];
+    localStorage.setItem("delilah:rail", "0");
+    mocked.deleteTask.mockResolvedValue(null);
+    await mount();
+    fireEvent.contextMenu(document.querySelector(".sb-taskrow")!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Eliminar tarea…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Eliminar tarea" }));
+    await act(async () => {});
+    expect(mocked.deleteTask).toHaveBeenCalledTimes(1);
+    expect(mocked.deleteTask).toHaveBeenCalledWith("PROJ-2");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

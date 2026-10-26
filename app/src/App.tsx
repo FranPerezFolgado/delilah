@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { api, baseStaleNotices, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { api, ApiError, baseStaleNotices, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
@@ -12,6 +12,7 @@ import { JiraView } from "./components/JiraView";
 import { NewTaskDialog, type TaskDraft } from "./components/NewTaskDialog";
 import { DeleteTaskDialog } from "./components/DeleteTaskDialog";
 import { BacklogTaskView } from "./components/BacklogTaskView";
+import { ProjectSettings } from "./components/ProjectSettings";
 import { ProjectsView } from "./components/ProjectsView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -82,6 +83,9 @@ export function App() {
   // A backlog task being started ("Empezar"), and one being deleted.
   const [starting, setStarting] = useState<Task | null>(null);
   const [deleting, setDeleting] = useState<Task | null>(null);
+  // A project's settings, opened from a task's setup banner.
+  const [settingsOf, setSettingsOf] = useState<string | null>(null);
+  const [addingProject, setAddingProject] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -192,6 +196,21 @@ export function App() {
 
 
 
+
+  /** The sidebar already confirmed: delete now, and only ask again when work would be lost. */
+  const deleteConfirmed = async (tk: Task) => {
+    try {
+      await api.deleteTask(tk.key);
+      if (selected === tk.key) {
+        setSelected(tk.project ? `@${tk.project}` : null);
+        if (!tk.project) setView("board");
+      }
+      refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.unpushed) setDeleting(tk);
+      else setToast((e as Error).message);
+    }
+  };
 
   /** Shows a task's screen, on one of its session tabs if given. */
   const openTask = (key: string, sessionId?: string) => {
@@ -347,11 +366,14 @@ export function App() {
               .catch((e) => setToast((e as Error).message))
           }
           onOpenIdeas={openIdeas}
-          onAddProject={() => setView("projects")}
+          onAddProject={() => {
+            setView("projects");
+            setAddingProject(true);
+          }}
           onDone={(tk) => api.done(tk.key).then(refresh).catch((e) => setToast((e as Error).message))}
           rail={rail}
           onToggleRail={toggleRail}
-          onDelete={setDeleting}
+          onDelete={deleteConfirmed}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
         <main className="shell-main">
@@ -387,9 +409,9 @@ export function App() {
               key={task.key}
               task={task}
               projects={projects}
-              onStart={(t) => {
-                setStarting(t);
-                setNewTask(true);
+              onOpen={(key) => {
+                setSelected(key);
+                refresh();
               }}
               onChanged={refresh}
             />
@@ -403,6 +425,7 @@ export function App() {
                   task={task}
                   spec={specs[owner]}
                   project={project}
+                  tasks={tasks}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && i.ask)}
                   notices={baseStaleNotices(inbox, owner)}
@@ -410,6 +433,7 @@ export function App() {
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
                   onOpenTask={(key) => openTask(key)}
+                  onOpenSettings={setSettingsOf}
                   onConvert={(s) => {
                     setConvertFrom(s);
                     setNewTask(true);
@@ -434,7 +458,14 @@ export function App() {
               }}
             />
           )}
-          {view === "projects" && <ProjectsView projects={projects} onChanged={refresh} />}
+          {view === "projects" && <ProjectsView
+              projects={projects}
+              tasks={tasks}
+              onChanged={refresh}
+              onOpenProject={(name) => openTask(`@${name}`)}
+              adding={addingProject}
+              onAddingChange={setAddingProject}
+            />}
           {view === "settings" && <SettingsView
               bindings={bindings}
               askPosition={askPosition}
@@ -500,6 +531,16 @@ export function App() {
             setDraft(undefined);
             refresh();
             notify(t("{key} guardada en el backlog de {project}", { key: saved.key, project: saved.project ?? "-" }));
+          }}
+        />
+      )}
+      {settingsOf && projects.some((p) => p.name === settingsOf) && (
+        <ProjectSettings
+          project={projects.find((p) => p.name === settingsOf)!}
+          onClose={() => setSettingsOf(null)}
+          onSaved={() => {
+            setSettingsOf(null);
+            refresh();
           }}
         />
       )}
