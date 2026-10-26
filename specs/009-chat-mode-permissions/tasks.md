@@ -296,7 +296,7 @@ after a relaunch.
   - that #43 is unchanged.
 - [X] T024 [P] `README.md`: the setting in the Ajustes or chat-mode section, as the user
   sees it.
-- [ ] T025 Verify in a preview, following `specs/009-chat-mode-permissions/quickstart.md`
+- [X] T025 Verify in a preview, following `specs/009-chat-mode-permissions/quickstart.md`
   (`scripts/preview.sh --fresh` in the background; never the installed app). Use the
   `ui-verifier` agent with these scenarios:
   - the setting shows Auto;

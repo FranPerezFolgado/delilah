@@ -14,12 +14,13 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 5 | 5A | done | 1 | | full suite green |
 | WP-07 | 6 | 6A | done | 1 | 7ac18fa | decision #80 |
 | WP-07F | 6 | 6F | done | 1 | | docs: permission_denied ignored, project-session hint |
-| WP-08 | 6 | 6B | implementing | 0 | | |
+| WP-08 | 6 | 6B | done | 1 | | preview: scenarios 2-4 pass via API/CLI with the real CLI; Ajustes UI not viewed (no browser), covered by vitest |
 
 ## Open findings
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 6 | ui-verifier | LOW | Ajustes control not checked in a browser (no browser tools); its rendering is covered by vitest only | app/src/components/SettingsView.tsx |
 | 5 | evidence | MEDIUM | daemon ignores `system/permission_denied` (no card, no pause, nothing shown); escalation channel under auto is unverified (spike found no escalating action) | crates/delilah-daemon |
 | 4 | spec-compliance | LOW | `deny` under "default" has no e2e | crates/delilah-e2e/tests/chat_permissions.rs |
 | 4 | spec-compliance | LOW | "null shows Auto" vitest passes even if the preference never loads (initial state is auto) | app/src/components/SettingsView.test.tsx |
@@ -68,3 +69,9 @@ T019: the fake's `auto` semantics (T009: `allow` runs without asking, `ask` rais
 - `cargo test --manifest-path app/src-tauri/Cargo.toml`: 4 passed. It first failed to build because the gitignored sidecar `app/src-tauri/binaries/delilahd-aarch64-apple-darwin` was missing; I copied `target/debug/delilahd` there (and made an empty `app/dist`), both gitignored.
 - `cd app && npx tsc --noEmit`: clean. `npx vitest run`: 83 files, 857 tests passed (permission-card, remembered-rule and autopilot-pause tests included, SC-004).
 - `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check`: clean.
+
+### WP-08 Preview (2026-10-26)
+Preview slot 1, fresh state, real Claude CLI. Scenario 1 (setting): API only. GET was null at first; PUT "default" and then "auto" were both stored. The UI was not viewed.
+Scenario 2 (Auto, chat): the task wrote, ran sed, ran ls and committed with no `permission` item. PASS.
+Scenario 3 (default, after a runtime switch): a `permission` item came back ("Bash: echo hi > notes2.txt"). PASS.
+Scenario 4 (PUT "bypassPermissions"): 400, and the stored value was unchanged. PASS.
