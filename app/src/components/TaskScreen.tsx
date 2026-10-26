@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
-import { sessionName } from "../chain";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
+import { sessionName } from "../chain";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
@@ -748,7 +748,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
           {closingSession && (
             <div className="ebar warn">
               <span className="ts-grow">
-                {t("Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.", { label: closingSession.label })}
+                {t("Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.", { label: sessionName(closingSession) })}
               </span>
               <button className="btn btn-p" onClick={() => close(sessionTab(closingSession.id), true)}>{t("Cerrar")}</button>
               <button className="btn btn-ghost" onClick={() => setClosingSession(null)}>{t("Cancelar")}</button>

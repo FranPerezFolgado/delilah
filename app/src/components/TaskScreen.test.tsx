@@ -182,6 +182,12 @@ describe("TaskScreen tabs", () => {
     expect(screen.queryByRole("button", { name: "Cerrar Revisión" })).toBeNull();
   });
 
+  it("names a live earlier phase session after its phase when asking to close it", () => {
+    taskScreen([sess("old", { step: "implement", label: "Implementación: Mi tarea" }), sess("new", { primary: true, step: "review" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar Implementación" }));
+    expect(screen.getByText(/Cerrar «Implementación» detiene ese Claude/)).not.toBeNull();
+  });
+
   it("keeps the own label of an extra Claude session with no step", () => {
     taskScreen([sess("a", { primary: true, step: "review" }), sess("b", { label: "Review", step: null })]);
     expect(labels()).toEqual(["Tarea", "Oficina", "Revisión", "Review", "PR"]);
