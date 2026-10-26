@@ -13,11 +13,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 3 | 3A | verified | 1 | 05691c8 | English seed via tr(); seed poll flaky once |
 | WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
 | WP-07 | 3 | 3B | verified | 1 | 38b6381 | 121 lines; includes T024 |
-| WP-08 | 3 | 3C | pending | 0 | | |
+| WP-08 | 3 | 3C | verified | 1 | 6f52dad | greps + lychee clean; CLI only from source |
 | WP-10 | 4 | 4A | verified | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
 | WP-12 | 4 | 4A | verified | 1 | 4edfd57 | decisions #79 #80 |
 | WP-11 | 4 | 4B | verified | 1 | 842a9a7 | not verifiable until next tag; actions pinned by tag like the rest |
-| WP-13 | 4 | 4B | implementing | 0 | | merged into the WP-07 run (same file) |
+| WP-13 | 4 | 4B | verified | 1 | 38b6381 | done in the WP-07 run (same file) |
 | WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
 | WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
 | WP-16 | 5 | 5A | implementing | 0 | | |
@@ -35,3 +35,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
 | 3 | implementer WP-04 | LOW | architecture.md quotes the deny reason and "session stopped" in English, but the daemon may emit them in Spanish | docs/architecture.md |
+| 4 | security | MEDIUM | release.yml grants contents/id-token/attestations write to the single job that also runs tauri-action with the signing key; actions pinned by mutable tag. Fix: pin by SHA, split build vs checksum/attest/publish jobs | .github/workflows/release.yml:13-16 |
+| 4 | security | LOW | DELILAH_BASE_URL override drops https/TLS flags (http accepted, no warning); add --proto '=https,file' and a warning | scripts/install.sh:11,75 |
+| 4 | security | LOW | no --proto-redir '=https', so redirects could downgrade | scripts/install.sh:73 |
+| 4 | security | LOW | SHA256SUMS comes from the same origin; docs should say attestation is the provenance check (optionally verify with gh if present) | scripts/install.sh:86-101 |
+| 4 | security | LOW | Delilah.app check uses -d (follows symlinks); add `! -L` (matters only with DELILAH_SKIP_CHECKSUM=1) | scripts/install.sh:105-110 |
+| 4 | security | LOW | predictable staging names .new-$$/.old-$$ in install dir; use mktemp -d | scripts/install.sh:136,144 |
+| 4 | security | LOW | "macOS will warn on first launch" isn't true for the script install (no quarantine) | SECURITY.md:47 |
+| 4 | security | LOW | on re-run, gh release download fetches a stale SHA256SUMS into dist and hashes/attests it; rm it after download | .github/workflows/release.yml:113-122 |
+| 4 | security | LOW | ci.yml has no permissions block; add contents: read | .github/workflows/ci.yml:3-12 |
