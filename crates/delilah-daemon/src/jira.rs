@@ -165,12 +165,29 @@ pub async fn issues(
     Ok(Json(rows))
 }
 
-/// `GET /jira/issues/{key}/subtasks`.
+/// `GET /jira/issues/{key}/subtasks`: every sub-task of the ticket, whoever has it.
 pub async fn subtasks(
-    State(_app): State<AppState>,
-    Path(_key): Path<String>,
+    State(app): State<AppState>,
+    Path(key): Path<String>,
 ) -> Result<Json<Vec<JiraIssue>>, ApiError> {
-    Err(ApiError::not_implemented())
+    use delilah_integrations::jira::JiraError;
+    // Unlike the other routes, a missing connection is a conflict here: a 404 is
+    // reserved for the ticket.
+    if app
+        .store
+        .setting::<JiraSettings>(SETTINGS_KEY)
+        .await?
+        .is_none()
+    {
+        return Err(ApiError::conflict("Jira is not connected yet"));
+    }
+    let (_, client) = client(&app).await?;
+    match client.subtasks(&key).await {
+        Ok(issues) => Ok(Json(issues)),
+        Err(e @ (JiraError::NotInSample(_) | JiraError::BadKey(_)))
+        | Err(e @ JiraError::Http { status: 404, .. }) => Err(ApiError::not_found(e.to_string())),
+        Err(e) => Err(ApiError::unprocessable(e.to_string())),
+    }
 }
 
 pub async fn issue(
@@ -371,6 +388,59 @@ mod tests {
         assert_eq!(subtask["subtask"], true);
         assert_eq!(subtask["parent"]["key"], "PROJ-1242");
         assert_eq!(subtask["epic"]["key"], "PROJ-1200");
+    }
+
+    #[tokio::test]
+    async fn subtasks_route_answers_200_404_and_409() {
+        let state = app().await;
+        let (status, _) = call(
+            &state,
+            "GET",
+            "/api/v1/jira/issues/PROJ-1242/subtasks",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "not connected");
+
+        call(
+            &state,
+            "PUT",
+            "/api/v1/jira",
+            Some(json!({ "mode": "sample" })),
+        )
+        .await;
+        let (status, kids) = call(
+            &state,
+            "GET",
+            "/api/v1/jira/issues/PROJ-1242/subtasks",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{kids}");
+        assert_eq!(kids.as_array().unwrap().len(), 2);
+        assert_eq!(kids[1]["assignee"], "Ana");
+
+        let (_, big) = call(
+            &state,
+            "GET",
+            "/api/v1/jira/issues/PROJ-1244/subtasks",
+            None,
+        )
+        .await;
+        assert_eq!(big.as_array().unwrap().len(), 20);
+
+        let (status, _) = call(&state, "GET", "/api/v1/jira/issues/NOPE-1/subtasks", None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (_, rows) = call(&state, "GET", "/api/v1/jira/issues", None).await;
+        let parent = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["key"] == "PROJ-1242")
+            .unwrap();
+        assert_eq!(parent["subtask_count"], 2);
+        assert_eq!(parent["subtasks_done"], 0);
     }
 
     #[tokio::test]

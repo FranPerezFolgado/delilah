@@ -16,7 +16,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-07 | 2 | 2B | implementing | 1 |  | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | implementing | 1 |  | PR check times, review comments, merge |
-| WP-10 | 2 | 2B | implementing | 1 |  | Setup failure detail and Jira subtasks |
+| WP-10 | 2 | 2B | done | 1 |  | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
@@ -39,7 +39,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-30 | 5 | 5A | done | 1 | 7220728 | Cambios, PR and setup panels |
 | WP-31 | 5 | 5B | implementing | 1 |  | Task header |
 | WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
-| WP-33 | 5 | 5B | done | 1 |  | Chat tab |
+| WP-33 | 5 | 5B | done | 1 | 3d93e8a | Chat tab |
 | WP-34 | 5 | 5C | pending | 0 | | Task screen integration |
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
@@ -50,10 +50,10 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
 | WP-43 | 7 | 7A | implementing | 1 |  | ProposalCard, delete task, Quick Open |
-| WP-44 | 7 | 7A | pending | 0 | | Projects and project view |
+| WP-44 | 7 | 7A | implementing | 1 |  | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
-| WP-46 | 7 | 7B | pending | 0 | | Nueva tarea dialog |
-| WP-47 | 7 | 7B | pending | 0 | | Backlog task and project settings |
+| WP-46 | 7 | 7B | implementing | 1 |  | Nueva tarea dialog |
+| WP-47 | 7 | 7B | implementing | 1 |  | Backlog task and project settings |
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
 | WP-50 | 8 | 8A | pending | 0 | | Sidebar at scale |
