@@ -15,6 +15,8 @@ export type TaskStatus =
   // The workspace setup failed, was cancelled or interrupted; reason is the end of its output.
   | { type: "setup-failed"; reason: string };
 
+/** The `agent-permissions` preference: how task and project agents are launched. */
+export type AgentPermissions = "auto" | "default";
 /** The steps of a saving-mode task, each in its own session. */
 export type Step = "plan" | "implement" | "review";
 export type HandoffStage = "offered" | "saving" | "starting" | "failed" | "skipped";
@@ -423,7 +425,7 @@ export type ConversationEntry =
   | { id: string; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" | "terminal" }
   | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
   | ToolEntry
-  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" }
+  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" | "background-done"; detail?: string }
   | QuestionCardEntry
   | PermissionCardEntry;
 
@@ -469,6 +471,50 @@ export interface PermissionAsk {
   rule: string | null;
 }
 
+/** One step of a turn or sub-agent, as the daemon summarises it. */
+export interface ProgressStep {
+  tool: string;
+  summary: string;
+  at: string;
+}
+
+/** The turn in progress; times are RFC3339 UTC. */
+export interface TurnProgress {
+  started_at: string;
+  by: "user" | "claude";
+  reason: string | null;
+  step: string | null;
+  last_signal_at: string;
+}
+
+/** A command or agent running in the background. */
+export interface BackgroundItem {
+  task_id: string;
+  tool_use_id: string | null;
+  kind: "command" | "agent" | "other";
+  description: string;
+  state: "running" | "completed" | "failed" | "stopped" | "unknown";
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface SubagentProgress {
+  tool_use_id: string;
+  description: string;
+  state: "running" | "completed" | "failed" | "stopped" | "unknown";
+  started_at: string;
+  ended_at: string | null;
+  steps: number;
+  recent: ProgressStep[];
+}
+
+/** What the agent is doing now; absent for PTY sessions and older daemons. */
+export interface Progress {
+  turn: TurnProgress | null;
+  background: BackgroundItem[];
+  subagents: SubagentProgress[];
+}
+
 export interface Conversation {
   entries: ConversationEntry[];
   /** Resume point for the next call. */
@@ -476,6 +522,7 @@ export interface Conversation {
   complete: boolean;
   transcript: "present" | "pending" | "missing";
   activity: string | null;
+  progress?: Progress | null;
   needs_terminal: boolean;
   runtime: "pty" | "stream";
 }
@@ -741,6 +788,8 @@ export const api = {
     request<JiraIssue[]>(`/api/v1/jira/issues?who=${who}&progress=${progress}&sprint=${sprint}`),
   sessions: () => request<Session[]>("/api/v1/sessions"),
   preference: <T>(key: string) => request<T | null>(`/api/v1/preferences/${key}`),
+  // Rejects (400) a bad key, a value over 64 KiB, and for `agent-permissions` anything
+  // but "auto" | "default"; the stored value is kept.
   setPreference: (key: string, value: unknown) =>
     request<unknown>(`/api/v1/preferences/${key}`, { method: "PUT", body: JSON.stringify(value) }),
   openSession: (task: string, s: { kind: SessionKind; label?: string; prompt?: string }) =>
@@ -762,6 +811,13 @@ export const api = {
     post<PullRequest>(`/api/v1/tasks/${key}/prs`, req),
   unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
+  activity: () =>
+    request<ActivityResponse>("/api/v1/activity").then((a) => ({ ...a, tokens: a.tokens ?? {} })),
+  activityHistory: (owner: string, after?: number) => {
+    const q = new URLSearchParams({ owner });
+    if (after !== undefined) q.set("after", String(after));
+    return request<HistoryResponse>(`/api/v1/activity/history?${q}`);
+  },
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
@@ -859,3 +915,62 @@ export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), 
 
 /** The live text of a chat-mode session: deltas of the message being written, then `done`. */
 export const liveSocket = (sessionId: string) => new WebSocket(`${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/live`);
+
+export type ActionKind = "edit" | "read" | "run" | "delegate" | "other";
+
+/** What a session is doing right now (a tool call in flight). */
+export interface Action {
+  id: string;
+  kind: ActionKind;
+  tool: string;
+  target: string | null;
+  background: boolean;
+  /** RFC 3339. */
+  since: string;
+}
+
+/** A helper (sub-agent) of a session; `role` may be empty. */
+export interface Helper {
+  id: string;
+  role: string;
+  action: Action | null;
+  since: string;
+}
+
+export interface Activity {
+  action: Action | null;
+  helpers: Helper[];
+}
+
+/** Who ran a tool or is a helper: the helper's id and role. */
+export interface AgentRef {
+  id: string;
+  role: string;
+}
+
+export interface TokenUsage {
+  total: number;
+  input: number;
+  output: number;
+  cache_write: number;
+  cache_read: number;
+}
+
+/** `tokens` is absent from an older daemon; `api.activity()` defaults it to `{}`. */
+export interface ActivityResponse {
+  sessions: Record<string, Activity>;
+  tokens: Record<string, TokenUsage>;
+}
+
+export type HistoryEntry = { seq: number; at: string } & (
+  | { type: "tool_started"; agent: AgentRef | null; action: Action }
+  | { type: "tool_ended"; agent: AgentRef | null; id: string; failed: boolean }
+  | { type: "helper_started"; agent: AgentRef }
+  | { type: "helper_ended"; id: string }
+  | { type: "turn_over" }
+);
+
+export interface HistoryResponse {
+  started_at: string;
+  sessions: { session: string; live: boolean; dropped: boolean; entries: HistoryEntry[] }[];
+}

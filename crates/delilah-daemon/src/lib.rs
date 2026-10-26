@@ -1,6 +1,8 @@
 //! The always-running process: scheduler, hook server and API.
 
 mod actions;
+mod activity;
+mod activity_log;
 pub mod api;
 mod archive;
 pub mod asks;
@@ -34,6 +36,7 @@ pub mod pr_types;
 mod preferences;
 pub mod preview;
 mod preview_api;
+mod progress;
 mod projects;
 pub mod proposals;
 pub mod prs;
@@ -56,6 +59,7 @@ pub mod store_sessions;
 mod store_settings;
 mod stream_events;
 mod terminal;
+mod tokens;
 pub mod transcript_watch;
 mod transitions;
 pub mod upgrade;

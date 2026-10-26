@@ -45,6 +45,9 @@ pub enum UserFrom {
 pub enum MarkerKind {
     Compacted,
     Stopped,
+    /// A turn Claude started by itself because a background task finished.
+    #[serde(rename = "background-done")]
+    BackgroundDone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -108,6 +111,9 @@ pub enum Entry {
         id: String,
         at: String,
         marker: MarkerKind,
+        /// Why, when known (the first line of a task notification's summary).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
 }
 
@@ -380,7 +386,23 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             id: format!("t:{uuid}:0"),
             at,
             marker: MarkerKind::Compacted,
+            detail: None,
         })];
+    }
+    if line.get("type").and_then(Value::as_str) == Some("user")
+        && let Some(message) = line.get("message")
+    {
+        let from_origin =
+            line.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification");
+        let text = user_text(message);
+        if from_origin || text.trim_start().starts_with("<task-notification>") {
+            return vec![Item::Entry(Entry::Marker {
+                id: format!("t:{uuid}:0"),
+                at,
+                marker: MarkerKind::BackgroundDone,
+                detail: notification_summary(&text),
+            })];
+        }
     }
     match line.get("message") {
         Some(message) => message_items(message, uuid, &at, skipped),
@@ -389,6 +411,41 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             vec![]
         }
     }
+}
+
+/// The text of a user message, its text blocks joined.
+fn user_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(t)) => t.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// First line of the `<summary>` of a task notification, at most 200 characters.
+fn notification_summary(text: &str) -> Option<String> {
+    let start = text.find("<summary>")? + "<summary>".len();
+    let rest = &text[start..];
+    let body = &rest[..rest.find("</summary>").unwrap_or(rest.len())];
+    let first = body.trim().lines().next()?.trim();
+    (!first.is_empty()).then(|| first.chars().take(200).collect())
+}
+
+/// What a tool call shows as a step: "Leyendo <file>", "Buscando <pattern>", the first
+/// 40 characters of a Bash command, else the tool name.
+pub fn tool_step_summary(tool: &str, input: &Value) -> Option<String> {
+    let field = |name: &str| input[name].as_str().filter(|s| !s.is_empty());
+    Some(match tool {
+        "Read" => format!("Leyendo {}", field("file_path")?),
+        "Grep" | "Glob" => format!("Buscando {}", field("pattern")?),
+        "Bash" => field("command")?.chars().take(40).collect(),
+        other => other.to_string(),
+    })
 }
 
 /// Text that Claude Code or its hooks put in user messages without the user typing it.
@@ -793,9 +850,160 @@ fn diff_rows(old: &str, new: &str, rows: &mut Vec<DiffRow>) -> bool {
     false
 }
 
+/// Tokens a session used, as the agent reports them. `total` is new input, output and
+/// cache writes; re-read cached context (`cache_read`) is not counted in it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct TokenUsage {
+    pub total: u64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+}
+
+impl TokenUsage {
+    pub fn add(&mut self, other: &TokenUsage) {
+        self.total = self.total.saturating_add(other.total);
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+    }
+}
+
+/// What `usage_delta` read: the usage of the new lines, how many bytes it consumed and
+/// the last message id counted (to pass to the next call).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageDelta {
+    pub usage: TokenUsage,
+    pub consumed: usize,
+    pub last_id: Option<String>,
+}
+
+/// Sums the usage of the assistant lines in `bytes`. Only complete lines are read (the
+/// bytes after the last `\n` are not consumed). Lines of one `message.id` (one per
+/// content block) count once; `last_id` carries that across calls. Bad JSON is skipped.
+pub fn usage_delta(bytes: &[u8], last_id: Option<&str>) -> UsageDelta {
+    let consumed = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let mut usage = TokenUsage::default();
+    let mut last = last_id.map(String::from);
+    for line in bytes[..consumed].split(|&b| b == b'\n') {
+        let Ok(v) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if v["type"].as_str() != Some("assistant") {
+            continue;
+        }
+        let msg = &v["message"];
+        if !msg["usage"].is_object() {
+            continue;
+        }
+        if let Some(id) = msg["id"].as_str() {
+            if last.as_deref() == Some(id) {
+                continue;
+            }
+            last = Some(id.to_string());
+        }
+        let n = |k: &str| msg["usage"][k].as_u64().unwrap_or(0);
+        let (input, output, cache_write) = (
+            n("input_tokens"),
+            n("output_tokens"),
+            n("cache_creation_input_tokens"),
+        );
+        usage.add(&TokenUsage {
+            total: input.saturating_add(cache_write).saturating_add(output),
+            input,
+            output,
+            cache_write,
+            cache_read: n("cache_read_input_tokens"),
+        });
+    }
+    UsageDelta {
+        usage,
+        consumed,
+        last_id: last,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn asst(id: &str, u: Value) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"assistant","message":{"id":id,"usage":u}})
+        )
+    }
+
+    #[test]
+    fn usage_delta_counts_one_message_once_and_excludes_cache_read() {
+        let u = serde_json::json!({"input_tokens":3,"output_tokens":5,"cache_creation_input_tokens":7,"cache_read_input_tokens":100});
+        let text = asst("m1", u.clone()) + &asst("m1", u.clone()) + &asst("m2", u);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.consumed, text.len());
+        assert_eq!(d.last_id.as_deref(), Some("m2"));
+        assert_eq!(
+            d.usage,
+            TokenUsage {
+                total: 30,
+                input: 6,
+                output: 10,
+                cache_write: 14,
+                cache_read: 200
+            }
+        );
+    }
+
+    #[test]
+    fn usage_sums_saturate() {
+        let big = u64::MAX - 1;
+        let u = serde_json::json!({"input_tokens":big,"output_tokens":big,"cache_creation_input_tokens":big});
+        let text = asst("m1", u.clone()) + &asst("m2", u);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.usage.total, u64::MAX);
+        assert_eq!(d.usage.input, u64::MAX);
+        let mut t = TokenUsage {
+            total: u64::MAX,
+            ..Default::default()
+        };
+        t.add(&TokenUsage {
+            total: 5,
+            ..Default::default()
+        });
+        assert_eq!(t.total, u64::MAX);
+    }
+
+    #[test]
+    fn usage_delta_carries_last_id_across_calls() {
+        let u = serde_json::json!({"input_tokens":1,"output_tokens":1});
+        let text = asst("m1", u);
+        let d = usage_delta(text.as_bytes(), Some("m1"));
+        assert_eq!(d.usage, TokenUsage::default());
+        assert_eq!(d.consumed, text.len());
+    }
+
+    #[test]
+    fn usage_delta_leaves_partial_line_and_skips_noise() {
+        let u = serde_json::json!({"output_tokens":4});
+        let full = asst("m1", u.clone());
+        let text = format!(
+            "not json\n{{\"type\":\"user\"}}\n{full}{}",
+            &asst("m2", u)[..20]
+        );
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.consumed, text.len() - 20);
+        assert_eq!(
+            d.usage,
+            TokenUsage {
+                total: 4,
+                output: 4,
+                ..Default::default()
+            }
+        );
+        assert_eq!(usage_delta(b"", None).consumed, 0);
+        assert_eq!(usage_delta(b"{\"type\":\"assi", None).consumed, 0);
+    }
 
     fn fixture(name: &str) -> Vec<u8> {
         std::fs::read(format!(
@@ -946,6 +1154,78 @@ mod tests {
             }
         ));
         assert_eq!(p.skipped, 0);
+    }
+
+    fn user_line(extra: &str, content: &str) -> Vec<u8> {
+        format!(
+            r#"{{"type":"user","uuid":"n1","timestamp":"2025-01-01T10:00:00.000Z"{extra},"message":{{"role":"user","content":{content}}}}}"#
+        )
+        .into_bytes()
+        .into_iter()
+        .chain(*b"\n")
+        .collect()
+    }
+
+    const NOTE: &str = r#""<task-notification>\n<task-id>b1</task-id>\n<summary>Background command \"sleep 5\" completed\nsecond line</summary>\n</task-notification>""#;
+
+    #[test]
+    fn task_notification_is_a_background_done_marker() {
+        for extra in [r#","origin":{"kind":"task-notification"}"#, ""] {
+            let p = parse(&user_line(extra, NOTE), 0);
+            assert_eq!(p.entries.len(), 1);
+            let Entry::Marker { marker, detail, .. } = &p.entries[0] else {
+                panic!("not a marker: {:?}", p.entries[0]);
+            };
+            assert_eq!(*marker, MarkerKind::BackgroundDone);
+            assert_eq!(
+                detail.as_deref(),
+                Some("Background command \"sleep 5\" completed")
+            );
+        }
+        let json = serde_json::to_value(&parse(&user_line("", NOTE), 0).entries[0]).unwrap();
+        assert_eq!(json["marker"], "background-done");
+    }
+
+    #[test]
+    fn task_notification_without_summary_has_no_detail() {
+        let p = parse(
+            &user_line(
+                "",
+                r#""<task-notification><task-id>x</task-id></task-notification>""#,
+            ),
+            0,
+        );
+        let Entry::Marker { marker, detail, .. } = &p.entries[0] else {
+            panic!("not a marker");
+        };
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        assert_eq!(*detail, None);
+        let json = serde_json::to_value(&p.entries[0]).unwrap();
+        assert!(json.get("detail").is_none());
+    }
+
+    #[test]
+    fn step_summaries() {
+        use serde_json::json;
+        assert_eq!(
+            tool_step_summary("Read", &json!({"file_path": "a.rs"})).as_deref(),
+            Some("Leyendo a.rs")
+        );
+        assert_eq!(
+            tool_step_summary("Grep", &json!({"pattern": "foo"})).as_deref(),
+            Some("Buscando foo")
+        );
+        let long = "x".repeat(60);
+        assert_eq!(
+            tool_step_summary("Bash", &json!({"command": long}))
+                .unwrap()
+                .len(),
+            40
+        );
+        assert_eq!(
+            tool_step_summary("Edit", &json!({})).as_deref(),
+            Some("Edit")
+        );
     }
 
     #[test]

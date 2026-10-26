@@ -1,0 +1,24 @@
+svg.pg-sprite { image-rendering: pixelated; shape-rendering: crispEdges; display: block; }
+/* Animated frames are stacked; each is visible for 1/N of the cycle, offset by a negative delay. */
+.pg-frame { visibility: hidden; animation-timing-function: steps(1, end); animation-iteration-count: infinite; animation-duration: var(--pg-dur); animation-delay: var(--pg-delay); }
+.pg-paused .pg-frame { animation-play-state: paused; }
+@keyframes pg-frame-2 { 0% { visibility: visible; } 50.0000% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-3 { 0% { visibility: visible; } 33.3333% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-4 { 0% { visibility: visible; } 25.0000% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-5 { 0% { visibility: visible; } 20.0000% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-6 { 0% { visibility: visible; } 16.6667% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-7 { 0% { visibility: visible; } 14.2857% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-8 { 0% { visibility: visible; } 12.5000% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-9 { 0% { visibility: visible; } 11.1111% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-10 { 0% { visibility: visible; } 10.0000% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-11 { 0% { visibility: visible; } 9.0909% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-12 { 0% { visibility: visible; } 8.3333% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-13 { 0% { visibility: visible; } 7.6923% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-14 { 0% { visibility: visible; } 7.1429% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-15 { 0% { visibility: visible; } 6.6667% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-16 { 0% { visibility: visible; } 6.2500% { visibility: hidden; } 100% { visibility: hidden; } }
+@keyframes pg-frame-1 { 0%, 100% { visibility: visible; } }
+@media (prefers-reduced-motion: reduce) {
+  .pg-frame { animation: none; }
+  .pg-frame:first-child { visibility: visible; }
+}

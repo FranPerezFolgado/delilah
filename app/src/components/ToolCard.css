@@ -8,3 +8,7 @@
 .tool-cmd, .tool-out { margin: 0; padding: 6px 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 7px; border: 1px solid var(--bd); }
 .tool-todos { margin: 0; padding-left: 18px; }
 .tool-todos li.done { color: var(--tx3); text-decoration: line-through; }
+.tool-sub { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: 12px; justify-content: flex-end; }
+.tool-sub-clock { font-variant-numeric: tabular-nums; }
+.tool-sub-step { min-width: 0; max-width: 40%; }
+.tool-steps { margin: 0; padding-left: 18px; font-size: 12px; }

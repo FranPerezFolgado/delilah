@@ -12,6 +12,7 @@ afterEach(() => {
 
 const tabs: TaskTabItem[] = [
   { id: "task", kind: "task", label: "Tarea" },
+  { id: "office", kind: "office", label: "Oficina", attention: true },
   { id: "project", kind: "project", label: "Proyecto" },
   { id: "s1", kind: "session", label: "Claude", dot: "run" },
   { id: "a.rs", kind: "file", label: "a.rs", closable: true },
@@ -27,7 +28,7 @@ const setup = (active = "task") => {
 it("is a tablist with the open tab selected", () => {
   setup("s1");
   const list = screen.getByRole("tablist");
-  expect(within(list).getAllByRole("tab")).toHaveLength(6);
+  expect(within(list).getAllByRole("tab")).toHaveLength(7);
   expect(screen.getByRole("tab", { name: /Claude/ }).getAttribute("aria-selected")).toBe("true");
   expect(screen.getByRole("tab", { name: "Tarea" }).getAttribute("aria-selected")).toBe("false");
 });
@@ -77,4 +78,11 @@ it("hiddenTabs lists the tabs outside the scroll box", () => {
 it("no layout means no overflow menu", () => {
   setup();
   expect(screen.queryByRole("button", { name: /más/ })).toBeNull();
+});
+
+it("shows the Oficina tab with an attention dot only when an agent waits, and no close button", () => {
+  setup();
+  const tab = document.querySelector('[data-tab="office"]')!;
+  expect(tab.querySelector(".ttab-attn")).not.toBeNull();
+  expect(tab.querySelector(".ttab-x")).toBeNull();
 });

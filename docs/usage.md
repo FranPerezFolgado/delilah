@@ -215,6 +215,14 @@ while the agent works or waits for you (wait, answer, or press "Stop"). A termin
 task goes the other way with the switch (or `delilah runtime <KEY> chat`). Project sessions and
 idea conversations always use the terminal.
 
+While Claude works the chat shows what it is doing ("Working" with a clock and the current
+step), sub-agents appear as cards with their latest steps (one line each, not their whole
+conversation), and background commands and sub-agents are listed in an "In the
+background" strip with "Stop". The task stays "Working" until that work ends; if Claude
+resumes on its own afterwards the chat says "Claude continues: background task finished".
+While background work runs you can type to Claude, but the Chat / Terminal switch answers
+"Background work is running: wait for it to finish or press Stop".
+
 When a chat-mode agent needs a permission it shows a permission card (also in the
 Inbox) with the tool and what it will do: "Allow once", "Deny" (with an
 optional reason that Claude is told) or "Always allow in this task". The last one is
@@ -224,6 +232,42 @@ plain arguments inside the workspace (no quoting, chaining, `-exec`-style flags 
 outside it), otherwise that exact command; the exact file for an edit; the exact host for
 a web fetch. When no safe rule exists the card offers only "Allow once". Anything
 else asks again.
+
+**Playground.** A view (in the sidebar) that draws your live Claude sessions as a
+building: one floor per task or project, newest on top, each with a miniature. A
+floor is an office with a pixel character at a desk per session, in fixed slots, so
+a character never jumps when another leaves. What the character does says what its
+session does:
+
+- *arriving*: the session is starting; *thinking*: Claude is working with no tool in flight;
+- *typing* (editing or writing), *reading* (reading or searching), *terminal* (running a command), *busy* (any other tool), with a caption under the desk such as `Edit src/lib.rs`, and the monitor glows in a colour per kind of tool;
+- *phone*: "Supervisando", Claude is waiting on a sub-agent it launched in the foreground (one in the background leaves it thinking);
+- *waiting*: it needs you (a `?` bubble, highlighted); *paused*: the usage limit stopped it (`zzz`).
+
+The caption is the tool plus its target, cut to 40 characters. File contents never
+show and a `WebFetch` shows the host only. When Claude launches sub-agents,
+**helpers** appear next to the desk, each with a role (researcher, implementer,
+reviewer or generic), and walk to the lounge when they finish. A **stack of paper**
+on each desk grows with the tokens the session has spent (new input and output; cache
+reads and sub-agents' own spend are not counted).
+
+Click a floor to open the task's **Oficina** tab (right after the overview, with a dot
+when an agent of that task waits). It shows the floor and, with the toggle on its
+right, **Flujo**: a graph of the agents, their helpers and every tool call, with
+failed calls marked, and a timeline beside it. Drag and scroll to pan and zoom, or use
+the +/-/fit buttons; click a node or a timeline row to find the other. The toggle
+remembers your choice. The header counts the agents waiting for you ("N esperando");
+**clicking a character opens that task on the session's terminal**, where you answer.
+"Abrir en ventana" moves the playground to its own window to keep it on a side
+screen: closing that window really closes it, a floor opens inside it with a back
+button, and a click on a character brings Delilah to the front with the task. In a
+plain browser it opens a named tab instead.
+
+With reduced motion in the system the characters stay in still poses, animations
+pause while the window is hidden, and while the daemon is unreachable a
+"Reconectando…" banner shows the last known state. Actions come from Claude's
+hooks, so **an agent started before this update shows no actions until it is
+relaunched** (it still shows thinking, waiting and paused).
 
 **Inbox.** Everything that waits on you, from every task, most urgent first:
 what an agent asks at the end of its turn (its last message, with a box to answer
@@ -462,6 +506,16 @@ app fetches only that again, so a question reaches the Inbox in well under a
 second. If the connection drops (the daemon restarts or updates), the app
 reconnects by itself and fetches everything again. A full refresh every 30 s
 stays as a safety net.
+
+**Agent permissions.** Settings › Agent permissions chooses how Claude decides what needs
+your approval, for task and project sessions in both the terminal and chat mode: "Auto"
+(the default) lets Claude's auto mode handle routine work, so it stops asking for every
+command; "Claude's default" launches Claude with no mode flag. It applies to sessions you
+start or reopen from then on; running ones are not restarted. Idea conversations and
+read-only sessions keep their own modes. If Claude refuses the mode at start, the error
+says to try "Claude's default" (checked with Claude's "invalid mode" error; the wording for
+an account without auto mode has not been seen yet). Actions auto mode still escalates show
+as permission cards in chat mode.
 
 **Language.** Spanish or English, picked in Settings › Language (Automatic follows the Mac: Spanish if the Mac is in Spanish, English for any other language). It
 covers the interface, the Mac menu (from the next time the app opens), the

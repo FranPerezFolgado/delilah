@@ -432,6 +432,11 @@ pub async fn get(
         "complete": complete,
         "transcript": state,
         "activity": live.as_ref().and_then(Live::activity),
+        // The live progress of a chat-mode session; null for a terminal or closed one.
+        "progress": live
+            .as_ref()
+            .filter(|l| l.runtime.as_stream().is_some())
+            .map(|l| l.progress()),
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
         "runtime": runtime,
     })))
@@ -594,7 +599,13 @@ pub async fn send(
     // in the terminal.
     let _typing = live.typing.lock().await;
     // A pending card holds the turn: what is typed now would land in the PTY under it.
-    let queued = live.state() == LiveState::Working || app.asks.has_session(&id);
+    // Working with only background work running (a stream session, no turn) is idle for
+    // this: Claude takes the message now.
+    let turn_running = live.state() == LiveState::Working && {
+        let progress = live.progress();
+        live.runtime.as_stream().is_none() || progress.turn.is_some() || !progress.has_background()
+    };
+    let queued = turn_running || app.asks.has_session(&id);
     let entry = if queued {
         let waiting = app.store.queued_entries(&id).await?;
         let chars: usize = waiting
@@ -690,7 +701,8 @@ pub async fn remove(
 /// waiting here, its pending cards withdrawn; a stream agent answers the interrupt with a
 /// `TurnResult` that does the same from [`turn_interrupted`] (setting the state here would
 /// race with a message sent before that result arrives). What was queued stays queued: it
-/// is typed at the next turn's end.
+/// is typed at the next turn's end. A stream session with no turn but background work (or a
+/// held Stop) has no result coming: the state is set here, through [`turn_interrupted`].
 ///
 /// This does not take `live.typing`: Detener must be immediate, not wait behind a send.
 /// A stop that lands in the middle of one cannot leave its entries inconsistent: a message
@@ -710,10 +722,22 @@ pub async fn stop(
         .stop()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    crate::permissions::release_session(&app, &id).await;
-    if live.runtime.as_stream().is_none() {
-        turn_interrupted(&app, &live).await;
+    if let Some(stream) = live.runtime.as_stream() {
+        // Background work outlives the turn: ask the agent to stop each running item too.
+        for b in live
+            .progress()
+            .background
+            .iter()
+            .filter(|b| b.state == "running")
+        {
+            if let Err(e) = stream.stop_task(&b.task_id).await {
+                tracing::warn!(session = %id, task = %b.task_id, "cannot stop the task: {e}");
+            }
+        }
     }
+    crate::permissions::release_session(&app, &id).await;
+    // The "stopped" marker goes in before anything the held Stop replays below, so the
+    // history reads: stopped, then what Claude said.
     if let Err(e) = app
         .store
         .add_entry(&id, EntryKind::Marker, &json!({ "marker": "stopped" }))
@@ -721,12 +745,50 @@ pub async fn stop(
     {
         tracing::warn!(session = %id, "cannot record the stop: {e}");
     }
+    // A stream session with only background work (no turn, a Stop held or rows running) gets
+    // no `result` from the interrupt, so nothing else would ever interrupt it: do it here. A
+    // session between writing a prompt and its init has no turn yet either, but its result
+    // is coming: leave it to that.
+    let only_background = live.progress().turn.is_none()
+        && (live.progress().has_background() || live.has_held_stop());
+    if live.runtime.as_stream().is_none() || only_background {
+        turn_interrupted(&app, &live).await;
+    }
     app.emit(Topic::Conversations);
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// The turn was interrupted: the session waits again, nothing is pending on it.
 pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
+    // Rule: a held Stop is never discarded without a successor turn (only a real new turn,
+    // a user prompt or an init, drops it: that turn brings its own Stop). Here none follows
+    // an interrupt, so it applies as the end of turn it was. The take also cancels its
+    // fallback. Claude was asked to stop the rows and answers later: they are marked stopped
+    // first, or the replay would be held again behind them.
+    let held = live.take_held_stop();
+    if held.is_some() {
+        let running: Vec<String> = live
+            .progress()
+            .background
+            .iter()
+            .filter(|b| b.state == "running")
+            .map(|b| b.task_id.clone())
+            .collect();
+        live.update_progress(|p| {
+            let mut changed = false;
+            for task_id in &running {
+                let ended = delilah_agents::stream::StreamEvent::Task(
+                    delilah_agents::stream::TaskEvent::Ended {
+                        task_id: task_id.clone(),
+                        status: delilah_agents::stream::TaskStatus::Stopped,
+                        summary: None,
+                    },
+                );
+                changed |= crate::progress::apply(p, &ended, Utc::now());
+            }
+            changed
+        });
+    }
     live.set_state(LiveState::Waiting);
     live.reset_turn_state();
     for ask in app.asks.release_session(&live.id) {
@@ -734,6 +796,8 @@ pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
     }
     let _ = app.store.set_attention(&live.id, None).await;
     app.emit(Topic::Inbox);
+    // After the clears above: the replay sets the attention the end of turn asks for.
+    crate::stream_events::replay_held_stop(app, &live.task, &live.id, held).await;
 }
 
 /// Types every queued message at once, joined by a blank line, and marks them sent.
@@ -770,15 +834,7 @@ async fn flush_locked(app: &AppState, live: &Live) {
 
 /// What the hook shows of a tool, for "what Claude is doing".
 fn activity_of(hook: &Value) -> Option<String> {
-    let tool = hook["tool_name"].as_str()?;
-    let input = &hook["tool_input"];
-    let field = |name: &str| input[name].as_str().filter(|s| !s.is_empty());
-    Some(match tool {
-        "Read" => format!("Leyendo {}", field("file_path")?),
-        "Grep" | "Glob" => format!("Buscando {}", field("pattern")?),
-        "Bash" => field("command")?.chars().take(40).collect(),
-        other => other.to_string(),
-    })
+    delilah_agents::transcript::tool_step_summary(hook["tool_name"].as_str()?, &hook["tool_input"])
 }
 
 /// Records what a Claude session's hook says: the prompts typed in its
@@ -797,10 +853,12 @@ pub async fn on_hook(
     // The live state emits by itself when it changes; entries recorded emit here.
     match signal {
         Signal::PromptSubmitted => {
+            // Not the user's text: a turn Claude started itself, or a task notification
+            // (the transcript shows it as a background-done marker).
             if let Some(text) = hook["prompt"]
                 .as_str()
                 .map(str::trim)
-                .filter(|t| !t.is_empty())
+                .filter(|t| !t.is_empty() && !crate::hooks::agent_prompt(hook))
             {
                 if let Err(e) = prompt_submitted(app, session, text, idea).await {
                     tracing::warn!(session, "cannot record the prompt: {e}");
@@ -849,6 +907,13 @@ pub async fn on_hook(
                 if let Some(live) = live {
                     flush_queue(app, live).await;
                 }
+            }
+        }
+        // PreToolUse is not a state change, but it names the tool that is about to run.
+        Signal::Other if hook["hook_event_name"] == "PreToolUse" => {
+            if let Some(live) = live {
+                let activity = activity_of(hook);
+                live.update_convo(|c| c.activity = activity);
             }
         }
         Signal::SessionStarted | Signal::Other => {}
@@ -1697,6 +1762,126 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stop_with_only_background_work_and_no_turn_applies_the_held_stop() {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        let f = Fixture::new().await;
+        let _ = f.live.runtime.kill();
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let session = std::sync::Arc::new(session);
+        let live =
+            f.app
+                .sessions
+                .insert("conv", "@web", SessionKind::Claude, false, session.clone());
+        live.set_idea(true);
+        live.update_progress(|p| {
+            crate::progress::apply(
+                p,
+                &StreamEvent::Task(TaskEvent::Started {
+                    task_id: "bg-1".into(),
+                    tool_use_id: None,
+                    kind: TaskKind::Command,
+                    description: "sleep".into(),
+                    background: true,
+                }),
+                Utc::now(),
+            )
+        });
+        assert!(live.progress().turn.is_none());
+        assert!(live.hold_stop_if_background(stop("listo")));
+        live.set_state(LiveState::Working);
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        session.kill();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        assert_eq!(live.progress().background[0].state, "stopped");
+        assert!(
+            f.app.store.attention("conv").await.unwrap().is_some(),
+            "the held Stop applied: the end of turn asks for the user"
+        );
+        let said = f.app.store.entries("conv").await.unwrap();
+        assert!(said.iter().any(|e| e.body["text"] == "listo"), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn stop_between_a_prompt_and_its_init_leaves_the_state_to_the_result() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        assert!(live.progress().turn.is_none());
+        assert!(!live.progress().has_background() && !live.has_held_stop());
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            live.state(),
+            LiveState::Working,
+            "the interrupt result sets it"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_asks_the_agent_to_stop_each_running_background_task() {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        let f = Fixture::new().await;
+        let _ = f.live.runtime.kill();
+        let dir = std::env::temp_dir().join(format!("delilah-stop-bg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("stdin.log");
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.arg("-c").arg("cat >> \"$1\"").arg("_").arg(&log);
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let session = std::sync::Arc::new(session);
+        let live =
+            f.app
+                .sessions
+                .insert("conv", "@web", SessionKind::Claude, false, session.clone());
+        for id in ["bg-1", "bg-2", "bg-done"] {
+            live.update_progress(|p| {
+                crate::progress::apply(
+                    p,
+                    &StreamEvent::Task(TaskEvent::Started {
+                        task_id: id.into(),
+                        tool_use_id: None,
+                        kind: TaskKind::Command,
+                        description: id.into(),
+                        background: true,
+                    }),
+                    Utc::now(),
+                )
+            });
+        }
+        live.update_progress(|p| {
+            p.background
+                .iter_mut()
+                .find(|b| b.task_id == "bg-done")
+                .unwrap()
+                .state = "completed";
+            true
+        });
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let mut stopped = vec![];
+        for _ in 0..100 {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            stopped = text
+                .lines()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .filter(|v| v["request"]["subtype"] == "stop_task")
+                .map(|v| v["request"]["task_id"].as_str().unwrap().to_string())
+                .collect();
+            if stopped.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        session.kill();
+        let _ = std::fs::remove_dir_all(&dir);
+        stopped.sort();
+        assert_eq!(stopped, ["bg-1", "bg-2"]);
+    }
+
+    #[tokio::test]
     async fn stop_on_a_stream_interrupts_keeps_the_session_and_the_next_message_starts_a_turn() {
         use delilah_agents::stream::StreamEvent;
         let f = Fixture::new().await;
@@ -2302,6 +2487,65 @@ mod tests {
         assert_eq!(f.conversation().await["activity"], Value::Null);
     }
 
+    #[tokio::test]
+    async fn pre_tool_use_sets_activity_and_stop_clears_it() {
+        let f = Fixture::new().await;
+        f.hook(
+            json!({ "hook_event_name": "PreToolUse", "tool_name": "Read",
+            "tool_input": { "file_path": "src/a.rs" } }),
+        )
+        .await;
+        assert_eq!(f.conversation().await["activity"], "Leyendo src/a.rs");
+        f.hook(stop("ok")).await;
+        assert_eq!(f.conversation().await["activity"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_conversation_carries_the_live_progress_of_a_stream_session_only() {
+        let f = Fixture::new().await;
+        // A terminal session: null, but present.
+        assert_eq!(f.conversation().await["progress"], Value::Null);
+        assert!(
+            f.conversation()
+                .await
+                .as_object()
+                .unwrap()
+                .contains_key("progress")
+        );
+
+        let _ = f.live.runtime.kill();
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../delilah-agents/tests/fixtures/fake-claude-stream.sh"
+        );
+        let (session, _rx) =
+            delilah_agents::stream::StreamSession::spawn(tokio::process::Command::new(script))
+                .unwrap();
+        let live = f.app.sessions.insert(
+            "conv",
+            "@web",
+            SessionKind::Claude,
+            false,
+            std::sync::Arc::new(session),
+        );
+        let empty = f.conversation().await;
+        assert_eq!(empty["progress"]["turn"], Value::Null);
+        assert_eq!(empty["progress"]["background"], json!([]));
+        live.update_progress(|p| {
+            p.turn = Some(crate::progress::Turn {
+                started_at: Utc::now(),
+                by: "user",
+                reason: None,
+                step: Some("Leyendo x".into()),
+                last_signal_at: Utc::now(),
+            });
+            true
+        });
+        let body = f.conversation().await;
+        assert_eq!(body["progress"]["turn"]["step"], "Leyendo x");
+        assert_eq!(body["progress"]["turn"]["by"], "user");
+    }
+
     #[test]
     fn activity_names_what_the_tool_does() {
         let hook = |tool: &str, input: Value| json!({ "tool_name": tool, "tool_input": input });
@@ -2475,6 +2719,165 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         live
+    }
+
+    #[tokio::test]
+    async fn a_prompt_hook_the_agent_made_up_resets_the_turn_state_and_records_nothing() {
+        let f = Fixture::new().await;
+        f.live.update_convo(|c| {
+            c.activity = Some("Reading".into());
+            c.needs_terminal = true;
+        });
+        let notification = json!({ "hook_event_name": "UserPromptSubmit",
+            "prompt": "<task-notification>\n<task-id>b1</task-id>" });
+        on_hook(
+            &f.app,
+            "conv",
+            Some(&f.live),
+            Signal::PromptSubmitted,
+            &notification,
+        )
+        .await;
+        assert!(f.app.store.entries("conv").await.unwrap().is_empty());
+        f.live.update_convo(|c| c.needs_terminal = true);
+        let hook = json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" });
+        on_hook(
+            &f.app,
+            "conv",
+            Some(&f.live),
+            Signal::PromptSubmitted,
+            &hook,
+        )
+        .await;
+        assert_eq!(
+            *f.live.convo.lock().unwrap(),
+            crate::sessions::ConvoState::default()
+        );
+        assert!(f.app.store.entries("conv").await.unwrap().is_empty());
+    }
+
+    /// The fixture's session "conv" as a chat-mode one whose process just sleeps, working.
+    fn stream_live(f: &Fixture) -> Live {
+        let _ = f.live.runtime.kill();
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("30");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let live = f.app.sessions.insert(
+            "conv",
+            "@web",
+            SessionKind::Claude,
+            false,
+            std::sync::Arc::new(session),
+        );
+        live.set_idea(true);
+        live.set_state(LiveState::Working);
+        live
+    }
+
+    fn feed(live: &Live, event: delilah_agents::stream::StreamEvent) {
+        live.update_progress(|p| crate::progress::apply(p, &event, Utc::now()));
+    }
+
+    fn background_started() -> delilah_agents::stream::StreamEvent {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        StreamEvent::Task(TaskEvent::Started {
+            task_id: "b1".into(),
+            tool_use_id: None,
+            kind: TaskKind::Command,
+            description: "sleep".into(),
+            background: true,
+        })
+    }
+
+    fn turn_init() -> delilah_agents::stream::StreamEvent {
+        delilah_agents::stream::StreamEvent::Init {
+            session_id: "x".into(),
+            self_started: false,
+        }
+    }
+
+    fn turn_result() -> delilah_agents::stream::StreamEvent {
+        delilah_agents::stream::StreamEvent::TurnResult {
+            subtype: "success".into(),
+            is_error: false,
+            result: None,
+        }
+    }
+
+    async fn states(f: &Fixture) -> Vec<String> {
+        f.app
+            .store
+            .entries("conv")
+            .await
+            .unwrap()
+            .iter()
+            .filter_map(|e| e.body["state"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn messages_queued_during_a_turn_are_typed_when_its_stop_is_held() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, turn_init());
+        feed(&live, background_started());
+        let (status, _) = f.send("later").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(states(&f).await, ["queued"], "a turn is running");
+
+        feed(&live, turn_result());
+        f.hook(stop("started a build")).await;
+        assert!(live.has_held_stop());
+        assert_eq!(
+            states(&f).await,
+            ["sent"],
+            "not stranded behind the held Stop"
+        );
+        assert_eq!(live.state(), LiveState::Working);
+    }
+
+    #[tokio::test]
+    async fn with_only_background_work_running_a_message_is_typed_now() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, background_started());
+        assert!(live.progress().turn.is_none());
+        let (status, _) = f.send("hola").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(states(&f).await, ["sent"]);
+
+        // A turn running: queued, as ever.
+        feed(&live, turn_init());
+        let (status, _) = f.send("otra").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(states(&f).await, ["sent", "queued"]);
+    }
+
+    #[tokio::test]
+    async fn an_interrupt_with_a_held_stop_applies_it_and_stops_the_rows() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, background_started());
+        assert!(live.hold_stop_if_background(stop("x")));
+        turn_interrupted(&f.app, &live).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop(), "consumed, not left behind");
+        assert!(!live.progress().has_background());
+        assert_eq!(live.progress().background[0].state, "stopped");
+        assert!(f.app.store.attention("conv").await.unwrap().is_some());
+        let said = f.app.store.entries("conv").await.unwrap();
+        assert!(said.iter().any(|e| e.body["text"] == "x"), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn an_interrupt_with_background_but_no_held_stop_keeps_the_rows_and_asks_nothing() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, background_started());
+        turn_interrupted(&f.app, &live).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(live.progress().background[0].state, "running");
+        assert!(f.app.store.attention("conv").await.unwrap().is_none());
     }
 
     #[tokio::test]

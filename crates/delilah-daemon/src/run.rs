@@ -103,10 +103,13 @@ fn short_reason(stderr: &str) -> String {
 /// How a Claude session is launched, by what it is: a conversation never asks
 /// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
 /// the plugin (which can create tasks) goes only to project sessions, never to a
-/// task's agents.
+/// task's agents. Task and project sessions follow the `agent-permissions` preference
+/// (`Auto` or Claude's default); the idea and read-only ones ignore it. Pure: the
+/// preference arrives as an argument.
 fn launch_flags(
     session: &SessionRecord,
     config: &crate::config::Config,
+    agent_permissions: crate::state::AgentPermissions,
 ) -> (
     claude::Permission,
     Option<std::path::PathBuf>,
@@ -117,7 +120,10 @@ fn launch_flags(
     } else if session.read_only {
         claude::Permission::Plan
     } else {
-        claude::Permission::Default
+        match agent_permissions {
+            crate::state::AgentPermissions::Auto => claude::Permission::Auto,
+            crate::state::AgentPermissions::Default => claude::Permission::Default,
+        }
     };
     let plugin_dir = project_of(&session.task)
         .is_some()
@@ -1350,8 +1356,10 @@ impl Spawned {
             Err(e) => Some(e),
             Ok(()) => match start.wait(self.timeout).await {
                 Wait::Up => None,
-                Wait::Failed(said) => Some(start_failure(&self.runtime, Some(&said)).await),
-                Wait::Exited | Wait::TimedOut => Some(start_failure(&self.runtime, None).await),
+                Wait::Failed(said) => Some(start_failure(app, &self.runtime, Some(&said)).await),
+                Wait::Exited | Wait::TimedOut => {
+                    Some(start_failure(app, &self.runtime, None).await)
+                }
             },
         };
         match failure {
@@ -1366,7 +1374,7 @@ impl Spawned {
 
 /// The error of a chat-mode agent that did not come up: what it said as its error result,
 /// or else on stderr.
-async fn start_failure(runtime: &Runtime, said: Option<&str>) -> ApiError {
+async fn start_failure(app: &AppState, runtime: &Runtime, said: Option<&str>) -> ApiError {
     let _ = runtime.kill();
     runtime.wait().await;
     let tail = match said.filter(|s| !s.trim().is_empty()) {
@@ -1380,7 +1388,98 @@ async fn start_failure(runtime: &Runtime, said: Option<&str>) -> ApiError {
         "" => "claude printed nothing before it stopped",
         tail => tail,
     };
+    let tail = with_permission_hint(app, tail);
     ApiError::unprocessable(format!("chat mode could not start: {tail}"))
+}
+
+/// Whether `text` is the CLI refusing the `--permission-mode` it was launched with (an
+/// unknown or unavailable mode). Keyed on the rejection's shape, not on the mode named:
+/// `error: option '--permission-mode <mode>' argument '<x>' is invalid. Allowed choices
+/// are ...` (docs/archive/spikes/2026-10-26-chat-permission-mode.md).
+fn rejects_permission_mode(text: &str) -> bool {
+    let text = text.to_lowercase();
+    text.contains("--permission-mode")
+        && ["invalid", "not available", "unavailable"]
+            .iter()
+            .any(|w| text.contains(w))
+}
+
+/// `text` with the hint that names the setting that changes the mode, when the CLI
+/// rejected it (FR-008); any other text as it is.
+fn with_permission_hint(app: &AppState, text: &str) -> String {
+    if !rejects_permission_mode(text) {
+        return text.to_string();
+    }
+    let hint = app.lang().pick(
+        "Ajustes → Permisos de los agentes: prueba \"Por defecto de Claude\"",
+        "Settings → Agent permissions: try \"Claude's default\"",
+    );
+    format!("{text}\n{hint}")
+}
+
+/// How soon after its spawn a terminal agent must exit for its exit to be the CLI
+/// rejecting its flags: that happens before the CLI draws anything (spike, FR-008).
+const MODE_REJECTION_WINDOW: Duration = Duration::from_secs(10);
+
+/// How many of a screen's first non-empty lines can hold the rejection: the CLI prints
+/// it before anything else, so a line further down is the agent's own output (a diff,
+/// a test run) quoting it.
+const MODE_REJECTION_HEAD: usize = 5;
+
+/// The lines at the top of a terminal screen where the CLI rejects the permission mode
+/// it was launched with, joined; empty when there are none.
+fn rejection_lines(screen: &str) -> String {
+    crate::setup::strip_escapes(screen)
+        .replace('\r', "\n")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(MODE_REJECTION_HEAD)
+        .filter(|l| rejects_permission_mode(l))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A terminal agent that exited, right after its spawn, with the CLI's rejection of the
+/// permission mode at the top of its screen (FR-008): an exit before any work. A later
+/// exit (a kill on Detener, a runtime switch, a crash) is never this, whatever the
+/// screen says. A task fails with that line and the hint; a project's session has no
+/// task to fail, so it raises an error in the inbox, as a failed turn does.
+async fn fail_if_mode_rejected(
+    app: &AppState,
+    task: &str,
+    session: &str,
+    pty: &PtySession,
+    lived: Duration,
+) {
+    if lived > MODE_REJECTION_WINDOW || pty.exit_code().is_none_or(|c| c == 0) {
+        return;
+    }
+    let (screen, _) = pty.attach();
+    let said = rejection_lines(&String::from_utf8_lossy(&screen));
+    if said.is_empty() {
+        return;
+    }
+    if project_of(task).is_some() {
+        let attention = crate::inbox::Attention {
+            kind: crate::inbox::AttentionKind::Error,
+            text: with_permission_hint(app, &start_error_tail(&said)),
+            since: chrono::Utc::now(),
+        };
+        match app.store.set_attention(session, Some(&attention)).await {
+            Ok(()) => app.emit(Topic::Inbox),
+            Err(e) => tracing::warn!(session, "cannot record the rejected mode: {e}"),
+        }
+        return;
+    }
+    let key = TaskKey::new(task);
+    let reason = format!(
+        "the agent could not start: {}",
+        with_permission_hint(app, &start_error_tail(&said))
+    );
+    if let Err(e) = app.transition(&key, Event::Fail { reason }).await {
+        tracing::warn!(task = %key, "cannot fail the task: {e}");
+    }
 }
 
 /// Starts the session's process and registers it, but a chat-mode agent is not given its
@@ -1413,7 +1512,8 @@ pub(crate) async fn spawn_session(
         |e: std::io::Error| ApiError::internal(format!("cannot start the session: {e}"));
     let (runtime, events) = match session.kind {
         SessionKind::Claude => {
-            let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
+            let (permission, plugin_dir, append_system_prompt) =
+                launch_flags(session, &app.config, app.agent_permissions());
             // The rules "always allow" added to the task, read now so a new session has them.
             let allowed_tools = match project_of(&session.task) {
                 Some(_) => Vec::new(),
@@ -1487,10 +1587,23 @@ pub(crate) async fn spawn_session(
     let sessions = Arc::clone(&app.sessions);
     let id = session.id.clone();
     let watched = runtime.clone();
+    let exit_app = app.clone();
+    let exiting = live.clone();
+    let rejection_watch = (session.kind == SessionKind::Claude && kind == RuntimeKind::Pty)
+        .then(|| (app.clone(), session.task.clone(), session.id.clone()));
+    let spawned_at = std::time::Instant::now();
     tokio::spawn(async move {
         watched.wait().await;
+        // A Stop held behind background work applies first, as after a normal turn end;
+        // this process's own session, even if already out of the registry, never a newer one's.
+        crate::stream_events::on_process_exit(&exit_app, &exiting).await;
         sessions.remove_if_same(&id, &watched);
         tracing::info!(session = %id, "session exited");
+        if let Some((app, task, session)) = rejection_watch
+            && let Some(pty) = watched.as_pty()
+        {
+            fail_if_mode_rejected(&app, &task, &session, pty, spawned_at.elapsed()).await;
+        }
     });
 
     let mut spawned = Spawned {
@@ -1512,7 +1625,7 @@ pub(crate) async fn spawn_session(
             Wait::Up | Wait::TimedOut => None,
         };
         if let Some(said) = early {
-            let e = start_failure(&runtime, said.as_deref()).await;
+            let e = start_failure(app, &runtime, said.as_deref()).await;
             spawned.discard(app).await;
             return Err(e);
         }
@@ -1712,6 +1825,7 @@ fn effective_submodules(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::AgentPermissions::Auto;
 
     #[test]
     fn every_selected_submodule_is_on_the_task_branch() {
@@ -1793,32 +1907,128 @@ mod tests {
         };
         let mut conv = session("@web", "Idea");
         conv.conversation = true;
-        let (p, dir, prompt) = launch_flags(&conv, &config);
+        let (p, dir, prompt) = launch_flags(&conv, &config, Auto);
         assert_eq!(p, claude::Permission::DontAsk);
         assert_eq!(dir, Some(config.plugin_dir()));
         assert_eq!(prompt, Some(IDEA_PROMPT));
 
         let mut ro = session("@web", "Claude 1");
         ro.read_only = true;
-        let (p, dir, prompt) = launch_flags(&ro, &config);
+        let (p, dir, prompt) = launch_flags(&ro, &config, Auto);
         assert_eq!(p, claude::Permission::Plan);
         assert!(dir.is_some());
         assert_eq!(prompt, None);
 
-        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config);
-        assert_eq!(p, claude::Permission::Default);
+        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config, Auto);
+        assert_eq!(p, claude::Permission::Auto);
         assert_eq!((dir, prompt), (None, None));
 
         // An extra session of a task is no different: it never gets the plugin.
         let mut extra = session("PROJ-1", "Claude 2");
         extra.primary = false;
-        let (p, dir, prompt) = launch_flags(&extra, &config);
-        assert_eq!(p, claude::Permission::Default);
+        let (p, dir, prompt) = launch_flags(&extra, &config, Auto);
+        assert_eq!(p, claude::Permission::Auto);
         assert_eq!((dir, prompt), (None, None));
         extra.read_only = true;
-        let (p, dir, prompt) = launch_flags(&extra, &config);
+        let (p, dir, prompt) = launch_flags(&extra, &config, Auto);
         assert_eq!(p, claude::Permission::Plan);
         assert_eq!((dir, prompt), (None, None));
+    }
+
+    const SPIKE_REJECTION: &str = "error: option '--permission-mode <mode>' argument 'bogus' is invalid. Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.";
+
+    #[test]
+    fn the_cli_rejecting_the_permission_mode_is_recognised_and_nothing_else_is() {
+        assert!(rejects_permission_mode(SPIKE_REJECTION));
+        assert!(rejects_permission_mode(
+            "--permission-mode auto is not available for this account"
+        ));
+        assert!(!rejects_permission_mode("Invalid API key"));
+        assert!(!rejects_permission_mode("no such flag"));
+        assert!(!rejects_permission_mode("--permission-mode auto"));
+    }
+
+    #[test]
+    fn the_rejection_is_picked_out_of_the_top_of_a_screen() {
+        let screen = format!(
+            "\x1b[31mWelcome to Claude\x1b[0m\r\n\r\n  \x1b[1m{SPIKE_REJECTION}\x1b[0m  \r\nInvalid API key\r\nTry again\r\n{SPIKE_REJECTION}\r\n"
+        );
+        assert_eq!(
+            rejection_lines(&screen),
+            format!("{SPIKE_REJECTION}\n{SPIKE_REJECTION}")
+        );
+        assert_eq!(rejection_lines("Welcome\r\nInvalid API key\r\n"), "");
+    }
+
+    #[test]
+    fn a_rejection_quoted_further_down_the_screen_is_not_one() {
+        let work = (1..=MODE_REJECTION_HEAD)
+            .map(|n| format!("● step {n}\r\n"))
+            .collect::<String>();
+        assert_eq!(
+            rejection_lines(&format!("{work}+ const R = \"{SPIKE_REJECTION}\";\r\n")),
+            ""
+        );
+    }
+
+    #[tokio::test]
+    async fn an_exit_long_after_the_spawn_is_never_a_rejected_mode() {
+        let app = app().await;
+        let mut cmd = portable_pty::CommandBuilder::new("sh");
+        cmd.args(["-c", &format!("echo \"{SPIKE_REJECTION}\"; exit 1")]);
+        let pty = PtySession::spawn(cmd, 200, 24, None).unwrap();
+        pty.wait().await;
+        let owner = crate::store_sessions::project_owner("p");
+        let mut rx = app.events.subscribe();
+        let late = MODE_REJECTION_WINDOW + Duration::from_secs(1);
+        fail_if_mode_rejected(&app, &owner, "s-1", &pty, late).await;
+        assert!(rx.try_recv().is_err(), "a late exit raised an inbox error");
+        fail_if_mode_rejected(&app, &owner, "s-1", &pty, Duration::ZERO).await;
+        assert_eq!(rx.try_recv().ok(), Some(Topic::Inbox));
+    }
+
+    #[tokio::test]
+    async fn a_rejected_permission_mode_gets_the_settings_hint_in_each_language() {
+        let app = app().await;
+        app.lang.set(crate::lang::Lang::En);
+        let said = with_permission_hint(&app, SPIKE_REJECTION);
+        assert!(said.starts_with(SPIKE_REJECTION), "{said}");
+        assert!(
+            said.ends_with("Settings → Agent permissions: try \"Claude's default\""),
+            "{said}"
+        );
+        app.lang.set(crate::lang::Lang::Es);
+        assert!(
+            with_permission_hint(&app, SPIKE_REJECTION)
+                .ends_with("Ajustes → Permisos de los agentes: prueba \"Por defecto de Claude\""),
+        );
+        assert_eq!(
+            with_permission_hint(&app, "Invalid API key"),
+            "Invalid API key"
+        );
+    }
+
+    #[test]
+    fn the_agent_permissions_preference_only_changes_task_and_project_sessions() {
+        use crate::state::AgentPermissions::Default as Asks;
+        let config = crate::config::Config::test_defaults();
+        for key in ["PROJ-1", "@web"] {
+            let (p, ..) = launch_flags(&session(key, "Claude 1"), &config, Auto);
+            assert_eq!(p, claude::Permission::Auto, "{key}");
+            let (p, ..) = launch_flags(&session(key, "Claude 1"), &config, Asks);
+            assert_eq!(p, claude::Permission::Default, "{key}");
+        }
+        let mut conv = session("@web", "Idea");
+        conv.conversation = true;
+        let mut ro = session("@web", "Claude 1");
+        ro.read_only = true;
+        for mode in [Auto, Asks] {
+            assert_eq!(
+                launch_flags(&conv, &config, mode).0,
+                claude::Permission::DontAsk
+            );
+            assert_eq!(launch_flags(&ro, &config, mode).0, claude::Permission::Plan);
+        }
     }
 
     async fn app() -> AppState {
@@ -3471,6 +3681,68 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(app.sessions.get("sess-1").is_none(), "gone once it died");
+    }
+
+    #[tokio::test]
+    async fn a_stream_exit_with_a_held_stop_replays_it_after_stopping_the_rows() {
+        let (app, ws) = chat_app("sleep 1.5\nexit 0", true).await;
+        let key = TaskKey::new("PROJ-1");
+        for event in [Event::Start, Event::WorkspaceReady] {
+            app.transition(&key, event).await.unwrap();
+        }
+        let record = session("PROJ-1", "Main");
+        app.store.create_session(&record).await.unwrap();
+        spawn_session(
+            &app,
+            &record,
+            &ws,
+            None,
+            true,
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+            false,
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        let live = app.sessions.get("sess-1").expect("up");
+        live.set_state(crate::sessions::LiveState::Working);
+        live.update_progress(|p| {
+            crate::progress::apply(
+                p,
+                &delilah_agents::stream::StreamEvent::Task(
+                    delilah_agents::stream::TaskEvent::Started {
+                        task_id: "b1".into(),
+                        tool_use_id: None,
+                        kind: delilah_agents::stream::TaskKind::Command,
+                        description: "sleep".into(),
+                        background: true,
+                    },
+                ),
+                chrono::Utc::now(),
+            )
+        });
+        assert!(live.hold_stop_if_background(
+            serde_json::json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" })
+        ));
+        for _ in 0..100 {
+            if app.sessions.get("sess-1").is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(app.sessions.get("sess-1").is_none(), "gone once it exited");
+        assert_eq!(
+            live.state(),
+            crate::sessions::LiveState::Waiting,
+            "the Stop applied"
+        );
+        assert!(!live.has_held_stop());
+        assert_eq!(live.progress().background[0].state, "stopped");
+        assert_eq!(
+            app.store.get_task(&key).await.unwrap().unwrap().status,
+            TaskStatus::WaitingForUser
+        );
     }
 
     #[tokio::test]

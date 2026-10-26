@@ -26,6 +26,14 @@ const SWITCH_SETTLE: Duration = Duration::from_secs(3);
 
 const BUSY: &str = "wait for the turn to end or press Detener";
 
+/// Background commands or sub-agents of a session would die with the switch.
+fn background_refusal(app: &AppState) -> ApiError {
+    ApiError::conflict(app.lang().pick(
+        "Hay trabajo en segundo plano: espera a que termine o pulsa Detener",
+        "Background work is running: wait for it to finish or press Stop",
+    ))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SetRuntime {
     pub mode: String,
@@ -110,6 +118,13 @@ async fn set_session_runtime_with(
         Some(l) => Some(l.typing.clone().lock_owned().await),
         None => None,
     };
+    // Background work first: a session that has it stays working, so the busy check
+    // would always answer for it.
+    if let Some(l) = &live
+        && l.progress().has_background()
+    {
+        return Err(background_refusal(&app));
+    }
     if let Some(l) = &live
         && is_busy(&app, l).await?
     {
@@ -217,6 +232,9 @@ async fn set_runtime_with(
         _typing.push(l.typing.clone().lock_owned().await);
     }
     for (l, _) in &live {
+        if l.progress().has_background() {
+            return Err(background_refusal(&app));
+        }
         if is_busy(&app, l).await? {
             return Err(ApiError::conflict(BUSY));
         }
@@ -591,6 +609,65 @@ mod tests {
         );
         assert_eq!(running_on_stream(&app), Some(true));
         assert!(switched_events(&app).await.is_empty());
+        kill_all(&app);
+    }
+
+    fn start_background(app: &AppState, id: &str) {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        app.sessions.get(id).unwrap().update_progress(|p| {
+            crate::progress::apply(
+                p,
+                &StreamEvent::Task(TaskEvent::Started {
+                    task_id: "bg1".into(),
+                    tool_use_id: None,
+                    kind: TaskKind::Command,
+                    description: "sleep".into(),
+                    background: true,
+                }),
+                chrono::Utc::now(),
+            )
+        });
+        // As in a real session: the turn ended but the held work keeps it working.
+        app.sessions
+            .get(id)
+            .unwrap()
+            .set_state(crate::sessions::LiveState::Working);
+    }
+
+    #[tokio::test]
+    async fn background_work_refuses_the_task_switch() {
+        let app = task_in(true, "exec sleep 5").await;
+        app.lang.set(crate::lang::Lang::Es);
+        start_background(&app, "main");
+        assert!(
+            app.sessions
+                .get("main")
+                .unwrap()
+                .progress()
+                .has_background()
+        );
+        let (status, m) = switch(&app, "terminal", Duration::from_millis(500)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(m.contains("espera a que termine o pulsa Detener"), "{m}");
+        assert!(chat_flag(&app).await);
+        assert_eq!(running_on_stream(&app), Some(true));
+        assert!(switched_events(&app).await.is_empty());
+        app.lang.set(crate::lang::Lang::En);
+        let (_, m) = switch(&app, "terminal", Duration::from_millis(500)).await;
+        assert!(m.contains("Background work is running"), "{m}");
+        kill_all(&app);
+    }
+
+    #[tokio::test]
+    async fn background_work_refuses_the_session_switch() {
+        let app = task_in(true, "exec sleep 5").await;
+        app.lang.set(crate::lang::Lang::Es);
+        start_background(&app, "main");
+        let (status, m) =
+            switch_session(&app, "main", "terminal", Duration::from_millis(500)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(m.contains("segundo plano"), "{m}");
+        assert_eq!(running_on_stream(&app), Some(true));
         kill_all(&app);
     }
 

@@ -10,7 +10,7 @@ const SLUGS = [
   "manual-resume", "agent-finished", "mark-done", "fail", "start-aborted", "setup-failed", "retry-setup",
   "skip-setup", "created-from-conversation", "step-started", "autopilot-paused", "autopilot-resumed",
   "autopilot-answered", "autopilot-nudged", "autopilot-finished", "reopened", "runtime-switched",
-  "permission-asked", "permission-expired",
+  "permission-asked", "permission-expired", "agent-resumed",
 ];
 
 describe("historyLine", () => {
@@ -37,6 +37,8 @@ describe("historyLine", () => {
     expect(historyLine({ type: "permission-expired", tool: "Bash", summary: "npm test", outcome: "terminal" })).toBe(
       "Caducó el permiso de Bash · se respondió en la terminal",
     );
+    expect(historyLine({ type: "agent-resumed", reason: "background-done" })).toBe("Claude continúa: tarea en segundo plano terminada");
+    expect(historyLine({ type: "agent-resumed", reason: null })).toBe("Claude continúa");
     expect(historyLine({ type: "fail", reason: "boom" })).toBe("Falló: boom");
     expect(historyLine({ type: "created-from-conversation", label: "Idea" })).toBe("Creada desde la conversación «Idea»");
   });

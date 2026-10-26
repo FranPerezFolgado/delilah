@@ -83,10 +83,10 @@ Post-design re-check: no violations.
    - `docs/vision.md` "Mobile, through Tailscale": replace the sketch with the decided approach,
      link to research.md, and remove the answered open questions (iPhone; both Macs, work
      conditional on IT; launch allowed).
-   - `docs/decisions.md`: new **#87 "Mobile through Tailscale serve and a home-screen web app;
-     device tokens first"**, with ruled-out options. Amend #12's last line to point to #87.
+   - `docs/decisions.md`: new **#96 "Mobile through Tailscale serve and a home-screen web app;
+     device tokens first"**, with ruled-out options. Amend #12's last line to point to #96.
    - `docs/status.md`, the "Mobile access" line (edit by content, not line number): "analysed
-     (#87); next is roadmap step 1, device auth".
+     (#96); next is roadmap step 1, device auth".
    - `docs/architecture.md`: no change (nothing built); the "(later: mobile web)" box stays.
    - `README.md`: no change (no user-facing behaviour).
 4. **Close**: version bump (patch), PR.

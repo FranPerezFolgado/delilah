@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, type ToolEntry } from "../api";
+import { api, type SubagentProgress, type ToolEntry } from "../api";
 import { setLanguage } from "../i18n";
 import { ToolCard } from "./ToolCard";
 
@@ -26,8 +26,8 @@ const tool = (over: Partial<ToolEntry> = {}): ToolEntry => ({
   ...over,
 });
 
-function setup(entry: ToolEntry, onOpenFile = vi.fn()) {
-  const r = render(<ToolCard entry={entry} sessionId="s1" onOpenFile={onOpenFile} />);
+function setup(entry: ToolEntry, onOpenFile = vi.fn(), subagent?: SubagentProgress | null) {
+  const r = render(<ToolCard entry={entry} sessionId="s1" onOpenFile={onOpenFile} subagent={subagent} />);
   return { ...r, onOpenFile };
 }
 
@@ -167,5 +167,74 @@ describe("ToolCard", () => {
     expect(r.container.querySelector(".tool-card.running")).toBeTruthy();
     open(r, "corriendo");
     expect(r.getByText("En curso…")).toBeTruthy();
+  });
+});
+
+describe("ToolCard sub-agent progress", () => {
+  const step = (n: number) => ({ tool: "Read", summary: `paso ${n}`, at: "" });
+  const sub = (over: Partial<SubagentProgress> = {}): SubagentProgress => ({
+    tool_use_id: "toolu_1",
+    description: "d",
+    state: "running",
+    started_at: new Date(Date.now() - 5000).toISOString(),
+    ended_at: null,
+    steps: 3,
+    recent: [step(1), step(2), step(3)],
+    ...over,
+  });
+  const agent = (over: Partial<ToolEntry> = {}) => tool({ tool: "Agent", summary: "Agente", input: { prompt: "haz" }, result: null, ...over });
+
+  it("shows state, clock, step count and latest step while running", () => {
+    const r = setup(agent(), vi.fn(), sub());
+    const head = r.container.querySelector(".tool-head")!.textContent!;
+    expect(head).toContain("en curso");
+    expect(head).toMatch(/\d+ s/);
+    expect(head).toContain("3 pasos");
+    expect(head).toContain("paso 3");
+    expect(head).not.toContain("paso 2");
+  });
+
+  it("uses the singular for one step", () => {
+    const r = setup(agent(), vi.fn(), sub({ steps: 1, recent: [step(1)] }));
+    expect(r.container.querySelector(".tool-head")!.textContent).toContain("1 paso");
+    expect(r.container.querySelector(".tool-head")!.textContent).not.toContain("1 pasos");
+  });
+
+  it("lists recent steps expanded, with the count of earlier ones", () => {
+    const r = setup(agent(), vi.fn(), sub({ steps: 5 }));
+    open(r);
+    expect(r.container.querySelectorAll(".tool-steps li").length).toBe(3);
+    expect(r.getByText("paso 1")).toBeTruthy();
+    expect(r.getByText("(+2 anteriores)")).toBeTruthy();
+  });
+
+  it("has no earlier-steps note when all steps are listed", () => {
+    const r = setup(agent(), vi.fn(), sub());
+    open(r);
+    expect(r.queryByText(/anteriores/)).toBeNull();
+  });
+
+  it("shows done with steps and minutes, failed and stopped", () => {
+    const t0 = Date.parse("2026-01-01T00:00:00Z");
+    const ended = new Date(t0 + 180000).toISOString();
+    const base = { started_at: new Date(t0).toISOString(), ended_at: ended, steps: 4 };
+    let r = setup(agent({ result: "ok" }), vi.fn(), sub({ ...base, state: "completed" }));
+    expect(r.container.querySelector(".tool-head")!.textContent).toContain("Hecho · 4 pasos · 3 min");
+    cleanup();
+    r = setup(agent({ result: "x" }), vi.fn(), sub({ ...base, state: "failed" }));
+    expect(r.container.querySelector(".tool-head")!.textContent).toContain("Fallido");
+    cleanup();
+    r = setup(agent({ result: "x" }), vi.fn(), sub({ ...base, state: "stopped" }));
+    expect(r.container.querySelector(".tool-head")!.textContent).toContain("Detenido");
+    cleanup();
+    r = setup(agent({ result: "x" }), vi.fn(), sub({ ...base, state: "unknown" }));
+    expect(r.container.querySelector(".tool-head")!.textContent).toContain("4 pasos");
+  });
+
+  it("renders as before without the prop", () => {
+    const r = setup(agent());
+    expect(r.container.querySelector(".tool-head")!.textContent).not.toContain("pasos");
+    open(r);
+    expect(r.container.querySelector(".tool-steps")).toBeNull();
   });
 });

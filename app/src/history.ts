@@ -50,6 +50,8 @@ export function historyLine(ev: Ev): string {
       return str(ev.mode) === "chat" || str(ev.mode) === "stream" ? t("La sesión pasó a chat") : t("La sesión pasó a la terminal");
     case "permission-asked": return t("Claude pidió permiso para {tool}: {summary}", { tool: str(ev.tool), summary: short(str(ev.summary)) });
     case "permission-expired": return t("Caducó el permiso de {tool} · {outcome}", { tool: str(ev.tool), outcome: expired(str(ev.outcome)) });
+    case "agent-resumed":
+      return str(ev.reason) === "background-done" ? t("Claude continúa: tarea en segundo plano terminada") : t("Claude continúa");
     default: return t("Pasó algo en la tarea");
   }
 }

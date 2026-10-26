@@ -68,7 +68,7 @@ workspace"). The state machine was meant to leave room for them.
 per task in tokens or time with a warning at 80 %, and optionally resuming with
 another agent or account when a task is urgent.
 
-**Mobile, through Tailscale (decided, [decision 87](decisions.md)).** The daemon is already
+**Mobile, through Tailscale (decided, [decision 96](decisions.md)).** The daemon is already
 API-first, so a phone is just one more client. Analysed and tried on an iPhone on 2026-10-26
 ([research](../specs/008-mobile-access-analysis/research.md)):
 - **Exposure:** `tailscale serve` on the personal Mac: HTTPS inside the tailnet only, never

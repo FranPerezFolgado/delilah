@@ -9,6 +9,7 @@ use delilah_agents::limits;
 use delilah_core::{Event, TaskKey};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::atomic::Ordering;
 use tokio::io::AsyncWriteExt;
 
 use crate::events::Topic;
@@ -53,7 +54,12 @@ async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
     }
     // Kept raw: the exact payloads (e.g. a real StopFailure) are what the next
     // iteration of the adapter is built from.
-    if let Err(e) = append_raw(&app, &q.task, &hook).await {
+    // PreToolUse is not logged: it fires for every tool with the full tool_input
+    // (e.g. Write contents), which PostToolUse already carries; logging both
+    // would double the file.
+    if hook["hook_event_name"].as_str() != Some("PreToolUse")
+        && let Err(e) = append_raw(&app, &q.task, &hook).await
+    {
         tracing::warn!(task = %q.task, "cannot log hook: {e}");
     }
     let signal = claude::classify(&hook);
@@ -63,7 +69,7 @@ async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
 
 /// What a hook (or a stream event that stands for one) does to the session, the inbox and
 /// the task, without logging it.
-async fn apply_signal(
+pub(crate) async fn apply_signal(
     app: AppState,
     task: &str,
     session: Option<&str>,
@@ -104,6 +110,40 @@ async fn apply_signal(
         _ => None,
     };
     if let Some(live) = &live {
+        // Only a new turn makes a held Stop stale. A tool hook (`Working`) does not: a
+        // background sub-agent posts them to this same session after the turn's Stop.
+        let agent_start = signal == Signal::PromptSubmitted && agent_prompt(&hook);
+        if signal == Signal::PromptSubmitted && (!agent_start || live.state() == LiveState::Waiting)
+        {
+            live.drop_held_stop();
+        }
+        // A background sub-agent's tool hook (it carries `agent_id`) arriving once the
+        // session waits again is not a turn: it must not flip the session back to working.
+        if signal == Signal::Working
+            && hook.get("agent_id").is_some()
+            && live.state() == LiveState::Waiting
+        {
+            return;
+        }
+        // The CLI also posts the `<task-notification>` prompt mid-turn, when a background
+        // task ends during it: no new turn, so nothing of a prompt's effects applies (it
+        // would clear a pending question the turn still waits on). Waiting, it is the
+        // start of a turn Claude began itself and applies in full.
+        if agent_start && live.state() != LiveState::Waiting {
+            return;
+        }
+        // Background work still runs: the turn's end is held, not applied (see
+        // `Live::hold_stop_if_background`, the one atomic check). Queued messages are typed
+        // now so they are not stranded until the replay.
+        if signal == Signal::TurnEnded
+            && limit_reset.is_none()
+            && live.runtime.as_stream().is_some()
+            && !next_turn_started(live)
+            && live.hold_stop_if_background(hook.clone())
+        {
+            crate::conversation::flush_queue(&app, live).await;
+            return;
+        }
         live.set_state(match (signal, limit_reset) {
             (_, Some(_)) => LiveState::Paused,
             (Signal::PromptSubmitted | Signal::Working, _) => LiveState::Working,
@@ -120,6 +160,22 @@ async fn apply_signal(
     if let Some(id) = &session_id {
         crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
         note_activity(&app, id, signal, &hook).await;
+    }
+
+    if let Some(live) = &live
+        && let Some(event) = claude::classify_activity(&hook)
+    {
+        // Snapshot before locking the log: never call `sessions` under its lock.
+        let live_ids: std::collections::HashSet<String> =
+            app.sessions.all().into_iter().map(|l| l.id).collect();
+        app.activity_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(&live.id, &live.task, Utc::now(), event.clone(), &live_ids);
+        // A change is announced at once; an append that changes nothing waits for the tick.
+        if !live.update_activity(event) {
+            app.activity_dirty.store(true, Ordering::Relaxed);
+        }
     }
 
     // What the session now waits on you for, for the inbox.
@@ -190,11 +246,31 @@ async fn apply_signal(
     }
 }
 
+/// Whether the turn after the one this `Stop` ends already began (its `Init` came first):
+/// the hook is late and belongs to the past, so it is applied, never held.
+fn next_turn_started(live: &crate::sessions::Live) -> bool {
+    live.progress()
+        .turn
+        .is_some_and(|t| t.started_at > Utc::now() - chrono::Duration::seconds(1))
+}
+
+/// Whether a prompt hook is not the user's: the one the daemon makes up for a turn Claude
+/// started by itself (`delilah_origin`), or the `<task-notification>` XML the CLI posts
+/// as a prompt when a background task ends.
+pub(crate) fn agent_prompt(hook: &Value) -> bool {
+    hook["delilah_origin"].as_str() == Some("agent")
+        || hook["prompt"]
+            .as_str()
+            .is_some_and(|p| p.trim_start().starts_with("<task-notification>"))
+}
+
 /// A finished turn or a submitted prompt is the session's last activity; Claude's closing
 /// message (or the prompt) is what its row shows.
 async fn note_activity(app: &AppState, session: &str, signal: Signal, hook: &Value) {
     let message = match signal {
         Signal::TurnEnded => hook["last_assistant_message"].as_str(),
+        // A turn Claude started itself has no prompt of the user's to show.
+        Signal::PromptSubmitted if agent_prompt(hook) => return,
         Signal::PromptSubmitted => hook["prompt"].as_str(),
         _ => return,
     };
@@ -499,6 +575,202 @@ mod tests {
         assert!(inbox(&state).await.is_empty());
     }
 
+    /// A live Claude session `s-1` of PROJ-1 (a quiet process behind it).
+    fn live_claude(state: &AppState) {
+        let mut cmd = portable_pty::CommandBuilder::new("bash");
+        cmd.args(["--noprofile", "--norc", "-c", "sleep 5"]);
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        state.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+    }
+
+    async fn activity(state: &AppState) -> Value {
+        let req = Request::get("/api/v1/activity")
+            .body(Body::empty())
+            .unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn history(state: &AppState, query: &str) -> (StatusCode, Value) {
+        let req = Request::get(format!("/api/v1/activity/history{query}"))
+            .body(Body::empty())
+            .unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        let code = res.status();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (code, serde_json::from_slice(&body).unwrap_or(Value::Null))
+    }
+
+    const LIVE: &str = "/hooks/claude?task=PROJ-1&session=s-1";
+
+    fn pre_edit() -> Value {
+        json!({ "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_use_id": "t1",
+                "tool_input": { "file_path": "/repo/src/main.rs" } })
+    }
+
+    #[tokio::test]
+    async fn pre_tool_use_is_not_logged_but_post_tool_use_is() {
+        let state = running_task().await;
+        live_claude(&state);
+        let log = state.config.task_dir("PROJ-1").join("hooks.jsonl");
+        let lines = || std::fs::read_to_string(&log).map_or(0, |s| s.lines().count());
+        post(&state, LIVE, pre_edit()).await;
+        assert_eq!(lines(), 0);
+        post(
+            &state,
+            LIVE,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
+        )
+        .await;
+        assert_eq!(lines(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_shows_in_the_activity_until_it_ends() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        let a = activity(&state).await;
+        assert_eq!(a["sessions"]["s-1"]["action"]["kind"], "edit");
+        assert_eq!(a["sessions"]["s-1"]["action"]["target"], "main.rs");
+
+        post(
+            &state,
+            LIVE,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
+        )
+        .await;
+        assert_eq!(
+            activity(&state).await,
+            json!({ "sessions": {}, "tokens": {} })
+        );
+    }
+
+    #[tokio::test]
+    async fn waiting_clears_the_activity() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        assert!(activity(&state).await["sessions"]["s-1"].is_object());
+        post(&state, LIVE, json!({ "hook_event_name": "Notification" })).await;
+        assert_eq!(
+            activity(&state).await,
+            json!({ "sessions": {}, "tokens": {} })
+        );
+        assert_eq!(
+            state.sessions.get("s-1").unwrap().state(),
+            LiveState::Waiting
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_of_an_unknown_session_is_ignored() {
+        let state = running_task().await;
+        let code = post(&state, "/hooks/claude?task=PROJ-1&session=nope", pre_edit()).await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
+        assert_eq!(
+            activity(&state).await,
+            json!({ "sessions": {}, "tokens": {} })
+        );
+    }
+
+    #[tokio::test]
+    async fn activity_is_announced_on_change_only() {
+        let state = running_task().await;
+        live_claude(&state);
+        let mut rx = state.events.subscribe();
+        let drain = |rx: &mut tokio::sync::broadcast::Receiver<Topic>| {
+            let mut topics = vec![];
+            while let Ok(t) = rx.try_recv() {
+                topics.push(t);
+            }
+            topics
+        };
+        post(&state, LIVE, pre_edit()).await;
+        assert!(drain(&mut rx).contains(&Topic::Activity));
+        // The end of a call that is not the current one changes nothing.
+        let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
+        post(&state, LIVE, other).await;
+        assert!(!drain(&mut rx).contains(&Topic::Activity));
+    }
+
+    #[tokio::test]
+    async fn a_no_change_append_is_recorded_and_marks_the_log_dirty() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        state.activity_dirty.store(false, Ordering::Relaxed);
+        // The end of a call that is not the current one changes nothing, but is logged.
+        let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
+        post(&state, LIVE, other).await;
+        assert!(state.activity_dirty.load(Ordering::Relaxed));
+        let (code, h) = history(&state, "?owner=PROJ-1").await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(h["sessions"][0]["entries"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn history_returns_entries_after_a_seq_and_keeps_ended_sessions() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        let (_, h) = history(&state, "?owner=PROJ-1").await;
+        assert!(h["started_at"].is_string());
+        assert_eq!(h["sessions"][0]["session"], "s-1");
+        assert_eq!(h["sessions"][0]["live"], true);
+        assert_eq!(h["sessions"][0]["entries"][0]["type"], "tool_started");
+        let seq = h["sessions"][0]["entries"][0]["seq"].as_u64().unwrap();
+
+        let end = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "t1" });
+        post(&state, LIVE, end).await;
+        let (_, h) = history(&state, &format!("?owner=PROJ-1&after={seq}")).await;
+        let entries = h["sessions"][0]["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["type"], "tool_ended");
+
+        let last = entries[0]["seq"].as_u64().unwrap();
+        let live = state.sessions.get("s-1").unwrap();
+        state.sessions.remove_if_same("s-1", &live.runtime);
+        let (_, h) = history(&state, &format!("?owner=PROJ-1&after={last}")).await;
+        assert_eq!(h["sessions"][0]["live"], false);
+        assert!(h["sessions"][0]["entries"].as_array().unwrap().is_empty());
+
+        let (code, h) = history(&state, "?owner=NOPE-1").await;
+        assert_eq!(
+            (code, h["sessions"].as_array().map(Vec::len)),
+            (StatusCode::OK, Some(0))
+        );
+    }
+
+    #[tokio::test]
+    async fn history_rejects_a_missing_owner_and_a_bad_after() {
+        let state = running_task().await;
+        assert_eq!(history(&state, "").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(history(&state, "?owner=").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            history(&state, "?owner=PROJ-1&after=x").await.0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
     fn session_record(id: &str, primary: bool) -> crate::store_sessions::SessionRecord {
         crate::store_sessions::SessionRecord {
             id: id.into(),
@@ -541,6 +813,27 @@ mod tests {
         .await;
         let extras = state.store.session_extras("s-1").await.unwrap();
         assert_eq!(extras.last_message.unwrap().chars().count(), 200);
+    }
+
+    #[tokio::test]
+    async fn a_prompt_the_agent_made_up_or_a_task_notification_is_not_the_users_last_message() {
+        let state = running_task().await;
+        state
+            .store
+            .create_session(&session_record("s-1", true))
+            .await
+            .unwrap();
+        let url = "/hooks/claude?task=PROJ-1&session=s-1";
+        for hook in [
+            json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" }),
+            json!({ "hook_event_name": "UserPromptSubmit",
+                    "prompt": "<task-notification>\n<task-id>b1</task-id>" }),
+        ] {
+            post(&state, url, hook).await;
+            let extras = state.store.session_extras("s-1").await.unwrap();
+            assert_eq!(extras.last_message, None);
+            assert_eq!(extras.last_activity_at, None);
+        }
     }
 
     #[tokio::test]
@@ -665,6 +958,287 @@ mod tests {
             post(&state, url, hook(bad)).await;
             assert_eq!(live.transcript(), Some(b.clone()), "{bad:?}");
         }
+    }
+
+    // --- Held Stop (background work running) ---
+
+    const URL: &str = "/hooks/claude?task=PROJ-1&session=s-1";
+
+    /// A chat-mode session `id` of PROJ-1 (its process just sleeps), working.
+    async fn stream_session(state: &AppState, id: &str, primary: bool) -> crate::sessions::Live {
+        state
+            .store
+            .create_session(&session_record(id, primary))
+            .await
+            .unwrap();
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("30");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let live = state.sessions.insert(
+            id,
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            primary,
+            std::sync::Arc::new(session),
+        );
+        live.set_state(LiveState::Working);
+        live
+    }
+
+    fn feed(live: &crate::sessions::Live, event: delilah_agents::stream::StreamEvent) {
+        live.update_progress(|p| crate::progress::apply(p, &event, Utc::now()));
+    }
+
+    fn bg_started() -> delilah_agents::stream::StreamEvent {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        StreamEvent::Task(TaskEvent::Started {
+            task_id: "b1".into(),
+            tool_use_id: None,
+            kind: TaskKind::Command,
+            description: "sleep".into(),
+            background: true,
+        })
+    }
+
+    fn init() -> delilah_agents::stream::StreamEvent {
+        delilah_agents::stream::StreamEvent::Init {
+            session_id: "x".into(),
+            self_started: false,
+        }
+    }
+
+    fn stop_hook() -> Value {
+        json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" })
+    }
+
+    #[tokio::test]
+    async fn a_stop_with_background_running_is_held_with_no_end_of_turn_effects() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        let other = stream_session(&state, "s-2", false).await;
+        feed(&live, bg_started());
+        feed(&other, bg_started());
+
+        post(&state, URL, stop_hook()).await;
+        post(&state, "/hooks/claude?task=PROJ-1&session=s-2", stop_hook()).await;
+
+        assert_eq!(live.state(), LiveState::Working);
+        assert_eq!(other.state(), LiveState::Working);
+        assert!(live.has_held_stop());
+        assert!(other.has_held_stop());
+        assert_eq!(status(&state).await, TaskStatus::Running);
+        // No question in the inbox, no "turn done" aviso, no last message.
+        assert!(inbox(&state).await.is_empty());
+        let extras = state.store.session_extras("s-1").await.unwrap();
+        assert_eq!(extras.last_message, None);
+    }
+
+    #[tokio::test]
+    async fn a_stop_with_no_background_applies_as_before() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        post(&state, URL, stop_hook()).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+        assert_eq!(inbox(&state).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_hold_stores_nothing_when_the_background_set_is_empty() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        assert!(!live.hold_stop_if_background(stop_hook()));
+        assert!(!live.has_held_stop());
+        feed(&live, bg_started());
+        assert!(live.hold_stop_if_background(stop_hook()));
+        // The replay: nothing runs any more, so it applies, whole.
+        feed(
+            &live,
+            delilah_agents::stream::StreamEvent::Task(delilah_agents::stream::TaskEvent::Ended {
+                task_id: "b1".into(),
+                status: delilah_agents::stream::TaskStatus::Completed,
+                summary: None,
+            }),
+        );
+        let held = live.take_held_stop().unwrap();
+        apply_signal(
+            state.clone(),
+            "PROJ-1",
+            Some("s-1"),
+            Signal::TurnEnded,
+            &held,
+        )
+        .await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+    }
+
+    #[tokio::test]
+    async fn a_new_turn_drops_the_held_stop_but_an_agent_prompt_mid_turn_does_not() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        feed(&live, bg_started());
+
+        for hook in [json!({ "hook_event_name": "UserPromptSubmit", "prompt": "hola" })] {
+            post(&state, URL, stop_hook()).await;
+            assert!(live.has_held_stop());
+            post(&state, URL, hook).await;
+            assert!(!live.has_held_stop());
+            assert_eq!(live.state(), LiveState::Working);
+        }
+
+        post(&state, URL, stop_hook()).await;
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "UserPromptSubmit",
+                    "prompt": "<task-notification>\n<task-id>b1</task-id>" }),
+        )
+        .await;
+        assert!(live.has_held_stop(), "the agent prompt is not a turn start");
+    }
+
+    #[tokio::test]
+    async fn a_background_sub_agents_tool_hook_neither_drops_the_held_stop_nor_wakes_a_waiting_session()
+     {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        feed(&live, bg_started());
+        post(&state, URL, stop_hook()).await;
+        assert!(live.has_held_stop());
+
+        let sub = json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                          "agent_id": "a696ef4688000ea5e" });
+        post(&state, URL, sub.clone()).await;
+        assert!(live.has_held_stop(), "a sub-agent tool is not a new turn");
+        assert_eq!(live.state(), LiveState::Working);
+
+        // The set empties: the replay applies the Stop.
+        feed(
+            &live,
+            delilah_agents::stream::StreamEvent::Task(delilah_agents::stream::TaskEvent::Ended {
+                task_id: "b1".into(),
+                status: delilah_agents::stream::TaskStatus::Completed,
+                summary: None,
+            }),
+        );
+        let held = live.take_held_stop().unwrap();
+        apply_signal(
+            state.clone(),
+            "PROJ-1",
+            Some("s-1"),
+            Signal::TurnEnded,
+            &held,
+        )
+        .await;
+        assert_eq!(live.state(), LiveState::Waiting);
+
+        // A late sub-agent hook does not flip it back.
+        post(&state, URL, sub).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+    }
+
+    #[tokio::test]
+    async fn a_stop_after_the_next_turns_init_is_applied_never_held() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        feed(&live, bg_started());
+        feed(&live, init());
+        post(&state, URL, stop_hook()).await;
+        assert!(!live.has_held_stop());
+        assert_eq!(live.state(), LiveState::Waiting);
+    }
+
+    #[tokio::test]
+    async fn a_failed_turn_a_usage_limit_and_a_terminal_session_are_never_held() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        feed(&live, bg_started());
+
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "StopFailure", "error": "server_error" }),
+        )
+        .await;
+        assert!(!live.has_held_stop());
+        assert_eq!(live.state(), LiveState::Waiting);
+
+        // A terminal session has no progress to wait on.
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        state
+            .store
+            .create_session(&session_record("s-3", false))
+            .await
+            .unwrap();
+        let term = state.sessions.insert(
+            "s-3",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            false,
+            pty,
+        );
+        term.set_state(LiveState::Working);
+        feed(&term, bg_started());
+        post(&state, "/hooks/claude?task=PROJ-1&session=s-3", stop_hook()).await;
+        assert!(!term.has_held_stop());
+        assert_eq!(term.state(), LiveState::Waiting);
+
+        // Last: the full window stays in the usage report.
+        live.set_state(LiveState::Working);
+        let reset = (Utc::now() + chrono::Duration::hours(1)).timestamp();
+        post(&state, "/hooks/claude/statusline?task=PROJ-1", json!({ "rate_limits": { "five_hour": { "used_percentage": 100, "resets_at": reset } } })).await;
+        post(&state, URL, stop_hook()).await;
+        assert!(!live.has_held_stop());
+        assert_eq!(live.state(), LiveState::Paused);
+    }
+
+    #[tokio::test]
+    async fn an_agent_prompt_mid_turn_keeps_a_pending_question_and_the_turn_state() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        // A question is pending (a permission card, say) while the turn is still going.
+        state
+            .store
+            .set_attention(
+                "s-1",
+                Some(&crate::inbox::Attention {
+                    kind: crate::inbox::AttentionKind::Permission,
+                    text: "Bash".into(),
+                    since: Utc::now(),
+                }),
+            )
+            .await
+            .unwrap();
+        live.update_convo(|c| c.needs_terminal = true);
+
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "UserPromptSubmit",
+                    "prompt": "<task-notification>\n<task-id>b1</task-id>" }),
+        )
+        .await;
+        assert_eq!(live.state(), LiveState::Working);
+        assert!(state.store.attention("s-1").await.unwrap().is_some());
+        assert!(live.needs_terminal());
+        assert_eq!(status(&state).await, TaskStatus::Running);
+
+        // Waiting (the self-started turn): it does what it did.
+        live.set_state(LiveState::Waiting);
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" }),
+        )
+        .await;
+        assert_eq!(live.state(), LiveState::Working);
+        assert!(state.store.attention("s-1").await.unwrap().is_none());
     }
 }
 
