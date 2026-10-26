@@ -49,7 +49,7 @@ The constitution file is the unfilled template; the gates are CLAUDE.md's ground
 | Try changes in a preview, never the installed daemon (7420) | Pass (e2e uses its own temp daemon; quickstart uses `scripts/preview.sh`) |
 | Migrations never edited | n/a (no migration) |
 | Contracts `api.rs` ↔ `app/src/api.ts` | Unchanged |
-| Version bump per Spec Kit task | Patch (bug fix, no new behaviour or API) |
+| Version bump | None on this branch (the user releases when they choose) |
 
 Re-check after design: still passing; the only contract that changes is the internal
 fake-claude scenario format, in a backwards-compatible way.
@@ -143,7 +143,7 @@ With `Env::start`, a fixture repo project, the fake Claude:
 - `docs/status.md`: the fix, and the new fake-claude steps.
 - `README.md` autopilot section: one line, autopilot waits while the agent's subagents
   run. This is user-facing behaviour (CLAUDE.md: the README covers what the user sees).
-- Patch bump with `scripts/bump-version.sh patch --commit`.
+- No version bump: the user bumps and releases when they choose.
 
 ## Project Structure
 
@@ -188,7 +188,7 @@ existing e2e crate.
 - A (agents rule) and C (fake-claude steps) share no files: parallel.
 - D (e2e test) needs C; it is written and run against the unfixed daemon (it must fail).
 - B (daemon wiring + hook tests) needs A.
-- E (docs, bump) last.
+- E (docs) last.
 
 ## Complexity Tracking
 

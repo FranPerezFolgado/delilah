@@ -133,7 +133,6 @@ waits and no nudge or pause.
 - [ ] T018 [P] Update `docs/status.md`: the fix (autopilot no longer pauses while subagents run), the new fake-claude `stop`/`write` steps and per-command scenarios, and the autopilot e2e test.
 - [ ] T019 [P] Add one line to the autopilot section of `README.md`: autopilot waits while the agent's background subagents run, and only nudges or pauses when the agent has really stopped.
 - [ ] T020 Run every check: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` (docs/development.md). Fix any failures inside this feature's files.
-- [ ] T021 Bump the version with `scripts/bump-version.sh patch --commit` (bug fix: no new behaviour, API or data change), from the version on `main`.
 
 ---
 
@@ -144,7 +143,7 @@ waits and no nudge or pause.
 - **US1**: T009 needs T001 and T003 (to compile the call in its setup, if any). T010 needs T005 and T007. T011→T012 come after T009 and T010 have been seen failing.
 - **US2**: T013 needs T001; T014 needs T007. Both can be written in parallel with US1's tests, but are checked green after T012.
 - **US3**: T015 needs T012; T016 needs T001, T010 and T014.
-- **Polish**: T017–T019 at any time after T012; T020 then T021 last.
+- **Polish**: T017–T019 at any time after T012; T020 last.
 
 ### Parallel opportunities
 
@@ -163,5 +162,5 @@ Agent C: T001, T008    (fixtures, contract doc)
 ## Implementation Strategy
 
 - **MVP**: Phases 1–3. The false pause is fixed and shown fixed by an e2e run.
-- Then US2 locks down the rule that must not change, US3 proves the tests can fail, and Polish closes with the docs and the patch bump.
+- Then US2 locks down the rule that must not change, US3 proves the tests can fail, and Polish closes with the docs. No version bump: the user bumps and releases when they choose.
 - Commit per work package, as `/orchestrate` does.
