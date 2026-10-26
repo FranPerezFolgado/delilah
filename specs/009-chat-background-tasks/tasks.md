@@ -127,8 +127,8 @@ Done before US3 because US3's ending relies on it; independently testable.
 - [ ] T048 [US3] Implement T047 in `crates/delilah-agents/src/stream.rs` and `conversation::stop` in `crates/delilah-daemon/src/conversation.rs`
 - [X] T049 [P] [US3] Write failing tests in `app/src/components/BackgroundStrip.test.tsx`: hidden with no items; one row per item with description, a ticking clock while running, total time when ended, state labels "en curso", "terminado", "fallido", "detenido", "estado desconocido"; `started_at` null → "desde hace ?"
 - [X] T050 [US3] Implement T049 in `app/src/components/BackgroundStrip.tsx` (+ CSS) and `app/src/i18n/en/BackgroundStrip.ts`
-- [ ] T051 [US3] Write failing tests in `app/src/components/ConversationView.test.tsx`: the strip shows above the composer from `progress.background` (load and socket); "Detener" stays visible while background runs with no turn; the composer sends (not "en cola") when only background work runs
-- [ ] T052 [US3] Implement T051 in `app/src/components/ConversationView.tsx`
+- [X] T051 [US3] Write failing tests in `app/src/components/ConversationView.test.tsx`: the strip shows above the composer from `progress.background` (load and socket); "Detener" stays visible while background runs with no turn; the composer sends (not "en cola") when only background work runs
+- [X] T052 [US3] Implement T051 in `app/src/components/ConversationView.tsx`
 
 **Checkpoint**: all four stories work; run quickstart US3/US4 ten times for SC-003/SC-004.
 

@@ -10,6 +10,7 @@ import {
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
+import { BackgroundStrip } from "./BackgroundStrip";
 import { Markdown } from "./Markdown";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { ToolCard } from "./ToolCard";
@@ -239,6 +240,8 @@ export function ConversationView({
   const guard = (p: Promise<unknown>) =>
     p.then(load, (e) => setError((e as Error).message));
   const working = session.state === "working";
+  // Background work keeps Detener available (and the session takes messages) with no turn running.
+  const backgroundRunning = !!progress?.background.some((b) => b.state === "running");
   // Any open Claude session takes messages; a closed one is reopened first and a shell has no chat.
   const canCompose = !session.closed && session.kind !== "shell";
 
@@ -404,6 +407,7 @@ export function ConversationView({
       ) : (
         !progress && working && conv?.activity && <div className="conv-activity muted">{conv.activity}</div>
       )}
+      {progress && progress.background.length > 0 && <BackgroundStrip items={progress.background} />}
       {conv?.needs_terminal && (
         <div className="conv-notice">
           {t("Claude espera en la terminal")}
@@ -439,7 +443,7 @@ export function ConversationView({
           <Button variant="primary" disabled={!text.trim()} title={text.trim() ? undefined : t("Escribe un mensaje")} onClick={send}>
             {t("Enviar")} <span className="conv-key">⌘↵</span>
           </Button>
-          {working && (
+          {(working || backgroundRunning) && (
             <Button variant="secondary" onClick={() => guard(api.stopSession(id))}>
               {t("Detener")}
             </Button>

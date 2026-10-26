@@ -17,12 +17,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
 | WP-09 | 5 | 5A | done | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
 | WP-10 | 5 | 5A | done | 1 | 25bffc7 | |
-| WP-11 | 6 | 6A | verified | 1 | SHA11 | +phase-5 arch MEDIUM (mid-turn notification side effects) |
+| WP-11 | 6 | 6A | verified | 1 | aee4c6a | +phase-5 arch MEDIUM (mid-turn notification side effects) |
 | WP-13 | 6 | 6A | verified | 1 | 7e87d3c | also refuses POST /sessions/{id}/runtime |
 | WP-15 | 6 | 6A | verified | 1 | 9a00f21 | |
-| WP-12 | 6 | 6B | pending | 0 | | |
-| WP-14 | 6 | 6B | pending | 0 | | |
-| WP-16 | 6 | 6B | pending | 0 | | |
+| WP-12 | 6 | 6B | implementing | 0 | | |
+| WP-14 | 6 | 6B | implementing | 0 | | |
+| WP-16 | 6 | 6B | verified | 1 | SHA16 | |
 | WP-17 | 7 | 7A | pending | 0 | | |
 | WP-18 | 7 | 7B | pending | 0 | | |
 

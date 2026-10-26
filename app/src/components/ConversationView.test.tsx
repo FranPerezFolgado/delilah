@@ -481,6 +481,48 @@ describe("ConversationView chat mode", () => {
     expect(container.querySelector("[data-testid=working-indicator]")).toBeNull();
   });
 
+  const bgItem = (state: "running" | "completed" = "running") => ({
+    task_id: "b1", tool_use_id: null, kind: "command", description: "npm run dev", state, started_at: new Date().toISOString(), ended_at: null,
+  });
+  const bgP = (state: "running" | "completed" = "running") => ({ turn: null, background: [bgItem(state)], subagents: [] });
+  const renderBg = (progress: object | null, state: "working" | "waiting" = "working") => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([], { progress: progress as never }));
+    return render(
+      <ConversationView session={session({ runtime: "stream", state })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+  };
+
+  it("shows the background strip from the loaded progress and the socket", async () => {
+    const { findByText, queryByText } = renderBg(bgP());
+    await findByText("En segundo plano");
+    await findByText("npm run dev");
+    FakeSocket.last.push({ progress: bgP("completed") });
+    expect(queryByText("terminado")).not.toBeNull();
+    FakeSocket.last.push({ progress: { turn: null, background: [], subagents: [] } });
+    expect(queryByText("En segundo plano")).toBeNull();
+  });
+
+  it("keeps Detener while background runs with no turn, even when waiting", async () => {
+    const stop = vi.spyOn(api, "stopSession").mockResolvedValue(null);
+    const { findByText, queryByText } = renderBg(bgP(), "waiting");
+    fireEvent.click(await findByText("Detener"));
+    expect(stop).toHaveBeenCalledWith("s1");
+    FakeSocket.last.push({ progress: bgP("completed") });
+    expect(queryByText("Detener")).toBeNull();
+  });
+
+  it("sends from the composer while only background work runs, without queueing", async () => {
+    const send = vi.spyOn(api, "sendMessage").mockResolvedValue(null as never);
+    const { findByLabelText, findByText, queryByText } = renderBg(bgP());
+    await findByText("npm run dev");
+    const field = (await findByLabelText("Mensaje")) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "hola" } });
+    fireEvent.keyDown(field, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(send).toHaveBeenCalledWith("s1", "hola"));
+    expect(queryByText("en cola")).toBeNull();
+    expect(queryByText("npm run dev")).not.toBeNull();
+  });
+
   it("gives each Agent card its own sub-agent progress, loaded and from the socket", async () => {
     const sa = (id: string, steps: string[]) => ({
       tool_use_id: id,
