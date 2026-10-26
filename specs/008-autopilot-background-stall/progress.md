@@ -9,11 +9,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-02 | 2 | 2A | done | 1 | 8fe3ebd | |
 | WP-03 | 2 | 2A | done | 1 | 03456b2 | |
 | WP-04 | 2 | 2A | done | 1 | 929ef46 | |
-| WP-05 | 3 | 3A | verified | 1 | | |
-| WP-06 | 4 | 4A | pending | 0 | | |
-| WP-07 | 4 | 4A | pending | 0 | | |
+| WP-05 | 3 | 3A | done | 1 | 8c8a7e3 | |
+| WP-06 | 4 | 4A | implementing | 1 | | |
+| WP-07 | 4 | 4A | implementing | 1 | | |
 | WP-08 | 5 | 5A | pending | 0 | | |
-| WP-09 | 6 | 6A | pending | 0 | | |
+| WP-09 | 6 | 6A | verified | 1 | | |
 | WP-10 | 6 | 6B | pending | 0 | | |
 
 ## Open findings
@@ -43,3 +43,9 @@ FAILED autopilot_waits_on_background_work: timed out after 30s waiting for the r
   last value: autopilot {"nudged":"plan","reason":"tasks.md not written","state":"paused"},
   events ["start","workspace-ready","agent-asked","autopilot-nudged","autopilot-paused",...]
 ```
+| 3 | architecture | MEDIUM | fixed 400ms sleep after spawned turn end; negative asserts can pass vacuously → folded into WP-06 | crates/delilah-daemon/src/hooks.rs:~765 |
+| 3 | architecture | LOW | `on_turn_ended_with` only called by tests but not cfg(test); wrapper names differ by one letter from on_turn_end(_with) | crates/delilah-daemon/src/handoff.rs:241-259 |
+| 3 | architecture | LOW | background_tests duplicates autopilot::testkit setup (~70 lines, testkit private) and leaks a temp dir per test → TempDir folded into WP-06 | crates/delilah-daemon/src/hooks.rs:670-740 |
+| 3 | spec-compliance | LOW | FR-004 test passes on handoff record OR implement session (launch fails with /nonexistent/claude); writes only tasks.md | crates/delilah-daemon/src/hooks.rs:~808 |
+| 3 | spec-compliance | LOW | `Api::set_preference` added without a task (test support to skip save-notes) | crates/delilah-e2e/src/api.rs:121 |
+| 3 | test-reviewer | HIGH→planned | real-stall coverage (done/absent fixtures, running→empty, e2e nudge→pause) is T013/T014 in phase 4 | — |

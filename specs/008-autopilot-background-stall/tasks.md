@@ -129,9 +129,9 @@ waits and no nudge or pause.
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T017 [P] Add a sentence to decision #39 in `docs/decisions.md`: a turn that ends with background tasks running (`Stop` hook `background_tasks`, `status: "running"`) is not a stall. Say the field is Claude Code's, observed rather than documented, that an unknown shape falls back to the stall rule, and point to `specs/008-autopilot-background-stall/contracts/stop-hook.md`.
-- [ ] T018 [P] Update `docs/status.md`: the fix (autopilot no longer pauses while subagents run), the new fake-claude `stop`/`write` steps and per-command scenarios, and the autopilot e2e test.
-- [ ] T019 [P] Add one line to the autopilot section of `README.md`: autopilot waits while the agent's background subagents run, and only nudges or pauses when the agent has really stopped.
+- [X] T017 [P] Add a sentence to decision #39 in `docs/decisions.md`: a turn that ends with background tasks running (`Stop` hook `background_tasks`, `status: "running"`) is not a stall. Say the field is Claude Code's, observed rather than documented, that an unknown shape falls back to the stall rule, and point to `specs/008-autopilot-background-stall/contracts/stop-hook.md`.
+- [X] T018 [P] Update `docs/status.md`: the fix (autopilot no longer pauses while subagents run), the new fake-claude `stop`/`write` steps and per-command scenarios, and the autopilot e2e test.
+- [X] T019 [P] Add one line to the autopilot section of `README.md`: autopilot waits while the agent's background subagents run, and only nudges or pauses when the agent has really stopped.
 - [ ] T020 Run every check: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` (docs/development.md). Fix any failures inside this feature's files.
 
 ---

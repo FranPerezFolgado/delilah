@@ -182,7 +182,8 @@ stalls gets one nudge; questions that have an option marked "(Recommended)" are
 answered for you. Anything else (a permission prompt in the task's session, a question without a
 recommendation, a blocked review, a failure) pauses it: the header shows "Autopiloto en
 pausa" with the reason, and the Bandeja offers "Reanudar autopiloto" or "Seguir a
-mano". On the idea card, "Crear y lanzar en autopiloto" creates the task and starts it.
+mano". Autopilot waits while the agent's background subagents run, and only nudges or
+pauses when the agent has really stopped. On the idea card, "Crear y lanzar en autopiloto" creates the task and starts it.
 Delilah pushes and opens the PR without asking again, so turn it on only where that is
 what you want. It never merges.
 

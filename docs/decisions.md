@@ -371,7 +371,11 @@ The workflow's approval stops are plain text, so without it nearly every plan st
 pause; unlimited nudges could loop. A question whose every item has exactly one option
 labelled "(Recommended)" is answered in the AskUserQuestion hook (no inbox item, history
 `autopilot-answered`); any other question pauses. Delilah still never drives the
-workflow's own phases.
+workflow's own phases. A turn that ends with background tasks running (the `Stop` hook's
+`background_tasks`, an entry with `status: "running"`) is not a stall: waiting on
+subagents gets no nudge and no pause. The field is Claude Code's, observed rather than
+documented; an unknown shape falls back to the stall rule. See
+`specs/008-autopilot-background-stall/contracts/stop-hook.md`.
 
 **40. Autopilot pushes and opens a draft PR with the user's own `gh` (2026-10-22).** It
 does so without asking at that moment, like "Abrir PR" (#26): the user opted in per task,

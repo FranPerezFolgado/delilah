@@ -98,9 +98,10 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 **Autopilot** (a task runs plan → implement → review → draft PR on its own; opt-in per task, spec workflow only, implies saving mode):
 - Option on new tasks, backlog items and running tasks (`--autopilot` / `--no-autopilot`, `delilah autopilot <KEY> on|off|resume`), a mark in the task header, and the chain's preview and PR steps.
-- The implementation starts without asking; a stalled step gets one nudge; questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into a Bandeja item (*Reanudar autopiloto* / *Seguir a mano*).
+- The implementation starts without asking; a stalled step gets one nudge, but a turn that ends while background subagents run is not a stall (no nudge, no pause; the step boundary and handoffs still run); questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into a Bandeja item (*Reanudar autopiloto* / *Seguir a mano*).
 - The review writes an outcome file; if ready, the project's preview starts and a draft PR opens per repo (title and body from the review, a loopback preview URL appended). Interrupted finishes recover on the scheduler tick.
 - "Crear y lanzar en autopiloto" on the idea card.
+- Waiting on background work is not a stall (decision #39): the fake Claude gained a `stop` object form (`{"message", "background"}`), a `write` step and per-command scenarios (`<task>.<command>.json`), and `crates/delilah-e2e/tests/autopilot.rs` covers a run that waits on subagents and one real stall (one nudge, then pause).
 - See [architecture.md](architecture.md) and decisions [#38](decisions.md) to [#48](decisions.md).
 
 **Dev workflow** (for working on this repo, not a product feature): CI on every PR (`.github/workflows/`), fmt/clippy/tests gating each implementer (`.claude/verify.sh`), a hook guarding the installed app, `scripts/bump-version.sh`. Decisions [#49](decisions.md) and [#50](decisions.md).
