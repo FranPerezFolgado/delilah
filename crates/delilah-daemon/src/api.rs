@@ -820,9 +820,14 @@ mod tests {
             ),
         ];
         for (method, uri, body) in routes {
-            let (status, _) = call(&app, method, uri, body).await;
-            assert_ne!(status, StatusCode::NOT_FOUND, "{method} {uri}");
-            assert_ne!(status, StatusCode::METHOD_NOT_ALLOWED, "{method} {uri}");
+            // A missing route is axum's bare 404/405; a handler's own 404/409 carries
+            // the ApiError JSON body.
+            let (status, body) = call(&app, method, uri, body).await;
+            let missing = matches!(
+                status,
+                StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+            ) && body.get("error").is_none();
+            assert!(!missing, "{method} {uri}: route not registered");
         }
     }
 

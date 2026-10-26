@@ -655,6 +655,17 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn tasks_carry_their_stored_created_at() {
+        let store = Store::in_memory().await.unwrap();
+        let mut t = task("PROJ-1");
+        t.created_at = "2026-01-02T03:04:05Z".parse().unwrap();
+        store.create_task(&t).await.unwrap();
+        let got = store.get_task(&TaskKey::new("PROJ-1")).await.unwrap().unwrap();
+        assert_eq!(got.created_at, t.created_at);
+        assert_eq!(store.list_tasks().await.unwrap()[0].created_at, t.created_at);
+    }
+
     fn task(key: &str) -> Task {
         Task::new(TaskKey::new(key), "Card retries", "feature")
     }

@@ -13,10 +13,10 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-04 | 2 | 2A | done | 1 | 8c35baa | Route skeleton |
 | WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
-| WP-07 | 2 | 2B | implementing | 1 |  | created_at exposed and reopen |
+| WP-07 | 2 | 2B | done | 1 |  | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | implementing | 1 |  | PR check times, review comments, merge |
-| WP-10 | 2 | 2B | done | 1 |  | Setup failure detail and Jira subtasks |
+| WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
@@ -83,3 +83,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 5 | WP-30 | NOTE | WP-34 must wire `PrView onOpenTerminal`, `SetupBanner onOpenTerminal` and `onOpenSettings` in TaskScreen/TaskView; WP-36 e2e: PR `#n` moved into `.pr-chip`. Run vitest with `--no-cache` (stale glob for new en/ files). | app/src/components/TaskScreen.tsx |
 | 4 | WP-25 | NOTE | WP-26: pass Sidebar `rail`, `onToggleRail`, `onAddProject`, `onDone`; drop `onNewTask`; `onDelete` now fires after its own confirm — App must not open DeleteTaskDialog again. Board: wire StatusBar filter + BoardView new props. Banner over main with content greyed. | app/src/App.tsx |
 | 5 | WP-32 | NOTE | WP-34: pass TaskView `asks` (task InboxItem[]) and `onOpenTask`. Check `ManualResume` is allowed from failed (Reanudar). «Main Claude» legacy EN key should read «Main Claude» — fine. | app/src/components/TaskScreen.tsx |
+| 2 | WP-10 | NOTE | Sample Jira data now has 20 sub-tasks of PROJ-1244 (affects e2e lists and the before/after Jira pair); client `SetupInfo.exit_code` is `number|null`; data-model.md setup.json gains `log`. | app/src/api.ts, app/e2e |
