@@ -645,5 +645,5 @@ account without auto) fails with a hint to «Por defecto de Claude». *Why a set
 auto in chat would hide the choice and leave the two runtimes different; reading
 `~/.claude.json` would depend on a private file whose format Claude may change. *Cost:* the
 default widens the terminal for users whose Claude default is not auto. Auto mode's own
-classifier decides what it escalates; Delilah answers both channels. [#43](decisions.md) is
+classifier decides what it escalates; Delilah turns `can_use_tool` into a card; `system/permission_denied` is currently ignored. [#43](decisions.md) is
 unchanged: Delilah's autopilot still never answers a permission prompt.

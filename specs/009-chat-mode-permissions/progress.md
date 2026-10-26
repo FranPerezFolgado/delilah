@@ -12,7 +12,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05 | 4 | 4A | done | 1 | dbab98f | tests written with code (no red seen) |
 | WP-03F | 3 | 3F | done | 1 | | FR-008 for project sessions, sleep → poll |
 | WP-06 | 5 | 5A | done | 1 | | full suite green |
-| WP-07 | 6 | 6A | verified | 1 | 7ac18fa | decision #80 |
+| WP-07 | 6 | 6A | done | 1 | 7ac18fa | decision #80 |
+| WP-07F | 6 | 6F | done | 1 | | docs: permission_denied ignored, project-session hint |
 | WP-08 | 6 | 6B | implementing | 0 | | |
 
 ## Open findings
