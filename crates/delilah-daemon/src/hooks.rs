@@ -781,7 +781,7 @@ mod background_tests {
     fn skipped(logs: &crate::logs::LogBuffer) -> usize {
         logs.tail(10_000)
             .iter()
-            .filter(|l| l.contains("background work running: no stall"))
+            .filter(|l| l.contains(crate::handoff::BACKGROUND_WAIT_LOG))
             .count()
     }
 

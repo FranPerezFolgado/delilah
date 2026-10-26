@@ -10,11 +10,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-03 | 2 | 2A | done | 1 | 03456b2 | |
 | WP-04 | 2 | 2A | done | 1 | 929ef46 | |
 | WP-05 | 3 | 3A | done | 1 | 8c8a7e3 | |
-| WP-06 | 4 | 4A | verified | 2 | 7c14b5f | flake fixed: event polling + log signal |
-| WP-07 | 4 | 4A | verified | 1 | be0ce95 | |
-| WP-08 | 5 | 5A | verified | 1 | | |
+| WP-06 | 4 | 4A | done | 2 | 7c14b5f | flake fixed: event polling + log signal |
+| WP-07 | 4 | 4A | done | 1 | be0ce95 | |
+| WP-08 | 5 | 5A | done | 1 | 6df251c | |
 | WP-09 | 6 | 6A | verified | 1 | db2cc68 | |
 | WP-10 | 6 | 6B | pending | 0 | | |
+| WP-06F | 4 | fix | done | 1 | | review fixes: shared skip-log const, tighter e2e asserts |
 
 ## Open findings
 
@@ -59,3 +60,8 @@ Pre-fix result: FAILED. Timed out after 30s waiting for "the review step starts"
 Head result (7c14b5f): `cargo test -p delilah-e2e --test autopilot` passes, 2 passed (autopilot_waits_on_background_work, autopilot_still_catches_a_real_stall).
 
 T016: grep for `/Users/`, `LIBRE-`, `PROJ-` and hex ids of 9+ chars in the hook fixtures and `autopilot.rs` found no hits.
+| 4 | test-reviewer | MEDIUM (raised HIGH) | negative tests sync on the debug log text "background work running: no stall" → WP-06F | crates/delilah-daemon/src/hooks.rs:784 |
+| 4 | test-reviewer | LOW | reviewer's race/polling MEDIUMs judged not real (log emitted after the skip decision; join test waits for nudge + skip) | crates/delilah-daemon/src/hooks.rs:788-943 |
+| 4 | spec-compliance | LOW | e2e doesn't assert the nudge is for implement; reason check loose → WP-06F | crates/delilah-e2e/tests/autopilot.rs:136-150 |
+| 4 | spec-compliance | LOW | FR-005 usage-limit and non-main-session paths not retested with a running entry (code path untouched) | crates/delilah-daemon/src/phases.rs:178 |
+| 6 | debugger | LOW (pre-existing) | flaky under --workspace load: pr_loop nudges_in_the_window_make_one_delayed_check (claim race, fixed 200ms sleep) and setup exit_zero_runs_the_task_and_launches_the_agent (login shell + 10s wait; leaks $TMPDIR/delilah-setup-* dirs); not touched by this branch | crates/delilah-daemon/src/pr_loop/mod.rs:591; setup.rs:556,656 |

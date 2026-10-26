@@ -123,6 +123,7 @@ fn autopilot_still_catches_a_real_stall() {
     env.scenario(key, &json!({"steps": [{"wait_input": true}]}));
     let api = env.api();
     api.set_preference("save-notes", json!(false));
+    api.set_preference("language", json!("en"));
     api.start_run(json!({"key": key, "title": "Stall", "project": "signal", "autopilot": true}));
 
     let (events, task) = env.wait_for("the autopilot pauses", T, || {
@@ -146,10 +147,12 @@ fn autopilot_still_catches_a_real_stall() {
         1,
         "{names:?}"
     );
-    let reason = task["autopilot"]["reason"].to_string();
-    assert!(
-        reason.contains('3') && (reason.contains("unchecked") || reason.contains("sin marcar")),
-        "{reason}"
+    let nudge = &items(&events)[nudged]["event"];
+    assert_eq!(nudge["step"], "implement", "{nudge}");
+    assert_eq!(
+        task["autopilot"]["reason"], "3 tasks unchecked",
+        "{}",
+        task["autopilot"]
     );
 
     let rec = env.wait_for("the nudge reaches the fake", T, || {

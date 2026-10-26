@@ -21,6 +21,10 @@ use crate::specs::SpecSummary;
 use crate::state::AppState;
 use crate::store_sessions::{SessionKind, SessionRecord};
 
+/// What the debug log says when a turn ends with background work running; the hooks tests
+/// count lines with it.
+pub(crate) const BACKGROUND_WAIT_LOG: &str = "turn ended with background work running: no stall";
+
 /// How long the stopped session gets to exit before the new one is launched.
 const KILL_WAIT: Duration = Duration::from_secs(3);
 
@@ -287,7 +291,7 @@ pub(crate) async fn on_turn_end_with<L: Launcher>(
         // Waiting only skips the stall; it never blocks `finish_save`, the boundary or
         // a handoff, which all ran above or below on every turn end.
         if end.background {
-            tracing::debug!(task = %key, "turn ended with background work running: no stall");
+            tracing::debug!(task = %key, "{BACKGROUND_WAIT_LOG}");
             return;
         }
         // No boundary on autopilot is a stall (which does nothing off autopilot or
