@@ -173,13 +173,13 @@ parallel (different files, no dependency on an unfinished task).
   - `npm` at `/app`, with a group `tauri` for `@tauri-apps/*` and a group `all` for the rest;
   - `github-actions` at `/`, grouped;
   - all weekly, `open-pull-requests-limit: 5`, commit-message prefix `chore(deps)`.
-- [ ] T033 [US3] Add `cliff.toml` (root): Conventional Commits parsers grouping feat → Features, fix → Fixes, perf → Performance, refactor → Refactor, docs → Docs, everything else → Other. Skip `chore: bump version`, merge commits and unconventional commits. Use the header `## [X.Y.Z] - YYYY-MM-DD` and a link to the GitHub compare. Generate `CHANGELOG.md` with `git cliff -o CHANGELOG.md` over all tags (v0.3.0…v1.0.0).
-- [ ] T034 [US3] Extend `scripts/bump-version.sh`:
+- [X] T033 [US3] Add `cliff.toml` (root): Conventional Commits parsers grouping feat → Features, fix → Fixes, perf → Performance, refactor → Refactor, docs → Docs, everything else → Other. Skip `chore: bump version`, merge commits and unconventional commits. Use the header `## [X.Y.Z] - YYYY-MM-DD` and a link to the GitHub compare. Generate `CHANGELOG.md` with `git cliff -o CHANGELOG.md` over all tags (v0.3.0…v1.0.0).
+- [X] T034 [US3] Extend `scripts/bump-version.sh`:
   - before writing anything, fail with "git-cliff is needed: brew install git-cliff" if `git cliff --version` fails;
   - after the lockfiles, run `git cliff --tag "v$new" -o CHANGELOG.md`;
   - add `CHANGELOG.md` to the `--commit` file list;
   - update its header comment.
-- [ ] T035 [US3] Extend `scripts/release/check.mjs`: fail if `CHANGELOG.md` has no line starting with `## [X.Y.Z]` for the version being released, with the message "CHANGELOG.md has no X.Y.Z section: run scripts/bump-version.sh (or git cliff --tag vX.Y.Z -o CHANGELOG.md) on a branch". If `check.mjs` has tests (`scripts/release/*.test.*`), add a case. Document both changes in `docs/development.md` "Releasing".
+- [X] T035 [US3] Extend `scripts/release/check.mjs`: fail if `CHANGELOG.md` has no line starting with `## [X.Y.Z]` for the version being released, with the message "CHANGELOG.md has no X.Y.Z section: run scripts/bump-version.sh (or git cliff --tag vX.Y.Z -o CHANGELOG.md) on a branch". If `check.mjs` has tests (`scripts/release/*.test.*`), add a case. Document both changes in `docs/development.md` "Releasing".
 - [X] T036 [US3] Clean `CLAUDE.md`:
   1. Move the personal rules into a new git-ignored `CLAUDE.local.md`: developed on a personal Mac and tested on the work Mac, never copying from work repos, git/gh as the personal account FranPerezFolgado, work credentials on the machine. That file is not committed; check with `git status`.
   2. In `CLAUDE.md` keep the generic versions: "never copy code or data from private repos; use `scripts/make-fixture-parent.sh` and the Jira JSON fixtures"; "if several GitHub accounts are configured, confirm the one gh uses before any remote operation".

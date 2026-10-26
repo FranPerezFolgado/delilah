@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Bumps the version in the four places from docs/development.md#releasing and refreshes the
-# lockfiles. Usage: scripts/bump-version.sh <major|minor|patch|X.Y.Z> [--commit]
+# Bumps the version in the four places from docs/development.md#releasing, refreshes the
+# lockfiles and regenerates CHANGELOG.md with git-cliff (needs `brew install git-cliff`).
+# Usage: scripts/bump-version.sh <major|minor|patch|X.Y.Z> [--commit]
 # The base is the version on main (origin/main if fetched), as CLAUDE.md asks; --commit
-# commits the result as "chore: bump version to X.Y.Z".
+# commits the result (CHANGELOG.md included) as "chore: bump version to X.Y.Z".
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,6 +26,8 @@ case "$level" in
   *) echo "unknown level: $level" >&2; exit 1 ;;
 esac
 
+git cliff --version >/dev/null 2>&1 || { echo "git-cliff is needed: brew install git-cliff" >&2; exit 1; }
+
 # First `version = ` line of each manifest is the package/workspace version.
 for f in Cargo.toml app/src-tauri/Cargo.toml; do
   perl -0pi -e "s/^version = \"[^\"]+\"/version = \"$new\"/m" "$f"
@@ -43,10 +46,12 @@ node -e '
   fs.writeFileSync(p, JSON.stringify(lock, null, 2) + "\n");
 ' "$new"
 
+git cliff --tag "v$new" -o CHANGELOG.md
+
 echo "$base ($base_ref) -> $new"
 if [[ "$commit" == --commit ]]; then
   git add Cargo.toml Cargo.lock app/src-tauri/Cargo.toml app/src-tauri/Cargo.lock \
-    app/package.json app/package-lock.json app/src-tauri/tauri.conf.json
+    app/package.json app/package-lock.json app/src-tauri/tauri.conf.json CHANGELOG.md
   git commit -q -m "chore: bump version to $new"
   echo "committed: chore: bump version to $new"
 fi

@@ -159,7 +159,9 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    It starts from the version on `origin/main`, writes the **four** places (`Cargo.toml`
    workspace, `app/src-tauri/Cargo.toml`, `app/package.json`,
    `app/src-tauri/tauri.conf.json`) and the three lockfiles (only their own version
-   lines), and with `--commit` makes the commit. Check what is merged since the last tag
+   lines), regenerates `CHANGELOG.md` with `git cliff --tag vX.Y.Z -o CHANGELOG.md`
+   (config in `cliff.toml`; needs `brew install git-cliff`, the script stops without it),
+   and with `--commit` makes the commit (changelog included). Check what is merged since the last tag
    with `git log vX.Y.Z..HEAD`.
 2. Merge the PR into `main`, then `git switch main && git pull`.
 3. `make release` on `main`. With neither `BUMP` nor `VERSION` it releases the version
@@ -178,7 +180,8 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
 4. **What the workflow does** on a `v*.*.*` tag: checks the commit is on `main`,
    fetches the annotated tag (`git fetch --force --tags`), runs
    `scripts/release/check.mjs --require-secrets` (versions agree, the public key is
-   not the `REPLACE_WITH_UPDATER_PUBKEY` placeholder, the secrets exist), writes the
+   not the `REPLACE_WITH_UPDATER_PUBKEY` placeholder, the secrets exist, `CHANGELOG.md`
+   has a `## [X.Y.Z]` section; if not, redo the bump on a branch), writes the
    notes (the tag message, else the `feat`/`fix` subjects since the last tag),
    builds with tauri-action and uploads a **draft** release (`includeUpdaterJson:
    false`), builds `latest.json` itself with `manifest.mjs --write` from the local
