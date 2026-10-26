@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AISLE_X, AISLE_Y, DESK_H, DESK_W, LEAVER_MS, LOUNGE_SEATS, POD_COLS, POD_H, POD_W, assignSlots, deskPosition, floorSize,
-  floorOrder, loungePath, podCount, seatPosition, trackLeavers,
+  AISLE_X, AISLE_Y, DESK_W, LEAVER_MS, POD_COLS, POD_H, POD_W, WALL_H, assignSlots, deskPosition, floorCols, floorSize,
+  floorOrder, loungeLeft, loungePath, loungeSeats, pathOffsets, podCount, seatPosition, sidePosition, trackLeavers,
 } from "./floorLayout";
 
 describe("assignSlots", () => {
@@ -67,11 +67,21 @@ describe("geometry", () => {
     expect(row2.y).toBe(d0.y + POD_H + AISLE_Y);
   });
 
-  it("the seat is centred below its desk", () => {
+  it("the seat is centred on its desk, with the head above the monitor and the body behind the desk", () => {
     const d = deskPosition(3);
     const s = seatPosition(3);
     expect(s.x).toBe(d.x + DESK_W / 2);
-    expect(s.y).toBeGreaterThan(d.y + DESK_H - 1);
+    // The sprite's top (feet - 12) is above the desk's top edge; its feet are behind the desk.
+    expect(s.y - 12).toBeLessThan(d.y);
+    expect(s.y).toBeGreaterThan(d.y);
+  });
+
+  it("the first desk row starts below the wall, with room for the head", () => {
+    expect(deskPosition(0).y - 5).toBeGreaterThanOrEqual(WALL_H);
+  });
+
+  it("a sitter's head clears the desk row above it", () => {
+    expect(seatPosition(2).y - 12).toBeGreaterThan(deskPosition(0).y + 9);
   });
 
   it("desks fit in the floor", () => {
@@ -79,22 +89,54 @@ describe("geometry", () => {
     const s = seatPosition(4 * POD_COLS);
     expect(s.y).toBeLessThan(size.height);
   });
+
+  it("the floor is sized to its content, not a tall box", () => {
+    const one = floorSize(1);
+    const two = floorSize(2);
+    expect(two).toEqual(one);
+    expect(two.height).toBeLessThan(80);
+    expect(floorCols(1)).toBe(2);
+    expect(floorCols(9)).toBe(POD_COLS);
+  });
+
+  it("the lounge sits right of the pods and inside the floor", () => {
+    for (const pods of [1, 2, 3, 5]) {
+      const size = floorSize(pods);
+      expect(loungeLeft(pods)).toBeGreaterThan(deskPosition(4 * (floorCols(pods) - 1)).x + POD_W - 1);
+      for (const seat of loungeSeats(pods)) {
+        expect(seat.x).toBeLessThan(size.width);
+        expect(seat.y).toBeLessThan(size.height);
+      }
+    }
+  });
 });
 
 describe("loungePath", () => {
-  it("goes seat, aisle below the pod, lounge seat", () => {
-    const path = loungePath(1);
-    expect(path).toHaveLength(3);
+  it("goes seat, beside the desk, down to the aisle, along it to the lounge, then a lounge seat", () => {
+    const path = loungePath(1, 2);
+    expect(path).toHaveLength(5);
     expect(path[0]).toEqual(seatPosition(1));
-    expect(path[1].x).toBe(path[0].x);
-    expect(path[1].y).toBeGreaterThan(path[0].y);
-    expect(LOUNGE_SEATS).toContainEqual(path[2]);
-    expect(path[2].x).toBeGreaterThan(path[0].x);
+    expect(path[1]).toEqual(sidePosition(1));
+    expect(path[2].x).toBe(path[1].x);
+    expect(path[2].y).toBeGreaterThan(path[1].y);
+    expect(path[3].y).toBe(path[2].y);
+    expect(loungeSeats(2)).toContainEqual(path[4]);
+    expect(path[4].x).toBeGreaterThan(path[0].x);
+  });
+
+  it("the walker steps out toward the middle of its pod row", () => {
+    expect(sidePosition(0).x).toBeGreaterThan(seatPosition(0).x);
+    expect(sidePosition(1).x).toBeLessThan(seatPosition(1).x);
   });
 
   it("spreads slots over several lounge seats", () => {
-    const ends = new Set([0, 1, 2, 3].map((s) => JSON.stringify(loungePath(s)[2])));
+    const ends = new Set([0, 1, 2, 3].map((s) => JSON.stringify(loungePath(s, 1).at(-1))));
     expect(ends.size).toBeGreaterThan(1);
+  });
+
+  it("offsets run from 0 to 1 by length", () => {
+    const o = pathOffsets([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 30 }]);
+    expect(o).toEqual([0, 0.25, 1]);
   });
 });
 

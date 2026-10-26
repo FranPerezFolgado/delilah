@@ -18,6 +18,9 @@ terminal pixel-art office for coding agents.
   holds the expected shades.
 - The outfit table (shirt/pants colours) and the seed hash used to pick an
   outfit from a name.
+- The room colours (wall, wall trim, warm carpet) of its default theme, in
+  `art/office.ts`, and the way it composes a room: a wall band across the top,
+  wall decor on it, a sitter behind a viewer-facing desk.
 - The monitor glow colours and the token-tier logic (the paper tower).
 
 `art/pixtuoid.ts` and `art/ramp.fixtures.ts` are generated: do not edit them,

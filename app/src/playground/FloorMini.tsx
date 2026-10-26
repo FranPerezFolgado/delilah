@@ -1,3 +1,4 @@
+import { OFFICE_COLOURS } from "./art/office";
 import { PixelSprite } from "./PixelSprite";
 import { lookFor, roleLook } from "./art/outfit";
 import { recolour } from "./art/ramp";
@@ -51,6 +52,11 @@ export function FloorMini({ floor, onOpen, selected }: FloorMiniProps) {
         {waiting && <span className="pill c-wait fm-pill">{waiting}</span>}
       </span>
       <span className="fm-strip" aria-hidden="true">
+        <svg className="fm-bg" width="100%" height="100%" focusable="false" shapeRendering="crispEdges">
+          <rect width="100%" height="100%" fill={OFFICE_COLOURS.floor} />
+          <rect width="100%" height="34%" fill={OFFICE_COLOURS.wall} />
+          <rect y="30%" width="100%" height="4%" fill={OFFICE_COLOURS.wallTrim} />
+        </svg>
         {shown.map((s) => (
           <Mini key={s.session ?? s.helperId} seat={s} project={floor.project} />
         ))}

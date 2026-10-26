@@ -3,6 +3,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Action } from "../api";
 import { KIND_COLOURS } from "./art/kinds";
+import { OFFICE_COLOURS } from "./art/office";
+import { LEAVER_WALK_MS, loungePath } from "./floorLayout";
 import { setLanguage } from "../i18n";
 import { Floor } from "./Floor";
 import type { DeskSeat, FloorModel } from "./useOffice";
@@ -84,20 +86,32 @@ describe("Floor", () => {
     expect(container.querySelector(".fl-desk")?.getAttribute("data-kind")).toBe("");
   });
 
-  it("walks a starting lead in from the aisle, then seats it", () => {
+  it("walks a starting lead in from beside its desk, then seats it", () => {
     vi.useFakeTimers();
     const { container } = show(model({ leads: [lead(0, { state: "starting" })] }));
     const walk = () => container.querySelector(".fl-char")?.getAttribute("data-walk");
-    expect(walk()).toBe("from");
-    act(() => {
-      vi.advanceTimersByTime(100);
-    });
     expect(walk()).toBe("walking");
-    expect((container.querySelector(".fl-char") as HTMLElement).style.transition).toContain("transform");
     act(() => {
       vi.advanceTimersByTime(2000);
     });
     expect(walk()).toBe("seated");
+  });
+
+  it("the walk-in is an animation that ends on the chair: from beside the desk to no offset", () => {
+    vi.useFakeTimers();
+    const animate = vi.fn(() => ({ cancel: vi.fn() }));
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = animate;
+    try {
+      const { container } = show(model({ leads: [lead(0, { state: "starting" })] }));
+      expect(animate).toHaveBeenCalledTimes(1);
+      const [frames] = animate.mock.calls[0] as unknown as [{ transform: string }[]];
+      expect(frames[0].transform).not.toBe("translate(0, 0)");
+      expect(frames[frames.length - 1].transform).toBe("translate(0, 0)");
+      // The element's own position is the chair, so nothing but the animation moves it.
+      expect((container.querySelector(".fl-char") as HTMLElement).style.transform).toBe("");
+    } finally {
+      delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+    }
   });
 
   it("a working lead is seated at once", () => {
@@ -139,12 +153,64 @@ describe("Floor", () => {
     vi.useFakeTimers();
     const floor = model({ leads: [lead(0)], leaving: [{ id: "h1", slot: 1, since: Date.now() }] });
     const { container, rerender } = show(floor);
-    expect(container.querySelector(".fl-leaver")?.getAttribute("data-step")).toBe("0");
+    const leaver = () => container.querySelector(".fl-leaver");
+    expect(leaver()?.getAttribute("data-step")).toBe("walking");
     act(() => {
-      vi.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(LEAVER_WALK_MS + 100);
     });
-    expect(container.querySelector(".fl-leaver")?.getAttribute("data-step")).toBe("2");
+    expect(leaver()?.getAttribute("data-step")).toBe("arrived");
     rerender(<Floor floor={{ ...floor, leaving: [] }} online onOpenSession={() => {}} />);
-    expect(container.querySelector(".fl-leaver")).toBeNull();
+    expect(leaver()).toBeNull();
+  });
+
+  it("a leaver's own position is its lounge seat, so it cannot be stuck mid-floor", () => {
+    vi.useFakeTimers();
+    const dest = loungePath(1, 1).at(-1)!;
+    const scale = 4;
+    const expected = `translate(${(dest.x - 4) * scale}px, ${(dest.y - 12) * scale}px)`;
+    const animate = vi.fn(() => ({ cancel: vi.fn() }));
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = animate;
+    try {
+      const { container } = show(model({ leads: [lead(0)], leaving: [{ id: "h1", slot: 1, since: Date.now() }] }));
+      const el = container.querySelector(".fl-leaver") as HTMLElement;
+      expect(el.style.transform).toBe(expected);
+      const [frames] = animate.mock.calls[0] as unknown as [{ transform: string; offset: number }[]];
+      expect(frames[0].offset).toBe(0);
+      expect(frames[frames.length - 1]).toMatchObject({ transform: expected, offset: 1 });
+    } finally {
+      delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+    }
+  });
+
+  it("a leaver that is shown late (the floor opened mid-walk) starts where it should, not at its desk", () => {
+    vi.useFakeTimers();
+    const since = Date.now() - LEAVER_WALK_MS - 500;
+    const { container } = show(model({ leads: [lead(0)], leaving: [{ id: "h1", slot: 1, since }] }));
+    expect(container.querySelector(".fl-leaver")?.getAttribute("data-step")).toBe("arrived");
+  });
+
+  it("with reduced motion a leaver stands in the lounge at once", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    const { container } = show(model({ leads: [lead(0)], leaving: [{ id: "h1", slot: 1, since: Date.now() }] }));
+    expect(container.querySelector(".fl-leaver")?.getAttribute("data-step")).toBe("still");
+    vi.unstubAllGlobals();
+  });
+
+  it("draws the room: a wall band, a floor and wall decor", () => {
+    const { container } = show(model({ leads: [lead(0)] }));
+    expect(container.querySelector("svg.fl-bg pattern")).toBeTruthy();
+    expect(container.querySelector("svg.fl-bg > rect")?.getAttribute("fill")).toBe(OFFICE_COLOURS.wall);
+    // Whiteboard, bookshelf, clock, vending, pantry, cooler, sofa, table, plant, one desk and its cup.
+    expect(container.querySelectorAll(".fl-floor svg.pg-sprite").length).toBeGreaterThanOrEqual(11);
+  });
+
+  it("seats the character behind the desk: its head is above the desk's top edge", () => {
+    const { container } = show(model({ leads: [lead(0)] }));
+    const char = container.querySelector(".fl-char") as HTMLElement;
+    const desk = container.querySelector(".fl-desk svg.fl-abs") as unknown as SVGElement;
+    const scale = Number(container.querySelector(".fl-floor")!.getAttribute("data-scale"));
+    expect(parseFloat(char.style.top)).toBe(parseFloat((desk as unknown as HTMLElement).style.top) - 5 * scale);
+    // The character comes before the desk in the DOM, so the desk is drawn over its body.
+    expect(char.compareDocumentPosition(desk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

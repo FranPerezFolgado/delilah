@@ -62,4 +62,9 @@ describe("FloorMini", () => {
     fireEvent.click(screen.getByRole("button"));
     expect(onOpen).toHaveBeenCalledWith("LIBRE-3");
   });
+
+  it("draws the room's wall and floor colours behind the strip", () => {
+    const { container } = render(<FloorMini floor={floor()} onOpen={() => {}} />);
+    expect(container.querySelectorAll(".fm-strip svg.fm-bg rect")).toHaveLength(3);
+  });
 });
