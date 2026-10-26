@@ -23,21 +23,21 @@ which ones are older ones.
 ### User Story 1 - The current phase session's tab says which phase it is (Priority: P1)
 
 A user opens a task that runs in saving mode. The tab of the session doing the
-current phase reads the phase's name («Implementación» / «Implementation»,
+current phase reads the phase's name («Implementación» / «Implement»,
 «Revisión» / «Review», «Spec y plan» / «Spec and plan»), not «Main Claude».
 
 **Why this priority**: This is the reported bug; the tab bar is where the user looks
 to find the session that is working now.
 
 **Independent Test**: Open a task whose primary session works on the Implementation
-step; the tab bar shows «Implementation» (English) or «Implementación» (Spanish) and
+step; the tab bar shows «Implement» (English) or «Implementación» (Spanish) and
 no «Main Claude» tab.
 
 **Acceptance Scenarios**:
 
 1. **Given** a task whose primary session works on the Implementation step, **When**
    the task screen opens, **Then** that session's tab reads «Implementación» in
-   Spanish and «Implementation» in English.
+   Spanish and «Implement» in English.
 2. **Given** a task whose primary session works on the Review step, **When** the task
    screen opens, **Then** its tab reads «Revisión» / «Review».
 3. **Given** a task whose primary session works on the Spec and plan step, **When**
@@ -56,19 +56,19 @@ no «Main Claude» tab.
 
 After a handoff the old phase session stays in the task (stopped, or still open). It
 reads its own phase name, so the tabs of a task in Review read «Spec and plan»,
-«Implementation», «Review».
+«Implement», «Review».
 
 **Why this priority**: It makes the history of phases readable, but the bug the user
 hit is the current one.
 
 **Independent Test**: Open a task with one stopped Implementation session and a
-primary Review session; the tabs read «Implementation» and «Review».
+primary Review session; the tabs read «Implement» and «Review».
 
 **Acceptance Scenarios**:
 
 1. **Given** a task with a former Implementation session (no longer primary) and a
    primary Review session, **When** the task screen opens, **Then** the two tabs read
-   «Implementation» and «Review», in that order.
+   «Implement» and «Review», in that order.
 2. **Given** an extra Claude or a terminal the user opened (no step), **When** the
    task screen opens, **Then** its tab keeps its own label, as today.
 
@@ -82,7 +82,7 @@ The «Sesiones» list on the task tab names each session the same way the tab ba
 its tab.
 
 **Independent Test**: On the task tab of a saving-mode task, the Sessions list shows
-«Implementation» for the implementation session and no «Main Claude» row.
+«Implement» for the implementation session and no «Main Claude» row.
 
 **Acceptance Scenarios**:
 
@@ -93,16 +93,16 @@ its tab.
 
 ### Edge Cases
 
-- A primary session that is a terminal (not a Claude) and has no step: keeps its own
-  label in the Sessions list and «Claude principal» in the tab bar exactly as today
-  (no change in behaviour for sessions without a step).
+- A primary session that is a terminal (not a Claude) and has no step keeps its own
+  label, in both places. The daemon never creates one today, so in practice nothing
+  changes for sessions without a step.
 - Two sessions with the same step (a phase session reopened as a new one): both read
   the phase name; the tooltip (the stored label) and the order of the tabs tell them
   apart.
 - The tab that is opening («Iniciando…» / «Starting…») is unchanged.
 - Keyboard and screen readers: the tab's accessible name is its visible name, so the
   close button of a closable phase tab reads «Cerrar Implementación» / «Close
-  Implementation».
+  Implement».
 
 ## Requirements *(mandatory)*
 
@@ -139,8 +139,8 @@ its tab.
   (no regression).
 - **SC-003**: For every session of a task, the name in the tab bar and the name in the
   Sessions list are identical.
-- **SC-004**: Switching the UI language renames the phase tabs on the next render,
-  with no reload of the task.
+- **SC-004**: After switching the UI language, the phase tabs read in the new language,
+  like every other text of the task screen.
 
 ## Assumptions
 
