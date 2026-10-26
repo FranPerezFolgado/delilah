@@ -18,11 +18,13 @@ Setup that worked:
 
 ## Q1 Loads over the tunnel (Wi-Fi and mobile data)
 
-The UI loads on the iPhone over the tunnel and works. Mobile-data-only was not explicitly confirmed. The layout is not responsive ("se ve raro"): expected, it is roadmap step 3. The user wants to design the phone layout separately with Claude Design.
+The UI loads on the iPhone over the tunnel and works (network not recorded; mobile data not confirmed). The layout is not responsive ("se ve raro"): expected, it is roadmap step 3. The user wants to design the phone layout separately with Claude Design.
 
 Also verified from the phone: answering an agent works (task LIBRE-3 history: agent-asked 14:16:38, user-answered 14:17:41; US3), and creating a task (LIBRE-3) and starting LIBRE-2 works; the user finds the number of taps fine, not counted (US6).
 
 ## Q2 Host reaching the daemon; curl without Origin
+
+Caveat: the no-Origin `curl` was run from the Mac itself via the tailnet name (through `tailscale serve`, so the same path as a tailnet device, but not from a second device), and the 200 was through the Host-rewriting Vite proxy.
 
 `serve` forwards the original Host (`macbook-delilah.tail60414d.ts.net`). The unchanged preview daemon refused every API call with 403 "the Host must be a loopback address", with and without Origin: it fails closed today. Then, through a throwaway proxy that rewrites Host to loopback (simulating roadmap step 2 without step 1), `curl` with no Origin got 200 on `/api/v1/projects`. This confirms that accepting the tailnet Host without tokens gives the whole API to any tailnet caller (R3).
 

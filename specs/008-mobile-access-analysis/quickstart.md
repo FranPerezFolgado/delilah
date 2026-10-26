@@ -3,7 +3,7 @@
 Throwaway, on the **personal Mac** only. Nothing here changes shipped code (FR-009). Never use
 port 7420 or the installed app; this runs against a preview.
 
-## Prerequisites (user, ~10 min)
+## Prerequisites (user, ~10 min, estimate, not timed)
 
 1. Install Tailscale on the Mac and the iPhone (App Store), same account.
 2. In the Tailscale admin console: enable MagicDNS and HTTPS certificates.
@@ -39,7 +39,7 @@ Undo: `tailscale serve reset`; stop the preview with Ctrl-C.
 - **Q1** Does the UI load and list tasks over the tunnel, on Wi-Fi and on mobile data?
 - **Q2** Which `Host` reaches the daemon? If requests are refused with "the Host must be a
   loopback address", `serve` forwards the tailnet name. Also check from another tailnet device:
-  `curl https://$TS:8443/api/v1/tasks` with no `Origin`. If it returns data, R3's
+  `curl https://$TS/api/v1/tasks` with no `Origin`. If it returns data, R3's
   unauthenticated-access finding is confirmed.
 - **Q3** Lock the iPhone for 10 min, unlock: does the view catch up by itself, and how fast?
 - **Q4** Add to Home Screen: does it open full-screen? (Push is not tested; it needs step 4.)

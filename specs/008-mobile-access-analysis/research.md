@@ -19,16 +19,16 @@ not optional.** No other decision R1-R9 is contradicted.
 
 | Check | Result |
 |---|---|
-| Q1 loads and works on iPhone over the tunnel | Verified on Wi-Fi. Mobile data not confirmed (unverified). Layout not responsive (expected, step 3) |
-| Q2 `serve` forwards the tailnet `Host`; today's daemon refuses | Verified: 403 "the Host must be a loopback address", with or without `Origin` (fails closed). With a throwaway proxy rewriting `Host` to loopback (simulates step 2 without step 1), curl with no `Origin` got 200: confirms R3's rule |
+| Q1 loads and works on iPhone over the tunnel | Verified (network not recorded; mobile data not confirmed). Layout not responsive (expected, step 3) |
+| Q2 `serve` forwards the tailnet `Host`; today's daemon refuses | Verified (curl from the Mac via the tailnet name, through the Host-rewriting proxy; not from a second device): 403 "the Host must be a loopback address", with or without `Origin` (fails closed). With a throwaway proxy rewriting `Host` to loopback (simulates step 2 without step 1), curl with no `Origin` got 200: confirms R3's rule |
 | Q3 catch-up after ~10 min locked | Partly verified: the view updated by itself (per the user); catch-up time not measured |
 | Q4 Home Screen install | Verified: opens as a full-screen web app. EU claim: iOS version not reported, from docs, unverified |
 | Q5 conversation and terminal readable | Verified |
 | Q6 phone resizing the Mac's PTY | Unverified (Q6 not run) |
-| US3 answer from phone | Verified: agent-asked, user-answered in ~1 min, first try |
+| US3 answer from phone | Verified: agent-asked, user-answered in ~63 s. Not comparable to SC-004: no push, and the user was not starting from a notification |
 | US6 create + start task | Flow verified, taps not counted (user finds it fine) |
 | Push, deep link | Unverified until step 4 |
-| SC-005 setup | Install app on both devices, enable MagicDNS + HTTPS in the admin DNS page, two `serve` commands. Not timed |
+| SC-005 setup | Install app on both devices, enable MagicDNS + HTTPS in the admin DNS page, one `serve` command. Not timed |
 
 **Privacy note**: HTTPS certs for `*.ts.net` are logged in public Certificate Transparency
 logs, so the tailnet and machine names become public (not the traffic). See R1 and R5.
@@ -55,7 +55,7 @@ Code facts (from the current tree):
 | Reachable from | Own tailnet devices only, any network | Same Wi-Fi only; client isolation on corporate/hotel Wi-Fi blocks it | The public internet, behind Cloudflare Access login | — (a client, needs A/B/C) | **The public internet** |
 | HTTPS (needed for service worker, push, install) | Yes, valid cert for `*.ts.net` | No: needs a self-signed CA installed on the iPhone | Yes | n/a | Yes |
 | Push to iPhone | Yes, as a home-screen web app (iOS 16.4+) | Only with the self-signed CA trusted; fragile | Yes | Native push needs a paid account → **no** | Yes |
-| Setup | ~10 min: install on both, enable HTTPS certs, one `serve` command | Bind change + CA on phone | Domain on Cloudflare, `cloudflared`, Access policy | Xcode/AltServer, refresh weekly | Like A |
+| Setup | ~10 min (estimate, not timed): install on both, enable HTTPS certs, one `serve` command | Bind change + CA on phone | Domain on Cloudflare, `cloudflared`, Access policy | Xcode/AltServer, refresh weekly | Like A |
 | Mac asleep/off | Unreachable; page shows offline | Same | Same, Cloudflare shows 502 | Same | Same |
 | iPhone / Android | iPhone: PWA from Safari, push from iOS 16.4+. Android: same web app, push works in Chrome too (not the target, FR-010) | iPhone: Safari tab only, no push without the CA | Same as A | iPhone: needs AltStore/SideStore + a Mac or PC. Android: APK, no store needed | Same as A |
 | Live updates / background | WebSocket live while the screen is on; drops on lock, refetch on return (R2). Push covers the gap | Same | Same | Same, plus native background limits | Same as A |
@@ -153,7 +153,7 @@ web app manifest and a service worker), with a phone layout.
 so the loopback bind no longer says who is calling. Today the daemon still fails closed:
 `serve` forwards the original `Host` (`<mac>.<tailnet>.ts.net`) and the `Host` guard
 (`api.rs:264-267`) refuses it with 403, with or without `Origin` (verified, Q2). With a
-throwaway proxy rewriting `Host` to loopback, a curl with no `Origin` got 200 (verified, Q2). The danger is created by **relaxing `Host`/`Origin`
+throwaway proxy rewriting `Host` to loopback, a curl with no `Origin` got 200 (verified, Q2; curl from the Mac via the tailnet name, through the Host-rewriting proxy; not from a second device). The danger is created by **relaxing `Host`/`Origin`
 to accept the tailnet name**. From then on, a tailnet caller with no `Origin` (curl, a script)
 would get the whole API with no authentication.
 **Rule:** the daemon accepts the tailnet `Host` only while token enforcement for it is active.
@@ -308,7 +308,7 @@ experiment outcome at the top and [experiment/README.md](experiment/README.md). 
 stay "unverified".
 
 **SC-005 (setup effort)**: setup is one-time: install Tailscale on both devices, enable
-MagicDNS + HTTPS in the admin DNS page, run two `serve` commands (minimal effort, not timed).
+MagicDNS + HTTPS in the admin DNS page, run one `serve` command (minimal effort, estimate, not timed).
 Pairing (step 1) adds about 1 minute per device (estimate, unverified), once.
 
 ## R9. Journeys on the phone (US3–US6)
@@ -329,7 +329,7 @@ stay estimates.
 | 5 | Tap *Allow once* / *Deny*, or pick an option | 1 | 1–2 |
 
 Total about 12–22 s, **2 taps** for a permission or a choice (estimate; flow verified from
-the phone in the experiment: agent asked, user answered in ~1 min on the first try, taps not
+the phone in the experiment: agent asked, user answered in ~63 s (not comparable to SC-004: no push, user not starting from a notification), taps not
 counted). A free-text answer adds the
 field tap, typing and *Send*: 3 taps, 25–40 s (over the target; the target is for the tap
 answer). A plan approval is 2 taps plus reading time.
@@ -344,7 +344,7 @@ design. Estimate: 1–6 s to a current view (partly verified, Q3: after ~10 min 
 updated by itself, per the user; time not measured). Step 3 should also reconnect at
 once on `visibilitychange` instead of waiting for the backoff timer (unverified, Q3).
 Switching Wi-Fi to mobile data drops the socket the same way and follows the same path; it
-also needs the Tailscale VPN to stay connected (unverified: Q1 was verified on Wi-Fi only). Limit: while locked there is
+also needs the Tailscale VPN to stay connected (unverified: Q1 network not recorded, mobile data not confirmed). Limit: while locked there is
 no live view, only push.
 
 **US5. Follow a session** (conversation vs terminal).
