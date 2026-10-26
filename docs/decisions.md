@@ -623,7 +623,8 @@ single persistent toast ("{key} te espera · Responder", or "{n} tareas te esper
 the Inbox) instead of one per task; closing it empties the group, and a task leaves it when it
 stops waiting, its screen is opened or it leaves the list. The toast store merges repeats only
 for the same kind and exact text with no action or key ("×N", capped "×99+"), keeps at most 3
-(evicting the oldest plain info toast, never the waiting one) and shows more than one collapsed
+(evicting plain info first, then toasts without an action, never a keyed one such as the waiting
+toast; an undo action is time-bound and cannot be raised again, an error can) and shows more than one collapsed
 as stacked cards ("+N", "Cerrar todo" whenever there is more than one). *Why:* several waiting tasks flooded the corner and buried the rest;
 the kit stays task-agnostic, so the group lives in `GlobalNotices` as one keyed toast. Actions
 carry closures (each "Deshacer" undoes a different thing), so toasts with an action never merge;

@@ -134,3 +134,16 @@ it("does not toast tasks already waiting when the list arrives after an empty fi
   expect(inToasts().queryByText("A-0 te espera")).toBeNull();
   expect(inToasts().queryByText("A-1 te espera")).toBeNull();
 });
+
+it("announces the waiting toast once per change, not on every refresh", () => {
+  const { to } = setup();
+  to([wait("A-0"), idle("A-1")]);
+  const status = () => screen.getByRole("status");
+  const first = status().firstElementChild;
+  expect(status().textContent).toBe("A-0 te espera");
+  // A refresh hands a new array with the same tasks: nothing new to announce.
+  to([wait("A-0"), idle("A-1")]);
+  expect(status().firstElementChild).toBe(first);
+  to([wait("A-0"), wait("A-1")]);
+  expect(status().textContent).toBe("2 tareas te esperan");
+});

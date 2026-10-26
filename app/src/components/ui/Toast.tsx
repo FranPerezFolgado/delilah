@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import "./Toast.css";
 
@@ -24,8 +24,6 @@ export interface ToastItem extends ToastInput {
   /** Time left (ms) while paused. */
   remaining?: number;
 }
-
-export const WAITING_TOAST_KEY = "waiting";
 
 const MAX = 3;
 const DEFAULT_TTL = 6000;
@@ -107,12 +105,17 @@ export function setToastsPaused(p: boolean) {
   emit();
 }
 
-/** Drops toasts beyond MAX, sparing the just-pushed one (`keepId`) while anything else can go. */
+/**
+ * Drops toasts beyond MAX, sparing the just-pushed one (`keepId`) while anything else can go:
+ * plain info first, then other toasts without an action (an action such as «Deshacer» is
+ * time-bound and can't be raised again), then any non-keyed one.
+ */
 function evict(keepId: number) {
   while (items.length > MAX) {
     const others = items.filter((i) => i.id !== keepId);
     const victim =
       others.find((i) => (i.kind ?? "info") === "info" && !i.action && !i.key) ??
+      others.find((i) => !i.action && !i.key) ??
       others.find((i) => !i.key) ??
       items.find((i) => !i.key);
     if (!victim) return;
@@ -130,7 +133,8 @@ export function pushToast(input: ToastInput): number {
       items = items.map((i) =>
         i === hit ? { ...input, id: hit.id, count: hit.count, aliases: hit.aliases } : i,
       );
-      announce(input.text);
+      // Re-pushing the same content (e.g. on a refresh) must not re-announce it.
+      if (hit.text !== input.text) announce(input.text);
       emit();
       return hit.id;
     }
@@ -205,6 +209,7 @@ function closeAll() {
 export function ToastHost() {
   const list = useSyncExternalStore(subscribe, snapshot);
   const live = useSyncExternalStore(subscribe, announcedSnapshot);
+  const host = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -212,6 +217,7 @@ export function ToastHost() {
   useEffect(() => setToastsPaused(expanded), [expanded]);
   useEffect(() => () => setToastsPaused(false), []);
   const empty = list.length === 0;
+  const more = list.length - 1;
   // Nothing left under the pointer or focus: no mouseleave/blur will come, so start over.
   useEffect(() => {
     if (!empty) return;
@@ -219,7 +225,12 @@ export function ToastHost() {
     setFocused(false);
     setPinned(false);
   }, [empty]);
-  const more = list.length - 1;
+  // A removed button may take focus with it without a blur (WebKit), and with one toast left
+  // there is no toggle to unpin: either would keep the stack expanded and its timers paused.
+  useEffect(() => {
+    if (!host.current?.contains(document.activeElement)) setFocused(false);
+    if (more <= 0) setPinned(false);
+  }, [list, more]);
   const shown = expanded ? list : list.slice(-1);
   const announcer = (
     <div role="status" aria-live="polite" className="toast-sr">
@@ -230,40 +241,41 @@ export function ToastHost() {
     <>
       {announcer}
       {!empty && (
-    <div
-      className={`toast-host${expanded ? " toast-expanded" : more > 0 ? " toast-stacked" : ""}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => {
-        setHovered(false);
-        if (!focused) setPinned(false);
-      }}
-      onFocus={() => setFocused(true)}
-      onBlur={(e) => {
-        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-        setFocused(false);
-        if (!hovered) setPinned(false);
-      }}
-    >
-      {shown.map((i) => (
-        <ToastView key={i.id} item={i} />
-      ))}
-      {more > 0 && (
-        <button
-          type="button"
-          className="toast-more"
-          aria-expanded={expanded}
-          aria-label={expanded ? undefined : t("Mostrar {n} avisos más", { n: more })}
-          onClick={() => setPinned((p) => !p)}
+        <div
+          ref={host}
+          className={`toast-host${expanded ? " toast-expanded" : more > 0 ? " toast-stacked" : ""}`}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => {
+            setHovered(false);
+            if (!focused) setPinned(false);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setFocused(false);
+            if (!hovered) setPinned(false);
+          }}
         >
-          {expanded ? t("Ocultar avisos") : t("+{n}", { n: more })}
-        </button>
-      )}
-      {more > 0 && (
-        <button type="button" className="toast-clear" onClick={closeAll}>
-          {t("Cerrar todo")}
-        </button>
-      )}
-    </div>
+          {shown.map((i) => (
+            <ToastView key={i.id} item={i} />
+          ))}
+          {more > 0 && (
+            <button
+              type="button"
+              className="toast-more"
+              aria-expanded={expanded}
+              aria-label={expanded ? undefined : t("Mostrar {n} avisos más", { n: more })}
+              onClick={() => setPinned((p) => !p)}
+            >
+              {expanded ? t("Ocultar avisos") : t("+{n}", { n: more })}
+            </button>
+          )}
+          {more > 0 && (
+            <button type="button" className="toast-clear" onClick={closeAll}>
+              {t("Cerrar todo")}
+            </button>
+          )}
+        </div>
       )}
     </>
   );

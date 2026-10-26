@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import type { Task, UsageReport } from "../api";
 import { t, tn } from "../i18n";
-import { Button, WAITING_TOAST_KEY, dismissToastByKey, pushToast } from "./ui";
+import { Button, dismissToastByKey, pushToast } from "./ui";
 import "./GlobalNotices.css";
 
 const HOT = 90;
+/** The one grouped «te espera» toast, updated in place by key. */
+const WAITING_TOAST_KEY = "waiting";
 const MAX_PAUSED = 3;
 const WINDOWS: Record<string, string> = { five_hour: "5 h", seven_day: "Semana" };
 

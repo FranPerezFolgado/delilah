@@ -6,7 +6,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Built
 
-**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
+**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](ui-redesign.md); decisions [#68](decisions.md) to [#79](decisions.md)):
 - **Tokens and themes:** `styles.css` holds only the tokens (dark and light, following the OS) and the base; every component has its own CSS. The terminal and the editor read the same tokens (`theme.ts`) and change theme live. Guards in `tokens.test.ts` (contrast), `styles.test.ts` (type/radius scale, allowed colours) and `inline-style.test.ts` (inline-style ratchet).
 - **Kit** (`components/ui/`, one barrel): Button, IconButton, Toggle, Segmented, Menu, Dialog, ConfirmDialog, Toast (store with keyed/merged toasts, "×N", collapsed stack with "+N" and "Cerrar todo", timers paused while expanded: hover, focus or "+N"), Skeleton, Row, OptionCard, StatusBadge, InboxKind, PrChip, PhaseBars, Icon.
 - **Shell:** the sidebar (collapses to a rail with ⌘\ or below 1300 px, a task filter, the 6 most urgent tasks per project with "Mostrar N más"), the statusbar (connection, "N trabajando · N te espera · N en pausa · N con error", usage, "Logs"), and the disconnected state (a banner over the content with the age of the data and "Reintentar ahora"; `connection.ts`). Logs, first run ("Primeros pasos") and the global notices (a task waits, usage almost out, limit reached, paused autopilot). A single grouped "te espera" toast for all waiting tasks (`GlobalNotices`).

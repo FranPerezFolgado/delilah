@@ -137,7 +137,7 @@ describe("Toast", () => {
     expect(qt("kw")).not.toBeNull();
   });
 
-  it("evicts plain info first, then oldest non-keyed, never keyed", () => {
+  it("evicts plain info first, then toasts without action, then oldest non-keyed, never keyed", () => {
     mount();
     act(() => {
       toast({ text: "k", key: "k", kind: "error" });
@@ -150,10 +150,17 @@ describe("Toast", () => {
     expect(qt("act")).not.toBeNull();
     act(() => void toast({ text: "n2", kind: "error" }));
     expand();
+    expect(qt("n1")).toBeNull();
+    expect(qt("act")).not.toBeNull();
+    act(() => void toast({ text: "act2", action: { label: "B", run: () => {} } }));
+    expand();
+    expect(qt("n2")).toBeNull();
+    act(() => void toast({ text: "act3", action: { label: "C", run: () => {} } }));
+    expand();
     expect(qt("act")).toBeNull();
     expect(qt("k")).not.toBeNull();
-    expect(qt("n1")).not.toBeNull();
-    expect(qt("n2")).not.toBeNull();
+    expect(qt("act2")).not.toBeNull();
+    expect(qt("act3")).not.toBeNull();
   });
 
   it("merges repeats into one toast with a count, moved to newest", () => {
@@ -282,9 +289,10 @@ describe("Toast", () => {
       fireEvent.mouseLeave(host());
       expect(qt("uno")).toBeNull();
 
-      fireEvent.focus(screen.getByRole("button", { name: MORE }));
+      const more = screen.getByRole("button", { name: MORE });
+      act(() => more.focus());
       expect(gt("uno")).not.toBeNull();
-      fireEvent.blur(screen.getAllByRole("button", { name: /^(Cerrar|Close)$/ })[0]);
+      act(() => more.blur());
       expect(qt("uno")).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: MORE }));
@@ -343,14 +351,43 @@ describe("Toast", () => {
       expect(region.textContent).toBe("primero");
     });
 
-    it("re-announces an identical consecutive announcement", () => {
+    it("re-announces an identical consecutive push", () => {
       mount();
-      act(() => void toast({ key: "k", text: "igual", kind: "wait" }));
+      let id = 0;
+      act(() => void (id = toast({ text: "igual", kind: "error" })));
       const first = screen.getByRole("status").firstElementChild;
-      act(() => void toast({ key: "k", text: "igual", kind: "wait" }));
+      act(() => dismissToast(id));
+      act(() => void toast({ text: "igual", kind: "error" }));
       const second = screen.getByRole("status").firstElementChild;
       expect(second).not.toBe(first);
       expect(screen.getByRole("status").textContent).toBe("igual");
+    });
+
+    it("a keyed update announces only when its text changes", () => {
+      mount();
+      act(() => void toast({ key: "k", text: "uno", kind: "wait" }));
+      const first = screen.getByRole("status").firstElementChild;
+      act(() => void toast({ key: "k", text: "uno", kind: "wait" }));
+      expect(screen.getByRole("status").firstElementChild).toBe(first);
+      act(() => void toast({ key: "k", text: "dos", kind: "wait" }));
+      expect(screen.getByRole("status").firstElementChild).not.toBe(first);
+      expect(screen.getByRole("status").textContent).toBe("dos");
+    });
+
+    it("collapses and resumes timers when the focused button is removed", () => {
+      mount();
+      three();
+      const more = screen.getByRole("button", { name: MORE });
+      more.focus();
+      fireEvent.click(more);
+      expect(host().classList.contains("toast-expanded")).toBe(true);
+      // Close the two older ones: the toggle unmounts with focus on it.
+      const closes = Array.from(document.querySelectorAll<HTMLButtonElement>(".toast [aria-label]"));
+      act(() => closes.slice(0, 2).forEach((b) => b.click()));
+      expect(document.querySelector(".toast-more")).toBeNull();
+      act(() => void toast({ text: "efimero", ttl: 1000 }));
+      act(() => void vi.advanceTimersByTime(1100));
+      expect(qt("efimero")).toBeNull();
     });
 
     it("resets hover state when the stack empties so new toasts start collapsed", () => {

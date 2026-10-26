@@ -44,3 +44,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | 7 | spec-compliance | LOW | WP-08 also changed ProposalCard.tsx (dismiss on unmount, from the phase-6 review) — beyond T022's "tests only", intentional | app/src/components/ProposalCard.tsx |
 | 7 | spec-compliance | LOW | ProposalCard.test.tsx l.142-158 lost indentation | app/src/components/ProposalCard.test.tsx |
 | 2 | spec-compliance | MEDIUM | FR-015 says the oldest toast "of any kind" goes when no plain info is left (waiting counts as one); code never evicts keyed toasts (as T005/data-model say) — spec vs tasks mismatch, left as is | app/src/components/ui/Toast.tsx |
+| final | code-quality + architecture | MEDIUM | keyed re-push with the same text re-announced on every task refresh (spec: announced once) — fixed in review | app/src/components/ui/Toast.tsx |
+| final | code-quality | MEDIUM | focused/pinned not reset when the focused button unmounts or one toast is left (stack stays expanded, timers paused) — fixed in review | app/src/components/ui/Toast.tsx |
+| final | code-quality | LOW | eviction could drop the «Deshacer» toast before an error, while the discard still fires — action toasts now go after actionless ones | app/src/components/ui/Toast.tsx |
+| final | architecture | LOW | `WAITING_TOAST_KEY` exported by the kit — moved to GlobalNotices; ToastHost re-indented; ProposalCard toastId sentinel removed; docs eviction wording and status #79 — fixed in review | app/src/components/ |
+| final | architecture | LOW | split store/view of Toast.tsx; `onExpire`/non-pausable ttl so ProposalCard needn't close its toast; ProposalCard.test deep-imports `setToastsPaused` — left as is | app/src/components/ui/Toast.tsx |

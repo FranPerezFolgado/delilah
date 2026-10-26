@@ -66,14 +66,12 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
   const discard = () => {
     setDiscarding(true);
     // The toast can be paused by hover; the discard can't, so it closes the toast itself.
-    let toastId = -1;
     const timer = setTimeout(() => {
+      if (pending.current) dismissToast(pending.current.toastId);
       pending.current = null;
-      dismissToast(toastId);
       void sendRef.current("Descartar");
     }, UNDO_MS);
-    pending.current = { timer, toastId };
-    toastId = pending.current.toastId = pushToast({
+    const toastId = pushToast({
       text: t("Tarea descartada"),
       ttl: UNDO_MS,
       action: {
@@ -86,6 +84,7 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
         },
       },
     });
+    pending.current = { timer, toastId };
   };
 
   if (discarding && !error) return null;
