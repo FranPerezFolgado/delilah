@@ -770,15 +770,7 @@ async fn flush_locked(app: &AppState, live: &Live) {
 
 /// What the hook shows of a tool, for "what Claude is doing".
 fn activity_of(hook: &Value) -> Option<String> {
-    let tool = hook["tool_name"].as_str()?;
-    let input = &hook["tool_input"];
-    let field = |name: &str| input[name].as_str().filter(|s| !s.is_empty());
-    Some(match tool {
-        "Read" => format!("Leyendo {}", field("file_path")?),
-        "Grep" | "Glob" => format!("Buscando {}", field("pattern")?),
-        "Bash" => field("command")?.chars().take(40).collect(),
-        other => other.to_string(),
-    })
+    delilah_agents::transcript::tool_step_summary(hook["tool_name"].as_str()?, &hook["tool_input"])
 }
 
 /// Records what a Claude session's hook says: the prompts typed in its

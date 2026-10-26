@@ -45,6 +45,9 @@ pub enum UserFrom {
 pub enum MarkerKind {
     Compacted,
     Stopped,
+    /// A turn Claude started by itself because a background task finished.
+    #[serde(rename = "background-done")]
+    BackgroundDone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -108,6 +111,9 @@ pub enum Entry {
         id: String,
         at: String,
         marker: MarkerKind,
+        /// Why, when known (the first line of a task notification's summary).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
 }
 
@@ -380,7 +386,23 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             id: format!("t:{uuid}:0"),
             at,
             marker: MarkerKind::Compacted,
+            detail: None,
         })];
+    }
+    if line.get("type").and_then(Value::as_str) == Some("user")
+        && let Some(message) = line.get("message")
+    {
+        let from_origin =
+            line.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification");
+        let text = user_text(message);
+        if from_origin || text.trim_start().starts_with("<task-notification>") {
+            return vec![Item::Entry(Entry::Marker {
+                id: format!("t:{uuid}:0"),
+                at,
+                marker: MarkerKind::BackgroundDone,
+                detail: notification_summary(&text),
+            })];
+        }
     }
     match line.get("message") {
         Some(message) => message_items(message, uuid, &at, skipped),
@@ -389,6 +411,41 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             vec![]
         }
     }
+}
+
+/// The text of a user message, its text blocks joined.
+fn user_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(t)) => t.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// First line of the `<summary>` of a task notification, at most 200 characters.
+fn notification_summary(text: &str) -> Option<String> {
+    let start = text.find("<summary>")? + "<summary>".len();
+    let rest = &text[start..];
+    let body = &rest[..rest.find("</summary>").unwrap_or(rest.len())];
+    let first = body.trim().lines().next()?.trim();
+    (!first.is_empty()).then(|| first.chars().take(200).collect())
+}
+
+/// What a tool call shows as a step: "Leyendo <file>", "Buscando <pattern>", the first
+/// 40 characters of a Bash command, else the tool name.
+pub fn tool_step_summary(tool: &str, input: &Value) -> Option<String> {
+    let field = |name: &str| input[name].as_str().filter(|s| !s.is_empty());
+    Some(match tool {
+        "Read" => format!("Leyendo {}", field("file_path")?),
+        "Grep" | "Glob" => format!("Buscando {}", field("pattern")?),
+        "Bash" => field("command")?.chars().take(40).collect(),
+        other => other.to_string(),
+    })
 }
 
 /// Text that Claude Code or its hooks put in user messages without the user typing it.
@@ -946,6 +1003,78 @@ mod tests {
             }
         ));
         assert_eq!(p.skipped, 0);
+    }
+
+    fn user_line(extra: &str, content: &str) -> Vec<u8> {
+        format!(
+            r#"{{"type":"user","uuid":"n1","timestamp":"2025-01-01T10:00:00.000Z"{extra},"message":{{"role":"user","content":{content}}}}}"#
+        )
+        .into_bytes()
+        .into_iter()
+        .chain(*b"\n")
+        .collect()
+    }
+
+    const NOTE: &str = r#""<task-notification>\n<task-id>b1</task-id>\n<summary>Background command \"sleep 5\" completed\nsecond line</summary>\n</task-notification>""#;
+
+    #[test]
+    fn task_notification_is_a_background_done_marker() {
+        for extra in [r#","origin":{"kind":"task-notification"}"#, ""] {
+            let p = parse(&user_line(extra, NOTE), 0);
+            assert_eq!(p.entries.len(), 1);
+            let Entry::Marker { marker, detail, .. } = &p.entries[0] else {
+                panic!("not a marker: {:?}", p.entries[0]);
+            };
+            assert_eq!(*marker, MarkerKind::BackgroundDone);
+            assert_eq!(
+                detail.as_deref(),
+                Some("Background command \"sleep 5\" completed")
+            );
+        }
+        let json = serde_json::to_value(&parse(&user_line("", NOTE), 0).entries[0]).unwrap();
+        assert_eq!(json["marker"], "background-done");
+    }
+
+    #[test]
+    fn task_notification_without_summary_has_no_detail() {
+        let p = parse(
+            &user_line(
+                "",
+                r#""<task-notification><task-id>x</task-id></task-notification>""#,
+            ),
+            0,
+        );
+        let Entry::Marker { marker, detail, .. } = &p.entries[0] else {
+            panic!("not a marker");
+        };
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        assert_eq!(*detail, None);
+        let json = serde_json::to_value(&p.entries[0]).unwrap();
+        assert!(json.get("detail").is_none());
+    }
+
+    #[test]
+    fn step_summaries() {
+        use serde_json::json;
+        assert_eq!(
+            tool_step_summary("Read", &json!({"file_path": "a.rs"})).as_deref(),
+            Some("Leyendo a.rs")
+        );
+        assert_eq!(
+            tool_step_summary("Grep", &json!({"pattern": "foo"})).as_deref(),
+            Some("Buscando foo")
+        );
+        let long = "x".repeat(60);
+        assert_eq!(
+            tool_step_summary("Bash", &json!({"command": long}))
+                .unwrap()
+                .len(),
+            40
+        );
+        assert_eq!(
+            tool_step_summary("Edit", &json!({})).as_deref(),
+            Some("Edit")
+        );
     }
 
     #[test]
