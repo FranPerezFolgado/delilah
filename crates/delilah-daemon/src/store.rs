@@ -731,10 +731,21 @@ mod tests {
 
         let at = Utc::now();
         for event in [
-            Event::AutofixSent { repo: ".".into(), sha: "a".into(), attempt: 1, checks: vec!["ci".into()] },
-            Event::AutofixFailedAgain { repo: ".".into(), sha: "b".into() },
+            Event::AutofixSent {
+                repo: ".".into(),
+                sha: "a".into(),
+                attempt: 1,
+                checks: vec!["ci".into()],
+            },
+            Event::AutofixFailedAgain {
+                repo: ".".into(),
+                sha: "b".into(),
+            },
             Event::AutofixFixed { repo: ".".into() },
-            Event::AutofixStopped { repo: ".".into(), reason: "limit".into() },
+            Event::AutofixStopped {
+                repo: ".".into(),
+                reason: "limit".into(),
+            },
             Event::AutofixCancelled { repo: ".".into() },
         ] {
             store.apply_event(&key, event, at).await.unwrap();
@@ -748,7 +759,13 @@ mod tests {
             .collect();
         assert_eq!(
             types,
-            ["autofix-sent", "autofix-failed-again", "autofix-fixed", "autofix-stopped", "autofix-cancelled"]
+            [
+                "autofix-sent",
+                "autofix-failed-again",
+                "autofix-fixed",
+                "autofix-stopped",
+                "autofix-cancelled"
+            ]
         );
     }
 
@@ -964,14 +981,24 @@ mod tests {
             });
             v
         };
-        let parse = |s: Option<String>| s.map(|s| serde_json::from_str::<serde_json::Value>(&s).unwrap());
-        assert_eq!(parse(autofix("RUN-AP", ".").await), Some(watching("RUN-AP")));
+        let parse =
+            |s: Option<String>| s.map(|s| serde_json::from_str::<serde_json::Value>(&s).unwrap());
+        assert_eq!(
+            parse(autofix("RUN-AP", ".").await),
+            Some(watching("RUN-AP"))
+        );
         assert_eq!(autofix("RUN-AP", "sub").await, None);
         assert_eq!(autofix("RUN-NO", ".").await, None);
-        assert_eq!(parse(autofix("DONE-WS", ".").await), Some(watching("DONE-WS")));
+        assert_eq!(
+            parse(autofix("DONE-WS", ".").await),
+            Some(watching("DONE-WS"))
+        );
         assert_eq!(autofix("DONE-NOWS", ".").await, None);
         assert_eq!(autofix("FAIL-NOWS", ".").await, None);
-        assert_eq!(parse(autofix("SETUP-AP", ".").await), Some(watching("SETUP-AP")));
+        assert_eq!(
+            parse(autofix("SETUP-AP", ".").await),
+            Some(watching("SETUP-AP"))
+        );
     }
 
     #[tokio::test]

@@ -638,13 +638,41 @@ mod tests {
         let a = fixing("aaa", 1);
         let b = fixing("bbb", 2);
         // None -> Some on a NULL row.
-        assert!(store.update_pr_autofix(pr.id, None, Some(&a)).await.unwrap());
+        assert!(
+            store
+                .update_pr_autofix(pr.id, None, Some(&a))
+                .await
+                .unwrap()
+        );
         // A stale expected changes nothing.
-        assert!(!store.update_pr_autofix(pr.id, None, Some(&b)).await.unwrap());
-        assert!(!store.update_pr_autofix(pr.id, Some(&b), Some(&b)).await.unwrap());
-        assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(a.clone()));
-        assert!(store.update_pr_autofix(pr.id, Some(&a), Some(&b)).await.unwrap());
-        assert!(store.update_pr_autofix(pr.id, Some(&b), None).await.unwrap());
+        assert!(
+            !store
+                .update_pr_autofix(pr.id, None, Some(&b))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .update_pr_autofix(pr.id, Some(&b), Some(&b))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.pr(pr.id).await.unwrap().unwrap().autofix,
+            Some(a.clone())
+        );
+        assert!(
+            store
+                .update_pr_autofix(pr.id, Some(&a), Some(&b))
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .update_pr_autofix(pr.id, Some(&b), None)
+                .await
+                .unwrap()
+        );
         assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, None);
         assert!(!store.update_pr_autofix(9999, None, Some(&a)).await.unwrap());
     }
@@ -662,9 +690,17 @@ mod tests {
         .unwrap();
         let got = store.pr(pr.id).await.unwrap().unwrap().autofix.unwrap();
         assert_eq!(got.state, crate::autofix::State::Watching);
-        assert_eq!((got.attempts, got.sha.clone(), got.session.clone()), (0, None, None));
+        assert_eq!(
+            (got.attempts, got.sha.clone(), got.session.clone()),
+            (0, None, None)
+        );
         let next = fixing("ccc", 1);
-        assert!(store.update_pr_autofix(pr.id, Some(&got), Some(&next)).await.unwrap());
+        assert!(
+            store
+                .update_pr_autofix(pr.id, Some(&got), Some(&next))
+                .await
+                .unwrap()
+        );
         assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(next));
     }
 
@@ -687,7 +723,12 @@ mod tests {
             let (x, y) = (x.expect("no error"), y.expect("no error"));
             assert!(x ^ y, "exactly one winner (round {round})");
             let now = store.pr(pr.id).await.unwrap().unwrap().autofix;
-            assert!(store.update_pr_autofix(pr.id, now.as_ref(), None).await.unwrap());
+            assert!(
+                store
+                    .update_pr_autofix(pr.id, now.as_ref(), None)
+                    .await
+                    .unwrap()
+            );
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -697,7 +738,12 @@ mod tests {
         let store = store_with(&["PROJ-1"]).await;
         let pr = link(&store, "PROJ-1", ".", 1).await;
         let a = fixing("aaa", 1);
-        assert!(store.update_pr_autofix(pr.id, None, Some(&a)).await.unwrap());
+        assert!(
+            store
+                .update_pr_autofix(pr.id, None, Some(&a))
+                .await
+                .unwrap()
+        );
         let same = link(&store, "PROJ-1", ".", 1).await;
         assert_eq!(same.autofix, Some(a));
         let other = link(&store, "PROJ-1", ".", 2).await;
@@ -718,10 +764,18 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, None);
-            assert_eq!(store.prs_of(&TaskKey::new("PROJ-1")).await.unwrap().len(), 1);
+            assert_eq!(
+                store.prs_of(&TaskKey::new("PROJ-1")).await.unwrap().len(),
+                1
+            );
             assert!(store.open_prs().await.unwrap().len() >= 1);
             let next = fixing("ddd", 1);
-            assert!(store.update_pr_autofix(pr.id, None, Some(&next)).await.unwrap());
+            assert!(
+                store
+                    .update_pr_autofix(pr.id, None, Some(&next))
+                    .await
+                    .unwrap()
+            );
             assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(next));
         }
         assert_eq!(store.pr(other.id).await.unwrap().unwrap().autofix, None);
