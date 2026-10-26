@@ -24,8 +24,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-13 | 6 | 6A | done | 1 | 32649b4 | |
 | WP-14 | 6 | 6A | done | 1 | a608e92 | |
 | WP-12F | 6 | 6F | done | 1 | 781345b | blank custom message refused (3 reviewers, FR-012) |
-| WP-15 | 7 | 7A | verified | 1 | | |
-| WP-16 | 7 | 7B | pending | 0 | | |
+| WP-15 | 7 | 7A | done | 1 | 82fcac3 | decision 97 | |
+| WP-16 | 7 | 7B | done | 1 | | T050 all green; T051 §1,3,4,5 pass via API/CLI, §2 by migration tests; UI points not checked (no browser) |
 
 ## Open findings
 
@@ -98,3 +98,6 @@ Mode: format=markdown commits=yes autonomy=auto
 | 6 | architecture | LOW | api.rs keeps growing (2117 lines); start logic could move to a task_start.rs module | crates/delilah-daemon/src/api.rs |
 | 6 | security | LOW | no length limit on prompt/start_message (local trusted clients only) | crates/delilah-daemon/src/api.rs |
 | 6 | WP-12F | LOW | the /runs 422 for workflow "prompt" with a blank prompt has no test | crates/delilah-daemon/src/run.rs:346 |
+| 7 | quickstart | — | UI not walked in a browser (no browser tools): presets/inline errors/"not found" warning, "Al empezar" preview, disabled buttons on blank message, saving mode/autopilot hidden, backlog edit round-trip — check by hand in a preview | app/src/components/ |
+| 7 | quickstart | LOW | PROJ-20 (official preset, phased) sat in `starting` with no prompt in hooks.jsonl when deleted; possibly just slow, not confirmed | crates/delilah-daemon/src/run.rs |
+| 7 | quickstart | LOW | the API accepts a template naming an uninstalled skill (200); the warning is UI-only | crates/delilah-daemon/src/projects.rs |
