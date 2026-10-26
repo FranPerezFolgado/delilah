@@ -742,7 +742,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
             />
           )}
           {shown === OFFICE && <OfficeTab owner={owner} online={online} onOpenSession={showSession} />}
-          {shown === PRS && <PrView owner={owner} onOpenTerminal={openTerminal} />}
+          {shown === PRS && <PrView owner={owner} task={task} onTaskChanged={onChanged} onOpenTerminal={openTerminal} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 
           {closingSession && (

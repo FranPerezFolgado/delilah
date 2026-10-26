@@ -179,6 +179,10 @@ pub struct RunRequest {
     /// what a backlog task chose, else off.
     #[serde(default)]
     pub chat_mode: Option<bool>,
+    /// CI autofix on or off. Left out: what a backlog task chose, else the project's
+    /// default (`always`, `autopilot` or `off`).
+    #[serde(default)]
+    pub ci_autofix: Option<bool>,
 }
 
 pub async fn start_run(
@@ -406,6 +410,10 @@ pub(crate) async fn start_run_with(
                 let value = autopilot.then(new_autopilot);
                 app.store.set_autopilot(&key, value.as_ref()).await?;
             }
+            // A backlog task keeps its own switch unless the request says otherwise.
+            if let Some(on) = req.ci_autofix.filter(|&on| on != updated.ci_autofix) {
+                app.store.set_ci_autofix(&key, on).await?;
+            }
             updated.notes
         }
         None => {
@@ -414,6 +422,11 @@ pub(crate) async fn start_run_with(
             task.saving_mode = saving_mode;
             task.autopilot = autopilot.then(new_autopilot);
             task.chat_mode = req.chat_mode.unwrap_or(false);
+            task.ci_autofix = crate::api::resolve_ci_autofix(
+                req.ci_autofix,
+                project.settings.ci_autofix,
+                autopilot,
+            );
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
             if crate::branching::is_free(&key) {
                 task.title_source = delilah_core::TitleSource::Initial;
@@ -2710,6 +2723,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_run_resolves_ci_autofix_from_the_request_then_the_project_default() {
+        use delilah_core::AutofixDefault;
+        let app = app().await;
+        let on = |key: &str| {
+            let key = TaskKey::new(key);
+            let store = app.store.clone();
+            async move { store.get_task(&key).await.unwrap().unwrap().ci_autofix }
+        };
+        // The project default is `autopilot`: on for an autopilot task only.
+        let mut req = run("PROJ-1");
+        req.title = "a".into();
+        req.autopilot = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(on("PROJ-1").await, "autopilot task, default autopilot");
+        let mut req = run("PROJ-2");
+        req.title = "b".into();
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!on("PROJ-2").await, "plain task, default autopilot");
+
+        // The explicit value wins both ways.
+        let mut req = run("PROJ-3");
+        req.title = "c".into();
+        req.ci_autofix = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(on("PROJ-3").await);
+        let mut req = run("PROJ-4");
+        req.title = "d".into();
+        req.autopilot = Some(true);
+        req.ci_autofix = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!on("PROJ-4").await);
+
+        // `off` turns the default off even for autopilot.
+        let mut project = app.store.project("web").await.unwrap();
+        project.settings.ci_autofix = AutofixDefault::Off;
+        app.store
+            .set_project_settings("web", &project.settings)
+            .await
+            .unwrap();
+        let mut req = run("PROJ-5");
+        req.title = "e".into();
+        req.autopilot = Some(true);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!on("PROJ-5").await, "default off");
+
+        // A backlog task keeps its own value unless the request sets one.
+        let mut task = Task::new(TaskKey::new("PROJ-6"), "f", "feature");
+        task.project = Some("web".into());
+        task.ci_autofix = true;
+        app.store.create_task(&task).await.unwrap();
+        start_run(State(app.clone()), Json(run("PROJ-6")))
+            .await
+            .unwrap_err();
+        assert!(on("PROJ-6").await, "kept");
+        let mut req = run("PROJ-6");
+        req.ci_autofix = Some(false);
+        start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert!(!on("PROJ-6").await, "set by the request");
+    }
+
+    #[tokio::test]
     async fn autopilot_comes_from_the_request_and_implies_saving_mode() {
         let app = app().await;
         let get = |key: &str| {
@@ -3016,6 +3090,7 @@ mod tests {
                 workflow: None,
                 free: true,
                 view: None,
+                ci_autofix: None,
             },
         )
         .await
@@ -4057,6 +4132,7 @@ mod tests {
             autopilot: None,
             from_session: None,
             chat_mode: None,
+            ci_autofix: None,
         }
     }
 

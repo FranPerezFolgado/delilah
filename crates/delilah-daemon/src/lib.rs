@@ -6,6 +6,7 @@ mod activity_log;
 pub mod api;
 mod archive;
 pub mod asks;
+mod autofix;
 mod autopilot;
 pub mod base_update;
 mod branch_name;

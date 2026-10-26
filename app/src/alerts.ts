@@ -19,6 +19,7 @@ const SAYS: Record<InboxKind, string> = {
   failed: "ha fallado",
   "pr-failed": "CI falló",
   "pr-review": "comentarios en la PR",
+  "pr-autofix": "autofix de CI detenido",
   "pr-blocked": "no se pudo archivar",
   "base-stale": "rama posiblemente atrasada",
   branch: "no se pudo crear la rama",

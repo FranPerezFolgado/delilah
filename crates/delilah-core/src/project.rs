@@ -83,6 +83,17 @@ pub struct SubmoduleRules {
     pub never: Vec<String>,
 }
 
+/// Which of a project's tasks start with CI autofix on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutofixDefault {
+    Off,
+    /// Only autopilot tasks.
+    #[default]
+    Autopilot,
+    Always,
+}
+
 /// Per-project settings. The default is how tasks started before they existed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -97,6 +108,8 @@ pub struct ProjectSettings {
     /// Command run in a new workspace; `None` (or blank) means none.
     pub setup: Option<String>,
     pub submodules: SubmoduleRules,
+    /// Which tasks get CI autofix on by default.
+    pub ci_autofix: AutofixDefault,
 }
 
 /// One problem found by [`validate`], tied to the field that has it.
@@ -325,6 +338,28 @@ mod tests {
     }
 
     #[test]
+    fn ci_autofix_defaults_to_autopilot_and_round_trips() {
+        let s: ProjectSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.ci_autofix, AutofixDefault::Autopilot);
+        for (text, value) in [
+            ("off", AutofixDefault::Off),
+            ("autopilot", AutofixDefault::Autopilot),
+            ("always", AutofixDefault::Always),
+        ] {
+            let s: ProjectSettings =
+                serde_json::from_str(&format!(r#"{{"ci_autofix":"{text}"}}"#)).unwrap();
+            assert_eq!(s.ci_autofix, value);
+            assert_eq!(serde_json::to_value(&s).unwrap()["ci_autofix"], text);
+        }
+    }
+
+    #[test]
+    fn unknown_ci_autofix_is_a_parse_error() {
+        let r = serde_json::from_str::<ProjectSettings>(r#"{"ci_autofix":"sometimes"}"#);
+        assert!(r.unwrap_err().to_string().contains("unknown variant"));
+    }
+
+    #[test]
     fn empty_object_gives_defaults() {
         let s: ProjectSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s, ProjectSettings::default());
@@ -332,7 +367,7 @@ mod tests {
 
     #[test]
     fn full_settings_round_trip() {
-        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]}}"#;
+        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]},"ci_autofix":"always"}"#;
         let s: ProjectSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.workspace, Some(WorkspaceMode::Worktree));
         assert_eq!(s.shared[0].mode, Some(ShareMode::Copy));
@@ -351,7 +386,7 @@ mod tests {
         let json = serde_json::to_string(&ProjectSettings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]}}"#
+            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]},"ci_autofix":"autopilot"}"#
         );
     }
 

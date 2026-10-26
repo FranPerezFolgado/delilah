@@ -129,6 +129,10 @@ pub async fn delete(
             .map_err(|e| ApiError::internal(e.to_string()))?
             .map_err(|e| ApiError::unpushed(format!("{key} would lose work: {e}")))?;
     }
+    // Before the sessions and the task go: an evaluation in flight ends first, autofix is
+    // cancelled, and none starts again (it would find no session and raise a notice).
+    let _slot = app.claim_autofix_waiting(key.as_str()).await;
+    crate::autofix::cancel_logged(&app, &key, None).await;
     app.end_task_runtime(&key);
     if task.status == TaskStatus::Queued {
         // No workspace yet; deleted only if still in the backlog, so a start that

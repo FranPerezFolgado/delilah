@@ -111,6 +111,18 @@ pub(crate) async fn apply_signal(
         }
         _ => None,
     };
+    // When this turn began and ended, taken here and now: the autofix judgement runs in
+    // a spawned task, long after, and must not take its own clock for the turn's.
+    let now = Utc::now();
+    let turn = crate::handoff::TurnEnd {
+        session: live.as_ref().map(|l| l.id.clone()),
+        started: match &live {
+            Some(l) if signal == Signal::TurnEnded => l.take_turn_started(),
+            _ => None,
+        },
+        ended: Some(now),
+        background: false,
+    };
     if let Some(live) = &live {
         // Only a new turn makes a held Stop stale. A tool hook (`Working`) does not: a
         // background sub-agent posts them to this same session after the turn's Stop.
@@ -154,6 +166,12 @@ pub(crate) async fn apply_signal(
         if agent_start && !agent_turn {
             return;
         }
+        // A prompt starts a turn; so does the first work of a session that was idle.
+        if signal == Signal::PromptSubmitted
+            || (signal == Signal::Working && live.state() != LiveState::Working)
+        {
+            live.mark_turn_started(now);
+        }
         // Background work still runs: the turn's end is held, not applied (see
         // `Live::hold_stop_if_background`, the one atomic check; a terminal goes by the
         // Stop's own `background_tasks`, `Live::hold_stop_if_reported`). Queued messages are
@@ -169,11 +187,19 @@ pub(crate) async fn apply_signal(
             })
         {
             crate::conversation::flush_queue(&app, live).await;
+            // The turn is not over: its start is kept for the replay to hand to autofix.
+            if !terminal && let Some(started) = turn.started {
+                live.mark_turn_started(started);
+            }
             // A terminal's turn end still does its phase work (the handoff, the stall
             // check) at once, as it always did: only the waiting is held. Its replay
             // does not do it again.
             if terminal && task_session {
-                crate::phases::on_hook(&app, &q.task, signal, &hook, primary, false).await;
+                let turn = crate::handoff::TurnEnd {
+                    background: true,
+                    ..turn.clone()
+                };
+                crate::phases::on_hook(&app, &q.task, signal, &hook, primary, false, turn).await;
             }
             return;
         }
@@ -265,7 +291,16 @@ pub(crate) async fn apply_signal(
     // What the agent did may move the task's phase (a task's sessions only).
     let replayed_in_terminal = terminal && hook["delilah_replayed"] == true;
     if task_session && !replayed_in_terminal {
-        crate::phases::on_hook(&app, &q.task, signal, &hook, primary, limit_reset.is_some()).await;
+        crate::phases::on_hook(
+            &app,
+            &q.task,
+            signal,
+            &hook,
+            primary,
+            limit_reset.is_some(),
+            turn,
+        )
+        .await;
     }
 
     // A project's session has no task to move: only the session and the inbox change.

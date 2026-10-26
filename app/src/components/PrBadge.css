@@ -10,3 +10,4 @@
 .pr-badge.pr-closed { color: var(--err); }
 .pr-badge.pr-draft { color: var(--tx3); }
 .pr-count { font-size: 12px; color: var(--tx2); }
+.pr-autofix-mark { display: inline-flex; color: var(--tx2); }

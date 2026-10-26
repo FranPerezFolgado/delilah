@@ -569,3 +569,61 @@ describe("NewTaskDialog layout and errors", () => {
     expect(queryByText("Iniciar en un worktree")).toBeNull();
   });
 });
+
+describe("NewTaskDialog autofix", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const mountWith = (mode: "off" | "autopilot" | "always" | undefined) =>
+    render(
+      <NewTaskDialog
+        projects={[{ ...web, settings: { ...DEFAULT_PROJECT_SETTINGS, ci_autofix: mode } }]}
+        draft={draft}
+        onClose={() => {}}
+        onStarted={() => {}}
+        onSaved={() => {}}
+        onConversation={() => {}}
+      />,
+    );
+
+  it("follows the project default: autopilot mode follows the autopilot toggle", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { container, getByText } = mountWith("autopilot");
+    expect(pressed(btn(container, "Arreglar CI"))).toBe(false);
+    fireEvent.click(btn(container, "Autopiloto"));
+    fireEvent.click(getByText("Activar"));
+    expect(pressed(btn(container, "Arreglar CI"))).toBe(true);
+  });
+
+  it("off never turns on by itself, always is on without autopilot", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const off = mountWith("off");
+    fireEvent.click(btn(off.container, "Autopiloto"));
+    fireEvent.click(off.getByText("Activar"));
+    expect(pressed(btn(off.container, "Arreglar CI"))).toBe(false);
+    cleanup();
+    const always = mountWith("always");
+    expect(pressed(btn(always.container, "Arreglar CI"))).toBe(true);
+  });
+
+  it("once touched it stops following autopilot, and is sent as ci_autofix", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container, getByText } = mountWith("autopilot");
+    fireEvent.click(btn(container, "Arreglar CI"));
+    fireEvent.click(btn(container, "Autopiloto"));
+    fireEvent.click(getByText("Activar"));
+    fireEvent.click(btn(container, "Arreglar CI"));
+    fireEvent.click(btn(container, "Arreglar CI"));
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].ci_autofix).toBe(true);
+  });
+
+  it("the resolved default is sent when untouched, also to the backlog", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { getByText } = mountWith("always");
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].ci_autofix).toBe(true);
+  });
+});

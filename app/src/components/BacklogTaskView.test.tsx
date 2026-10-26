@@ -137,8 +137,32 @@ describe("BacklogTaskView autopilot", () => {
     expect(toggle(container, "Ahorro").title).toBe("Una sesión de Claude nueva por fase, para gastar menos contexto");
   });
 
-  it("is hidden for a task outside the spec workflow", () => {
+  it("autopilot is hidden for a task outside the spec workflow (autofix stays)", () => {
     const { container } = mount({ ...task, workflow: "prompt" });
-    expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Ahorro"]);
+    expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Ahorro", "Arreglar CI"]);
+  });
+
+  it("autofix shows the stored value, can be changed and saved, and is sent on start", async () => {
+    const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
+    const run = vi.spyOn(api, "run").mockResolvedValue({ ...task, status: { type: "running" } });
+    const { container } = mount({ ...task, ci_autofix: true });
+    const af = toggle(container, "Arreglar CI");
+    expect(af.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(af);
+    expect(af.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn(container, "Guardar"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1]).toMatchObject({ ci_autofix: false });
+    fireEvent.click(btn(container, "Iniciar"));
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].ci_autofix).toBe(false);
+  });
+
+  it("without a stored value it follows the project default and autopilot", () => {
+    const { container } = mount(task);
+    expect(toggle(container, "Arreglar CI").getAttribute("aria-pressed")).toBe("false");
+    cleanup();
+    const withAuto = mount({ ...task, autopilot: { state: "running", since: "" } });
+    expect(toggle(withAuto.container, "Arreglar CI").getAttribute("aria-pressed")).toBe("true");
   });
 });

@@ -360,6 +360,7 @@ pub(crate) mod tests {
             error: None,
             error_kind: None,
             created_at: Utc::now(),
+            autofix: None,
         }
     }
 

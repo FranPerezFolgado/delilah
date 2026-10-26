@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, isCheckoutDirty, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
 import { t } from "../i18n";
+import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 import { Button, Dialog, Segmented, Toggle } from "./ui";
@@ -61,6 +62,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const savingTouched = useRef(!!existing);
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
+  // CI autofix: null until the user touches it, then it follows the project default and autopilot.
+  const [autofix, setAutofix] = useState<boolean | null>(existing?.ci_autofix ?? null);
   const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
   // Experimental headless mode: only a backlog task can carry it now (no control sets it).
   const chatMode = !!existing?.chat_mode;
@@ -89,6 +92,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const autopilotOn = autopilot && autopilotAllowed;
   // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
   const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
+  // Always sent resolved: what the toggle shows is what the task gets.
+  const autofixOn = autofix ?? autofixDefault(project?.settings.ci_autofix, autopilotOn);
   // The branch name: proposed while the developer hasn't touched it. With the project's
   // own template it is that template's branch; `feature/` stays a fixed prefix only when
   // the name has none of its own (no template, or one that starts with `feature/`).
@@ -245,6 +250,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: inCheckout,
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
+        ci_autofix: autofixOn,
         view,
         ...(chat || existing ? { chat_mode: chat } : {}),
         // A backlog task's notes as they read now ("" clears them).
@@ -276,6 +282,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         in_checkout: where === "checkout",
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
+        ci_autofix: autofixOn,
         view,
         ...(chatMode ? { chat_mode: true } : {}),
       });
@@ -407,6 +414,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 ) : (
                   <Toggle label={t("Ahorro")} pressed={savingMode} onChange={setSaving} />
                 )}
+                <AutofixControl on={autofixOn} onChange={setAutofix} />
                 <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>
               </div>
             )}

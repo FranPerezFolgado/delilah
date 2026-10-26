@@ -25,6 +25,9 @@ use crate::store_sessions::SessionKind;
 /// Long answers are cut: the inbox shows the gist, the session tab the rest.
 const MAX_TEXT: usize = 4000;
 
+/// The notice CI autofix leaves when it stops (`autofix::stop`).
+const KIND_AUTOFIX_STOPPED: &str = "autofix-stopped";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AttentionKind {
@@ -134,6 +137,8 @@ pub enum ItemKind {
     PrFailed,
     /// A reviewer asked for changes or commented on a task's PR.
     PrReview,
+    /// CI autofix gave up on a task's PR: the reason, and the app offers to retry.
+    PrAutofix,
     /// The branch derived from the spec could not be applied to a repo; retry from here.
     /// Right after the review items: an actionable problem that blocks no agent.
     Branch,
@@ -167,6 +172,7 @@ impl ItemKind {
             Self::Error => "error",
             Self::PrFailed => "pr-failed",
             Self::PrReview => "pr-review",
+            Self::PrAutofix => "pr-autofix",
             Self::Branch => "branch",
             Self::Waiting => "waiting",
             Self::Review => "review",
@@ -194,6 +200,7 @@ impl ItemKind {
                 | Self::Waiting
                 | Self::PrFailed
                 | Self::PrReview
+                | Self::PrAutofix
                 | Self::PrBlocked
         )
     }
@@ -204,6 +211,7 @@ pub(crate) fn notice_kind(kind: &str) -> Option<ItemKind> {
     Some(match kind {
         "ci-failed" => ItemKind::PrFailed,
         "changes-requested" | "comments" => ItemKind::PrReview,
+        KIND_AUTOFIX_STOPPED => ItemKind::PrAutofix,
         KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
         KIND_BASE_STALE => ItemKind::BaseStale,
         KIND_TURN_DONE => ItemKind::TurnDone,
@@ -257,6 +265,15 @@ pub struct InboxItem {
     /// The notice this item stands for, when it has no PR (e.g. a stale base).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<i64>,
+    /// The repo of the PR whose autofix stopped (`pr-autofix` items).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    /// Why autofix stopped: `limit`, `no-push` or `no-session` (`pr-autofix` items).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The fix attempts made before it stopped (`pr-autofix` items).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempts: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -286,6 +303,9 @@ impl InboxItem {
             pr: None,
             permission: None,
             notice: None,
+            repo: None,
+            reason: None,
+            attempts: None,
         }
     }
 }
@@ -721,6 +741,10 @@ async fn collect(app: &AppState) -> Result<Vec<InboxItem>, ApiError> {
             items.push(stale_base_item(n, t));
             continue;
         }
+        if n.kind == KIND_AUTOFIX_STOPPED {
+            items.push(autofix_item(app, n, t));
+            continue;
+        }
         if n.kind == KIND_TURN_DONE {
             if !t.status.is_terminal() {
                 items.extend(turn_done_item(app, n, t).await);
@@ -768,6 +792,53 @@ fn stale_base_item(n: NoticeRow, t: &Task) -> InboxItem {
         since: Some(n.created_at),
         notice: Some(n.id),
         ..InboxItem::new(ItemKind::BaseStale, n.task_key, t.title.clone())
+    }
+}
+
+/// CI autofix stopped on a PR: the reason and attempts come from the notice's detail, the
+/// text is written here in the app's language at read time. It carries the notice to
+/// dismiss, and the repo "Retry autofix" names.
+fn autofix_item(app: &AppState, n: NoticeRow, t: &Task) -> InboxItem {
+    let detail = n.detail.as_ref();
+    let reason = detail
+        .and_then(|d| d["reason"].as_str())
+        .map(str::to_string);
+    let attempts = detail
+        .and_then(|d| d["attempts"].as_u64())
+        .and_then(|a| u32::try_from(a).ok());
+    let lang = app.lang();
+    let n_attempts = attempts.unwrap_or_default();
+    let text = match reason.as_deref() {
+        Some("limit") => format!(
+            "{} {n_attempts} {}",
+            lang.pick(
+                "El autofix de CI se rindió tras",
+                "CI autofix gave up after"
+            ),
+            lang.pick("intentos", "attempts")
+        ),
+        Some("no-push") => lang
+            .pick(
+                "El agente terminó su turno sin hacer push de un arreglo.",
+                "The agent's turn ended without pushing a fix.",
+            )
+            .to_string(),
+        Some("no-session") => lang
+            .pick(
+                "No había sesión a la que enviar el fallo del CI.",
+                "There was no session to send the CI failure to.",
+            )
+            .to_string(),
+        _ => n.text,
+    };
+    InboxItem {
+        text: Some(text),
+        since: Some(n.created_at),
+        notice: Some(n.id),
+        repo: Some(n.repo),
+        reason,
+        attempts,
+        ..InboxItem::new(ItemKind::PrAutofix, n.task_key, t.title.clone())
     }
 }
 
@@ -1369,6 +1440,7 @@ mod tests {
             ItemKind::Error,
             ItemKind::PrFailed,
             ItemKind::PrReview,
+            ItemKind::PrAutofix,
             ItemKind::Branch,
             ItemKind::Waiting,
             ItemKind::Review,
@@ -1531,6 +1603,76 @@ mod tests {
         let json = serde_json::to_value(failed).unwrap();
         assert_eq!(json["kind"], "pr-failed");
         assert_eq!(json["pr"]["notice"], pr.notice);
+    }
+
+    async fn stopped_notice(app: &AppState, reason: &str, attempts: u32) {
+        use crate::store_prs::NewNotice;
+        app.store
+            .insert_notice(
+                &delilah_core::TaskKey::new("PROJ-1"),
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: "autofix-stopped".into(),
+                    cause: format!("abc:{reason}"),
+                    text: "stored text".into(),
+                    detail: Some(serde_json::json!({
+                        "reason": reason, "attempts": attempts, "checks": ["build"]
+                    })),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_open_autofix_stopped_notice_is_a_pr_autofix_item_in_the_app_language() {
+        let app = app_with_pr_task().await;
+        stopped_notice(&app, "limit", 3).await;
+        let Ok(Json(items)) = list(State(app.clone())).await else {
+            panic!("the inbox failed");
+        };
+        let item = items
+            .iter()
+            .find(|i| i.kind == ItemKind::PrAutofix)
+            .unwrap();
+        assert!(item.kind.is_blocking());
+        let json = serde_json::to_value(item).unwrap();
+        assert_eq!(json["kind"], "pr-autofix");
+        assert_eq!(json["reason"], "limit");
+        assert_eq!(json["attempts"], 3);
+        assert_eq!(json["repo"], ".");
+        assert!(json["notice"].is_i64());
+        for (lang, text) in [
+            (crate::lang::Lang::En, "CI autofix gave up after 3 attempts"),
+            (
+                crate::lang::Lang::Es,
+                "El autofix de CI se rindió tras 3 intentos",
+            ),
+        ] {
+            app.lang.set(lang);
+            let Ok(Json(items)) = list(State(app.clone())).await else {
+                panic!("the inbox failed");
+            };
+            let item = items
+                .iter()
+                .find(|i| i.kind == ItemKind::PrAutofix)
+                .unwrap();
+            assert_eq!(item.text.as_deref(), Some(text));
+        }
+    }
+
+    #[tokio::test]
+    async fn autofix_items_say_why_for_no_push_and_no_session() {
+        let app = app_with_pr_task().await;
+        app.lang.set(crate::lang::Lang::En);
+        stopped_notice(&app, "no-push", 1).await;
+        stopped_notice(&app, "no-session", 0).await;
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        let texts: Vec<_> = items.iter().filter_map(|i| i.text.as_deref()).collect();
+        assert!(texts.contains(&"The agent's turn ended without pushing a fix."));
+        assert!(texts.contains(&"There was no session to send the CI failure to."));
     }
 
     async fn stale_task() -> AppState {

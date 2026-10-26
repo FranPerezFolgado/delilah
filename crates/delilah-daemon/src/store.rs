@@ -104,7 +104,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -115,7 +115,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -301,6 +301,20 @@ impl Store {
         Ok(())
     }
 
+    /// Turns the task's CI autofix on or off.
+    pub async fn set_ci_autofix(&self, key: &TaskKey, on: bool) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET ci_autofix = ?, updated_at = ? WHERE key = ?")
+            .bind(on)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
     /// Records why the task's branch couldn't be created, or clears it.
     pub async fn set_branch_error(
         &self,
@@ -475,7 +489,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -538,8 +552,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, allowed_tools, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -557,6 +571,7 @@ async fn insert_task<'e>(
     .bind(&task.branch_error)
     .bind(task.view.as_str())
     .bind(task.chat_mode)
+    .bind(task.ci_autofix)
     .bind(allowed_tools_json(&task.allowed_tools)?)
     .bind(task.created_at.to_rfc3339())
     .bind(&now)
@@ -642,6 +657,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         branch_error: row.try_get("branch_error")?,
         view: TaskView::parse(&row.try_get::<String, _>("view")?).unwrap_or_default(),
         chat_mode: row.try_get("chat_mode")?,
+        ci_autofix: row.try_get("ci_autofix")?,
         allowed_tools: allowed_tools_from_json(
             row.try_get::<Option<String>, _>("allowed_tools")?
                 .as_deref(),
@@ -690,6 +706,67 @@ mod tests {
 
     fn task(key: &str) -> Task {
         Task::new(TaskKey::new(key), "Card retries", "feature")
+    }
+
+    #[tokio::test]
+    async fn ci_autofix_persists_and_autofix_events_reach_the_history() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut t = task("PROJ-1");
+        t.ci_autofix = true;
+        store.create_task(&t).await.unwrap();
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        assert!(store.get_task(&key).await.unwrap().unwrap().ci_autofix);
+        let listed = store.list_tasks().await.unwrap();
+        assert!(listed[0].ci_autofix && !listed[1].ci_autofix);
+
+        store.set_ci_autofix(&key, false).await.unwrap();
+        assert!(!store.get_task(&key).await.unwrap().unwrap().ci_autofix);
+        store.set_ci_autofix(&key, true).await.unwrap();
+        assert!(store.list_tasks().await.unwrap()[0].ci_autofix);
+        assert!(matches!(
+            store.set_ci_autofix(&TaskKey::new("NOPE-1"), true).await,
+            Err(StoreError::NotFound(_))
+        ));
+
+        let at = Utc::now();
+        for event in [
+            Event::AutofixSent {
+                repo: ".".into(),
+                sha: "a".into(),
+                attempt: 1,
+                checks: vec!["ci".into()],
+            },
+            Event::AutofixFailedAgain {
+                repo: ".".into(),
+                sha: "b".into(),
+            },
+            Event::AutofixFixed { repo: ".".into() },
+            Event::AutofixStopped {
+                repo: ".".into(),
+                reason: "limit".into(),
+            },
+            Event::AutofixCancelled { repo: ".".into() },
+        ] {
+            store.apply_event(&key, event, at).await.unwrap();
+        }
+        let types: Vec<_> = store
+            .events(&key)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.event.name())
+            .collect();
+        assert_eq!(
+            types,
+            [
+                "autofix-sent",
+                "autofix-failed-again",
+                "autofix-fixed",
+                "autofix-stopped",
+                "autofix-cancelled"
+            ]
+        );
     }
 
     #[tokio::test]
@@ -801,6 +878,127 @@ mod tests {
             .unwrap();
         assert!(!t.chat_mode);
         assert!(t.allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn migration_0022_backfills_autofix_for_watched_autopilot_tasks() {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = old
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 21)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        // (key, status type, autopilot, workspace)
+        let tasks = [
+            ("RUN-AP", "running", Some("on"), false),
+            ("RUN-NO", "running", None, false),
+            ("DONE-WS", "done", Some("on"), true),
+            ("DONE-NOWS", "done", Some("on"), false),
+            ("FAIL-NOWS", "failed", Some("on"), false),
+            ("SETUP-AP", "setup-failed", Some("on"), true),
+        ];
+        for (key, status, autopilot, ws) in tasks {
+            sqlx::query(
+                "INSERT INTO tasks (key, title, project, workflow, phase, status, autopilot, created_at, updated_at)
+                 VALUES (?, 'T', NULL, 'feature', 'backlog', ?, ?, 'x', 'x')",
+            )
+            .bind(key)
+            .bind(format!("{{\"type\":\"{status}\"}}"))
+            .bind(autopilot)
+            .execute(&pool)
+            .await
+            .unwrap();
+            if ws {
+                sqlx::query(
+                    "INSERT INTO workspaces (task_key, parent, path, branch, submodules)
+                     VALUES (?, '/p', '/w', 'b', '[]')",
+                )
+                .bind(key)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+            let snapshot = (key != "RUN-NO").then(|| format!("{{\"head\":\"h-{key}\"}}"));
+            sqlx::query(
+                "INSERT INTO pull_requests (task_key, repo, host, owner_name, number, url, linked_by, snapshot, created_at)
+                 VALUES (?, '.', 'github.com', 'o/n', 1, 'u', 'detected', ?, 'x')",
+            )
+            .bind(key)
+            .bind(snapshot)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        // A PR of a backfilled task that has no snapshot yet.
+        sqlx::query(
+            "INSERT INTO pull_requests (task_key, repo, host, owner_name, number, url, linked_by, snapshot, created_at)
+             VALUES ('RUN-AP', 'sub', 'github.com', 'o/n', 2, 'u2', 'detected', NULL, 'x')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        Store::connect(pool.clone()).await.unwrap();
+
+        let flags: Vec<(String, i64)> =
+            sqlx::query_as("SELECT key, ci_autofix FROM tasks ORDER BY key")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let flag = |k: &str| flags.iter().find(|(key, _)| key == k).unwrap().1;
+        assert_eq!(flag("RUN-AP"), 1);
+        assert_eq!(flag("RUN-NO"), 0);
+        assert_eq!(flag("DONE-WS"), 1);
+        assert_eq!(flag("DONE-NOWS"), 0);
+        assert_eq!(flag("FAIL-NOWS"), 0);
+        assert_eq!(flag("SETUP-AP"), 1);
+
+        let autofix = |task: &'static str, repo: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT autofix FROM pull_requests WHERE task_key = ? AND repo = ?",
+                )
+                .bind(task)
+                .bind(repo)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let watching = |k: &str| {
+            let v: serde_json::Value = serde_json::json!({
+                "state": "watching", "attempts": 0, "sha": format!("h-{k}")
+            });
+            v
+        };
+        let parse =
+            |s: Option<String>| s.map(|s| serde_json::from_str::<serde_json::Value>(&s).unwrap());
+        assert_eq!(
+            parse(autofix("RUN-AP", ".").await),
+            Some(watching("RUN-AP"))
+        );
+        assert_eq!(autofix("RUN-AP", "sub").await, None);
+        assert_eq!(autofix("RUN-NO", ".").await, None);
+        assert_eq!(
+            parse(autofix("DONE-WS", ".").await),
+            Some(watching("DONE-WS"))
+        );
+        assert_eq!(autofix("DONE-NOWS", ".").await, None);
+        assert_eq!(autofix("FAIL-NOWS", ".").await, None);
+        assert_eq!(
+            parse(autofix("SETUP-AP", ".").await),
+            Some(watching("SETUP-AP"))
+        );
     }
 
     #[tokio::test]

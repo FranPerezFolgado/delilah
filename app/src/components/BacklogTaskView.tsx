@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, isCheckoutDirty, type Project, type Task } from "../api";
 import { t } from "../i18n";
 import { relativeTime } from "../time";
+import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 import { Button, ConfirmDialog, StatusBadge, Toggle, useToast } from "./ui";
@@ -28,6 +29,8 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
   const [where, setWhere] = useState<Where>(whereOf(task.in_checkout, savedProject));
   const [savingMode, setSavingMode] = useState(task.saving_mode);
   const [autopilot, setAutopilot] = useState(!!task.autopilot);
+  // null until the user touches it: then it follows the project default and autopilot.
+  const [autofix, setAutofix] = useState<boolean | null>(task.ci_autofix ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
@@ -44,15 +47,20 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     setWhere(whereOf(task.in_checkout, savedProject));
     setSavingMode(task.saving_mode);
     setAutopilot(!!task.autopilot);
-  }, [task.title, task.notes, task.project, task.in_checkout, savedProject?.settings.workspace, task.saving_mode, task.autopilot]);
+    setAutofix(task.ci_autofix ?? null);
+  }, [task.title, task.notes, task.project, task.in_checkout, savedProject?.settings.workspace, task.saving_mode, task.autopilot, task.ci_autofix]);
 
+  const mode = projects.find((p) => p.name === project)?.settings.ci_autofix;
+  const autofixOn = autofix ?? autofixDefault(mode, autopilot);
+  const autofixSaved = task.ci_autofix ?? autofixDefault(savedProject?.settings.ci_autofix, !!task.autopilot);
   const dirty =
     title.trim() !== task.title ||
     notes !== (task.notes ?? "") ||
     project !== (task.project ?? "") ||
     where !== whereOf(task.in_checkout, savedProject) ||
     savingMode !== task.saving_mode ||
-    autopilot !== !!task.autopilot;
+    autopilot !== !!task.autopilot ||
+    autofixOn !== autofixSaved;
   // Only the spec workflow has autopilot.
   const autopilotAllowed = task.workflow === "feature";
   const locked = busy || !!started;
@@ -75,7 +83,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
 
   const save = () =>
     guard(async () => {
-      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: where === "checkout", saving_mode: savingMode || autopilot, autopilot: autopilot && autopilotAllowed });
+      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: where === "checkout", saving_mode: savingMode || autopilot, autopilot: autopilot && autopilotAllowed, ci_autofix: autofixOn });
       onChanged();
     });
 
@@ -89,6 +97,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
         in_checkout: inCheckout,
         saving_mode: savingMode || autopilot,
         ...(autopilotAllowed ? { autopilot } : {}),
+        ci_autofix: autofixOn,
         notes,
       });
       setStarted(run);
@@ -143,6 +152,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
             <Toggle label={t("Ahorro")} pressed={savingMode} disabled={locked} onChange={setSavingMode} title={t("Una sesión de Claude nueva por fase, para gastar menos contexto")} />
           </div>
         )}
+        <AutofixControl on={autofixOn} busy={locked} onChange={setAutofix} />
         <label className="field">
           <span>{t("Notas (el agente las recibe al empezar)")}</span>
           <textarea className="input" rows={8} value={notes} disabled={locked} onChange={(e) => setNotes(e.target.value)} />

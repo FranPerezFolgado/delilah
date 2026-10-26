@@ -11,6 +11,7 @@ const SLUGS = [
   "skip-setup", "created-from-conversation", "step-started", "autopilot-paused", "autopilot-resumed",
   "autopilot-answered", "autopilot-nudged", "autopilot-finished", "reopened", "runtime-switched",
   "permission-asked", "permission-expired", "agent-resumed",
+  "autofix-sent", "autofix-fixed", "autofix-failed-again", "autofix-stopped", "autofix-cancelled",
 ];
 
 describe("historyLine", () => {
@@ -21,6 +22,23 @@ describe("historyLine", () => {
       expect(line, type).not.toBe(type);
       expect(line, type).not.toContain(type);
     }
+  });
+
+  it("labels the autofix events with the checks, the reason and the repo when it isn't the root", () => {
+    setLanguage("en");
+    const sent = { type: "autofix-sent", sha: "abc", attempt: 2, checks: ["test", "lint"] };
+    expect(historyLine({ ...sent, repo: "." })).toBe("CI autofix: attempt 2 of 3 — test, lint");
+    expect(historyLine({ ...sent, repo: "api" })).toBe("CI autofix: attempt 2 of 3 — test, lint · api");
+    expect(historyLine({ ...sent, repo: ".", checks: [] })).toBe("CI autofix: attempt 2 of 3");
+    expect(historyLine({ type: "autofix-fixed", repo: "." })).toBe("CI autofix: CI fixed");
+    expect(historyLine({ type: "autofix-fixed", repo: "api" })).toBe("CI autofix: CI fixed · api");
+    expect(historyLine({ type: "autofix-failed-again", repo: "." })).toBe("CI autofix: CI still failing");
+    expect(historyLine({ type: "autofix-failed-again", repo: "api" })).toBe("CI autofix: CI still failing · api");
+    expect(historyLine({ type: "autofix-stopped", repo: ".", reason: "limit" })).toBe("CI autofix stopped: reached the attempt limit");
+    expect(historyLine({ type: "autofix-stopped", repo: "api", reason: "no-push" })).toBe("CI autofix stopped: the agent pushed no change · api");
+    expect(historyLine({ type: "autofix-stopped", repo: ".", reason: "no-session" })).toBe("CI autofix stopped: no agent session");
+    expect(historyLine({ type: "autofix-cancelled", repo: "." })).toBe("CI autofix cancelled");
+    expect(historyLine({ type: "autofix-cancelled", repo: "api" })).toBe("CI autofix cancelled · api");
   });
 
   it("never shows the slug of an unknown event", () => {

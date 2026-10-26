@@ -10,6 +10,21 @@ type Ev = EventRecord["event"];
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+const AUTOFIX_STOP: Record<string, string> = {
+  limit: "alcanzó el límite de intentos",
+  "no-push": "el agente no subió ningún cambio",
+  "no-session": "no hay sesión del agente",
+};
+
+// Attempts per commit; events carry no limit (the daemon's autofix LIMIT).
+const AUTOFIX_LIMIT = 3;
+
+/** Adds the repo to an autofix line when the PR isn't in the root repo (multi-repo parents). */
+const inRepo = (text: string, ev: Ev) => {
+  const repo = str(ev.repo);
+  return repo && repo !== "." ? `${text} · ${repo}` : text;
+};
+
 function expired(outcome: string): string {
   if (outcome === "terminal") return t("se respondió en la terminal");
   if (outcome === "withdrawn") return t("se retiró");
@@ -50,6 +65,18 @@ export function historyLine(ev: Ev): string {
       return str(ev.mode) === "chat" || str(ev.mode) === "stream" ? t("La sesión pasó a chat") : t("La sesión pasó a la terminal");
     case "permission-asked": return t("Claude pidió permiso para {tool}: {summary}", { tool: str(ev.tool), summary: short(str(ev.summary)) });
     case "permission-expired": return t("Caducó el permiso de {tool} · {outcome}", { tool: str(ev.tool), outcome: expired(str(ev.outcome)) });
+    case "autofix-sent": {
+      const attempt = t("Autofix de CI: intento {n} de {limit}", { n: Number(ev.attempt) || 1, limit: AUTOFIX_LIMIT });
+      const checks = Array.isArray(ev.checks) ? ev.checks.map(str).filter(Boolean) : [];
+      return inRepo(checks.length ? `${attempt} — ${short(checks.join(", "))}` : attempt, ev);
+    }
+    case "autofix-fixed": return inRepo(t("Autofix de CI: CI arreglado"), ev);
+    case "autofix-failed-again": return inRepo(t("Autofix de CI: el CI sigue fallando"), ev);
+    case "autofix-stopped": {
+      const why = AUTOFIX_STOP[str(ev.reason)];
+      return inRepo(why ? t("Autofix de CI parado: {reason}", { reason: t(why) }) : t("Autofix de CI parado"), ev);
+    }
+    case "autofix-cancelled": return inRepo(t("Autofix de CI cancelado"), ev);
     case "agent-resumed":
       return str(ev.reason) === "background-done" ? t("Claude continúa: tarea en segundo plano terminada") : t("Claude continúa");
     default: return t("Pasó algo en la tarea");

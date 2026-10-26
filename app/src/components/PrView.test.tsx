@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
-import { api, ApiError, type PullRequest, type TaskPrs } from "../api";
+import { api, ApiError, type PullRequest, type Task, type TaskPrs } from "../api";
 import * as platform from "../platform";
 import { PrView } from "./PrView";
 
@@ -221,5 +221,84 @@ describe("PrView", () => {
     fireEvent.click(within(getByRole("dialog")).getByText("Merge"));
     expect((await findAllByText("Checks are failing")).length).toBe(1);
     await waitFor(() => expect(taskPrs.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  describe("autofix", () => {
+    const task = { key: "PROJ-1", status: { type: "running" }, ci_autofix: true } as unknown as Task;
+
+    it("toggles the task's autofix from the header and tells the screen", async () => {
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+      const set = vi.spyOn(api, "setAutofix").mockResolvedValue({ ...task, ci_autofix: false });
+      const changed = vi.fn();
+      const { findByRole } = render(<PrView owner="PROJ-1" task={task} onTaskChanged={changed} />);
+      const toggle = await findByRole("button", { name: /Fix CI/ });
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      fireEvent.click(toggle);
+      await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "off"));
+      await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("false"));
+      expect(changed).toHaveBeenCalled();
+    });
+
+    it("is disabled on a done task", async () => {
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+      const { findByRole } = render(<PrView owner="PROJ-1" task={{ ...task, status: { type: "done" } }} />);
+      expect(((await findByRole("button", { name: /Fix CI/ })) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("is disabled, with no retry, on a failed task (the daemon answers 409 terminal)", async () => {
+      const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: stopped }] }));
+      const failed = { ...task, status: { type: "failed", reason: "x" } } as unknown as Task;
+      const { findByRole, findByText } = render(<PrView owner="PROJ-1" task={failed} />);
+      expect(((await findByRole("button", { name: /Fix CI/ })) as HTMLButtonElement).disabled).toBe(true);
+      expect(((await findByText("Retry autofix")).closest("button") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("a 409 terminal reads translated and reloads the PRs", async () => {
+      const taskPrs = vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+      vi.spyOn(api, "setAutofix").mockRejectedValue(new ApiError("task is finished", 409, false, "terminal"));
+      const { findByRole, findByText } = render(<PrView owner="PROJ-1" task={task} />);
+      fireEvent.click(await findByRole("button", { name: /Fix CI/ }));
+      await findByText(/finished/i);
+      expect(document.body.textContent).not.toContain("task is finished");
+      await waitFor(() => expect(taskPrs.mock.calls.length).toBeGreaterThan(1));
+    });
+
+    it("reads off for every PR, with no retry, when the task's autofix is off", async () => {
+      const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: stopped }] }));
+      const { findByText, queryByText } = render(<PrView owner="PROJ-1" task={{ ...task, ci_autofix: false }} />);
+      await findByText("Autofix: off");
+      expect(queryByText("Retry autofix")).toBeNull();
+    });
+
+    it("a stopped PR says why and retries with its repo", async () => {
+      const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: stopped }] }));
+      const set = vi.spyOn(api, "setAutofix").mockResolvedValue(task);
+      const { findByText } = render(<PrView owner="PROJ-1" task={task} />);
+      await findByText(/Autofix: stopped · reached the attempt limit/);
+      fireEvent.click(await findByText("Retry autofix"));
+      await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "retry", "api"));
+    });
+
+    it("a fixing PR shows the attempt, the failed checks and when it was sent", async () => {
+      const fixing = { state: "fixing" as const, attempts: 1, limit: 3, sha: "abc", sent_at: new Date().toISOString(), reason: null };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: fixing }] }));
+      const { findByText, container } = render(<PrView owner="PROJ-1" task={task} />);
+      await findByText(/Fixing CI: attempt 1 of 3/);
+      const line = container.querySelector(".pr-autofix")!.textContent!;
+      expect(line).toContain("Failed checks: test");
+      expect(line).toContain("sent");
+    });
+
+    it("a PR with no autofix record reads watching when the task has it on, off otherwise", async () => {
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+      const on = render(<PrView owner="PROJ-1" task={task} />);
+      await on.findByText("Autofix: watching");
+      cleanup();
+      const off = render(<PrView owner="PROJ-1" task={{ ...task, ci_autofix: false }} />);
+      await off.findByText("Autofix: off");
+    });
   });
 });

@@ -2,7 +2,7 @@
 //! (in the submodules) opening them and what to do with their notices.
 
 mod dto;
-mod forward;
+pub(crate) mod forward;
 pub mod merge;
 mod open;
 

@@ -45,7 +45,7 @@ describe("ProjectSettings", () => {
     expect(document.querySelector("[role=dialog][aria-modal=true]")).not.toBeNull();
     expect(document.querySelector("[role=dialog]")?.textContent).toContain("Dónde trabaja por defecto");
     expect(radios(container).length).toBe(2);
-    expect(document.querySelectorAll(".ps-help").length).toBe(5);
+    expect(document.querySelectorAll(".ps-help").length).toBe(6);
   });
 
   it("the preview command is saved on the project, so saving makes two calls", async () => {
@@ -219,5 +219,27 @@ describe("ProjectSettings", () => {
     const banner = document.querySelector(".error:not(.field-error)")!.textContent!;
     expect(banner).toContain("cuerpo inválido");
     expect(banner).toContain("submodules.unknown_key: clave rara");
+  });
+
+  it("the autofix select shows the default and saves the chosen mode", async () => {
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    const sel = document.querySelector<HTMLSelectElement>("select[name=ci_autofix]")!;
+    expect(sel.value).toBe("autopilot");
+    expect(Array.from(sel.options).map((o) => o.value)).toEqual(["off", "autopilot", "always"]);
+    fireEvent.change(sel, { target: { value: "always" } });
+    fireEvent.submit(form());
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1].ci_autofix).toBe("always");
+  });
+
+  it("saving another field keeps ci_autofix as it was", async () => {
+    const withMode: Project = { ...repo, settings: { ...repo.settings, ci_autofix: "off" } };
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(withMode);
+    render(<ProjectSettings project={withMode} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(document.querySelector("input[name=setup]")!, { target: { value: "npm i" } });
+    fireEvent.submit(form());
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1]).toMatchObject({ setup: "npm i", ci_autofix: "off" });
   });
 });
