@@ -631,7 +631,13 @@ mod tests {
     async fn background_work_refuses_the_task_switch() {
         let app = task_in(true, "exec sleep 5").await;
         start_background(&app, "main");
-        assert!(app.sessions.get("main").unwrap().progress().has_background());
+        assert!(
+            app.sessions
+                .get("main")
+                .unwrap()
+                .progress()
+                .has_background()
+        );
         let (status, m) = switch(&app, "terminal", Duration::from_millis(500)).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(m.contains("espera a que termine o pulsa Detener"), "{m}");

@@ -599,7 +599,13 @@ pub async fn send(
     // in the terminal.
     let _typing = live.typing.lock().await;
     // A pending card holds the turn: what is typed now would land in the PTY under it.
-    let queued = live.state() == LiveState::Working || app.asks.has_session(&id);
+    // Working with only background work running (a stream session, no turn) is idle for
+    // this: Claude takes the message now.
+    let turn_running = live.state() == LiveState::Working && {
+        let progress = live.progress();
+        live.runtime.as_stream().is_none() || progress.turn.is_some() || !progress.has_background()
+    };
+    let queued = turn_running || app.asks.has_session(&id);
     let entry = if queued {
         let waiting = app.store.queued_entries(&id).await?;
         let chars: usize = waiting
@@ -732,6 +738,9 @@ pub async fn stop(
 
 /// The turn was interrupted: the session waits again, nothing is pending on it.
 pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
+    // A held Stop belongs to the turn that was cut short; the background rows stay as they
+    // are (they are running still).
+    live.drop_held_stop();
     live.set_state(LiveState::Waiting);
     live.reset_turn_state();
     for ask in app.asks.release_session(&live.id) {
@@ -2575,6 +2584,116 @@ mod tests {
             crate::sessions::ConvoState::default()
         );
         assert!(f.app.store.entries("conv").await.unwrap().is_empty());
+    }
+
+    /// The fixture's session "conv" as a chat-mode one whose process just sleeps, working.
+    fn stream_live(f: &Fixture) -> Live {
+        let _ = f.live.runtime.kill();
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("30");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let live = f.app.sessions.insert(
+            "conv",
+            "@web",
+            SessionKind::Claude,
+            false,
+            std::sync::Arc::new(session),
+        );
+        live.set_idea(true);
+        live.set_state(LiveState::Working);
+        live
+    }
+
+    fn feed(live: &Live, event: delilah_agents::stream::StreamEvent) {
+        live.update_progress(|p| crate::progress::apply(p, &event, Utc::now()));
+    }
+
+    fn background_started() -> delilah_agents::stream::StreamEvent {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        StreamEvent::Task(TaskEvent::Started {
+            task_id: "b1".into(),
+            tool_use_id: None,
+            kind: TaskKind::Command,
+            description: "sleep".into(),
+            background: true,
+        })
+    }
+
+    fn turn_init() -> delilah_agents::stream::StreamEvent {
+        delilah_agents::stream::StreamEvent::Init {
+            session_id: "x".into(),
+            self_started: false,
+        }
+    }
+
+    fn turn_result() -> delilah_agents::stream::StreamEvent {
+        delilah_agents::stream::StreamEvent::TurnResult {
+            subtype: "success".into(),
+            is_error: false,
+            result: None,
+        }
+    }
+
+    async fn states(f: &Fixture) -> Vec<String> {
+        f.app
+            .store
+            .entries("conv")
+            .await
+            .unwrap()
+            .iter()
+            .filter_map(|e| e.body["state"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn messages_queued_during_a_turn_are_typed_when_its_stop_is_held() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, turn_init());
+        feed(&live, background_started());
+        let (status, _) = f.send("later").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(states(&f).await, ["queued"], "a turn is running");
+
+        feed(&live, turn_result());
+        f.hook(stop("started a build")).await;
+        assert!(live.has_held_stop());
+        assert_eq!(
+            states(&f).await,
+            ["sent"],
+            "not stranded behind the held Stop"
+        );
+        assert_eq!(live.state(), LiveState::Working);
+    }
+
+    #[tokio::test]
+    async fn with_only_background_work_running_a_message_is_typed_now() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, background_started());
+        assert!(live.progress().turn.is_none());
+        let (status, _) = f.send("hola").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(states(&f).await, ["sent"]);
+
+        // A turn running: queued, as ever.
+        feed(&live, turn_init());
+        let (status, _) = f.send("otra").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(states(&f).await, ["sent", "queued"]);
+    }
+
+    #[tokio::test]
+    async fn an_interrupt_with_background_running_waits_drops_the_held_stop_and_keeps_the_rows() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, background_started());
+        assert!(live.hold_stop_if_background(stop("x")));
+        turn_interrupted(&f.app, &live).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        assert!(live.progress().has_background());
+        assert_eq!(live.progress().background.len(), 1);
     }
 
     #[tokio::test]

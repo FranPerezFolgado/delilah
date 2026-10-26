@@ -156,9 +156,9 @@ mod tests {
 
     use crate::config::Config;
     use crate::state::AppState;
-    use delilah_agents::stream::StreamEvent;
     use crate::store::Store;
     use crate::store_sessions::SessionKind;
+    use delilah_agents::stream::StreamEvent;
 
     async fn serve() -> (AppState, String) {
         let config = Config {
@@ -380,8 +380,8 @@ mod tests {
     /// text keeps flowing.
     #[tokio::test]
     async fn relay_does_not_spin_when_progress_sender_is_dropped() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let turns = Arc::new(AtomicUsize::new(0));
         let (tx, _) = tokio::sync::broadcast::channel::<StreamEvent>(16);
