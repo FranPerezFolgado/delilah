@@ -222,14 +222,11 @@ pub(crate) fn split_notifications(text: &str) -> Vec<Segment<'_>> {
         let block = &rest[i..];
         let after = OPEN.len();
         let next_open = block[after..].find(OPEN).map(|j| j + after);
-        let end = match (
-            block[after..].find(CLOSE).map(|j| j + after + CLOSE.len()),
-            next_open,
-        ) {
-            (Some(c), Some(n)) if n < c => n,
-            (Some(c), _) => c,
-            (None, Some(n)) => n,
-            (None, None) => block.len(),
+        // Look for the close tag only before the next opening, so the split stays linear.
+        let limit = next_open.unwrap_or(block.len());
+        let end = match block[after..limit].find(CLOSE) {
+            Some(j) => j + after + CLOSE.len(),
+            None => limit,
         };
         out.push(Segment::Notification(&block[..end]));
         rest = &block[end..];
@@ -551,6 +548,15 @@ mod tests {
             [Notification("<task-notification>áé")]
         );
         assert_eq!(split_notifications("plain"), [Text("plain")]);
+    }
+
+    #[test]
+    fn many_unclosed_tags_split_in_linear_time() {
+        let text = "<task-notification>".repeat(20_000);
+        let start = std::time::Instant::now();
+        let segments = split_notifications(&text);
+        assert_eq!(segments.len(), 20_000);
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]

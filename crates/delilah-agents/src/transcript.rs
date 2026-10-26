@@ -502,7 +502,12 @@ fn message_items(message: &Value, uuid: &str, at: &str, skipped: &mut usize) -> 
                 let text = block.get("text").and_then(Value::as_str).unwrap_or("");
                 if user {
                     let mut k = 0;
-                    for segment in background::split_notifications(text) {
+                    let segments = background::split_notifications(text);
+                    // Only a block that held a notification is trimmed; plain text stays verbatim.
+                    let split = segments
+                        .iter()
+                        .any(|s| matches!(s, background::Segment::Notification(_)));
+                    for segment in segments {
                         let id = if k == 0 {
                             id.clone()
                         } else {
@@ -511,7 +516,7 @@ fn message_items(message: &Value, uuid: &str, at: &str, skipped: &mut usize) -> 
                         let at = at.clone();
                         match segment {
                             background::Segment::Text(t) => {
-                                let t = t.trim();
+                                let t = if split { t.trim() } else { t };
                                 if !is_injected(t) {
                                     items.push(Item::Entry(Entry::User {
                                         id,
@@ -1307,6 +1312,20 @@ mod tests {
         );
         let side = format!(r#","isSidechain":true{HANDBACK}"#);
         assert!(parse(&user_line(&side, r#""m""#), 0).entries.is_empty());
+    }
+
+    #[test]
+    fn plain_user_text_keeps_its_whitespace() {
+        let p = parse(&user_line("", r#""  hola\n""#), 0);
+        let texts: Vec<_> = p
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::User { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["  hola\n"]);
     }
 
     #[test]
