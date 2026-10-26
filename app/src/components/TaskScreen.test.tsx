@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ApiError, DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
@@ -571,5 +571,36 @@ describe("TaskScreen runtime switch", () => {
     fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
     const alert = await r.findByRole("alert");
     expect(alert.textContent).toContain("wait for the turn to end");
+  });
+});
+
+describe("TaskScreen at 1280 (tree hidden below 1300)", () => {
+  const narrow = (rail: boolean) =>
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: rail && q.includes("1299"),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  const screenFor = () =>
+    render(<TaskScreen owner="@web" project={project} sessions={[]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("hides the file tree below the rail breakpoint", () => {
+    narrow(true);
+    expect(screenFor().container.querySelector(".tscreen")!.className).not.toContain("with-tree");
+  });
+
+  it("lets the user open it with the toggle", () => {
+    narrow(true);
+    const r = screenFor();
+    act(() => {
+      window.dispatchEvent(new Event("delilah:toggle-tree"));
+    });
+    expect(r.container.querySelector(".tscreen")!.className).toContain("with-tree");
+  });
+
+  it("shows the tree on a wide window", () => {
+    narrow(false);
+    expect(screenFor().container.querySelector(".tscreen")!.className).toContain("with-tree");
   });
 });

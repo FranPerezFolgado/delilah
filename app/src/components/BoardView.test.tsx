@@ -120,3 +120,37 @@ it("shows a skeleton while loading", () => {
   expect(document.querySelector("[aria-busy='true']")).not.toBeNull();
   expect(screen.queryByRole("region", { name: "Plan" })).toBeNull();
 });
+
+it("shows a hint with the number of columns cut off at the right edge and scrolls on click", () => {
+  const defs = [
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth"),
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetLeft"),
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth"),
+  ];
+  const isBoard = (el: HTMLElement) => el.classList.contains("board");
+  const isCol = (el: HTMLElement) => el.classList.contains("col");
+  const index = (el: HTMLElement) => [...el.parentElement!.children].indexOf(el);
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get() { return isBoard(this) ? 700 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get() { return isCol(this) ? 220 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "offsetLeft", { configurable: true, get() { return isCol(this) ? index(this) * 232 : 0; } });
+  const scrollBy = vi.fn();
+  HTMLElement.prototype.scrollBy = scrollBy;
+  try {
+    setup([task("A-1")]);
+    // 6 columns at 232 px: the 4th ends at 916 > 701, so columns 4, 5 and 6 are cut.
+    const hint = screen.getByRole("button", { name: /columnas más/ });
+    expect(hint.textContent).toBe("3 columnas más ›");
+    fireEvent.click(hint);
+    expect(scrollBy).toHaveBeenCalledWith(expect.objectContaining({ left: 700 }));
+  } finally {
+    ["clientWidth", "offsetLeft", "offsetWidth"].forEach((k, i) => {
+      if (defs[i]) Object.defineProperty(HTMLElement.prototype, k, defs[i]!);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[k];
+    });
+  }
+});
+
+it("has no hint when every column fits", () => {
+  setup([task("A-1")]);
+  expect(screen.queryByRole("button", { name: /columnas más/ })).toBeNull();
+});

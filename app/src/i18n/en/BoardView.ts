@@ -7,6 +7,7 @@ export const EN: Record<string, string> = {
   "Quitar el filtro de estado": "Clear the status filter",
   "Estado: {status}": "Status: {status}",
   "{n} más": "{n} more",
+  "{n} columnas más": "{n} more columns",
   Responder: "Reply",
   "Autopiloto en pausa": "Autopilot paused",
   Autopiloto: "Autopilot",

@@ -19,6 +19,7 @@ import { Icon } from "./Icon";
 import { SessionChain } from "./SessionChain";
 import { SessionViewSwitch } from "./SessionViewSwitch";
 import { TaskHeader } from "./TaskHeader";
+import { useBreakpoints } from "../useWidth";
 import { TaskTabs, type TaskTabItem } from "./TaskTabs";
 import { IconButton } from "./ui";
 import { headerPhaseOf } from "../phases";
@@ -76,7 +77,15 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
   const [closing, setClosing] = useState<string | null>(null);
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
-  const [showTree, setShowTree] = useState(treeOpen);
+  // Below the rail breakpoint the tree starts hidden (the user can still open it).
+  const { rail } = useBreakpoints();
+  const [showTree, setShowTree] = useState(() => treeOpen() && !rail);
+  const railSeen = useRef(rail);
+  useEffect(() => {
+    if (railSeen.current === rail) return;
+    railSeen.current = rail;
+    setShowTree(!rail && treeOpen());
+  }, [rail]);
   const [treeW, setTreeW] = useState(treeWidth);
   const treeId = useId();
   const [closingSession, setClosingSession] = useState<Session | null>(null);

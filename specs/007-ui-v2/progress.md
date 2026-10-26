@@ -32,8 +32,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-23 | 4 | 4A | done | 1 | 48806d0 | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | done | 1 | 1537fa3 | Logs view, statusbar, disconnected banner |
 | WP-25 | 4 | 4B | done | 1 | 973db8b | Sidebar rewrite |
-| WP-26 | 4 | 4C | done | 1 |  | App shell |
-| WP-27 | 4 | 4D | pending | 0 | | E2E selectors for the shell |
+| WP-26 | 4 | 4C | done | 1 | 4b8c8cc | App shell |
+| WP-27 | 4 | 4D | implementing | 1 |  | E2E selectors for the shell |
 | WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
 | WP-29 | 5 | 5A | done | 1 | 8a1cdce | Header controls and tabs |
 | WP-30 | 5 | 5A | done | 1 | 7220728 | Cambios, PR and setup panels |
@@ -58,8 +58,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
 | WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
-| WP-52 | 8 | 8A | implementing | 1 |  | Task screen and board at width |
-| WP-53 | 8 | 8A | pending | 0 | | Global notices |
+| WP-52 | 8 | 8A | done | 1 |  | Task screen and board at width |
+| WP-53 | 8 | 8A | pending | 1 |  | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |
 | WP-55 | 9 | 9A | pending | 0 | | Remove replaced code and i18n cleanup |
 | WP-56 | 9 | 9A | pending | 0 | | Preview seed |

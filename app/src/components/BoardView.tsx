@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Autopilot, SpecPhase, PrSummary, Project, SpecSummary, Task } from "../api";
 import { BOARD_COLUMNS, COLUMNS, boardColumnOf, headerPhaseOf } from "../phases";
 import { t } from "../i18n";
@@ -39,11 +39,30 @@ export function BoardView({
   onOpen, onNewTask, onAddProject = () => {}, onConnectJira = () => {},
 }: Props) {
   const [project, setProject] = useState("");
+  const boardRef = useRef<HTMLDivElement>(null);
+  // Columns cut off at the right edge of the scrolling area.
+  const [hiddenCols, setHiddenCols] = useState(0);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const names = [...new Set([...projects.map((p) => p.name), ...tasks.map((x) => x.project).filter((p): p is string => !!p)])];
   const shown = tasks.filter(
     (x) => (!project || x.project === project) && (!statusFilter || statusOf(x.status).tone === statusFilter),
   );
+
+  const measure = useCallback(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const edge = el.scrollLeft + el.clientWidth + 1;
+    const n = [...el.querySelectorAll<HTMLElement>(".col")].filter((c) => c.offsetLeft + c.offsetWidth > edge).length;
+    setHiddenCols(n);
+  }, []);
+  useEffect(() => {
+    measure();
+    const el = boardRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
 
   return (
     <>
@@ -79,7 +98,8 @@ export function BoardView({
             <FirstRun projects={projects} tasks={tasks} onAddProject={onAddProject} onConnectJira={onConnectJira} onNewTask={onNewTask} />
           )}
           {(projects.length > 0 || tasks.length > 0) && (
-        <div className="board">
+        <div className="board-wrap">
+        <div className="board" ref={boardRef} onScroll={measure}>
           {BOARD_COLUMNS.map((col) => {
             const cards = shown.filter((x) => boardColumnOf(x, specs[x.key]) === col.id);
             const phase = col.id !== "backlog" && col.id !== "done";
@@ -114,6 +134,14 @@ export function BoardView({
               </section>
             );
           })}
+        </div>
+        {hiddenCols > 0 && (
+          <div className="board-more">
+            <button onClick={() => boardRef.current?.scrollBy({ left: boardRef.current.clientWidth, behavior: "smooth" })}>
+              {t("{n} columnas más", { n: hiddenCols })} ›
+            </button>
+          </div>
+        )}
         </div>
           )}
         </>
