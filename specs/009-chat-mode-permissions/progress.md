@@ -7,11 +7,11 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 32944f0 | R1 confirmed; no escalating control action found |
 | WP-02 | 2 | 2A | done | 1 | a345669 | red weak: agents/fake tests written with code; 2 daemon flakes pass alone |
-| WP-03 | 3 | 3A | verified | 1 | 6954d08 | T015 code-first (no red); e2e needs cargo build -p delilah-daemon first |
-| WP-04 | 4 | 4A | verified | 1 | 88dfd94 | PERM-9, PERM-10 |
-| WP-05 | 4 | 4A | verified | 1 | dbab98f | tests written with code (no red seen) |
-| WP-03F | 3 | 3F | implementing | 0 | | FR-008 for project sessions, sleep → poll |
-| WP-06 | 5 | 5A | pending | 0 | | |
+| WP-03 | 3 | 3A | done | 1 | 6954d08 | T015 code-first (no red); e2e needs cargo build -p delilah-daemon first |
+| WP-04 | 4 | 4A | done | 1 | 88dfd94 | PERM-9, PERM-10 |
+| WP-05 | 4 | 4A | done | 1 | dbab98f | tests written with code (no red seen) |
+| WP-03F | 3 | 3F | done | 1 | | FR-008 for project sessions, sleep → poll |
+| WP-06 | 5 | 5A | implementing | 0 | | |
 | WP-07 | 6 | 6A | verified | 1 | 7ac18fa | decision #80 |
 | WP-08 | 6 | 6B | pending | 0 | | |
 
@@ -19,6 +19,9 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 4 | spec-compliance | LOW | `deny` under "default" has no e2e | crates/delilah-e2e/tests/chat_permissions.rs |
+| 4 | spec-compliance | LOW | "null shows Auto" vitest passes even if the preference never loads (initial state is auto) | app/src/components/SettingsView.test.tsx |
+| 3 | test | LOW | "no restart" check is a bounded 3 s sleep (justified in a comment) | crates/delilah-e2e/tests/chat_permissions.rs |
 | 3 | test | LOW | add multi-line PTY screen test for rejection extraction | crates/delilah-daemon/src/run.rs |
 | 3 | spec-compliance | MEDIUM | FR-008 hint skipped for project sessions (fail_if_mode_rejected returns early when project_of(task)) | crates/delilah-daemon/src/run.rs |
 | 3 | spec-compliance | LOW | T015 written code-first, no red run | crates/delilah-daemon/src/run.rs |

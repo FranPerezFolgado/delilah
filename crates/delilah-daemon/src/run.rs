@@ -1417,22 +1417,41 @@ fn with_permission_hint(app: &AppState, text: &str) -> String {
     format!("{text}\n{hint}")
 }
 
-/// A terminal agent that exited with the CLI's rejection of the permission mode on its
-/// screen: the task fails with that line and the hint (FR-008). That text is only printed
-/// at start, so it is an exit before any work.
-async fn fail_if_mode_rejected(app: &AppState, task: &str, pty: &PtySession) {
-    if pty.exit_code().is_none_or(|c| c == 0) || project_of(task).is_some() {
-        return;
-    }
-    let (screen, _) = pty.attach();
-    let screen = String::from_utf8_lossy(&screen).replace('\r', "\n");
-    let said = screen
+/// The lines of a terminal screen where the CLI rejects the permission mode it was
+/// launched with, joined; empty when there are none.
+fn rejection_lines(screen: &str) -> String {
+    screen
+        .replace('\r', "\n")
         .lines()
         .map(str::trim)
         .filter(|l| rejects_permission_mode(l))
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+}
+
+/// A terminal agent that exited with the CLI's rejection of the permission mode on its
+/// screen (FR-008). That text is only printed at start, so it is an exit before any work.
+/// A task fails with that line and the hint; a project's session has no task to fail, so
+/// it raises an error in the inbox, as a failed turn does.
+async fn fail_if_mode_rejected(app: &AppState, task: &str, session: &str, pty: &PtySession) {
+    if pty.exit_code().is_none_or(|c| c == 0) {
+        return;
+    }
+    let (screen, _) = pty.attach();
+    let said = rejection_lines(&String::from_utf8_lossy(&screen));
     if said.is_empty() {
+        return;
+    }
+    if project_of(task).is_some() {
+        let attention = crate::inbox::Attention {
+            kind: crate::inbox::AttentionKind::Error,
+            text: with_permission_hint(app, &start_error_tail(&said)),
+            since: chrono::Utc::now(),
+        };
+        match app.store.set_attention(session, Some(&attention)).await {
+            Ok(()) => app.emit(Topic::Inbox),
+            Err(e) => tracing::warn!(session, "cannot record the rejected mode: {e}"),
+        }
         return;
     }
     let key = TaskKey::new(task);
@@ -1551,15 +1570,15 @@ pub(crate) async fn spawn_session(
     let id = session.id.clone();
     let watched = runtime.clone();
     let rejection_watch = (session.kind == SessionKind::Claude && kind == RuntimeKind::Pty)
-        .then(|| (app.clone(), session.task.clone()));
+        .then(|| (app.clone(), session.task.clone(), session.id.clone()));
     tokio::spawn(async move {
         watched.wait().await;
         sessions.remove_if_same(&id, &watched);
         tracing::info!(session = %id, "session exited");
-        if let Some((app, task)) = rejection_watch
+        if let Some((app, task, session)) = rejection_watch
             && let Some(pty) = watched.as_pty()
         {
-            fail_if_mode_rejected(&app, &task, pty).await;
+            fail_if_mode_rejected(&app, &task, &session, pty).await;
         }
     });
 
@@ -1903,6 +1922,18 @@ mod tests {
         assert!(!rejects_permission_mode("Invalid API key"));
         assert!(!rejects_permission_mode("no such flag"));
         assert!(!rejects_permission_mode("--permission-mode auto"));
+    }
+
+    #[test]
+    fn the_rejection_is_picked_out_of_a_multi_line_screen() {
+        let screen = format!(
+            "Welcome to Claude\r\n  {SPIKE_REJECTION}  \r\nInvalid API key\r\nTry again\r\n{SPIKE_REJECTION}\r\n"
+        );
+        assert_eq!(
+            rejection_lines(&screen),
+            format!("{SPIKE_REJECTION}\n{SPIKE_REJECTION}")
+        );
+        assert_eq!(rejection_lines("Welcome\r\nInvalid API key\r\n"), "");
     }
 
     #[tokio::test]

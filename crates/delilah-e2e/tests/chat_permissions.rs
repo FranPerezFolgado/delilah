@@ -267,7 +267,9 @@ fn a_runtime_switch_relaunches_with_the_current_mode() {
 
     // Changing the preference does not touch the running session ...
     set_preference(&env, "agent-permissions", "default");
-    std::thread::sleep(Duration::from_secs(1));
+    // Nothing is meant to happen, so there is nothing to poll for: the check is bounded
+    // (3 s, enough for a restart to have shown) and the record is read after it.
+    std::thread::sleep(Duration::from_secs(3));
     let after = env.record_for("PERM-4").expect("the same record");
     assert_eq!(after.session_id, chat.session_id);
     assert_eq!(after.args, chat.args);
@@ -335,6 +337,29 @@ fn a_cli_rejecting_the_mode_fails_a_terminal_start_with_the_settings_hint() {
         assert!(text.contains("--permission-mode"), "{task}");
         assert!(text.ends_with(hint), "{lang}: {text}");
     }
+}
+
+#[test]
+fn a_cli_rejecting_the_mode_raises_the_hint_for_a_project_session() {
+    let env = Env::start(EnvOptions::default());
+    env.register_fixtures();
+    env.scenario(
+        "rejects-project",
+        &json!({"steps": [{"exit_with_stderr": {"code": 1, "message": REJECTION}}]}),
+    );
+    set_preference(&env, "language", "en");
+    // Not read-only, so the session gets the preference's mode like a task's.
+    let (code, body) = env.api().raw(
+        Method::POST,
+        "/api/v1/projects/signal/sessions",
+        Some(json!({"kind": "claude", "read_only": false,
+            "prompt": "Rechazo [fake:rejects-project]"})),
+    );
+    assert_eq!(code, 201, "{body}");
+    let item = wait_item(&env, "@signal", "error");
+    let text = item["text"].as_str().unwrap_or_default();
+    assert!(text.contains("--permission-mode"), "{item}");
+    assert!(text.ends_with(HINT_EN), "{text}");
 }
 
 #[test]
