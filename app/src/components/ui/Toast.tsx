@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import "./Toast.css";
 
@@ -207,8 +207,10 @@ export function ToastHost() {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinned, setPinned] = useState(false);
-  if (list.length === 0) return null;
   const expanded = hovered || focused || pinned;
+  useEffect(() => setToastsPaused(expanded), [expanded]);
+  useEffect(() => () => setToastsPaused(false), []);
+  if (list.length === 0) return null;
   const more = list.length - 1;
   const shown = expanded ? list : list.slice(-1);
   return (

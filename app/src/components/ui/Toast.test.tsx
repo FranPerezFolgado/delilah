@@ -320,4 +320,60 @@ describe("Toast", () => {
       expect(regions[0].textContent).toBe("clave");
     });
   });
+
+  describe("pause while expanded", () => {
+    const host = () => document.querySelector(".toast-host") as HTMLElement;
+    const tick = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+
+    it("hovering freezes the timer and leaving resumes the remaining time", () => {
+      mount();
+      act(() => void toast({ text: "pronto" }));
+      tick(4000);
+      fireEvent.mouseEnter(host());
+      tick(10000);
+      expect(qt("pronto")).not.toBeNull();
+      fireEvent.mouseLeave(host());
+      tick(1900);
+      expect(qt("pronto")).not.toBeNull();
+      tick(200);
+      expect(qt("pronto")).toBeNull();
+    });
+
+    it("hidden older info toasts keep expiring while not hovered", () => {
+      mount();
+      act(() => {
+        toast({ text: "viejo", ttl: 1000 });
+        toast({ text: "nuevo", kind: "error" });
+      });
+      expect(qt("viejo")).toBeNull();
+      tick(1100);
+      fireEvent.mouseEnter(host());
+      expect(qt("viejo")).toBeNull();
+      expect(gt("nuevo")).not.toBeNull();
+    });
+
+    it("a toast pushed while expanded gets its full ttl after leaving", () => {
+      mount();
+      act(() => void toast({ text: "a", kind: "error" }));
+      fireEvent.mouseEnter(host());
+      act(() => void toast({ text: "b", ttl: 2000 }));
+      tick(10000);
+      expect(gt("b")).not.toBeNull();
+      fireEvent.mouseLeave(host());
+      tick(1900);
+      expect(qt("b")).not.toBeNull();
+      tick(200);
+      expect(qt("b")).toBeNull();
+    });
+
+    it("unmounting the host resumes the timers", () => {
+      mount();
+      act(() => void toast({ text: "u", ttl: 1000 }));
+      fireEvent.mouseEnter(host());
+      cleanup();
+      tick(1100);
+      mount();
+      expect(qt("u")).toBeNull();
+    });
+  });
 });

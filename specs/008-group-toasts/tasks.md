@@ -86,8 +86,8 @@ with failing Vitest tests (jsdom, fake timers).
 
 **Independent Test**: info toast, hover 10 s, leave → still there, gone after its remaining time.
 
-- [ ] T018 [US4] Write failing tests in `app/src/components/ui/Toast.test.tsx`: info toast with 2 s left, `mouseEnter` host, advance 10 s → still there; `mouseLeave` → gone after ~2 s, not before; hidden (collapsed) older info toasts keep expiring while not hovered
-- [ ] T019 [US4] In `app/src/components/ui/Toast.tsx` call `setToastsPaused(expanded)` from `ToastHost` in an effect (and `setToastsPaused(false)` on unmount)
+- [X] T018 [US4] Write failing tests in `app/src/components/ui/Toast.test.tsx`: info toast with 2 s left, `mouseEnter` host, advance 10 s → still there; `mouseLeave` → gone after ~2 s, not before; hidden (collapsed) older info toasts keep expiring while not hovered
+- [X] T019 [US4] In `app/src/components/ui/Toast.tsx` call `setToastsPaused(expanded)` from `ToastHost` in an effect (and `setToastsPaused(false)` on unmount)
 - [X] T020 [P] [US4] Write a failing test in `app/src/components/ProposalCard.test.tsx`: after «Descartar», hovering the toast stack past `UNDO_MS` still sends «Descartar» and the «Tarea descartada» toast is gone
 - [X] T021 [US4] In `app/src/components/ProposalCard.tsx` keep the id returned by `pushToast` for «Tarea descartada» and call `dismissToast(id)` in the discard timer callback
 
