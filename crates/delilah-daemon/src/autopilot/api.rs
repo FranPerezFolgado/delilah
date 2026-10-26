@@ -42,7 +42,7 @@ pub(crate) async fn act(
 /// as it is: `resume` continues it.
 async fn turn_on<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) -> Result<(), ApiError> {
     let task = task_of(app, key).await?;
-    if !crate::autopilot::allowed(key, &task.workflow) {
+    if !crate::autopilot::allowed_for(app, &task).await? {
         return Err(crate::autopilot::not_spec_workflow(key));
     }
     let written = app
@@ -107,10 +107,19 @@ mod tests {
         let _ = key;
     }
 
+    /// The fixture's project follows the phased `/feature` workflow.
+    async fn phased_project(app: &AppState) {
+        app.store
+            .set_project_settings("proj", &crate::autopilot::feature_settings())
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn turning_on_confirms_a_pending_offer_at_once() {
         use delilah_core::{Handoff, Step};
         let (app, key, _dir) = task_with_commits(gh("[]"), None, &["first"]).await;
+        phased_project(&app).await;
         app.store.set_saving_mode(&key, true).await.unwrap();
         app.store.set_autopilot(&key, None).await.unwrap();
         write_spec(&app, "- [ ] T001 One\n", false);
@@ -133,6 +142,7 @@ mod tests {
     #[tokio::test]
     async fn turning_on_leaves_a_paused_autopilot_for_resume() {
         let (app, key, _dir) = paused_task(gh("[]"), None).await;
+        phased_project(&app).await;
         let launched = Launched::default();
         turn_on(&app, &key, &stub(&launched)).await.ok().unwrap();
         let task = task_of(&app, &key).await.ok().unwrap();

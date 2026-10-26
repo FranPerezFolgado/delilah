@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_agents::runtime::{self, Runtime, RuntimeKind};
-use delilah_core::workflow::TaskWorkflow;
+use delilah_core::workflow::{self, StartRequest, TaskWorkflow, Vars};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{Deadline, FetchOutcome, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
@@ -319,35 +319,57 @@ pub(crate) async fn start_run_with(
         }
         _ => {}
     }
-    // `feature` (the old name, still stored by older projects) is `project`.
-    let workflow = match &req.workflow {
-        Some(w) => crate::api::normalise_workflow(w)?,
-        None => {
-            let stored = existing
-                .as_ref()
-                .map(|t| t.workflow.as_str())
-                .unwrap_or(project.workflow.as_str());
-            // A stored free-text value from before the workflow enum: it needs a prompt.
-            TaskWorkflow::parse(stored).unwrap_or(TaskWorkflow::Prompt)
-        }
+    // What the request says about the first message; the stored choice and the
+    // project's workflow decide the rest (`workflow::resolve`).
+    let (stored_workflow, stored_message) = match &existing {
+        Some(t) => (t.workflow.as_str(), t.start_message.as_deref()),
+        None => (project.workflow.as_str(), None),
     };
-    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, workflow.as_str()) {
+    let prompt_text = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
+    let start_req = match (req.workflow.as_deref(), prompt_text) {
+        (None, None) => StartRequest::Inherit,
+        (Some(w), prompt) => match (crate::api::normalise_workflow(w)?, prompt) {
+            (TaskWorkflow::None, _) => StartRequest::Nothing,
+            (_, Some(p)) => StartRequest::Prompt(p.to_string()),
+            (TaskWorkflow::Project, None) => StartRequest::Project,
+            (TaskWorkflow::Prompt, None) if stored_message.is_some() => StartRequest::Inherit,
+            (TaskWorkflow::Prompt, None) => {
+                return Err(ApiError::bad_request("workflow `prompt` needs a --prompt"));
+            }
+        },
+        (None, Some(p)) => StartRequest::Prompt(p.to_string()),
+    };
+    if start_req == StartRequest::Inherit && TaskWorkflow::parse(stored_workflow).is_err() {
+        tracing::warn!(task = %key, workflow = stored_workflow, "unknown stored workflow: starting with no message");
+    }
+    let free_key = crate::branching::is_free(&key);
+    let title = req.title.trim().to_string();
+    let vars = Vars {
+        ticket: &req.key,
+        title: &title,
+        task: if free_key { &title } else { &req.key },
+        spec_dir: None,
+    };
+    let builtin = delilah_core::workflow::render(crate::lang::builtin_start(app.lang()), &vars);
+    let resolved = workflow::resolve(
+        &start_req,
+        stored_workflow,
+        stored_message,
+        Some(&project.settings),
+        &vars,
+        &builtin,
+    );
+    if req.autopilot == Some(true)
+        && !crate::autopilot::allowed(&key, resolved.workflow.as_str(), Some(&project.settings))
+    {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
-    let prompt = match (&req.prompt, workflow) {
-        (Some(prompt), _) => prompt.clone(),
-        (None, TaskWorkflow::Project) if req.free => {
-            format!("/feature {}", req.title.trim())
-        }
-        (None, TaskWorkflow::Project) => format!("/feature {}", req.key),
-        (None, other) => {
-            return Err(ApiError::bad_request(format!(
-                "workflow `{}` needs a --prompt",
-                other.as_str()
-            )));
-        }
-    };
-    let workflow = workflow.as_str().to_string();
+    // Saving mode, autopilot and hand-offs are for phased tasks only.
+    let saving_mode = saving_mode && resolved.phased;
+    let autopilot = autopilot && resolved.phased;
+    let workflow = resolved.workflow.as_str().to_string();
+    let prompt = resolved.prompt.clone().unwrap_or_default();
+    let custom_prompt = resolved.workflow == TaskWorkflow::Prompt;
 
     // Named before anything is created, so a refused name leaves a backlog task as it is.
     let notes = req
@@ -408,6 +430,11 @@ pub(crate) async fn start_run_with(
                 in_checkout: Some(in_checkout),
             };
             let updated = app.store.update_backlog_task(&key, &change).await?;
+            if updated.start_message != resolved.start_message {
+                app.store
+                    .set_start_message(&key, resolved.start_message.as_deref())
+                    .await?;
+            }
             if updated.saving_mode != saving_mode {
                 app.store.set_saving_mode(&key, saving_mode).await?;
             }
@@ -427,7 +454,8 @@ pub(crate) async fn start_run_with(
             task.autopilot = autopilot.then(new_autopilot);
             task.chat_mode = req.chat_mode.unwrap_or(false);
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
-            if crate::branching::is_free(&key) {
+            task.start_message = resolved.start_message.clone();
+            if free_key {
                 task.title_source = delilah_core::TitleSource::Initial;
             }
             app.store.create_task(&task).await?;
@@ -487,7 +515,7 @@ pub(crate) async fn start_run_with(
     let launch = AgentLaunch {
         free: req.free,
         prompt,
-        custom_prompt: req.prompt.is_some(),
+        custom_prompt,
         notes,
         adopted,
         saving_mode,
@@ -668,7 +696,7 @@ impl From<LaunchError> for ApiError {
 pub(crate) struct AgentLaunch {
     /// A task without a Jira ticket: nothing to fetch.
     pub free: bool,
-    /// The prompt as resolved (the request's own, or the workflow's default).
+    /// The first message as resolved; empty when none is sent.
     pub prompt: String,
     /// The request gave its own prompt: no ticket pointer is added to it.
     pub custom_prompt: bool,
@@ -794,7 +822,8 @@ pub(crate) async fn launch_agent(
     } = launch;
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
-    let issue = match free {
+    let sends = !prompt.is_empty();
+    let issue = match free || !sends {
         true => None,
         false => crate::jira::fetch_issue(app, &key.to_string()).await,
     };
@@ -816,8 +845,14 @@ pub(crate) async fn launch_agent(
         }
         _ => prompt,
     };
-    let prompt = point_to_notes(app, key, prompt, notes.as_deref());
-    let prompt = match !ws.has_branch() {
+    let prompt = match sends {
+        true => point_to_notes(app, key, prompt, notes.as_deref()),
+        false => prompt,
+    };
+    // The branch is created by the plan command (Spec Kit's), so only a phased task is
+    // told to leave it to that.
+    let phased = sends && !ws.has_branch() && is_phased_task(app, key).await;
+    let prompt = match phased {
         true => format!(
             "{prompt} ({})",
             app.lang().pick(
@@ -844,7 +879,7 @@ pub(crate) async fn launch_agent(
         settle,
         guard,
     };
-    tokio::spawn(run.run(adopted, existing, key.to_string(), prompt))
+    tokio::spawn(run.run(adopted, existing, key.to_string(), sends.then_some(prompt)))
         .await
         .map_err(|e| LaunchError::Start(format!("the start was interrupted: {e}")))??;
     Ok(())
@@ -883,7 +918,7 @@ impl Launch {
         adopted: Option<SessionRecord>,
         existing: Option<Task>,
         req_key: String,
-        prompt: String,
+        prompt: Option<String>,
     ) -> Result<(), ApiError> {
         let Self {
             guard,
@@ -925,7 +960,7 @@ impl Launch {
                     rollback_start(&app, &key, &session, None, existing, &reason).await;
                     return Err(e.into());
                 }
-                (session, None, Some(prompt), false)
+                (session, None, prompt, false)
             }
         };
         // A chat-mode agent can fail to come up, and the start is then undone: it is spawned,
@@ -1063,6 +1098,13 @@ async fn abort_start(
             if let Err(e) = app.store.update_backlog_task(key, &undo).await {
                 tracing::warn!(task = %key, "cannot put it back as it was: {e}");
             }
+            if let Err(e) = app
+                .store
+                .set_start_message(key, task.start_message.as_deref())
+                .await
+            {
+                tracing::warn!(task = %key, "cannot put the start message back: {e}");
+            }
             if let Err(e) = app.store.set_saving_mode(key, task.saving_mode).await {
                 tracing::warn!(task = %key, "cannot put saving mode back: {e}");
             }
@@ -1144,28 +1186,29 @@ fn new_autopilot() -> delilah_core::Autopilot {
     }
 }
 
-/// A task's first (main) session and the prompt it starts with. In saving mode it is
-/// the plan step, told to stop once the tasks are written; with autopilot it is also
-/// told to answer the workflow's questions itself.
+/// A task's first (main) session and the prompt it starts with (none for a task
+/// that starts with no message). In saving mode (phased tasks only) it is the plan
+/// step, told to stop once the tasks are written; with autopilot it is also told to
+/// answer the workflow's questions itself.
 fn first_session(
     app: &AppState,
     task: &str,
     saving_mode: bool,
     autopilot: bool,
-    prompt: String,
-) -> (SessionRecord, String) {
+    prompt: Option<String>,
+) -> (SessionRecord, Option<String>) {
     let lang = app.lang();
     let (label, step, prompt) = match saving_mode {
         true => (
             crate::handoff::step_label(lang, Step::Plan).to_string(),
             Some(Step::Plan),
-            match autopilot {
+            prompt.map(|prompt| match autopilot {
                 true => format!(
                     "{prompt} {}",
                     crate::autopilot::autopilot_plan_note(lang, task)
                 ),
                 false => format!("{prompt} {}", crate::handoff::plan_note(lang)),
-            },
+            }),
         ),
         false => (lang.pick("Principal", "Main").to_string(), None, prompt),
     };
@@ -1744,6 +1787,23 @@ fn point_to_notes(app: &AppState, key: &TaskKey, prompt: String, notes: Option<&
     }
 }
 
+/// Whether the stored task follows a phased project workflow.
+async fn is_phased_task(app: &AppState, key: &TaskKey) -> bool {
+    let Ok(Some(task)) = app.store.get_task(key).await else {
+        return false;
+    };
+    let Some(project) = task.project.as_deref() else {
+        return false;
+    };
+    let (Ok(workflow), Ok(project)) = (
+        TaskWorkflow::parse(&task.workflow),
+        app.store.project(project).await,
+    ) else {
+        return false;
+    };
+    workflow::is_phased(workflow, &project.settings)
+}
+
 /// The setting that holds the last free task's number handed out.
 const FREE_KEY_LAST: &str = "free_key_last";
 
@@ -2063,7 +2123,7 @@ mod tests {
                 path: app.config.home.join("missing"),
                 kind: ProjectKind::Repo,
                 workflow: "project".into(),
-                settings: Default::default(),
+                settings: crate::autopilot::feature_settings(),
                 preview_command: None,
             })
             .await
@@ -2465,7 +2525,7 @@ mod tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "project".into(),
-                settings: Default::default(),
+                settings: crate::autopilot::feature_settings(),
                 preview_command: None,
             })
             .await
@@ -2636,7 +2696,9 @@ mod tests {
     #[tokio::test]
     async fn saving_mode_gives_the_first_session_the_plan_step_and_a_note() {
         let app = app().await;
-        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
+        let (s, prompt) =
+            first_session(&app, "PROJ-1", true, false, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!(s.step, Some(Step::Plan));
         assert_eq!(s.label, "Spec y plan");
         assert!(s.primary);
@@ -2647,16 +2709,20 @@ mod tests {
         );
 
         app.lang.set(crate::lang::Lang::En);
-        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
+        let (s, prompt) =
+            first_session(&app, "PROJ-1", true, false, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!(s.label, "Spec and plan");
         assert!(prompt.contains("tasks.md"), "{prompt}");
         assert!(!prompt.ends_with("nueva."), "{prompt}");
 
-        let (s, prompt) = first_session(&app, "PROJ-1", false, false, "/feature PROJ-1".into());
+        let (s, prompt) =
+            first_session(&app, "PROJ-1", false, false, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!((s.label.as_str(), s.step), ("Main", None));
         assert_eq!(prompt, "/feature PROJ-1");
         app.lang.set(crate::lang::Lang::Es);
-        let (s, _) = first_session(&app, "PROJ-1", false, false, String::new());
+        let (s, _) = first_session(&app, "PROJ-1", false, false, None);
         assert_eq!(s.label, "Principal");
     }
 
@@ -2707,7 +2773,8 @@ mod tests {
     #[tokio::test]
     async fn autopilot_replaces_the_saving_mode_note_in_both_languages() {
         let app = app().await;
-        let (s, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        let (s, prompt) = first_session(&app, "PROJ-1", true, true, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!(s.step, Some(Step::Plan));
         assert!(prompt.starts_with("/feature PROJ-1 "), "{prompt}");
         assert!(prompt.contains("Autopilot"), "{prompt}");
@@ -2715,7 +2782,8 @@ mod tests {
         assert!(!prompt.contains("Modo ahorro:"), "{prompt}");
         assert!(prompt.contains("(Recomendado)"), "{prompt}");
         app.lang.set(crate::lang::Lang::En);
-        let (_, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        let (_, prompt) = first_session(&app, "PROJ-1", true, true, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert!(prompt.contains("Autopilot"), "{prompt}");
         assert!(prompt.contains("(Recommended)"), "{prompt}");
         assert!(!prompt.contains("Saving mode:"), "{prompt}");
@@ -3514,7 +3582,7 @@ mod tests {
             .unwrap();
         assert_eq!(status, StatusCode::CREATED);
         let stdin = read_when_there(home.join("stdin.txt")).await;
-        assert!(stdin.contains("/feature LIBRE-1"), "{stdin}");
+        assert!(stdin.contains("/feature Chat"), "{stdin}");
         let task = app.store.get_task(&started.key).await.unwrap().unwrap();
         assert_eq!(task.workflow, "project", "stored normalised");
         let _ = app.sessions.primary("LIBRE-1").map(|l| l.runtime.kill());
@@ -3529,11 +3597,130 @@ mod tests {
         req.workflow = Some("feature".into());
         req.autopilot = Some(true);
         req.saving_mode = Some(true);
-        let res = start_run(State(app.clone()), Json(req)).await;
-        if let Err(e) = &res {
-            assert_ne!(e.status, StatusCode::CONFLICT, "{}", e.message);
-        }
+        let (status, Json(started)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(started.autopilot.is_some() && started.saving_mode);
         let _ = app.sessions.primary("LIBRE-2").map(|l| l.runtime.kill());
+    }
+
+    /// Starts `req` on the chat fake agent and returns what it was sent first.
+    async fn first_message(app: &AppState, home: &std::path::Path, req: RunRequest) -> String {
+        let key = req.key.clone();
+        let (status, Json(task)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let key = if key.is_empty() {
+            task.key.to_string()
+        } else {
+            key
+        };
+        let stdin = read_when_there(home.join("stdin.txt")).await;
+        let _ = app.sessions.primary(&key).map(|l| l.runtime.kill());
+        stdin
+    }
+
+    /// A project registered after this feature: no workflow chosen, so no `/feature`.
+    async fn fresh_workflow_project(app: &AppState) {
+        let mut settings = app.store.project("repo").await.unwrap().settings;
+        settings.workflow = None;
+        app.store
+            .set_project_settings("repo", &settings)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_fresh_project_starts_with_the_builtin_prompt_and_no_saving_mode() {
+        let home = std::env::temp_dir().join(format!("delilah-builtin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        fresh_workflow_project(&app).await;
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = chat_run("LIBRE-1");
+        req.free = true;
+        req.key = String::new();
+        req.title = "Arreglar el login".into();
+        req.notes = Some("mira el token".into());
+        let stdin = first_message(&app, &home, req).await;
+        assert!(
+            stdin.contains("Work on the task LIBRE-1: Arreglar el login."),
+            "{stdin}"
+        );
+        assert!(stdin.contains("your notes on the task are at"), "{stdin}");
+        assert!(
+            !stdin.contains("/feature") && !stdin.contains("Saving mode"),
+            "{stdin}"
+        );
+        assert!(!stdin.contains("Spec Kit"), "not phased: {stdin}");
+        let task = app
+            .store
+            .get_task(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!task.saving_mode && task.autopilot.is_none());
+        assert_eq!(task.workflow, "project");
+        let session = app.store.primary_session("LIBRE-1").await.unwrap().unwrap();
+        assert_eq!((session.label.as_str(), session.step), ("Main", None));
+    }
+
+    #[tokio::test]
+    async fn the_feature_preset_starts_with_the_feature_command_and_the_saving_mode_note() {
+        let home = std::env::temp_dir().join(format!("delilah-preset-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut free = chat_run("LIBRE-1");
+        free.free = true;
+        free.title = "Arreglar el login".into();
+        free.saving_mode = Some(true);
+        let stdin = first_message(&app, &home, free).await;
+        assert!(stdin.contains("/feature Arreglar el login"), "{stdin}");
+        assert!(
+            stdin.contains("Spec Kit"),
+            "phased: told about the branch: {stdin}"
+        );
+        assert!(
+            stdin.contains("Delilah will carry on in a new session."),
+            "{stdin}"
+        );
+
+        let _ = std::fs::remove_file(home.join("stdin.txt"));
+        let mut jira = chat_run("PROJ-1");
+        jira.saving_mode = Some(false);
+        let stdin = first_message(&app, &home, jira).await;
+        assert!(stdin.contains("/feature PROJ-1"), "{stdin}");
+        assert!(
+            !stdin.contains("Saving mode") && !stdin.contains("tasks.md"),
+            "{stdin}"
+        );
+    }
+
+    #[tokio::test]
+    async fn autopilot_on_a_task_that_is_not_phased_is_refused() {
+        let home = std::env::temp_dir().join(format!("delilah-nophase-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        fresh_workflow_project(&app).await;
+        let mut req = chat_run("LIBRE-1");
+        req.autopilot = Some(true);
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
+        // A prompt of its own is not phased either, even on the preset.
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut req = chat_run("LIBRE-2");
+        req.autopilot = Some(true);
+        req.prompt = Some("haz esto".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
     }
 
     #[tokio::test]
@@ -3855,7 +4042,7 @@ mod tests {
                 kind: ProjectKind::Repo,
                 workflow: "project".into(),
                 preview_command: None,
-                settings: Default::default(),
+                settings: crate::autopilot::feature_settings(),
             })
             .await
             .unwrap();

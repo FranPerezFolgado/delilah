@@ -11,7 +11,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2C | done | 1 | cb1d2c2 | scope widened to all daemon src (user); API requests sending "feature" not normalised yet → WP-05 |
 | WP-04F | 2 | fix | done | 1 | b0a55dc | review fix: feature alias normalisation, projects.workflow migration; unknown workflow values now 400 |
 | WP-04F2 | 2 | fix | done | 1 | a5ba4b6 | 2nd fix round: UI autopilot check accepts "project" (interim until T037) |
-| WP-05 | 3 | 3A | implementing | 0 | | +core workflow.rs, autopilot/api.rs allowed |
+| WP-05 | 3 | 3A | verified | 1 | | +core workflow.rs, autopilot/api.rs; e2e autopilot+chat_permissions set preset per test (user); prompt+autopilot now 409 |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 4 | 4A | pending | 0 | | |
 | WP-08 | 4 | 4A | pending | 0 | | |

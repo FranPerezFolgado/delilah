@@ -64,10 +64,44 @@ fn is_task(key: &TaskKey) -> bool {
     crate::store_sessions::project_of(key.as_str()).is_none()
 }
 
-/// Whether autopilot may be on in `key`: a task (not a project's owner) on the spec
-/// workflow.
-pub(crate) fn allowed(key: &TaskKey, workflow: &str) -> bool {
-    is_task(key) && delilah_core::workflow::TaskWorkflow::parse(workflow) == Ok(delilah_core::workflow::TaskWorkflow::Project)
+/// Whether autopilot may be on in `key`: a task (not a project's owner) whose workflow
+/// is phased. Without a project nothing is phased.
+pub(crate) fn allowed(
+    key: &TaskKey,
+    task_workflow: &str,
+    project: Option<&delilah_core::ProjectSettings>,
+) -> bool {
+    use delilah_core::workflow::{TaskWorkflow, is_phased};
+    is_task(key)
+        && project
+            .zip(TaskWorkflow::parse(task_workflow).ok())
+            .is_some_and(|(p, w)| is_phased(w, p))
+}
+
+/// A project's settings with the `/feature` preset: the phased workflow the tests of
+/// saving mode and autopilot run on.
+#[cfg(test)]
+pub(crate) fn feature_settings() -> delilah_core::ProjectSettings {
+    delilah_core::ProjectSettings {
+        workflow: Some(crate::lang::feature_preset(crate::lang::Lang::Es)),
+        ..Default::default()
+    }
+}
+
+/// [`allowed`] for a stored task, looking its project up.
+pub(crate) async fn allowed_for(
+    app: &crate::state::AppState,
+    task: &delilah_core::Task,
+) -> Result<bool, crate::api::ApiError> {
+    let project = match &task.project {
+        Some(name) => Some(app.store.project(name).await?),
+        None => None,
+    };
+    Ok(allowed(
+        &task.key,
+        &task.workflow,
+        project.as_ref().map(|p| &p.settings),
+    ))
 }
 
 /// The 409 for autopilot asked for where it cannot be.
@@ -208,6 +242,21 @@ mod tests {
 
     use super::*;
     use crate::autopilot::testkit::*;
+
+    #[test]
+    fn autopilot_is_allowed_only_for_phased_tasks_of_a_task_key() {
+        let phased = feature_settings();
+        let plain = delilah_core::ProjectSettings::default();
+        let key = TaskKey::new("PROJ-1");
+        assert!(allowed(&key, "project", Some(&phased)));
+        assert!(allowed(&key, "feature", Some(&phased)), "the old name");
+        assert!(!allowed(&key, "prompt", Some(&phased)));
+        assert!(!allowed(&key, "none", Some(&phased)));
+        assert!(!allowed(&key, "bogus", Some(&phased)));
+        assert!(!allowed(&key, "project", Some(&plain)));
+        assert!(!allowed(&key, "project", None));
+        assert!(!allowed(&TaskKey::new("@web"), "project", Some(&phased)));
+    }
 
     #[test]
     fn shape_starts_the_implementation_only_while_running() {

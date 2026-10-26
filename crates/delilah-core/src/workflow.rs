@@ -4,7 +4,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::project::{FieldError, ProjectSettings};
-use crate::task::Task;
 
 /// How a project's tasks run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,7 +249,7 @@ pub struct ResolvedStart {
     /// Saving mode, autopilot and hand-offs apply only if true.
     pub phased: bool,
     /// Value for `tasks.workflow`.
-    pub workflow: &'static str,
+    pub workflow: TaskWorkflow,
     /// Value for `tasks.start_message`.
     pub start_message: Option<String>,
 }
@@ -260,7 +259,7 @@ impl ResolvedStart {
         Self {
             prompt: None,
             phased: false,
-            workflow: TaskWorkflow::None.as_str(),
+            workflow: TaskWorkflow::None,
             start_message: None,
         }
     }
@@ -269,7 +268,7 @@ impl ResolvedStart {
         Self {
             prompt: Some(render(template, vars)),
             phased: false,
-            workflow: TaskWorkflow::Prompt.as_str(),
+            workflow: TaskWorkflow::Prompt,
             start_message: Some(template.to_string()),
         }
     }
@@ -291,17 +290,20 @@ impl ResolvedStart {
         Self {
             prompt,
             phased,
-            workflow: TaskWorkflow::Project.as_str(),
+            workflow: TaskWorkflow::Project,
             start_message: None,
         }
     }
 }
 
 /// Decides the first message: the start request, then the task's stored choice,
-/// then the project's workflow, then the built-in prompt.
+/// then the project's workflow, then the built-in prompt. `stored_workflow` and
+/// `stored_message` are the task's `workflow` and `start_message` columns (an
+/// unparseable workflow starts with nothing; the caller may want to log it).
 pub fn resolve(
     req: &StartRequest,
-    task: &Task,
+    stored_workflow: &str,
+    stored_message: Option<&str>,
     project: Option<&ProjectSettings>,
     vars: &Vars,
     builtin_text: &str,
@@ -310,9 +312,9 @@ pub fn resolve(
         StartRequest::Prompt(p) => ResolvedStart::message(p, vars),
         StartRequest::Nothing => ResolvedStart::nothing(),
         StartRequest::Project => ResolvedStart::project(project, vars, builtin_text),
-        StartRequest::Inherit => match TaskWorkflow::parse(&task.workflow) {
+        StartRequest::Inherit => match TaskWorkflow::parse(stored_workflow) {
             Ok(TaskWorkflow::Project) => ResolvedStart::project(project, vars, builtin_text),
-            Ok(TaskWorkflow::Prompt) => match task.start_message.as_deref() {
+            Ok(TaskWorkflow::Prompt) => match stored_message {
                 Some(m) => ResolvedStart::message(m, vars),
                 // Legacy: a prompt task that never stored its message.
                 None => ResolvedStart::nothing(),
@@ -325,7 +327,6 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task::TaskKey;
 
     fn vars() -> Vars<'static> {
         Vars {
@@ -489,20 +490,22 @@ mod tests {
         assert!(!is_phased(TaskWorkflow::Project, &m));
     }
 
-    fn task(workflow: &str, msg: Option<&str>) -> Task {
-        let mut t = Task::new(TaskKey::new("PROJ-1"), "Fix it", workflow);
-        t.start_message = msg.map(String::from);
-        t
+    fn task<'a>(workflow: &'a str, msg: Option<&'a str>) -> (&'a str, Option<&'a str>) {
+        (workflow, msg)
     }
 
-    fn run(req: StartRequest, t: &Task, p: Option<&ProjectSettings>) -> ResolvedStart {
-        resolve(&req, t, p, &vars(), "BUILTIN")
+    fn run(
+        req: StartRequest,
+        t: &(&str, Option<&str>),
+        p: Option<&ProjectSettings>,
+    ) -> ResolvedStart {
+        resolve(&req, t.0, t.1, p, &vars(), "BUILTIN")
     }
 
     fn check(r: ResolvedStart, prompt: Option<&str>, phased: bool, wf: &str, msg: Option<&str>) {
         assert_eq!(r.prompt.as_deref(), prompt);
         assert_eq!(r.phased, phased);
-        assert_eq!(r.workflow, wf);
+        assert_eq!(r.workflow.as_str(), wf);
         assert_eq!(r.start_message.as_deref(), msg);
     }
 

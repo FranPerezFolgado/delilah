@@ -478,7 +478,9 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     }
     .as_str()
     .to_string();
-    if new.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+    if new.autopilot == Some(true)
+        && !crate::autopilot::allowed(&key, &workflow, project.as_ref().map(|p| &p.settings))
+    {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
     let mut task = Task::new(key, new.title.trim(), workflow);
@@ -557,7 +559,7 @@ async fn update_task(
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
     }
     if let Some(on) = autopilot {
-        if on && !crate::autopilot::allowed(&key, &task.workflow) {
+        if on && !crate::autopilot::allowed_for(&app, &task).await? {
             return Err(crate::autopilot::not_spec_workflow(&key));
         }
         // On brings saving mode with it; off leaves it as it is. A paused or finished
@@ -873,7 +875,7 @@ mod tests {
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
                 workflow: "prompt".into(),
-                settings: Default::default(),
+                settings: crate::autopilot::feature_settings(),
                 preview_command: None,
             })
             .await
@@ -1546,7 +1548,7 @@ mod tests {
             &app,
             "POST",
             "/api/v1/tasks",
-            Some(json!({"free": true, "title": "T", "workflow": "feature", "autopilot": true})),
+            Some(json!({"free": true, "title": "T", "project": "web", "workflow": "feature", "autopilot": true})),
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "{task}");
@@ -1642,11 +1644,9 @@ mod tests {
     async fn saving_mode_off_clears_autopilot_through_the_route() {
         let (app, state) = app_with_project().await;
         let key = TaskKey::new("PROJ-1");
-        state
-            .store
-            .create_task(&Task::new(key.clone(), "t", "project"))
-            .await
-            .unwrap();
+        let mut t = Task::new(key.clone(), "t", "project");
+        t.project = Some("web".into());
+        state.store.create_task(&t).await.unwrap();
         let (status, task) = call(
             &app,
             "POST",
