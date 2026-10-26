@@ -64,7 +64,7 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 - [X] T022 [US1] Skip the "CI failed" notification for tasks with autofix handling the PR in `crates/delilah-daemon/src/pr_loop/notices.rs`
 - [X] T023 [US1] Manual forward CASes the sha first, no double send, in `crates/delilah-daemon/src/pr_api/forward.rs`
 - [X] T024 [US1] Expose `autofix` (DTO without `session`, with `limit`) on each PR of `GET /tasks/{key}/prs` in `crates/delilah-daemon/src/pr_api/dto.rs`, and `ci_autofix` on the task DTO in `crates/delilah-daemon/src/api.rs`
-- [ ] T025 [US1] E2E `crates/delilah-e2e/tests/autofix.rs`: fake `gh` reports a failing head, fake Claude (scenario per command) commits/pushes, fake `gh` then reports the new green head → one autofix prompt reached the agent, history shows sent + fixed (extend `gh/fake.rs` / fake bin only as needed)
+- [X] T025 [US1] E2E `crates/delilah-e2e/tests/autofix.rs`: fake `gh` reports a failing head, fake Claude (scenario per command) commits/pushes, fake `gh` then reports the new green head → one autofix prompt reached the agent, history shows sent + fixed (extend `gh/fake.rs` / fake bin only as needed)
 
 **Checkpoint**: autofix fixes CI on its own for tasks that have it on (set via DB/API).
 

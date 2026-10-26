@@ -15,7 +15,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 3 | 3A | verified | 1 | d7fd9ad | prompt duplicated in autofix (forward::ci_prompt/fit private) → dedupe in WP-07; FR-006 vs R3: followed R3 |
 | WP-08 | 3 | 3A | verified | 1 | dabc503 | manual forward: CAS sha before send, restore on failure, 409 after 3 CAS tries |
 | WP-07 | 3 | 3B | verified | 1 | 39c4788 | no re-read from gh before send (uses just-saved snapshot, FR-006?); stopped notice hook for WP-12 |
-| WP-09 | 3 | 3C | implementing | 0 | | |
+| WP-09 | 3 | 3C | verified | 1 | | POST /runs has no ci_autofix (test uses PATCH) |
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-12 | 4 | 4B | pending | 0 | | |
