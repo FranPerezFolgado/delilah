@@ -21,7 +21,7 @@
 - [x] CHK010 - Are the paper stack tiers quantified? [Clarity, Spec §FR-026]
 - [x] CHK011 - Is token freshness quantified? [Clarity, Spec §FR-025] — within 10 seconds
 - [x] CHK012 - Is the retention of ended sessions' history bounded with a number? [Clarity, Spec §Assumptions] — 50 sessions
-- [ ] CHK013 - Is "idle" (for `zzz`) distinguishable from "waiting for the user" in how sessions end a turn? [Ambiguity, Spec §FR-003, Assumptions] — open for the plan: check whether a finished turn already counts as waiting
+- [x] CHK013 - Is "idle" (for `zzz`) distinguishable from "waiting for the user" in how sessions end a turn? [Ambiguity, Spec §FR-003, Assumptions] — resolved: no idle state; a finished turn is waiting (`?`), `zzz` only for paused
 - [x] CHK014 - Is the history limit stated as a number? [Clarity, Spec §FR-013] — 200 per session
 
 ## Requirement Consistency

@@ -37,7 +37,7 @@ each helper agent it launched sits at a desk of its own nearby, like a boss and 
 team. The state is on the desk, not only in the pose: the monitor glows in the colour of
 the kind of tool in use (editing, reading/searching, running a command, delegating,
 other), a `?` floats over an agent that waits for the user, `zzz` over one that is
-paused or idle, and a short caption names the current action. When a helper finishes it
+paused by the usage limit, and a short caption names the current action. When a helper finishes it
 stands up and walks to the lounge, and its desk frees up. Clicking the lead agent opens
 its terminal.
 
@@ -197,7 +197,7 @@ its details.
 - **FR-003**: Each desk MUST show its occupant's state on the desk: the monitor glows in
   the colour of the current action's kind (edit, read/search, run, delegate, other; dark
   when there is none), a `?` over an agent that waits for the user, `zzz` over one paused
-  by the usage limit or idle, and a caption of the current action (cut at 40 characters).
+  by the usage limit, and a caption of the current action (cut at 40 characters).
 - **FR-004**: Characters MUST have distinct poses for at least: arriving, sitting idle,
   typing, waiting with a raised hand, sleeping, and walking.
 - **FR-005**: When a helper finishes, its character MUST walk from its desk to the floor's
@@ -206,7 +206,8 @@ its details.
 - **FR-006**: The lead characters of agents of the same project MUST wear the same outfit
   colours, chosen deterministically from the project; helpers keep a look per role.
 - **FR-025**: The system MUST know how many tokens each live agent session has used so far
-  (input, output and cache, as the agent reports them), reflected on screen within 10
+  (new input, output and cache writes, as the agent reports them; re-read cached context
+  is not counted, so the tiers measure work done), reflected on screen within 10
   seconds of the agent recording it.
 - **FR-026**: Each lead desk MUST show a paper stack that grows with its session's tokens:
   none below 250K, then a small, medium and large stack from 250K, 2M and 16M; the exact
@@ -322,8 +323,8 @@ its details.
   there.
 - Ambient extras (day/night skyline, weather, pet, sound) are out of scope.
 - The file heatmap of agent-flow is out of scope.
-- "Idle" for `zzz` means an agent session that is live but has finished its turn and is not
-  waiting on a question (between turns); paused by the usage limit also shows `zzz`.
+- There is no separate "idle" state: an agent that finished its turn is waiting for the
+  user (`?`), as everywhere else in Delilah; `zzz` is for paused by the usage limit.
 - Decision #80 is revised: activity stays in memory and on its own topic, but now keeps a
   short per-session history besides the current state.
 - An ended session's history may stay in memory (at most the 50 most recently ended
