@@ -18,7 +18,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-13 | 4 | 4B | pending | 0 | | |
-| WP-14 | 5 | 5A | implementing | 0 | | |
+| WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
 | WP-15 | 5 | 5A | implementing | 0 | | |
 | WP-16 | 5 | 5A | pending | 0 | | |
 | WP-17 | 5 | 5A | pending | 0 | | |
