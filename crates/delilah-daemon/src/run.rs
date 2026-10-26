@@ -155,7 +155,7 @@ pub struct RunRequest {
     #[serde(default)]
     pub free: bool,
     /// Work in the project's own checkout (a branch there) instead of a worktree.
-    /// Left out: what a backlog task chose, else the project's default workspace.
+    /// Left out: what a backlog task chose, else the project's default workspace, else the checkout.
     #[serde(default)]
     pub in_checkout: Option<bool>,
     /// Saving mode: each phase runs in a fresh session. Left out: what a backlog
@@ -265,7 +265,7 @@ pub(crate) async fn start_run_with(
     }
     let project = app.store.project(&req.project).await?;
     // The request wins, then what the backlog task chose, then the project's setting;
-    // with none of them, a worktree.
+    // with none of them, the checkout (decision 57 reversed).
     let in_checkout = req
         .in_checkout
         .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
@@ -273,7 +273,7 @@ pub(crate) async fn start_run_with(
             .settings
             .workspace
             .map(|m| m == delilah_core::WorkspaceMode::Checkout))
-        .unwrap_or(false);
+        .unwrap_or(true);
     let rules = &project.settings.submodules;
     if project.kind == ProjectKind::Parent && !(rules.always.is_empty() && rules.never.is_empty()) {
         let root = project.path.clone();
@@ -446,7 +446,18 @@ pub(crate) async fn start_run_with(
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
-            abort_start(&app, &key, existing, false, &reason).await?;
+            let fresh = existing.is_none();
+            // A checkout with work in it is the user's to resolve, not an invalid request.
+            let dirty = in_checkout && matches!(e, delilah_git::GitError::Dirty { .. });
+            if dirty && fresh {
+                // Nothing started: the task made for this request goes, not an errored one.
+                app.store.delete_task(&key).await?;
+            } else {
+                abort_start(&app, &key, existing, false, &reason).await?;
+            }
+            if dirty {
+                return Err(ApiError::conflict_reason(reason, "checkout-dirty"));
+            }
             return Err(ApiError::unprocessable(reason));
         }
     };
@@ -1177,11 +1188,20 @@ pub(crate) async fn runtime_kind(
     {
         return Ok(RuntimeKind::Pty);
     }
-    let chat = app
+    // The session's own runtime wins over the task's flag.
+    let chat = match app
         .store
-        .get_task(&TaskKey::new(&session.task))
+        .session_extras(&session.id)
         .await?
-        .is_some_and(|t| t.chat_mode);
+        .runtime_override
+    {
+        Some(kind) => kind == RuntimeKind::Stream,
+        None => app
+            .store
+            .get_task(&TaskKey::new(&session.task))
+            .await?
+            .is_some_and(|t| t.chat_mode),
+    };
     Ok(match chat {
         true => RuntimeKind::Stream,
         false => RuntimeKind::Pty,
@@ -2008,6 +2028,31 @@ mod tests {
             n.text.contains("/nonexistent") || n.text.contains("fetch"),
             "{}",
             n.text
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dirty_checkout_is_refused_with_a_reason_the_client_can_read() {
+        let app = repo_project(None).await;
+        let repo = app.store.project("stale").await.unwrap().path;
+        std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+        let mut req = run("PROJ-9");
+        req.project = "stale".into();
+        req.title = "Dirty".into();
+        req.in_checkout = Some(true);
+        let Err(e) = start_run(State(app.clone()), Json(req)).await else {
+            panic!("a dirty checkout must be refused");
+        };
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.reason.as_deref(), Some("checkout-dirty"));
+        assert!(e.message.contains("uncommitted changes"), "{}", e.message);
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("PROJ-9"))
+                .await
+                .unwrap()
+                .is_none(),
+            "a refused start leaves no task behind"
         );
     }
 
@@ -3494,7 +3539,7 @@ mod tests {
                 .uri("/api/v1/runs")
                 .header("content-type", "application/json")
                 .body(axum::body::Body::from(
-                    serde_json::json!({ "key": key, "title": "Idea", "project": "web", "free": free })
+                    serde_json::json!({ "key": key, "title": "Idea", "project": "web", "free": free, "in_checkout": false })
                         .to_string(),
                 ))
                 .unwrap();
@@ -4068,8 +4113,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_workspace_setting_and_no_choice_start_in_a_worktree() {
+    async fn no_choice_anywhere_works_in_the_checkout() {
         let (app, repo) = settings_app(settings(None)).await;
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(!logged(&app, "LIBRE-1"));
+        assert!(in_checkout(&app, "LIBRE-1", &repo).await);
+    }
+
+    #[tokio::test]
+    async fn a_saved_backlog_worktree_choice_wins_over_the_default() {
+        let (app, repo) = settings_app(settings(None)).await;
+        app.store
+            .create_task(&{
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                t.project = Some("web".into());
+                t.status = TaskStatus::Queued;
+                t.in_checkout = Some(false);
+                t
+            })
+            .await
+            .unwrap();
+        let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
+            .await
+            .ok()
+            .expect("the run starts");
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(logged(&app, "LIBRE-1"));
+        assert!(!in_checkout(&app, "LIBRE-1", &repo).await);
+    }
+
+    #[tokio::test]
+    async fn the_project_setting_wins_over_the_default() {
+        let (app, repo) = settings_app(worktree_default()).await;
         let (_, Json(task)) = start_run(State(app.clone()), Json(without_choice("LIBRE-1")))
             .await
             .ok()

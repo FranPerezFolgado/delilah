@@ -1,6 +1,6 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { expect, test } from "./fixtures";
+import { boardCard, expect, test } from "./fixtures";
 
 // The UI follows the browser language and these specs read the Spanish texts.
 test.use({ locale: "es-ES" });
@@ -74,17 +74,19 @@ test("the PR tab shows the PR state, the failing check and the review comment", 
   openFailingPr(env.gh_dir, 7, branch, `PR for ${title}`);
 
   await page.goto("/");
-  await page.getByRole("button", { name: /^Tareas/ }).click();
-  await page.locator(".board .kcard", { hasText: title }).click();
+  await page.getByRole("navigation", { name: "Navegación" }).getByRole("button", { name: /^Tareas/ }).click();
+  await (await boardCard(page, title)).click();
   await page.getByRole("tab", { name: "PR", exact: true }).click();
 
-  const card = page.locator(".pr-view .pr-card");
+  const card = page.getByRole("region").or(page.locator(".pr-card")).filter({ has: page.locator(".pr-chip") }).first();
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await expect(card.locator(".pr-chip")).toHaveText("Abierta");
-  await expect(card.locator(".pr-meta")).toContainText("Cambios pedidos");
-  await expect(card.locator(".pr-meta")).toContainText("1 comentarios");
-  await expect(card.locator(".pr-meta")).toContainText("CI fallido");
-  const check = card.locator(".pr-checks li", { hasText: "build" });
-  await expect(check.locator(".pr-ci-failure")).toBeVisible();
-  await expect(check).toContainText("failure");
+  // The chip carries the number and the state; the title link only the title.
+  await expect(card.locator(".pr-chip")).toContainText("#7");
+  await expect(card.locator(".pr-chip")).toContainText("Checks fallan");
+  await expect(card.getByRole("link", { name: `PR for ${title}` })).toBeVisible();
+  await expect(card).toContainText("Cambios pedidos");
+  await expect(card).toContainText("1 comentarios");
+  const check = card.getByRole("list", { name: "Checks" }).getByRole("listitem").filter({ hasText: "build" });
+  await expect(check.locator("[data-ci=failure]")).toBeVisible();
+  await expect(check).toContainText("falló");
 });

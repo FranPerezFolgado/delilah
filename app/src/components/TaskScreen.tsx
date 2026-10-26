@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ApiError, ConflictError, statusLabel, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
+import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
@@ -15,19 +15,21 @@ import { TreeResizer } from "./TreeResizer";
 import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
-import { Icon, type IconName } from "./Icon";
-import { AutopilotMark } from "./AutopilotMark";
-import { PreviewControl } from "./PreviewControl";
-import { PhaseBadge } from "./PhaseBadge";
+import { Icon, IconButton, useToast } from "./ui";
 import { SessionChain } from "./SessionChain";
+import { SessionViewSwitch } from "./SessionViewSwitch";
+import { TaskHeader } from "./TaskHeader";
+import { useBreakpoints } from "../useWidth";
+import { TaskTabs, type TaskTabItem } from "./TaskTabs";
 import { headerPhaseOf } from "../phases";
-import { isSetupRunning, kindLabel, sessionStatus } from "./sessionLabels";
-import { statusIcon } from "./status";
+import { isSetupRunning } from "./sessionLabels";
+import { sessionDot } from "../vocab";
 import { PrView } from "./PrView";
 import { ProjectView } from "./ProjectView";
 import { TaskView } from "./TaskView";
 import { SetupBanner } from "./SetupBanner";
 import { TerminalPane } from "./TerminalPane";
+import "./TaskScreen.css";
 
 interface Props {
   /** The task's key, or `@<project>` for a project's own checkout. */
@@ -44,6 +46,10 @@ interface Props {
   onConvert?: (session: Session) => void;
   /** Goes to a task, e.g. the one a conversation created. */
   onOpenTask?: (key: string) => void;
+  /** Opens a project's settings (the setup command lives there). */
+  onOpenSettings?: (project: string) => void;
+  /** All tasks: a project's screen lists its active ones. */
+  tasks?: Task[];
   /** The task's open sessions: each one is a tab. */
   sessions: Session[];
   /** Questions with options this task's sessions are waiting on. */
@@ -57,27 +63,106 @@ interface Props {
 
 const WATCH_MS = 3000;
 
+/** The base name without its remote: `origin/main` -> `main`. */
+const shortBase = (base: string | null) => (base ?? "main").replace(/^origin\//, "");
+
+/**
+ * The base-stale warnings above the tabs. When the base has moved on (the daemon fetches
+ * to say how far) the first one offers to merge it into the branch, and says how it went
+ * in a toast.
+ */
+function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: InboxItem[]; onChanged: () => void }) {
+  const toast = useToast();
+  const [status, setStatus] = useState<BaseStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const has = notices.length > 0;
+  useEffect(() => {
+    setStatus(null);
+    if (!has || owner.startsWith("@")) return;
+    let alive = true;
+    api
+      .baseStatus(owner)
+      .then((s) => alive && setStatus(s))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [owner, has]);
+
+  const update = () => {
+    setBusy(true);
+    api
+      .updateBranch(owner)
+      .then((r) => {
+        const base = shortBase(r.base);
+        toast({
+          text:
+            r.merged === 0
+              ? t("La rama ya estaba al día")
+              : r.merged === 1
+                ? t("Rama actualizada: 1 commit de {base} integrado", { base })
+                : t("Rama actualizada: {n} commits de {base} integrados", { n: r.merged, base }),
+        });
+        setStatus((s) => (s ? { ...s, behind_by: 0 } : s));
+        onChanged();
+      })
+      .catch((e) => toast({ text: (e as Error).message, kind: "error" }))
+      .finally(() => setBusy(false));
+  };
+
+  const behind = status?.behind_by ?? 0;
+  return (
+    <>
+      {notices.map((n, i) => (
+        <div key={n.notice} className="ts-bar base-stale">
+          <span className="ts-grow">{n.text}</span>
+          {i === 0 && behind > 0 && (
+            <>
+              <span>
+                {behind === 1
+                  ? t("{base} avanzó 1 commit", { base: shortBase(status!.base) })
+                  : t("{base} avanzó {n} commits", { base: shortBase(status!.base), n: behind })}
+              </span>
+              <button className="btn btn-ghost" disabled={busy} onClick={update}>
+                {t("Actualizar rama")}
+              </button>
+            </>
+          )}
+          {n.notice != null && (
+            <button className="btn btn-ghost" onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}>
+              {t("Descartar")}
+            </button>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 /**
  * A task as Orca shows a worktree: tabs for the task itself, its sessions (Claude and
  * terminals), its changes and the files opened from the project tree on the right. The agent keeps working in the same
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask }: Props) {
+export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [error, setError] = useState<string | null>(null);
-  const [switching, setSwitching] = useState(false);
-  // Why the last runtime switch was refused, next to its button: the screen's error bar
-  // lives in the editor pane, out of sight while the conversation shows.
-  const [switchError, setSwitchError] = useState<string | null>(null);
-  useEffect(() => setSwitchError(null), [owner]);
   const [closing, setClosing] = useState<string | null>(null);
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
-  const [showTree, setShowTree] = useState(treeOpen);
+  // Below the rail breakpoint the tree starts hidden (the user can still open it).
+  const { rail } = useBreakpoints();
+  const [showTree, setShowTree] = useState(() => treeOpen() && !rail);
+  const railSeen = useRef(rail);
+  useEffect(() => {
+    if (railSeen.current === rail) return;
+    railSeen.current = rail;
+    setShowTree(!rail && treeOpen());
+  }, [rail]);
   const [treeW, setTreeW] = useState(treeWidth);
   const treeId = useId();
   const [closingSession, setClosingSession] = useState<Session | null>(null);
@@ -86,17 +171,28 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
   const [starting, setStarting] = useState<string | null>(null);
   // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
   const [mounted, setMounted] = useState<Set<string>>(() => new Set());
-  // Per Claude session, the view the user picked with the Chat / Terminal switch; without
-  // one, the task's setting decides (a project's sessions open in chat). Kept while the
-  // screen is open.
+  // Per Claude session, the view the user picked with the Chat / Terminal switch (in the
+  // header); without one, the task's setting decides (a project's sessions open in chat).
+  // Kept while the screen is open.
   const [views, setViews] = useState<Map<string, ViewMode>>(() => new Map());
+  // A task's Claude shows what its runtime is (the switch changes the runtime); a project's
+  // sessions have no runtime to choose, so they only change what is shown.
   const viewOf = (s: Session): ViewMode =>
-    s.kind === "shell" ? "terminal" : s.runtime === "stream" ? "chat" : (views.get(s.id) ?? (task?.view === "terminal" ? "terminal" : "chat"));
+    s.kind === "shell"
+      ? "terminal"
+      : project
+        ? s.runtime === "stream"
+          ? "chat"
+          : (views.get(s.id) ?? "chat")
+        : (s.live ? s.runtime : (s.effective_runtime ?? s.runtime)) === "stream"
+          ? "chat"
+          : "terminal";
   const showView = (id: string, v: ViewMode) => setViews((cur) => new Map(cur).set(id, v));
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
   // The PR tab: for a task with a workspace (its PR is coming) or with PRs already linked.
-  const [hasPrs, setHasPrs] = useState(false);
+  const [prs, setPrs] = useState<PullRequest[]>([]);
+  const hasPrs = prs.length > 0;
   const prTab = !project && (hasWorkspace || hasPrs);
   useEffect(() => {
     if (project) return;
@@ -104,7 +200,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
     const load = () =>
       api
         .taskPrs(owner)
-        .then((d) => alive && setHasPrs(d.prs.length > 0))
+        .then((d) => alive && setPrs(d.prs))
         .catch(() => {});
     api.refreshPrs(owner).catch(() => {});
     load();
@@ -129,6 +225,8 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
   const shown = exists ? session.active : OVERVIEW;
   const shownRef = useRef(shown);
   shownRef.current = shown;
+  // An error belongs to the tab it came up in.
+  useEffect(() => setError(null), [shown]);
   const active = tab(shown);
   const shownSession = sessionOf(shown);
   const shownClaude = sessions.find((s) => s.id === shownSession && s.kind !== "shell");
@@ -280,21 +378,8 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
       .then(onChanged)
       .catch((e) => setError((e as Error).message));
 
-  const [editing, setEditing] = useState<string | null>(null);
-  const saveTitle = () => {
-    const title = (editing ?? "").trim();
-    setEditing(null);
-    if (!task || !title || title === task.title) return;
-    api.updateTask(owner, { title }).then(onChanged).catch((e) => setError((e as Error).message));
-  };
-  const restoreTitle = () =>
-    task?.previous_title &&
-    api
-      .updateTask(owner, { title: task.previous_title })
-      .then(onChanged)
-      .catch((e) => setError((e as Error).message));
   const [autopilotBusy, setAutopilotBusy] = useState(false);
-  const setAutopilotMode = (action: "on" | "off") => {
+  const setAutopilotMode = (action: "on" | "off" | "resume") => {
     setAutopilotBusy(true);
     api
       .setAutopilot(owner, action)
@@ -313,9 +398,9 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
     OVERVIEW,
     ...sessions.map((s) => sessionTab(s.id)),
     ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
+    ...session.tabs.map((t) => t.path),
     ...(session.changesOpen ? [CHANGES] : []),
     ...(prTab ? [PRS] : []),
-    ...session.tabs.map((t) => t.path),
   ];
 
   const close = async (id: string, force = false) => {
@@ -521,219 +606,116 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
     redraw();
   };
 
-  const switchRuntime = (mode: "chat" | "terminal") => {
-    setSwitching(true);
-    setSwitchError(null);
-    api
-      .setRuntime(owner, mode)
-      .then(() => {
-        // The sessions come back in the new runtime: to the terminal, show it (the old
-        // choice was a chat the session no longer has); to chat, drop any override.
-        setViews(mode === "terminal" ? new Map(sessions.filter((x) => x.kind === "claude").map((x) => [x.id, "terminal" as ViewMode])) : new Map());
-        rememberView(mode);
-        onChanged();
-      }, (err) =>
-        setSwitchError(
-          err instanceof ApiError && err.status === 409
-            ? t("Espera a que acabe el turno o a responder lo que pide, o pulsa Detener")
-            : (err as Error).message,
-        ))
-      .finally(() => setSwitching(false));
-  };
-
   // The task's view setting (FR-007) is whatever the user last picked with the switch.
   const rememberView = (v: ViewMode) => {
     if (task && task.view !== v) api.updateTask(owner, { view: v }).then(onChanged, () => {});
   };
-  // The one Chat / Terminal switch: on a chat-mode session "Terminal" moves the task to
-  // the terminal (refused, with the reason next to the switch, while the agent is busy);
-  // otherwise it only changes the view.
+  // A project session's view only changes what is shown (the switch is not offered there).
   const chooseView = (s: Session, v: ViewMode) => {
-    setSwitchError(null);
-    if (s.runtime === "stream" && v === "terminal") {
-      switchRuntime("terminal");
-      return;
-    }
     showView(s.id, v);
     rememberView(v);
   };
 
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
   const toggleTree = () => window.dispatchEvent(new Event("delilah:toggle-tree"));
-  const status = task ? statusIcon(task.status) : null;
   const phase = task ? headerPhaseOf(task, spec) : null;
+  const openTerminal = () => {
+    newSession("shell").catch((e) => setError((e as Error).message));
+  };
+  // The tree gives its room to the diff while the changes show.
+  const treeVisible = showTree && hasWorkspace && shown !== CHANGES;
+
+  const tabItems: TaskTabItem[] = [
+    { id: OVERVIEW, kind: project ? "project" : "task", label: project ? t("Proyecto") : t("Tarea") },
+    ...sessions.map((s): TaskTabItem => ({
+      id: sessionTab(s.id),
+      kind: "session",
+      label: s.primary ? t("Claude principal") : s.label,
+      title: s.label,
+      dot: sessionDot(s),
+      closable: !s.primary,
+    })),
+    ...(starting && !sessionById(starting) ? [{ id: sessionTab(starting), kind: "session" as const, label: t("Iniciando…") }] : []),
+    ...session.tabs.map((f): TaskTabItem => ({ id: f.path, kind: "file", label: name(f.path), title: f.path, dirty: f.dirty, closable: true })),
+    ...(session.changesOpen ? [{ id: CHANGES, kind: "changes" as const, label: t("Cambios"), count: changed.size, closable: true }] : []),
+    ...(prTab ? [{ id: PRS, kind: "pr" as const, label: "PR" }] : []),
+  ];
+
+  // Chat | Terminal for the session of the open tab: not on the Tarea tab nor plain terminals.
+  // Not for a project's sessions: the daemon refuses to change their runtime.
+  const turnRunning =
+    !!shownClaude && (shownClaude.state === "working" || asks.some((a) => a.session?.id === shownClaude.id && a.ask));
+  const sessionSwitch = shownClaude && !project ? (
+    <SessionViewSwitch
+      session={shownClaude}
+      busy={turnRunning}
+      onChanged={() => {
+        setError(null);
+        onChanged();
+      }}
+      onError={setError}
+    />
+  ) : undefined;
+  const pr = prs[0] ? { number: prs[0].number, snapshot: prs[0].snapshot } : null;
 
   return (
     <>
-      <div className="view-head" data-tauri-drag-region>
-        {task && status ? (
-          <>
-            <span className="mono muted">{owner}</span>
-            {editing === null ? (
-              <h1
-                data-tauri-drag-region
-                className="trunc"
-                title={t("Clic para renombrar")}
-                onClick={() => setEditing(task.title)}
-              >
-                {task.title}
-              </h1>
-            ) : (
-              <input
-                autoFocus
-                aria-label={t("Título de la tarea")}
-                value={editing}
-                onChange={(e) => setEditing(e.target.value)}
-                onBlur={() => setEditing(null)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") saveTitle();
-                  else if (e.key === "Escape") setEditing(null);
-                }}
-              />
-            )}
-            {task.previous_title && (
-              <span className="muted trunc">
-                {t("Antes: {title}", { title: task.previous_title })}{" "}
-                <button className="saving-off" onClick={restoreTitle}>{t("Restaurar")}</button>
-              </span>
-            )}
-            <span className="head-pills">
-              {phase && <PhaseBadge phase={phase} />}
-              <AutopilotMark autopilot={task.autopilot} />
-              {task.chat_mode && <span className="pill chat-mode-pill">{t("experimental: modo chat")}</span>}
-              <PreviewControl taskKey={owner} project={task.project} status={task.status} />
-              {task.workflow === "feature" && task.status.type !== "done" && task.autopilot?.state === "running" && (
-                <button className="saving-off" disabled={autopilotBusy} title={t("Desactiva el autopiloto y sigue a mano")} onClick={() => setAutopilotMode("off")}>
-                  {t("Desactivar")}
-                </button>
-              )}
-              {task.saving_mode && (
-                <span className="pill saving-pill">
-                  {t("Modo ahorro")}
-                  {task.status.type !== "done" && (
-                    <button className="saving-off" onClick={() => setSaving(false)}>{t("Desactivar")}</button>
-                  )}
-                </span>
-              )}
-              <span className={`pill ${status.cls}`}>
-                <Icon name={status.icon} /> {statusLabel(task.status)}
-              </span>
-              {task.workflow === "feature" && task.status.type !== "done" && !task.autopilot && (
-                <button className="btn btn-ghost saving-on" disabled={autopilotBusy} title={t("Activa el autopiloto: la cadena sigue sola hasta abrir las PRs")} onClick={() => setAutopilotMode("on")}>
-                  {t("Activar autopiloto")}
-                </button>
-              )}
-              {!task.saving_mode && task.status.type !== "done" && (
-                <button className="btn btn-ghost saving-on" onClick={() => setSaving(true)}>
-                  {t("Activar modo ahorro")}
-                </button>
-              )}
-            </span>
-          </>
-        ) : (
-          <>
-            <Icon name="folder" />
-            <h1 data-tauri-drag-region className="trunc">{project?.name}</h1>
-            <span className="mono muted trunc" style={{ marginRight: "auto" }}>{project?.path}</span>
-          </>
-        )}
-        {hasWorkspace && (
-          <button
-            className={`btn btn-ghost ${showTree ? "is-on" : ""}`}
-            onClick={toggleTree}
+      {task ? (
+        <TaskHeader
+          task={task}
+          phase={phase}
+          owner={owner}
+          hasWorkspace={hasWorkspace}
+          showTree={treeVisible}
+          onToggleTree={toggleTree}
+          sessionSwitch={sessionSwitch}
+          autopilotBusy={autopilotBusy}
+          onAutopilot={setAutopilotMode}
+          onSavingMode={setSaving}
+          pr={pr}
+          doneAt={task?.finished_at}
+          onChanged={onChanged}
+          onError={setError}
+        />
+      ) : (
+        <div className="ts-head" data-tauri-drag-region>
+          <Icon name="folder" />
+          <h1 data-tauri-drag-region className="trunc">{project?.name}</h1>
+          <span className="mono muted trunc ts-grow">{project?.path}</span>
+          {sessionSwitch}
+          <IconButton
+            label={t("Árbol de archivos")}
             title={t("Árbol de archivos ({key})", { key: keyOf("toggle-tree") })}
-            aria-pressed={showTree}
-          >
-            <Icon name="sidebar" />
-          </button>
-        )}
-      </div>
+            icon="sidebar"
+            pressed={treeVisible}
+            onClick={toggleTree}
+          />
+        </div>
+      )}
       <div
-        className={`tscreen ${showTree && hasWorkspace ? "with-tree" : ""}`}
+        className={`tscreen ${treeVisible ? "with-tree" : ""}`}
         style={{ "--tree-w": `${treeW}px` } as CSSProperties}
       >
         <div className="tmain">
           {task && <SessionChain task={task} sessions={sessions} onOpenSession={showSession} onChanged={onChanged} />}
-          {notices.map((n) => (
-            <div key={n.notice} className="ebar warn base-stale">
-              <span style={{ flex: 1 }}>{n.text}</span>
-              {n.notice != null && (
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}
-                >
-                  {t("Descartar")}
-                </button>
-              )}
-            </div>
-          ))}
-          <div className="etabs" role="tablist">
-            <TabButton id={OVERVIEW} label={project ? t("Proyecto") : t("Tarea")} icon={project ? "folder" : "tasks"} shown={shown} onActivate={activate} />
-            {sessions.map((s) => {
-              const st = sessionStatus(s, task);
-              return (
-                <TabButton
-                  key={s.id}
-                  id={sessionTab(s.id)}
-                  label={s.label}
-                  title={`${s.label} · ${kindLabel(s)} · ${st.label}`}
-                  icon={s.kind === "claude" ? st.icon : "console"}
-                  iconClass={s.kind === "claude" ? st.cls : ""}
-                  shown={shown}
-                  onActivate={activate}
-                  onClose={s.primary ? undefined : close}
-                />
-              );
-            })}
-            {starting && !sessionById(starting) && (
-              <TabButton id={sessionTab(starting)} label={t("Arrancando…")} icon="run" shown={shown} onActivate={activate} />
-            )}
-            {session.changesOpen && (
-              <TabButton id={CHANGES} label={t("Cambios")} icon="diff" shown={shown} onActivate={activate} onClose={close} />
-            )}
-            {prTab && <TabButton id={PRS} label="PR" icon="review" shown={shown} onActivate={activate} />}
-            {session.tabs.map((t) => (
-              <TabButton
-                key={t.path}
-                id={t.path}
-                label={name(t.path)}
-                title={t.path}
-                dirty={t.dirty}
-                shown={shown}
-                onActivate={activate}
-                onClose={close}
-              />
-            ))}
-            {shownClaude && (
-              <span className="view-switch-wrap" style={{ marginLeft: "auto", alignSelf: "center", marginRight: 8 }}>
-                {switchError && (
-                  <span className="switch-error selectable" role="alert">
-                    {switchError}
-                    <button className="saving-off" aria-label={t("Cerrar")} onClick={() => setSwitchError(null)}>×</button>
-                  </span>
-                )}
-                <span className="segs view-switch">
-                  {(["chat", "terminal"] as const).map((v) => (
-                    <button
-                      key={v}
-                      className={`seg ${viewOf(shownClaude) === v ? "on" : ""}`}
-                      aria-pressed={viewOf(shownClaude) === v}
-                      disabled={switching}
-                      title={v === "terminal" && shownClaude.runtime === "stream" ? t("Pasa la tarea a terminal: Claude sigue con la misma conversación") : undefined}
-                      onClick={() => viewOf(shownClaude) !== v && chooseView(shownClaude, v)}
-                    >
-                      {v === "chat" ? "Chat" : "Terminal"}
-                    </button>
-                  ))}
-                </span>
-              </span>
-            )}
-          </div>
+          <BaseStaleBars owner={owner} notices={notices} onChanged={onChanged} />
+          <TaskTabs
+            tabs={tabItems}
+            active={shown}
+            onSelect={activate}
+            onClose={(id) => void close(id)}
+            onNewSession={(kind) => {
+              newSession(kind === "terminal" ? "shell" : "claude").catch((e) => setError((e as Error).message));
+            }}
+          />
+          {error && <div className="error selectable ts-error" role="alert">{error}</div>}
 
           {shown === OVERVIEW && project && (
             <ProjectView
               project={project}
               sessions={sessions}
+              tasks={tasks}
+              onOpenTask={onOpenTask}
               onOpenSession={showSession}
               onNewSession={newSession}
               onNewIdea={() => newSession("claude", undefined, undefined, true)}
@@ -744,18 +726,20 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
             <TaskView
               task={task}
               sessions={sessions}
+              asks={asks}
               onOpenSession={showSession}
               onNewSession={newSession}
               onChanged={onChanged}
               onViewChanges={openChanges}
+              onOpenTask={onOpenTask}
             />
           )}
-          {shown === PRS && <PrView owner={owner} />}
+          {shown === PRS && <PrView owner={owner} onOpenTerminal={openTerminal} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 
           {closingSession && (
             <div className="ebar warn">
-              <span style={{ flex: 1 }}>
+              <span className="ts-grow">
                 {t("Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.", { label: closingSession.label })}
               </span>
               <button className="btn btn-p" onClick={() => close(sessionTab(closingSession.id), true)}>{t("Cerrar")}</button>
@@ -775,14 +759,20 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
                   .then(onChanged)
                   .catch((e) => setError((e as Error).message));
               return (
-                <div key={s.id} className="tterm" style={{ display: on ? "flex" : "none" }}>
+                <div key={s.id} className={`tterm ts-term${on ? "" : " off"}`}>
                   {s.kind === "setup" && s.live && task && (
-                    <SetupBanner task={task} running={isSetupRunning(sessions)} onChanged={onChanged} />
+                    <SetupBanner
+                      task={task}
+                      running={isSetupRunning(sessions)}
+                      onChanged={onChanged}
+                      onOpenTerminal={openTerminal}
+                      onOpenSettings={onOpenSettings && task.project ? () => onOpenSettings(task.project!) : undefined}
+                    />
                   )}
                   {!asConversation && s.read_only && s.kind === "claude" && s.live && (
                     <div className="ebar warn">
                       <Icon name="lock" />
-                      <span style={{ flex: 1 }}>
+                      <span className="ts-grow">
                         <b>{t("Solo lectura.")}</b> {t("Este Claude lee, busca y explica, pero no edita.")}
                       </span>
                       <button
@@ -805,7 +795,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
                   )}
                   {!asConversation && !s.read_only && s.kind === "claude" && s.live && project && onConvert && (
                     <div className="ebar">
-                      <span style={{ flex: 1 }} className="muted">
+                      <span className="ts-grow muted">
                         {t("Claude sobre tu checkout, sin tarea.")}
                       </span>
                       <button className="btn" onClick={() => onConvert(s)}>
@@ -815,19 +805,12 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
                   )}
                   {!s.live && !asConversation && (
                     <div className="ebar">
-                      <span style={{ flex: 1 }}>{t("Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).")}</span>
+                      <span className="ts-grow">{t("Esta sesión no está en marcha (el daemon se reinició o el proceso terminó).")}</span>
                       <button
                         className="btn btn-p"
                         onClick={reopen}
                       >
                         {t("Reabrir")}
-                      </button>
-                    </div>
-                  )}
-                  {asConversation && task && !task.chat_mode && s.runtime === "pty" && s.live && task.status.type !== "done" && (
-                    <div className="try-chat-mode">
-                      <button className="btn btn-ghost" disabled={switching} onClick={() => switchRuntime("chat")} title={t("Experimental: la tarea sigue en modo chat, sin terminal")}>
-                        {t("Probar modo chat (experimental)")}
                       </button>
                     </div>
                   )}
@@ -865,8 +848,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
               {active.dirty && <span className="c-wait">{t("sin guardar · ⌘S")}</span>}
               {active.saved && isMarkdown(active.path) && (
                 <button
-                  className={`btn btn-ghost ${active.preview ? "is-on" : ""}`}
-                  style={{ marginLeft: "auto", height: 20 }}
+                  className={`btn btn-ghost ts-preview ${active.preview ? "is-on" : ""}`}
                   onClick={togglePreview}
                   title={t("Alternar vista previa ({key})", { key: keyOf("toggle-preview") })}
                   aria-pressed={active.preview}
@@ -878,7 +860,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
           )}
           {closing && (
             <div className="ebar">
-              <span style={{ flex: 1 }}>
+              <span className="ts-grow">
                 {t("«{name}» tiene cambios sin guardar.", { name: name(closing) })}
               </span>
               <button className="btn btn-p" onClick={async () => (await save(closing), close(closing, true))}>{t("Guardar")}</button>
@@ -888,16 +870,15 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
           )}
           {active?.conflict && (
             <div className="ebar warn">
-              <span style={{ flex: 1 }}>
+              <span className="ts-grow">
                 {t("El archivo ha cambiado en disco (probablemente el agente) y aquí tienes cambios sin guardar.")}
               </span>
               <button className="btn" onClick={takeDisk}>{t("Cargar el del disco")}</button>
               <button className="btn" onClick={keepMine}>{t("Guardar el mío encima")}</button>
             </div>
           )}
-          {error && <div className="error selectable" style={{ padding: "8px 14px" }}>{error}</div>}
-          {/* Always mounted: one CodeMirror view for every file tab. */}
-          <div className="ehost" ref={host} style={{ display: active?.saved && !active.preview ? "block" : "none" }} />
+                    {/* Always mounted: one CodeMirror view for every file tab. */}
+          <div className={`ehost${active?.saved && !active.preview ? "" : " ts-off"}`} ref={host} />
           {/* The live text, unsaved edits included; a reload from disk redraws it. */}
           {active?.saved && active.preview && (
             <div className="md-preview">
@@ -922,7 +903,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
         </div>
 
         {finding && hasWorkspace && <QuickOpen taskKey={owner} onOpen={openFile} onClose={() => setFinding(false)} />}
-        {showTree && hasWorkspace && (
+        {treeVisible && (
           <aside id={treeId} className="tpanel" aria-label={t("Archivos del workspace")}>
             <TreeResizer width={treeW} controls={treeId} onChange={setTreeW} />
             <div className="tpanel-head">
@@ -930,7 +911,7 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
               <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>
                 {keyOf("quick-open")}
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Refrescar")} aria-label={t("Actualizar el árbol")}>
+              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Recargar")} aria-label={t("Actualizar el árbol")}>
                 <Icon name="refresh" />
               </button>
               <button className="btn btn-ghost icon-btn" onClick={toggleTree} title={t("Ocultar ({key})", { key: keyOf("toggle-tree") })} aria-label={t("Ocultar el árbol")}>
@@ -949,56 +930,5 @@ export function TaskScreen({ owner, task, spec, project, sessions, asks, notices
         )}
       </div>
     </>
-  );
-}
-
-function TabButton({
-  id,
-  label,
-  title,
-  icon,
-  iconClass,
-  dirty,
-  shown,
-  onActivate,
-  onClose,
-}: {
-  id: string;
-  label: string;
-  title?: string;
-  icon?: IconName;
-  iconClass?: string;
-  dirty?: boolean;
-  /** The tab on screen. */
-  shown: string;
-  onActivate: (id: string) => void;
-  onClose?: (id: string) => void;
-}) {
-  const on = shown === id;
-  return (
-    <div
-      role="tab"
-      aria-selected={on}
-      className={`etab ${on ? "on" : ""}`}
-      title={title ?? label}
-      onClick={() => onActivate(id)}
-      onAuxClick={(e) => e.button === 1 && onClose?.(id)}
-    >
-      {icon && <Icon name={icon} className={iconClass} />}
-      <span className="trunc">{label}</span>
-      {onClose && (
-        <button
-          className={`etab-x ${dirty ? "dirty" : ""}`}
-          aria-label={t("Cerrar {label}", { label })}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(id);
-          }}
-        >
-          <span className="dot-dirty" />
-          <Icon name="close" />
-        </button>
-      )}
-    </div>
   );
 }

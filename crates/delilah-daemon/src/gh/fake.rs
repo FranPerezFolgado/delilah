@@ -28,10 +28,12 @@ pub(crate) fn bare_snapshot(state: &str, merged: bool) -> String {
 /// `conclusion` (`SUCCESS`, `FAILURE`...), and the given merged/closed `state`.
 pub(crate) fn ci_snapshot(state: &str, head: &str, conclusion: &str) -> String {
     format!(
-        r#"{{"data":{{"repository":{{"pullRequest":{{"state":"{state}","isDraft":false,"merged":{merged},
+        r#"{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":false,
+      "pullRequest":{{"state":"{state}","isDraft":false,"merged":{merged},
       "headRefOid":"{head}","baseRefName":"main","title":"Add things","url":"u","reviewDecision":null,
       "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":{{"contexts":{{"nodes":[
-        {{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"{conclusion}","detailsUrl":"https://ci/1"}}
+        {{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"{conclusion}","detailsUrl":"https://ci/1",
+          "startedAt":"2026-10-20T09:00:00Z","completedAt":"2026-10-20T09:01:30Z"}}
       ]}}}}}}}}]}},
       "reviews":{{"nodes":[]}},"comments":{{"nodes":[]}},"reviewThreads":{{"nodes":[]}}}}}}}}}}"#,
         merged = state == "MERGED"
@@ -106,7 +108,9 @@ impl FakeGh {
         self.on(&["api", "user"], Ok(&format!("{login}\n")))
     }
 
-    /// Answers calls whose arguments start with `prefix` (the first match wins).
+    /// Answers calls whose arguments start with `prefix` (the first match wins; when
+    /// several replies match, the first is used up, so a call can be answered differently
+    /// the second time).
     pub(crate) fn on(self, prefix: &[&str], reply: Result<&str, GhError>) -> Self {
         self.replies
             .lock()
@@ -133,13 +137,23 @@ impl Gh for FakeGh {
         args: Vec<String>,
         stdin: Option<String>,
     ) -> BoxFuture<'_, Result<String, GhError>> {
-        let reply = self
-            .replies
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(prefix, _)| args.starts_with(prefix))
-            .map(|(_, r)| r.clone());
+        let reply = {
+            let mut replies = self.replies.lock().unwrap();
+            let mut matching = replies
+                .iter()
+                .enumerate()
+                .filter(|(_, (prefix, _))| args.starts_with(prefix))
+                .map(|(i, _)| i);
+            let first = matching.next();
+            let more = matching.next().is_some();
+            first.map(|i| {
+                if more {
+                    replies.remove(i).1
+                } else {
+                    replies[i].1.clone()
+                }
+            })
+        };
         let unsupported = format!("fake gh: unsupported: {}", args.join(" "));
         self.stdins.lock().unwrap().push(stdin);
         self.calls.lock().unwrap().push(args);

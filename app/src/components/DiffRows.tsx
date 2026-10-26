@@ -1,3 +1,4 @@
+import "./DiffRows.css";
 export type DiffRowKind = "add" | "del" | "ctx" | "hunk" | "note";
 
 export interface DiffRowData {

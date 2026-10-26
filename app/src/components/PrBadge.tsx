@@ -1,6 +1,7 @@
 import type { PrSnapshot, PrSummary } from "../api";
-import { Icon, type IconName } from "./Icon";
+import { Icon, type IconName } from "./ui";
 import { t } from "../i18n";
+import "./PrBadge.css";
 
 const STATES: Record<"draft" | PrSnapshot["state"], { icon: IconName; label: string }> = {
   draft: { icon: "pause", label: "Borrador" },

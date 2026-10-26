@@ -5,9 +5,10 @@ import { api, ApiError, type Handoff, type InboxItem, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import * as platform from "../platform";
 import { InboxView } from "./InboxView";
+import { ToastHost, clearToasts } from "./ui";
 
 const item: InboxItem = {
-  kind: "pr-failed",
+  id: "item-1", kind: "pr-failed",
   task: "PROJ-1",
   title: "Reintentos",
   session: null,
@@ -19,8 +20,17 @@ const item: InboxItem = {
 const view = (onChanged = () => {}) =>
   render(<InboxView items={[item]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
 
+/** Fake matchMedia: a query `(max-width: N px)` matches when the window is at most N wide. */
+const setWidth = (w: number) => {
+  window.matchMedia = ((q: string) => {
+    const max = Number(/max-width:\s*(\d+)px/.exec(q)?.[1] ?? Infinity);
+    return { matches: w <= max, media: q, addEventListener: () => {}, removeEventListener: () => {} };
+  }) as unknown as typeof window.matchMedia;
+};
+
 beforeEach(() => setLanguage("en"));
 afterEach(() => {
+  delete (window as { matchMedia?: unknown }).matchMedia;
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -64,7 +74,7 @@ describe("InboxView PR items", () => {
   it("opens the PR externally", () => {
     const open = vi.spyOn(platform, "openExternal").mockResolvedValue();
     view();
-    fireEvent.click(screen.getByText("View PR"));
+    fireEvent.click(screen.getByText("Open PR"));
     expect(open).toHaveBeenCalledWith("https://github.com/o/r/pull/3");
   });
 });
@@ -105,7 +115,7 @@ describe("InboxView pr-blocked", () => {
 });
 
 const handoffItem: InboxItem = {
-  kind: "handoff",
+  id: "item-1", kind: "handoff",
   task: "PROJ-1",
   title: "Reintentos",
   session: { id: "s-1", label: "Claude", primary: true, live: true },
@@ -114,7 +124,7 @@ const handoffItem: InboxItem = {
 };
 
 const taskWith = (handoff: Handoff | null): Task => ({
-  key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
   title: "Reintentos",
   project: "web",
   workflow: "feature",
@@ -163,8 +173,8 @@ describe("InboxView handoff item", () => {
   });
 
   it("shows no buttons while saving", async () => {
-    const { findByText, queryByText } = show({ to: "implement", stage: "saving" });
-    await findByText(/sesión nueva/);
+    const { queryByText } = show({ to: "implement", stage: "saving" });
+    await waitFor(() => expect(document.querySelector(".ac-text")?.textContent).toMatch(/sesión nueva/));
     await Promise.resolve();
     expect(queryByText("Seguir aquí")).toBeNull();
     expect(queryByText("Reintentar")).toBeNull();
@@ -237,7 +247,7 @@ describe("InboxView permission items", () => {
 
 describe("InboxView base-stale", () => {
   const stale: InboxItem = {
-    kind: "base-stale",
+    id: "item-1", kind: "base-stale",
     task: "PROJ-1",
     title: "Reintentos",
     session: null,
@@ -251,8 +261,8 @@ describe("InboxView base-stale", () => {
   it("shows the label and the text, with no PR actions", () => {
     viewStale();
     expect(screen.getByText("Branch may be behind")).toBeTruthy();
-    expect(screen.getByText("No se pudo actualizar r (sin red); se usó main")).toBeTruthy();
-    expect(screen.queryByText("View PR")).toBeNull();
+    expect(document.querySelector(".ac-text")?.textContent).toBe("No se pudo actualizar r (sin red); se usó main");
+    expect(screen.queryByText("Open PR")).toBeNull();
     expect(screen.queryByText("Ask the agent to fix it")).toBeNull();
   });
 
@@ -307,7 +317,7 @@ describe("InboxView autopilot items", () => {
     const set = vi.spyOn(api, "setAutopilot").mockResolvedValue({} as Task);
     const onChanged = vi.fn();
     viewAp(onChanged);
-    expect(screen.getByText("The review keeps failing")).toBeTruthy();
+    expect(document.querySelector(".ac-text")?.textContent).toBe("The review keeps failing");
     fireEvent.click(screen.getByText("Resume autopilot"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(set).toHaveBeenCalledWith("PROJ-1", "resume");
@@ -318,5 +328,106 @@ describe("InboxView autopilot items", () => {
     viewAp();
     fireEvent.click(screen.getByText("Carry on by hand"));
     await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "off"));
+  });
+});
+
+describe("InboxView list and detail", () => {
+  const notice = (n: number, extra: Partial<InboxItem> = {}): InboxItem => ({
+    kind: "turn-done",
+    task: "PROJ-1",
+    title: "Reintentos",
+    session: null,
+    text: `Done ${n}`,
+    since: null,
+    id: `turn-done:PROJ-1:s${n}:${n}`,
+    ...extra,
+  });
+  const renderView = (items: InboxItem[], onChanged = () => {}) =>
+    render(<InboxView items={items} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("lists by task in a listbox and shows the count and the selected detail", () => {
+    renderView([notice(1), notice(2), notice(3, { task: "PROJ-2", title: "Otra" })]);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getAllByRole("option").length).toBe(3);
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("option")[2]);
+    expect(screen.queryByText("1 of 2")).toBeNull();
+    expect(screen.getAllByText("Done 3").length).toBeGreaterThan(1);
+  });
+
+  it("moves the selection with the arrow keys", () => {
+    renderView([notice(1), notice(2)]);
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    expect(screen.getAllByRole("option")[1].getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("dismisses a notice with Quitar", async () => {
+    const dis = vi.spyOn(api, "dismissInbox").mockResolvedValue(null);
+    const onChanged = vi.fn();
+    renderView([notice(1)], onChanged);
+    fireEvent.click(screen.getByText("Remove"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(dis).toHaveBeenCalledWith("turn-done:PROJ-1:s1:1");
+  });
+
+  it("offers no Quitar on a blocking notice", () => {
+    renderView([{ ...item, id: "pr-failed:PROJ-1:7:1" }]);
+    expect(screen.queryByText("Remove")).toBeNull();
+  });
+
+  it("clears the notices and undoes it from the toast", async () => {
+    clearToasts();
+    vi.spyOn(api, "clearInbox").mockResolvedValue({ ids: ["a", "b"] });
+    const restore = vi.spyOn(api, "restoreInbox").mockResolvedValue(null);
+    render(<><InboxView items={[notice(1)]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} /><ToastHost /></>);
+    fireEvent.click(screen.getByText("Clear notices"));
+    fireEvent.click(await screen.findByText("Undo"));
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(["a", "b"]));
+    clearToasts();
+  });
+
+  it("disables Limpiar avisos when only blocking items remain", () => {
+    renderView([{ ...item, id: "pr-failed:PROJ-1:7:1" }]);
+    expect((screen.getByText("Clear notices") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the empty state with the latest activity", async () => {
+    vi.spyOn(api, "sessions").mockResolvedValue([
+      { id: "s", task: "PROJ-9", last_activity_at: new Date().toISOString(), last_message: "ran tests" } as never,
+    ]);
+    renderView([]);
+    expect(screen.getByText("Nothing is waiting for you")).toBeTruthy();
+    expect(await screen.findByText(/Last activity: PROJ-9 · ran tests · just now/)).toBeTruthy();
+  });
+});
+
+describe("InboxView at width", () => {
+  it("keeps the detail inline at 1280", () => {
+    setWidth(1280);
+    view();
+    expect(document.querySelector(".ib-detail")).toBeTruthy();
+    expect(document.querySelector(".ib-scrim")).toBeNull();
+  });
+
+  it("uses its own root class, not the icon-button .ib (32x32) that squeezed the panes", () => {
+    setWidth(1280);
+    view();
+    const root = document.querySelector(".ib-list")!.parentElement!;
+    expect(root.classList.contains("ib-root")).toBe(true);
+    expect(root.classList.contains("ib")).toBe(false);
+  });
+
+  it("opens the detail as an overlay below 1200, closed by «Cerrar» and Esc", () => {
+    setWidth(1100);
+    view();
+    expect(document.querySelector(".ib-detail")).toBeNull();
+    fireEvent.click(screen.getAllByRole("option")[0]);
+    expect(document.querySelector(".ib-overlay")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(document.querySelector(".ib-overlay")).toBeNull();
+    fireEvent.click(screen.getAllByRole("option")[0]);
+    expect(document.querySelector(".ib-overlay")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.querySelector(".ib-overlay")).toBeNull();
   });
 });

@@ -14,7 +14,8 @@ export type ActionId =
   | "view-inbox"
   | "view-tasks"
   | "view-jira"
-  | "view-projects";
+  | "view-projects"
+  | "toggle-sidebar";
 
 export interface ActionDef {
   id: ActionId;
@@ -33,10 +34,11 @@ export const ACTIONS: ActionDef[] = [
   { id: "quick-open", label: "Abrir un archivo por su nombre", group: "Tarea", default: "Mod+P" },
   { id: "toggle-preview", label: "Alternar vista previa del Markdown", group: "Tarea", default: "Mod+Shift+V" },
   { id: "new-task", label: "Nueva tarea", group: "General", default: "Mod+N" },
-  { id: "view-inbox", label: "Ir a la Bandeja", group: "General", default: "Mod+I" },
-  { id: "view-tasks", label: "Ir a Tareas", group: "General", default: "Mod+1" },
-  { id: "view-jira", label: "Ir a Jira", group: "General", default: "Mod+2" },
-  { id: "view-projects", label: "Ir a Proyectos", group: "General", default: "Mod+3" },
+  { id: "view-inbox", label: "Abrir la Bandeja", group: "General", default: "Mod+I" },
+  { id: "view-tasks", label: "Abrir el tablero", group: "General", default: "Mod+1" },
+  { id: "view-jira", label: "Abrir Jira", group: "General", default: "Mod+2" },
+  { id: "view-projects", label: "Abrir Proyectos", group: "General", default: "Mod+3" },
+  { id: "toggle-sidebar", label: "Plegar barra lateral", group: "Ventana", default: "Mod+\\" },
 ];
 
 export type Bindings = Record<ActionId, string>;

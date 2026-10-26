@@ -165,6 +165,25 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /tasks/{key}/reopen`: a done task waits for the user again.
+pub async fn reopen(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<Task>, ApiError> {
+    let key = TaskKey::new(key);
+    app.store
+        .get_task(&key)
+        .await?
+        .ok_or(StoreError::NotFound(key.clone()))?;
+    if app.store.workspace(&key).await?.is_none() {
+        return Err(ApiError::conflict(format!(
+            "{key} has no workspace any more; it cannot be reopened"
+        )));
+    }
+    let task = app.transition(&key, Event::Reopen).await?;
+    Ok(Json(task))
+}
+
 pub async fn usage(State(app): State<AppState>) -> Json<Option<UsageReport>> {
     Json(app.usage.lock().unwrap().clone())
 }
@@ -1023,5 +1042,51 @@ mod tests {
         let err = archive_task(&app, &key).await.unwrap_err();
         assert_eq!(err.status, StatusCode::CONFLICT);
         assert_eq!(app.store.open_notices().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reopening_a_done_task_makes_it_wait_and_records_it() {
+        let (app, repo) = setup().await;
+        let ws = started(&app, &repo, "PROJ-1", false).await;
+        let _ = ws;
+        app.transition(&TaskKey::new("PROJ-1"), Event::MarkDone)
+            .await
+            .unwrap();
+        let Json(task) = reopen(State(app.clone()), Path("PROJ-1".into()))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::WaitingForUser);
+        let events = app.store.events(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert_eq!(events.last().unwrap().event, Event::Reopen);
+    }
+
+    #[tokio::test]
+    async fn reopen_is_409_unless_done() {
+        let (app, repo) = setup().await;
+        started(&app, &repo, "PROJ-1", false).await;
+        let err = reopen(State(app.clone()), Path("PROJ-1".into()))
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        let err = reopen(State(app.clone()), Path("NOPE-1".into()))
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn reopen_is_409_after_archiving() {
+        let (app, repo) = setup().await;
+        git(&repo, &["branch", "feature/PROJ-1"]);
+        let key = partially_archived(&app, &repo, "feature/PROJ-1").await;
+        let _ = archive_task(&app, &key).await.map_err(|e| e.message);
+        let err = reopen(State(app.clone()), Path(key.to_string()))
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
     }
 }

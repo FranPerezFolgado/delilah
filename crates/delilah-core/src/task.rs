@@ -163,6 +163,25 @@ pub enum Event {
     AutopilotFinished {
         prs: Vec<String>,
     },
+    /// The user reopens a finished task to keep working on it.
+    #[serde(rename = "reopened")]
+    Reopen,
+    /// The task's runtime changed (chat or terminal); history only.
+    RuntimeSwitched {
+        session: Option<String>,
+        mode: String,
+    },
+    /// The agent asked for a permission; history only.
+    PermissionAsked {
+        tool: String,
+        summary: String,
+    },
+    /// A permission ask ended without an answer; history only.
+    PermissionExpired {
+        tool: String,
+        summary: String,
+        outcome: String,
+    },
 }
 
 impl Event {
@@ -190,6 +209,10 @@ impl Event {
             Self::AutopilotAnswered { .. } => "autopilot-answered",
             Self::AutopilotNudged { .. } => "autopilot-nudged",
             Self::AutopilotFinished { .. } => "autopilot-finished",
+            Self::Reopen => "reopened",
+            Self::RuntimeSwitched { .. } => "runtime-switched",
+            Self::PermissionAsked { .. } => "permission-asked",
+            Self::PermissionExpired { .. } => "permission-expired",
         }
     }
 }
@@ -410,6 +433,13 @@ pub struct Task {
     /// Permission rules granted with "allow always in this task".
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// When the task was created.
+    #[serde(default = "Utc::now")]
+    pub created_at: DateTime<Utc>,
+    /// When a task that is done got there (read from its events; never stored on the task);
+    /// `null` in any other state.
+    #[serde(default)]
+    pub finished_at: Option<DateTime<Utc>>,
 }
 
 impl Task {
@@ -433,6 +463,8 @@ impl Task {
             view: TaskView::default(),
             chat_mode: false,
             allowed_tools: Vec::new(),
+            created_at: Utc::now(),
+            finished_at: None,
         }
     }
 
@@ -457,6 +489,9 @@ impl Task {
                 | Event::AutopilotAnswered { .. }
                 | Event::AutopilotNudged { .. }
                 | Event::AutopilotFinished { .. }
+                | Event::RuntimeSwitched { .. }
+                | Event::PermissionAsked { .. }
+                | Event::PermissionExpired { .. }
         ) {
             return Ok(());
         }
@@ -510,6 +545,7 @@ fn next_status(status: &TaskStatus, event: Event) -> Result<TaskStatus, Transiti
             Ok(S::Queued)
         }
         (S::Queued, Event::CreatedFromConversation { .. }) => Ok(S::Queued),
+        (S::Done, Event::Reopen) => Ok(S::WaitingForUser),
         _ => Err(invalid),
     }
 }
@@ -1045,5 +1081,116 @@ mod tests {
                 assert_eq!(task, before);
             }
         }
+    }
+
+    #[test]
+    fn a_done_task_reopens_waiting_for_the_user() {
+        let mut task = running_task();
+        task.apply(Event::AgentFinished).unwrap();
+        task.apply(Event::Reopen).unwrap();
+        assert_eq!(task.status, TaskStatus::WaitingForUser);
+        assert_eq!(Event::Reopen.name(), "reopened");
+        assert_eq!(
+            serde_json::to_value(Event::Reopen).unwrap()["type"],
+            "reopened"
+        );
+    }
+
+    #[test]
+    fn reopen_is_refused_unless_done() {
+        let mut paused = running_task();
+        paused
+            .apply(Event::LimitReached {
+                resume_at: at(15, 0),
+            })
+            .unwrap();
+        let mut waiting = running_task();
+        waiting.apply(Event::AgentAsked).unwrap();
+        let mut failed = running_task();
+        failed.apply(Event::Fail { reason: "x".into() }).unwrap();
+        let mut setup = Task::new(TaskKey::new("PROJ-6"), "t", "feature");
+        setup.apply(Event::Start).unwrap();
+        setup
+            .apply(Event::SetupFailed { reason: "x".into() })
+            .unwrap();
+        for mut task in [
+            Task::new(TaskKey::new("PROJ-5"), "t", "feature"),
+            running_task(),
+            waiting,
+            paused,
+            failed,
+            setup,
+        ] {
+            let before = task.clone();
+            assert!(task.apply(Event::Reopen).is_err());
+            assert_eq!(task, before);
+        }
+    }
+
+    fn history_events() -> Vec<(Event, &'static str)> {
+        vec![
+            (
+                Event::RuntimeSwitched {
+                    session: Some("s".into()),
+                    mode: "chat".into(),
+                },
+                "runtime-switched",
+            ),
+            (
+                Event::PermissionAsked {
+                    tool: "Bash".into(),
+                    summary: "ls".into(),
+                },
+                "permission-asked",
+            ),
+            (
+                Event::PermissionExpired {
+                    tool: "Bash".into(),
+                    summary: "ls".into(),
+                    outcome: "denied".into(),
+                },
+                "permission-expired",
+            ),
+        ]
+    }
+
+    #[test]
+    fn history_events_keep_the_status() {
+        let mut paused = running_task();
+        paused
+            .apply(Event::LimitReached {
+                resume_at: at(15, 0),
+            })
+            .unwrap();
+        for (event, name) in history_events() {
+            assert_eq!(event.name(), name);
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["type"], name);
+            assert_eq!(serde_json::from_value::<Event>(json).unwrap(), event);
+            for mut task in [
+                running_task(),
+                paused.clone(),
+                Task::new(TaskKey::new("PROJ-5"), "t", "feature"),
+            ] {
+                let before = task.clone();
+                task.apply(event.clone()).unwrap();
+                assert_eq!(task, before);
+            }
+        }
+    }
+
+    #[test]
+    fn a_task_records_when_it_was_created() {
+        let before = Utc::now();
+        let task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        assert!(task.created_at >= before && task.created_at <= Utc::now());
+        let json = serde_json::to_value(&task).unwrap();
+        assert!(json["created_at"].is_string());
+        assert!(json["finished_at"].is_null(), "present, null until done");
+        let back: Task = serde_json::from_value(json).unwrap();
+        assert_eq!(back, task);
+
+        let old = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,"status":{"type":"queued"}}"#;
+        assert!(serde_json::from_str::<Task>(old).is_ok());
     }
 }

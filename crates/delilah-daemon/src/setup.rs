@@ -8,9 +8,16 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::Json;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::header;
+use axum::response::IntoResponse;
+use chrono::{DateTime, Utc};
 use delilah_agents::pty::PtySession;
 use delilah_core::{Event, TaskKey, TaskStatus};
+use serde::{Deserialize, Serialize};
 
+use crate::api::ApiError;
 use crate::events::Topic;
 use crate::run::{AgentLaunch, LaunchError, forget_launch, load_launch, save_launch, start_agent};
 use crate::state::AppState;
@@ -24,6 +31,116 @@ const TAIL_LINES: usize = 20;
 const TAIL_BYTES: u64 = 256 * 1024;
 /// After a kill, how long to wait for the output to drain before moving on.
 const KILL_GRACE: Duration = Duration::from_secs(5);
+
+/// The file in the task dir that tells how the last setup run went. A file-based
+/// exception to the database, like the saved launch: it goes with the task dir when the
+/// task is deleted, is overwritten by a retry, and is only read by `GET …/setup`.
+const SETUP_FILE: &str = "setup.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SetupRecord {
+    command: String,
+    /// `None` when the process was killed or never started.
+    exit_code: Option<u32>,
+    started_at: DateTime<Utc>,
+    finished_at: DateTime<Utc>,
+    cancelled: bool,
+    timed_out: bool,
+    /// The run's log: a file name inside the task dir, never a path.
+    #[serde(default)]
+    log: Option<String>,
+}
+
+/// What `GET /tasks/{key}/setup` answers.
+#[derive(Debug, Serialize)]
+pub struct SetupInfo {
+    command: String,
+    exit_code: Option<u32>,
+    started_at: DateTime<Utc>,
+    finished_at: DateTime<Utc>,
+    duration_ms: u64,
+    cancelled: bool,
+    timed_out: bool,
+    tail: String,
+    log_bytes: u64,
+}
+
+fn write_record(dir: &Path, record: &SetupRecord) {
+    let written = serde_json::to_vec(record)
+        .map_err(std::io::Error::other)
+        .and_then(|bytes| std::fs::write(dir.join(SETUP_FILE), bytes));
+    if let Err(e) = written {
+        tracing::warn!("cannot write {SETUP_FILE}: {e}");
+    }
+}
+
+/// The record and the log of the last setup run of an existing task. The log is only
+/// found by a bare file name next to the record, `setup-*.log`, a regular file (no
+/// symlink): the record is a file on disk and is not trusted to point elsewhere.
+async fn last_run(
+    app: &AppState,
+    key: &str,
+) -> Result<(SetupRecord, Option<std::path::PathBuf>), ApiError> {
+    let key = TaskKey::new(key);
+    if app.store.get_task(&key).await?.is_none() {
+        return Err(ApiError::not_found(format!("no task {key}")));
+    }
+    let dir = app.config.task_dir(key.as_str());
+    let no_setup = || ApiError::not_found(format!("{key} has not run a setup"));
+    let bytes = std::fs::read(dir.join(SETUP_FILE)).map_err(|_| no_setup())?;
+    let record: SetupRecord = serde_json::from_slice(&bytes).map_err(|_| no_setup())?;
+    let log = record
+        .log
+        .as_deref()
+        .filter(|name| {
+            Path::new(name).file_name().is_some_and(|n| n == *name)
+                && name.starts_with("setup-")
+                && name.ends_with(".log")
+        })
+        .map(|name| dir.join(name))
+        .filter(|path| std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file()));
+    Ok((record, log))
+}
+
+/// `GET /tasks/{key}/setup`: how the last setup run went.
+pub async fn info(
+    State(app): State<AppState>,
+    UrlPath(key): UrlPath<String>,
+) -> Result<Json<SetupInfo>, ApiError> {
+    let (record, log) = last_run(&app, &key).await?;
+    let log_bytes = log
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map_or(0, |m| m.len());
+    let tail = log.as_deref().map(output_tail).unwrap_or_default();
+    let duration_ms = (record.finished_at - record.started_at)
+        .num_milliseconds()
+        .max(0) as u64;
+    Ok(Json(SetupInfo {
+        command: record.command,
+        exit_code: record.exit_code,
+        started_at: record.started_at,
+        finished_at: record.finished_at,
+        duration_ms,
+        cancelled: record.cancelled,
+        timed_out: record.timed_out,
+        tail,
+        log_bytes,
+    }))
+}
+
+/// `GET /tasks/{key}/setup/log`: the whole log as plain text.
+pub async fn log(
+    State(app): State<AppState>,
+    UrlPath(key): UrlPath<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (_, log) = last_run(&app, &key).await?;
+    let path = log.ok_or_else(|| ApiError::not_found("the setup left no log"))?;
+    let bytes = std::fs::read(&path).map_err(|_| ApiError::not_found("the setup left no log"))?;
+    // The log holds terminal bytes: readable text is what a browser tab wants.
+    let text = strip_escapes(&String::from_utf8_lossy(&bytes)).replace("\r\n", "\n");
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text))
+}
 
 /// Stops the setup and everything it started: the shell leads its own process group
 /// under the PTY, so the group gets TERM, then KILL after the grace, and the shell
@@ -231,12 +348,26 @@ async fn spawn_setup(
 
     let app = app.clone();
     let key = key.clone();
+    let command = command.to_string();
+    let started_at = Utc::now();
     tokio::spawn(async move {
-        if let Err(e) = finish(&app, &key, &session.id, &pty, &log, timeout).await {
+        let run = Run {
+            command,
+            started_at,
+            timeout,
+        };
+        if let Err(e) = finish(&app, &key, &session.id, &pty, &log, run).await {
             tracing::error!(task = %key, "setup: {e}");
         }
     });
     Ok(())
+}
+
+/// What `finish` needs to know about the run it waits for.
+struct Run {
+    command: String,
+    started_at: DateTime<Utc>,
+    timeout: Duration,
 }
 
 /// Waits for the command and acts on how it ended.
@@ -246,8 +377,13 @@ async fn finish(
     session_id: &str,
     pty: &Arc<PtySession>,
     log: &Path,
-    timeout: Duration,
+    run: Run,
 ) -> Result<(), LaunchError> {
+    let Run {
+        command,
+        started_at,
+        timeout,
+    } = run;
     let timed_out = tokio::time::timeout(timeout, pty.wait()).await.is_err();
     if timed_out {
         stop(pty).await;
@@ -260,6 +396,20 @@ async fn finish(
     app.emit(Topic::Sessions);
 
     let cancelled = app.sessions.take_cancelled(session_id);
+    // Written before the task changes state, so a client that sees `setup-failed`
+    // finds the detail.
+    write_record(
+        &app.config.task_dir(key.as_str()),
+        &SetupRecord {
+            command,
+            exit_code: pty.exit_code(),
+            started_at,
+            finished_at: Utc::now(),
+            cancelled,
+            timed_out,
+            log: log.file_name().map(|n| n.to_string_lossy().into_owned()),
+        },
+    );
     let tail = output_tail(log);
     let failure = if cancelled {
         Some("cancelled".to_string())
@@ -695,6 +845,142 @@ mod tests {
         assert!(start(&e.app, &e.key, "touch oops", launch()).await.is_err());
         assert!(!parent.join("oops").exists());
         assert_eq!(status(&e).await, TaskStatus::PreparingWorkspace);
+    }
+
+    async fn get(e: &Env, uri: &str) -> (axum::http::StatusCode, Option<String>, String) {
+        use tower::ServiceExt;
+        let res = crate::api::router(e.app.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        let ctype = res
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap().to_string());
+        let bytes = http_body_util::BodyExt::collect(res.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        (status, ctype, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn a_failed_setup_writes_setup_json_with_the_exit_code() {
+        let e = env(FAILING).await;
+        start(&e.app, &e.key, FAILING, launch()).await.unwrap();
+        wait_for(&e, |s| matches!(s, TaskStatus::SetupFailed { .. })).await;
+        let dir = e.app.config.task_dir("PROJ-1");
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join(SETUP_FILE)).unwrap()).unwrap();
+        assert_eq!(saved["exit_code"], 3);
+        assert_eq!(saved["command"], FAILING);
+        assert_eq!(saved["cancelled"], false);
+        assert_eq!(saved["timed_out"], false);
+
+        // A retry overwrites it.
+        std::fs::remove_file(dir.join(SETUP_FILE)).unwrap();
+        cancel_and_record(&e).await;
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join(SETUP_FILE)).unwrap()).unwrap();
+        assert_eq!(saved["cancelled"], true);
+    }
+
+    async fn cancel_and_record(e: &Env) {
+        let script = "sleep 30";
+        spawn_setup(&e.app, &e.key, script, Duration::from_secs(60))
+            .await
+            .unwrap();
+        cancel(&e.app, &e.key).await.unwrap();
+        let dir = e.app.config.task_dir("PROJ-1");
+        for _ in 0..200 {
+            if dir.join(SETUP_FILE).exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("no setup.json after the cancel");
+    }
+
+    #[tokio::test]
+    async fn info_returns_command_exit_code_duration_and_tail() {
+        let e = env(FAILING).await;
+        start(&e.app, &e.key, FAILING, launch()).await.unwrap();
+        wait_for(&e, |s| matches!(s, TaskStatus::SetupFailed { .. })).await;
+        let (status, _, body) = get(&e, "/api/v1/tasks/PROJ-1/setup").await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let info: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(info["command"], FAILING);
+        assert_eq!(info["exit_code"], 3);
+        assert!(info["duration_ms"].is_u64());
+        assert!(info["log_bytes"].as_u64().unwrap() > 0);
+        let tail = info["tail"].as_str().unwrap();
+        assert_eq!(tail.lines().count(), 20, "{tail}");
+        assert!(tail.ends_with("l25"));
+    }
+
+    #[tokio::test]
+    async fn log_returns_the_whole_log() {
+        let e = env(FAILING).await;
+        start(&e.app, &e.key, FAILING, launch()).await.unwrap();
+        wait_for(&e, |s| matches!(s, TaskStatus::SetupFailed { .. })).await;
+        let (status, ctype, body) = get(&e, "/api/v1/tasks/PROJ-1/setup/log").await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(ctype.unwrap().starts_with("text/plain"));
+        // Beyond the 20 lines of the tail.
+        assert!(body.contains("l1\n"), "{body}");
+        assert!(body.contains("l25"), "{body}");
+        assert!(!body.contains('\r'));
+    }
+
+    #[tokio::test]
+    async fn info_is_404_without_a_setup() {
+        let e = env("true").await;
+        for uri in [
+            "/api/v1/tasks/PROJ-1/setup",
+            "/api/v1/tasks/PROJ-1/setup/log",
+            "/api/v1/tasks/NOPE-1/setup",
+        ] {
+            let (status, _, _) = get(&e, uri).await;
+            assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_log_never_leaves_the_task_dir() {
+        let e = env("true").await;
+        let dir = e.app.config.task_dir("PROJ-1");
+        std::fs::create_dir_all(&dir).unwrap();
+        let secret = dir.parent().unwrap().join("secret.log");
+        std::fs::write(&secret, "secret").unwrap();
+        let outside = dir.join("setup-link.log");
+        std::os::unix::fs::symlink(&secret, &outside).unwrap();
+        let record = |log: &str| {
+            serde_json::json!({
+                "command": "x", "exit_code": 1, "started_at": Utc::now(),
+                "finished_at": Utc::now(), "cancelled": false, "timed_out": false,
+                "log": log,
+            })
+        };
+        for log in [
+            "../secret.log",
+            "/etc/hosts",
+            "setup-../../secret.log",
+            "setup-link.log",
+            "setup.json",
+        ] {
+            std::fs::write(dir.join(SETUP_FILE), record(log).to_string()).unwrap();
+            let (status, _, body) = get(&e, "/api/v1/tasks/PROJ-1/setup/log").await;
+            assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{log}: {body}");
+            assert!(!body.contains("secret"));
+            let (_, _, info) = get(&e, "/api/v1/tasks/PROJ-1/setup").await;
+            assert!(!info.contains("secret"), "{log}");
+        }
     }
 
     #[test]

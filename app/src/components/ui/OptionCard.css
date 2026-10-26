@@ -1,0 +1,4 @@
+.opt { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--bd2); background: var(--panel); color: var(--tx); text-align: left; position: relative; }
+.opt:hover { background: var(--hov); }
+.opt[aria-checked="true"], .opt[aria-pressed="true"] { background: var(--sel); border-color: var(--tx3); }
+.opt[aria-checked="true"]::after, .opt[aria-pressed="true"]::after { content: "\2713"; position: absolute; top: 8px; right: 10px; font-size: 12px; color: var(--tx-strong); }

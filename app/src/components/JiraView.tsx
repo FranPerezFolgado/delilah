@@ -1,27 +1,19 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
-  type JiraSprintFilter, type JiraWho,
+  api, ApiError, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
+  type JiraSprintFilter, type JiraWho, type Task, type TaskStatus,
 } from "../api";
-import { Icon } from "./Icon";
+import { Button, Icon, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
 import { Markdown } from "./Markdown";
+import { openExternal } from "../platform";
 import { t, tn } from "../i18n";
+import { useBreakpoints } from "../useWidth";
+import "./JiraView.css";
 
 interface Props {
   onAnalyze: (issue: JiraIssue) => void;
   onOpenTask: (key: string) => void;
 }
-
-const TASK_LABELS: Record<string, string> = {
-  queued: "Backlog",
-  "preparing-workspace": "Preparando",
-  running: "En ejecución",
-  "waiting-for-user": "Te espera",
-  "paused-by-limit": "Pausada",
-  done: "Hecha",
-  failed: "Fallida",
-  "setup-failed": "Setup fallido",
-};
 
 type GroupBy = "status" | "epic";
 
@@ -113,8 +105,32 @@ function groupIssues(nodes: Node[], by: GroupBy): Group[] {
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 
+/** Only the two top priorities get a mark in the list. */
+const isUrgent = (p: string | null) => !!p && /^(alta|cr[ií]tica|high|highest|critical|blocker|bloqueante)$/i.test(p.trim());
+
+const isTokenRejected = (e: unknown) =>
+  e instanceof ApiError ? e.status === 401 : /\b401\b/.test((e as Error)?.message ?? "");
+
 function StatusDot({ category }: { category: string }) {
   return <span className={`jdot jdot-${category || "new"}`} aria-hidden />;
+}
+
+/** Below this window width the three filter chips collapse into one «Filtros · N» menu. */
+const FILTERS_COLLAPSE_BELOW = 1024;
+const narrowFilters = () =>
+  typeof window !== "undefined" && !!window.matchMedia?.(`(max-width: ${FILTERS_COLLAPSE_BELOW - 1}px)`).matches;
+
+function useCollapsedFilters(): boolean {
+  const [collapsed, setCollapsed] = useState(narrowFilters);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(`(max-width: ${FILTERS_COLLAPSE_BELOW - 1}px)`);
+    const update = () => setCollapsed(mq.matches);
+    mq.addEventListener("change", update);
+    update();
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return collapsed;
 }
 
 /** Tickets from Jira, and "Analizar" to start a task on one. */
@@ -130,19 +146,37 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  // Below 1200 px the detail is a drawer that only opens when a row is chosen.
+  const { overlays } = useBreakpoints();
+  const collapsed = useCollapsedFilters();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const showDrawer = overlays && drawerOpen;
+  useEffect(() => {
+    if (!showDrawer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showDrawer]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setExpired(false);
     try {
       const rows = await api.jiraIssues(who, progress, sprint);
       setIssues(rows);
       setSelected((s) => (s && rows.some((r) => r.key === s) ? s : rows[0]?.key ?? null));
     } catch (e) {
-      setError((e as Error).message);
+      if (isTokenRejected(e)) setExpired(true);
+      else setError((e as Error).message);
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   }, [who, progress, sprint]);
 
@@ -170,7 +204,11 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
       return next;
     });
 
-  if (settings === undefined) return <div className="empty">{t("Cargando…")}</div>;
+  if (settings === undefined) {
+    return error
+      ? <div className="empty"><span className="error selectable">{error}</span></div>
+      : <div className="jv-loading"><Skeleton lines={4} /></div>;
+  }
   if (settings === null || editing) {
     return (
       <ConnectForm
@@ -185,175 +223,302 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     );
   }
 
-  const WHO: { id: JiraWho; label: string }[] = [
-    { id: "assigned", label: t("Asignados") },
-    { id: "reported", label: t("Reportados") },
-    ...(hasQuery ? [{ id: "query" as const, label: t("Mi consulta") }] : []),
+  const WHO: { value: JiraWho; label: string }[] = [
+    { value: "assigned", label: t("Asignados a mí") },
+    { value: "reported", label: t("Reportados por mí") },
+    ...(hasQuery ? [{ value: "query" as const, label: t("Mi consulta") }] : []),
   ];
-  const PROGRESS: { id: JiraProgress; label: string }[] = [
-    { id: "open", label: t("Abiertos") },
-    { id: "done", label: t("Hechos") },
+  const PROGRESS: { value: JiraProgress; label: string }[] = [
+    { value: "open", label: t("Abiertos") },
+    { value: "done", label: t("Hechos") },
   ];
-  const SPRINT: { id: JiraSprintFilter; label: string }[] = [
-    { id: "all", label: t("Todos") },
-    { id: "current", label: t("Actual") },
+  const SPRINT: { value: JiraSprintFilter; label: string }[] = [
+    { value: "all", label: t("Todos") },
+    { value: "current", label: t("Sprint actual") },
   ];
-  const GROUP_BY: { id: GroupBy; label: string }[] = [
-    { id: "status", label: t("Estado") },
-    { id: "epic", label: t("Épica") },
-  ];
-
-  const row = (i: JiraIssue, child: boolean, subs: number) => (
-    <button key={i.key} className={`jrow ${child ? "child" : ""} ${i.key === selected ? "on" : ""}`} onClick={() => setSelected(i.key)}>
-      <StatusDot category={i.status_category} />
-      <span className="mono jkey">{i.key}</span>
-      <span className="trunc jtitle">{i.summary}</span>
-      {subs > 0 && <span className="jsubs">{tn(subs, "{n} subtarea", "{n} subtareas")}</span>}
-      {!child && i.parent && (
-        <span className="jtag trunc mono" title={i.parent.summary ?? undefined}>↳ {i.parent.key}</span>
+  const chip = <T extends string>(label: string, options: { value: T; label: string }[], value: T, set: (v: T) => void) => (
+    <Menu
+      items={options.map((o) => ({ label: o.label, onSelect: () => set(o.value) }))}
+      trigger={(p) => (
+        <button type="button" className="jv-chip" {...p}>
+          <span className="jv-chip-k">{label}</span>
+          <span className="jv-chip-v">{options.find((o) => o.value === value)?.label}</span>
+          <Icon name="chevron" className="jv-chip-c" />
+        </button>
       )}
-      {groupBy === "epic" && <span className="jtag">{i.status}</span>}
-      {groupBy === "status" && !child && i.epic && (
-        <span className="jtag trunc" title={i.epic.key}>{i.epic.summary ?? i.epic.key}</span>
-      )}
-      {sprint === "all" && !child && i.sprint && <span className="jtag trunc">{i.sprint.name}</span>}
-      {i.task_status && (
-        <span className="pill">{TASK_LABELS[i.task_status] ? t(TASK_LABELS[i.task_status]) : i.task_status}</span>
-      )}
-      <span className="muted jmeta">{i.issue_type}</span>
-      <span className="muted jmeta">{i.priority ?? "—"}</span>
-      {i.assignee
-        ? <span className="javatar" title={i.assignee}>{initials(i.assignee)}</span>
-        : <span className="javatar none" title={t("Sin asignar")} />}
-    </button>
+    />
   );
-  const parentListed = !!issue?.parent && issues.some((i) => i.key === issue.parent!.key);
+  const activeFilters = Number(who !== "assigned") + Number(progress !== "open") + Number(sprint !== "all");
+  const filterItems = <T extends string>(label: string, options: { value: T; label: string }[], value: T, set: (v: T) => void) =>
+    options.map((o) => ({ label: `${o.value === value ? "✓ " : ""}${label}: ${o.label}`, onSelect: () => set(o.value) }));
+  const filtersMenu = (
+    <Menu
+      items={[
+        ...filterItems(t("De quién"), WHO, who, setWho),
+        ...filterItems(t("Estado"), PROGRESS, progress, setProgress),
+        ...filterItems(t("Sprint"), SPRINT, sprint, setSprint),
+      ]}
+      trigger={(p) => (
+        <button type="button" className="jv-chip" {...p}>
+          <span className="jv-chip-v">{t("Filtros · {n}", { n: activeFilters })}</span>
+          <Icon name="chevron" className="jv-chip-c" />
+        </button>
+      )}
+    />
+  );
+  const clearFilters = () => {
+    setWho("assigned");
+    setProgress("open");
+    setSprint("all");
+    setFilter("");
+  };
+
+  const avatars = who !== "assigned";
+  const row = (i: JiraIssue, child: boolean) => {
+    const meta = [
+      !child && i.epic ? i.epic.summary ?? i.epic.key : null,
+      !child && i.sprint ? i.sprint.name : null,
+      !child && (i.subtask_count ?? 0) > 0 ? t("{done}/{total} subtareas", { done: i.subtasks_done ?? 0, total: i.subtask_count ?? 0 }) : null,
+      groupBy === "epic" ? i.status : null,
+    ].filter(Boolean);
+    return (
+      <button key={i.key} type="button" className={`jv-row ${child ? "child" : ""} ${i.key === selected ? "on" : ""}`}
+        aria-current={i.key === selected ? "true" : undefined} onClick={() => {
+          setSelected(i.key);
+          setDrawerOpen(true);
+        }}>
+        <StatusDot category={i.status_category} />
+        <span className="jv-main">
+          <span className="jv-l1">
+            <span className="mono jv-key">{i.key}</span>
+            <span className="jv-title">{i.summary}</span>
+            {isUrgent(i.priority) && (
+              <span className="jv-prio"><Icon name="priority" />{i.priority}</span>
+            )}
+          </span>
+          <span className="jv-l2">{meta.join(" · ")}</span>
+        </span>
+        {i.task_status && <span className="jv-linked" title={t("Tiene una tarea en Delilah")}><Icon name="tasks" /></span>}
+        {avatars && (i.assignee
+          ? <span className="javatar" title={i.assignee}>{initials(i.assignee)}</span>
+          : <span className="javatar none" title={t("Sin asignar")} />)}
+      </button>
+    );
+  };
 
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
         <h1 data-tauri-drag-region>Jira</h1>
-        <span className="muted" style={{ fontSize: 12 }}>
+        <span className="muted jv-sub">
           {settings.mode === "sample" ? t("datos de ejemplo") : settings.site} · {tn(issues.length, "{n} ticket", "{n} tickets")}
         </span>
-        <input className="input" style={{ marginLeft: "auto", width: 260, height: 26 }} placeholder={t("Filtrar tickets…")}
+        <input className="input jv-search" placeholder={t("Filtrar tickets…")}
           value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={t("Filtrar tickets")} />
-        <button className="btn" onClick={load} disabled={loading} aria-label={t("Recargar")}>
-          <Icon name="refresh" />
-        </button>
-        <button className="btn" onClick={() => setEditing(true)}>{t("Conexión")}</button>
+        <IconButton label={t("Recargar")} icon="refresh" onClick={load} disabled={loading} />
+        <Button variant="secondary" onClick={() => setEditing(true)}>{t("Conexión")}</Button>
       </div>
-      <div className="jbar">
-        <Segs label={t("De quién")} options={WHO} value={who} onChange={setWho} />
-        <Segs label={t("Estado")} options={PROGRESS} value={progress} onChange={setProgress} />
-        <Segs label={t("Sprint")} options={SPRINT} value={sprint} onChange={setSprint} />
-        <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>{t("Agrupar por")}</span>
-        <Segs label={t("Agrupar por")} options={GROUP_BY} value={groupBy} onChange={setGroupBy} />
+      <div className="jv-bar">
+        {collapsed ? filtersMenu : (
+          <>
+            {chip(t("De quién"), WHO, who, setWho)}
+            {chip(t("Estado"), PROGRESS, progress, setProgress)}
+            {chip(t("Sprint"), SPRINT, sprint, setSprint)}
+          </>
+        )}
+        <span className="jv-bar-end">
+          <span className="muted">{t("Agrupar por")}</span>
+          <Segmented mode="radio" label={t("Agrupar por")} value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)}
+            options={[{ value: "status", label: t("Estado") }, { value: "epic", label: t("Épica") }]} />
+        </span>
       </div>
-      {error && <div className="error selectable" style={{ padding: "8px 20px" }}>{error}</div>}
-      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "4px 0 16px" }}>
+      {expired && (
+        <div className="jv-banner" role="alert">
+          <strong>{t("Jira rechazó el token (401)")}</strong>
+          <span>{t("Lo que ves son los últimos datos conocidos.")}</span>
+          <Button variant="primary" size={28} onClick={() => setEditing(true)}>{t("Reconectar")}</Button>
+        </div>
+      )}
+      {error && <div className="error selectable jv-error">{error}</div>}
+      <div className={`jv-body ${expired ? "stale" : ""}`}>
+        <div className="jv-list">
+          {!loaded && loading && <div className="jv-loading"><Skeleton lines={4} /></div>}
           {groups.map((g) => {
             const open = !folded.has(`${groupBy}:${g.id}`);
             return (
               <section key={g.id}>
-                <button className="jgroup" onClick={() => toggle(`${groupBy}:${g.id}`)} aria-expanded={open}>
+                <button type="button" className="jgroup" onClick={() => toggle(`${groupBy}:${g.id}`)} aria-expanded={open}>
                   <span className={`chev ${open ? "open" : ""}`}>›</span>
                   {g.category !== undefined && <StatusDot category={g.category} />}
                   <span className="jgroup-name trunc">{g.label}</span>
-                  {g.hint && <span className="mono muted" style={{ fontSize: 11 }}>{g.hint}</span>}
+                  {g.hint && <span className="mono muted jv-hint">{g.hint}</span>}
                   <span className="jgroup-count">{g.nodes.length}</span>
                 </button>
                 {open && g.nodes.map((n) => (
                   <Fragment key={n.issue.key}>
-                    {row(n.issue, false, n.children.length)}
-                    {n.children.map((c) => row(c, true, 0))}
+                    {row(n.issue, false)}
+                    {n.children.map((c) => row(c, true))}
                   </Fragment>
                 ))}
               </section>
             );
           })}
-          {shown.length === 0 && !loading && (
-            <div className="muted" style={{ padding: "12px 20px", fontSize: 12.5 }}>
-              {filter ? t("No hay tickets con ese filtro.") : t("No hay tickets para esta consulta.")}
+          {shown.length === 0 && !loading && loaded && !error && !expired && (
+            <div className="jv-empty">
+              <span>{t("Ningún ticket con estos filtros")}</span>
+              <Button variant="secondary" size={28} onClick={clearFilters}>{t("Quitar filtros")}</Button>
             </div>
           )}
         </div>
-        {issue && (
-          <aside style={{ width: 460, flex: "none", borderLeft: "1px solid var(--bd)", background: "var(--panel)",
-            overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <div className="mono muted">{issue.key}</div>
-              <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }} className="selectable">{issue.summary}</div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: "6px 10px", fontSize: 12.5 }}>
-              <span className="muted">{t("Tipo")}</span><span>{issue.issue_type}</span>
-              <span className="muted">{t("Prioridad")}</span><span>{issue.priority ?? "—"}</span>
-              <span className="muted">{t("Estado")}</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}><StatusDot category={issue.status_category} />{issue.status}</span>
-              {issue.parent && (
-                <>
-                  <span className="muted">{t("Padre")}</span>
-                  {parentListed ? (
-                    <button className="jparent" onClick={() => setSelected(issue.parent!.key)}>
-                      {issue.parent.summary ?? ""} <span className="mono muted">{issue.parent.key}</span>
-                    </button>
-                  ) : (
-                    <span>{issue.parent.summary ?? ""} <span className="mono muted">{issue.parent.key}</span></span>
-                  )}
-                </>
-              )}
-              <span className="muted">{t("Épica")}</span>
-              <span>{issue.epic ? <>{issue.epic.summary ?? ""} <span className="mono muted">{issue.epic.key}</span></> : "—"}</span>
-              <span className="muted">{t("Sprint")}</span><span>{issue.sprint?.name ?? "—"}</span>
-              <span className="muted">{t("Asignado")}</span><span>{issue.assignee ?? t("Sin asignar")}</span>
-              <span className="muted">{t("Informador")}</span><span>{issue.reporter ?? "—"}</span>
-              <span className="muted">{t("Componentes")}</span>
-              <span className="mono">{issue.components.length ? issue.components.join(", ") : "—"}</span>
-            </div>
-            <div>
-              {issue.task_status ? (
-                <button className="btn" onClick={() => onOpenTask(issue.key)}>{t("Ver la tarea en Delilah")}</button>
-              ) : (
-                <button className="btn btn-p" style={{ height: 30 }} onClick={() => onAnalyze(issue)}>
-                  {t("Analizar con Claude")}
-                </button>
-              )}
-            </div>
-            <div>
-              <div className="sec" style={{ marginBottom: 6 }}>{t("Descripción")}</div>
-              {issue.description ? <Markdown text={issue.description} remoteImages="click" /> : <span className="muted">{t("Sin descripción.")}</span>}
-            </div>
-          </aside>
+        {issue && (!overlays || showDrawer) && (
+          <>
+            {overlays && <div className="jv-scrim" onClick={() => setDrawerOpen(false)} />}
+            <Detail key={issue.key} issue={issue} expired={expired} parentListed={!!issue.parent && issues.some((i) => i.key === issue.parent!.key)}
+              drawer={overlays} onClose={() => setDrawerOpen(false)}
+              onSelect={setSelected} onAnalyze={onAnalyze} onOpenTask={onOpenTask} />
+          </>
         )}
       </div>
     </>
   );
 }
 
-function Segs<T extends string>({ label, options, value, onChange }: {
-  label: string;
-  options: { id: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
+function Detail({ issue, expired, parentListed, drawer, onClose, onSelect, onAnalyze, onOpenTask }: {
+  issue: JiraIssue;
+  /** The token expired: «Reconectar» is the view's primary action. */
+  expired: boolean;
+  parentListed: boolean;
+  drawer: boolean;
+  onClose: () => void;
+  onSelect: (key: string) => void;
+  onAnalyze: (issue: JiraIssue) => void;
+  onOpenTask: (key: string) => void;
 }) {
+  const [subs, setSubs] = useState<JiraIssue[] | null>(null);
+  const [task, setTask] = useState<Task | null>(null);
+  const hasSubs = !issue.subtask && (issue.subtask_count ?? 0) > 0;
+
+  useEffect(() => {
+    if (!hasSubs) return;
+    let live = true;
+    api.jiraSubtasks(issue.key).then((r) => live && setSubs(r)).catch(() => live && setSubs([]));
+    return () => { live = false; };
+  }, [issue.key, hasSubs]);
+  useEffect(() => {
+    if (!issue.task_status) return;
+    let live = true;
+    api.tasks().then((r) => live && setTask(r.find((x) => x.key === issue.key) ?? null)).catch(() => {});
+    return () => { live = false; };
+  }, [issue.key, issue.task_status]);
+
+  const status = task?.status ?? ({ type: issue.task_status } as TaskStatus);
+  const done = subs?.filter((s) => s.status_category === "done").length ?? 0;
+  const bySubStatus = useMemo(() => {
+    const m = new Map<string, { category: string; items: JiraIssue[] }>();
+    for (const s of subs ?? []) {
+      const g = m.get(s.status) ?? { category: s.status_category, items: [] };
+      g.items.push(s);
+      m.set(s.status, g);
+    }
+    return [...m].sort((a, b) => categoryRank(a[1].category) - categoryRank(b[1].category));
+  }, [subs]);
+
   return (
-    <div className="segs" role="radiogroup" aria-label={label}>
-      {options.map((o) => (
-        <button key={o.id} role="radio" aria-checked={value === o.id} className={`seg ${value === o.id ? "on" : ""}`}
-          onClick={() => onChange(o.id)}>
-          {o.label}
+    <aside className={`jv-detail ${drawer ? "jv-drawer" : ""}`} role={drawer ? "dialog" : undefined} aria-label={drawer ? issue.key : undefined}>
+      {drawer && (
+        <div className="jv-close">
+          <Button variant="secondary" size={28} onClick={onClose}>{t("Cerrar")}</Button>
+        </div>
+      )}
+      <div className="jv-dhead">
+        <div className="mono muted">{issue.key}</div>
+        <h2 className="t-sec selectable">{issue.summary}</h2>
+        {issue.url && (
+          <Button variant="ghost" size={28} onClick={() => openExternal(issue.url!).catch(() => {})}>
+            {t("Abrir en Jira ↗")}
+          </Button>
+        )}
+      </div>
+      {issue.task_status ? (
+        <button type="button" className="jv-task" onClick={() => onOpenTask(issue.key)}>
+          <Icon name="tasks" />
+          <span className="jv-task-what">{[task?.phase, t("Tarea en Delilah")].filter(Boolean).join(" · ")}</span>
+          <StatusBadge status={status} />
+          <span className="b b-s sm jv-task-open">{t("Abrir ›")}</span>
         </button>
+      ) : (
+        <div className="jv-analyze">
+          <Button variant={expired ? "secondary" : "primary"} onClick={() => onAnalyze(issue)}>{t("Analizar con Claude")}</Button>
+          <span className="muted">{t("Claude lee el ticket y propone un plan antes de tocar código.")}</span>
+        </div>
+      )}
+      <div className="jv-fields">
+        <span className="muted">{t("Tipo")}</span><span>{issue.issue_type}</span>
+        <span className="muted">{t("Prioridad")}</span><span>{issue.priority ?? "—"}</span>
+        <span className="muted">{t("Estado")}</span>
+        <span className="jv-status"><StatusDot category={issue.status_category} />{issue.status}</span>
+        {issue.parent && (
+          <>
+            <span className="muted">{t("Padre")}</span>
+            {parentListed ? (
+              <button type="button" className="jparent" onClick={() => onSelect(issue.parent!.key)}>
+                {issue.parent.summary ?? ""} <span className="mono muted">{issue.parent.key}</span>
+              </button>
+            ) : (
+              <span>{issue.parent.summary ?? ""} <span className="mono muted">{issue.parent.key}</span></span>
+            )}
+          </>
+        )}
+        <span className="muted">{t("Épica")}</span>
+        <span>{issue.epic ? <>{issue.epic.summary ?? ""} <span className="mono muted">{issue.epic.key}</span></> : "—"}</span>
+        <span className="muted">{t("Sprint")}</span><span>{issue.sprint?.name ?? "—"}</span>
+        <span className="muted">{t("Asignado")}</span><span>{issue.assignee ?? t("Sin asignar")}</span>
+        <span className="muted">{t("Informador")}</span><span>{issue.reporter ?? "—"}</span>
+        <span className="muted">{t("Componentes")}</span>
+        <span className="mono">{issue.components.length ? issue.components.join(", ") : "—"}</span>
+      </div>
+      <div>
+        <div className="sec">{t("Descripción")}</div>
+        {issue.description ? <Markdown text={issue.description} remoteImages="click" /> : <span className="muted">{t("Sin descripción.")}</span>}
+      </div>
+      {hasSubs && (
+        <div>
+          <div className="sec jv-subs-head">
+            <span>{t("Subtareas")}</span>
+            {subs && subs.length > 0 && <span className="jv-progress">{t("{done}/{total} hechas", { done, total: subs.length })}</span>}
+          </div>
+          {subs === null ? <Skeleton lines={3} /> : bySubStatus.map(([status, g]) => (
+            <SubGroup key={status} status={status} category={g.category} items={g.items} />
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+/** Only the work in progress starts open. */
+function SubGroup({ status, category, items }: { status: string; category: string; items: JiraIssue[] }) {
+  const [open, setOpen] = useState(category === "indeterminate");
+  return (
+    <div className="jv-sg">
+      <button type="button" className="jv-sg-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className={`chev ${open ? "open" : ""}`}>›</span>
+        <StatusDot category={category} />
+        <span>{status}</span>
+        <span className="jgroup-count">{items.length}</span>
+      </button>
+      {open && items.map((s) => (
+        <div key={s.key} className="jv-sub">
+          <span className="mono muted">{s.key}</span>
+          <span className="jv-sub-title">{s.summary}</span>
+          {s.assignee && <span className="javatar" title={s.assignee}>{initials(s.assignee)}</span>}
+        </div>
       ))}
     </div>
   );
 }
 
-const MODES: { id: JiraMode; label: string }[] = [
-  { id: "cloud", label: "Jira Cloud" },
-  { id: "data-center", label: "Jira Server / Data Center" },
-  { id: "sample", label: "Datos de ejemplo" },
-];
+type Errors = Partial<Record<"site" | "email" | "token", string>>;
 
 function ConnectForm({ current, onConnected, onCancel }: {
   current: JiraSettings | null;
@@ -365,13 +530,25 @@ function ConnectForm({ current, onConnected, onCancel }: {
   const [email, setEmail] = useState(current?.email ?? "");
   const [token, setToken] = useState("");
   const [jql, setJql] = useState(current?.jql ?? "");
+  const [errors, setErrors] = useState<Errors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const keepsToken = !!current?.site && current.site === site.trim();
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
+    const found: Errors = {};
+    if (mode !== "sample") {
+      if (!site.trim()) found.site = t("Falta la URL del sitio");
+      else if (!/^https?:\/\//i.test(site.trim())) found.site = t("La URL debe empezar por https://");
+      if (mode === "cloud" && !email.trim()) found.email = t("Falta el email");
+      if (!token.trim() && !keepsToken) found.token = t("Falta el token");
+    }
+    setErrors(found);
     setError(null);
+    if (Object.keys(found).length) return;
+    setBusy(true);
     const req: JiraConnect = { mode, jql: jql.trim() || undefined };
     if (mode !== "sample") {
       req.site = site.trim();
@@ -382,43 +559,46 @@ function ConnectForm({ current, onConnected, onCancel }: {
       const res = await api.connectJira(req);
       onConnected(res.settings);
     } catch (err) {
-      setError((err as Error).message);
+      const fields = err instanceof ApiError ? err.fields : [];
+      const mapped: Errors = {};
+      for (const f of fields) if (f.field === "site" || f.field === "email" || f.field === "token") mapped[f.field] = f.message;
+      if (Object.keys(mapped).length) setErrors(mapped);
+      else setError((err as Error).message);
     } finally {
       setBusy(false);
     }
   };
 
+  const field = (key: keyof Errors, label: string, input: React.ReactNode) => (
+    <label className="field">
+      <span>{label}</span>
+      {input}
+      {errors[key] && <span className="jv-ferr" role="alert">{errors[key]}</span>}
+    </label>
+  );
+
   return (
     <>
       <div className="view-head" data-tauri-drag-region><h1 data-tauri-drag-region>{t("Conectar Jira")}</h1></div>
       <div className="view-body">
-        <form className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 620 }} onSubmit={submit}>
-          <div className="choices" role="radiogroup" aria-label={t("Tipo de Jira")}>
-            {MODES.map((m) => (
-              <label key={m.id} className={`choice ${mode === m.id ? "on" : ""}`}>
-                <input type="radio" name="mode" checked={mode === m.id} onChange={() => setMode(m.id)} /> {t(m.label)}
-              </label>
-            ))}
-          </div>
+        <form className="card jv-form" onSubmit={submit} noValidate>
+          <Segmented mode="radio" label={t("Tipo de Jira")} value={mode} onChange={(v) => { setMode(v as JiraMode); setErrors({}); }}
+            options={[
+              { value: "cloud", label: t("Cloud") },
+              { value: "data-center", label: t("Server") },
+              { value: "sample", label: t("Datos de ejemplo") },
+            ]} />
           {mode !== "sample" && (
             <>
-              <label className="field">
-                <span>{t("URL del sitio")}</span>
+              {field("site", t("URL del sitio"),
                 <input className="input mono" placeholder={mode === "cloud" ? t("https://tu-empresa.atlassian.net") : t("https://jira.tu-empresa.com")}
-                  value={site} onChange={(e) => setSite(e.target.value)} required />
-              </label>
-              {mode === "cloud" && (
-                <label className="field">
-                  <span>{t("Email de tu cuenta de Atlassian")}</span>
-                  <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                </label>
-              )}
-              <label className="field">
-                <span>{mode === "cloud" ? "API token" : t("Token de acceso personal")} {current?.site === site.trim() && t("(vacío = mantener el guardado)")}</span>
+                  value={site} onChange={(e) => setSite(e.target.value)} aria-invalid={!!errors.site} />)}
+              {mode === "cloud" && field("email", t("Email de tu cuenta de Atlassian"),
+                <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!errors.email} />)}
+              {field("token", `${mode === "cloud" ? "API token" : t("Token de acceso personal")}${keepsToken ? ` ${t("(vacío = mantener el guardado)")}` : ""}`,
                 <input className="input mono" type="password" value={token} onChange={(e) => setToken(e.target.value)}
-                  required={current?.site !== site.trim()} autoComplete="off" />
-              </label>
-              <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                  autoComplete="off" aria-invalid={!!errors.token} />)}
+              <p className="muted jv-note">
                 {t("El token se guarda en el Llavero de macOS, no en Delilah.")}
                 {mode === "cloud" && t(" Se crea en id.atlassian.com → Seguridad → Tokens de API.")}
               </p>
@@ -430,9 +610,9 @@ function ConnectForm({ current, onConnected, onCancel }: {
               value={jql} onChange={(e) => setJql(e.target.value)} />
           </label>
           {error && <div className="error selectable">{error}</div>}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-p" disabled={busy}>{busy ? t("Comprobando…") : t("Conectar")}</button>
-            {onCancel && <button type="button" className="btn" onClick={onCancel}>{t("Cancelar")}</button>}
+          <div className="jv-actions">
+            <Button variant="primary" type="submit" disabled={busy}>{busy ? t("Comprobando…") : t("Conectar")}</Button>
+            {onCancel && <Button variant="secondary" onClick={onCancel}>{t("Cancelar")}</Button>}
           </div>
         </form>
       </div>

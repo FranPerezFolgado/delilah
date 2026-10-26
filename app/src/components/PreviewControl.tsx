@@ -3,6 +3,8 @@ import { api, ApiError, type PreviewView, type TaskStatus } from "../api";
 import { t } from "../i18n";
 import { on } from "../live";
 import { openExternal } from "../platform";
+import { Button, Menu } from "./ui";
+import "./PreviewControl.css";
 
 interface Props {
   taskKey: string;
@@ -11,10 +13,12 @@ interface Props {
   project: string | null;
   /** The task's status; a finished task (done or failed) cannot start a preview. */
   status?: TaskStatus;
+  /** Compact header: only the icon (the text goes to the tooltip). */
+  iconOnly?: boolean;
 }
 
 /** Starts, shows and stops a task's preview (the project's preview command). */
-export function PreviewControl({ taskKey, project, status }: Props) {
+export function PreviewControl({ taskKey, project, status, iconOnly }: Props) {
   const [hasCommand, setHasCommand] = useState(false);
   const [preview, setPreview] = useState<PreviewView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,40 +66,41 @@ export function PreviewControl({ taskKey, project, status }: Props) {
     }
   };
 
+  const port = preview?.url ? new URL(preview.url, "http://localhost").port : "";
+  const label = port ? t("Preview :{port}", { port }) : t("Preview");
+  const shown = iconOnly ? undefined : label;
+  const open = () => preview?.url && openExternal(preview.url);
+
   return (
     <span className="preview-ctl">
       {!preview && (
-        <button className="btn btn-ghost" disabled={busy} onClick={start}>{t("Lanzar preview")}</button>
+        <Button variant="secondary" size={28} icon="external" disabled={busy} title={t("Iniciar preview")} aria-label={label} onClick={start}>
+          {shown}
+        </Button>
       )}
       {preview?.state === "starting" && (
-        <>
-          <button className="btn btn-ghost" disabled>{t("Preview arrancando")}</button>
-          <button className="btn btn-ghost" disabled={busy} onClick={stop}>{t("Parar preview")}</button>
-        </>
+        <Button variant="secondary" size={28} icon="external" disabled title={t("Preview iniciándose")} aria-label={t("Preview iniciándose")}>
+          {iconOnly ? undefined : t("Preview iniciándose")}
+        </Button>
       )}
       {preview?.state === "running" && (
-        <>
-          {preview.url ? (
-            <a
-              href={preview.url}
-              title={t("Preview en marcha")}
-              onClick={(e) => {
-                e.preventDefault();
-                openExternal(preview.url!);
-              }}
-            >
-              {preview.url}
-            </a>
-          ) : (
-            <span>{t("Preview en marcha")}</span>
+        <Menu
+          trigger={(p) => (
+            <Button variant="secondary" size={28} title={t("Preview en marcha")} aria-label={label} {...p}>
+              <span className="preview-dot" aria-hidden="true" />
+              {shown}
+            </Button>
           )}
-          <button className="btn btn-ghost" disabled={busy} onClick={stop}>{t("Parar preview")}</button>
-        </>
+          items={[
+            { label: t("Abrir"), onSelect: open, disabled: !preview.url },
+            { label: t("Detener"), onSelect: stop, disabled: busy },
+          ]}
+        />
       )}
       {preview?.state === "failed" && (
         <>
           <span className="preview-err" title={preview.error}>{t("Preview fallida")}{preview.error ? `: ${preview.error}` : ""}</span>
-          <button className="btn btn-ghost" disabled={busy} onClick={start}>{t("Reintentar")}</button>
+          <Button variant="secondary" size={28} disabled={busy} onClick={start}>{t("Reintentar")}</Button>
         </>
       )}
       {error && <span className="preview-err" title={error}>{error}</span>}

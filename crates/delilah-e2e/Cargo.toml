@@ -60,3 +60,7 @@ required-features = ["e2e"]
 [[test]]
 name = "real_claude"
 required-features = ["e2e"]
+
+[[test]]
+name = "ui_v2"
+required-features = ["e2e"]

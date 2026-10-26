@@ -1,0 +1,15 @@
+export const EN: Record<string, string> = {
+  "Dónde trabaja por defecto": "Where it works by default",
+  "Crea la rama en {path} y trabaja ahí. Una tarea a la vez, con el checkout limpio.": "Creates the branch in {path} and works there. One task at a time, with a clean checkout.",
+  "Copia aparte. Varias tareas en paralelo sin tocar tu carpeta.": "A separate copy. Several tasks in parallel without touching your folder.",
+  "Lo que se usa al empezar una tarea de este proyecto, salvo que elijas otra cosa en esa tarea.": "Used when a task of this project starts, unless you pick something else on that task.",
+  "Plantilla de rama": "Branch template",
+  "Opcional. Usa {ticket} para el número del ticket; vacía, Delilah propone el nombre.": "Optional. Use {ticket} for the ticket number; empty, Delilah proposes the name.",
+  "Archivos que no están en git (.env, credenciales) y que cada worktree necesita: se copian o se enlazan.": "Files that are not in git (.env, credentials) and that every worktree needs: they are copied or linked.",
+  "Comando de setup": "Setup command",
+  "Se ejecuta al preparar el workspace de una tarea, antes de que el agente empiece (por ejemplo npm ci).": "Runs when a task's workspace is prepared, before the agent starts (for example npm ci).",
+  "Comando de preview": "Preview command",
+  "Delilah lo ejecuta en el workspace de una tarea para que puedas probarla. Déjalo vacío si el proyecto no tiene preview.": "Delilah runs it in a task's workspace so you can try it. Leave it empty if the project has no preview.",
+  "Entran en todo workspace de este proyecto.": "Included in every workspace of this project.",
+  "Nunca se clonan ni se incluyen en un workspace.": "Never cloned or included in a workspace.",
+};

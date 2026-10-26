@@ -1,0 +1,13 @@
+/* Moved from the pre-v2 stylesheet. */
+.trow.c-wait, .trow.c-done, .trow.c-run { color: inherit; }
+.trow.c-wait .trunc, .trow.c-wait .tkind { color: var(--wait-tx); }
+.trow.c-done .trunc, .trow.c-done .tkind { color: var(--ok-tx); }
+.trow.c-run .trunc, .trow.c-run .tkind { color: var(--run); }
+.tree { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px 20px; }
+.trow { display: flex; align-items: center; gap: 4px; width: 100%; height: 24px; padding-right: 8px; border: 0; border-radius: 7px; background: transparent; color: var(--tx2); font: inherit; font-size: 12px; text-align: left; cursor: pointer; white-space: nowrap; }
+.trow:hover { background: var(--hov); color: var(--tx); }
+.trow.on { background: var(--sel); color: var(--tx); }
+.tkind { font-size: 12px; font-weight: 700; flex: none; }
+.tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--wait); flex: none; }
+.tree-name { flex: 1; }
+.tree-note { padding: 10px; }

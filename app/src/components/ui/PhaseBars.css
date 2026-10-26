@@ -1,0 +1,5 @@
+.phasebars { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--tx2); white-space: nowrap; }
+.bars { display: inline-flex; gap: 3px; }
+.bars i { display: block; width: 14px; height: 4px; border-radius: 2px; background: var(--bd2); }
+.bars i.on { background: var(--tx-strong); }
+.bars.mini i { width: 10px; height: 3px; }

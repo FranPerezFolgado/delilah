@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { clampTreeWidth, setTreeWidth, TREE_WIDTH } from "../editor/session";
 import { t } from "../i18n";
+import "./TreeResizer.css";
 
 /**
  * The tree's left edge: drag it to widen or narrow the tree, double-click to go back

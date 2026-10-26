@@ -22,19 +22,23 @@ test("confirming the proposal card in a project conversation opens the new task"
   });
 
   await page.goto("/");
-  // The sidebar's button for this project.
-  await page.getByRole("button", { name: `Nueva tarea con Claude en ${p.name}` }).click();
+  // «Nueva tarea» → «Con Claude»: an idea conversation in the project.
+  await page.getByRole("button", { name: "Nueva tarea", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Nueva tarea" });
+  await dialog.getByRole("radio", { name: "Con Claude" }).click();
+  await dialog.getByRole("combobox", { name: /^Proyecto/ }).selectOption({ label: `${p.name} · repo` });
+  await dialog.getByRole("button", { name: "Abrir conversación" }).click();
 
   await page.getByRole("textbox", { name: "Mensaje" }).fill("I want a user dashboard");
-  await page.getByRole("button", { name: "Enviar" }).click();
+  await page.getByRole("button", { name: /^Enviar/ }).click();
 
-  const card = page.locator(".conv").getByRole("heading", { name: title });
-  await expect(card).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".conv .ask-preview")).toContainText(brief);
-  await page.locator(".conv").getByRole("button", { name: "Crear", exact: true }).click();
+  const card = page.locator(".pc");
+  await expect(card.getByRole("heading", { name: title })).toBeVisible({ timeout: 30_000 });
+  await expect(card).toContainText(brief);
+  await card.getByRole("button", { name: "Crear", exact: true }).click();
 
   // The answered card is replaced by "Creada" and a link with the new key.
-  const link = page.locator(".conv").getByRole("link", { name: /^[A-Z]+-\d+$/ });
+  const link = page.getByRole("log", { name: "Conversación" }).getByRole("link", { name: /^[A-Z]+-\d+$/ });
   await expect(link).toBeVisible();
   const key = (await link.innerText()).trim();
   await link.click();

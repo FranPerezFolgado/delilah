@@ -10,7 +10,7 @@ const platform = vi.hoisted(() => ({
   onCheckUpdatesMenu: vi.fn(),
 }));
 vi.mock("./platform", () => platform);
-const api = vi.hoisted(() => ({ sessions: vi.fn() }));
+const api = vi.hoisted(() => ({ sessions: vi.fn(), preference: vi.fn() }));
 vi.mock("./api", () => ({ api }));
 
 import { setLanguage } from "./i18n";
@@ -27,6 +27,7 @@ beforeEach(() => {
   platform.relaunch.mockReset().mockResolvedValue(undefined);
   platform.onCheckUpdatesMenu.mockReset().mockResolvedValue(() => {});
   api.sessions.mockReset().mockResolvedValue([]);
+  api.preference.mockReset().mockResolvedValue(null);
 });
 afterEach(() => {
   cleanup();
@@ -43,6 +44,17 @@ describe("useUpdates", () => {
     expect(platform.checkForUpdate).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000); });
     expect(platform.checkForUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips scheduled checks when auto-update is off, but a manual check still runs", async () => {
+    api.preference.mockResolvedValue(false);
+    const { result } = renderHook(() => useUpdates());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000); });
+    expect(api.preference).toHaveBeenCalledWith("auto-update");
+    expect(platform.checkForUpdate).not.toHaveBeenCalled();
+    await act(async () => { await result.current.check(true); });
+    expect(platform.checkForUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("reaches available when an update is found", async () => {

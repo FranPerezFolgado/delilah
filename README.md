@@ -39,12 +39,13 @@ delilah new SIGNAL-13 --project signal --title "Feed cache" --notes "Look at the
 delilah new --free --project signal --title "Try a lighter JSON parser"   # named LIBRE-n
 delilah run SIGNAL-13     # starts the backlog task in its project; its notes reach the agent
 
-delilah new SIGNAL-14 --project signal --title "Feed cache" --worktree   # --checkout or --worktree; neither: the project's setting
-delilah run SIGNAL-13 --checkout   # same flags; neither: the backlog task's choice, else the project's setting
+delilah new SIGNAL-14 --project signal --title "Feed cache" --worktree   # --checkout or --worktree; neither: the project's setting, else the checkout
+delilah run SIGNAL-13 --checkout   # same flags; neither: the backlog task's choice, else the project's setting, else the checkout
 
 # Chat mode (experimental): the agent runs without a terminal, the conversation is the only view
 delilah run SIGNAL-15 --project signal --title "Feed tags" --chat   # also on `delilah new`
 delilah runtime SIGNAL-15 terminal   # move a task's agent to the terminal and back (chat | terminal)
+delilah runtime --session <ID> chat # only that session (no key needed); the task's setting stays the default
 
 # Per-project settings (see "Project settings" below)
 delilah project show signal                          # effective settings, defaults marked
@@ -62,6 +63,7 @@ delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
 delilah resume PROJ-1234   # resume a task paused by the usage limit right away
 delilah done PROJ-1234     # mark it done and stop its agent
+delilah reopen PROJ-1234   # bring a done task back (needs its workspace; not an archived one)
 delilah archive PROJ-1234  # remove its workspace (a worktree with unpushed work needs --force)
 delilah rm PROJ-1234       # delete the task for good: stops its agent, releases its workspace
                            # (the branch stays); a worktree with unpushed work needs --force
@@ -94,6 +96,24 @@ cd app && npm run dist
 ```
 
 `npm run dev` alone serves the same UI at http://localhost:1420 for a browser.
+
+**The interface (UI v2).** Dark and light follow the Mac, and the terminal and the editor
+change theme with it. The window has the sidebar, the main area and, at the bottom, a
+statusbar: "Conectado" (or "Sin conexión con delilahd · reintentando…"), "N trabajando · N te
+espera · N en pausa · N con error", the Claude usage and "Logs" (opens the log view; Ayuda ›
+Ver logs and ⌘⇧L do too). With the daemon away the app keeps the last data under a banner
+with its age ("Datos de hace 2 min"), "Reintentar ahora" and the command to start it; it
+reconnects by itself. The sidebar folds to a rail with ⌘\ (and by itself below 1300 px of
+window); it lists each project's most urgent tasks with "Mostrar N más", a task filter, and
+"Eliminar tarea…" in a task's menu. The first time (no project) "Primeros pasos" walks
+through adding a project, connecting Jira (optional) and creating the first task. The same
+words mean the same thing everywhere: a task is Backlog, Trabajando, Te espera, En pausa,
+Hecha or Error; a Bandeja item is a Pregunta, a Permiso or an Aviso; a PR is Borrador,
+Abierta, Checks fallan or Fusionada. Amber is only for "Te espera". Starting is "Iniciar",
+stopping is "Detener", going somewhere is "Abrir…". Narrow windows keep every function: the
+task header compacts below 960 px of main area and the panels become overlays below 1200 px.
+Over the app, short notices warn when a task waits for you ("Responder"), when Claude's usage is
+almost out, when a limit is reached ("se reanuda a las…") or when an autopilot pauses.
 
 **Previews.** To try a branch while the installed Delilah keeps working (e.g. when
 Delilah's own agents build Delilah), `scripts/preview.sh` runs that checkout's
@@ -176,7 +196,9 @@ Terminal switch above its tabs; the chat shows your messages, Claude's replies, 
 cards (commands, diffs, file reads; click one for its full input and result), question
 cards and a text field, and queues what you write while Claude works ("Detener"
 interrupts). The switch is the only view control: what you pick is remembered as the
-task's view (the new task dialog's "Vista" sets the first one).
+task's view (the new task dialog's "Vista" sets the first one). Each session has its own
+switch, so one Claude of a task can be in chat mode and another in the terminal
+(`delilah runtime --session <ID> chat|terminal`).
 
 Chat mode goes further: with "Modo chat (experimental)" in the new task dialog or
 `--chat` on `delilah new` / `delilah run`, the task's Claude runs without a terminal
@@ -204,8 +226,12 @@ else asks again.
 what an agent asks at the end of its turn (its last message, with a box to answer
 it right there), a permission it needs (answered in its terminal, or with the "¿Permitir?" card for a task in chat mode), a failed turn,
 tasks ready for review, paused by the usage limit (with "Reanudar ahora") or failed.
-Each item opens the task on the right tab. The sidebar counts what blocks an
-agent; ⌘I opens it. The daemon keeps what each session waits for from its hooks,
+Each item opens the task on the right tab, and questions and permissions can be
+answered inline. The sidebar counts what blocks an
+agent; ⌘I opens it. Avisos (what does not block an agent: "Terminó su turno" of a
+secondary session, a PR opened, review ready, paused, failed, branch behind) go away one by one
+with "Quitar" or all at once with "Limpiar avisos" (a toast offers "Deshacer"); what waits on
+an answer stays. With nothing waiting it says "Nada te espera" and the last activity. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
 
 **Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
@@ -229,6 +255,15 @@ binary swaps `gh` (previews use a fake one).
   description to edit (the Jira link and the commit subjects), "Borrador", and for a
   parent a "Submódulo" picker, on the first free submodule with commits. It pushes the branch and opens the PR against the
   default branch; if anything fails, nothing is linked and the error is shown.
+- **"Fusionar"** (PR tab) merges an open, non-draft PR whose checks passed, with the
+  method the repository allows (the tab shows "Método: …" and what will happen) and only
+  while `gh` is still the account the tab showed. Each check shows its time and the review
+  comments their file and line. The task is then archived as below; Delilah never merges
+  on its own.
+- **"Actualizar rama"** appears under the task header as "main avanzó N commits" when the
+  base moved on: it merges the base into the branch (never a rebase), refuses with a
+  reason if the workspace has tracked changes or the merge conflicts (then the branch is
+  left as it was), and clears the "Rama posiblemente atrasada" notice.
 - **Archive on merge.** When all of a task's PRs are merged, Delilah marks it done and
   archives it without asking: back to your previous branches in checkout mode, the
   worktree removed otherwise, and the local task branches deleted (never the parent's
@@ -273,11 +308,13 @@ repo) and the same ones can be edited with `delilah project show|set|unset`.
 Whatever is not set keeps its default, which `show` marks.
 
 - **Dónde trabaja** (workspace mode): checkout or worktree, for new tasks. Unset by
-  default, and then tasks run in a worktree (as before this feature). A task started
+  default, and then tasks run in your checkout. A task started
   without saying where follows it (CLI, ideas, "Crear y lanzar en autopiloto"); the
-  new task form preselects it, or the checkout when the project has none, and a
+  new task form preselects it, and a
   backlog task keeps the choice you saved on it. `delilah project show` prints
-  `worktree (default)` when unset.
+  `checkout (default)` when unset. Before this redesign an unset setting meant a
+  worktree for everything but the form: scripts that relied on it now get the checkout
+  (with its clean-folder rule) unless they pass `--worktree`.
   `--checkout` / `--worktree` on `delilah new` and `delilah run` override it.
 - **Rama** (branch template, optional): empty by default, and then Delilah proposes a
   descriptive name for each task (`feature/PROJ-12-retry-payments`). With a template,
@@ -303,7 +340,9 @@ Whatever is not set keeps its default, which `show` marks.
   running setup can be cancelled too; the whole process group is stopped). The same
   from the terminal: `delilah setup retry|skip|cancel <KEY>`. If the daemon restarts
   during a setup, the task shows it as interrupted and can be retried. A failed
-  setup task can be archived. Checkout tasks do not run the setup.
+  setup task can be archived. The failure banner shows the command ("Copiar comando"), the
+  exit code or "Superó el tiempo límite" / "Cancelado", the duration, the end of the
+  output, "Abrir el log completo" and "Abrir terminal aquí". Checkout tasks do not run the setup.
 - **Submódulos siempre / nunca incluidos** (parents): "always" ones are added to
   every run; "never" ones are not offered in the new task form's picker. A rule
   that names a submodule that no longer exists is rejected with an error pointing
@@ -327,6 +366,11 @@ fresh; in your checkout it starts from where your folder is. If the fetch fails 
 last known state and warns "Rama posiblemente atrasada": an item in the Bandeja and a
 banner on the task screen, with "Descartar". It never blocks the task, and archiving
 clears it.
+
+**Finished tasks.** "Marcar como hecha" offers "Deshacer" for a moment; later, "Reabrir"
+(or `delilah reopen`) brings a done task back while its workspace still exists. The board's
+"Hecha" cards show the PR chip (#n and its state) and the finish date. Jira tickets show
+their sub-tasks (with the count done) under the parent.
 
 **The task's branch.** Delilah names it from the title: Claude proposes a short name
 and the branch is `feature/<short-name>`, or `feature/<KEY>-<short-name>` for a Jira
@@ -413,7 +457,7 @@ covers the interface, the Mac menu (from the next time the app opens), the
 notifications, and what Delilah writes to Claude (the message after a usage
 limit, the review prompt, the ticket handed over), so the agent answers in that
 language too. Texts are written in Spanish in the components, wrapped in `t()`;
-the English ones are in `app/src/i18n/en.ts`. In development the console warns of
+the English ones are in `app/src/i18n/en/<Component>.ts`. In development the console warns of
 any text without a translation.
 
 **Help.** Ayuda › Ver logs (⌘⇧L) shows the daemon's last lines live, to see what is

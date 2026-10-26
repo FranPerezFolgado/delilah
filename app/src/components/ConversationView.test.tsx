@@ -155,6 +155,37 @@ describe("ConversationView", () => {
     await waitFor(() => expect(answer).toHaveBeenCalledWith("s1", "p1", "allow_once", undefined));
   });
 
+  it("exposes the log as Conversación and a skeleton while loading", async () => {
+    vi.spyOn(api, "conversation").mockReturnValue(new Promise(() => {}));
+    const { container } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    expect(container.querySelector('[role="log"]')?.getAttribute("aria-label")).toBe("Conversación");
+    expect(container.querySelector(".conv-log .sk")).toBeTruthy();
+  });
+
+  it("keeps an expired permission card with its outcome", async () => {
+    const perm: ConversationEntry = { id: "perm:p2", at: "", kind: "card", ask_kind: "permission", ask: "p2", tool: "Bash", summary: "rm x", suggestion: null, rule: null, outcome: "terminal" };
+    const { findByText, queryByText, container } = setup(conv([perm]));
+    expect(await findByText("Caducada · se respondió en la terminal")).toBeTruthy();
+    expect(queryByText("Permitir una vez")).toBeNull();
+    expect(container.querySelector(".ac-chat")).toBeTruthy();
+  });
+
+  it("shows the decision of an answered permission card", async () => {
+    const perm: ConversationEntry = { id: "perm:p3", at: "", kind: "card", ask_kind: "permission", ask: "p3", tool: "Bash", summary: "ls", suggestion: null, rule: null, outcome: "answered", decision: "deny" };
+    const { findByText } = setup(conv([perm]));
+    expect(await findByText("Denegada")).toBeTruthy();
+  });
+
+  it("words the stopped marker as Detenida: detuviste a Claude.", async () => {
+    const { findByText } = setup(conv([{ id: "m1", at: "", kind: "marker", marker: "stopped" }]));
+    expect(await findByText("Detenida: detuviste a Claude.")).toBeTruthy();
+  });
+
+  it("shows the ⌘↵ hint on Enviar", async () => {
+    const { findByRole } = setup(conv());
+    expect((await findByRole("button", { name: /Enviar/ })).textContent).toContain("⌘↵");
+  });
+
   it("shows an answered card's task as a link", async () => {
     const onOpenTask = vi.fn();
     const { findByText } = setup(conv([card(5, { outcome: "answered", answer: { "¿Cuál?": "Crear" }, task: "LIBRE-7" })]), session(), { onOpenTask });
@@ -200,7 +231,7 @@ describe("ConversationView", () => {
     // A successful send reloads the conversation.
     vi.spyOn(api, "sendMessage").mockResolvedValue(user(2, "x"));
     fireEvent.change(document.querySelector("textarea")!, { target: { value: "hola" } });
-    fireEvent.click(document.querySelector(".btn-p") as HTMLButtonElement);
+    fireEvent.click(document.querySelector(".b-p") as HTMLButtonElement);
     await waitFor(() => expect(queryByText("caído")).toBeNull());
     expect(spy).toHaveBeenCalledTimes(2);
   });

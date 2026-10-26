@@ -31,7 +31,14 @@ case "${1:-} ${2:-}" in
     fi
     ;;
   "pr list")
-    cat "$dir/pr-list.json"
+    # Like gh: --head keeps only the PRs of that branch (entries without headRefName stay).
+    python3 -I -c '
+import json, sys
+head = sys.argv[2]
+prs = json.load(open(sys.argv[1]))
+if head and isinstance(prs, list):
+    prs = [p for p in prs if p.get("headRefName", head) == head]
+json.dump(prs, sys.stdout)' "$dir/pr-list.json" "$(flag --head)"
     ;;
   "pr view")
     n="${3:-}"
@@ -53,6 +60,28 @@ prs.append({"number": n, "url": url, "headRefName": head, "baseRefName": base,
             "title": title, "isDraft": draft == "1", "body": body, "state": "OPEN"})
 json.dump(prs, open(lp, "w"), indent=2)
 print(url)
+PY
+    ;;
+  "pr merge")
+    n="${args[${#args[@]} - 1]}"
+    n="${n%/}"
+    n="${n##*/}"
+    python3 -I - "$dir" "$n" <<'PY'
+import json, os, sys
+d, n = sys.argv[1:3]
+p = os.path.join(d, "pr-%s.json" % n)
+doc = json.load(open(p))
+pr = doc["data"]["repository"]["pullRequest"]
+pr["state"] = "MERGED"
+pr["merged"] = True
+json.dump(doc, open(p, "w"), indent=2)
+lp = os.path.join(d, "pr-list.json")
+if os.path.exists(lp):
+    prs = json.load(open(lp))
+    for x in prs:
+        if str(x.get("number")) == n:
+            x["state"] = "MERGED"
+    json.dump(prs, open(lp, "w"), indent=2)
 PY
     ;;
   "api graphql")

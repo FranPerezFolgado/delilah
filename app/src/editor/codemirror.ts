@@ -2,34 +2,63 @@
 // name (loaded on demand), Tab indents, ⌘S saves.
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
-import { LanguageDescription, syntaxHighlighting, type LanguageSupport } from "@codemirror/language";
+import { LanguageDescription, defaultHighlightStyle, syntaxHighlighting, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, ViewPlugin, keymap } from "@codemirror/view";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
+import { isDark, onSchemeChange } from "../theme";
 
 /** Swapped in once the file's language has loaded. */
 export const languageSlot = new Compartment();
 
-const dark = typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
-
-const theme = EditorView.theme(
-  {
-    "&": { height: "100%", backgroundColor: "var(--term)", color: "var(--tx)", fontSize: "12.5px" },
-    ".cm-scroller": { fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', lineHeight: "1.55" },
-    ".cm-gutters": { backgroundColor: "var(--term)", color: "var(--tx3)", border: "none" },
-    ".cm-activeLine": { backgroundColor: "rgba(127, 127, 127, 0.07)" },
-    ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--tx2)" },
-    "&.cm-focused": { outline: "none" },
-    "&.cm-focused .cm-cursor": { borderLeftColor: "var(--acc)" },
-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": {
-      backgroundColor: "rgba(240, 160, 60, 0.25)",
+const baseTheme = (dark: boolean) =>
+  EditorView.theme(
+    {
+      "&": { height: "100%", backgroundColor: "var(--term-bg)", color: "var(--term-tx)", fontSize: "12.5px" },
+      ".cm-scroller": { fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', lineHeight: "1.55" },
+      ".cm-gutters": { backgroundColor: "var(--term-bg)", color: "var(--tx3)", border: "none" },
+      ".cm-activeLine": { backgroundColor: "var(--hov)" },
+      ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--tx2)" },
+      "&.cm-focused": { outline: "none" },
+      "&.cm-focused .cm-cursor": { borderLeftColor: "var(--tx-strong)" },
+      "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": {
+        backgroundColor: "var(--sel)",
+      },
+      ".cm-panels": { backgroundColor: "var(--panel)", color: "var(--tx)", borderColor: "var(--bd)" },
+      ".cm-searchMatch": { backgroundColor: "var(--bd2)" },
+      ".cm-tooltip": { backgroundColor: "var(--panel)", border: "1px solid var(--bd2)" },
     },
-    ".cm-panels": { backgroundColor: "var(--panel)", color: "var(--tx)", borderColor: "var(--bd)" },
-    ".cm-searchMatch": { backgroundColor: "rgba(240, 160, 60, 0.2)" },
-    ".cm-tooltip": { backgroundColor: "var(--panel)", border: "1px solid var(--bd2)" },
+    { dark },
+  );
+
+const themes = new Map<boolean, Extension>();
+
+/** The theme and syntax colours for a scheme (the CSS variables do the rest live). */
+export function themeFor(dark: boolean): Extension {
+  let ext = themes.get(dark);
+  if (!ext) {
+    // basicSetup's default highlighting is the light style; dark swaps in One Dark's.
+    ext = [baseTheme(dark), syntaxHighlighting(dark ? oneDarkHighlightStyle : defaultHighlightStyle)];
+    themes.set(dark, ext);
+  }
+  return ext;
+}
+
+/** Holds the theme; reconfigured when the OS scheme changes. */
+export const themeSlot = new Compartment();
+
+/** Follows the OS scheme for as long as the view lives. */
+const followScheme = ViewPlugin.fromClass(
+  class {
+    off: () => void;
+    constructor(view: EditorView) {
+      this.off = onSchemeChange((dark) => view.dispatch({ effects: themeSlot.reconfigure(themeFor(dark)) }));
+    }
+    destroy() {
+      this.off();
+    }
   },
-  { dark },
 );
 
 export interface Hooks {
@@ -41,9 +70,8 @@ export function createState(doc: string, hooks: Hooks): EditorState {
   const extensions: Extension[] = [
     basicSetup,
     keymap.of([indentWithTab, { key: "Mod-s", preventDefault: true, run: () => (hooks.onSave(), true) }]),
-    theme,
-    // basicSetup's highlighting is only a fallback: in dark mode this one wins.
-    dark ? syntaxHighlighting(oneDarkHighlightStyle) : [],
+    themeSlot.of(themeFor(isDark())),
+    followScheme,
     languageSlot.of([]),
     EditorView.updateListener.of((u) => u.docChanged && hooks.onChange(u.state)),
   ];

@@ -9,10 +9,15 @@ use serde_json::Value;
 use crate::adf::adf_to_text;
 
 const FIELDS: &str =
-    "summary,issuetype,priority,status,assignee,reporter,parent,components,description";
+    "summary,issuetype,priority,status,assignee,reporter,parent,components,description,subtasks";
 const MAX_RESULTS: usize = 50;
 /// The sub-tasks of a listing come in one more search, with room for more of them.
 const MAX_SUBTASKS: usize = 500;
+/// How many sub-tasks `subtasks` returns for one parent.
+const MAX_PARENT_SUBTASKS: usize = 50;
+/// The sample parent with many children (a long list to scroll and group).
+const SAMPLE_BIG_PARENT: &str = "PROJ-1244";
+const SAMPLE_BIG_CHILDREN: usize = 20;
 /// What Jira hands over per request, at most.
 const PAGE_SIZE: usize = 100;
 const SAMPLE: &str = include_str!("../fixtures/jira-search.json");
@@ -56,6 +61,11 @@ pub struct JiraIssue {
     pub parent: Option<JiraParent>,
     #[serde(default)]
     pub subtask: bool,
+    /// How many sub-tasks hang from this ticket, and how many of them are done.
+    #[serde(default)]
+    pub subtask_count: u32,
+    #[serde(default)]
+    pub subtasks_done: u32,
     /// The open sprint, or else the next one, or else the last it went through.
     #[serde(default)]
     pub sprint: Option<JiraSprint>,
@@ -209,6 +219,8 @@ pub enum JiraError {
     Parse(String),
     #[error("{0} is not in the sample data")]
     NotInSample(String),
+    #[error("{0} is not a Jira issue key")]
+    BadKey(String),
 }
 
 pub enum JiraClient {
@@ -445,7 +457,7 @@ impl JiraClient {
                 ("maxResults", size.as_str()),
             ];
             let body = match self {
-                Self::Sample => serde_json::from_str(SAMPLE).expect("valid sample"),
+                Self::Sample => sample_body(),
                 // Cloud retired `/search` in favour of `/search/jql`.
                 Self::Remote {
                     mode: JiraMode::Cloud,
@@ -480,7 +492,35 @@ impl JiraClient {
             };
             if !more || page.is_empty() || issues.len() >= limit {
                 issues.truncate(limit);
+                if let Self::Sample = self {
+                    count_sample_subtasks(&mut issues);
+                }
                 return Ok(issues);
+            }
+        }
+    }
+
+    /// The sub-tasks of `parent` whoever has them and whatever their status, at most 50.
+    /// Fails if the parent does not exist.
+    pub async fn subtasks(&self, parent: &str) -> Result<Vec<JiraIssue>, JiraError> {
+        // The key goes into a JQL string: only an issue key may.
+        if !is_issue_key(parent) {
+            return Err(JiraError::BadKey(parent.into()));
+        }
+        self.issue(parent).await?;
+        let custom = self.custom_fields().await;
+        match self {
+            Self::Sample => {
+                let all = self.query("", MAX_RESULTS, &custom).await?;
+                Ok(all
+                    .into_iter()
+                    .filter(|i| i.parent.as_ref().is_some_and(|p| p.key == parent))
+                    .take(MAX_PARENT_SUBTASKS)
+                    .collect())
+            }
+            Self::Remote { .. } => {
+                self.query(&format!("parent = {parent}"), MAX_PARENT_SUBTASKS, &custom)
+                    .await
             }
         }
     }
@@ -631,6 +671,12 @@ pub fn map_issue(
         epic: epic(f, custom.epic_link.as_deref()),
         parent: subtask.then(|| parent(f)).flatten(),
         subtask,
+        subtask_count: f["subtasks"].as_array().map_or(0, |s| s.len() as u32),
+        subtasks_done: f["subtasks"].as_array().map_or(0, |s| {
+            s.iter()
+                .filter(|t| t["fields"]["status"]["statusCategory"]["key"] == "done")
+                .count() as u32
+        }),
         sprint: sprint(f, custom.sprint.as_deref()),
         components: f["components"]
             .as_array()
@@ -749,6 +795,67 @@ fn is_issue_key(key: &str) -> bool {
         && number.chars().all(|c| c.is_ascii_digit())
 }
 
+/// The bundled tickets plus a parent with many children, built here so the
+/// fixture stays readable.
+fn sample_body() -> Value {
+    let mut body: Value = serde_json::from_str(SAMPLE).expect("valid sample");
+    let parent = body["issues"]
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["key"] == SAMPLE_BIG_PARENT))
+        .map(|i| i["fields"]["summary"].clone())
+        .unwrap_or(Value::Null);
+    let statuses = [
+        ("Por hacer", "new"),
+        ("En curso", "indeterminate"),
+        ("Hecho", "done"),
+    ];
+    let people = [Some("Fran"), Some("Ana"), None];
+    let children: Vec<Value> = (0..SAMPLE_BIG_CHILDREN)
+        .map(|n| {
+            let (status, category) = statuses[n % statuses.len()];
+            let assignee = people[n % people.len()].map_or(
+                Value::Null,
+                |name| serde_json::json!({ "displayName": name }),
+            );
+            serde_json::json!({
+                "key": format!("PROJ-{}", 1260 + n),
+                "fields": {
+                    "summary": format!("Paso {} de la migración", n + 1),
+                    "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+                    "status": { "name": status, "statusCategory": { "key": category } },
+                    "assignee": assignee,
+                    "reporter": { "displayName": "Fran" },
+                    "parent": { "key": SAMPLE_BIG_PARENT, "fields": { "summary": parent } },
+                    "components": [],
+                    "description": "",
+                }
+            })
+        })
+        .collect();
+    if let Some(issues) = body["issues"].as_array_mut() {
+        issues.extend(children);
+    }
+    body
+}
+
+/// Fills `subtask_count` / `subtasks_done` of the sample parents from the list.
+fn count_sample_subtasks(issues: &mut [JiraIssue]) {
+    let mut counts: HashMap<String, (u32, u32)> = HashMap::new();
+    for child in issues.iter().filter(|i| i.subtask) {
+        if let Some(parent) = &child.parent {
+            let entry = counts.entry(parent.key.clone()).or_default();
+            entry.0 += 1;
+            entry.1 += u32::from(child.status_category == "done");
+        }
+    }
+    for issue in issues.iter_mut() {
+        if let Some((count, done)) = counts.get(&issue.key) {
+            issue.subtask_count = *count;
+            issue.subtasks_done = *done;
+        }
+    }
+}
+
 fn parent_listed(issue: &JiraIssue, issues: &[JiraIssue]) -> bool {
     issue
         .parent
@@ -810,6 +917,65 @@ mod tests {
             jira.issue("NOPE-1").await,
             Err(JiraError::NotInSample(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn subtasks_of_a_parent_include_every_assignee_and_status() {
+        let jira = JiraClient::sample();
+        let kids = jira.subtasks("PROJ-1242").await.unwrap();
+        let keys: Vec<&str> = kids.iter().map(|i| i.key.as_str()).collect();
+        assert_eq!(keys, ["PROJ-1250", "PROJ-1251"]);
+        assert!(kids.iter().all(|i| i.subtask));
+        // Mine and someone else's, in progress and to do.
+        assert_eq!(kids[0].assignee.as_deref(), Some("Fran"));
+        assert_eq!(kids[1].assignee.as_deref(), Some("Ana"));
+        assert_ne!(kids[0].status, kids[1].status);
+
+        assert!(jira.subtasks("PROJ-1238").await.unwrap().is_empty());
+        assert!(matches!(
+            jira.subtasks("NOPE-1").await,
+            Err(JiraError::NotInSample(_))
+        ));
+        assert!(matches!(
+            jira.subtasks("PROJ-1 OR x").await,
+            Err(JiraError::BadKey(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn parents_carry_subtask_and_done_counts() {
+        let jira = JiraClient::sample();
+        let parent = jira.issue("PROJ-1242").await.unwrap();
+        assert_eq!((parent.subtask_count, parent.subtasks_done), (2, 0));
+        let story = jira.issue("PROJ-1246").await.unwrap();
+        assert_eq!((story.subtask_count, story.subtasks_done), (1, 1));
+        let bare = jira.issue("PROJ-1238").await.unwrap();
+        assert_eq!((bare.subtask_count, bare.subtasks_done), (0, 0));
+
+        // Jira's own `subtasks` field gives the same counts.
+        let raw = json!({ "key": "P-1", "fields": { "summary": "S",
+            "issuetype": { "name": "Story" }, "status": { "name": "x" }, "components": [],
+            "subtasks": [
+                { "key": "P-2", "fields": { "status": { "statusCategory": { "key": "done" } } } },
+                { "key": "P-3", "fields": { "status": { "statusCategory": { "key": "new" } } } },
+                { "key": "P-4", "fields": { "status": { "statusCategory": { "key": "done" } } } }
+            ] }});
+        let issue = map_issue(&raw, None, &none()).unwrap();
+        assert_eq!((issue.subtask_count, issue.subtasks_done), (3, 2));
+    }
+
+    #[tokio::test]
+    async fn the_sample_has_a_parent_with_twenty_children() {
+        let jira = JiraClient::sample();
+        let big = jira.issue("PROJ-1244").await.unwrap();
+        assert_eq!(big.subtask_count, 20);
+        assert!(big.subtasks_done > 0 && big.subtasks_done < 20);
+        let kids = jira.subtasks("PROJ-1244").await.unwrap();
+        assert_eq!(kids.len(), 20);
+        assert_eq!(
+            kids.iter().filter(|k| k.status_category == "done").count() as u32,
+            big.subtasks_done
+        );
     }
 
     #[test]

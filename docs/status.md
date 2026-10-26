@@ -1,10 +1,24 @@
 # Status
 
 What Delilah does today, what is pending, and the known problems. Update this
-page when a feature lands or a decision is taken. Last updated: 2026-10-22
-(version 0.5.0: autopilot and task previews, on `feature/LIBRE-9`; per-project settings, on `feature/LIBRE-2`).
+page when a feature lands or a decision is taken. Last updated: 2026-10-26
+(UI v2, the redesign of `docs/ui-redesign.md`, on `feature/ui-v2`; before it, 0.12.0).
 
 ## Built
+
+**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
+- **Tokens and themes:** `styles.css` holds only the tokens (dark and light, following the OS) and the base; every component has its own CSS. The terminal and the editor read the same tokens (`theme.ts`) and change theme live. Guards in `tokens.test.ts` (contrast), `styles.test.ts` (type/radius scale, allowed colours) and `inline-style.test.ts` (inline-style ratchet).
+- **Kit** (`components/ui/`, one barrel): Button, IconButton, Toggle, Segmented, Menu, Dialog, ConfirmDialog, Toast, Skeleton, Row, OptionCard, StatusBadge, InboxKind, PrChip, PhaseBars, Icon.
+- **Shell:** the sidebar (collapses to a rail with ⌘\ or below 1300 px, a task filter, the 6 most urgent tasks per project with "Mostrar N más"), the statusbar (connection, "N trabajando · N te espera · N en pausa · N con error", usage, "Logs"), and the disconnected state (a banner over the content with the age of the data and "Reintentar ahora"; `connection.ts`). Logs, first run ("Primeros pasos") and the global notices (a task waits, usage almost out, limit reached, paused autopilot).
+- **Every screen redone:** Bandeja, board, task screen (header with phase and PR chip, task tab, Chat / Terminal tab, Cambios, PR, setup), Jira, projects and project view, settings (with the auto-update preference), "Nueva tarea", backlog task, project settings, quick open, delete task, idea proposals.
+- **Bandeja:** the three-axis vocabulary (`vocab.ts`), avisos you can remove one by one or all with "Limpiar avisos" and bring back with "Deshacer" (`inbox_dismissals`), the new avisos "Terminó su turno" (a secondary session finished its turn) and PR opened, and the empty state with the last activity.
+- **Chat | Terminal per session**, with `sessions.runtime` as the session's own override (`POST /sessions/{id}/runtime`, `delilah runtime --session`); inline answers to questions and permissions; a pending permission makes the task "Te espera".
+- **Tasks:** reopen a done task (`Done → WaitingForUser`, "Deshacer" after "Marcar como hecha", `delilah reopen`); PR merge from the PR tab ("Fusionar", with the repo's allowed method and the `gh` account guard); setup failure detail (command, exit code, duration, tail, full log); base update ("main avanzó N commits · Actualizar rama", a merge, never a rebase); Jira sub-tasks; the board's PR chip and "Hecha" dates (`PrSummary.number`, `Task.finished_at`).
+- **Checkout is now the default** when nothing says otherwise (`POST /runs`, `delilah run|new`; decisions 16 and 57).
+- **Widths and scale:** breakpoints at 1300 px (rail) and 1200 px (overlays), the task header compacts at 960 px of main area (`useWidth.ts`); the sidebar, Bandeja, Jira, task screen and board at width.
+- **Per-component English** in `i18n/en/` (a coverage test finds literals missing a translation); the old code, LEGACY CSS and orphan keys are gone.
+- **Preview seed** (`scripts/seed-preview.sh`) with every state of the redesign, and a fake `gh` that merges.
+- **Before / after record:** `docs/redesign/antes/` and `despues/` (the same 46 screens; see [redesign/README.md](redesign/README.md)).
 
 **Core (MVP-0):**
 - The Cargo workspace and the task state machine.
@@ -165,6 +179,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-22
   - cross-linked PRs of a changeset (each PR names the others);
   - saving lessons to QMD when a task merges;
   - "Abrir PR" against a base other than the default branch.
+- **UI v2, open items** (from the reviews in `specs/007-ui-v2/progress.md`):
+  - **Structure:** `TaskScreen.tsx` (~900 lines) and `App.tsx` (~570) should be split (a data hook plus panes; `useRoute` / `useAppData` / a shell). Deferred on purpose to its own behaviour-neutral PR. Also ~60 raw `<button>` outside the kit and Spanish literals as kind keys where neutral keys would do.
+  - **Bandeja avisos:** the `turn-done` / `pr-opened` rows in `pr_notices` accumulate (never resolved) and their text-hash ids change with the language; `pr_notices` is still the table of those two avisos, and a rename to a neutral `notices` is pending ([#74](decisions.md)). Downgrade: an older binary refuses a database at version 21 (say it in the release notes).
+  - **Colour:** light `--tx3` on `--side` is 4.43:1 (listed in `KNOWN_LOW` in `tokens.test.ts`); darken to #686b72 and drop the entry. A colour-blind mode is not built.
+  - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). Run vitest with `--no-cache` after adding files under `i18n/en/` (the glob list is cached).
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
 - **Testing:** test the whole flow on the work Mac with a real ticket.

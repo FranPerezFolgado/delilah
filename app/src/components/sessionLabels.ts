@@ -1,5 +1,5 @@
 import { statusLabel, type Session, type Task } from "../api";
-import type { IconName } from "./Icon";
+import type { IconName } from "./ui";
 import { statusIcon } from "./status";
 import { t } from "../i18n";
 

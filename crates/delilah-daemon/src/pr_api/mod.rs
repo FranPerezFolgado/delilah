@@ -3,6 +3,7 @@
 
 mod dto;
 mod forward;
+pub mod merge;
 mod open;
 
 use axum::Json;
@@ -11,7 +12,7 @@ use axum::http::StatusCode;
 use delilah_core::TaskKey;
 
 use self::dto::{LinkRequest, PrView, Problem, TaskPrs};
-pub use self::forward::{dismiss, forward};
+pub use self::forward::forward;
 pub use self::open::{open, proposal};
 pub(crate) use self::open::{open_for, proposal_for};
 use crate::api::ApiError;
@@ -121,6 +122,26 @@ pub async fn task_prs(
         problem,
         prs: rows.iter().map(PrView::from).collect(),
     }))
+}
+
+/// Discards a notice without telling the agent: writes the dismissal of its inbox item
+/// (`inbox_dismissals`, the one record, so `/inbox/restore` undoes it too). Idempotent:
+/// 204 for a notice dismissed already, 404 only if it never existed.
+pub async fn dismiss(
+    State(app): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let notice = app
+        .store
+        .notice(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("notice {id} does not exist")))?;
+    // A kind the inbox never lists has nothing to dismiss.
+    if let Some(item) = crate::inbox::notice_item_id(&notice) {
+        app.store.dismiss(&[(item, notice.task_key)]).await?;
+        app.emit(Topic::Inbox);
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn summaries(State(app): State<AppState>) -> Result<Json<Vec<PrSummary>>, ApiError> {
@@ -435,6 +456,49 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(task.phase.as_deref(), Some("review"));
+    }
+
+    #[tokio::test]
+    async fn linking_a_pr_writes_one_pr_opened_aviso_that_both_dismiss_routes_agree_on() {
+        let (router, app, _dir) = setup(fake()).await;
+        let link = || async {
+            let body = json!({ "url": PR_URL });
+            call(&router, "POST", "/api/v1/tasks/PROJ-1/prs/link", Some(body)).await
+        };
+        let opened = |items: &Value| {
+            items
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["kind"] == "pr-opened")
+                .cloned()
+        };
+        link().await;
+        let (_, items) = call(&router, "GET", "/api/v1/inbox", None).await;
+        let item = opened(&items).expect("a pr-opened item");
+        let id = item["id"].as_str().unwrap().to_string();
+        let notice = item["pr"]["notice"].as_i64().unwrap();
+        assert_eq!(item["pr"]["url"], PR_URL);
+
+        let uri = format!("/api/v1/pr-notices/{notice}/dismiss");
+        assert_eq!(
+            call(&router, "POST", &uri, None).await.0,
+            StatusCode::NO_CONTENT
+        );
+        assert!(app.store.dismissed().await.unwrap().contains(&id));
+        let (_, items) = call(&router, "GET", "/api/v1/inbox", None).await;
+        assert!(opened(&items).is_none());
+
+        // Linking it again is not news.
+        link().await;
+        let (_, items) = call(&router, "GET", "/api/v1/inbox", None).await;
+        assert!(opened(&items).is_none());
+
+        let body = json!({ "ids": [id] });
+        let (s, _) = call(&router, "POST", "/api/v1/inbox/restore", Some(body)).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        let (_, items) = call(&router, "GET", "/api/v1/inbox", None).await;
+        assert!(opened(&items).is_some());
     }
 
     #[tokio::test]

@@ -91,11 +91,12 @@ fn projects_tasks_and_sessions_survive_a_daemon_restart() {
         items(&all).iter().any(|s| s["id"] == session.as_str()),
         "session {session} lost: {all}"
     );
+    // The checkout is the default workspace (decision 57): no worktree is created.
     assert!(
-        env.home
+        !env.home
             .parent()
             .unwrap()
             .join("delilah/workspaces/E2E-11")
-            .is_dir()
+            .exists()
     );
 }

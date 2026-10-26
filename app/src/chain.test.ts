@@ -3,7 +3,7 @@ import type { Autopilot, Handoff, Session, Step, Task } from "./api";
 import { chainOf } from "./chain";
 
 const task = (saving: boolean, handoff: Handoff | null = null): Task => ({
-  key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
   title: "T",
   project: "web",
   workflow: "feature",
@@ -13,7 +13,7 @@ const task = (saving: boolean, handoff: Handoff | null = null): Task => ({
   status: { type: "running" },
 });
 const sess = (id: string, step: Step | null, primary: boolean): Session => ({
-  id,
+  effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id,
   task: "PROJ-1",
   kind: "claude",
   label: id,

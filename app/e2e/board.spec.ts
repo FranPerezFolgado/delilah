@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { boardCard, expect, startFreeTask, test } from "./fixtures";
 
 test.use({ locale: "en-GB" });
 
@@ -7,20 +7,12 @@ test("a started task appears on the board and goes from working to waiting", asy
   const p = await project("repo");
   const title = `Slow stop ${Date.now()} [fake:slow-stop]`;
 
-  await page.goto("/");
-  await page.getByRole("button", { name: /^Task\b(?!s)/ }).first().click();
-  const dialog = page.getByRole("dialog", { name: "New task" });
-  await dialog.getByRole("radio", { name: "Free task" }).click();
-  await dialog.getByPlaceholder("Try a rates cache in svc-billing").fill(title);
-  await dialog.getByRole("combobox", { name: /^Project/ }).selectOption({ label: `${p.name} · repo` });
-  await dialog.getByRole("button", { name: "Start" }).click();
-  await expect(dialog).toBeHidden();
+  await startFreeTask(page, p, title);
 
-  await page.getByRole("button", { name: /^Tasks/ }).click();
-  const card = page.locator(".board .kcard", { hasText: title });
+  await page.getByRole("navigation", { name: "Navigation" }).getByRole("button", { name: /^Tasks/ }).click();
+  const card = await boardCard(page, title);
   await expect(card).toBeVisible();
-  const status = card.locator(".kcard-status");
-  // Board columns are phases, so the move is the live status of the card.
-  await expect(status).toHaveAttribute("title", "Running");
-  await expect(status).toHaveAttribute("title", "Waiting for you");
+  // Board columns are phases, so the move is the live status badge of the card.
+  await expect(card.getByText("Working", { exact: true })).toBeVisible();
+  await expect(card.getByText("Waiting for you", { exact: true })).toBeVisible();
 });

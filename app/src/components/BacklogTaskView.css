@@ -1,0 +1,11 @@
+.bt-head { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 0 20px; min-height: 48px; border-bottom: 1px solid var(--bd); }
+.bt-key { flex: none; color: var(--tx2); font-size: 13.5px; }
+.bt-title { flex: 1 1 0; min-width: 0; margin: 0; font-size: 15px; font-weight: 600; color: var(--tx-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-head > .badge { flex: none; }
+.bt-when { flex: none; color: var(--tx3); font-size: 12px; white-space: nowrap; }
+.bt-body { max-width: 720px; }
+.bt-body textarea { resize: vertical; font: inherit; }
+.bt-refused { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bt-started { color: var(--run-tx); font-size: 13.5px; }
+.bt-actions { display: flex; align-items: center; gap: 8px; }
+.bt-actions .bt-delete { margin-left: auto; }

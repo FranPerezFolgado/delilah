@@ -1,5 +1,5 @@
 import type { TaskStatus } from "../api";
-import type { IconName } from "./Icon";
+import type { IconName } from "./ui";
 
 export const statusIcon = (s: TaskStatus): { icon: IconName; cls: string } => {
   switch (s.type) {

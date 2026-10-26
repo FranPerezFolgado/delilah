@@ -1,0 +1,4 @@
+.sk-group { display: flex; flex-direction: column; gap: 8px; }
+.sk { display: block; height: 12px; border-radius: 6px; background: var(--hov); animation: sk-pulse 1.4s ease-in-out infinite; }
+@keyframes sk-pulse { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }

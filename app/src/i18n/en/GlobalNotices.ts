@@ -1,0 +1,14 @@
+export const EN: Record<string, string> = {
+  "{key} te espera": "{key} is waiting for you",
+  Responder: "Reply",
+  "Claude {window} al {pct} %": "Claude {window} at {pct} %",
+  "Quedan pocas peticiones en esta ventana de uso": "Few requests are left in this usage window",
+  "Límite de {window} alcanzado · se reanuda a las {time}": "{window} limit reached · resumes at {time}",
+  "Límite de {window} alcanzado": "{window} limit reached",
+  "{n} tarea en pausa": "{n} task paused",
+  "{n} tareas en pausa": "{n} tasks paused",
+  "{key} · autopiloto en pausa": "{key} · autopilot paused",
+  "{key} · autopiloto en pausa: {reason}": "{key} · autopilot paused: {reason}",
+  Abrir: "Open",
+  "y {n} más con el autopiloto en pausa": "and {n} more with autopilot paused",
+};

@@ -1,0 +1,10 @@
+.tool-card { align-self: stretch; border: 1px solid var(--bd); border-radius: 7px; background: var(--panel); font-size: 13.5px; }
+.tool-card.running { border-color: var(--run); }
+.tool-card.failed { border-color: var(--err); }
+.tool-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 10px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.tool-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-body { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px 10px; border-top: 1px solid var(--bd); }
+.tool-path { display: flex; align-items: center; gap: 8px; }
+.tool-cmd, .tool-out { margin: 0; padding: 6px 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 7px; border: 1px solid var(--bd); }
+.tool-todos { margin: 0; padding-left: 18px; }
+.tool-todos li.done { color: var(--tx3); text-decoration: line-through; }

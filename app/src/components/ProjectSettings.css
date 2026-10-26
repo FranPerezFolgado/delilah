@@ -1,0 +1,6 @@
+.ps { display: flex; flex-direction: column; gap: 18px; }
+.ps .ps-help { font-size: 12px; font-weight: 400; color: var(--tx3); }
+.ps .ps-where { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ps .shared-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
+.ps .picks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.ps .field-error { font-size: 12px; }

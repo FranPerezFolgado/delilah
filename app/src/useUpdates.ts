@@ -128,8 +128,14 @@ export function useUpdates() {
         apply({ type: "installed", version: v });
       })
       .catch(() => {});
-    const first = setTimeout(() => void check(false), FIRST_CHECK_MS);
-    const every = setInterval(() => void check(false), EVERY_MS);
+    // Scheduled checks honour the «auto-update» preference (read each time, so a change
+    // applies at once); unreadable means on. A manual check never looks at it.
+    const scheduled = async () => {
+      const on = await api.preference<boolean>("auto-update").catch(() => true);
+      if (alive && on !== false) void check(false);
+    };
+    const first = setTimeout(() => void scheduled(), FIRST_CHECK_MS);
+    const every = setInterval(() => void scheduled(), EVERY_MS);
     return () => {
       alive = false;
       clearTimeout(first);

@@ -71,6 +71,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = delilah_daemon::recover_interrupted_setups(&app).await {
         tracing::warn!("cannot recover interrupted setups: {e}");
     }
+    // The permissions that were waiting died with the previous daemon: record it.
+    if let Err(e) = delilah_daemon::permissions::reconcile_lost(&app).await {
+        tracing::warn!("cannot reconcile the lost permissions: {e}");
+    }
     scheduler::spawn(app.clone());
     pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
