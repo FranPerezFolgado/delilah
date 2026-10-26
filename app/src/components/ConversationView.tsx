@@ -313,12 +313,13 @@ export function ConversationView({
               />
             );
           if (e.kind === "marker") {
-            // Unknown markers (and "background-done", rendered elsewhere) show nothing.
-            if (e.marker !== "compacted" && e.marker !== "stopped") return null;
+            // Unknown markers show nothing.
+            if (e.marker !== "compacted" && e.marker !== "stopped" && e.marker !== "background-done") return null;
             return (
               <div key={e.id} className="conv-marker muted">
                 {e.marker === "compacted" && t("Conversación compactada")}
                 {e.marker === "stopped" && t("Detenida: detuviste a Claude.")}
+                {e.marker === "background-done" && (e.detail ? `${t("Tarea en segundo plano terminada")} · ${e.detail}` : t("Tarea en segundo plano terminada"))}
               </div>
             );
           }

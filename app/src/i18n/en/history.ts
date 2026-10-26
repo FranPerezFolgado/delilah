@@ -31,5 +31,7 @@ export const EN: Record<string, string> = {
   "La sesión pasó a la terminal": "The session switched to the terminal",
   "Claude pidió permiso para {tool}: {summary}": "Claude asked permission for {tool}: {summary}",
   "Caducó el permiso de {tool} · {outcome}": "Permission for {tool} expired · {outcome}",
+  "Claude continúa: tarea en segundo plano terminada": "Claude continues: background task finished",
+  "Claude continúa": "Claude continues",
   "Pasó algo en la tarea": "Something happened in the task",
 };

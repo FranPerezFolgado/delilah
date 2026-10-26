@@ -513,14 +513,25 @@ describe("ConversationView chat mode", () => {
     expect(heads()[1]).not.toContain("nuevo-a");
   });
 
-  it("renders nothing for unknown and background-done markers", async () => {
+  it("renders nothing for unknown markers", async () => {
     const mk = (id: string, marker: string) => ({ id, at: "2025-01-01T00:00:00Z", kind: "marker", marker }) as unknown as ConversationEntry;
-    vi.spyOn(api, "conversation").mockResolvedValue(conv([mk("m1", "stopped"), mk("m2", "background-done"), mk("m3", "weird")]));
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([mk("m1", "stopped"), mk("m3", "weird")]));
     const { findByText, container } = render(
       <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
     );
     await findByText("Detenida: detuviste a Claude.");
     expect(container.querySelectorAll(".conv-marker").length).toBe(1);
+  });
+
+  it("renders a background-done marker as a divider with its detail", async () => {
+    const e = { id: "m1", at: "2025-01-01T00:00:00Z", kind: "marker", marker: "background-done", detail: 'Background command "sleep 5" completed' } as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([e]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText(/Tarea en segundo plano terminada/);
+    const m = container.querySelector(".conv-marker")!;
+    expect(m.textContent).toContain('Background command "sleep 5" completed');
   });
 
   it("keeps the old activity line without progress", async () => {

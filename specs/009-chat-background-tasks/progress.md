@@ -15,8 +15,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05F | 2 | fix | done | 1 | ed96262 | phase 1-2 review mediums |
 | WP-07F | 3 | fix | done | 1 | 8610596 | live.rs busy loop when progress sender drops; live.ts wiring goes in WP-08 |
 | WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
-| WP-09 | 5 | 5A | verified | 1 | SHA9 | +delilah-core task.rs (Event::AgentResumed) allowed |
-| WP-10 | 5 | 5A | implementing | 0 | | |
+| WP-09 | 5 | 5A | verified | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
+| WP-10 | 5 | 5A | verified | 1 | SHA10 | |
 | WP-11 | 6 | 6A | pending | 0 | | |
 | WP-13 | 6 | 6A | implementing | 0 | | |
 | WP-15 | 6 | 6A | implementing | 0 | | |
