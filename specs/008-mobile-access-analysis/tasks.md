@@ -13,7 +13,7 @@ Tests: none (not requested; nothing executable ships).
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `specs/008-mobile-access-analysis/experiment/` with a `README.md` stating it holds the experiment's notes and screenshots (throwaway, not shipped)
+- [X] T001 Create `specs/008-mobile-access-analysis/experiment/` with a `README.md` stating it holds the experiment's notes and screenshots (throwaway, not shipped)
 
 ---
 
