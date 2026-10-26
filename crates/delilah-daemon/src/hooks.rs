@@ -156,6 +156,10 @@ async fn apply_signal(
         }
     }
 
+    if signal == Signal::TurnEnded && limit_reset.is_none() {
+        note_turn_done(&app, &q.task, session_id.as_deref(), &hook).await;
+    }
+
     let event = match (signal, limit_reset) {
         // The subscription is shared: a limit hit by any session pauses the task.
         (_, Some(resume_at)) => {
@@ -182,6 +186,50 @@ async fn apply_signal(
             Ok(_) | Err(StoreError::Transition(_)) => {}
             Err(e) => tracing::warn!(task = %q.task, "hook not applied: {e}"),
         }
+    }
+}
+
+/// A non-primary Claude session ended a turn: an aviso (`turn-done`) for the inbox. The
+/// primary session's turn is the `waiting` of the task instead. The notice is a row of
+/// `pr_notices` on purpose; its cause is the session and the moment, one per turn.
+async fn note_turn_done(app: &AppState, task: &str, session: Option<&str>, hook: &Value) {
+    use crate::store_prs::{KIND_TURN_DONE, NewNotice};
+    use crate::store_sessions::SessionKind;
+    if crate::store_sessions::project_of(task).is_some() {
+        return;
+    }
+    let Some(record) = (match session {
+        Some(id) => app.store.session(id).await.ok().flatten(),
+        None => None,
+    }) else {
+        return;
+    };
+    if record.primary || record.closed || record.kind != SessionKind::Claude {
+        return;
+    }
+    let text = hook["last_assistant_message"]
+        .as_str()
+        .map(inbox::clip)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| {
+            app.lang()
+                .pick(
+                    "La sesión terminó su turno.",
+                    "The session finished its turn.",
+                )
+                .into()
+        });
+    let notice = NewNotice {
+        repo: ".".into(),
+        kind: KIND_TURN_DONE.into(),
+        cause: format!("{}:{}", record.id, Utc::now().timestamp_millis()),
+        text,
+        detail: Some(serde_json::json!({ "session": record.id })),
+    };
+    match app.store.insert_notice(&TaskKey::new(task), &notice).await {
+        Ok(true) => app.emit(Topic::Inbox),
+        Ok(false) => {}
+        Err(e) => tracing::warn!(task, "cannot record the finished turn: {e}"),
     }
 }
 
@@ -433,6 +481,48 @@ mod tests {
         )
         .await;
         assert!(inbox(&state).await.is_empty());
+    }
+
+    fn session_record(id: &str, primary: bool) -> crate::store_sessions::SessionRecord {
+        crate::store_sessions::SessionRecord {
+            id: id.into(),
+            task: "PROJ-1".into(),
+            kind: crate::store_sessions::SessionKind::Claude,
+            label: id.into(),
+            primary,
+            closed: false,
+            read_only: false,
+            conversation: false,
+            step: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stop_of_a_non_primary_session_is_a_turn_done_aviso_and_a_primary_one_is_not() {
+        let state = running_task().await;
+        state
+            .store
+            .create_session(&session_record("s-1", true))
+            .await
+            .unwrap();
+        state
+            .store
+            .create_session(&session_record("s-2", false))
+            .await
+            .unwrap();
+        let stop = json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" });
+        post(&state, "/hooks/claude?task=PROJ-1&session=s-1", stop.clone()).await;
+        let items = inbox(&state).await;
+        assert!(items.iter().all(|i| i["kind"] != "turn-done"), "{items:?}");
+        assert!(items.iter().any(|i| i["kind"] == "question"));
+
+        post(&state, "/hooks/claude?task=PROJ-1&session=s-2", stop).await;
+        let items = inbox(&state).await;
+        let done: Vec<_> = items.iter().filter(|i| i["kind"] == "turn-done").collect();
+        assert_eq!(done.len(), 1, "{items:?}");
+        assert_eq!(done[0]["session"]["id"], "s-2");
+        assert_eq!(done[0]["text"], "listo");
+        assert!(done[0]["notice"].is_i64());
     }
 
     #[tokio::test]

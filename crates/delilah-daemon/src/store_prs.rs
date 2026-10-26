@@ -70,6 +70,10 @@ const PR_COLUMNS: &str = "id, task_key, repo, host, owner_name, number, url, lin
 /// The `pr_notices.kind` of "the branch started from a base that could not be
 /// refreshed". It belongs to the task's start, not to a PR, so PR changes leave it.
 pub(crate) const KIND_BASE_STALE: &str = "base-stale";
+/// A non-primary session finished a turn (`detail.session` names it). A plain aviso.
+pub(crate) const KIND_TURN_DONE: &str = "turn-done";
+/// A PR was opened or linked for the task. A plain aviso, once per PR URL.
+pub(crate) const KIND_PR_OPENED: &str = "pr-opened";
 
 const NOTICE_COLUMNS: &str =
     "id, task_key, repo, kind, cause, text, detail, created_at, resolved_at";
@@ -182,6 +186,7 @@ impl Store {
                 .bind(&pr.repo)
                 .fetch_optional(&mut *tx)
                 .await?;
+        let is_new = old_url.as_deref() != Some(pr.url.as_str());
         if old_url.is_some_and(|old| old != pr.url) {
             sqlx::query(
                 "UPDATE pr_notices SET resolved_at = ?
@@ -228,6 +233,18 @@ impl Store {
             .bind(&pr.url)
             .execute(&mut *tx)
             .await?;
+        // Opening, pasting and detecting all come through here. The URL as the cause
+        // makes it once per PR: unlinking and linking it again is not news.
+        if is_new {
+            let opened = NewNotice {
+                repo: pr.repo.clone(),
+                kind: KIND_PR_OPENED.into(),
+                cause: pr.url.clone(),
+                text: format!("{}#{}", pr.owner_name, pr.number),
+                detail: None,
+            };
+            insert_notice_in(&mut tx, key.as_str(), &opened).await?;
+        }
         let row = sqlx::query(&format!(
             "SELECT {PR_COLUMNS} FROM pull_requests WHERE task_key = ? AND repo = ?"
         ))
@@ -405,11 +422,28 @@ impl Store {
         insert_notice_in(&mut conn, key.as_str(), notice).await
     }
 
-    /// The notices still showing, oldest first.
+    /// The notices still showing that ask for something, oldest first. The avisos
+    /// (`turn-done`, `pr-opened`) are apart: see [`Store::open_avisos`].
     pub(crate) async fn open_notices(&self) -> Result<Vec<NoticeRow>, StoreError> {
         let rows = sqlx::query(&format!(
-            "SELECT {NOTICE_COLUMNS} FROM pr_notices WHERE resolved_at IS NULL ORDER BY id"
+            "SELECT {NOTICE_COLUMNS} FROM pr_notices
+             WHERE resolved_at IS NULL AND kind NOT IN (?, ?) ORDER BY id"
         ))
+        .bind(KIND_TURN_DONE)
+        .bind(KIND_PR_OPENED)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(notice_row).collect()
+    }
+
+    /// The avisos still showing (a session ended a turn, a PR was opened), oldest first.
+    pub(crate) async fn open_avisos(&self) -> Result<Vec<NoticeRow>, StoreError> {
+        let rows = sqlx::query(&format!(
+            "SELECT {NOTICE_COLUMNS} FROM pr_notices
+             WHERE resolved_at IS NULL AND kind IN (?, ?) ORDER BY id"
+        ))
+        .bind(KIND_TURN_DONE)
+        .bind(KIND_PR_OPENED)
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(notice_row).collect()
@@ -513,6 +547,25 @@ mod tests {
             text: "text".into(),
             detail: None,
         }
+    }
+
+    #[tokio::test]
+    async fn a_pr_linked_for_the_first_time_raises_one_pr_opened_notice_per_url() {
+        let store = store_with(&["PROJ-1"]).await;
+        let opened = |store: &Store| {
+            let store = store.clone();
+            async move { store.open_avisos().await.unwrap() }
+        };
+        link(&store, "PROJ-1", ".", 1).await;
+        link(&store, "PROJ-1", ".", 1).await;
+        let first = opened(&store).await;
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].cause, url(1));
+        // Another PR in the repo is another aviso (the old one went with its PR).
+        link(&store, "PROJ-1", ".", 2).await;
+        let now = opened(&store).await;
+        assert_eq!(now.len(), 1);
+        assert_eq!(now[0].cause, url(2));
     }
 
     async fn table_count(store: &Store, table: &str) -> i64 {
@@ -775,7 +828,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(table_count(&store, "pull_requests").await, 1);
-        assert_eq!(table_count(&store, "pr_notices").await, 0);
+        // PROJ-2 keeps its own pr-opened aviso.
+        assert_eq!(table_count(&store, "pr_notices").await, 1);
         assert_eq!(table_count(&store, "pr_unlinked").await, 0);
     }
 

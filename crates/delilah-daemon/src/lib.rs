@@ -47,6 +47,7 @@ pub use setup::recover_interrupted as recover_interrupted_setups;
 pub mod specs;
 pub mod state;
 pub mod store;
+mod store_inbox;
 mod store_projects;
 mod store_prs;
 mod store_runs;
