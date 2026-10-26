@@ -58,7 +58,7 @@ to FR-005, research R2/R3).
 
 **Independent Test**: Render `TaskScreen` with a non-primary stopped `implement` session and a primary `review` session. The tabs read «Implementación», «Revisión», in that order.
 
-- [ ] T005 [US2] Add tests in `app/src/components/TaskScreen.test.tsx`:
+- [X] T005 [US2] Add tests in `app/src/components/TaskScreen.test.tsx`:
   - `[sess("old", { step: "implement", live: false, closed: false }), sess("new", { primary: true, step: "review" })]` → the session tabs read «Implementación», «Revisión» in that order;
   - the former phase tab is closable, and its close button is named «Cerrar Implementación»;
   - an extra Claude `sess("b", { label: "Review" })` with `step: null` keeps «Review».

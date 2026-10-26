@@ -175,6 +175,18 @@ describe("TaskScreen tabs", () => {
     expect(screen.queryByRole("button", { name: "Cerrar Implementación" })).toBeNull();
   });
 
+  it("keeps earlier phase sessions under their phase name, in order, and closable", () => {
+    taskScreen([sess("old", { step: "implement", live: false, closed: false }), sess("new", { primary: true, step: "review" })]);
+    expect(labels()).toEqual(["Tarea", "Oficina", "Implementación", "Revisión", "PR"]);
+    expect(screen.queryByRole("button", { name: "Cerrar Implementación" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Cerrar Revisión" })).toBeNull();
+  });
+
+  it("keeps the own label of an extra Claude session with no step", () => {
+    taskScreen([sess("a", { primary: true, step: "review" }), sess("b", { label: "Review", step: null })]);
+    expect(labels()).toEqual(["Tarea", "Oficina", "Revisión", "Review", "PR"]);
+  });
+
   it("orders the tabs Tarea, sessions, files, Cambios, PR", () => {
     sessionFor("PROJ-1").changesOpen = true;
     sessionFor("PROJ-1").tabs = [{ path: "src/a.rs", dirty: false } as never];
