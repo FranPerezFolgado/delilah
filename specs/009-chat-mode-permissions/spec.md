@@ -113,9 +113,12 @@ on the current code and pass after the fix.
 
 ### Edge Cases
 
-- **The user's default is not auto.** If the user's own default permission behaviour is
-  "ask", terminal mode asks and chat mode should ask the same. The fix must give parity
-  with the terminal. It must never grant more than the terminal would.
+- **The user's Claude default is not auto.** Both runtimes follow the Delilah setting, so
+  they stay equal. With Auto, that user's terminal sessions stop asking for routine
+  actions as well. With "Claude's default", both runtimes behave as they did before
+  (chat mode asks for everything outside the allow list).
+- **Auto mode unavailable on the account.** Every task and project session fails at start
+  in both runtimes. The failure names the setting (FR-008).
 - **Idea conversations and read-only sessions.** These keep their stricter, explicit modes
   ("never ask", plan). This feature does not change them.
 - **Project sessions and shells.** These always use a terminal. They are unaffected.
@@ -145,11 +148,15 @@ on the current code and pass after the fix.
   session of the same task. They MUST also state that idea conversations and read-only
   sessions keep their own modes in both runtimes.
 - **FR-003**: A chat-mode task session (autopilot or not) MUST be given the same permission
-  behaviour as that task's terminal session would have, so that routine workspace actions
-  that do not prompt in terminal mode do not raise permission asks in chat mode.
-- **FR-004**: The fix MUST NOT grant more than terminal mode does. It MUST NOT bypass
-  permissions, it MUST NOT widen the allow list, and idea conversations and read-only
-  sessions MUST keep their current modes.
+  behaviour as that task's terminal session. Parity holds by construction: both runtimes
+  get the mode the "Agent permissions" setting names (FR-010). With the default (Auto),
+  routine workspace actions raise no permission asks in either runtime.
+- **FR-004**: The fix MUST NOT grant more than the mode the user chose in the setting. It
+  MUST NOT bypass permissions, it MUST NOT widen the allow list, and idea conversations
+  and read-only sessions MUST keep their current modes. Terminal sessions also get the
+  setting's mode. For a user whose Claude default is not auto, the default (Auto) makes
+  terminal sessions more permissive after upgrading. This MUST be stated in the docs and
+  the decision record, and "Claude's default" restores the old behaviour.
 - **FR-005**: A permission ask that still reaches Delilah from a chat-mode autopilot
   session MUST keep pausing autopilot with "needs permission: <tool>" (decision #43
   unchanged).
@@ -158,13 +165,25 @@ on the current code and pass after the fix.
 - **FR-007**: An end-to-end test with the fake agent MUST reproduce the reported scenario:
   a chat-mode autopilot task whose agent does routine workspace work. It MUST show no
   permission pause after the fix, and still a pause for an action that needs permission.
-- **FR-008**: If the CLI rejects the permission setting chat mode passes, the session MUST
-  fail visibly at start with a message that names the cause.
+- **FR-008**: If the CLI rejects the permission mode, the session MUST fail visibly at
+  start with a message that names the cause and the setting that changes it. This holds
+  in both runtimes:
+  - chat: the start check;
+  - terminal: the session is reported failed when the process exits before any work.
 - **FR-009**: The docs MUST describe how chat mode now chooses its permission behaviour,
   and the "Chat mode, known problems" entry MUST be updated. The decision MUST be recorded
   in `docs/decisions.md`. The affected docs are `docs/status.md`,
   `docs/architecture.md`, `docs/decisions.md`, and the README if what the user sees
   changes.
+
+- **FR-010**: The user MUST be able to choose the agents' permission behaviour in
+  Ajustes ("Agent permissions"). There are two options:
+  - **Auto** (the default): routine actions run, and Claude's auto mode decides what to
+    ask.
+  - **Claude's default**: today's behaviour.
+
+  The choice MUST apply to task and project sessions in both runtimes from their next
+  start or relaunch. Sessions already running are not restarted.
 
 ### Key Entities
 
@@ -218,6 +237,16 @@ on the current code and pass after the fix.
 - **Detecting a future CLI change.** The fake agent's tests pin the arguments chat mode
   passes. The spike record names the CLI version, and can be re-run when the CLI is
   upgraded.
+
+### Session 2026-10-26 (planning)
+
+- **How parity is achieved.** The user chose this option. A Delilah setting, "Agent
+  permissions", has two values: Auto, the default, and "Claude's default". It applies the
+  same mode to task and project sessions in both runtimes, so terminal and chat cannot
+  differ. "Claude's default" keeps today's behaviour, in which chat mode asks. Idea
+  conversations and read-only sessions keep their own modes. A planning probe confirmed
+  the cause: chat-mode startup with no mode asked 5 times for the 5 test actions, and with
+  auto it asked 0 times (research.md R1).
 
 ## Assumptions
 
