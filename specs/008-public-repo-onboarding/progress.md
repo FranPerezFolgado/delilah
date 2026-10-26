@@ -7,10 +7,10 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | verified | 1 | c328ca8 | tools: git-cliff 2.14.2, gitleaks 8.30.1, shellcheck 0.11.0, lychee 0.24.2 (brew; `npx lychee` doesn't work → call `lychee` directly) |
 | WP-02 | 2 | 2A | verified | 1 | ff6cbd5 | + comment paths in 6 code files |
-| WP-03 | 3 | 3A | pending | 0 | | |
-| WP-04 | 3 | 3A | pending | 0 | | |
-| WP-05 | 3 | 3A | pending | 0 | | |
-| WP-06 | 3 | 3A | pending | 0 | | |
+| WP-03 | 3 | 3A | implementing | 0 | | |
+| WP-04 | 3 | 3A | implementing | 0 | | |
+| WP-05 | 3 | 3A | verified | 1 | fd20712 |  |
+| WP-06 | 3 | 3A | implementing | 0 | | |
 | WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
 | WP-07 | 3 | 3B | pending | 0 | | |
 | WP-08 | 3 | 3C | pending | 0 | | |
