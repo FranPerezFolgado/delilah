@@ -56,7 +56,7 @@ print(url)
 PY
     ;;
   "pr merge")
-    n="${3:-}"
+    n="${args[${#args[@]} - 1]}"
     n="${n%/}"
     n="${n##*/}"
     python3 -I - "$dir" "$n" <<'PY'
