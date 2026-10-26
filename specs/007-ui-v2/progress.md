@@ -49,15 +49,15 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
-| WP-43 | 7 | 7A | done | 1 |  | ProposalCard, delete task, Quick Open |
+| WP-43 | 7 | 7A | done | 1 | da2920b | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | implementing | 1 |  | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | implementing | 1 |  | Nueva tarea dialog |
 | WP-47 | 7 | 7B | implementing | 1 |  | Backlog task and project settings |
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
-| WP-50 | 8 | 8A | implementing | 1 |  | Sidebar at scale |
-| WP-51 | 8 | 8A | pending | 0 | | Bandeja and Jira at width |
+| WP-50 | 8 | 8A | done | 1 |  | Sidebar at scale |
+| WP-51 | 8 | 8A | implementing | 1 |  | Bandeja and Jira at width |
 | WP-52 | 8 | 8A | pending | 0 | | Task screen and board at width |
 | WP-53 | 8 | 8A | pending | 0 | | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |

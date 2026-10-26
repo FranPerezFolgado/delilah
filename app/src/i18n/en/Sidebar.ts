@@ -8,5 +8,9 @@ export const EN: Record<string, string> = {
   "Backlog · {n}": "Backlog · {n}",
   "{n} hecha": "{n} done",
   "{n} hechas": "{n} done",
+  "Mostrar {n} más": "Show {n} more",
+  "Mostrar menos": "Show less",
+  "Filtrar tareas": "Filter tasks",
+  "Ninguna tarea coincide.": "No task matches.",
   "Eliminar tarea…": "Delete task…",
 };

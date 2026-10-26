@@ -49,6 +49,8 @@ interface Props {
  *  (`queued`) sit in their own folded section: they are not pending work. */
 const ORDER = ["waiting-for-user", "paused-by-limit", "running", "preparing-workspace", "failed", "setup-failed"];
 
+/** Active tasks shown per project before the «Mostrar N más» expander. */
+const VISIBLE_TASKS = 6;
 const COLLAPSED_KEY = "delilah.collapsed-projects";
 /** Backlogs start folded: these are the ones the viewer opened. */
 const OPEN_BACKLOGS_KEY = "delilah.open-backlogs";
@@ -82,6 +84,17 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
   // would otherwise take the whole sidebar.
   const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
   const [openBacklogs, toggleBacklog] = useRememberedSet(OPEN_BACKLOGS_KEY);
+  const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
+  const q = filter.trim().toLowerCase();
+  const matches = (t: Task) => !q || t.title.toLowerCase().includes(q) || t.key.toLowerCase().includes(q);
+  const toggleAll = (id: string) =>
+    setShowAll((c) => {
+      const next = new Set(c);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [deleting, setDeleting] = useState<Task | null>(null);
   const prOf = new Map(prs.map((p) => [p.task, p]));
   const tip = (label: string, action: ActionId) => `${label} (${keyOf(action)})`;
@@ -131,22 +144,25 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
   const group = (project: Project | null) => {
     const owner = project ? `@${project.name}` : null;
     const mine = tasks.filter((t) => (t.project ?? null) === (project?.name ?? null));
+    const active = mine
+      .filter((t) => t.status.type !== "done" && t.status.type !== "queued")
+      .sort((a, b) => ORDER.indexOf(a.status.type) - ORDER.indexOf(b.status.type));
     return {
       owner,
       project,
       sessions: owner ? sessions.filter((s) => s.task === owner) : [],
-      tasks: mine
-        .filter((t) => t.status.type !== "done" && t.status.type !== "queued")
-        .sort((a, b) => ORDER.indexOf(a.status.type) - ORDER.indexOf(b.status.type)),
+      tasks: active.filter(matches),
+      allTasks: active,
       // Oldest first: the daemon lists tasks in the order they were created.
-      backlog: mine.filter((t) => t.status.type === "queued"),
+      backlog: mine.filter((t) => t.status.type === "queued").filter(matches),
       done: mine.filter((t) => t.status.type === "done").length,
     };
   };
   const groups = [
     ...projects.map(group),
     ...(tasks.some((t) => !t.project) ? [group(null)] : []),
-  ];
+    // While filtering, only the projects with a matching task stay.
+  ].filter((g) => !q || g.tasks.length > 0 || g.backlog.length > 0);
   // Something in the group waits on you (also when it is folded).
   const waitsIn = (g: ReturnType<typeof group>) =>
     g.tasks.some((t) => t.status.type === "waiting-for-user") || g.sessions.some((s) => s.state === "waiting");
@@ -205,13 +221,14 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
               key={g.owner ?? "none"}
               type="button"
               className="sb-initial"
+              data-n={g.allTasks.length || undefined}
               aria-label={name}
               title={name}
               aria-current={g.owner && selected === g.owner ? "true" : undefined}
               onClick={() => (g.owner ? onSelect(g.owner) : toggle("none"))}
             >
               {name.charAt(0).toUpperCase()}
-              {hot && <span className="sb-hot" />}
+                            {hot && <span className="sb-hot" />}
             </button>
           );
         })}
@@ -241,10 +258,23 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
         <span className="sec">{t("Proyectos")}</span>
         <IconButton label={t("Añadir proyecto")} icon="plus" title={t("Añadir proyecto")} onClick={addProject} />
       </div>
+      <input
+        type="search"
+        className="sb-filter"
+        aria-label={t("Filtrar tareas")}
+        placeholder={t("Filtrar tareas")}
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
       {groups.map((g) => {
         const id = g.owner ?? "none";
         const folded = collapsed.has(id);
-        const count = g.sessions.length + g.tasks.length;
+        const count = g.sessions.length + g.allTasks.length;
+        const tones = [...new Set(g.allTasks.map((t) => statusOf(t.status).tone))].slice(0, 4);
+        const open = showAll.has(id) || !!q;
+        const shown = open ? g.tasks : g.tasks.slice(0, VISIBLE_TASKS);
+        const hidden = g.tasks.length - VISIBLE_TASKS;
+        const backlogOpen = openBacklogs.has(id) || !!q;
         const owner = g.owner;
         const name = g.project?.name ?? t("Sin proyecto");
         const ideas = g.sessions.filter((s) => s.conversation);
@@ -260,7 +290,16 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
             onClick={() => toggle(id)}
           />
         );
-        const countBadge = folded && count > 0 && <span className={`sb-count mono ${waitingHere ? "hot" : ""}`}>{count}</span>;
+        const countBadge = folded && count > 0 && (
+          <>
+            <span className="sb-dots">
+              {tones.map((tone) => (
+                <span key={tone} className={`sb-dot ${tone}`} />
+              ))}
+            </span>
+            <span className={`sb-count mono ${waitingHere ? "hot" : ""}`}>{count}</span>
+          </>
+        );
         return (
           <div key={id} className="sb-group">
             {g.project ? (
@@ -321,23 +360,32 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
                   trailing={s.read_only ? <Icon name="lock" className="sb-lock" /> : undefined}
                 />
               ))}
-            {!folded && g.tasks.map(taskRow)}
+            {!folded && shown.map(taskRow)}
+            {!folded && !q && hidden > 0 && (
+              <Row
+                className="sb-row sb-more"
+                aria-expanded={open}
+                onClick={() => toggleAll(id)}
+                title={open ? t("Mostrar menos") : t("Mostrar {n} más", { n: hidden })}
+              />
+            )}
             {!folded && g.backlog.length > 0 && (
               <>
                 <Row
-                  className={`sb-row sb-fold ${openBacklogs.has(id) ? "open" : ""}`}
-                  aria-expanded={openBacklogs.has(id)}
+                  className={`sb-row sb-fold ${backlogOpen ? "open" : ""}`}
+                  aria-expanded={backlogOpen}
                   onClick={() => toggleBacklog(id)}
                   leading={<Icon name="chevron" />}
                   title={t("Backlog · {n}", { n: g.backlog.length })}
                 />
-                {openBacklogs.has(id) && g.backlog.map(taskRow)}
+                {backlogOpen && g.backlog.map(taskRow)}
               </>
             )}
             {!folded && g.done > 0 && <div className="sb-done">{tn(g.done, "{n} hecha", "{n} hechas")}</div>}
           </div>
         );
       })}
+      {q && groups.length === 0 && <p className="sb-empty">{t("Ninguna tarea coincide.")}</p>}
       {projects.length === 0 && tasks.length === 0 && (
         <p className="sb-empty">{t("Añade un proyecto en Proyectos.")}</p>
       )}

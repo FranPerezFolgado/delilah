@@ -298,3 +298,34 @@ describe("Sidebar ideas", () => {
     expect(count.classList.contains("hot")).toBe(true);
   });
 });
+
+describe("Sidebar at scale", () => {
+  const many = Array.from({ length: 8 }, (_, i) => task(`PROJ-${i + 1}`, { type: "running" }));
+
+  it("shows 6 tasks per project and expands the rest", () => {
+    const { keys, getByRole } = setup(many);
+    expect(keys().length).toBe(6);
+    fireEvent.click(getByRole("button", { name: "Mostrar 2 más" }));
+    expect(keys().length).toBe(8);
+    fireEvent.click(getByRole("button", { name: "Mostrar menos" }));
+    expect(keys().length).toBe(6);
+  });
+
+  it("filters tasks by title or key", () => {
+    const { keys, getByLabelText } = setup(many);
+    fireEvent.change(getByLabelText("Filtrar tareas"), { target: { value: "proj-8" } });
+    expect(keys()).toEqual(["PROJ-8"]);
+  });
+
+  it("shows a count and status dots on a folded project", () => {
+    const { getByRole, container } = setup(many);
+    fireEvent.click(getByRole("button", { name: "Plegar web" }));
+    expect(container.querySelector(".sb-count")!.textContent).toBe("8");
+    expect(container.querySelectorAll(".sb-dots .sb-dot").length).toBe(1);
+  });
+
+  it("shows the task count on the rail initial", () => {
+    const { container } = setup(many, [], { rail: true });
+    expect(container.querySelector(".sb-initial")!.getAttribute("data-n")).toBe("8");
+  });
+});
