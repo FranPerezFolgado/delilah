@@ -11,10 +11,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2C | done | 1 | cb1d2c2 | scope widened to all daemon src (user); API requests sending "feature" not normalised yet → WP-05 |
 | WP-04F | 2 | fix | done | 1 | b0a55dc | review fix: feature alias normalisation, projects.workflow migration; unknown workflow values now 400 |
 | WP-04F2 | 2 | fix | done | 1 | a5ba4b6 | 2nd fix round: UI autopilot check accepts "project" (interim until T037) |
-| WP-05 | 3 | 3A | verified | 1 | | +core workflow.rs, autopilot/api.rs; e2e autopilot+chat_permissions set preset per test (user); prompt+autopilot now 409 |
-| WP-06 | 4 | 4A | pending | 0 | | |
-| WP-07 | 4 | 4A | pending | 0 | | |
-| WP-08 | 4 | 4A | pending | 0 | | |
+| WP-05 | 3 | 3A | done | 1 | 951e664 | +core workflow.rs, autopilot/api.rs; e2e autopilot+chat_permissions set preset per test (user); prompt+autopilot now 409 |
+| WP-06 | 4 | 4A | implementing | 0 | | |
+| WP-07 | 4 | 4A | implementing | 0 | | +legacy projects.workflow fallback fix (run.rs) |
+| WP-08 | 4 | 4A | verified | 1 | | SkillPicker {project,value,onChange}; start_message optional in TS |
 | WP-09 | 4 | 4B | pending | 0 | | |
 | WP-10 | 5 | 5A | pending | 0 | | |
 | WP-11 | 5 | 5A | pending | 0 | | |
@@ -42,3 +42,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | 1-2 | contract | MEDIUM | PATCH backlog task stores change.workflow raw (no normalise_workflow) (→ WP-12) | crates/delilah-daemon/src/api.rs:540-550 |
 | 1-2 | contract | LOW | build_task 400 on unknown project workflow vs run.rs fallback to Prompt; autopilot regression test only asserts not-409 | crates/delilah-daemon/src/api.rs:474 |
 | 1-2 | spec | MEDIUM | run.rs feature+autopilot regression test only asserts not-409 | crates/delilah-daemon/src/run.rs:3524 |
+| 3 | contract | HIGH (scheduled) | UI offers autopilot on fresh (non-phased) projects → 409; fixed by T037 (WP-11), same release | app/src/components/NewTaskDialog.tsx:90, BacklogTaskView.tsx:58 |
+| 3 | contract | HIGH (scheduled) | POST /tasks prompt / PATCH start_message not implemented → T039-T040 (WP-12); api.ts Task lacks start_message → WP-08 | crates/delilah-daemon/src/api.rs:315-342 |
+| 3 | contract | MEDIUM | new tasks fall back to legacy projects.workflow; "prompt" there → start with nothing instead of built-in (→ WP-07) | run.rs start, api.rs build_task |
+| 3 | contract | MEDIUM | PATCH writes workflow before the autopilot 409 (partial apply, pre-existing) (→ WP-12) | crates/delilah-daemon/src/api.rs:~560 |
+| 3 | contract | MEDIUM | prompt+autopilot now 409 (by contract); stored workflow becomes "prompt" when a prompt is given | crates/delilah-daemon/src/run.rs |
+| 3 | contract | LOW | blank prompt silently → Inherit; build_task stores saving_mode for non-phased backlog tasks; CLI --prompt help still says /feature (→ WP-13) | run.rs, api.rs, cli main.rs:222 |
+| 3 | spec | MEDIUM | data-model table says request workflow project/feature → task's stored choice; code maps to Project (matches FR-007 "follow the project's workflow"); fix the table (→ WP-15) | data-model.md, run.rs ~L334 |
+| 3 | spec | LOW | backlog/CLI free LIBRE-n task now gets /feature <title> instead of /feature LIBRE-n (R4, deliberate); note in docs (→ WP-15) | run.rs |
+| 3 | spec | LOW | workflow prompt without prompt accepted if stored message; typed prompts now rendered as templates; misplaced doc comment | run.rs ~L335, e2e chat_permissions.rs:21 |

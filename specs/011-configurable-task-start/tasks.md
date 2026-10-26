@@ -68,10 +68,10 @@ task comes before the task that implements it.
 - [ ] T022 [US2] Localise the `workflow.*` validation codes in `crates/delilah-daemon/src/projects.rs` as the branch codes are, with a `PUT /settings` test returning field errors for `/fix {foo}` and a blank custom start
 - [ ] T023 [US2] Write failing tests in `crates/delilah-daemon/src/run.rs`: project `single{message:"/fix {ticket}"}` → `/fix PROJ-12` + notes pointer, no note; project `single{nothing}` → launch with no prompt, task status after launch is waiting for the user, notes not sent
 - [ ] T024 [US2] Implement T023 in `crates/delilah-daemon/src/run.rs` (launch with `None` through the existing no-prompt path, `launch_session_settled` for stream agents; status as after a finished turn)
-- [ ] T025 [P] [US2] Add `ProjectWorkflow`, `Start`, `Skill`, `Task.start_message` and `api.projectSkills(name)` to `app/src/api.ts`; `Task.workflow` doc values `project|prompt|none`
-- [ ] T026 [P] [US2] Create `app/src/workflowPresets.ts` (presets "Prompt integrado", "Nada", "Spec Kit (`/feature`)", "Spec Kit (oficial)" per research R6; `isPhased(taskWorkflow, settings)`) with `app/src/workflowPresets.test.ts`
-- [ ] T027 [US2] Write failing tests `app/src/components/SkillPicker.test.tsx`: lists skills from a mocked `api.projectSkills` with source badges, filters by search, picking `fix` returns `/fix {ticket}`; empty/failed list still allows free text
-- [ ] T028 [US2] Implement T027 in `app/src/components/SkillPicker.tsx`
+- [X] T025 [P] [US2] Add `ProjectWorkflow`, `Start`, `Skill`, `Task.start_message` and `api.projectSkills(name)` to `app/src/api.ts`; `Task.workflow` doc values `project|prompt|none`
+- [X] T026 [P] [US2] Create `app/src/workflowPresets.ts` (presets "Prompt integrado", "Nada", "Spec Kit (`/feature`)", "Spec Kit (oficial)" per research R6; `isPhased(taskWorkflow, settings)`) with `app/src/workflowPresets.test.ts`
+- [X] T027 [US2] Write failing tests `app/src/components/SkillPicker.test.tsx`: lists skills from a mocked `api.projectSkills` with source badges, filters by search, picking `fix` returns `/fix {ticket}`; empty/failed list still allows free text
+- [X] T028 [US2] Implement T027 in `app/src/components/SkillPicker.tsx`
 - [ ] T029 [US2] Write failing tests `app/src/components/WorkflowEditor.test.tsx`: single mode with built-in / message / nothing; applying a preset fills the fields; the "not found" warning when the template's leading `/name` is not in the list (still savable); daemon `FieldError`s shown next to `workflow.*` fields
 - [ ] T030 [US2] Implement T029 in `app/src/components/WorkflowEditor.tsx` (single-start part)
 - [ ] T031 [US2] Add the "Flujo de trabajo" section to `app/src/components/ProjectSettings.tsx` using `WorkflowEditor`, with the existing save/discard and error mapping; extend `app/src/components/ProjectSettings.test.tsx`

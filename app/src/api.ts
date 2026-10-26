@@ -54,7 +54,10 @@ export interface Task {
   finished_at: string | null;
   title: string;
   project: string | null;
+  /** How the task starts: `project` (the project's workflow), `prompt` (`start_message`) or `none`. */
   workflow: string;
+  /** The first message when `workflow` is `prompt`; null otherwise. */
+  start_message?: string | null;
   phase: string | null;
   status: TaskStatus;
   /** What the user keeps with the task; handed to the agent on start. */
@@ -108,6 +111,28 @@ export interface ProjectSettings {
   shared: SharedEntry[];
   setup: string | null;
   submodules: { always: string[]; never: string[] };
+  /** How a task starts; null or absent: the built-in prompt (single, builtin). */
+  workflow?: ProjectWorkflow | null;
+}
+
+/** What a single-session task sends first. */
+export type Start =
+  | { type: "builtin" }
+  | { type: "message"; template: string }
+  | { type: "nothing" };
+
+/** A project's start: one session, or plan / implement / review sessions. */
+export type ProjectWorkflow =
+  | { kind: "single"; start: Start }
+  | { kind: "phased"; plan: string; implement: string; review: string };
+
+/** A skill or command Claude Code can run (`GET /projects/{name}/skills`). */
+export interface Skill {
+  /** What follows the slash; `plugin:skill` for plugin skills. */
+  name: string;
+  description: string;
+  source: "user" | "project" | "plugin";
+  plugin?: string;
 }
 
 /** Body of a 422 from the settings endpoint: one message per invalid field. */
@@ -732,6 +757,8 @@ export const api = {
   jiraSubtasks: (key: string) => request<JiraIssue[]>(`/api/v1/jira/issues/${key}/subtasks`),
   setSessionRuntime: (id: string, mode: "chat" | "terminal") => post<null>(`/api/v1/sessions/${id}/runtime`, { mode }),
   tasks: () => request<Task[]>("/api/v1/tasks"),
+  projectSkills: (name: string) =>
+    request<Skill[]>(`/api/v1/projects/${encodeURIComponent(name)}/skills`),
   events: (key: string) => request<EventRecord[]>(`/api/v1/tasks/${key}/events`),
   projects: () => request<Project[]>("/api/v1/projects"),
   /** `all` includes the `never` submodules (the settings screen edits the rules). */
