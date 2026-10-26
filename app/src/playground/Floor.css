@@ -1,30 +1,30 @@
 /* The office floor: a framed inset (R10) with a 30px header and the pixel floor inside. */
-.fl { border: 1px solid var(--bd); border-radius: 8px; background: var(--term-bg); overflow: hidden; min-width: 0; }
+.fl { border: 1px solid var(--bd); border-radius: 7px; background: var(--term-bg); overflow: hidden; min-width: 0; }
 .fl-head { display: flex; align-items: center; gap: 12px; height: 30px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--bd); font-size: 12px; color: var(--tx2); }
 .fl-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .fl-title b { font-weight: 600; color: var(--tx); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .fl-legend { display: flex; gap: 10px; white-space: nowrap; }
 .fl-key { display: inline-flex; align-items: center; gap: 4px; color: var(--tx3); }
-.fl-key i { width: 8px; height: 8px; border-radius: 2px; }
+.fl-key i { width: 8px; height: 8px; }
 .fl-spacer { flex: 1; }
-.fl-pill { padding: 0 8px; border-radius: 9px; background: var(--wait-bg); color: var(--wait-tx); white-space: nowrap; }
+.fl-pill { padding: 0 8px; border-radius: 10px; background: var(--wait-bg); color: var(--wait-tx); white-space: nowrap; }
 .fl-banner { padding: 4px 10px; font-size: 12px; background: var(--wait-bg); color: var(--wait-tx); }
 .fl-body { position: relative; padding: 0; overflow: hidden; }
 .fl-empty { margin: 0; padding: 8px 10px 0; font-size: 12px; color: var(--tx3); }
 .fl-floor { position: relative; margin: 0 auto; }
 .fl-floor svg { display: block; }
 .fl-abs { position: absolute; }
-.fl-char { position: absolute; padding: 0; border: 0; background: none; border-radius: 4px; }
+.fl-char { position: absolute; padding: 0; border: 0; background: none; border-radius: 7px; }
 button.fl-char { cursor: pointer; }
 button.fl-char:hover, button.fl-char:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.fl-halo { position: absolute; border-radius: 2px; pointer-events: none; }
+.fl-halo { position: absolute; pointer-events: none; }
 .fl-tower { position: absolute; display: block; }
-.fl-bar { position: absolute; width: 3px; background: var(--wait); border-radius: 2px; }
+.fl-bar { position: absolute; width: 3px; background: var(--wait); }
 .fl-bubble { position: absolute; font-size: 12px; font-weight: 600; line-height: 14px; padding: 0 4px; border-radius: 7px; background: var(--panel); border: 1px solid var(--bd2); pointer-events: none; }
 .fl-bubble--wait { color: var(--wait); border-color: var(--wait); }
 .fl-bubble--zzz { color: var(--pause); }
 .fl-label { position: absolute; display: flex; flex-direction: column; align-items: center; pointer-events: none; z-index: 2; font-size: 12px; line-height: 14px; }
-.fl-caption, .fl-role { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--term-bg) 85%, transparent); }
+.fl-caption, .fl-role { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; background: color-mix(in srgb, var(--term-bg) 85%, transparent); }
 .fl-caption { color: var(--term-tx); }
 .fl-role { color: var(--tx3); }
 .fl-leaver { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; animation: fl-leave-fade 5s linear forwards; }

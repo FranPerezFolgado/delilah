@@ -16,9 +16,9 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-05 | 2 | 2C | verified | 1 | 41827dc | needs 02,04 |
 | WP-09 | 3 | 2B | verified | 1 | b03fa7f | early: needs 06 |
 | WP-10 | 3 | 3B | verified | 1 | 0ebdb82 |  |
-| WP-11 | 3 | 3C | verified | 1 | PENDING |  |
+| WP-11 | 3 | 3C | verified | 1 | 30a0d03 |  |
 | WP-12 | 4 | 3C | verified | 1 | 31a41fa | early: with 11 |
-| WP-13 | 4 | 4B | pending | 0 | |  |
+| WP-13 | 4 | 4B | implementing | 1 | |  |
 | WP-14 | 5 | 2B | verified | 1 | 5bbdcd9 | early: needs 06 |
 | WP-15 | 5 | 2B | verified | 1 | 5533380 | early: needs 06 |
 | WP-16 | 5 | 5B | verified | 1 | d2c88da |  |
@@ -26,6 +26,7 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-18 | 6 | 6A | pending | 0 | |  |
 | WP-19 | 6 | 6A | pending | 0 | |  |
 | WP-05F | 2 | fix | implementing | 1 | | phase 2 review fixes |
+| WP-10F | 3 | fix | verified | 1 | PENDING | styles.test scale/token fixes |
 
 ## Open findings
 
