@@ -1,0 +1,15 @@
+/* Global notices and the update bar: slim bars above the main views, on tokens and the kit. */
+.gn { display: flex; flex-direction: column; gap: 8px; margin: 12px 12px 0; }
+.gn:empty { display: none; }
+.gn-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--bd);
+  background: var(--card); color: var(--tx); font-size: 13.5px; }
+.gn-bar .grow { flex: 1; min-width: 0; }
+.gn-wait { background: var(--wait-bg); border-color: var(--wait); color: var(--wait-tx); }
+.gn-pause { background: var(--pause-bg); border-color: var(--pause); color: var(--pause-tx); }
+.gn-err { border-color: var(--err); }
+.gn-err .gn-dot { color: var(--err-tx); }
+.gn-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.gn-row { display: flex; align-items: center; gap: 12px; }
+.gn-notes { max-height: 220px; overflow-y: auto; font-size: 12px; }
+.gn-progress { flex: 1; height: 6px; }
+.gn-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { t, tn } from "../i18n";
 import type { UpdateIntent, UpdateState } from "../updates";
 import { Markdown } from "./Markdown";
+import { Button } from "./ui";
+import "./GlobalNotices.css";
 
 interface Props {
   state: UpdateState;
@@ -19,30 +21,30 @@ export function UpdateNotice({ state, dispatch, installed }: Props) {
       return null;
     case "checking":
       // Only a manual check shows anything.
-      return state.manual ? <div className="notice update-notice"><span>{t("Buscando actualizaciones…")}</span></div> : null;
+      return state.manual ? <div className="gn-bar" role="status"><span>{t("Buscando actualizaciones…")}</span></div> : null;
     case "upToDate":
       return (
-        <div className="notice update-notice">
+        <div className="gn-bar" role="status">
           <span>{installed ? t("Delilah está al día ({version})", { version: installed }) : t("Delilah está al día")}</span>
           <span className="grow" />
-          <button className="btn btn-ghost" onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</button>
+          <Button variant="ghost" size={28} onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</Button>
         </div>
       );
     case "available":
       return (
-        <div className="notice update-notice wait">
-          <div className="update-body">
-            <div className="update-row">
+        <div className="gn-bar gn-wait" role="status">
+          <div className="gn-body">
+            <div className="gn-row">
               <span>{t("Delilah {version} disponible", { version: state.version })}</span>
               {state.notes && (
-                <button className="btn btn-ghost" onClick={() => setNotesOpen((o) => !o)}>{t("Ver novedades")}</button>
+                <Button variant="ghost" size={28} onClick={() => setNotesOpen((o) => !o)}>{t("Ver novedades")}</Button>
               )}
               <span className="grow" />
-              <button className="btn btn-p" onClick={() => dispatch({ type: "requestUpdate" })}>{t("Actualizar")}</button>
-              <button className="btn btn-ghost" onClick={() => dispatch({ type: "later" })}>{t("Más tarde")}</button>
+              <Button variant="primary" size={28} onClick={() => dispatch({ type: "requestUpdate" })}>{t("Actualizar")}</Button>
+              <Button variant="ghost" size={28} onClick={() => dispatch({ type: "later" })}>{t("Más tarde")}</Button>
             </div>
             {notesOpen && state.notes && (
-              <div className="update-notes"><Markdown text={state.notes} remoteImages="click" /></div>
+              <div className="gn-notes"><Markdown text={state.notes} remoteImages="click" /></div>
             )}
           </div>
         </div>
@@ -50,41 +52,41 @@ export function UpdateNotice({ state, dispatch, installed }: Props) {
     case "downloading": {
       const pct = state.total ? Math.min(100, Math.floor((state.received / state.total) * 100)) : null;
       return (
-        <div className="notice update-notice wait">
+        <div className="gn-bar gn-wait" role="status">
           <span>{pct === null ? t("Descargando…") : t("Descargando… {pct}%", { pct })}</span>
-          <progress className="update-progress" max={100} value={pct ?? undefined} />
+          <progress className="gn-progress" max={100} value={pct ?? undefined} />
         </div>
       );
     }
     case "installing":
-      return <div className="notice update-notice wait"><span>{t("Instalando y reiniciando…")}</span></div>;
+      return <div className="gn-bar gn-wait" role="status"><span>{t("Instalando y reiniciando…")}</span></div>;
     case "error":
       return (
-        <div className="notice update-notice" style={{ borderColor: "var(--err)" }}>
-          <span className="c-err">●</span>
+        <div className="gn-bar gn-err" role="alert">
+          <span className="gn-dot">●</span>
           <span>{state.version ? t("No se pudo actualizar: {reason}", { reason: state.reason }) : t("No se pudo buscar actualizaciones: {reason}", { reason: state.reason })}</span>
           <span className="grow" />
-          <button className="btn btn-p" onClick={() => dispatch({ type: "retry" })}>{t("Reintentar")}</button>
-          <button className="btn btn-ghost" onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</button>
+          <Button variant="primary" size={28} onClick={() => dispatch({ type: "retry" })}>{t("Reintentar")}</Button>
+          <Button variant="ghost" size={28} onClick={() => dispatch({ type: "close" })}>{t("Cerrar")}</Button>
         </div>
       );
     case "confirmSessions":
       return (
-        <div className="notice update-notice wait">
+        <div className="gn-bar gn-wait" role="status">
           <span>{tn(state.running, "Hay {n} sesión en marcha; se detendrá al actualizar", "Hay {n} sesiones en marcha; se detendrán al actualizar")}</span>
           <span className="grow" />
-          <button className="btn btn-p" onClick={() => dispatch({ type: "now" })}>{t("Actualizar ahora")}</button>
-          <button className="btn btn-ghost" onClick={() => dispatch({ type: "whenIdle" })}>{t("Cuando terminen")}</button>
-          <button className="btn btn-ghost" onClick={() => dispatch({ type: "cancel" })}>{t("Cancelar")}</button>
+          <Button variant="primary" size={28} onClick={() => dispatch({ type: "now" })}>{t("Actualizar ahora")}</Button>
+          <Button variant="ghost" size={28} onClick={() => dispatch({ type: "whenIdle" })}>{t("Cuando terminen")}</Button>
+          <Button variant="ghost" size={28} onClick={() => dispatch({ type: "cancel" })}>{t("Cancelar")}</Button>
         </div>
       );
     case "waiting":
       return (
-        <div className="notice update-notice wait">
+        <div className="gn-bar gn-wait" role="status">
           <span>{tn(state.running, "Se actualizará cuando termine {n} sesión", "Se actualizará cuando terminen {n} sesiones")}</span>
           <span className="grow" />
-          <button className="btn btn-p" onClick={() => dispatch({ type: "now" })}>{t("Actualizar ahora")}</button>
-          <button className="btn btn-ghost" onClick={() => dispatch({ type: "cancel" })}>{t("Cancelar")}</button>
+          <Button variant="primary" size={28} onClick={() => dispatch({ type: "now" })}>{t("Actualizar ahora")}</Button>
+          <Button variant="ghost" size={28} onClick={() => dispatch({ type: "cancel" })}>{t("Cancelar")}</Button>
         </div>
       );
   }

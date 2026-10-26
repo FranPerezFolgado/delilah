@@ -50,7 +50,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
 | WP-43 | 7 | 7A | done | 1 | da2920b | ProposalCard, delete task, Quick Open |
-| WP-44 | 7 | 7A | done | 1 |  | Projects and project view |
+| WP-44 | 7 | 7A | done | 1 | e4bd446 | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | done | 1 | ab5a100 | Nueva tarea dialog |
 | WP-47 | 7 | 7B | done | 1 | f80fe4c | Backlog task and project settings |
@@ -59,7 +59,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
 | WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
 | WP-52 | 8 | 8A | done | 1 | 5c2a3fa | Task screen and board at width |
-| WP-53 | 8 | 8A | pending | 1 |  | Global notices |
+| WP-53 | 8 | 8A | done | 2 |  | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |
 | WP-55 | 9 | 9A | pending | 0 | | Remove replaced code and i18n cleanup |
 | WP-56 | 9 | 9A | pending | 0 | | Preview seed |
@@ -91,3 +91,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 5 | WP-34 | HIGH | Base-stale bar can only show the notice text: «main avanzó N commits · Actualizar rama» needs the commit count and an update-branch endpoint (daemon + api.ts + TaskScreen). Same API-gap fix package as PrSummary.number / finished date. | crates/delilah-daemon, app/src/api.ts, TaskScreen.tsx |
 | 9 | orchestrator | HIGH | styles.test: ~40 font-size/radius values outside the scale across new component CSS (AskCard, AutopilotControls, BacklogTaskView, BoardView, ChangesView, ConversationView, …) and an old token/raw colour in BoardView.css. One fix package after WP-52/WP-44/WP-26. | app/src/components/*.css |
 | 2 | WP-05 | MEDIUM | `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in full daemon runs (maybe WP-10 setup.json write order or load); investigate in WP-14/58. | crates/delilah-daemon/src/setup.rs |
+| 4 | WP-26F | MEDIUM | Delete with unpushed work: sidebar confirm, then DeleteTaskDialog opens at step 1 again before «Eliminar igualmente». Add a `startForced` prop to DeleteTaskDialog and use it from App/TaskView. | app/src/components/DeleteTaskDialog.tsx, App.tsx |
