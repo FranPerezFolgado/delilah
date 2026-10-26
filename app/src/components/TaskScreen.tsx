@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
+import { sessionName } from "../chain";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
@@ -636,7 +637,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
     ...sessions.map((s): TaskTabItem => ({
       id: sessionTab(s.id),
       kind: "session",
-      label: s.primary ? t("Claude principal") : s.label,
+      label: sessionName(s),
       title: s.label,
       dot: sessionDot(s),
       closable: !s.primary,

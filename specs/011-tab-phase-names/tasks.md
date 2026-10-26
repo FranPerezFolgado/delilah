@@ -40,13 +40,13 @@ to FR-005, research R2/R3).
 
 **Independent Test**: Render `TaskScreen` with a primary session whose `step` is `implement`. The tab list contains «Implementación» and no «Claude principal».
 
-- [ ] T003 [US1] Add failing tests in `app/src/components/TaskScreen.test.tsx` under `describe("TaskScreen tabs")`:
+- [X] T003 [US1] Add failing tests in `app/src/components/TaskScreen.test.tsx` under `describe("TaskScreen tabs")`:
   - `taskScreen([sess("a", { primary: true, step: "implement", label: "Implementación" })])` → `labels()` equals `["Tarea", "Oficina", "Implementación", "PR"]`;
   - the same with `step: "review"` → «Revisión», and with `step: "plan"` → «Spec y plan»;
   - the phase tab's `title` attribute is the stored label (use a stored label that differs from the step name, for example `label: "Implementación: Mi tarea"`, to prove it is kept as the tooltip, FR-006);
   - the primary phase tab has no close button (`queryByRole("button", { name: "Cerrar Implementación" })` is null).
   The existing test "lists Tarea, the primary as Claude principal and the other sessions" stays unchanged as the FR-002 regression guard.
-- [ ] T004 [US1] In `app/src/components/TaskScreen.tsx` (tab items, around line 639), replace `label: s.primary ? t("Claude principal") : s.label` with `label: sessionName(s)` (import from `../chain`). Keep `title: s.label` and `closable: !s.primary`. Make T003 pass, and keep every existing `TaskScreen` test green.
+- [X] T004 [US1] In `app/src/components/TaskScreen.tsx` (tab items, around line 639), replace `label: s.primary ? t("Claude principal") : s.label` with `label: sessionName(s)` (import from `../chain`). Keep `title: s.label` and `closable: !s.primary`. Make T003 pass, and keep every existing `TaskScreen` test green.
 
 **Checkpoint**: US1 works on its own. In a preview, a saving-mode task's current phase tab reads its phase.
 
