@@ -15,11 +15,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05F | 2 | fix | done | 1 | ed96262 | phase 1-2 review mediums |
 | WP-07F | 3 | fix | done | 1 | 8610596 | live.rs busy loop when progress sender drops; live.ts wiring goes in WP-08 |
 | WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
-| WP-09 | 5 | 5A | verified | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
-| WP-10 | 5 | 5A | verified | 1 | 25bffc7 | |
-| WP-11 | 6 | 6A | pending | 0 | | |
-| WP-13 | 6 | 6A | verified | 1 | SHA13 | also refuses POST /sessions/{id}/runtime |
-| WP-15 | 6 | 6A | implementing | 0 | | |
+| WP-09 | 5 | 5A | done | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
+| WP-10 | 5 | 5A | done | 1 | 25bffc7 | |
+| WP-11 | 6 | 6A | implementing | 0 | | +phase-5 arch MEDIUM (mid-turn notification side effects) |
+| WP-13 | 6 | 6A | verified | 1 | 7e87d3c | also refuses POST /sessions/{id}/runtime |
+| WP-15 | 6 | 6A | verified | 1 | SHA15 | |
 | WP-12 | 6 | 6B | pending | 0 | | |
 | WP-14 | 6 | 6B | pending | 0 | | |
 | WP-16 | 6 | 6B | pending | 0 | | |
@@ -45,3 +45,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | ui-verifier | NOT CHECKED | US1 scenarios 1-5 verified via API on a real chat session only; no browser tools in this environment, UI render not seen | app/src/components/WorkingIndicator.tsx |
 | 4 | spec | LOW | Finished sub-agent duration rounded to whole minutes (min 1): 15 s shows "1 min" | app/src/components/ToolCard.tsx |
 | 4 | spec | LOW | Expanded step list shows summary only, not tool name (fine while summaries carry the verb) | app/src/components/ToolCard.tsx |
+| 5 | architecture | MEDIUM | Older daemon reading history with Event::AgentResumed fails serde for the whole history (downgrade/mixed versions only) — accepted, to note in docs/decisions.md | crates/delilah-core/src/task.rs |
+| 5 | architecture | LOW | "delilah_origin":"agent" is a stringly-typed protocol across 4 files; add a constructor next to agent_prompt | crates/delilah-daemon/src/hooks.rs |
+| 5 | architecture | LOW | "background-done" reason code duplicated as literals (progress, stream_events, UI) | crates/delilah-daemon/src/stream_events.rs |
+| 5 | architecture | LOW | Paused (limit) session self-start: AgentResumed logged without apply_signal, untested | crates/delilah-daemon/src/stream_events.rs |
+| 6 | review-note | LOW | Existing BUSY runtime refusal is hardcoded English, not via lang | crates/delilah-daemon/src/runtime_api.rs |
+| 5 | spec | LOW | US4-2 (self-started turn's end applies usual effects) has no specific test | crates/delilah-daemon/src/stream_events.rs |
+| 5 | spec | LOW | Divider only when transcript has a background-done marker; other self-started reasons get history only (consistent with "when known") | app/src/components/ConversationView.tsx |

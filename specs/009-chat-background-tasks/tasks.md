@@ -125,8 +125,8 @@ Done before US3 because US3's ending relies on it; independently testable.
 - [X] T046 [US3] Implement T045 in `crates/delilah-daemon/src/runtime_api.rs` (message in Spanish and English through the daemon's `lang` like the existing refusal)
 - [ ] T047 [US3] Write failing tests in `crates/delilah-agents/src/stream.rs` and `crates/delilah-daemon/src/conversation.rs` (tests modules), only if T002 confirmed `stop_task`: `StreamSession::stop_task(task_id)` writes the control request; `POST /api/v1/sessions/{id}/stop` sends it for each running background row after the interrupt. If T002 found it unsupported, record that in `research.md` R8 and skip T048
 - [ ] T048 [US3] Implement T047 in `crates/delilah-agents/src/stream.rs` and `conversation::stop` in `crates/delilah-daemon/src/conversation.rs`
-- [ ] T049 [P] [US3] Write failing tests in `app/src/components/BackgroundStrip.test.tsx`: hidden with no items; one row per item with description, a ticking clock while running, total time when ended, state labels "en curso", "terminado", "fallido", "detenido", "estado desconocido"; `started_at` null → "desde hace ?"
-- [ ] T050 [US3] Implement T049 in `app/src/components/BackgroundStrip.tsx` (+ CSS) and `app/src/i18n/en/BackgroundStrip.ts`
+- [X] T049 [P] [US3] Write failing tests in `app/src/components/BackgroundStrip.test.tsx`: hidden with no items; one row per item with description, a ticking clock while running, total time when ended, state labels "en curso", "terminado", "fallido", "detenido", "estado desconocido"; `started_at` null → "desde hace ?"
+- [X] T050 [US3] Implement T049 in `app/src/components/BackgroundStrip.tsx` (+ CSS) and `app/src/i18n/en/BackgroundStrip.ts`
 - [ ] T051 [US3] Write failing tests in `app/src/components/ConversationView.test.tsx`: the strip shows above the composer from `progress.background` (load and socket); "Detener" stays visible while background runs with no turn; the composer sends (not "en cola") when only background work runs
 - [ ] T052 [US3] Implement T051 in `app/src/components/ConversationView.tsx`
 
