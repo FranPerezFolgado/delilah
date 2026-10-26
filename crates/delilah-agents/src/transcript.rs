@@ -408,7 +408,7 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
                 at,
                 marker: MarkerKind::BackgroundDone,
                 detail: notification_summary(&text),
-                background: None,
+                background: Some(background::read_notification(notification_block(&text))),
             })];
         }
     }
@@ -432,6 +432,17 @@ fn user_text(message: &Value) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::new(),
+    }
+}
+
+/// The `<task-notification>` block of a text: from its opening tag to the closing tag
+/// or the end. Without an opening tag, the whole text.
+fn notification_block(text: &str) -> &str {
+    let from = text.find("<task-notification>").unwrap_or(0);
+    let block = &text[from..];
+    match block.find("</task-notification>") {
+        Some(end) => &block[..end],
+        None => block,
     }
 }
 
@@ -1192,6 +1203,39 @@ mod tests {
         }
         let json = serde_json::to_value(&parse(&user_line("", NOTE), 0).entries[0]).unwrap();
         assert_eq!(json["marker"], "background-done");
+    }
+
+    #[test]
+    fn task_notification_fills_background() {
+        for extra in [r#","origin":{"kind":"task-notification"}"#, ""] {
+            let p = parse(&user_line(extra, NOTE), 0);
+            let Entry::Marker { background, .. } = &p.entries[0] else {
+                panic!("not a marker");
+            };
+            let b = background.as_ref().expect("background");
+            assert_eq!(b.task_id.as_deref(), Some("b1"));
+            assert_eq!(b.kind, BackgroundKind::Command);
+            assert_eq!(b.label.as_deref(), Some("sleep 5"));
+        }
+    }
+
+    #[test]
+    fn origin_notification_without_block_still_gives_a_marker() {
+        let p = parse(
+            &user_line(r#","origin":{"kind":"task-notification"}"#, r#""nothing""#),
+            0,
+        );
+        assert_eq!(p.entries.len(), 1);
+        let Entry::Marker {
+            detail, background, ..
+        } = &p.entries[0]
+        else {
+            panic!("not a marker");
+        };
+        assert_eq!(*detail, None);
+        let b = background.as_ref().expect("background");
+        assert_eq!(b.source, BackgroundSource::Notification);
+        assert_eq!(b.kind, BackgroundKind::Task);
     }
 
     #[test]

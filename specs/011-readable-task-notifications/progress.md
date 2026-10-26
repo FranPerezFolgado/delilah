@@ -5,11 +5,11 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | | |
-| WP-02 | 1 | 1A | verified | 1 | | |
-| WP-03 | 2 | 2A | verified | 1 | | |
-| WP-04 | 2 | 2A | verified | 1 | | |
-| WP-05 | 3 | 3A | implementing | 0 | | |
+| WP-01 | 1 | 1A | done | 1 | | |
+| WP-02 | 1 | 1A | done | 1 | | |
+| WP-03 | 2 | 2A | done | 1 | | |
+| WP-04 | 2 | 2A | done | 1 | | |
+| WP-05 | 3 | 3A | verified | 2 | | |
 | WP-06 | 3 | 3A | verified | 1 | | also edited i18n/en/ConversationView.ts (stale key moved), allowed |
 | WP-07 | 4 | 4A | pending | 0 | | |
 | WP-08 | 4 | 4A | pending | 0 | | |
@@ -22,3 +22,6 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 1-2 | contract | LOW | No shared Rust↔TS JSON fixture for `background` (parity is manual) | app/src/api.ts |
+| 1-2 | contract | LOW | `Default` on wire enums BackgroundSource/BackgroundKind can hide a missing choice | crates/delilah-agents/src/transcript/background.rs |
+| 1-2 | spec | LOW | T004 hand-back serialization test doesn't match the contract's hand-back JSON shape exactly | crates/delilah-agents/src/transcript/background.rs |
