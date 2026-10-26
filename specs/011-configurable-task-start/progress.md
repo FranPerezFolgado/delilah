@@ -16,8 +16,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 4 | 4A | done | 1 | 225e616 | +legacy projects.workflow fallback fix (run.rs) |
 | WP-08 | 4 | 4A | done | 1 | ecb0950 | SkillPicker {project,value,onChange}; start_message optional in TS |
 | WP-09 | 4 | 4B | done | 1 | f1b269f | +SkillPicker onSkills callback |
-| WP-10 | 5 | 5A | implementing | 0 | | |
-| WP-11 | 5 | 5A | verified | 1 | | +AskCard callers (InboxView, TaskView, TaskScreen) allowed by user; useSkills hook |
+| WP-10 | 5 | 5A | verified | 1 | | +lang::review_text single source; autopilot/testkit.rs allowed by user (proj gets feature preset) |
+| WP-11 | 5 | 5A | verified | 1 | cfa17f0 | +AskCard callers (InboxView, TaskView, TaskScreen) allowed by user; useSkills hook |
 | WP-12 | 6 | 6A | pending | 0 | | |
 | WP-13 | 6 | 6A | pending | 0 | | |
 | WP-14 | 6 | 6A | pending | 0 | | |

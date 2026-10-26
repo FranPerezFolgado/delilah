@@ -37,19 +37,23 @@ pub fn builtin_start(lang: Lang) -> &'static str {
     }
 }
 
+/// The review step's prompt in the "Spec Kit (`/feature`)" preset (the one place
+/// that names `/review`).
+pub fn review_text(lang: Lang) -> &'static str {
+    lang.pick(
+        "/review de la rama de esta tarea. Después aplica los hallazgos confirmados, actualiza la documentación que hayan dejado obsoleta y haz commit. No hagas push ni abras una PR.",
+        "/review the branch of this task. Then apply the confirmed findings, update the docs they made stale and commit. Do not push or open a PR.",
+    )
+}
+
 /// The "Spec Kit (`/feature`)" preset: what projects had before commands were
-/// configurable. The review text is the one of `handoff::step_prompt`, and the
+/// configurable. The review text is [`review_text`], and the
 /// JSON in migration 0022 must stay equal to this (a test checks it).
 pub fn feature_preset(lang: Lang) -> ProjectWorkflow {
     ProjectWorkflow::Phased {
         plan: "/feature {task}".to_string(),
         implement: "/orchestrate {spec_dir}".to_string(),
-        review: lang
-            .pick(
-                "/review de la rama de esta tarea. Después aplica los hallazgos confirmados, actualiza la documentación que hayan dejado obsoleta y haz commit. No hagas push ni abras una PR.",
-                "/review the branch of this task. Then apply the confirmed findings, update the docs they made stale and commit. Do not push or open a PR.",
-            )
-            .to_string(),
+        review: review_text(lang).to_string(),
     }
 }
 
@@ -151,7 +155,7 @@ mod tests {
             };
             assert_eq!(plan, "/feature {task}");
             assert_eq!(implement, "/orchestrate {spec_dir}");
-            // Same text as handoff::step_prompt's Review arm.
+            // Same text as `review_text`.
             assert!(review.starts_with(lang.pick("/review de la rama", "/review the branch")));
             assert!(review.ends_with(lang.pick("abras una PR.", "open a PR.")));
         }

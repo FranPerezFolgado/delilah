@@ -3722,6 +3722,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_phased_project_starts_with_its_plan_command_and_the_saving_mode_note() {
+        use delilah_core::workflow::ProjectWorkflow;
+        let home = std::env::temp_dir().join(format!("delilah-plan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Phased {
+                plan: "/design {ticket}".into(),
+                implement: "/build {spec_dir}".into(),
+                review: "/check".into(),
+            },
+        )
+        .await;
+        let mut req = chat_run("PROJ-12");
+        req.saving_mode = Some(true);
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("/design PROJ-12"), "{stdin}");
+        assert!(!stdin.contains("/feature"), "{stdin}");
+        assert!(
+            stdin.contains("Delilah will carry on in a new session."),
+            "{stdin}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_single_message_start_fills_the_ticket_and_points_to_the_notes() {
         use delilah_core::workflow::{ProjectWorkflow, Start};
         let home = std::env::temp_dir().join(format!("delilah-msg-{}", uuid::Uuid::new_v4()));

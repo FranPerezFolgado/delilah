@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path as AxPath, State};
+use delilah_core::workflow::{ProjectWorkflow, Vars, render};
 use delilah_core::{Handoff, HandoffStage, Step, Task, TaskKey};
 use delilah_git::{GitOptions, Workspace};
 
@@ -138,18 +139,20 @@ pub(crate) fn plan_note(lang: Lang) -> &'static str {
     )
 }
 
-/// What a step's session is told to do. `dir` is the spec folder in the workspace.
-fn step_prompt(lang: Lang, step: Step, dir: &str) -> Option<String> {
+/// What a step's session is told to do: the project's own command for it, with
+/// `{spec_dir}` and the other placeholders filled in (`vars`). Nothing for the plan
+/// step (the start sends it) or for a workflow that is not phased.
+fn step_prompt(step: Step, workflow: &ProjectWorkflow, vars: &Vars) -> Option<String> {
+    let ProjectWorkflow::Phased {
+        implement, review, ..
+    } = workflow
+    else {
+        return None;
+    };
     match step {
         Step::Plan => None,
-        Step::Implement => Some(format!("/orchestrate {dir}")),
-        Step::Review => Some(
-            lang.pick(
-                "/review de la rama de esta tarea. Después aplica los hallazgos confirmados, actualiza la documentación que hayan dejado obsoleta y haz commit. No hagas push ni abras una PR.",
-                "/review the branch of this task. Then apply the confirmed findings, update the docs they made stale and commit. Do not push or open a PR.",
-            )
-            .to_string(),
-        ),
+        Step::Implement => Some(render(implement, vars)),
+        Step::Review => Some(render(review, vars)),
     }
 }
 
@@ -694,7 +697,40 @@ async fn try_start<L: Launcher>(
             .to_string()
             + &format!(": {d}"));
     }
-    let prompt = match (step_prompt(lang, step, dir.as_deref().unwrap_or("")), &dir) {
+    let task = match app.store.get_task(key).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return Err("the task does not exist".into()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let not_phased = || {
+        lang.pick(
+            "el proyecto de la tarea ya no tiene un flujo por fases",
+            "the task's project no longer has a phased workflow",
+        )
+        .to_string()
+    };
+    let Some(project) = task.project.as_deref() else {
+        return Err(not_phased());
+    };
+    let workflow = match app.store.project(project).await {
+        Ok(p) => p.settings.workflow(),
+        Err(_) => return Err(not_phased()),
+    };
+    if !matches!(workflow, ProjectWorkflow::Phased { .. }) {
+        return Err(not_phased());
+    }
+    let title = task.title.trim();
+    let vars = Vars {
+        ticket: key.as_str(),
+        title,
+        task: if crate::branching::is_free(key) {
+            title
+        } else {
+            key.as_str()
+        },
+        spec_dir: Some(dir.as_deref().unwrap_or("")),
+    };
+    let prompt = match (step_prompt(step, &workflow, &vars), &dir) {
         (Some(prompt), Some(_)) => prompt,
         (Some(prompt), None) if step == Step::Review => prompt,
         _ => {
@@ -862,7 +898,22 @@ mod tests {
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
+        app.store
+            .create_project(&delilah_core::Project {
+                name: "project".into(),
+                path: app.config.home.join("ws"),
+                kind: ProjectKind::Repo,
+                workflow: "project".into(),
+                settings: delilah_core::ProjectSettings {
+                    workflow: Some(crate::lang::feature_preset(Lang::Es)),
+                    ..Default::default()
+                },
+                preview_command: None,
+            })
+            .await
+            .unwrap();
         let mut t = Task::new(key.clone(), "t", "project");
+        t.project = Some("project".into());
         t.saving_mode = true;
         app.store.create_task(&t).await.unwrap();
         let path = app.config.home.join("ws");
@@ -894,6 +945,94 @@ mod tests {
             .await
             .unwrap();
         (app, key)
+    }
+
+    /// `step_prompt` for the `/feature` preset.
+    fn preset_prompt(lang: Lang, step: Step, dir: &str) -> Option<String> {
+        step_prompt(
+            step,
+            &crate::lang::feature_preset(lang),
+            &Vars {
+                ticket: "PROJ-1",
+                title: "t",
+                task: "PROJ-1",
+                spec_dir: Some(dir),
+            },
+        )
+    }
+
+    async fn set_workflow(app: &AppState, workflow: Option<ProjectWorkflow>) {
+        let mut settings = app.store.project("project").await.unwrap().settings;
+        settings.workflow = workflow;
+        app.store
+            .set_project_settings("project", &settings)
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn step_prompt_renders_the_projects_own_commands() {
+        let w = ProjectWorkflow::Phased {
+            plan: "/plan {task}".into(),
+            implement: "/build {spec_dir} for {ticket}".into(),
+            review: "/check {title}".into(),
+        };
+        let vars = Vars {
+            ticket: "PROJ-1",
+            title: "Fix it",
+            task: "Fix it",
+            spec_dir: Some("specs/x"),
+        };
+        assert_eq!(
+            step_prompt(Step::Implement, &w, &vars).unwrap(),
+            "/build specs/x for PROJ-1"
+        );
+        assert_eq!(
+            step_prompt(Step::Review, &w, &vars).unwrap(),
+            "/check Fix it"
+        );
+        assert!(step_prompt(Step::Plan, &w, &vars).is_none());
+        assert!(step_prompt(Step::Review, &ProjectWorkflow::default(), &vars).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_custom_workflow_hands_over_with_its_own_implement_command() {
+        let (app, key) = setup().await;
+        set_workflow(
+            &app,
+            Some(ProjectWorkflow::Phased {
+                plan: "/plan".into(),
+                implement: "/build {spec_dir}".into(),
+                review: "/check".into(),
+            }),
+        )
+        .await;
+        let launched = Launched::default();
+        try_start(&app, &key, Step::Implement, &ok_launcher(&launched))
+            .await
+            .unwrap();
+        let sent = launched.lock().unwrap()[0].1.clone().unwrap();
+        assert_eq!(sent, "/build specs/proj-1-x");
+    }
+
+    #[tokio::test]
+    async fn try_start_fails_when_the_project_is_no_longer_phased() {
+        let (app, key) = setup().await;
+        set_workflow(&app, None).await;
+        let launched = Launched::default();
+        let err = try_start(&app, &key, Step::Implement, &ok_launcher(&launched))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "el proyecto de la tarea ya no tiene un flujo por fases"
+        );
+        assert!(launched.lock().unwrap().is_empty());
+        app.lang.set(Lang::En);
+        let err = try_start(&app, &key, Step::Review, &ok_launcher(&launched))
+            .await
+            .unwrap_err();
+        assert!(err.contains("no longer has a phased workflow"), "{err}");
     }
 
     type Launched = Mutex<Vec<(SessionRecord, Option<String>)>>;
@@ -1088,11 +1227,11 @@ mod tests {
     #[tokio::test]
     async fn the_prompts_follow_the_language() {
         assert_eq!(
-            step_prompt(Lang::Es, Step::Implement, "specs/x").unwrap(),
+            preset_prompt(Lang::Es, Step::Implement, "specs/x").unwrap(),
             "/orchestrate specs/x"
         );
-        let es = step_prompt(Lang::Es, Step::Review, "").unwrap();
-        let en = step_prompt(Lang::En, Step::Review, "").unwrap();
+        let es = preset_prompt(Lang::Es, Step::Review, "").unwrap();
+        let en = preset_prompt(Lang::En, Step::Review, "").unwrap();
         assert!(es.starts_with("/review") && en.starts_with("/review"));
         assert!(es.contains("No hagas push") && en.contains("Do not push"));
         assert!(plan_note(Lang::Es).contains("Delilah seguirá en una sesión nueva."));
@@ -1470,7 +1609,7 @@ mod tests {
 
     #[test]
     fn the_review_prompt_forbids_push_and_pr_in_both_languages() {
-        let en = step_prompt(Lang::En, Step::Review, "").unwrap();
+        let en = preset_prompt(Lang::En, Step::Review, "").unwrap();
         for word in [
             "review",
             "confirmed findings",
@@ -1480,7 +1619,7 @@ mod tests {
         ] {
             assert!(en.contains(word), "{word}");
         }
-        let es = step_prompt(Lang::Es, Step::Review, "").unwrap();
+        let es = preset_prompt(Lang::Es, Step::Review, "").unwrap();
         assert!(
             es.contains("hallazgos confirmados") && es.contains("No hagas push ni abras una PR")
         );

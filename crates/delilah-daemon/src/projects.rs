@@ -849,6 +849,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_rejects_a_phased_workflow_missing_its_review() {
+        let env = env().await;
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({ "workflow": { "kind": "phased", "plan": "/feature {task}", "implement": "/orchestrate {spec_dir}", "review": " " } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["fields"][0]["field"], "workflow.review");
+        assert_eq!(body["fields"][0]["code"], "workflow.blank");
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn skills_endpoint_is_200_for_a_project_and_404_for_unknown() {
         let env = env().await;
         let proj = env.dir.join("env/parent/.claude/commands");
