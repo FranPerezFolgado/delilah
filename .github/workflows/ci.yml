@@ -46,9 +46,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
+      # The daemon runs previews and agents through /bin/zsh, which Ubuntu does not ship.
+      - run: sudo apt-get install -y zsh
       # nextest runs every test binary at once (cargo test runs them one after another);
       # the crates have no doc tests, so `cargo test --doc` is not needed.
-      - run: cargo nextest run --workspace
+      - run: cargo nextest run --workspace --no-fail-fast
 
   web:
     name: Web UI
@@ -76,6 +78,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: e2e
+      - run: sudo apt-get install -y zsh
       - run: scripts/e2e.sh api
 
   e2e-ui:
