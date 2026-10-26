@@ -5,18 +5,22 @@
 
 pub(crate) mod api;
 
-use delilah_core::{TaskKey, TaskStatus};
+use chrono::Utc;
+use delilah_core::{Event, TaskKey, TaskStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::events::Topic;
 use crate::inbox::AttentionKind;
 use crate::lang::Lang;
+use crate::pr_api::forward;
 use crate::pr_types::{Check, Outcome, PrState, Snapshot};
 use crate::prs;
 use crate::sessions::LiveState;
 use crate::state::AppState;
+use crate::store::StoreError;
+use crate::store_prs::PrRow;
 
 /// Autofix attempts per PR before it stops (FR-008).
-#[allow(dead_code)]
 pub(crate) const LIMIT: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,7 +61,6 @@ pub(crate) struct PrAutofix {
 
 /// What to do with one PR of the task (pure; the caller applies it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum Action {
     /// Nothing to do now (also: wait for pending checks or for an idle agent).
     Nothing,
@@ -81,7 +84,6 @@ fn failed_and_finished(checks: &[Check]) -> bool {
 /// Decides one PR (data-model "Transitions", the pure rows). `autofix` is the task's
 /// switch, `row` the PR's state (`None` before any), `idle` whether the agent can be
 /// typed into now. The caller re-reads the head just before sending (FR-006).
-#[allow(dead_code)]
 pub(crate) fn decide(
     autofix: bool,
     row: Option<&PrAutofix>,
@@ -120,7 +122,6 @@ pub(crate) fn decide(
 
 /// Whether the agent can be typed into (R3), from plain inputs. `live` is the primary
 /// live session's state and its pending attention kind; `None` means no live primary.
-#[allow(dead_code)]
 pub(crate) fn is_idle(
     status: &TaskStatus,
     live: Option<(LiveState, Option<AttentionKind>)>,
@@ -140,7 +141,6 @@ pub(crate) fn is_idle(
 }
 
 /// `is_idle` over the task's real sessions.
-#[allow(dead_code)]
 pub(crate) async fn idle(app: &AppState, key: &TaskKey, status: &TaskStatus) -> bool {
     let live = match app.sessions.primary(key.as_str()) {
         Some(l) => {
@@ -166,18 +166,11 @@ pub(crate) async fn idle(app: &AppState, key: &TaskKey, status: &TaskStatus) -> 
 
 /// Longest a check name goes into a prompt.
 const NAME: usize = 200;
-/// Largest a prompt is, in bytes (the same cap as `pr_api::forward`).
-const PROMPT: usize = 16 * 1024;
-
-/// A check link, only if it is a plain https URL.
-fn safe_url(link: &str) -> Option<&str> {
-    (link.starts_with("https://") && !link.chars().any(|c| c.is_control() || c.is_whitespace()))
-        .then_some(link)
-}
 
 /// The prompt for attempt `attempt` of `LIMIT`: one section per PR (its url and failed
-/// checks), framed as CI output, not as instructions from the user.
-#[allow(dead_code)]
+/// checks), framed as CI output, not as instructions from the user. It has its own text
+/// rather than `forward::ci_prompt` (one PR, a notice's JSON, no attempt count); the
+/// link filter and the size cap are `forward`'s.
 pub(crate) fn prompt(lang: Lang, attempt: u32, prs_failed: &[(&str, &[Check])]) -> String {
     let mut out = format!(
         "{} {attempt}/{LIMIT}{}\n",
@@ -200,7 +193,7 @@ pub(crate) fn prompt(lang: Lang, attempt: u32, prs_failed: &[(&str, &[Check])]) 
         ));
         for c in checks.iter().filter(|c| c.outcome == Outcome::Failure) {
             out.push_str(&format!("> {}", prs::one_line(&c.name, NAME)));
-            if let Some(link) = c.url.as_deref().and_then(safe_url) {
+            if let Some(link) = c.url.as_deref().and_then(forward::safe_url) {
                 out.push_str(&format!(" ({link})"));
             }
             out.push('\n');
@@ -213,20 +206,299 @@ pub(crate) fn prompt(lang: Lang, attempt: u32, prs_failed: &[(&str, &[Check])]) 
             "Read the logs with `gh run view --log-failed`, fix the failure, then commit and push to this same branch; don't force-push or open another PR. If you can't fix it, say why and stop."
         )
     ));
-    if out.len() > PROMPT {
-        let mark = lang.pick("\n[recortado]", "\n[truncated]");
-        let mut at = PROMPT - mark.len();
-        while !out.is_char_boundary(at) {
-            at -= 1;
-        }
-        out.truncate(at);
-        out.push_str(mark);
-    }
-    out
+    forward::fit(lang, out)
 }
 
-#[allow(dead_code)]
-pub(crate) fn evaluate() {}
+/// Most times one evaluation re-reads the rows after losing a compare-and-set.
+const TRIES: usize = 3;
+
+/// A PR whose failure goes into the prompt: its row, the value to claim, what it was.
+struct Pending {
+    row: PrRow,
+    prev: Option<PrAutofix>,
+    next: PrAutofix,
+    checks: Vec<Check>,
+}
+
+/// What `deliver` did.
+#[derive(Default)]
+struct Delivered {
+    /// Rows were written (sent or stopped).
+    changed: bool,
+    /// `ci-failed` notices were resolved.
+    resolved: bool,
+    /// A row changed under us: redo the pass.
+    lost: bool,
+}
+
+fn reason_name(reason: StopReason) -> &'static str {
+    match reason {
+        StopReason::Limit => "limit",
+        StopReason::NoPush => "no-push",
+        StopReason::NoSession => "no-session",
+    }
+}
+
+/// `prev` back to `watching` with no attempts (green head, or the user's reset); the
+/// sent sha stays, so the same head is never sent twice.
+fn watching(prev: Option<&PrAutofix>) -> PrAutofix {
+    PrAutofix {
+        state: State::Watching,
+        attempts: 0,
+        reason: None,
+        ..prev.cloned().unwrap_or(PrAutofix {
+            state: State::Watching,
+            attempts: 0,
+            sha: None,
+            session: None,
+            sent_at: None,
+            reason: None,
+        })
+    }
+}
+
+/// Looks at the task's PRs and does what autofix owes them: sends the failures of the
+/// ones that are due in one prompt, closes the ones that went green, stops the ones
+/// out of attempts. One evaluation per task at a time; a second call returns at once.
+pub(crate) async fn evaluate(app: &AppState, key: &TaskKey) {
+    let Some(_guard) = app.claim_autofix(key.as_str()) else {
+        return;
+    };
+    for _ in 0..TRIES {
+        match round(app, key).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(e) => return tracing::warn!(%key, "autofix: {e}"),
+        }
+    }
+}
+
+/// One pass over the rows; `true` when a row changed under us and it must be redone.
+async fn round(app: &AppState, key: &TaskKey) -> Result<bool, StoreError> {
+    let Some(task) = app.store.get_task(key).await? else {
+        return Ok(false);
+    };
+    if !task.ci_autofix {
+        return Ok(false);
+    }
+    let idle = idle(app, key, &task.status).await;
+    let mut pending: Vec<Pending> = Vec::new();
+    let (mut prs_changed, mut inbox, mut retry) = (false, false, false);
+    for row in app.store.prs_of(key).await? {
+        let Some(snap) = row.snapshot.clone() else {
+            continue;
+        };
+        let prev = row.autofix.clone();
+        let next = match decide(true, prev.as_ref(), &snap, idle) {
+            Action::Nothing => continue,
+            Action::Send => {
+                let attempts = prev.as_ref().map_or(0, |p| p.attempts) + 1;
+                let next = PrAutofix {
+                    state: State::Fixing,
+                    attempts,
+                    sha: Some(snap.head.clone()),
+                    session: session_id(app, key).await,
+                    sent_at: Some(Utc::now().to_rfc3339()),
+                    reason: None,
+                };
+                pending.push(Pending {
+                    row,
+                    prev,
+                    next,
+                    checks: snap.checks,
+                });
+                continue;
+            }
+            Action::Fixed | Action::Reset => watching(prev.as_ref()),
+            Action::Stop(reason) => PrAutofix {
+                state: State::Stopped,
+                reason: Some(reason),
+                ..prev.clone().unwrap_or(watching(None))
+            },
+        };
+        if !app
+            .store
+            .update_pr_autofix(row.id, prev.as_ref(), Some(&next))
+            .await?
+        {
+            retry = true;
+            continue;
+        }
+        prs_changed = true;
+        let was_fixing = prev.as_ref().is_some_and(|p| p.state == State::Fixing);
+        let event = match (next.state, next.reason) {
+            (State::Stopped, Some(reason)) => Some(Event::AutofixStopped {
+                repo: row.repo.clone(),
+                reason: reason_name(reason).into(),
+            }),
+            _ if was_fixing => Some(Event::AutofixFixed {
+                repo: row.repo.clone(),
+            }),
+            _ => None,
+        };
+        if let Some(event) = event {
+            app.transition(key, event).await?;
+        }
+        if prev.as_ref().is_some_and(|p| p.state == State::Stopped) {
+            // The `autofix-stopped` notice of a stopped PR that went green.
+            inbox |= app
+                .store
+                .resolve_notices_of(key, &row.repo, &["autofix-stopped"])
+                .await?
+                > 0;
+        }
+    }
+    if !retry && !pending.is_empty() {
+        let done = deliver(app, key, pending).await?;
+        prs_changed |= done.changed;
+        inbox |= done.resolved;
+        retry |= done.lost;
+    }
+    if prs_changed {
+        app.emit(Topic::Prs);
+    }
+    if inbox {
+        app.emit(Topic::Inbox);
+    }
+    Ok(retry)
+}
+
+/// Claims every row of `pending`, sends their failures as one prompt, and settles the
+/// rows: sent (the `ci-failed` notices resolved, history recorded), stopped for lack of
+/// a session, or given back as they were when the send failed (the attempt does not
+/// count).
+async fn deliver(
+    app: &AppState,
+    key: &TaskKey,
+    pending: Vec<Pending>,
+) -> Result<Delivered, StoreError> {
+    let mut claimed: Vec<&Pending> = Vec::new();
+    for p in &pending {
+        if app
+            .store
+            .update_pr_autofix(p.row.id, p.prev.as_ref(), Some(&p.next))
+            .await?
+        {
+            claimed.push(p);
+        } else {
+            // Changed meanwhile: give back what was claimed; the next pass decides again.
+            give_back(app, &claimed).await;
+            return Ok(Delivered {
+                lost: true,
+                ..Delivered::default()
+            });
+        }
+    }
+    let attempt = claimed.iter().map(|p| p.next.attempts).max().unwrap_or(1);
+    let sections: Vec<(&str, &[Check])> = claimed
+        .iter()
+        .map(|p| (p.row.url.as_str(), p.checks.as_slice()))
+        .collect();
+    let text = prompt(app.lang(), attempt, &sections);
+    match forward::send(app, key, &text).await {
+        Ok(()) => {
+            let mut resolved = false;
+            for p in &claimed {
+                let a = &p.next;
+                let sha = a.sha.clone().unwrap_or_default();
+                if p.prev.as_ref().is_some_and(|v| v.state == State::Fixing) {
+                    let event = Event::AutofixFailedAgain {
+                        repo: p.row.repo.clone(),
+                        sha: sha.clone(),
+                    };
+                    app.transition(key, event).await?;
+                }
+                let checks = p
+                    .checks
+                    .iter()
+                    .filter(|c| c.outcome == Outcome::Failure)
+                    .map(|c| c.name.clone())
+                    .collect();
+                let event = Event::AutofixSent {
+                    repo: p.row.repo.clone(),
+                    sha,
+                    attempt: a.attempts,
+                    checks,
+                };
+                app.transition(key, event).await?;
+                resolved |= app
+                    .store
+                    .resolve_notices_of(key, &p.row.repo, &["ci-failed"])
+                    .await?
+                    > 0;
+            }
+            Ok(Delivered {
+                changed: true,
+                resolved,
+                lost: false,
+            })
+        }
+        Err(e) if e.resume_at.is_none() && no_session(app, key).await => {
+            // Nobody to type into: stop (the user retries once there is a session).
+            for p in &claimed {
+                let stopped = PrAutofix {
+                    state: State::Stopped,
+                    attempts: p.prev.as_ref().map_or(0, |v| v.attempts),
+                    reason: Some(StopReason::NoSession),
+                    ..p.next.clone()
+                };
+                // Best effort: if the row changed meanwhile, whoever changed it decides.
+                let _ = app
+                    .store
+                    .update_pr_autofix(p.row.id, Some(&p.next), Some(&stopped))
+                    .await;
+                let event = Event::AutofixStopped {
+                    repo: p.row.repo.clone(),
+                    reason: reason_name(StopReason::NoSession).into(),
+                };
+                app.transition(key, event).await?;
+            }
+            Ok(Delivered {
+                changed: true,
+                ..Delivered::default()
+            })
+        }
+        Err(e) => {
+            tracing::info!(%key, "autofix could not send: {}", e.message);
+            give_back(app, &claimed).await;
+            Ok(Delivered::default())
+        }
+    }
+}
+
+/// Puts the rows back as they were before they were claimed.
+async fn give_back(app: &AppState, claimed: &[&Pending]) {
+    for p in claimed {
+        // Best effort: if the row changed meanwhile, whoever changed it decides.
+        let _ = app
+            .store
+            .update_pr_autofix(p.row.id, Some(&p.next), p.prev.as_ref())
+            .await;
+    }
+}
+
+/// Whether the task has no agent session to send to: no live primary, no open record.
+async fn no_session(app: &AppState, key: &TaskKey) -> bool {
+    let live = app
+        .sessions
+        .primary(key.as_str())
+        .is_some_and(|l| !l.runtime.has_exited());
+    !live && !matches!(app.store.primary_session(key.as_str()).await, Ok(Some(r)) if !r.closed)
+}
+
+/// The id of the session the next prompt goes to, if known.
+async fn session_id(app: &AppState, key: &TaskKey) -> Option<String> {
+    match app.sessions.primary(key.as_str()) {
+        Some(live) => Some(live.id.clone()),
+        None => app
+            .store
+            .primary_session(key.as_str())
+            .await
+            .ok()
+            .flatten()
+            .map(|r| r.id),
+    }
+}
 
 #[allow(dead_code)]
 pub(crate) fn on_turn_ended() {}
@@ -237,6 +509,7 @@ pub(crate) fn cancel() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pr_loop;
 
     fn check(name: &str, outcome: Outcome) -> Check {
         Check {
@@ -472,7 +745,7 @@ mod tests {
             .map(|i| check(&format!("check-{i}-{}", "x".repeat(150)), Outcome::Failure))
             .collect();
         let p = prompt(Lang::En, 1, &[("https://gh/pr/1", &many)]);
-        assert!(p.len() <= PROMPT);
+        assert!(p.len() <= forward::PROMPT);
         assert!(p.ends_with("[truncated]"));
     }
 
@@ -511,5 +784,255 @@ mod tests {
         assert!(!is_idle(&TaskStatus::Done, None, false, true));
         assert!(is_idle(&waiting, None, false, true), "relaunch the record");
         assert!(!is_idle(&waiting, None, false, false));
+    }
+
+    // --- evaluate (flow) ---
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use delilah_core::SpecPhase;
+
+    use crate::gh::fake::{FakeGh, PR_LIST, REPO_VIEW, ci_snapshot};
+    use crate::pr_testkit::task_with_workspace;
+
+    fn gh_heads(heads: &[(&str, &str)]) -> Arc<FakeGh> {
+        let mut gh = FakeGh::new()
+            .on(&["repo", "view"], Ok(REPO_VIEW))
+            .on(&["pr", "list"], Ok(PR_LIST))
+            .with_user("me");
+        for (head, conclusion) in heads {
+            gh = gh.on(
+                &["api", "graphql"],
+                Ok(&ci_snapshot("OPEN", head, conclusion)),
+            );
+        }
+        Arc::new(gh)
+    }
+
+    /// A primary session played by `cat`, waiting for input.
+    fn cat_session(app: &AppState) -> tokio::sync::broadcast::Receiver<delilah_agents::pty::Chunk> {
+        use delilah_agents::pty::PtySession;
+        use portable_pty::CommandBuilder;
+
+        let mut cmd = CommandBuilder::new("cat");
+        cmd.args(["-u"]);
+        let pty = PtySession::spawn(cmd, 200, 24, None).unwrap();
+        let (_, output) = pty.attach();
+        app.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+        wait_for_input(app);
+        output
+    }
+
+    fn wait_for_input(app: &AppState) {
+        app.sessions
+            .primary("PROJ-1")
+            .unwrap()
+            .set_state(LiveState::Waiting);
+    }
+
+    async fn read_until(
+        output: &mut tokio::sync::broadcast::Receiver<delilah_agents::pty::Chunk>,
+        needles: &[&str],
+    ) {
+        let mut seen = String::new();
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !needles.iter().all(|n| seen.contains(n)) {
+                match output.recv().await {
+                    Ok(chunk) => seen.push_str(&String::from_utf8_lossy(&chunk)),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(e) => panic!("the terminal closed: {e}, saw {seen:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("never saw {needles:?} in {seen:?}"));
+    }
+
+    async fn autofix_of(app: &AppState, key: &TaskKey) -> Vec<Option<PrAutofix>> {
+        let rows = app.store.prs_of(key).await.unwrap();
+        rows.into_iter().map(|r| r.autofix).collect()
+    }
+
+    /// Waits for the evaluation `check_task` spawned to leave `want` on the first PR.
+    async fn settle(app: &AppState, key: &TaskKey, want: impl Fn(&PrAutofix) -> bool) -> PrAutofix {
+        for _ in 0..300 {
+            if let Some(a) = autofix_of(app, key).await.remove(0)
+                && want(&a)
+            {
+                return a;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("autofix never got there: {:?}", autofix_of(app, key).await);
+    }
+
+    async fn history(app: &AppState, key: &TaskKey) -> Vec<String> {
+        app.store
+            .events(key)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.event.name().to_string())
+            .filter(|n| n.starts_with("autofix"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_failing_head_is_sent_once_and_a_green_head_ends_the_attempt() {
+        let gh = gh_heads(&[("abc", "FAILURE"), ("abc", "FAILURE"), ("def", "SUCCESS")]);
+        let (app, key, _dir) = task_with_workspace(gh, Some(SpecPhase::Review)).await;
+        app.store.set_ci_autofix(&key, true).await.unwrap();
+        let mut out = cat_session(&app);
+
+        pr_loop::check_task(&app, &key, true).await;
+        let a = settle(&app, &key, |a| a.state == State::Fixing).await;
+        assert_eq!((a.attempts, a.sha.as_deref()), (1, Some("abc")));
+        assert_eq!(a.session.as_deref(), Some("s-1"));
+        read_until(&mut out, &["intento 1/3", "> build (https://ci/1)"]).await;
+        let mut notices = app.store.open_notices().await.unwrap();
+        for _ in 0..100 {
+            if notices.iter().all(|n| n.kind != "ci-failed") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            notices = app.store.open_notices().await.unwrap();
+        }
+        assert!(notices.iter().all(|n| n.kind != "ci-failed"), "{notices:?}");
+        assert!(app.notifier.recorded().is_empty(), "no CI failed ping");
+
+        // The same head again: nothing is typed, nothing is counted.
+        wait_for_input(&app);
+        pr_loop::check_task(&app, &key, true).await;
+        evaluate(&app, &key).await;
+        let again = autofix_of(&app, &key).await.remove(0).unwrap();
+        assert_eq!((again.state, again.attempts), (State::Fixing, 1));
+        assert_eq!(history(&app, &key).await, ["autofix-sent"]);
+
+        // A green head: back to watching.
+        pr_loop::check_task(&app, &key, true).await;
+        let a = settle(&app, &key, |a| a.state == State::Watching).await;
+        assert_eq!(a.attempts, 0);
+        assert_eq!(history(&app, &key).await, ["autofix-sent", "autofix-fixed"]);
+    }
+
+    #[tokio::test]
+    async fn two_prs_failing_together_make_one_prompt_with_both() {
+        let gh = gh_heads(&[("abc", "FAILURE")]);
+        let (app, key, _dir) = task_with_workspace(gh, Some(SpecPhase::Review)).await;
+        app.store.set_ci_autofix(&key, true).await.unwrap();
+        // No session yet: the first check links and reads the first PR, autofix waits.
+        pr_loop::check_task(&app, &key, true).await;
+        let second = app
+            .store
+            .link_pr(
+                &key,
+                &crate::store_prs::NewPr {
+                    repo: "sub".into(),
+                    host: "github.com".into(),
+                    owner_name: "o/s".into(),
+                    number: 9,
+                    url: "https://github.com/o/s/pull/9".into(),
+                    linked_by: "pasted".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let mut red = snap("def", vec![check("lint", Outcome::Failure)]);
+        red.checks[0].url = None;
+        app.store
+            .save_check(
+                second.id,
+                &red,
+                &Default::default(),
+                chrono::Utc::now(),
+                &[],
+                &[],
+            )
+            .await
+            .unwrap();
+        let mut out = cat_session(&app);
+
+        // The evaluation the first check spawned may still hold the task: try again.
+        for _ in 0..100 {
+            evaluate(&app, &key).await;
+            if autofix_of(&app, &key).await.iter().all(Option::is_some) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        read_until(
+            &mut out,
+            &["pull/7:", "> build", "pull/9:", "> lint", "intento 1/3"],
+        )
+        .await;
+        for a in autofix_of(&app, &key).await {
+            let a = a.unwrap();
+            assert_eq!((a.state, a.attempts), (State::Fixing, 1));
+        }
+        assert_eq!(history(&app, &key).await, ["autofix-sent", "autofix-sent"]);
+    }
+
+    fn pending(row: PrRow) -> Pending {
+        let next = PrAutofix {
+            state: State::Fixing,
+            attempts: 1,
+            sha: Some("abc".into()),
+            session: None,
+            sent_at: None,
+            reason: None,
+        };
+        Pending {
+            checks: row.snapshot.clone().unwrap().checks,
+            prev: row.autofix.clone(),
+            next,
+            row,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_send_gives_the_rows_back_and_no_session_stops() {
+        let gh = gh_heads(&[("abc", "FAILURE")]);
+        let (app, key, _dir) = task_with_workspace(gh, Some(SpecPhase::Review)).await;
+        app.store.set_ci_autofix(&key, true).await.unwrap();
+        pr_loop::check_task(&app, &key, true).await;
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        assert_eq!(row.autofix, None);
+
+        // The task got paused by the limit between the idle check and the send.
+        let resume_at = chrono::Utc::now() + chrono::Duration::hours(2);
+        app.transition(&key, Event::LimitReached { resume_at })
+            .await
+            .unwrap();
+        let done = deliver(&app, &key, vec![pending(row.clone())])
+            .await
+            .unwrap();
+        assert!(!done.changed && !done.lost);
+        assert_eq!(autofix_of(&app, &key).await, [None], "attempt not counted");
+        assert!(history(&app, &key).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_session_stops_the_pr_with_that_reason() {
+        let gh = gh_heads(&[("abc", "FAILURE")]);
+        let (app, key, _dir) = task_with_workspace(gh, Some(SpecPhase::Review)).await;
+        app.store.set_ci_autofix(&key, true).await.unwrap();
+        pr_loop::check_task(&app, &key, true).await;
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+
+        let done = deliver(&app, &key, vec![pending(row)]).await.unwrap();
+        assert!(done.changed);
+        let a = autofix_of(&app, &key).await.remove(0).unwrap();
+        assert_eq!(
+            (a.state, a.reason, a.attempts),
+            (State::Stopped, Some(StopReason::NoSession), 0)
+        );
+        assert_eq!(history(&app, &key).await, ["autofix-stopped"]);
     }
 }

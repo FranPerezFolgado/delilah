@@ -33,16 +33,16 @@ const BODY: usize = 2000;
 /// Most comments one prompt carries.
 const COMMENTS: usize = 20;
 /// Largest a prompt is, in bytes.
-const PROMPT: usize = 16 * 1024;
+pub(crate) const PROMPT: usize = 16 * 1024;
 
 /// A check link, only if it is a plain https URL.
-fn safe_url(link: &str) -> Option<&str> {
+pub(crate) fn safe_url(link: &str) -> Option<&str> {
     (link.starts_with("https://") && !link.chars().any(|c| c.is_control() || c.is_whitespace()))
         .then_some(link)
 }
 
 /// `out` within `PROMPT` bytes, cut on a char boundary.
-fn fit(lang: Lang, mut out: String) -> String {
+pub(crate) fn fit(lang: Lang, mut out: String) -> String {
     if out.len() > PROMPT {
         let mark = lang.pick("\n[recortado]", "\n[truncated]");
         let mut at = PROMPT - mark.len();

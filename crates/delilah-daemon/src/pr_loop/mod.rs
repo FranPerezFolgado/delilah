@@ -157,7 +157,7 @@ pub(crate) fn nudge_after(app: &AppState, key: &TaskKey, delay: Duration) {
 /// reads every open PR. `force` also searches below review and ignores the back-off.
 /// Only one check of a task runs at a time: a second call returns at once.
 pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
-    let Some(_guard) = claim(app, key) else {
+    let Some(guard) = claim(app, key) else {
         return;
     };
     let Ok(Some(task)) = app.store.get_task(key).await else {
@@ -208,6 +208,10 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
     if merge::all_merged(&rows) {
         merge::on_merged(app, key, &rows).await;
     }
+    // Autofix looks at what this check saw, once the next check may start.
+    drop(guard);
+    let (app, key) = (app.clone(), key.clone());
+    tokio::spawn(async move { crate::autofix::evaluate(&app, &key).await });
 }
 
 /// Looks for the PR of `branch` in one repo and links it. Whether the rows changed;
