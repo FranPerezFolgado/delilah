@@ -29,6 +29,7 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-10F | 3 | fix | verified | 1 | 27fbd7d | styles.test scale/token fixes (also carries WP-13's staged deletions) |
 | WP-13F | 4 | fix | verified | 1 | 7db48bb | inline styles, test locale, role i18n |
 | WP-17F | 5 | fix | implementing | 1 | | phase 5 review fixes |
+| WP-13G | 4 | fix | implementing | 1 | | phase 3-4 review fixes (shared store, online, looks, walk-in) |
 
 ## Open findings
 
@@ -44,3 +45,5 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | 2 | spec | LOW | PixelSprite reduced-motion / .pg-paused only in CSS, untested | PixelSprite.css |
 | 5 | spec | LOW | flow layout is columns per agent with tools below, not a left-to-right tree (stable, intent kept) | flowLayout.ts |
 | 5 | spec | LOW | node/frame radius 7 (project radius scale) instead of R10's 6/8 | FlowView.css |
+| 3-4 | spec | LOW | FloorMini rows use --card radius 10; no phase icon (text label only) | FloorMini.tsx |
+| 3-4 | arch | LOW | openTask(key, target) mixes session id and OFFICE sentinel in one string | App.tsx |
