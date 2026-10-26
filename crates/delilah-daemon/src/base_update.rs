@@ -306,7 +306,7 @@ mod tests {
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         app.store
@@ -427,7 +427,7 @@ mod tests {
         let key = TaskKey::new("PROJ-2");
         f.app
             .store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let Err(e) = update(State(f.app.clone()), UrlPath(key.to_string())).await else {

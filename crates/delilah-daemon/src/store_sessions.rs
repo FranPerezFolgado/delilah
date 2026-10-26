@@ -711,7 +711,7 @@ mod tests {
     async fn the_activity_and_runtime_columns_round_trip() {
         let store = Store::in_memory().await.unwrap();
         store
-            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "project"))
             .await
             .unwrap();
         store
@@ -791,7 +791,7 @@ mod tests {
     async fn a_forgotten_session_is_gone() {
         let store = Store::in_memory().await.unwrap();
         store
-            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "project"))
             .await
             .unwrap();
         store
@@ -809,7 +809,7 @@ mod tests {
     async fn keeps_a_tasks_sessions_and_its_primary() {
         let store = Store::in_memory().await.unwrap();
         store
-            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "project"))
             .await
             .unwrap();
         store
@@ -857,7 +857,7 @@ mod tests {
     async fn store_with_plan_session() -> Store {
         let store = Store::in_memory().await.unwrap();
         store
-            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "project"))
             .await
             .unwrap();
         let plan = SessionRecord {
@@ -1054,7 +1054,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -1068,7 +1068,7 @@ mod tests {
         with_project(&store).await;
         store.create_session(&conversation("c")).await.unwrap();
         store
-            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "project"))
             .await
             .unwrap();
         store

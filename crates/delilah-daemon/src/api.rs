@@ -351,7 +351,7 @@ fn parse_view(view: &str) -> Result<delilah_core::TaskView, ApiError> {
 }
 
 fn default_workflow() -> String {
-    "feature".into()
+    delilah_core::workflow::TaskWorkflow::Project.as_str().into()
 }
 
 /// `POST /api/v1/tasks/{key}/setup/retry`: from `setup-failed`, runs the setup again.
@@ -897,7 +897,7 @@ mod tests {
         let key = TaskKey::new(key);
         state
             .store
-            .create_task(&Task::new(key.clone(), "Idea", "feature"))
+            .create_task(&Task::new(key.clone(), "Idea", "project"))
             .await
             .unwrap();
         let ws = delilah_git::Workspace {
@@ -1250,7 +1250,7 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(task["status"], json!({"type": "queued"}));
-        assert_eq!(task["workflow"], "feature");
+        assert_eq!(task["workflow"], "project");
 
         let (status, _) = call(
             &app,
@@ -1366,7 +1366,7 @@ mod tests {
     async fn saving_mode_on_a_task_and_its_handoff_actions() {
         let (app, state) = app_with_project().await;
         let key = TaskKey::new("PROJ-1");
-        let mut t = Task::new(key.clone(), "t", "feature");
+        let mut t = Task::new(key.clone(), "t", "project");
         t.saving_mode = true;
         state.store.create_task(&t).await.unwrap();
         let offered = delilah_core::Handoff {
@@ -1467,7 +1467,7 @@ mod tests {
         let (app, _state) = app_with_project().await;
         let new = |extra: Value| {
             let mut body =
-                json!({"free": true, "title": "T", "project": "web", "workflow": "feature"});
+                json!({"free": true, "title": "T", "project": "web", "workflow": "project"});
             body.as_object_mut()
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
@@ -1558,7 +1558,7 @@ mod tests {
             &app,
             "POST",
             "/api/v1/tasks",
-            Some(json!({"free": true, "title": "T", "project": "web", "workflow": "feature", "autopilot": true})),
+            Some(json!({"free": true, "title": "T", "project": "web", "workflow": "project", "autopilot": true})),
         )
         .await;
         let key = TaskKey::new(task["key"].as_str().unwrap());
@@ -1600,7 +1600,7 @@ mod tests {
         let key = TaskKey::new("PROJ-1");
         state
             .store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let (status, task) = call(

@@ -26,7 +26,7 @@ pub(crate) fn running() -> Autopilot {
 }
 
 pub(crate) fn task_with(autopilot: Option<AutopilotState>) -> Task {
-    let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+    let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "project");
     t.saving_mode = true;
     t.autopilot = autopilot.map(|state| Autopilot { state, ..running() });
     t

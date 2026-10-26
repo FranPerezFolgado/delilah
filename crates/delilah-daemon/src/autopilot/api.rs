@@ -144,7 +144,7 @@ mod tests {
     async fn turning_on_refuses_a_project_session_and_another_workflow() {
         let (app, key, _dir) = paused_task(gh("[]"), None).await;
         let mut task = task_of(&app, &key).await.ok().unwrap();
-        assert_eq!(task.workflow, "feature");
+        assert_eq!(task.workflow, "project");
         task.workflow = "prompt".into();
         let other = TaskKey::new("PROJ-2");
         task.key = other.clone();

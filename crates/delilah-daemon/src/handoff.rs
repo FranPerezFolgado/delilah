@@ -765,7 +765,7 @@ mod tests {
     use delilah_core::ProjectKind;
 
     fn task(saving: bool, handoff: Option<(Step, HandoffStage)>) -> Task {
-        let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "project");
         t.saving_mode = saving;
         t.handoff = handoff.map(|(to, stage)| Handoff {
             to,
@@ -862,7 +862,7 @@ mod tests {
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
-        let mut t = Task::new(key.clone(), "t", "feature");
+        let mut t = Task::new(key.clone(), "t", "project");
         t.saving_mode = true;
         app.store.create_task(&t).await.unwrap();
         let path = app.config.home.join("ws");

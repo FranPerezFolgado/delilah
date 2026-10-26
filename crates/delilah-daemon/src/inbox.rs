@@ -1045,7 +1045,7 @@ mod tests {
     async fn app_with_a_question_and_a_failure() -> AppState {
         let app = app_with_pr_task().await;
         let key = delilah_core::TaskKey::new("PROJ-1");
-        let mut other = Task::new(delilah_core::TaskKey::new("PROJ-2"), "Other", "feature");
+        let mut other = Task::new(delilah_core::TaskKey::new("PROJ-2"), "Other", "project");
         other.status = TaskStatus::Failed {
             reason: "boom".into(),
         };
@@ -1454,7 +1454,7 @@ mod tests {
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = delilah_core::TaskKey::new("PROJ-1");
-        let mut task = Task::new(key.clone(), "Fix it", "feature");
+        let mut task = Task::new(key.clone(), "Fix it", "project");
         task.status = TaskStatus::Running;
         app.store.create_task(&task).await.unwrap();
         app.store
@@ -1704,7 +1704,7 @@ mod tests {
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = delilah_core::TaskKey::new("PROJ-1");
-        let mut t = Task::new(key.clone(), "t", "feature");
+        let mut t = Task::new(key.clone(), "t", "project");
         t.saving_mode = true;
         app.store.create_task(&t).await.unwrap();
         app.store

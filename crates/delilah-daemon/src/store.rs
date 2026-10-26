@@ -711,7 +711,7 @@ mod tests {
     }
 
     fn task(key: &str) -> Task {
-        Task::new(TaskKey::new(key), "Card retries", "feature")
+        Task::new(TaskKey::new(key), "Card retries", "project")
     }
 
     #[tokio::test]
@@ -1598,7 +1598,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })

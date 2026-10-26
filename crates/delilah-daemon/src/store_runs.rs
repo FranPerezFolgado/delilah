@@ -193,7 +193,7 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let key = TaskKey::new("PROJ-1");
         store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let ws = Workspace {
@@ -218,7 +218,7 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let key = TaskKey::new("LIBRE-1");
         store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let ws = Workspace {
@@ -242,7 +242,7 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let key = TaskKey::new("PROJ-1");
         store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let ws = Workspace {
@@ -283,7 +283,7 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let key = TaskKey::new("SEC-1");
         store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let ws = Workspace {

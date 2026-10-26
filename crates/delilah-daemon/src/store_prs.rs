@@ -511,7 +511,7 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         for k in keys {
             store
-                .create_task(&Task::new(TaskKey::new(*k), "title", "feature"))
+                .create_task(&Task::new(TaskKey::new(*k), "title", "project"))
                 .await
                 .unwrap();
         }

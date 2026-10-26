@@ -121,7 +121,7 @@ mod tests {
             .set_preview_command("proj", Some("sleep 30"))
             .await
             .unwrap();
-        let mut other = delilah_core::Task::new(TaskKey::new("PROJ-2"), "t", "feature");
+        let mut other = delilah_core::Task::new(TaskKey::new("PROJ-2"), "t", "project");
         other.project = Some("proj".into());
         app.store.create_task(&other).await.unwrap();
         let router = crate::api::router(app);

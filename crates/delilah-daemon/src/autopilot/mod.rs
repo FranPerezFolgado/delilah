@@ -67,7 +67,7 @@ fn is_task(key: &TaskKey) -> bool {
 /// Whether autopilot may be on in `key`: a task (not a project's owner) on the spec
 /// workflow.
 pub(crate) fn allowed(key: &TaskKey, workflow: &str) -> bool {
-    is_task(key) && workflow == "feature"
+    is_task(key) && workflow == delilah_core::workflow::TaskWorkflow::Project.as_str()
 }
 
 /// The 409 for autopilot asked for where it cannot be.

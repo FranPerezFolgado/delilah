@@ -23,7 +23,7 @@ pub struct NewProject {
 }
 
 fn default_workflow() -> String {
-    "feature".into()
+    delilah_core::workflow::TaskWorkflow::Project.as_str().into()
 }
 
 pub async fn list_projects(State(app): State<AppState>) -> Result<Json<Vec<Project>>, ApiError> {
@@ -843,7 +843,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })

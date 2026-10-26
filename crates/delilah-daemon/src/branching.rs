@@ -737,7 +737,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("delilah-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let key = TaskKey::new(key);
-        let mut task = Task::new(key.clone(), "Idea", "feature");
+        let mut task = Task::new(key.clone(), "Idea", "project");
         task.title_source = TitleSource::Initial;
         app.store.create_task(&task).await.unwrap();
         let ws = Workspace {

@@ -74,7 +74,7 @@ mod tests {
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "Card retries", "feature"))
+            .create_task(&Task::new(key.clone(), "Card retries", "project"))
             .await
             .unwrap();
         for event in [
@@ -296,7 +296,7 @@ mod tests {
         let (app, key, gh, _dir) = finishing_app(PR_LIST, Duration::ZERO).await;
         // A second task with no autopilot is left alone.
         app.store
-            .create_task(&Task::new(TaskKey::new("PROJ-2"), "other", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-2"), "other", "project"))
             .await
             .unwrap();
         // Preview stage with a lost process: on to the PR, linking the one gh has.

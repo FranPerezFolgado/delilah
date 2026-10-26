@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_agents::runtime::{self, Runtime, RuntimeKind};
+use delilah_core::workflow::TaskWorkflow;
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{Deadline, FetchOutcome, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
@@ -328,8 +329,10 @@ pub(crate) async fn start_run_with(
     }
     let prompt = match (&req.prompt, workflow.as_str()) {
         (Some(prompt), _) => prompt.clone(),
-        (None, "feature") if req.free => format!("/feature {}", req.title.trim()),
-        (None, "feature") => format!("/feature {}", req.key),
+        (None, w) if w == TaskWorkflow::Project.as_str() && req.free => {
+            format!("/feature {}", req.title.trim())
+        }
+        (None, w) if w == TaskWorkflow::Project.as_str() => format!("/feature {}", req.key),
         (None, other) => {
             return Err(ApiError::bad_request(format!(
                 "workflow `{other}` needs a --prompt"
@@ -1843,7 +1846,7 @@ mod tests {
             name: "parent".into(),
             path: dir.join("env/parent"),
             kind: ProjectKind::Parent,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             settings: Default::default(),
             preview_command: None,
         };
@@ -2050,7 +2053,7 @@ mod tests {
                 name: "web".into(),
                 path: app.config.home.join("missing"),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -2139,7 +2142,7 @@ mod tests {
                 name: "fresh".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -2203,7 +2206,7 @@ mod tests {
                 name: "stale".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -2287,7 +2290,7 @@ mod tests {
         let app = app().await;
         let key = TaskKey::new("PROJ-5");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         let base = |repo: &str, fetch| RepoBase {
@@ -2414,7 +2417,7 @@ mod tests {
     }
 
     async fn backlog_task(app: &AppState, key: &str) -> TaskKey {
-        let mut task = Task::new(TaskKey::new(key), "Reintentos", "feature");
+        let mut task = Task::new(TaskKey::new(key), "Reintentos", "project");
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         task.key
@@ -2452,7 +2455,7 @@ mod tests {
                 name: "repo".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -2678,7 +2681,7 @@ mod tests {
         assert!(!saving(&app, "PROJ-3").await, "the request wins");
 
         // A backlog task keeps its own choice, and goes back to it if the start fails.
-        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "project");
         task.project = Some("web".into());
         task.saving_mode = true;
         app.store.create_task(&task).await.unwrap();
@@ -2759,7 +2762,7 @@ mod tests {
         assert!(get("PROJ-3").await.autopilot.is_none());
 
         // A backlog task keeps its autopilot, and it goes back if the start fails.
-        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "project");
         task.project = Some("web".into());
         task.saving_mode = true;
         task.autopilot = Some(new_autopilot());
@@ -2827,7 +2830,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_start_leaves_the_backlog_task_as_it_was() {
         let app = app().await;
-        let mut task = Task::new(TaskKey::new("PROJ-1"), "Reintentos", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Reintentos", "project");
         task.project = Some("web".into());
         task.notes = Some("con backoff".into());
         task.in_checkout = Some(false);
@@ -2991,7 +2994,7 @@ mod tests {
                 name: "web".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -3083,7 +3086,7 @@ mod tests {
         config.agent_program = Some(bin);
         let app = AppState::new(app.store.clone(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
-        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "project");
         task.project = Some("web".into());
         task.chat_mode = chat_mode;
         app.store.create_task(&task).await.unwrap();
@@ -3421,7 +3424,7 @@ mod tests {
         config.agent_program = Some(bin);
         let app = AppState::new(app.store.clone(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
-        let mut task = Task::new(TaskKey::new("LIBRE-1"), "Reintentos", "feature");
+        let mut task = Task::new(TaskKey::new("LIBRE-1"), "Reintentos", "project");
         task.project = Some("repo".into());
         task.in_checkout = Some(false);
         task.chat_mode = true;
@@ -3805,7 +3808,7 @@ mod tests {
                 name: "web".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 preview_command: None,
                 settings: Default::default(),
             })
@@ -4020,7 +4023,7 @@ mod tests {
                 name: "web".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 preview_command: None,
                 settings,
             })
@@ -4154,7 +4157,7 @@ mod tests {
             name: "parent".into(),
             path: dir.join("env/parent"),
             kind: ProjectKind::Parent,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             preview_command: None,
             settings: Default::default(),
         };
@@ -4376,7 +4379,7 @@ mod tests {
         let (app, repo) = settings_app(worktree_default()).await;
         app.store
             .create_task(&{
-                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "project");
                 t.project = Some("web".into());
                 t.status = TaskStatus::Queued;
                 t.in_checkout = Some(true);
@@ -4410,7 +4413,7 @@ mod tests {
         let (app, repo) = settings_app(settings(None)).await;
         app.store
             .create_task(&{
-                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "project");
                 t.project = Some("web".into());
                 t.status = TaskStatus::Queued;
                 t.in_checkout = Some(false);

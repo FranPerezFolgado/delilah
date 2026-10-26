@@ -422,7 +422,7 @@ mod tests {
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "Card retries", "feature"))
+            .create_task(&Task::new(key.clone(), "Card retries", "project"))
             .await
             .unwrap();
         app.transition(&key, Event::Start).await.unwrap();
@@ -784,7 +784,7 @@ mod project_tests {
                 name: "platform".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -858,7 +858,7 @@ mod project_tests {
                 name: "platform".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })

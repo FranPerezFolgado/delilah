@@ -53,13 +53,13 @@ pub(crate) async fn task_with_workspace(
             name: "proj".into(),
             path: "/parent".into(),
             kind: ProjectKind::Repo,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             settings: Default::default(),
             preview_command: None,
         })
         .await
         .unwrap();
-    let mut task = Task::new(key.clone(), "t", "feature");
+    let mut task = Task::new(key.clone(), "t", "project");
     task.project = Some("proj".into());
     app.store.create_task(&task).await.unwrap();
     app.transition(&key, Event::Start).await.unwrap();

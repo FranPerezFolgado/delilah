@@ -375,7 +375,7 @@ mod tests {
             .set_setting(SETTINGS_KEY, &jira("https://acme.atlassian.net"))
             .await
             .unwrap();
-        let mut task = delilah_core::Task::new(TaskKey::new("LIBRE-1"), "free", "feature");
+        let mut task = delilah_core::Task::new(TaskKey::new("LIBRE-1"), "free", "project");
         task.project = Some("proj".into());
         app.store.create_task(&task).await.unwrap();
         let ws = app

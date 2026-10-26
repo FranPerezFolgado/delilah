@@ -421,7 +421,7 @@ mod tests {
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&delilah_core::Task::new(key.clone(), "t", "feature"))
+            .create_task(&delilah_core::Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         let workspace = delilah_git::Workspace {

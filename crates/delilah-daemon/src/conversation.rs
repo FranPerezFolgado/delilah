@@ -1118,7 +1118,7 @@ mod tests {
                     name: "web".into(),
                     path: "/w/web".into(),
                     kind: delilah_core::ProjectKind::Repo,
-                    workflow: "feature".into(),
+                    workflow: "project".into(),
                     settings: Default::default(),
                     preview_command: None,
                 })
@@ -1332,7 +1332,7 @@ mod tests {
     async fn the_conversation_reports_the_sessions_real_runtime() {
         let f = Fixture::new().await;
         let mut task =
-            delilah_core::Task::new(delilah_core::TaskKey::new("PROJ-1"), "t", "feature");
+            delilah_core::Task::new(delilah_core::TaskKey::new("PROJ-1"), "t", "project");
         task.chat_mode = true;
         f.app.store.create_task(&task).await.unwrap();
         let mut rec = record("chat1", false);
@@ -2618,7 +2618,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })

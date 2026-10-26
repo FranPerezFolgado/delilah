@@ -829,7 +829,7 @@ mod tests {
                 name: "web".into(),
                 path: repo.clone(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })

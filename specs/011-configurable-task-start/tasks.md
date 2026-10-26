@@ -34,7 +34,7 @@ task comes before the task that implements it.
 - [X] T010 Write a failing migration test in `crates/delilah-daemon/src/store.rs` (tests module): seed a DB migrated to 0021 with projects (`settings` `{}` and with a branch template) and tasks (`feature`, `prompt`, `bugfix`), and `pref:language` unset / `"en"`; after migrating, projects have `$.workflow` equal to `feature_preset(Lang::Es)` / `(Lang::En)`, existing keys kept; tasks are `project`, `prompt`, `prompt`; `start_message` is NULL; running the migration SQL twice changes nothing
 - [X] T011 Implement T010: `crates/delilah-daemon/migrations/0022_workflow_commands.sql` per data-model.md §Migration (`CASE` on `settings` `pref:language`)
 - [X] T012 Read and write `start_message` in `crates/delilah-daemon/src/store.rs` (task SELECTs, insert, update/`change` paths) with a round-trip test
-- [ ] T013 Replace every hard-coded `"feature"` task workflow with `TaskWorkflow::Project.as_str()` in `crates/delilah-daemon/src/actions.rs`, `conversation.rs`, `session_api.rs`, `asks.rs`, `pr_loop/mod.rs`, `proposals.rs` and `store.rs` (including test fixtures); `rg '"feature"' crates/delilah-daemon/src` must only show the preset and the alias parser
+- [X] T013 Replace every hard-coded `"feature"` task workflow with `TaskWorkflow::Project.as_str()` in `crates/delilah-daemon/src/actions.rs`, `conversation.rs`, `session_api.rs`, `asks.rs`, `pr_loop/mod.rs`, `proposals.rs` and `store.rs` (including test fixtures); `rg '"feature"' crates/delilah-daemon/src` must only show the preset and the alias parser
 
 **Checkpoint**: `cargo test -p delilah-core -p delilah-daemon` green; the daemon starts on a migrated copy of a pre-upgrade state with unchanged behaviour (still the old start code).
 

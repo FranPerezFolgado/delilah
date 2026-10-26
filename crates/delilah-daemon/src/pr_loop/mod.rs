@@ -673,14 +673,14 @@ mod tests {
                 name: "par".into(),
                 path: "/par".into(),
                 kind: ProjectKind::Parent,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
             .await
             .unwrap();
         for (name, project) in [("PROJ-2", "proj"), ("PROJ-3", "par")] {
-            let mut task = Task::new(TaskKey::new(name), "t", "feature");
+            let mut task = Task::new(TaskKey::new(name), "t", "project");
             task.project = Some(project.into());
             app.store.create_task(&task).await.unwrap();
         }
