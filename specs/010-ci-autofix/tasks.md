@@ -139,9 +139,9 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T045 [P] `docs/decisions.md`: decision 87 "CI autofix forwards CI failures on its own, opt-in and bounded" (amends #29 for CI only; reviews stay manual; why: limit 3, one per sha, state before send), and an "Amended by 87" note on #29
-- [ ] T046 [P] `docs/architecture.md`: an `autofix/` section (decide/evaluate/guard, triggers, CAS, turn-end judgement, cancel, notices) and the module table row
-- [ ] T047 [P] `docs/status.md` (PR loop: CI autofix built; upgrade note: live autopilot tasks get autofix on, seeded so no old failure fires) and `docs/usage.md` (toggle, project default, CLI, what the agent is told, stops and retry)
+- [X] T045 [P] `docs/decisions.md`: decision 87 "CI autofix forwards CI failures on its own, opt-in and bounded" (amends #29 for CI only; reviews stay manual; why: limit 3, one per sha, state before send), and an "Amended by 87" note on #29
+- [X] T046 [P] `docs/architecture.md`: an `autofix/` section (decide/evaluate/guard, triggers, CAS, turn-end judgement, cancel, notices) and the module table row
+- [X] T047 [P] `docs/status.md` (PR loop: CI autofix built; upgrade note: live autopilot tasks get autofix on, seeded so no old failure fires) and `docs/usage.md` (toggle, project default, CLI, what the agent is told, stops and retry)
 - [ ] T048 Run `cargo fmt`, `cargo clippy --workspace`, `cargo test --workspace`, `cd app && npx tsc --noEmit && npx vitest run`, and the e2e `cargo test -p delilah-e2e --test autofix`
 - [ ] T049 Walk through `specs/010-ci-autofix/quickstart.md` in a preview (`scripts/preview.sh --fresh`), never on the installed daemon; check the UI with `ui-verifier`
 

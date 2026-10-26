@@ -76,6 +76,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
 - The Inbox shows failed CI, changes requested and new comments (from anyone but the signed-in account), and "Ask the agent to fix it" sends them to the agent, only when the user chooses.
 - "Open PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
+- **CI autofix** ([#87](decisions.md), spec `010-ci-autofix`): opt in per task (a "Fix CI" toggle in the PR tab, `--autofix` / `--no-autofix` on `delilah new|run`, `delilah autofix <KEY> on|off|retry`) with a project default (`delilah project set <name> ci-autofix off|autopilot|always`, a select in the project settings). When a task's PR has all its checks finished with a failure and the agent is idle, Delilah types the failed checks into the agent's session, up to 3 attempts per PR and once per commit. It stops, with an Inbox item ("Retry autofix"), when the limit is reached, the agent ends its turn without pushing, or there is no session. Merge, close, archive, delete and toggling off cancel it. Reviews and comments are still forwarded only by the user. See [architecture.md](architecture.md#ci-autofix-autofix).
 - A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
 
 **Branch names:**
@@ -195,6 +196,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the settings screen, the setup banner and the new task form were never checked in a browser during that feature's reviews (API and CLI were);
   - low: no test for the "Settings saved" confirmation; a PATCH that changes a project's kind does two non-atomic writes; the Spanish "unknown submodule" message omits the path; the CLI's 422 output is untested end to end; no migration test over pre-existing rows; `ß`/`Æ` become hyphens in branch slugs;
 - **PR loop follow-ups:**
+  - **CI autofix, known limits:** an attempt whose session exits without a `Stop` hook stays "fixing" until the next turn or a green head; the attempts reset when a head goes green, so the cost is bounded per commit, not overall; the prompt carries check names and links from GitHub, which an outsider can influence (fork PRs, external status apps), so the defence is the data framing plus the agent's permission prompts.
+  - **CI autofix, upgrade:** tasks that are live and on autopilot get autofix on (migration 0022), with their PRs' current head counted as already sent, so no old failure fires. The daemon, CLI and app must ship together: an older daemon rejects the new `ci_autofix` project setting, and after a downgrade it cannot read the new `autofix-*` history events or the `pr-autofix` inbox kind (say so in the release notes).
   - cross-linked PRs of a changeset (each PR names the others);
   - saving lessons to QMD when a task merges;
   - "Open PR" against a base other than the default branch.

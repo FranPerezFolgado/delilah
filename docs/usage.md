@@ -262,7 +262,37 @@ binary swaps `gh` (previews use a fake one).
   anyone but you. Each opens the PR, or "Ask the agent to fix it" sends it to
   the task's agent as comments to consider (never on its own), or "Discard" it.
   They count on the Dock badge. A new failing commit raises a new item; the same one
-  never twice.
+  never twice. With CI autofix on, a failure it handles raises no notification of its own.
+- **CI autofix.** Turn on "Fix CI" in the PR tab (also `--autofix` / `--no-autofix` in
+  `delilah new` and `run`, and `delilah autofix <KEY> on|off`) and a red CI is sent to the
+  agent without you pressing anything. A new task gets it from its project: in the project
+  settings, "Fix CI automatically" is "Never", "Only on autopilot tasks" (the
+  default) or "On every task" (`delilah project set <name> ci-autofix off|autopilot|always`).
+  A task with it on shows a mark on its PR badge, and each PR card says "Autofix:
+  watching", "Fixing CI: attempt N of 3" or "Autofix: stopped" with the reason.
+  - *When it sends:* once all the head commit's checks have finished and at least one
+    failed, and the agent is waiting for you (it has finished its turn; not while it works,
+    waits on a permission prompt or an open question, or the task is paused by a limit).
+    Otherwise it waits for that. The agent is told which checks failed (names and links
+    from the PR, marked as CI data, not as your instructions), to read the logs with
+    `gh run view --log-failed`, fix it, and commit and push to the same branch; not to
+    force-push or open another PR. The history shows "CI autofix: attempt N of 3".
+  - *Limits:* 3 attempts per PR, and a commit is sent once. A green head ends the attempt
+    ("CI fixed") and gives the PR its 3 attempts back. Reviews and comments are never sent
+    by themselves.
+  - *When it stops:* after 3 attempts that did not fix it, when the agent ends its turn
+    without pushing, or when there is no agent session to send to. You get one notification
+    and an Inbox item "CI autofix stopped" with the reason; "Retry autofix" (also in the PR
+    card, or `delilah autofix <KEY> retry --repo <path>`) gives the PR its attempts back and
+    tries again at once. A green head clears it. Turning the toggle off, a merged or closed
+    PR, archiving or deleting the task cancel it: nothing more is sent, and a turn already
+    running is not interrupted.
+  - *Pressing "Ask the agent to fix it"* on a CI item still works; it does not send a commit
+    autofix already sent.
+  - *Security:* check names and links come from GitHub and can be influenced by others
+    (pull requests from forks, external status apps). The defence is that the agent is told
+    they are data, and its own permission prompts. Don't run autofix with permissive or
+    bypass permission modes on PRs you don't trust.
 - **"Open PR"** (in the PR tab, once the branch has commits, and while some repo of the task has no open PR) shows a title and
   description to edit (the Jira link and the commit subjects), "Draft", and for a
   parent a "Submodule" picker, on the first free submodule with commits. It pushes the branch and opens the PR against the

@@ -25,8 +25,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-14 | 5 | 5A | verified | 1 | 082e25a | set/retry await evaluate inline; PATCH ci_autofix → autofix::set (409 terminal only when it changes) |
 | WP-15 | 5 | 5A | verified | 1 | ce53e13 | retry requires --repo (CLI error); project show prints ci-autofix |
 | WP-16 | 5 | 5A | verified | 1 | 801a88f | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
-| WP-17 | 6 | 6A | verified | 1 | | inbox button reuses "Descartar"; badge mark via Sidebar |
-| WP-18 | 7 | 7A | pending | 0 | | |
+| WP-17 | 6 | 6A | verified | 1 | f9732e5 | inbox button reuses "Descartar"; badge mark via Sidebar |
+| WP-17F | 5-6 | fix | implementing | 0 | | Phase 5-6 review fixes |
+| WP-18 | 7 | 7A | verified | 1 | | decision 87; architecture autofix section; status + usage |
 | WP-19 | 7 | 7B | pending | 0 | | |
 
 ## Open findings
@@ -70,3 +71,13 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | architecture | LOW | autofix/mod.rs ~1,900 lines: move turn-end judging to autofix/turn.rs | crates/delilah-daemon/src/autofix/mod.rs |
 | 4 | spec-compliance | MEDIUM | Turn start consumed on a background/limited turn end → the following turn without PromptSubmitted/Working has started=None and is never judged; PR can stay `fixing` (FR-009 delayed). Don't consume the start when background/limited | crates/delilah-daemon/src/hooks.rs, sessions.rs |
 | 4 | spec-compliance | LOW | Working hook while Waiting (non-permission NeedsUser, late subagent hook) resets the turn start | crates/delilah-daemon/src/hooks.rs |
+| 5 | contract | MEDIUM | PrView gates the toggle/Retry only on `done`, not `failed` (daemon 409 terminal) and shows the raw English 409 message → fold into the UI fix package | app/src/components/PrView.tsx:91,194,362 |
+| 5 | contract | MEDIUM | 422 on retry shown as a generic error; no reload after a failed action | app/src/components/PrView.tsx |
+| 5 | contract | LOW | PATCH writes backlog fields before autofix::set (partial write on a race) | crates/delilah-daemon/src/api.rs:565-580 |
+| 5 | contract | LOW | contracts/api.md says "409 terminal for done/archived"; code is Done or Failed | specs/010-ci-autofix/contracts/api.md |
+| 5 | contract | LOW | UI dialogs always send an explicit ci_autofix (freezes the project default at dialog time) | app/src/components/NewTaskDialog.tsx |
+| 5-6 | ui-verifier | MEDIUM (open) | UI not verified visually: no browser tools in this session; API side of settings/toggle passes; check in a preview by hand | app/src |
+| 5 | spec-compliance | LOW (accepted) | Backlog task keeps ci_autofix from creation when autopilot is turned on later — matches research R8 (default only at creation) | app/src/components/BacklogTaskView.tsx |
+| 5 | spec-compliance | LOW | `autofix K on --repo x` accepts and ignores --repo | crates/delilah-cli/src/main.rs |
+| 6 | spec-compliance | LOW | Fixing line lists the current snapshot's failed checks, not the sent sha's | app/src/components/PrView.tsx:329 |
+| 6 | spec-compliance | LOW | Badge mark only appears once the task has a PR | app/src/components/PrBadge.tsx |

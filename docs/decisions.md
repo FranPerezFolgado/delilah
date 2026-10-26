@@ -305,7 +305,8 @@ after a restart.
 **29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
 A failed CI or a review only reaches the Inbox; "Ask the agent to fix it" sends it, as comments to consider, not as instructions from the user.
 Auto-forwarding was ruled out: it would spend the subscription and let a
-reviewer's text steer the agent unseen.
+reviewer's text steer the agent unseen. *Amended by 87: CI failures (only those)
+can be forwarded on their own, opt in; reviews and comments stay manual.*
 
 **30. Notify for comments from anyone but the signed-in account (2026-10-20).**
 Other people and bots count; only the user's own comments are skipped. Filtering
@@ -693,3 +694,23 @@ folder of several GB that git had forgotten, so no retry could ever remove it. D
 only happens after the same checks as before (or `force`), so it loses nothing git would have
 kept. *Ruled out:* only retrying `git worktree remove` (it refuses a forgotten worktree), and a
 periodic sweep of `workspaces/` (it would have to guess which folders are still in use).
+
+**87. CI autofix forwards CI failures on its own, opt-in and bounded (2026-10-26).** Amends
+29 for CI only. A task with `ci_autofix` on (per task; the project default `off` /
+`autopilot` / `always`, `autopilot` if unset, decides what a new task gets) sends the agent
+the failed checks of its PR when the head's checks have all finished with a failure and the
+agent is idle, then waits for the next head. At most 3 attempts per PR (`autofix::LIMIT`);
+a head is sent once (its sha is kept); a push that does not come (the turn ends with the
+same head) or a missing session stops it into an Inbox item with "Retry autofix". Reviews
+and comments still reach the agent only when the user asks. *Why:* a red CI is the most
+mechanical feedback there is, and waiting for the user to press "Ask the agent to fix it"
+stalls autopilot at its last step. The risk 29 named (a stranger's text steering the agent)
+is smaller here: the prompt carries check names and links only, framed as CI data, with
+instructions first and the size capped from the end; the agent's own permission prompts are
+the real defence. The limit bounds the spend. *State before send:* the per-PR state (attempt,
+sha, session, time) is written by compare-and-set before the text is typed, and given back
+if the send fails, so a crash or a race can lose an attempt's count but never send a head
+twice; a manual forward takes the same per-task slot. *Ruled out:* forwarding reviews too
+(they come from people and bots, and are judgment calls); an unbounded loop; a time-based
+retry (the head is the trigger, not the clock); a lock in memory only (a restart would forget
+what was sent).
