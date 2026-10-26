@@ -226,8 +226,8 @@ parallel (different files, no dependency on an unfinished task).
 
 **Independent test**: `~/.delilah/tasks/LIBRE-15/secret-scan.md` exists, lists every finding (or none), and the git history is unchanged.
 
-- [ ] T043 [P] [US5] Run `gitleaks git --log-opts=--all --redact -v --report-format json --report-path "$TMPDIR/gitleaks-delilah.json" .` from the repo root.
-- [ ] T044 [US5] Triage each finding (open the commit and file; decide whether it is a real secret, a test fixture or a false positive) and write `~/.delilah/tasks/LIBRE-15/secret-scan.md` (outside the repo, never committed). Include the scan date, tool and version, commit range, and a table of findings (file, commit, rule, verdict, what to rotate). If a real secret shows up, also run `trufflehog git file://. --only-verified` for a second opinion. Stop and say so in `progress.md` and the PR description without rewriting anything. Delete the raw JSON afterwards.
+- [X] T043 [P] [US5] Run `gitleaks git --log-opts=--all --redact -v --report-format json --report-path "$TMPDIR/gitleaks-delilah.json" .` from the repo root.
+- [X] T044 [US5] Triage each finding (open the commit and file; decide whether it is a real secret, a test fixture or a false positive) and write `~/.delilah/tasks/LIBRE-15/secret-scan.md` (outside the repo, never committed). Include the scan date, tool and version, commit range, and a table of findings (file, commit, rule, verdict, what to rotate). If a real secret shows up, also run `trufflehog git file://. --only-verified` for a second opinion. Stop and say so in `progress.md` and the PR description without rewriting anything. Delete the raw JSON afterwards.
 
 ---
 
