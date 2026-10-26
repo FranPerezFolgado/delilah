@@ -64,9 +64,22 @@ trap 'rm -f "$NOTES_FILE"' EXIT
 printf '%s\n' "$NOTES" > "$NOTES_FILE"
 node scripts/release/manifest.mjs --write "$BUNDLE/latest.json" "v$VERSION" "$SIG_FILE" "$NOTES_FILE" "$REPO"
 
-# 5. What was produced.
+# 5. SHA256SUMS over the outputs, as the release workflow will publish it.
+SUMS_DIR="$(mktemp -d)"
+trap 'rm -f "$NOTES_FILE"; rm -rf "$SUMS_DIR"' EXIT
+cp "$BUNDLE/macos/Delilah.app.tar.gz" "$SUMS_DIR/Delilah_aarch64.app.tar.gz"
+cp "$SIG_FILE" "$SUMS_DIR/Delilah_aarch64.app.tar.gz.sig"
+cp "$BUNDLE/latest.json" "$SUMS_DIR/latest.json"
+for dmg in "$BUNDLE"/dmg/*.dmg; do
+  [[ -f "$dmg" ]] && cp "$dmg" "$SUMS_DIR/"
+done
+(cd "$SUMS_DIR" && shasum -a 256 -- * | sort -k2) > "$BUNDLE/SHA256SUMS"
+
+# 6. What was produced.
 echo "dry run for v$VERSION done; nothing was uploaded. Artefacts:"
 echo "  $BUNDLE/macos/Delilah.app.tar.gz"
 echo "  $SIG_FILE"
 echo "  $BUNDLE/latest.json"
 ls "$BUNDLE"/dmg/*.dmg 2>/dev/null | sed 's/^/  /' || true
+echo "  $BUNDLE/SHA256SUMS:"
+sed 's/^/    /' "$BUNDLE/SHA256SUMS"

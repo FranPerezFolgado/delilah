@@ -1,4 +1,4 @@
-# ADR-001: "Permitir siempre" in chat mode remembers only allowlisted or exact rules
+# ADR-001: "Always allow" in chat mode remembers only allowlisted or exact rules
 
 - **Status**: Accepted
 - **Date**: 2026-10-25
@@ -6,8 +6,8 @@
 ## Context
 
 In chat mode Delilah runs `claude -p --input-format stream-json --permission-prompt-tool stdio`
-and answers every `can_use_tool` request with a "¿Permitir?" card. "Permitir siempre en esta
-tarea" stores a rule in `tasks.allowed_tools`; that rule goes into `permissions.allow` of every
+and answers every `can_use_tool` request with a "Allow?" card. "Always allow in this
+task" stores a rule in `tasks.allowed_tools`; that rule goes into `permissions.allow` of every
 later session of the task (autopilot included) and the daemon answers matching requests by
 itself. The rule shape comes from Claude's `permission_suggestions`, which the model writes and
 repo content can steer. Two security reviews showed that a bare `Bash` rule, broad prefixes
@@ -20,7 +20,7 @@ exfiltration for the rest of the task.
 A remembered Bash prefix rule is accepted only for an allowlist of bounded commands
 (`SAFE_BASH_PREFIXES`); anything else is remembered as the exact command, file rules as the
 exact approved file inside the workspace, WebFetch rules as the exact host, and when no safe
-rule exists only "Permitir una vez" is offered.
+rule exists only "Allow once" is offered.
 
 A prefix rule is applied by the daemon only, never written into the session settings: Claude's
 own matcher would accept any arguments after the prefix. The daemon matches it when the
@@ -73,6 +73,6 @@ pass are silently ignored.
 ## When to reconsider
 
 When a "review / revoke rules" view exists in the task screen, or if after a month of real
-chat-mode use most "Permitir siempre" clicks end up as exact-command rules that never match
+chat-mode use most "Always allow" clicks end up as exact-command rules that never match
 again (users asking for the same tool with new arguments), revisit the allowlist: add the
 recurring safe prefixes, or replace the flag denylist with a per-entry list of allowed flags.
