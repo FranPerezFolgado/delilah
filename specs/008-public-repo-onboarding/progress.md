@@ -20,7 +20,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-13 | 4 | 4B | verified | 1 | 38b6381 | done in the WP-07 run (same file) |
 | WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
 | WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
-| WP-16 | 5 | 5A | implementing | 0 | | |
+| WP-16 | 5 | 5A | verified | 1 | 3b9554e | CHANGELOG v0.2.1..v1.0.0; release check requires the version's section |
 | WP-17 | 5 | 5A | verified | 1 | 302a7a1 | personal notes moved to ignored CLAUDE.local.md |
 | WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
 | WP-19 | 6 | 6A | verified | 1 | d7954db | T041 pending: preview check via ui-verifier; native menu = unit tests only; empty defaults output now → English |
@@ -44,3 +44,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | security | LOW | "macOS will warn on first launch" isn't true for the script install (no quarantine) | SECURITY.md:47 |
 | 4 | security | LOW | on re-run, gh release download fetches a stale SHA256SUMS into dist and hashes/attests it; rm it after download | .github/workflows/release.yml:113-122 |
 | 4 | security | LOW | ci.yml has no permissions block; add contents: read | .github/workflows/ci.yml:3-12 |
+| 3 | implementer WP-08 | MEDIUM | the app/DMG/install.sh ship only delilahd; the `delilah` CLI used in the Quickstart must be built from source (documented, not fixed) | README.md, app/src-tauri/tauri.conf.json |
