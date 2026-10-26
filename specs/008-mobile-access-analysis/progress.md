@@ -9,13 +9,13 @@ Experiment (WP-03): run with the user on 2026-10-26.
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | b52d62c | first run hung, relaunched |
 | WP-02 | 2 | 2A | done | 1 | 492c9c5 | |
-| WP-03 | 3 | 3A | verified | 1 | f520f5e | run with the user 2026-10-26 |
-| WP-04 | 3 | 3B | verified | 1 | 7bceddb | also fixed phase 1–2 findings |
-| WP-05 | 4 | 4A | pending | 0 | | |
-| WP-06 | 4 | 4A | pending | 0 | | |
-| WP-07 | 4 | 4A | pending | 0 | | |
-| WP-08 | 4 | 4B | pending | 0 | | |
-| WP-09 | 5 | 5A | pending | 0 | | T019/T020 by orchestrator |
+| WP-03 | 3 | 3A | done | 1 | f520f5e | run with the user 2026-10-26 |
+| WP-04 | 3 | 3B | done | 1 | 7bceddb | also fixed phase 1–2 findings |
+| WP-05 | 4 | 4A | done | 2 | cc46b93 | first run hung, relaunched |
+| WP-06 | 4 | 4A | done | 1 | b37eacf | renumbered to decision 87 after merging main (c41954e) |
+| WP-07 | 4 | 4A | done | 1 | ac2805e | |
+| WP-08 | 4 | 4B | done | 1 | 65a2ee9 | links ok; architecture.md/README unchanged |
+| WP-09 | 5 | 5A | done | 1 | df40e7c | bump 1.1.0 → 1.1.1 (patch) |
 
 ## Open findings
 
@@ -29,4 +29,5 @@ Experiment (WP-03): run with the user on 2026-10-26.
 | 1–2 | spec-compliance | LOW | SC-005: not said one-time; pairing not counted in setup time | research.md:29 |
 | 1–2 | spec-compliance | LOW | Missing blank line after R5 table breaks rendering | research.md:185 |
 
-Plan: fold these into WP-04 (T013 edits research.md anyway).
+Phase 1–2 findings: fixed in WP-04 (7bceddb). Phase 3 findings (3 MEDIUM, LOWs): fixed in WP-04F (56d5003).
+Open: SC-004 not verifiable before push (step 4); Q6 not run; iOS version not recorded.

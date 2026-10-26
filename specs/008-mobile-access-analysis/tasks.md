@@ -62,7 +62,7 @@ Tests: none (not requested; nothing executable ships).
 ## Phase 5: Close
 
 - [X] T018 Mark `specs/008-mobile-access-analysis/checklists/security.md` items still true after T013; note any changed by the experiment
-- [ ] T019 Bump the version, **patch** (docs only, no new behaviour): `scripts/bump-version.sh patch --commit` (from `origin/main`; commit `chore: bump version to X.Y.Z`)
+- [X] T019 Bump the version, **patch** (docs only, no new behaviour): `scripts/bump-version.sh patch --commit` (from `origin/main`; commit `chore: bump version to X.Y.Z`)
 - [ ] T020 Draft the PR text (pr-writer), in English, stating the bump level and why; the user pushes and opens it
 
 ---
