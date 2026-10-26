@@ -60,7 +60,7 @@ parallel (different files, no dependency on an unfinished task).
 
   Use `platform` in examples and no claude.ai links.
 - [X] T013 [P] [US1] Create `docs/README.md`: an index of the current docs (usage, architecture, decisions, development, status, vision, adr/), one line each, plus "History" pointing to `docs/archive/`, `docs/redesign/` and `specs/`.
-- [ ] T014 [US1] Run the Story 1 checks from [quickstart.md](quickstart.md):
+- [X] T014 [US1] Run the Story 1 checks from [quickstart.md](quickstart.md):
   - the forbidden-terms grep over everything except `specs/`, `.specify/`, `docs/archive/` and `docs/redesign/` screenshots;
   - the Spanish-labels grep;
   - `npx --yes lychee --offline` over `README.md` and `docs/**/*.md`, excluding only `docs/archive` (not `docs/redesign`).

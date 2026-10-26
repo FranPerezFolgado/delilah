@@ -83,8 +83,10 @@ Updates install from inside the app and are not quarantined; see
 ## Quickstart
 
 ```bash
-# 1. Install (see above), then open Delilah.app, or run the daemon yourself:
-delilah daemon
+# 1. Install (see above) and open Delilah.app: it starts the daemon.
+#    The `delilah` command is not installed by the app; build it from source
+#    (`cargo build --release -p delilah-cli`) and use target/release/delilah,
+#    or put it on your PATH.
 # 2. Register a project (a repo, or a parent repo with submodules)
 delilah project add ~/work/platform --kind parent
 # 3. Run a task: builds its workspace and starts Claude Code on it

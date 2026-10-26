@@ -16,6 +16,16 @@ sessions. For what Delilah is, see the [README](../README.md).
 
 ## Command line
 
+The `delilah` command is a separate binary (crate `delilah-cli`). The `.dmg`, the app
+tarball and `install.sh` do not put it on your PATH (the app bundles only the daemon,
+`delilahd`, which it starts itself, and there is no "install CLI" menu item). To use it,
+build it and link it yourself:
+
+```bash
+cargo build --release -p delilah-cli
+ln -s "$PWD/target/release/delilah" /usr/local/bin/delilah   # or any folder on your PATH
+```
+
 ```bash
 # Terminal 1: the daemon (state in ~/.delilah, API on 127.0.0.1:7420)
 cargo run -p delilah-daemon
