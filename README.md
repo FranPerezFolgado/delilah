@@ -466,8 +466,9 @@ needs your approval, for task and project sessions in both the terminal and chat
 «Auto» (the default) lets Claude's auto mode handle routine work, so it stops asking for
 every command; «Por defecto de Claude» launches Claude with no mode flag. It applies to
 sessions you start or reopen from then on; running ones are not restarted. Idea
-conversations and read-only sessions keep their own modes. If Claude refuses auto mode at
-start (an account without it), the error says to try «Por defecto de Claude». Actions
+conversations and read-only sessions keep their own modes. If Claude refuses the mode at
+start, the error says to try «Por defecto de Claude» (checked with Claude's "invalid mode"
+error; the wording for an account without auto mode has not been seen yet). Actions
 auto mode still escalates show as "¿Permitir?" cards in chat mode.
 
 **Language.** Spanish or English, picked in Ajustes (Automatic follows the Mac). It

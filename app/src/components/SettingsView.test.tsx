@@ -163,6 +163,15 @@ describe("SettingsView agent permissions", () => {
     expect(screen.getByRole("radio", { name: "Auto" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: "Por defecto de Claude" }).getAttribute("aria-checked")).toBe("false");
   });
+
+  it("on a failed load shows the error and keeps the control disabled", async () => {
+    vi.mocked(api.preference).mockImplementation(((k: string) =>
+      k === "agent-permissions" ? Promise.reject(new Error("down")) : Promise.resolve(null)) as never);
+    setup();
+    expect(await screen.findByText("down")).toBeTruthy();
+    fireEvent.click(await radio("Por defecto de Claude"));
+    expect(api.setPreference).not.toHaveBeenCalledWith("agent-permissions", "default");
+  });
 });
 
 describe("SettingsView diagnostics", () => {

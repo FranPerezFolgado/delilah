@@ -15,9 +15,9 @@ export type TaskStatus =
   // The workspace setup failed, was cancelled or interrupted; reason is the end of its output.
   | { type: "setup-failed"; reason: string };
 
-/** The steps of a saving-mode task, each in its own session. */
 /** The `agent-permissions` preference: how task and project agents are launched. */
 export type AgentPermissions = "auto" | "default";
+/** The steps of a saving-mode task, each in its own session. */
 export type Step = "plan" | "implement" | "review";
 export type HandoffStage = "offered" | "saving" | "starting" | "failed" | "skipped";
 

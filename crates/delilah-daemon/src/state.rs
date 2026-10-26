@@ -176,14 +176,16 @@ impl AppState {
     }
 
     /// Reads the `agent-permissions` preference again (at start, and when it changes):
-    /// `"default"` gives `Default`; anything else, including unset, gives `Auto`.
+    /// `"default"` gives `Default`; anything else, including unset, gives `Auto`. A store
+    /// that cannot be read leaves the mode as it was, so a failed read never widens it.
     pub async fn load_agent_permissions(&self) {
-        let value: Option<Value> = self
-            .store
-            .setting("pref:agent-permissions")
-            .await
-            .ok()
-            .flatten();
+        let value: Option<Value> = match self.store.setting("pref:agent-permissions").await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::warn!("cannot read the agent-permissions preference: {e}");
+                return;
+            }
+        };
         let mode = match value.as_ref().and_then(Value::as_str) {
             Some("default") => 1,
             _ => 0,

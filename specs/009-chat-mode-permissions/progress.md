@@ -75,3 +75,12 @@ Preview slot 1, fresh state, real Claude CLI. Scenario 1 (setting): API only. GE
 Scenario 2 (Auto, chat): the task wrote, ran sed, ran ls and committed with no `permission` item. PASS.
 Scenario 3 (default, after a runtime switch): a `permission` item came back ("Bash: echo hi > notes2.txt"). PASS.
 Scenario 4 (PUT "bypassPermissions"): 400, and the stored value was unchanged. PASS.
+
+### Final review (2026-10-26)
+Four reviewers (security, code quality, tests, architecture). Applied:
+- MEDIUM (fixed): `fail_if_mode_rejected` ran on every non-zero PTY exit and scanned the whole scrollback, so a kill (Detener, runtime switch, relaunch) of an agent whose own output quoted the rejection failed the task. It now acts only on an exit within 10 s of the spawn, with the rejection among the first 5 non-empty lines; escape codes are stripped first. Tests: `a_rejection_quoted_further_down_the_screen_is_not_one`, `an_exit_long_after_the_spawn_is_never_a_rejected_mode`.
+- LOW (fixed): `load_agent_permissions` keeps the current mode (and logs) when the store cannot be read, instead of falling back to Auto.
+- LOW (fixed): Ajustes keeps the permissions control disabled when its preference cannot be loaded (new vitest).
+- LOW (fixed): `AgentPermissions` in `api.ts` had split the `Step` doc comment.
+- MEDIUM (docs): README, architecture and status no longer promise the hint for "an account without auto"; only the "invalid mode" text is verified.
+Not applied (LOW / design): moving the rejection helpers out of `run.rs`; a typed enum instead of the `AtomicU8`; a per-key preference validator; unit test for `exit_with_stderr` parsing (covered by three e2e tests); splitting a two-case vitest. Full suite green after the fixes (daemon 820, vitest 858, Tauri 4, clippy, fmt); `a_message_sent_while_a_card_is_pending_is_queued` flaked once more in the first run and passed on 5 reruns and in the final run.

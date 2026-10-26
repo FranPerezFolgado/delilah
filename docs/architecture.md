@@ -192,8 +192,12 @@ and only changes while the task is under way (see `phases.rs`):
   `PUT /api/v1/preferences/agent-permissions` refuses anything else with 400 and keeps the
   stored value. `AppState` holds it in memory (reloaded at start and after each PUT);
   `launch_flags` reads it, so it applies to sessions spawned or relaunched afterwards, not to
-  running ones. The flag is the same in PTY and chat. If the CLI rejects the mode at start,
-  the hint to Settings → Agent permissions ("Claude's default") is added to the task failure reason (terminal), the start error (chat), or, for a project session (which does not fail), an Inbox error item on the session (`fail_if_mode_rejected`).
+  running ones. The flag is the same in PTY and chat. If the CLI rejects the mode at start
+  (its text names `--permission-mode` and says invalid/unavailable; only the "invalid" text
+  has been seen, see the spike), the hint to Settings → Agent permissions ("Claude's default") is added to the task failure reason (terminal), the start error (chat), or, for a project session (which does not fail), an Inbox error item on the session (`fail_if_mode_rejected`). For a terminal this only
+  counts for an exit within 10 s of the spawn with the rejection among the first lines of
+  the screen, so a kill (Detener, a runtime switch) of an agent whose own output quotes the
+  error is not mistaken for it.
 - **Clean environment.** Claude runs with a clean environment plus the login
   shell's PATH (see `env.rs`). A Claude spawned with another Claude session's
   variables does not save its transcript.

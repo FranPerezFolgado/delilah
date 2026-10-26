@@ -1417,24 +1417,42 @@ fn with_permission_hint(app: &AppState, text: &str) -> String {
     format!("{text}\n{hint}")
 }
 
-/// The lines of a terminal screen where the CLI rejects the permission mode it was
-/// launched with, joined; empty when there are none.
+/// How soon after its spawn a terminal agent must exit for its exit to be the CLI
+/// rejecting its flags: that happens before the CLI draws anything (spike, FR-008).
+const MODE_REJECTION_WINDOW: Duration = Duration::from_secs(10);
+
+/// How many of a screen's first non-empty lines can hold the rejection: the CLI prints
+/// it before anything else, so a line further down is the agent's own output (a diff,
+/// a test run) quoting it.
+const MODE_REJECTION_HEAD: usize = 5;
+
+/// The lines at the top of a terminal screen where the CLI rejects the permission mode
+/// it was launched with, joined; empty when there are none.
 fn rejection_lines(screen: &str) -> String {
-    screen
+    crate::setup::strip_escapes(screen)
         .replace('\r', "\n")
         .lines()
         .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(MODE_REJECTION_HEAD)
         .filter(|l| rejects_permission_mode(l))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// A terminal agent that exited with the CLI's rejection of the permission mode on its
-/// screen (FR-008). That text is only printed at start, so it is an exit before any work.
-/// A task fails with that line and the hint; a project's session has no task to fail, so
-/// it raises an error in the inbox, as a failed turn does.
-async fn fail_if_mode_rejected(app: &AppState, task: &str, session: &str, pty: &PtySession) {
-    if pty.exit_code().is_none_or(|c| c == 0) {
+/// A terminal agent that exited, right after its spawn, with the CLI's rejection of the
+/// permission mode at the top of its screen (FR-008): an exit before any work. A later
+/// exit (a kill on Detener, a runtime switch, a crash) is never this, whatever the
+/// screen says. A task fails with that line and the hint; a project's session has no
+/// task to fail, so it raises an error in the inbox, as a failed turn does.
+async fn fail_if_mode_rejected(
+    app: &AppState,
+    task: &str,
+    session: &str,
+    pty: &PtySession,
+    lived: Duration,
+) {
+    if lived > MODE_REJECTION_WINDOW || pty.exit_code().is_none_or(|c| c == 0) {
         return;
     }
     let (screen, _) = pty.attach();
@@ -1571,6 +1589,7 @@ pub(crate) async fn spawn_session(
     let watched = runtime.clone();
     let rejection_watch = (session.kind == SessionKind::Claude && kind == RuntimeKind::Pty)
         .then(|| (app.clone(), session.task.clone(), session.id.clone()));
+    let spawned_at = std::time::Instant::now();
     tokio::spawn(async move {
         watched.wait().await;
         sessions.remove_if_same(&id, &watched);
@@ -1578,7 +1597,7 @@ pub(crate) async fn spawn_session(
         if let Some((app, task, session)) = rejection_watch
             && let Some(pty) = watched.as_pty()
         {
-            fail_if_mode_rejected(&app, &task, &session, pty).await;
+            fail_if_mode_rejected(&app, &task, &session, pty, spawned_at.elapsed()).await;
         }
     });
 
@@ -1925,15 +1944,42 @@ mod tests {
     }
 
     #[test]
-    fn the_rejection_is_picked_out_of_a_multi_line_screen() {
+    fn the_rejection_is_picked_out_of_the_top_of_a_screen() {
         let screen = format!(
-            "Welcome to Claude\r\n  {SPIKE_REJECTION}  \r\nInvalid API key\r\nTry again\r\n{SPIKE_REJECTION}\r\n"
+            "\x1b[31mWelcome to Claude\x1b[0m\r\n\r\n  \x1b[1m{SPIKE_REJECTION}\x1b[0m  \r\nInvalid API key\r\nTry again\r\n{SPIKE_REJECTION}\r\n"
         );
         assert_eq!(
             rejection_lines(&screen),
             format!("{SPIKE_REJECTION}\n{SPIKE_REJECTION}")
         );
         assert_eq!(rejection_lines("Welcome\r\nInvalid API key\r\n"), "");
+    }
+
+    #[test]
+    fn a_rejection_quoted_further_down_the_screen_is_not_one() {
+        let work = (1..=MODE_REJECTION_HEAD)
+            .map(|n| format!("● step {n}\r\n"))
+            .collect::<String>();
+        assert_eq!(
+            rejection_lines(&format!("{work}+ const R = \"{SPIKE_REJECTION}\";\r\n")),
+            ""
+        );
+    }
+
+    #[tokio::test]
+    async fn an_exit_long_after_the_spawn_is_never_a_rejected_mode() {
+        let app = app().await;
+        let mut cmd = portable_pty::CommandBuilder::new("sh");
+        cmd.args(["-c", &format!("echo \"{SPIKE_REJECTION}\"; exit 1")]);
+        let pty = PtySession::spawn(cmd, 200, 24, None).unwrap();
+        pty.wait().await;
+        let owner = crate::store_sessions::project_owner("p");
+        let mut rx = app.events.subscribe();
+        let late = MODE_REJECTION_WINDOW + Duration::from_secs(1);
+        fail_if_mode_rejected(&app, &owner, "s-1", &pty, late).await;
+        assert!(rx.try_recv().is_err(), "a late exit raised an inbox error");
+        fail_if_mode_rejected(&app, &owner, "s-1", &pty, Duration::ZERO).await;
+        assert_eq!(rx.try_recv().ok(), Some(Topic::Inbox));
     }
 
     #[tokio::test]

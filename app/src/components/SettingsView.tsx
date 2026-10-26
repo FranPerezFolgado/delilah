@@ -76,9 +76,12 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
     api
       .preference<AgentPermissions>("agent-permissions")
       // Auto unless the user chose Claude's default.
-      .then((v) => setPerms(v === "default" ? "default" : "auto"))
-      .catch((e) => setError((e as Error).message))
-      .finally(() => setPermsBusy(false));
+      .then((v) => {
+        setPerms(v === "default" ? "default" : "auto");
+        setPermsBusy(false);
+      })
+      // Unknown: the control stays disabled rather than show a mode that may not be the one saved.
+      .catch((e) => setError((e as Error).message));
   }, []);
 
   const choosePerms = async (value: AgentPermissions) => {
