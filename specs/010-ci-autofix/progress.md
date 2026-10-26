@@ -12,14 +12,14 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-03 | 2 | 2B | done | 1 | c897f5c | +prs.rs test literal (allowed); CAS by value in BEGIN IMMEDIATE |
 | WP-05 | 2 | 2C | done | 1 | 3f4e2b7 | +run.rs test literal (compile-only); PATCH uses set_ci_autofix, BacklogChange untouched |
 | WP-05F | 2 | fix | done | 1 | a8d0b61 | Phase 2 review fixes |
-| WP-06 | 3 | 3A | verified | 1 | d7fd9ad | prompt duplicated in autofix (forward::ci_prompt/fit private) → dedupe in WP-07; FR-006 vs R3: followed R3 |
-| WP-08 | 3 | 3A | verified | 1 | dabc503 | manual forward: CAS sha before send, restore on failure, 409 after 3 CAS tries |
-| WP-07 | 3 | 3B | verified | 1 | 39c4788 | no re-read from gh before send (uses just-saved snapshot, FR-006?); stopped notice hook for WP-12 |
-| WP-09 | 3 | 3C | verified | 1 | 3a4ee36 | POST /runs has no ci_autofix (test uses PATCH) |
-| WP-09F | 3 | fix | implementing | 0 | | Phase 3 review fixes |
-| WP-10 | 4 | 4A | pending | 0 | | |
-| WP-11 | 4 | 4B | pending | 0 | | |
-| WP-12 | 4 | 4B | pending | 0 | | |
+| WP-06 | 3 | 3A | done | 1 | d7fd9ad | prompt duplicated in autofix (forward::ci_prompt/fit private) → dedupe in WP-07; FR-006 vs R3: followed R3 |
+| WP-08 | 3 | 3A | done | 1 | dabc503 | manual forward: CAS sha before send, restore on failure, 409 after 3 CAS tries |
+| WP-07 | 3 | 3B | done | 1 | 39c4788 | no re-read from gh before send (uses just-saved snapshot, FR-006?); stopped notice hook for WP-12 |
+| WP-09 | 3 | 3C | done | 1 | 3a4ee36 | POST /runs has no ci_autofix (test uses PATCH) |
+| WP-09F | 3 | fix | done | 1 | 9ee01f0 | Phase 3 review fixes; manual forward holds per-task autofix slot (InFlight → 409) |
+| WP-10 | 4 | 4A | verified | 1 | | turn start unknown: started=None proxy (first turn end after sent_at counts) |
+| WP-11 | 4 | 4B | implementing | 0 | | |
+| WP-12 | 4 | 4B | implementing | 0 | | |
 | WP-13 | 4 | 4C | pending | 0 | | |
 | WP-14 | 5 | 5A | pending | 0 | | |
 | WP-15 | 5 | 5A | pending | 0 | | |
@@ -52,3 +52,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | spec-compliance | LOW | 4th red head stops at limit without recording attempt 3's autofix-failed-again (FR-013) → consider in Phase 4 | crates/delilah-daemon/src/autofix/mod.rs |
 | 3 | spec-compliance | LOW | Manual forward of an older ci-failed notice overwrites sha with the older one | crates/delilah-daemon/src/pr_api/forward.rs |
 | 3 | contract | LOW | TS `autofix?: PrAutofixView \| null` must be optional+nullable (WP-16) | app/src/api.ts |
+| 3 | spec-compliance | LOW | still_due re-checks the stored snapshot (no gh call, by design R1/R3): record in decisions.md (WP-18) | crates/delilah-daemon/src/autofix/mod.rs |
+| 3 | spec-compliance | LOW | Idle not re-checked between claim and send | crates/delilah-daemon/src/autofix/mod.rs |
+| 3 | architecture | LOW | evaluate that loses claim_autofix returns silently (dropped until next poll); consider dirty flag / re-run on guard drop | crates/delilah-daemon/src/autofix/mod.rs |
+| 3 | architecture | LOW | Two-way dependency autofix ↔ pr_api::forward; move delivery primitives to a shared module | crates/delilah-daemon/src/pr_api/forward.rs |
+| 3 | architecture | LOW | RunRequest.ci_autofix must be exposed in app/src/api.ts (WP-16) | app/src/api.ts |

@@ -78,16 +78,16 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 
 ### Tests for User Story 2
 
-- [ ] T026 [P] [US2] `decide()` tests in `crates/delilah-daemon/src/autofix/mod.rs`: 4th red head with attempts 3 → stop `limit`; green head while `stopped` → `watching`, notice resolved (acceptance 2.4)
-- [ ] T027 [P] [US2] Turn-end tests in `crates/delilah-daemon/src/autofix/mod.rs`: turn end of `session` started after `sent_at`, fresh snapshot with head == sha → stop `no-push`; head changed → stays `fixing`; turn of another session or started before `sent_at` → ignored; no fresh snapshot (claim timeout / gh error) → stays `fixing`
+- [X] T026 [P] [US2] `decide()` tests in `crates/delilah-daemon/src/autofix/mod.rs`: 4th red head with attempts 3 → stop `limit`; green head while `stopped` → `watching`, notice resolved (acceptance 2.4)
+- [X] T027 [P] [US2] Turn-end tests in `crates/delilah-daemon/src/autofix/mod.rs`: turn end of `session` started after `sent_at`, fresh snapshot with head == sha → stop `no-push`; head changed → stays `fixing`; turn of another session or started before `sent_at` → ignored; no fresh snapshot (claim timeout / gh error) → stays `fixing`
 - [ ] T028 [P] [US2] Cancel tests: toggle off, PR merged/closed, task archived/deleted/back to backlog while `fixing` → `watching` + `AutofixCancelled`, `autofix-stopped` resolved, nothing sent (in `crates/delilah-daemon/src/autofix/mod.rs`)
 - [ ] T029 [P] [US2] Inbox test in `crates/delilah-daemon/src/inbox.rs`: an open `autofix-stopped` notice is a `pr-autofix` item with reason, attempts and text in es/en; forward on it → 409
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] Stop path in `crates/delilah-daemon/src/autofix/mod.rs`: CAS to `stopped` with reason, insert the `autofix-stopped` notice (`cause = "<sha>:<reason>"`, detail with reason/attempts/checks) via `store_prs`, one notification (none if the app listens), `AutofixStopped` history; resolve it on green/retry/toggle/merge
-- [ ] T031 [US2] Add `pr_loop::check_task_waiting(app, key, timeout)` (waits for the claim instead of returning) in `crates/delilah-daemon/src/pr_loop/mod.rs`
-- [ ] T032 [US2] Implement `autofix::on_turn_ended` (spawned; forced waiting check; judge `no-push` only from a snapshot checked after the turn end, for the attempt's session) and call it for the primary session from `handoff::on_turn_ended` in `crates/delilah-daemon/src/handoff.rs`, then `evaluate`
+- [X] T030 [US2] Stop path in `crates/delilah-daemon/src/autofix/mod.rs`: CAS to `stopped` with reason, insert the `autofix-stopped` notice (`cause = "<sha>:<reason>"`, detail with reason/attempts/checks) via `store_prs`, one notification (none if the app listens), `AutofixStopped` history; resolve it on green/retry/toggle/merge
+- [X] T031 [US2] Add `pr_loop::check_task_waiting(app, key, timeout)` (waits for the claim instead of returning) in `crates/delilah-daemon/src/pr_loop/mod.rs`
+- [X] T032 [US2] Implement `autofix::on_turn_ended` (spawned; forced waiting check; judge `no-push` only from a snapshot checked after the turn end, for the attempt's session) and call it for the primary session from `handoff::on_turn_ended` in `crates/delilah-daemon/src/handoff.rs`, then `evaluate`
 - [ ] T033 [US2] Implement `autofix::cancel(app, key, repo?)` and call it from toggle off, the merge/close path in `crates/delilah-daemon/src/pr_loop/notices.rs` / `merge.rs`, archive (`archive.rs`), delete and back-to-backlog (`actions.rs`)
 - [ ] T034 [US2] `pr-autofix` inbox item (kind, reason, attempts, text) in `crates/delilah-daemon/src/inbox.rs`; `forward` refuses it with 409 in `crates/delilah-daemon/src/pr_api/forward.rs`
 - [ ] T035 [US2] E2E in `crates/delilah-e2e/tests/autofix.rs`: always-failing checks → 3 prompts, one stopped item, no 4th prompt; a fake Claude turn that doesn't push → `no-push` item

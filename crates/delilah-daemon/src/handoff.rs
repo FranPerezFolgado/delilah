@@ -259,6 +259,16 @@ pub(crate) struct TurnEnd {
 }
 
 pub(crate) async fn on_turn_end(app: &AppState, key: &TaskKey, end: TurnEnd) {
+    // CI autofix judges its own attempt apart: it waits for a check, so it never holds
+    // up the handoff and the hint.
+    {
+        let (app, key) = (app.clone(), key.clone());
+        tokio::spawn(async move {
+            if let Some(session) = crate::autofix::session_id(&app, &key).await {
+                crate::autofix::on_turn_ended(&app, &key, &session, None).await;
+            }
+        });
+    }
     on_turn_end_with(app, key, end, &crate::run::launch_session).await;
 }
 

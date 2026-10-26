@@ -160,9 +160,33 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
     let Some(guard) = claim(app, key) else {
         return;
     };
-    let Ok(Some(task)) = app.store.get_task(key).await else {
-        return;
+    run_check(app, key, force, guard).await;
+}
+
+/// Like a forced [`check_task`], but waits up to `timeout` for a check that is running
+/// instead of returning, so the check that runs started after the call. Whether a PR
+/// snapshot was read and saved by it: `false` when the claim timed out or `gh` failed.
+pub(crate) async fn check_task_waiting(app: &AppState, key: &TaskKey, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let guard = loop {
+        if let Some(guard) = claim(app, key) {
+            break guard;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     };
+    run_check(app, key, true, guard).await
+}
+
+/// The check `check_task` and `check_task_waiting` run once they hold the claim. Whether
+/// a snapshot of a PR was saved.
+async fn run_check(app: &AppState, key: &TaskKey, force: bool, guard: CheckGuard) -> bool {
+    let Ok(Some(task)) = app.store.get_task(key).await else {
+        return false;
+    };
+    let mut fresh = false;
     let project = task.project.clone().unwrap_or_default();
     let in_review = task
         .phase
@@ -192,7 +216,8 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
             .as_ref()
             .is_none_or(|s| s.state == PrState::Open);
         if open || force {
-            let checked = snapshot(app, &project, &row, force).await;
+            let (checked, saved) = snapshot(app, &project, &row, force).await;
+            fresh |= saved;
             changed |= checked.changed;
             inbox |= checked.notices_changed;
         }
@@ -212,6 +237,7 @@ pub async fn check_task(app: &AppState, key: &TaskKey, force: bool) {
     drop(guard);
     let (app, key) = (app.clone(), key.clone());
     tokio::spawn(async move { crate::autofix::evaluate(&app, &key).await });
+    fresh
 }
 
 /// Looks for the PR of `branch` in one repo and links it. Whether the rows changed;
@@ -281,11 +307,12 @@ async fn detect(
 }
 
 /// Reads a linked PR and saves what it found. Whether to tell the open clients: after
-/// every good check (they show when it was made) and when the problem changed.
-async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> Checked {
+/// every good check (they show when it was made) and when the problem changed. Also
+/// whether the snapshot was read and saved.
+async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> (Checked, bool) {
     let backoff_key = format!("{}/{}", row.host, row.owner_name);
     if !force && !due(app, &backoff_key) {
-        return Checked::default();
+        return (Checked::default(), false);
     }
     match app
         .gh
@@ -294,10 +321,13 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> Ch
     {
         Ok(snap) => {
             succeeded(app, project, &[&backoff_key]).await;
-            record(app, row, &snap).await.unwrap_or_else(|e| {
-                tracing::warn!(task = %row.task_key, "could not save the PR check: {e}");
-                Checked::default()
-            })
+            match record(app, row, &snap).await {
+                Ok(checked) => (checked, true),
+                Err(e) => {
+                    tracing::warn!(task = %row.task_key, "could not save the PR check: {e}");
+                    (Checked::default(), false)
+                }
+            }
         }
         Err(e) => {
             failed(app, project, &backoff_key, &e, force).await;
@@ -306,16 +336,17 @@ async fn snapshot(app: &AppState, project: &str, row: &PrRow, force: bool) -> Ch
             if row.error.as_deref() == Some(text.as_str())
                 && row.error_kind.as_deref() == Some(kind)
             {
-                return Checked::default();
+                return (Checked::default(), false);
             }
-            Checked {
+            let checked = Checked {
                 changed: app
                     .store
                     .set_pr_error(row.id, Some((kind, &text)))
                     .await
                     .is_ok(),
                 notices_changed: false,
-            }
+            };
+            (checked, false)
         }
     }
 }
@@ -443,6 +474,28 @@ mod tests {
         let task = app.store.get_task(&key).await.unwrap().unwrap();
         assert_eq!(task.phase.as_deref(), Some("review"));
         assert!(drain(&mut rx).contains(&Topic::Prs));
+    }
+
+    #[tokio::test]
+    async fn check_task_waiting_waits_for_the_running_check_and_reports_a_fresh_snapshot() {
+        let fake = Arc::new(FakeGh::happy());
+        let (app, key, _dir) = task_with_workspace(fake, Some(SpecPhase::Implement)).await;
+        check_task(&app, &key, true).await;
+
+        // A check is running and outlasts the timeout: nothing was read.
+        let held = claim(&app, &key).unwrap();
+        assert!(!check_task_waiting(&app, &key, Duration::from_millis(100)).await);
+
+        // It ends while we wait: our own check runs after it.
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            drop(held);
+        });
+        let before = chrono::Utc::now();
+        assert!(check_task_waiting(&app, &key, Duration::from_secs(10)).await);
+        release.await.unwrap();
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        assert!(row.checked_at.unwrap() >= before);
     }
 
     #[tokio::test]

@@ -5,7 +5,9 @@
 
 pub(crate) mod api;
 
-use chrono::Utc;
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
 use delilah_core::{Event, TaskKey, TaskStatus};
 use serde::{Deserialize, Serialize};
 
@@ -13,12 +15,13 @@ use crate::events::Topic;
 use crate::inbox::AttentionKind;
 use crate::lang::Lang;
 use crate::pr_api::forward;
+use crate::pr_loop;
 use crate::pr_types::{Check, Outcome, PrState, Snapshot};
 use crate::prs;
 use crate::sessions::LiveState;
 use crate::state::AppState;
 use crate::store::StoreError;
-use crate::store_prs::PrRow;
+use crate::store_prs::{NewNotice, PrRow};
 
 /// Autofix attempts per PR before it stops (FR-008).
 pub(crate) const LIMIT: u32 = 3;
@@ -333,11 +336,22 @@ async fn round(app: &AppState, key: &TaskKey) -> Result<bool, StoreError> {
                 continue;
             }
             Action::Fixed | Action::Reset => watching(prev.as_ref()),
-            Action::Stop(reason) => PrAutofix {
-                state: State::Stopped,
-                reason: Some(reason),
-                ..prev.clone().unwrap_or(watching(None))
-            },
+            Action::Stop(reason) => {
+                let stopped = PrAutofix {
+                    state: State::Stopped,
+                    reason: Some(reason),
+                    ..prev.clone().unwrap_or(watching(None))
+                };
+                let (head, checks) = (snap.head.clone(), failed_names(&snap.checks));
+                match stop(app, key, &row, prev.as_ref(), &stopped, &head, &checks).await? {
+                    true => {
+                        prs_changed = true;
+                        inbox = true;
+                    }
+                    false => retry = true,
+                }
+                continue;
+            }
         };
         if !app
             .store
@@ -349,26 +363,15 @@ async fn round(app: &AppState, key: &TaskKey) -> Result<bool, StoreError> {
         }
         prs_changed = true;
         let was_fixing = prev.as_ref().is_some_and(|p| p.state == State::Fixing);
-        let event = match (next.state, next.reason) {
-            (State::Stopped, Some(reason)) => Some(Event::AutofixStopped {
+        if was_fixing {
+            let event = Event::AutofixFixed {
                 repo: row.repo.clone(),
-                reason: reason.as_str().into(),
-            }),
-            _ if was_fixing => Some(Event::AutofixFixed {
-                repo: row.repo.clone(),
-            }),
-            _ => None,
-        };
-        if let Some(event) = event {
+            };
             app.transition(key, event).await?;
         }
         if prev.as_ref().is_some_and(|p| p.state == State::Stopped) {
             // The `autofix-stopped` notice of a stopped PR that went green.
-            inbox |= app
-                .store
-                .resolve_notices_of(key, &row.repo, &["autofix-stopped"])
-                .await?
-                > 0;
+            inbox |= resolve_stopped(app, key, &row.repo).await?;
         }
     }
     if !retry && !pending.is_empty() {
@@ -527,19 +530,133 @@ async fn stop_no_session(
             reason: Some(StopReason::NoSession),
             ..p.next.clone()
         };
-        if !claim(app, p.row.id, Some(&p.next), &stopped).await? {
+        let head = p.next.sha.clone().unwrap_or_default();
+        let checks = failed_names(&p.checks);
+        if stop(app, key, &p.row, Some(&p.next), &stopped, &head, &checks).await? {
+            changed = true;
+        } else {
             // The row changed meanwhile: whoever changed it decides.
             tracing::warn!(%key, pr = p.row.id, "autofix: the row changed, not stopping it");
-            continue;
         }
-        changed = true;
-        let event = Event::AutofixStopped {
-            repo: p.row.repo.clone(),
-            reason: StopReason::NoSession.as_str().into(),
+    }
+    if changed {
+        app.emit(Topic::Inbox);
+    }
+    Ok(changed)
+}
+
+/// The names of the failed checks.
+fn failed_names(checks: &[Check]) -> Vec<String> {
+    checks
+        .iter()
+        .filter(|c| c.outcome == Outcome::Failure)
+        .map(|c| c.name.clone())
+        .collect()
+}
+
+/// The one stop path (limit, no-push, no-session): `stopped` over `from` by
+/// compare-and-set, then the `autofix-stopped` notice (cause `<head>:<reason>`), one
+/// notification (none when the app is listening) and the history. Nothing is recorded
+/// when the row changed meanwhile: `false`, and whoever changed it decides. A stop at the
+/// limit of a row that was `fixing` first records that the last attempt failed.
+async fn stop(
+    app: &AppState,
+    key: &TaskKey,
+    row: &PrRow,
+    from: Option<&PrAutofix>,
+    stopped: &PrAutofix,
+    head: &str,
+    checks: &[String],
+) -> Result<bool, StoreError> {
+    let Some(reason) = stopped.reason else {
+        return Ok(false);
+    };
+    if !claim(app, row.id, from, stopped).await? {
+        return Ok(false);
+    }
+    if let Some(prev) = from
+        && reason == StopReason::Limit
+        && prev.state == State::Fixing
+    {
+        let event = Event::AutofixFailedAgain {
+            repo: row.repo.clone(),
+            sha: prev.sha.clone().unwrap_or_default(),
         };
         app.transition(key, event).await?;
     }
-    Ok(changed)
+    let lang = app.lang();
+    let why = reason_text(lang, reason, stopped.attempts);
+    let notice = NewNotice {
+        repo: row.repo.clone(),
+        kind: "autofix-stopped".into(),
+        cause: format!("{head}:{}", reason.as_str()),
+        text: format!(
+            "{}: {why}",
+            lang.pick("Autofix de CI detenido", "CI autofix stopped")
+        ),
+        detail: Some(serde_json::json!({
+            "reason": reason.as_str(),
+            "attempts": stopped.attempts,
+            "checks": checks,
+        })),
+    };
+    app.store.insert_notice(key, &notice).await?;
+    if !app.events.listening() {
+        app.notifier.send(
+            format!(
+                "{key} {}",
+                lang.pick("autofix de CI detenido", "CI autofix stopped")
+            ),
+            why,
+        );
+    }
+    let event = Event::AutofixStopped {
+        repo: row.repo.clone(),
+        reason: reason.as_str().into(),
+    };
+    app.transition(key, event).await?;
+    app.emit(Topic::Prs);
+    app.emit(Topic::Inbox);
+    Ok(true)
+}
+
+/// Why autofix stopped, for the notice and the notification.
+fn reason_text(lang: Lang, reason: StopReason, attempts: u32) -> String {
+    match reason {
+        StopReason::Limit => format!(
+            "{attempts} {}",
+            lang.pick("intentos sin arreglar el CI", "attempts did not fix the CI")
+        ),
+        StopReason::NoPush => lang
+            .pick(
+                "el agente terminó sin hacer push",
+                "the agent finished without pushing",
+            )
+            .into(),
+        StopReason::NoSession => lang
+            .pick(
+                "no hay sesión del agente a la que enviar",
+                "there is no agent session to send to",
+            )
+            .into(),
+    }
+}
+
+/// Resolves the `autofix-stopped` notice of the task's PR in `repo` (green head, retry,
+/// toggle, merge) and tells the open clients. Whether any was open.
+pub(crate) async fn resolve_stopped(
+    app: &AppState,
+    key: &TaskKey,
+    repo: &str,
+) -> Result<bool, StoreError> {
+    let n = app
+        .store
+        .resolve_notices_of(key, repo, &["autofix-stopped"])
+        .await?;
+    if n > 0 {
+        app.emit(Topic::Inbox);
+    }
+    Ok(n > 0)
 }
 
 /// Compare-and-set of a PR's autofix state: `next` over `prev`. The one primitive the
@@ -589,7 +706,7 @@ async fn no_session(app: &AppState, key: &TaskKey) -> bool {
 }
 
 /// The id of the session the next prompt goes to, if known.
-async fn session_id(app: &AppState, key: &TaskKey) -> Option<String> {
+pub(crate) async fn session_id(app: &AppState, key: &TaskKey) -> Option<String> {
     match app.sessions.primary(key.as_str()) {
         Some(live) => Some(live.id.clone()),
         None => app
@@ -602,8 +719,88 @@ async fn session_id(app: &AppState, key: &TaskKey) -> Option<String> {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn on_turn_ended() {}
+/// How long a turn end waits for a running check before giving up on judging.
+const TURN_WAIT: Duration = Duration::from_secs(60);
+
+/// A turn of the task's primary session ended. A PR whose last attempt went to that
+/// session and was sent before this turn started is judged: a check forced now (waiting
+/// for the running one) and, if the PR's head is still the one that was sent, autofix
+/// stops with `no-push`. That is judged only from a snapshot checked after this turn end;
+/// without one (claim timeout, `gh` error) the PR stays `fixing` and the next turn end
+/// decides. `started` is when the turn began, if known; the hook does not carry it, so
+/// callers pass `None` and the first turn end after `sent_at` counts. Then `evaluate`.
+pub(crate) async fn on_turn_ended(
+    app: &AppState,
+    key: &TaskKey,
+    session: &str,
+    started: Option<DateTime<Utc>>,
+) {
+    let ended = Utc::now();
+    match judge(app, key, session, started, ended).await {
+        Ok(()) => {}
+        Err(e) => tracing::warn!(%key, "autofix turn end: {e}"),
+    }
+    evaluate(app, key).await;
+}
+
+async fn judge(
+    app: &AppState,
+    key: &TaskKey,
+    session: &str,
+    started: Option<DateTime<Utc>>,
+    ended: DateTime<Utc>,
+) -> Result<(), StoreError> {
+    match app.store.get_task(key).await? {
+        Some(t) if t.ci_autofix => {}
+        _ => return Ok(()),
+    }
+    let attempt_of_turn = |a: &PrAutofix| {
+        let sent = a
+            .sent_at
+            .as_deref()
+            .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.with_timezone(&Utc));
+        a.state == State::Fixing
+            && a.session.as_deref() == Some(session)
+            && sent.is_some_and(|sent| sent <= ended && started.is_none_or(|s| s >= sent))
+    };
+    let due: Vec<PrRow> = app
+        .store
+        .prs_of(key)
+        .await?
+        .into_iter()
+        .filter(|r| r.autofix.as_ref().is_some_and(attempt_of_turn))
+        .collect();
+    if due.is_empty() {
+        return Ok(());
+    }
+    if !pr_loop::check_task_waiting(app, key, TURN_WAIT).await {
+        return Ok(());
+    }
+    for old in due {
+        let Some(row) = app.store.pr(old.id).await? else {
+            continue;
+        };
+        let (Some(a), Some(snap)) = (row.autofix.clone(), row.snapshot.clone()) else {
+            continue;
+        };
+        let fresh = row.checked_at.is_some_and(|t| t >= ended);
+        let unchanged = row.autofix == old.autofix;
+        let pushed_nothing = snap.state == PrState::Open
+            && Some(snap.head.as_str()) == a.sha.as_deref()
+            && prs::ci_outcome(&snap.checks) != crate::pr_types::Rollup::Success;
+        if fresh && unchanged && pushed_nothing {
+            let stopped = PrAutofix {
+                state: State::Stopped,
+                reason: Some(StopReason::NoPush),
+                ..a.clone()
+            };
+            let checks = failed_names(&snap.checks);
+            stop(app, key, &row, Some(&a), &stopped, &snap.head, &checks).await?;
+        }
+    }
+    Ok(())
+}
 
 #[allow(dead_code)]
 pub(crate) fn cancel() {}
@@ -1244,6 +1441,186 @@ mod tests {
         let changed = stop_no_session(&app, &key, &[&work]).await.unwrap();
         assert!(!changed);
         assert_eq!(autofix_of(&app, &key).await, [None]);
+        assert!(history(&app, &key).await.is_empty());
+    }
+
+    // --- stop path and turn end ---
+
+    /// Links the first PR (head `abc`, failing) and writes `autofix` over its row.
+    async fn seeded(
+        gh: Arc<FakeGh>,
+        autofix: PrAutofix,
+    ) -> (AppState, TaskKey, crate::pr_testkit::TempDir, PrRow) {
+        let (app, key, dir) = task_with_workspace(gh, Some(SpecPhase::Review)).await;
+        app.store.set_ci_autofix(&key, true).await.unwrap();
+        pr_loop::check_task(&app, &key, true).await;
+        let row = app.store.prs_of(&key).await.unwrap().remove(0);
+        assert!(claim(&app, row.id, None, &autofix).await.unwrap());
+        (app, key, dir, row)
+    }
+
+    fn fixing_since(minutes: i64, session: &str) -> PrAutofix {
+        PrAutofix {
+            state: State::Fixing,
+            attempts: 1,
+            sha: Some("abc".into()),
+            session: Some(session.into()),
+            sent_at: Some((Utc::now() - chrono::Duration::minutes(minutes)).to_rfc3339()),
+            reason: None,
+        }
+    }
+
+    async fn stored(app: &AppState, key: &TaskKey) -> PrAutofix {
+        autofix_of(app, key).await.remove(0).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_fourth_red_head_stops_at_the_limit_and_green_resolves_it() {
+        let gh = gh_heads(&[("abc", "FAILURE"), ("def", "SUCCESS")]);
+        let three = PrAutofix {
+            attempts: 3,
+            sha: Some("old".into()),
+            ..fixing_since(1, "s-1")
+        };
+        let (app, key, _dir, _row) = seeded(gh, three).await;
+        for _ in 0..100 {
+            evaluate(&app, &key).await;
+            if stored(&app, &key).await.state == State::Stopped {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let a = stored(&app, &key).await;
+        assert_eq!(
+            (a.state, a.reason, a.attempts),
+            (State::Stopped, Some(StopReason::Limit), 3)
+        );
+        assert_eq!(
+            history(&app, &key).await,
+            ["autofix-failed-again", "autofix-stopped"]
+        );
+        let notices = app.store.open_notices().await.unwrap();
+        let stop: Vec<_> = notices
+            .iter()
+            .filter(|n| n.kind == "autofix-stopped")
+            .collect();
+        assert_eq!(stop.len(), 1, "{notices:?}");
+        assert_eq!(stop[0].cause, "abc:limit");
+        let detail = stop[0].detail.clone().unwrap();
+        assert_eq!(detail["reason"], "limit");
+        assert_eq!(detail["attempts"], 3);
+        assert_eq!(detail["checks"][0], "build");
+        assert_eq!(app.notifier.recorded().len(), 1, "one notification");
+
+        // Evaluating again changes nothing: one notice, one notification, one history.
+        evaluate(&app, &key).await;
+        assert_eq!(app.notifier.recorded().len(), 1);
+        assert_eq!(history(&app, &key).await.len(), 2);
+
+        // Green while stopped: back to watching, the notice resolved.
+        pr_loop::check_task(&app, &key, true).await;
+        let a = settle(&app, &key, |a| a.state == State::Watching).await;
+        assert_eq!((a.attempts, a.reason), (0, None));
+        let notices = app.store.open_notices().await.unwrap();
+        assert!(notices.iter().all(|n| n.kind != "autofix-stopped"));
+    }
+
+    #[tokio::test]
+    async fn no_notification_when_the_app_is_listening() {
+        let gh = gh_heads(&[("abc", "FAILURE")]);
+        let (app, key, _dir, row) = seeded(gh, fixing_since(1, "s-1")).await;
+        let _listener = app.events.subscribe();
+        let from = stored(&app, &key).await;
+        let stopped = PrAutofix {
+            state: State::Stopped,
+            reason: Some(StopReason::NoPush),
+            ..from.clone()
+        };
+        assert!(
+            stop(&app, &key, &row, Some(&from), &stopped, "abc", &[])
+                .await
+                .unwrap()
+        );
+        assert!(app.notifier.recorded().is_empty());
+        let notices = app.store.open_notices().await.unwrap();
+        assert!(notices.iter().any(|n| n.kind == "autofix-stopped"));
+        assert!(resolve_stopped(&app, &key, &row.repo).await.unwrap());
+        assert!(!resolve_stopped(&app, &key, &row.repo).await.unwrap());
+    }
+
+    fn two_reads(first: &str, second: Result<&str, crate::gh::GhError>) -> Arc<FakeGh> {
+        Arc::new(
+            FakeGh::new()
+                .on(&["repo", "view"], Ok(REPO_VIEW))
+                .on(&["pr", "list"], Ok(PR_LIST))
+                .with_user("me")
+                .on(
+                    &["api", "graphql"],
+                    Ok(&ci_snapshot("OPEN", first, "FAILURE")),
+                )
+                .on(&["api", "graphql"], second),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_turn_end_with_the_head_unchanged_stops_with_no_push() {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+        on_turn_ended(&app, &key, "s-1", None).await;
+        let a = stored(&app, &key).await;
+        assert_eq!(
+            (a.state, a.reason, a.attempts),
+            (State::Stopped, Some(StopReason::NoPush), 1)
+        );
+        assert_eq!(history(&app, &key).await, ["autofix-stopped"]);
+        let notices = app.store.open_notices().await.unwrap();
+        let stop: Vec<_> = notices
+            .iter()
+            .filter(|n| n.kind == "autofix-stopped")
+            .collect();
+        assert_eq!(stop.len(), 1);
+        assert_eq!(stop[0].cause, "abc:no-push");
+        assert_eq!(app.notifier.recorded().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_turn_end_with_a_new_head_leaves_the_attempt_fixing() {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "def", "FAILURE")));
+        let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+        on_turn_ended(&app, &key, "s-1", None).await;
+        assert_eq!(stored(&app, &key).await.state, State::Fixing);
+        assert!(app.notifier.recorded().is_empty());
+    }
+
+    #[tokio::test]
+    async fn turns_of_another_session_or_started_before_the_send_are_ignored() {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        let a = fixing_since(1, "s-1");
+        let sent = DateTime::parse_from_rfc3339(a.sent_at.as_deref().unwrap())
+            .unwrap()
+            .with_timezone(&Utc);
+        let (app, key, _dir, _row) = seeded(gh, a).await;
+        on_turn_ended(&app, &key, "s-2", None).await;
+        assert_eq!(stored(&app, &key).await.state, State::Fixing);
+        let before = Some(sent - chrono::Duration::seconds(30));
+        on_turn_ended(&app, &key, "s-1", before).await;
+        assert_eq!(stored(&app, &key).await.state, State::Fixing);
+        assert!(history(&app, &key).await.is_empty());
+        // The turn that follows the send is judged.
+        on_turn_ended(&app, &key, "s-1", Some(sent + chrono::Duration::seconds(1))).await;
+        assert_eq!(stored(&app, &key).await.state, State::Stopped);
+    }
+
+    #[tokio::test]
+    async fn without_a_fresh_snapshot_the_turn_end_does_not_judge() {
+        let err = crate::gh::GhError::Failed {
+            code: Some(1),
+            stderr: "HTTP 502".into(),
+        };
+        let gh = two_reads("abc", Err(err));
+        let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+        on_turn_ended(&app, &key, "s-1", None).await;
+        assert_eq!(stored(&app, &key).await.state, State::Fixing);
         assert!(history(&app, &key).await.is_empty());
     }
 }
