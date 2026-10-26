@@ -19,7 +19,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-13 | 4 | 4B | pending | 0 | | |
 | WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
-| WP-15 | 5 | 5A | implementing | 0 | | |
+| WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
 | WP-16 | 5 | 5A | pending | 0 | | |
 | WP-17 | 5 | 5A | pending | 0 | | |
 | WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
