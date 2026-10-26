@@ -701,7 +701,8 @@ pub async fn remove(
 /// waiting here, its pending cards withdrawn; a stream agent answers the interrupt with a
 /// `TurnResult` that does the same from [`turn_interrupted`] (setting the state here would
 /// race with a message sent before that result arrives). What was queued stays queued: it
-/// is typed at the next turn's end.
+/// is typed at the next turn's end. A stream session with no turn but background work (or a
+/// held Stop) has no result coming: the state is set here, through [`turn_interrupted`].
 ///
 /// This does not take `live.typing`: Detener must be immediate, not wait behind a send.
 /// A stop that lands in the middle of one cannot leave its entries inconsistent: a message
@@ -735,11 +736,8 @@ pub async fn stop(
         }
     }
     crate::permissions::release_session(&app, &id).await;
-    // A stream session with only background work (no turn) gets no `result` from the
-    // interrupt, so nothing else would ever interrupt it: do it here.
-    if live.runtime.as_stream().is_none() || live.progress().turn.is_none() {
-        turn_interrupted(&app, &live).await;
-    }
+    // The "stopped" marker goes in before anything the held Stop replays below, so the
+    // history reads: stopped, then what Claude said.
     if let Err(e) = app
         .store
         .add_entry(&id, EntryKind::Marker, &json!({ "marker": "stopped" }))
@@ -747,15 +745,49 @@ pub async fn stop(
     {
         tracing::warn!(session = %id, "cannot record the stop: {e}");
     }
+    // A stream session with only background work (no turn, a Stop held or rows running) gets
+    // no `result` from the interrupt, so nothing else would ever interrupt it: do it here. A
+    // session between writing a prompt and its init has no turn yet either, but its result
+    // is coming: leave it to that.
+    let only_background = live.progress().turn.is_none()
+        && (live.progress().has_background() || live.has_held_stop());
+    if live.runtime.as_stream().is_none() || only_background {
+        turn_interrupted(&app, &live).await;
+    }
     app.emit(Topic::Conversations);
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// The turn was interrupted: the session waits again, nothing is pending on it.
 pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
-    // A held Stop belongs to the turn that was cut short; the background rows stay as they
-    // are (they are running still).
-    live.drop_held_stop();
+    // Rule: a held Stop is never discarded without a successor turn (only a real new turn,
+    // a user prompt or an init, drops it: that turn brings its own Stop). Here none follows
+    // an interrupt, so it applies as the end of turn it was. The take also cancels its
+    // fallback. Claude was asked to stop the rows and answers later: they are marked stopped
+    // first, or the replay would be held again behind them.
+    let held = live.take_held_stop();
+    if held.is_some() {
+        let running: Vec<String> = live
+            .progress()
+            .background
+            .iter()
+            .filter(|b| b.state == "running")
+            .map(|b| b.task_id.clone())
+            .collect();
+        live.update_progress(|p| {
+            for task_id in &running {
+                let ended = delilah_agents::stream::StreamEvent::Task(
+                    delilah_agents::stream::TaskEvent::Ended {
+                        task_id: task_id.clone(),
+                        status: delilah_agents::stream::TaskStatus::Stopped,
+                        summary: None,
+                    },
+                );
+                crate::progress::apply(p, &ended, Utc::now());
+            }
+            true
+        });
+    }
     live.set_state(LiveState::Waiting);
     live.reset_turn_state();
     for ask in app.asks.release_session(&live.id) {
@@ -763,6 +795,8 @@ pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
     }
     let _ = app.store.set_attention(&live.id, None).await;
     app.emit(Topic::Inbox);
+    // After the clears above: the replay sets the attention the end of turn asks for.
+    crate::stream_events::replay_held_stop(app, &live.task, &live.id, held).await;
 }
 
 /// Types every queued message at once, joined by a blank line, and marks them sent.
@@ -1727,7 +1761,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_with_only_background_work_and_no_turn_waits_and_drops_the_held_stop() {
+    async fn stop_with_only_background_work_and_no_turn_applies_the_held_stop() {
         use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
         let f = Fixture::new().await;
         let _ = f.live.runtime.kill();
@@ -1739,6 +1773,7 @@ mod tests {
             f.app
                 .sessions
                 .insert("conv", "@web", SessionKind::Claude, false, session.clone());
+        live.set_idea(true);
         live.update_progress(|p| {
             crate::progress::apply(
                 p,
@@ -1760,7 +1795,24 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert_eq!(live.state(), LiveState::Waiting);
         assert!(!live.has_held_stop());
-        assert_eq!(live.progress().background[0].state, "running");
+        assert_eq!(live.progress().background[0].state, "stopped");
+        assert!(
+            f.app.store.attention("conv").await.unwrap().is_some(),
+            "the held Stop applied: the end of turn asks for the user"
+        );
+        let said = f.app.store.entries("conv").await.unwrap();
+        assert!(said.iter().any(|e| e.body["text"] == "listo"), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn stop_between_a_prompt_and_its_init_leaves_the_state_to_the_result() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        assert!(live.progress().turn.is_none());
+        assert!(!live.progress().has_background() && !live.has_held_stop());
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(live.state(), LiveState::Working, "the interrupt result sets it");
     }
 
     #[tokio::test]
@@ -2797,16 +2849,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_interrupt_with_background_running_waits_drops_the_held_stop_and_keeps_the_rows() {
+    async fn an_interrupt_with_a_held_stop_applies_it_and_stops_the_rows() {
         let f = Fixture::new().await;
         let live = stream_live(&f);
         feed(&live, background_started());
         assert!(live.hold_stop_if_background(stop("x")));
         turn_interrupted(&f.app, &live).await;
         assert_eq!(live.state(), LiveState::Waiting);
-        assert!(!live.has_held_stop());
-        assert!(live.progress().has_background());
-        assert_eq!(live.progress().background.len(), 1);
+        assert!(!live.has_held_stop(), "consumed, not left behind");
+        assert!(!live.progress().has_background());
+        assert_eq!(live.progress().background[0].state, "stopped");
+        assert!(f.app.store.attention("conv").await.unwrap().is_some());
+        let said = f.app.store.entries("conv").await.unwrap();
+        assert!(said.iter().any(|e| e.body["text"] == "x"), "{said:?}");
+    }
+
+    #[tokio::test]
+    async fn an_interrupt_with_background_but_no_held_stop_keeps_the_rows_and_asks_nothing() {
+        let f = Fixture::new().await;
+        let live = stream_live(&f);
+        feed(&live, background_started());
+        turn_interrupted(&f.app, &live).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(live.progress().background[0].state, "running");
+        assert!(f.app.store.attention("conv").await.unwrap().is_none());
     }
 
     #[tokio::test]

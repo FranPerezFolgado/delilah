@@ -262,3 +262,5 @@ the API and CLI only (no browser, no websocat/wscat). Real Claude Code.
   divider): no browser.
 - `/live` websocket `progress` messages and the 4/s limit: no websocat/wscat.
 - The "sin novedades desde hace 30 s" text with a silent foreground tool.
+
+**Detener variant fixed in WP-18F.** Cause: Detener with only background work dropped the held Stop (`turn_interrupted`), and Claude starts no turn after a stop, so no Stop hook ever applied the end of turn and the task stayed `running`. Fix: `turn_interrupted` now takes the held Stop, marks the running rows `stopped`, and replays it as a normal end of turn (`waiting-for-user`, `AgentAsked`, inbox); `stop()` takes that path only when there is background work or a held Stop.
