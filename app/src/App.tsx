@@ -18,7 +18,9 @@ import { Sidebar, type View } from "./components/Sidebar";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { useUpdates } from "./useUpdates";
 import { canUpdate } from "./platform";
-import { StatusBar } from "./components/StatusBar";
+import { StatusBar, type StatusFilter } from "./components/StatusBar";
+import { DisconnectedBanner } from "./components/DisconnectedBanner";
+import { useConnection } from "./connection";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
 
 // The task screen carries CodeMirror, most of the bundle: load it when a task opens.
@@ -34,6 +36,8 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [usage, setUsage] = useState<UsageReport | null>(null);
   const [online, setOnline] = useState(true);
+  const conn = useConnection();
+  const [, setStatusFilter] = useState<StatusFilter | null>(null); // board wiring: WP-26
   const [selected, setSelected] = useState<string | null>(null);
   const [newTask, setNewTask] = useState(false);
   const [draft, setDraft] = useState<TaskDraft | undefined>(undefined);
@@ -257,7 +261,6 @@ export function App() {
   // `@<name>` selects a project's own screen (sessions on its checkout).
   const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
   const owner = task?.key ?? (project ? `@${project.name}` : null);
-  const active = tasks.filter((t) => t.status.type === "running").length;
 
   return (
     <div className="window">
@@ -407,7 +410,8 @@ export function App() {
             />}
         </main>
       </div>
-      <StatusBar online={online} active={active} usage={usage} />
+      {conn.status === "down" && <DisconnectedBanner lastOk={conn.lastOk} onRetry={conn.retry} />}
+      <StatusBar status={conn.status} tasks={tasks} usage={usage} onFilter={setStatusFilter} onLogs={() => setShowLogs(true)} />
       {showLogs && <LogsView onClose={() => setShowLogs(false)} />}
       {toast && (
         <div className="toast" role="status">

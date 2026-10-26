@@ -1,0 +1,6 @@
+.dcb { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--err-bg); border-bottom: 1px solid var(--err); color: var(--err-tx); font-size: 12.5px; }
+.dcb-dot { background: var(--err); flex: none; }
+.dcb-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dcb-text strong { font-weight: 600; }
+.dcb-text span { color: var(--tx2); }
+.dcb code { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--tx); }
