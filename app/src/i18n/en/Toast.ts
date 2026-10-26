@@ -1,1 +1,3 @@
-export const EN: Record<string, string> = {};
+export const EN: Record<string, string> = {
+"×{n}": "×{n}",
+};

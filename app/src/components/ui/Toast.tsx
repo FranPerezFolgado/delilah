@@ -126,6 +126,17 @@ export function pushToast(input: ToastInput): number {
     }
   }
   const id = nextId++;
+  if (!input.action) {
+    const kind = input.kind ?? "info";
+    const twin = items.find((i) => !i.key && !i.action && (i.kind ?? "info") === kind && i.text === input.text);
+    if (twin) {
+      const { deadline: _d, remaining: _r, ...rest } = twin;
+      const merged = { ...rest, count: twin.count + 1, aliases: [...twin.aliases, id], ...timing(twin) };
+      items = [...items.filter((i) => i !== twin), merged];
+      emit();
+      return id;
+    }
+  }
   items = [...items, { ...input, id, count: 1, aliases: [], ...timing(input) }];
   evict();
   emit();
@@ -147,6 +158,9 @@ function ToastView({ item }: { item: ToastItem }) {
   return (
     <div className={`toast toast-${item.kind ?? "info"}`} role="status">
       <span className="toast-text">{item.text}</span>
+      {item.count > 1 && (
+        <span className="toast-count">{t("×{n}", { n: item.count > 99 ? "99+" : item.count })}</span>
+      )}
       {item.action && (
         <button
           type="button"

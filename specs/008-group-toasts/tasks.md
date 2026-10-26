@@ -57,9 +57,9 @@ with failing Vitest tests (jsdom, fake timers).
 
 **Independent Test**: push the same error three times → one toast with «×3».
 
-- [ ] T011 [US2] Write failing tests in `app/src/components/ui/Toast.test.tsx`: same text+kind ×3 → one toast showing «×3», moved to newest position; merged info toast restarts its full ttl; different kind → not merged; toasts with an action (two «Deshacer») → not merged; `dismissToast` with the id of any repeat removes the merged toast; count above 99 shows «×99+»
-- [ ] T012 [US2] In `app/src/components/ui/Toast.tsx` implement the merge branch of `pushToast` (count++, reset deadline to full ttl, append new id to `aliases`, move to end, return new id) and render the count badge `<span className="toast-count">{t("×{n}", {n})}</span>` (n = count or «99+») in `ToastView`
-- [ ] T013 [P] [US2] Add `.toast-count` style in `app/src/components/ui/Toast.css` (muted, tabular numbers, same tokens as today) and the «×{n}» entry in `app/src/i18n/en/Toast.ts`
+- [X] T011 [US2] Write failing tests in `app/src/components/ui/Toast.test.tsx`: same text+kind ×3 → one toast showing «×3», moved to newest position; merged info toast restarts its full ttl; different kind → not merged; toasts with an action (two «Deshacer») → not merged; `dismissToast` with the id of any repeat removes the merged toast; count above 99 shows «×99+»
+- [X] T012 [US2] In `app/src/components/ui/Toast.tsx` implement the merge branch of `pushToast` (count++, reset deadline to full ttl, append new id to `aliases`, move to end, return new id) and render the count badge `<span className="toast-count">{t("×{n}", {n})}</span>` (n = count or «99+») in `ToastView`
+- [X] T013 [P] [US2] Add `.toast-count` style in `app/src/components/ui/Toast.css` (muted, tabular numbers, same tokens as today) and the «×{n}» entry in `app/src/i18n/en/Toast.ts`
 
 **Checkpoint**: US2 tests green.
 

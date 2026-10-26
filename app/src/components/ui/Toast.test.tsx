@@ -137,4 +137,70 @@ describe("Toast", () => {
     expect(screen.queryByText("n1")).not.toBeNull();
     expect(screen.queryByText("n2")).not.toBeNull();
   });
+
+  it("merges repeats into one toast with a count, moved to newest", () => {
+    mount();
+    act(() => {
+      toast({ text: "No se pudo conectar", kind: "error" });
+      toast({ text: "otro", kind: "error" });
+      toast({ text: "No se pudo conectar", kind: "error" });
+      toast({ text: "No se pudo conectar", kind: "error" });
+    });
+    expect(screen.getAllByText("No se pudo conectar").length).toBe(1);
+    expect(screen.getByText("×3")).not.toBeNull();
+    const texts = Array.from(document.querySelectorAll(".toast-text")).map((e) => e.textContent);
+    expect(texts).toEqual(["otro", "No se pudo conectar"]);
+  });
+
+  it("a merged info toast restarts its full ttl", () => {
+    mount();
+    act(() => void toast({ text: "hola" }));
+    act(() => void vi.advanceTimersByTime(5000));
+    act(() => void toast({ text: "hola" }));
+    act(() => void vi.advanceTimersByTime(5000));
+    expect(screen.queryByText("hola")).not.toBeNull();
+    expect(screen.getByText("×2")).not.toBeNull();
+    act(() => void vi.advanceTimersByTime(1100));
+    expect(screen.queryByText("hola")).toBeNull();
+  });
+
+  it("does not merge different kinds", () => {
+    mount();
+    act(() => {
+      toast({ text: "igual" });
+      toast({ text: "igual", kind: "error" });
+    });
+    expect(screen.getAllByText("igual").length).toBe(2);
+    expect(screen.queryByText("×2")).toBeNull();
+  });
+
+  it("does not merge toasts with an action", () => {
+    mount();
+    act(() => {
+      toast({ text: "Archivada", action: { label: "Deshacer", run: () => {} } });
+      toast({ text: "Archivada", action: { label: "Deshacer", run: () => {} } });
+    });
+    expect(screen.getAllByText("Deshacer").length).toBe(2);
+  });
+
+  it("dismissToast with any repeat id removes the merged toast", () => {
+    mount();
+    const ids: number[] = [];
+    act(() => {
+      for (let n = 0; n < 3; n++) ids.push(toast({ text: "rep", kind: "error" }));
+    });
+    act(() => dismissToast(ids[1]));
+    expect(screen.queryByText("rep")).toBeNull();
+    act(() => void ids.push(toast({ text: "rep2", kind: "error" })));
+    act(() => dismissToast(ids[2]));
+    expect(screen.queryByText("rep2")).not.toBeNull();
+  });
+
+  it("caps the displayed count at 99+", () => {
+    mount();
+    act(() => {
+      for (let n = 0; n < 120; n++) toast({ text: "spam", kind: "error" });
+    });
+    expect(screen.getByText("×99+")).not.toBeNull();
+  });
 });

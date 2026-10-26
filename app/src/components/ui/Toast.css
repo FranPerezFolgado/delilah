@@ -4,3 +4,4 @@
 .toast-text { flex: 1; min-width: 0; }
 .toast-error { border-color: var(--err); }
 .toast-wait { border-color: var(--wait); }
+.toast-count { color: var(--tx2, var(--tx)); opacity: 0.7; font-variant-numeric: tabular-nums; font-size: 12px; }
