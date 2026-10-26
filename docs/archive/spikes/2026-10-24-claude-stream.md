@@ -11,7 +11,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose \
 ```
 
 Answers research.md R7 (a-h). Verdict: **adjust**, see decision 67 in
-[decisions.md](../decisions.md).
+[decisions.md](../../decisions.md).
 
 ## R7 answers
 
@@ -105,7 +105,7 @@ hooks), `system/thinking_tokens`, `result` (`subtype`, `is_error`, `terminal_rea
 
 ## Background tasks (2026-10-26)
 
-Answers research.md R9 of specs/009-chat-background-tasks. Claude Code 2.1.292, the
+Answers research.md R9 of specs/010-chat-background-tasks. Claude Code 2.1.292, the
 `background` and `background-stop` scenarios of the example (same flags and settings as
 above, `--permission-prompt-tool stdio`, stdin open 150 s, workspace from
 `scripts/make-fixture-parent.sh`). Prompt: background Bash `sleep 25`, background

@@ -1,13 +1,13 @@
-# Work packages — 009-chat-background-tasks
+# Work packages — 010-chat-background-tasks
 
-Source: specs/009-chat-background-tasks/tasks.md · 59 pending tasks · 18 packages
+Source: specs/010-chat-background-tasks/tasks.md · 59 pending tasks · 18 packages
 
 Check names: `cargo:agents` = `cargo test -p delilah-agents`; `cargo:daemon` = `cargo test -p delilah-daemon`; `app` = `cd app && npx tsc --noEmit && npx vitest related --run <files>`; `cargo:workspace` = `cargo test --workspace`.
 
 ## WP-01 Capture real background streams and freeze fixtures
 - Phase: 1 Setup
 - Tasks: T001, T002
-- Files: crates/delilah-agents/examples/claude_stream_spike.rs, crates/delilah-agents/tests/fixtures/stream-background.jsonl, crates/delilah-agents/tests/fixtures/stream-background-stop.jsonl, crates/delilah-agents/tests/fixtures/stream-background-hooks.jsonl, specs/009-chat-background-tasks/research.md, docs/spikes/2026-10-24-claude-stream.md
+- Files: crates/delilah-agents/examples/claude_stream_spike.rs, crates/delilah-agents/tests/fixtures/stream-background.jsonl, crates/delilah-agents/tests/fixtures/stream-background-stop.jsonl, crates/delilah-agents/tests/fixtures/stream-background-hooks.jsonl, specs/010-chat-background-tasks/research.md, docs/spikes/2026-10-24-claude-stream.md
 - Depends on: —
 - Parallel group: 1A
 - Acceptance: FR-017 — fixtures exist with home paths stripped; R4/R8 answers (Stop on background turns, UserPromptSubmit on self-started turns, stop_task support) written down
@@ -177,7 +177,7 @@ Check names: `cargo:agents` = `cargo test -p delilah-agents`; `cargo:daemon` = `
 ## WP-18 Full checks and quickstart run
 - Phase: 7 Polish
 - Tasks: T058, T059
-- Files: specs/009-chat-background-tasks/research.md
+- Files: specs/010-chat-background-tasks/research.md
 - Depends on: WP-17
 - Parallel group: 7B
 - Acceptance: SC-003, SC-004 — workspace tests, clippy and full vitest green; quickstart US1–US4 and Detener variant run in a preview

@@ -637,6 +637,7 @@ mod tests {
     #[tokio::test]
     async fn background_work_refuses_the_task_switch() {
         let app = task_in(true, "exec sleep 5").await;
+        app.lang.set(crate::lang::Lang::Es);
         start_background(&app, "main");
         assert!(
             app.sessions
@@ -660,6 +661,7 @@ mod tests {
     #[tokio::test]
     async fn background_work_refuses_the_session_switch() {
         let app = task_in(true, "exec sleep 5").await;
+        app.lang.set(crate::lang::Lang::Es);
         start_background(&app, "main");
         let (status, m) =
             switch_session(&app, "main", "terminal", Duration::from_millis(500)).await;

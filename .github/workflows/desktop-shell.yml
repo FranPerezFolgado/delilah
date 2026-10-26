@@ -1,5 +1,5 @@
 # The desktop shell (app/src-tauri, outside the workspace), only when it changes:
-# it is macOS-only and slow to build.
+# it is macOS-only and slow to build. Its fmt check is in ci.yml, on every PR.
 name: Desktop shell
 
 on:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
@@ -37,6 +37,5 @@ jobs:
           (cd app && npm ci && npm run build)
           mkdir -p app/src-tauri/binaries
           touch "app/src-tauri/binaries/delilahd-$(rustc -vV | sed -n 's/^host: //p')"
-      - run: cargo fmt --manifest-path app/src-tauri/Cargo.toml --check
       - run: cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path app/src-tauri/Cargo.toml

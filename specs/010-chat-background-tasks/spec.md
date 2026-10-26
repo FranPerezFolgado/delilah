@@ -1,6 +1,6 @@
 # Feature Specification: Show background work in chat mode
 
-**Feature Branch**: `009-chat-background-tasks`
+**Feature Branch**: `010-chat-background-tasks`
 
 **Created**: 2026-10-26
 

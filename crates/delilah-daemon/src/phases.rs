@@ -180,8 +180,11 @@ pub async fn on_hook(
         Signal::PromptSubmitted => drop_hint(app, task),
         Signal::TurnEnded if primary && !limited => {
             let app = app.clone();
+            let end = crate::handoff::TurnEnd {
+                background: delilah_agents::claude::background_running(hook),
+            };
             tokio::spawn(async move {
-                crate::handoff::on_turn_ended(&app, &key).await;
+                crate::handoff::on_turn_end(&app, &key, end).await;
                 maybe_hint(&app, &key).await;
             });
         }

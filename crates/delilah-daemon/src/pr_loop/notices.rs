@@ -324,6 +324,7 @@ mod tests {
         };
         let restarted = AppState::new(app.store.clone(), config)
             .with_gh(gh_with(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        restarted.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         check_task(&restarted, &key, true).await;
         assert_eq!(restarted.store.open_notices().await.unwrap().len(), 1);
         assert!(restarted.notifier.recorded().is_empty());

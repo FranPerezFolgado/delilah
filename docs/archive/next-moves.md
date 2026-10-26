@@ -7,7 +7,7 @@ once the PR work lands.
 
 ## Where we are
 
-MVP-0 and MVP-1 are done (see [status.md](status.md)). Work in flight:
+MVP-0 and MVP-1 are done (see [status.md](../status.md)). Work in flight:
 
 | Task | What | State | Branch |
 |---|---|---|---|
@@ -32,7 +32,7 @@ FEAT-9 hit the archive refusal that status.md lists as a known problem.
 | F | **Preview button per task** and a browser MCP so the agent can see the preview UI | Medium: speeds up building Delilah with Delilah | M | Light |
 | G | **Gates and declarative workflows** | High long-term | L | Yes: the PR flow is the last phase of the workflow |
 | H | **More agents** (Codex, Pi) behind `AgentAdapter` | Low today: only Claude is used | L | No |
-| I | **Mobile through Tailscale** | Unknown | L | No; blocked on the user's answers (see [vision.md](vision.md)) |
+| I | **Mobile through Tailscale** | Unknown | L | No; blocked on the user's answers (see [vision.md](../vision.md)) |
 | J | **Real-ticket test on the work Mac**, including the usage-limit payload | High: the main flow has never run end to end on a real ticket | Not code; needs the work Mac | No |
 
 ## Recommendation

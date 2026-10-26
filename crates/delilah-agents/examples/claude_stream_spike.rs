@@ -55,7 +55,7 @@
 //!   PreToolUse ask hook in the terminal runtime).
 //! - `remote`: `--remote-control <name>` together with `-p`. [h] Does it start, what does
 //!   `stderr.log` / `stream.jsonl` say?
-//! - `background` / `background-stop` (specs/009-chat-background-tasks, research.md R9):
+//! - `background` / `background-stop` (specs/010-chat-background-tasks, research.md R9):
 //!   background Bash `sleep 25`, a background sub-agent, a foreground sub-agent, in a
 //!   `make-fixture-parent.sh` workspace; stdin stays open 150 s so self-started turns show.
 //!   `background-stop` also sends `stop_task` for the first background task. Besides the

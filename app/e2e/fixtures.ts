@@ -125,3 +125,13 @@ export async function boardCard(page: Page, title: string | RegExp) {
   for (let i = 0; i < 20 && (await link.count()) === 0 && (await more.count()) > 0; i++) await more.first().click();
   return link;
 }
+
+/**
+ * Clicks a toast's button. With more than one toast only the newest shows (a «te espera»
+ * toast may arrive after the one wanted), so the stack is expanded by hovering it first.
+ */
+export async function clickToastButton(page: Page, name: string) {
+  const host = page.locator(".toast-host");
+  await host.hover();
+  await host.getByRole("button", { name, exact: true }).click();
+}

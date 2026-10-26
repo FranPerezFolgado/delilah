@@ -46,6 +46,7 @@ pub(crate) async fn task_with_workspace(
         ..crate::config::Config::test_defaults()
     };
     let app = AppState::new(Store::in_memory().await.unwrap(), config).with_gh(gh);
+    app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
     let key = TaskKey::new("PROJ-1");
     app.store
         .create_project(&Project {

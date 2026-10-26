@@ -1,8 +1,8 @@
 # Implementation Plan: Show background work in chat mode
 
-**Branch**: `009-chat-background-tasks` | **Date**: 2026-10-26 | **Spec**: [spec.md](spec.md)
+**Branch**: `010-chat-background-tasks` | **Date**: 2026-10-26 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/009-chat-background-tasks/spec.md`
+**Input**: Feature specification from `specs/010-chat-background-tasks/spec.md`
 
 ## Summary
 
@@ -74,7 +74,7 @@ Post-design re-check: no violations.
 ### Documentation (this feature)
 
 ```text
-specs/009-chat-background-tasks/
+specs/010-chat-background-tasks/
 ├── spec.md
 ├── plan.md              # this file
 ├── research.md          # capture results R1–R9

@@ -1,6 +1,6 @@
 # Tasks: Show background work in chat mode
 
-**Input**: Design documents from `specs/009-chat-background-tasks/`
+**Input**: Design documents from `specs/010-chat-background-tasks/`
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/api.md](contracts/api.md), [quickstart.md](quickstart.md)
 
 **Tests**: test-first, as the project's convention. Every implementation task is preceded by a
@@ -23,7 +23,7 @@ self-started handling for its ending; both are kept separate so US4 can ship alo
 **Purpose**: confirm the stream shapes with Delilah's real flags and freeze them as fixtures.
 
 - [X] T001 Add a `background` scenario to `crates/delilah-agents/examples/claude_stream_spike.rs`: the same flags as `StreamSession` (`--permission-prompt-tool stdio`, partial messages, `--settings` shaped like `claude::settings` with every hook posting to the listener), in a fixture workspace from `scripts/make-fixture-parent.sh`; prompt: a background Bash `sleep 25`, a background sub-agent that globs and reads files, a foreground sub-agent that reads one file, then end the turn and say ALL-DONE when the background work ends; keep stdin open 150 s; also send `{"type":"control_request","request_id":"s1","request":{"subtype":"stop_task","task_id":<first background task_id>}}` in a second run (`background-stop`). Record: whether `Stop` fires for the turn that ends with background work, whether `UserPromptSubmit` fires for self-started turns, whether `stop_task` is accepted and what it answers
-- [X] T002 Run T001 on the personal Mac and save the stdout as `crates/delilah-agents/tests/fixtures/stream-background.jsonl` and `stream-background-stop.jsonl` (strip absolute home paths from `output_file` and `cwd` to `/fixture/...`), and the hook posts as `stream-background-hooks.jsonl`; write the answers to R4's open point and R8 into `specs/009-chat-background-tasks/research.md` (section R9 "Results") and a new "Background tasks (2026-10-26)" section of `docs/spikes/2026-10-24-claude-stream.md`
+- [X] T002 Run T001 on the personal Mac and save the stdout as `crates/delilah-agents/tests/fixtures/stream-background.jsonl` and `stream-background-stop.jsonl` (strip absolute home paths from `output_file` and `cwd` to `/fixture/...`), and the hook posts as `stream-background-hooks.jsonl`; write the answers to R4's open point and R8 into `specs/010-chat-background-tasks/research.md` (section R9 "Results") and a new "Background tasks (2026-10-26)" section of `docs/spikes/2026-10-24-claude-stream.md`
 
 **Checkpoint**: fixtures exist; R4/R8 settled. If `stop_task` is not accepted, T048 becomes a no-op note.
 
@@ -142,7 +142,7 @@ Done before US3 because US3's ending relies on it; independently testable.
 - [X] T056 [P] Add a decision to `docs/decisions.md`: background work holds the turn end in memory instead of a new task state (alternatives from research R6), and progress is live-only (R7)
 - [X] T057 [P] Make sure every new Spanish string has its English entry: run `cd app && npx vitest run src/i18n/coverage.test.ts`
 - [X] T058 Run all checks: `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, `cd app && npx tsc --noEmit && npx vitest run`
-- [X] T059 Run quickstart.md end to end in a preview (`scripts/preview.sh --fresh`, never the installed daemon), US1–US4 and the "Detener" variant; record anything that differs in `specs/009-chat-background-tasks/research.md`
+- [X] T059 Run quickstart.md end to end in a preview (`scripts/preview.sh --fresh`, never the installed daemon), US1–US4 and the "Detener" variant; record anything that differs in `specs/010-chat-background-tasks/research.md`
 
 ---
 

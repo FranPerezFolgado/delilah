@@ -1,6 +1,6 @@
 //! A long-lived `claude -p --input-format stream-json --output-format stream-json` process.
 //!
-//! The wire shapes (recorded in docs/spikes/2026-10-24-claude-stream.md) stay private to this
+//! The wire shapes (recorded in docs/archive/spikes/2026-10-24-claude-stream.md) stay private to this
 //! module: stdout lines become [`StreamEvent`]s on a broadcast channel (live text, which may
 //! lag) and, but for the text deltas, on a lossless one ([`StreamSession::take_events`], what
 //! the daemon's state follows). The commands the daemon sends (user turns, interrupts,
