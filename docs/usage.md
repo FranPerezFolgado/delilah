@@ -186,7 +186,7 @@ answered for you. Anything else (a permission prompt in the task's session, a qu
 recommendation, a blocked review, a failure) pauses it: the header shows "Autopilot
 paused" with the reason, and the Inbox offers "Resume autopilot" or "Carry on by
 hand". Autopilot waits while the agent's background subagents run, and only nudges or
-pauses when the agent has really stopped. On the idea card, the autopilot option creates the task and starts it.
+pauses when the agent has really stopped. In the terminal too, a task whose agent ended its turn while its sub-agents still work stays "Working", not "Waiting", until they report back. On the idea card, the autopilot option creates the task and starts it.
 Delilah pushes and opens the PR without asking again, so turn it on only where that is
 what you want. It never merges.
 

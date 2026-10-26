@@ -60,6 +60,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.
+- A terminal task stays "Working" while the sub-agents its turn left running work, instead of "Waiting" ([#97](decisions.md)).
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
@@ -179,6 +180,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - "Always allow" is bounded on purpose (more prompts: `npm install x` is remembered only as that exact command); allowlisted prefixes take only workspace-relative paths (`is_safe_prefix_tail`), but `cargo`/`npm`/`go`/`make test|build` run the repo's own code; there is no view to review or revoke a task's remembered rules; rules stored before the allowlist that no longer pass are ignored;
   - images show as a placeholder; thinking blocks are not shown, and a sub-agent shows one-line steps (the last 50), not its nested conversation; finished background rows drop on the next turn or after 60 s;
   - a turn end held for background work is released 30 s after the set empties if no follow-up turn starts; progress is live-only (lost on a daemon restart);
+  - in terminal mode the turn end is held only behind sub-agents the `Stop` lists as running (not background shells); a sub-agent that never sends `SubagentStop` keeps it held until the next prompt, Stop or exit ([#97](decisions.md));
   - held-Stop heuristics not yet confirmed against Claude Code (review of 010): a late Stop is told from the current turn's by a 1 s window after the turn's init, not by `prompt_id`; a user line that never gets its own init leaves the next self-started turn marked as the user's; a row that never gets an end event keeps the Stop held, with no upper bound, until the next turn, Stop or exit; a Stop hook that arrives after Stop with background still running is held instead of applied; the conversation GET and the `/live` progress snapshot are not versioned, so a slow GET can show a stale snapshot until the next change;
   - the stream shapes used for background work (`system/task_*`, `background_tasks_changed`, `parent_tool_use_id`, `stop_task`) are undocumented by Anthropic, captured from Claude Code 2.1.x ([spike](archive/spikes/2026-10-24-claude-stream.md)); an older daemon fails to decode the history of a task with an `agent-resumed` event (downgrade only);
   - the API has no token: any local process without an `Origin` can type into a session or answer a permission.
