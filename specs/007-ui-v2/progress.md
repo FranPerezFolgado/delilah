@@ -37,7 +37,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
 | WP-29 | 5 | 5A | done | 1 | 8a1cdce | Header controls and tabs |
 | WP-30 | 5 | 5A | done | 1 | 7220728 | Cambios, PR and setup panels |
-| WP-31 | 5 | 5B | done | 1 |  | Task header |
+| WP-31 | 5 | 5B | done | 1 | c313d31 | Task header |
 | WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
 | WP-33 | 5 | 5B | done | 1 | 3d93e8a | Chat tab |
 | WP-34 | 5 | 5C | pending | 0 | | Task screen integration |
@@ -45,7 +45,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | implementing | 1 |  | Bandeja |
 | WP-38 | 6 | 6A | done | 1 | 8b4f80a | First run and board |
-| WP-39 | 6 | 6A | implementing | 1 |  | Jira |
+| WP-39 | 6 | 6A | done | 1 |  | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
@@ -84,3 +84,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 4 | WP-25 | NOTE | WP-26: pass Sidebar `rail`, `onToggleRail`, `onAddProject`, `onDone`; drop `onNewTask`; `onDelete` now fires after its own confirm — App must not open DeleteTaskDialog again. Board: wire StatusBar filter + BoardView new props. Banner over main with content greyed. | app/src/App.tsx |
 | 5 | WP-32 | NOTE | WP-34: pass TaskView `asks` (task InboxItem[]) and `onOpenTask`. Check `ManualResume` is allowed from failed (Reanudar). «Main Claude» legacy EN key should read «Main Claude» — fine. | app/src/components/TaskScreen.tsx |
 | 2 | WP-10 | NOTE | Sample Jira data now has 20 sub-tasks of PROJ-1244 (affects e2e lists and the before/after Jira pair); client `SetupInfo.exit_code` is `number|null`; data-model.md setup.json gains `log`. | app/src/api.ts, app/e2e |
+| 5 | WP-31 | NOTE | WP-34: render SessionChain row + base-stale bar under TaskHeader; TaskHeaderProps in WP-31 report (task, phase, owner, hasWorkspace, showTree, onToggleTree, sessionSwitch, autopilotBusy, onAutopilot, onSavingMode, pr, doneAt, onChanged, onError). | app/src/components/TaskScreen.tsx |
