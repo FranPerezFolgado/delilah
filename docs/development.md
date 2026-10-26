@@ -187,7 +187,21 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    then publishes it (`gh release edit --draft=false --latest`). A failed run leaves
    at most a draft; re-running the same tag is safe. tauri-action's own
    `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 62).
+   It also writes `SHA256SUMS` (`shasum -a 256` of every other asset, sorted by name,
+   outside the attested dir) and attests the assets with
+   `actions/attest-build-provenance@v3` before publishing; a release is never published
+   without them. The job needs `contents: write`, `id-token: write` and
+   `attestations: write`.
 5. Installed apps check for it within 6 h (or at once with "Check for updates…").
+
+**Verifying a release:** from the folder with the downloaded assets,
+`shasum -a 256 -c SHA256SUMS --ignore-missing`, and
+`gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`.
+
+**Testing the install script:** `scripts/test-install.sh` runs `scripts/install.sh` against
+local `file://` assets and a temporary install dir. The script reads `DELILAH_BASE_URL`,
+`DELILAH_INSTALL_DIR`, `DELILAH_ARCH` and `DELILAH_SKIP_CHECKSUM=1` (only for releases
+before 1.1.0, which have no `SHA256SUMS`; it never skips a mismatch).
 
 **Rehearsal:** `make release-dry-run VERSION=X.Y.Z` (`scripts/release.sh`) runs the
 checks, builds and signs the app and writes `latest.json` locally. It never uploads.

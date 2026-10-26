@@ -615,3 +615,16 @@ runs only on a non-draft open PR with passing checks, with a method the repo all
 (`snapshot.merge_methods`; none known, no merge), and only if the `gh` account for the host
 is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
 draft PR). *Ruled out:* a merge queue or auto-merge.
+
+**79. Unsigned distribution, with checksums and attestation for trust.** There is no Apple
+Developer account, so the app keeps only its ad-hoc signature and is not notarized. The
+supported install is `scripts/install.sh` via `curl`, which sets no quarantine flag, so
+Gatekeeper does not block the result. Trust comes from `SHA256SUMS` (checked by the script
+and by hand) and a build-provenance attestation on every release
+(`gh attestation verify`). *Ruled out:* notarization (the paid Apple Developer Program).
+
+**80. No Homebrew tap for now.** Homebrew removed `--no-quarantine` and ends support for
+casks that fail Gatekeeper on 2026-09-01 (Homebrew/brew#20755). A tap of our own with a
+`postflight` that clears the quarantine attribute is possible, but it adds a repo and a
+release step for the same trust trade as `install.sh`. *Ruled out:* the official cask
+(it cannot pass Gatekeeper) and an own tap, until there is a signed build.

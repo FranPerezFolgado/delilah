@@ -112,11 +112,11 @@ parallel (different files, no dependency on an unfinished task).
 
   Update the header comment to list the new steps.
 - [X] T020 [P] [US2] Update `scripts/release.sh` (the dry run) to also write a local `SHA256SUMS` for the bundle outputs and print it, so the rehearsal shows what the release will publish (no upload, no attestation).
-- [ ] T021 [P] [US2] Add to `docs/development.md` "Releasing": what each release now publishes (`SHA256SUMS`, attestation), how to verify (`shasum -a 256 -c SHA256SUMS --ignore-missing`, `gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`), and how to test the install script (`scripts/test-install.sh`).
-- [ ] T022 [P] [US2] Add decisions to `docs/decisions.md` (next numbers after #78):
+- [X] T021 [P] [US2] Add to `docs/development.md` "Releasing": what each release now publishes (`SHA256SUMS`, attestation), how to verify (`shasum -a 256 -c SHA256SUMS --ignore-missing`, `gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`), and how to test the install script (`scripts/test-install.sh`).
+- [X] T022 [P] [US2] Add decisions to `docs/decisions.md` (next numbers after #78):
   - **Unsigned distribution**: no Apple Developer account; `install.sh` via curl, which sets no quarantine; checksums and build-provenance attestation for trust; ad-hoc signature kept. *Ruled out*: notarization (cost).
   - **No Homebrew tap for now** (research R1): Homebrew removes `--no-quarantine` and ends support for casks that fail Gatekeeper on 2026-09-01. An own tap with a `postflight` xattr is possible but adds a repo and a release step for the same trust trade as `install.sh`. Cite Homebrew/brew#20755.
-- [ ] T023 [US2] Add the uninstall steps to `docs/usage.md` ("Uninstall": stop the daemon from the app menu, delete the app, `~/Library/LaunchAgents/dev.delilah.daemon.plist`, optionally `~/.delilah`). Write them in English from the old README text.
+- [X] T023 [US2] Add the uninstall steps to `docs/usage.md` ("Uninstall": stop the daemon from the app menu, delete the app, `~/Library/LaunchAgents/dev.delilah.daemon.plist`, optionally `~/.delilah`). Write them in English from the old README text.
 - [ ] T024 [US2] Write the README "Install" section (`README.md`):
   1. The script: `curl -fsSL https://raw.githubusercontent.com/FranPerezFolgado/delilah/main/scripts/install.sh | bash`, with one line on what it does and that it verifies the checksum.
   2. "Why unsigned": no paid Apple Developer account, so macOS blocks a downloaded copy.

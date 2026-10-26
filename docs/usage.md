@@ -11,6 +11,7 @@ sessions. For what Delilah is, see the [README](../README.md).
 - [Sessions](#sessions)
 - [Resource usage](#resource-usage)
 - [Building from source](#building-from-source)
+- [Uninstall](#uninstall)
 - [Updates](#updates)
 
 ## Command line
@@ -539,8 +540,16 @@ xattr -dr com.apple.quarantine /Applications/Delilah.app
 ```
 
 State lives in `~/.delilah` (database, workspaces, task files) and the Jira token
-in the Keychain. To uninstall: Delilah → Stop the daemon, then delete the app,
-`~/Library/LaunchAgents/dev.delilah.daemon.plist` and, if you want, `~/.delilah`.
+in the Keychain. To remove it, see [Uninstall](#uninstall).
+
+## Uninstall
+
+1. Stop the daemon from the app menu (Delilah → Stop the daemon), then quit the app (⌘Q).
+2. Delete the app: `/Applications/Delilah.app`.
+3. Delete the daemon's LaunchAgent: `~/Library/LaunchAgents/dev.delilah.daemon.plist`.
+4. Optional: delete `~/.delilah` (database, workspaces, task files, backups). This
+   discards your tasks and their workspaces; skip it if you may reinstall later.
+   The Jira token lives in the Keychain and can be removed there.
 
 ## Updates
 
