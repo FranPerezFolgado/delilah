@@ -198,8 +198,9 @@ its details.
   the colour of the current action's kind (edit, read/search, run, delegate, other; dark
   when there is none), a `?` over an agent that waits for the user, `zzz` over one paused
   by the usage limit, and a caption of the current action (cut at 40 characters).
-- **FR-004**: Characters MUST have distinct poses for at least: arriving, sitting idle,
-  typing, waiting with a raised hand, sleeping, and walking.
+- **FR-004**: Characters MUST have distinct poses for at least: arriving (walking in),
+  sitting, typing, sleeping, and walking; waiting is shown by the `?` over the seated
+  character and the desk highlight (the ported art has no raised-hand pose).
 - **FR-005**: When a helper finishes, its character MUST walk from its desk to the floor's
   lounge, stay there about 5 seconds, and leave; its desk MUST become free as soon as
   it stands up.

@@ -79,6 +79,6 @@ missing numbers count as 0; bad JSON lines are skipped.
 | Starting | walking in → seated | — | idle glass |
 | Working, action of kind K | typing | caption | glow K |
 | Working, no action | seated | — | idle glass |
-| Waiting | seated, hand up | `?` | idle glass |
+| Waiting | seated | `?` (`--acc`), desk accent bar | idle glass |
 | Paused | seated_sleeping | `zzz` | off |
 | helper ended | standing → walking → lounge (≈5 s) → gone | — | idle glass |

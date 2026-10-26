@@ -156,3 +156,39 @@ Sources: the code (daemon `activity.rs`, `sessions.rs`, `hooks.rs`, `transcript_
   and refetches `after` on the `activity` topic. Floors' desk slots stay stable in
   module-level maps keyed by owner (as `SPOTS`/`SLOTS` today); building floor order is
   first-seen order, newest on top.
+
+## R10. Visual frame: the app's design system (user request)
+
+Neither design artifact (the "Delilah" mock-ups canvas and the design doc) draws a
+Playground, so the views follow the design system those mock-ups define (and UI v2
+implements in `styles.css`):
+
+- **Frame**: office, flow and each building floor sit in an inset box like the mock-ups'
+  embedded "Consola" view: `border: 1px solid var(--bd); border-radius: 8px;
+  background: var(--term); overflow: hidden`, with a 30px header row inside
+  (`--panel`, border-bottom `--bd`, 12px text) holding the title/legend on the left and
+  controls on the right. No gradients, no shadows (only overlays have one).
+- **Toggle**: Oficina/Flujo is the mock-ups' segmented control (`role="tablist"`, 1px
+  `--bd2`, radius 6, `.seg` 12px with a 13px line icon, `.seg.on` = `--sel` bg +
+  `--tx`), right-aligned in the header row; the waiting count sits just before it as a
+  `pill c-wait`.
+- **Tab**: "Oficina" is a normal `.tab` in the existing strip (13px line icon, 12px label,
+  active = `--panel` + `inset 0 2px 0 var(--acc)`), with a 6px `--acc` dot when an agent
+  of the owner waits.
+- **State colours come from the status tokens**, not from the art: waiting = `--acc`
+  (the `?` bubble, the desk/floor highlight as an inset accent bar), paused = `--pause`
+  (`zzz`), running = `--run`, error = `--err`, done = `--done`. The accent is used only for
+  "needs you". The monitor glow per tool kind (pixtuoid colours) is the one exception: it
+  is part of the art, inside the dark screen, and always named in the caption.
+- **Flow nodes**: rectangles with radius 6, `--panel` fill, 1px `--bd2` border; state by
+  border/badge colour from the status tokens (`--run` running, `--err` failed, `--done`
+  done, `--tx3` unknown); tool kind as a small swatch of the glow colour plus its name.
+  Labels 12px system font, targets in the mono font. Timeline rows 12px, times in mono
+  11.5px, selected row = `--sel` + `inset 2px 0 0 var(--acc)`.
+- **Building floors**: a list of framed rows (like the mock-ups' list rows): key in mono,
+  title, phase with the phase icons, miniature strip on `--term`; waiting floor = left
+  accent bar + `pill c-wait`.
+- **Width**: the centre column can be ~600px with both side panels open; the floor scales
+  down by integer steps (×5 → ×4 → ×3) to fit, and the flow graph fits on open.
+- **Themes**: the pixel art keeps its own colours inside the `--term` inset in both themes;
+  everything around it (frame, labels, bubbles, nodes) uses the tokens of `.dk` / `.lt`.

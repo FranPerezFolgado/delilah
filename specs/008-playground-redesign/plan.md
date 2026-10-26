@@ -205,6 +205,10 @@ one component per file with its CSS and i18n, as UI v2.
 
 ### 6. Floor, building, office tab (UI)
 
+- Visual frame, toggle, tab, state colours, flow node and building row styles follow
+  the app's design system as set out in [research.md R10](research.md) (user request: base
+  the design on the design artifacts, which have no Playground of their own).
+
 - `floorLayout.ts` (pure): grid of 2×2 pods (lead desks fill first, helpers next), aisle,
   lounge corner (sofa, table, pantry, plants); `seatPosition(slot)`, `loungePath(slot)`
   (3-point polyline), floor size grows by pods. Tests: stable slots across updates,
