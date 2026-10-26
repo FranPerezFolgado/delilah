@@ -17,15 +17,15 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 3 | 3B | done | 1 | 39c4788 | no re-read from gh before send (uses just-saved snapshot, FR-006?); stopped notice hook for WP-12 |
 | WP-09 | 3 | 3C | done | 1 | 3a4ee36 | POST /runs has no ci_autofix (test uses PATCH) |
 | WP-09F | 3 | fix | done | 1 | 9ee01f0 | Phase 3 review fixes; manual forward holds per-task autofix slot (InFlight → 409) |
-| WP-10 | 4 | 4A | verified | 1 | f65133f | turn start unknown: started=None proxy (first turn end after sent_at counts) |
-| WP-11 | 4 | 4B | verified | 1 | dc3dc77 | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
-| WP-12 | 4 | 4B | verified | 1 | 3902f30 | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
-| WP-13 | 4 | 4C | verified | 1 | 4868349 | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
-| WP-13F | 4 | fix | verified | 1 | 7c1fc5e | Phase 4 review fixes; turn start from UserPromptSubmit on Live |
-| WP-14 | 5 | 5A | pending | 0 | | |
+| WP-10 | 4 | 4A | done | 1 | f65133f | turn start unknown: started=None proxy (first turn end after sent_at counts) |
+| WP-11 | 4 | 4B | done | 1 | dc3dc77 | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
+| WP-12 | 4 | 4B | done | 1 | 3902f30 | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
+| WP-13 | 4 | 4C | done | 1 | 4868349 | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
+| WP-13F | 4 | fix | done | 1 | 7c1fc5e | Phase 4 review fixes; turn start from UserPromptSubmit on Live |
+| WP-14 | 5 | 5A | verified | 1 | | set/retry await evaluate inline; PATCH ci_autofix → autofix::set (409 terminal only when it changes) |
 | WP-15 | 5 | 5A | verified | 1 | ce53e13 | retry requires --repo (CLI error); project show prints ci-autofix |
-| WP-16 | 5 | 5A | verified | 1 | | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
-| WP-17 | 6 | 6A | pending | 0 | | |
+| WP-16 | 5 | 5A | verified | 1 | 801a88f | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
+| WP-17 | 6 | 6A | implementing | 0 | | |
 | WP-18 | 7 | 7A | pending | 0 | | |
 | WP-19 | 7 | 7B | pending | 0 | | |
 
@@ -65,3 +65,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | spec-compliance | LOW | A push GitHub hasn't shown yet at the forced check looks like no-push (recovers on green) | crates/delilah-daemon/src/autofix/mod.rs judge |
 | 4 | spec-compliance | LOW | An attempt whose session exits/crashes/fails without a Stop hook stays `fixing` forever | crates/delilah-daemon/src/autofix/mod.rs |
 | 4 | spec-compliance | LOW | cancel resets attempts to 0 (data-model silent) | crates/delilah-daemon/src/autofix/mod.rs cancel |
+| 4 | architecture | MEDIUM | claim_autofix_waiting gives up after ~2s and archive/delete proceed anyway (cancel can race an in-flight send); log the timeout, consider failing delete | crates/delilah-daemon/src/state.rs, archive.rs, actions.rs |
+| 4 | architecture | LOW | Stale turn_started after a lost Stop; prompt merged into a running turn leaves PR fixing until next turn end (fails safe) | crates/delilah-daemon/src/hooks.rs |
+| 4 | architecture | LOW | autofix/mod.rs ~1,900 lines: move turn-end judging to autofix/turn.rs | crates/delilah-daemon/src/autofix/mod.rs |
+| 4 | spec-compliance | MEDIUM | Turn start consumed on a background/limited turn end → the following turn without PromptSubmitted/Working has started=None and is never judged; PR can stay `fixing` (FR-009 delayed). Don't consume the start when background/limited | crates/delilah-daemon/src/hooks.rs, sessions.rs |
+| 4 | spec-compliance | LOW | Working hook while Waiting (non-permission NeedsUser, late subagent hook) resets the turn start | crates/delilah-daemon/src/hooks.rs |

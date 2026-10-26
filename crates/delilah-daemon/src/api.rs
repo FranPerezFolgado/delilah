@@ -153,6 +153,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/tasks/{key}/handoff", post(crate::handoff::act))
         .route("/api/v1/tasks/{key}/autopilot", post(crate::autopilot::act))
+        .route("/api/v1/tasks/{key}/autofix", post(crate::autofix::act))
         .route(
             "/api/v1/tasks/{key}/review-hint/dismiss",
             post(crate::phases::dismiss),
@@ -543,6 +544,18 @@ async fn update_task(
         }
     }
     let key = TaskKey::new(key);
+    // A real autofix change on a finished task is refused (409 `terminal`, as the route)
+    // before anything else is written.
+    if let Some(on) = ci_autofix
+        && let Some(t) = app.store.get_task(&key).await?
+        && t.status.is_terminal()
+        && t.ci_autofix != on
+    {
+        return Err(ApiError::conflict_reason(
+            format!("task {key} is finished"),
+            "terminal",
+        ));
+    }
     // A view-only change works in any state; a title alone, on any task but an archived
     // one; the rest edits the backlog.
     let title_only = change.notes.is_none()
@@ -561,7 +574,9 @@ async fn update_task(
         }
     };
     if let Some(on) = ci_autofix.filter(|on| *on != task.ci_autofix) {
-        app.store.set_ci_autofix(&key, on).await?;
+        // The toggle's side effects (reset or cancel, evaluate) and its 409 on a finished
+        // task, as the `autofix` route has them.
+        crate::autofix::set(&app, &key, on).await?;
         task.ci_autofix = on;
     }
     if let Some(view) = view.filter(|v| *v != task.view) {

@@ -3,7 +3,7 @@
 //! `tasks.ci_autofix` (on/off) and `pull_requests.autofix` (per PR). See
 //! `specs/010-ci-autofix`.
 
-pub(crate) mod api;
+mod api;
 
 use std::time::Duration;
 
@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use delilah_core::{Event, TaskKey, TaskStatus};
 use serde::{Deserialize, Serialize};
 
+use crate::api::ApiError;
 use crate::events::Topic;
 use crate::inbox::AttentionKind;
 use crate::lang::Lang;
@@ -22,6 +23,8 @@ use crate::sessions::LiveState;
 use crate::state::AppState;
 use crate::store::StoreError;
 use crate::store_prs::{NewNotice, PrRow};
+
+pub(crate) use api::act;
 
 /// Autofix attempts per PR before it stops (FR-008).
 pub(crate) const LIMIT: u32 = 3;
@@ -867,6 +870,84 @@ pub(crate) async fn cancel(
         app.emit(Topic::Inbox);
     }
     Ok(changed)
+}
+
+/// The task for a toggle or a retry: unknown is a 404, finished (done or archived) a 409
+/// `terminal`, since autofix has nothing left to do there.
+async fn open_task(app: &AppState, key: &TaskKey) -> Result<delilah_core::Task, ApiError> {
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))?;
+    if task.status.is_terminal() {
+        return Err(ApiError::conflict_reason(
+            format!("task {key} is finished"),
+            "terminal",
+        ));
+    }
+    Ok(task)
+}
+
+/// The task's autofix on or off (the toggle). On resets the attempts of every stopped PR
+/// (the sent sha stays), resolves their notices and evaluates at once; off cancels what
+/// is `fixing` without touching the session. Each row write is a compare-and-set.
+pub(crate) async fn set(app: &AppState, key: &TaskKey, on: bool) -> Result<(), ApiError> {
+    open_task(app, key).await?;
+    app.store.set_ci_autofix(key, on).await?;
+    app.emit(Topic::Tasks);
+    if !on {
+        cancel(app, key, None).await?;
+        return Ok(());
+    }
+    let mut changed = false;
+    for row in app.store.prs_of(key).await? {
+        if let Some(a) = row.autofix.as_ref()
+            && a.state == State::Stopped
+        {
+            changed |= claim(app, row.id, Some(a), &watching(Some(a))).await?;
+        }
+        changed |= resolve_stopped(app, key, &row.repo).await?;
+    }
+    if changed {
+        app.emit(Topic::Prs);
+    }
+    evaluate(app, key).await;
+    Ok(())
+}
+
+/// Retry of the PR in `repo`: attempts and the forwarded sha are reset, its stopped
+/// notice resolved and the current failure evaluated at once. Turns autofix on.
+pub(crate) async fn retry(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+) -> Result<(), ApiError> {
+    open_task(app, key).await?;
+    let field = |code: &str, message: &str| {
+        ApiError::invalid_fields(
+            message,
+            vec![delilah_core::FieldError {
+                field: "repo".into(),
+                code: code.into(),
+                message: message.into(),
+            }],
+        )
+    };
+    let Some(repo) = repo.filter(|r| !r.is_empty()) else {
+        return Err(field("required", "retry needs the `repo` of the PR"));
+    };
+    let rows = app.store.prs_of(key).await?;
+    let Some(row) = rows.iter().find(|r| r.repo == repo) else {
+        return Err(field("unknown", &format!("{repo} is not a PR of {key}")));
+    };
+    app.store.set_ci_autofix(key, true).await?;
+    claim(app, row.id, row.autofix.as_ref(), &PrAutofix::watching()).await?;
+    resolve_stopped(app, key, repo).await?;
+    app.emit(Topic::Tasks);
+    app.emit(Topic::Prs);
+    evaluate(app, key).await;
+    Ok(())
 }
 
 #[cfg(test)]
