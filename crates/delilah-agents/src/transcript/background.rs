@@ -2,6 +2,15 @@
 //! client can render it instead of the raw markup.
 
 use serde::Serialize;
+use serde_json::Value;
+
+use super::truncate;
+
+/// Longest report kept, in bytes.
+const MAX_REPORT: usize = 16 * 1024;
+
+const PLACEHOLDER: &str = "This agent's report was delivered to you as a message from";
+const PREAMBLE_END: &str = "The report follows:\n";
 
 /// Where the information came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
@@ -74,7 +83,7 @@ fn read_summary(summary: &str) -> (BackgroundKind, Option<String>, Option<i64>) 
     let quoted = |prefix: &str| {
         let rest = first.strip_prefix(prefix)?;
         let end = rest.rfind('"')?;
-        Some(rest[..end].to_string())
+        Some(rest[..end].chars().take(200).collect::<String>())
     };
     if let Some(label) = quoted("Agent \"") {
         return (BackgroundKind::Agent, Some(label), None);
@@ -94,14 +103,110 @@ fn read_summary(summary: &str) -> (BackgroundKind, Option<String>, Option<i64>) 
     )
 }
 
+/// Decode the five entities the notification escapes; everything else stays as written.
+fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let decoded = [
+            ("&lt;", '<'),
+            ("&gt;", '>'),
+            ("&amp;", '&'),
+            ("&quot;", '"'),
+            ("&#39;", '\''),
+        ]
+        .iter()
+        .find(|(entity, _)| rest.starts_with(entity));
+        match decoded {
+            Some((entity, c)) => {
+                out.push(*c);
+                rest = &rest[entity.len()..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The report of a notification: (report, truncated, delivered in the hand-back).
+fn read_report(block: &str) -> (Option<String>, bool, bool) {
+    let Some(start) = block.find("<result>").map(|i| i + "<result>".len()) else {
+        return (None, false, false);
+    };
+    let rest = &block[start..];
+    // The last `</result>`, so a report that quotes one stays whole.
+    let end = rest
+        .rfind("</result>")
+        .or_else(|| rest.find("<usage>"))
+        .unwrap_or(rest.len());
+    let text = decode_entities(rest[..end].trim());
+    if text.is_empty() {
+        return (None, false, false);
+    }
+    if text.starts_with(PLACEHOLDER) {
+        return (None, false, true);
+    }
+    let (report, truncated) = truncate(&text, MAX_REPORT);
+    (Some(report), truncated, false)
+}
+
+/// The hand-back of a background agent, from the `origin` of its hidden user line.
+pub(crate) fn read_handback(origin: &Value) -> Option<BackgroundInfo> {
+    if origin.get("kind").and_then(Value::as_str) != Some("peer")
+        || origin.get("handback").and_then(Value::as_bool) != Some(true)
+    {
+        return None;
+    }
+    let text = |key: &str| {
+        origin
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let body = text("body").unwrap_or("");
+    let body = match body.find(PREAMBLE_END) {
+        Some(i) => &body[i + PREAMBLE_END.len()..],
+        None => body,
+    };
+    let dedented = body
+        .lines()
+        .map(|l| l.strip_prefix("  ").unwrap_or(l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let dedented = dedented.trim();
+    let (report, report_truncated) = if dedented.is_empty() {
+        (None, false)
+    } else {
+        let (r, t) = truncate(dedented, MAX_REPORT);
+        (Some(r), t)
+    };
+    Some(BackgroundInfo {
+        source: BackgroundSource::Handback,
+        task_id: text("from").map(String::from),
+        kind: BackgroundKind::Agent,
+        label: text("name").map(|n| n.chars().take(200).collect()),
+        status: Some("completed".into()),
+        report,
+        report_truncated,
+        ..Default::default()
+    })
+}
+
 /// Read a `<task-notification>` block. Never panics: whatever cannot be read stays
-/// `None`. `tool-use-id`, `output-file`, `note` and `result` are not part of it.
+/// `None`. `tool-use-id`, `output-file` and `note` are not part of it.
 pub(crate) fn read_notification(block: &str) -> BackgroundInfo {
     let usage = tag(block, "usage").unwrap_or("");
     let (kind, label, exit_code) =
         tag(block, "summary")
             .map(read_summary)
             .unwrap_or((BackgroundKind::Task, None, None));
+    let (report, report_truncated, report_in_handback) = read_report(block);
     BackgroundInfo {
         source: BackgroundSource::Notification,
         task_id: tag(block, "task-id")
@@ -116,7 +221,9 @@ pub(crate) fn read_notification(block: &str) -> BackgroundInfo {
         duration_ms: number(tag(usage, "duration_ms")),
         tool_uses: number(tag(usage, "tool_uses")),
         tokens: number(tag(usage, "subagent_tokens")),
-        ..Default::default()
+        report,
+        report_truncated,
+        report_in_handback,
     }
 }
 
@@ -193,6 +300,93 @@ mod tests {
         assert_eq!(read_notification(""), BackgroundInfo::default());
         let _ = read_notification("<summary>Agent \"é");
         let _ = read_notification("<summary>Background command \"é\" (exit code ");
+    }
+
+    fn with_result(result: &str) -> String {
+        format!(
+            "<task-notification><task-id>a</task-id><status>completed</status><result>{result}</result>\n<usage><tool_uses>1</tool_uses></usage></task-notification>"
+        )
+    }
+
+    #[test]
+    fn report_keeps_quoted_closing_tag_and_decodes() {
+        let b = read_notification(&with_result(
+            "a </result> b &lt;x&gt; &amp;amp; &quot;q&quot; &#39;s&#39; <raw>",
+        ));
+        assert_eq!(
+            b.report.as_deref(),
+            Some("a </result> b <x> &amp; \"q\" 's' <raw>")
+        );
+        assert!(!b.report_truncated && !b.report_in_handback);
+        assert_eq!(b.tool_uses, Some(1));
+    }
+
+    #[test]
+    fn report_placeholder_and_missing() {
+        let b = read_notification(&with_result(
+            "This agent's report was delivered to you as a message from \"a1\" (its SubagentHandback call). Read it there; it is not repeated here.",
+        ));
+        assert_eq!((b.report, b.report_in_handback), (None, true));
+        let b = read_notification(AGENT);
+        assert_eq!(
+            (b.report, b.report_truncated, b.report_in_handback),
+            (None, false, false)
+        );
+    }
+
+    #[test]
+    fn long_report_is_cut_on_a_char_boundary() {
+        let b = read_notification(&with_result(&"é".repeat(MAX_REPORT)));
+        assert!(b.report_truncated);
+        let r = b.report.unwrap();
+        assert_eq!(r.len(), MAX_REPORT);
+        assert!(r.chars().all(|c| c == 'é'));
+        let b = read_notification(&with_result(&"é".repeat(MAX_REPORT / 2 - 1)));
+        assert!(!b.report_truncated);
+    }
+
+    fn handback(body: &str) -> Value {
+        json!({"kind":"peer","from":"a97d","name":"code-researcher","handback":true,"body":body})
+    }
+
+    #[test]
+    fn reads_handback() {
+        let b = read_handback(&handback(
+            "[Subagent hand-back] The text below is the final report. The report follows:\n  ## Map\n    nested\n x\n",
+        ))
+        .unwrap();
+        assert_eq!(b.source, BackgroundSource::Handback);
+        assert_eq!(b.kind, BackgroundKind::Agent);
+        assert_eq!(b.task_id.as_deref(), Some("a97d"));
+        assert_eq!(b.label.as_deref(), Some("code-researcher"));
+        assert_eq!(b.status.as_deref(), Some("completed"));
+        assert_eq!(b.report.as_deref(), Some("## Map\n  nested\n x"));
+        let b = read_handback(&handback("plain body")).unwrap();
+        assert_eq!(b.report.as_deref(), Some("plain body"));
+    }
+
+    #[test]
+    fn handback_requires_flag_and_peer_kind() {
+        let mut o = handback("x");
+        o["handback"] = json!(false);
+        assert!(read_handback(&o).is_none());
+        let mut o = handback("x");
+        o["kind"] = json!("task-notification");
+        assert!(read_handback(&o).is_none());
+        assert!(read_handback(&Value::Null).is_none());
+    }
+
+    #[test]
+    fn labels_are_capped_at_200() {
+        let long = "é".repeat(300);
+        let b = read_notification(&format!("<summary>Agent \"{long}\" finished</summary>"));
+        assert_eq!(b.label.unwrap().chars().count(), 200);
+        let mut o = handback("x");
+        o["name"] = json!(long);
+        assert_eq!(
+            read_handback(&o).unwrap().label.unwrap().chars().count(),
+            200
+        );
     }
 
     #[test]

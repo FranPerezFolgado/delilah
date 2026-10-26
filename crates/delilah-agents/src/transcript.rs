@@ -368,7 +368,13 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
         }
     }
     let flag = |name: &str| line.get(name).and_then(Value::as_bool).unwrap_or(false);
-    if flag("isSidechain") || flag("isMeta") {
+    // A hand-back is a hidden (`isMeta`) line; it is the one meta line that is shown.
+    let handback = if !flag("isSidechain") && flag("isMeta") {
+        background::read_handback(&line["origin"])
+    } else {
+        None
+    };
+    if flag("isSidechain") || (flag("isMeta") && handback.is_none()) {
         return vec![];
     }
     let Some(uuid) = line.get("uuid").and_then(Value::as_str) else {
@@ -387,6 +393,15 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
         *skipped += 1;
         return vec![];
     };
+    if let Some(info) = handback {
+        return vec![Item::Entry(Entry::Marker {
+            id: format!("t:{uuid}:0"),
+            at,
+            marker: MarkerKind::BackgroundDone,
+            detail: info.label.clone(),
+            background: Some(info),
+        })];
+    }
     if flag("isCompactSummary") {
         return vec![Item::Entry(Entry::Marker {
             id: format!("t:{uuid}:0"),
@@ -1217,6 +1232,67 @@ mod tests {
             assert_eq!(b.kind, BackgroundKind::Command);
             assert_eq!(b.label.as_deref(), Some("sleep 5"));
         }
+    }
+
+    const HANDBACK: &str = r#","isMeta":true,"origin":{"kind":"peer","from":"a97d","name":"code-researcher","handback":true,"body":"[Subagent hand-back] x. The report follows:\n  ## Map\n  line two\n"}"#;
+
+    #[test]
+    fn handback_line_is_a_background_done_marker() {
+        let p = parse(
+            &user_line(HANDBACK, r#""Another Claude session sent a message""#),
+            0,
+        );
+        assert_eq!(p.entries.len(), 1);
+        let Entry::Marker {
+            id,
+            marker,
+            detail,
+            background,
+            ..
+        } = &p.entries[0]
+        else {
+            panic!("not a marker");
+        };
+        assert_eq!(id, "t:n1:0");
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        assert_eq!(detail.as_deref(), Some("code-researcher"));
+        let b = background.as_ref().expect("background");
+        assert_eq!(b.source, BackgroundSource::Handback);
+        assert_eq!(b.report.as_deref(), Some("## Map\nline two"));
+    }
+
+    #[test]
+    fn notification_and_handback_get_different_ids() {
+        let mut bytes = user_line("", NOTE);
+        let other = String::from_utf8(user_line(HANDBACK, r#""m""#))
+            .unwrap()
+            .replace("\"n1\"", "\"n2\"");
+        bytes.extend(other.into_bytes());
+        let p = parse(&bytes, 0);
+        let ids: Vec<_> = p
+            .entries
+            .iter()
+            .map(|e| match e {
+                Entry::Marker { id, .. } => id.clone(),
+                _ => panic!("not a marker"),
+            })
+            .collect();
+        assert_eq!(ids, ["t:n1:0", "t:n2:0"]);
+    }
+
+    #[test]
+    fn other_meta_and_sidechain_lines_still_give_nothing() {
+        let skill = r#","isMeta":true"#;
+        assert!(
+            parse(
+                &user_line(skill, r#""Base directory for this skill: /x""#),
+                0
+            )
+            .entries
+            .is_empty()
+        );
+        let side = format!(r#","isSidechain":true{HANDBACK}"#);
+        assert!(parse(&user_line(&side, r#""m""#), 0).entries.is_empty());
     }
 
     #[test]
