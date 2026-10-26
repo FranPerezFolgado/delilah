@@ -145,6 +145,7 @@ ask.**
 - **(A) Checkout.** Most work happens in the developer's own folder, as they would by hand: a branch there, the checkout clean to start, one task at a time.
 - **(B) Worktree.** For parallel work.
 - **(C) Project sessions.** Questions about the code are not tasks: a project session (`@project`) runs Claude read-only (`--permission-mode plan`) in the checkout. It can be allowed to edit, or turned into a free task, keeping the conversation.
+- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Crear y lanzar en autopiloto") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Iniciar en un worktree".
 
 **17. Phases: the user decides; files and signals only move forward.** The user
 sets any phase (the phase bar, or asking for a review).
@@ -205,13 +206,18 @@ A rule that names a submodule that no longer exists is a 422 pointing at the
 settings.
 
 **57. The workspace mode is the request's, else the backlog task's saved choice,
-else the project's `workspace` setting, else a worktree.** `settings.workspace` is
-optional (`null` by default), so a project with nothing saved behaves as before the
-settings existed. The CLI sends it only when `--checkout` or `--worktree` is given,
-so the daemon decides otherwise (this also covers idea proposals and "Crear y lanzar
-en autopiloto"). Only the new-task form still preselects the checkout when the
-project has no setting, as it always did; a backlog task with no saved choice shows
-"worktree", which is what the daemon will do.
+else the project's `workspace` setting, else the checkout.** `settings.workspace` is
+optional (`null` by default). The CLI sends the mode only when `--checkout` or
+`--worktree` is given, so the daemon decides otherwise (this also covers idea proposals
+and "Crear y lanzar en autopiloto"). *Amended by UI v2 (2026-10-26):* the last step was
+"else a worktree"; it is now the checkout, matching decision 16 and what the new-task
+form always preselected. This is a behaviour change for `POST /runs` and `delilah run`
+(no shape change): a caller that never said where and relied on a worktree now works in
+the user's folder, with its one-task-at-a-time rule and its clean-checkout check. The
+`WherePicker` labels the options "(por defecto)" / "(por defecto del proyecto)", and a
+backlog task with no saved choice shows "checkout", which is what the daemon will do.
+*Ruled out:* keeping the worktree default for the API only (the UI would show one thing
+and the CLI another).
 
 ## UI
 
@@ -524,3 +530,90 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
 - Not observed: `Notification` and `StopFailure` in print mode, and the `rate_limit_event`
   `status` when a limit is hit.
 - **The switch to chat mode relaunches without a prompt**, and the real CLI says nothing until it gets a message, so the switch judges the agent healthy if it stays alive for 3 s; a later death is seen by the exit watcher and leaves the task in chat mode with no live session (resume or switch back).
+
+## UI v2
+
+Decided while applying [ui-redesign.md](ui-redesign.md) (spec `007-ui-v2`, 2026-10-26).
+
+**68. One colour, one meaning.** Amber (`--wait`) only means "te espera"; blue (`--run`)
+only the status "Trabajando" and the focus ring; the primary button is light grey and
+stands out by lightness, one per view; everything else in progress (a running check, the
+current spec task, a PR "Abierta") is neutral. Tokens are guarded by tests (`tokens.test.ts`
+contrast, `styles.test.ts` scale and allowed colours). *Why:* amber and blue were used for
+buttons, tabs and phases, so a glance told nothing. *Ruled out:* an accent colour per area;
+a colour-blind mode for now (pending in status.md).
+
+**69. Selection is one language.** `--sel` background with `--tx-strong` text through
+`aria-pressed`, `aria-selected` and `aria-current`; option cards add a check; tabs are the
+only exception (a neutral 2 px underline). The terminal and the editor take their colours
+from the same tokens (`theme.ts`) and change live with the OS scheme. *Ruled out:* amber
+selection (it collided with "te espera").
+
+**70. Status vocabulary in three axes.** A task's status is a `StatusBadge` (Backlog,
+Trabajando, Te espera, En pausa, Hecha, Error); a Bandeja item is an `InboxKind` (Pregunta,
+Permiso, Aviso); a PR is a `PrChip` (Borrador, Abierta, Checks fallan, Fusionada); a session
+is only a dot. One mapping in `vocab.ts`, never a word from another axis. "Limpiar avisos"
+removes only non-blocking avisos. *Why:* "Pendiente", "Esperando" and "Aviso" meant three
+things each. The glossary of brief section 3 is the copy rule (Iniciar, Detener, Abrir…,
+Recargar, Omitir, Quitar, "N más" instead of "Ver N más").
+
+**71. A pending permission makes the task "Te espera".** An ask inserted while the task
+runs fires `AgentAsked` (history `permission-asked`); the last pending ask of the task
+answered, withdrawn or expired fires `UserAnswered`. At daemon start the permission asks
+are reconciled: a `waiting-for-user` task whose latest ask has no answer and no live ask
+gets `permission-expired` and stays resumable. *Why:* the status said "Trabajando" while
+the agent was blocked on you. The session with the ask lists only the `permission` item,
+no extra `waiting` one.
+
+**72. Chat | Terminal per session.** The switch belongs to each Claude session, not to
+the task: `sessions.runtime` (`pty` / `stream` / NULL) overrides `tasks.chat_mode`, which
+stays the default; the API reports `runtime` (the live process), `effective_runtime` (what
+the next launch uses) and `runtime_override`. The words map once: "chat" is the headless
+stream, "terminal" is the PTY (whose view may still be chat or terminal on the client, a
+client-side change with no route). `POST /sessions/{id}/runtime` and `delilah runtime
+--session`; the task route stays. *Ruled out:* one switch per task (a task has several
+sessions, and only some should leave the terminal).
+
+**73. "Detener" is the one word for stopping.** For a session or an agent, everywhere
+(never "Parar"); the preview's "Parar" became "Detener" too. Transcript line "Detenida:
+detuviste a Claude". It keeps the meaning of 36 / 67 (an interrupt; the turn ends without a
+`Stop` hook).
+
+**74. Dismissals live in `inbox_dismissals`, the only source of truth.** Removing an aviso
+("Quitar", "Limpiar avisos") stores its computed id (`kind:task:source:since_ms`), so a new
+occurrence of the same cause has a new id and shows again, and "Deshacer" restores by id.
+Notice-backed items are filtered by joining the same table, and `POST /pr-notices/{id}/dismiss`
+writes a dismissal row, so every route and restore agree. Blocking kinds cannot be dismissed
+(409). The two new avisos (a secondary session finished its turn: `turn-done`; a PR was
+opened or linked: `pr-opened`) are stored in `pr_notices`, **reused on purpose** as for
+`base-stale` (65/66): it gives the item, its resolution and the cascade for free. Pending:
+rename it to a neutral `notices` table (status.md). *Ruled out:* a `dismissed` flag on each
+source table (several places to keep in step, no undo by id); a new notices table now (a
+migration for a rename only).
+
+**75. `setup.json` is a file-based exception to the database.** The result of a task's setup
+(command, exit code, times, tail, log size) sits in `tasks/<KEY>/setup.json`, written at the
+end of each setup run, overwritten on retry and removed with the task folder on delete.
+*Why:* it is a log-like artefact next to `setup.log`, read only for one panel, and a table
+would need a migration for data that never joins anything. *Ruled out:* a `setups` table.
+
+**76. Updating a task's branch is a merge, never a rebase.** "Actualizar rama"
+(`POST /tasks/{key}/update-branch`) merges the base into the branch; with tracked changes in
+the workspace, off the task's branch, or on a conflict it refuses (the merge is aborted and the
+branch left as it was), and it settles the `base-stale` notice. *Why:* the branch may be
+pushed and have a PR, and a rebase would rewrite what others (and the PR) see; it also never
+touches local `main` (66).
+
+**77. Reopen after done; per-component CSS and English.** A done task can be reopened
+(`Done → WaitingForUser`, history `reopened`; `POST /tasks/{key}/reopen`, `delilah reopen`,
+"Deshacer" after "Marcar como hecha"): it needs its workspace, so an archived task cannot.
+In the app, `styles.css` keeps only tokens and base; each component has its own CSS file and
+its own `i18n/en/<Component>.ts` (merged into `en.ts`, with a coverage test), so a change
+touches one component. *Why:* one global sheet and one long dictionary meant every
+change touched the same files (and the same merge conflicts).
+
+**78. Merge from the PR tab, with the user's `gh`.** "Fusionar" (`POST /tasks/{key}/prs/{id}/merge`)
+runs only on a non-draft open PR with passing checks, with a method the repo allows
+(`snapshot.merge_methods`; none known, no merge), and only if the `gh` account for the host
+is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
+draft PR). *Ruled out:* a merge queue or auto-merge.

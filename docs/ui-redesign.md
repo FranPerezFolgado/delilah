@@ -22,7 +22,7 @@ All boards use the same mock data (projects signal / delilah / fixture-parent, t
 `scripts/seed-preview.sh` seeds a preview with similar states; it need not match the mock data
 exactly, but cover the same states so the comparison is fair.
 
-Status: design only. Nothing below is implemented yet.
+Status: applied (spec `007-ui-v2`, branch `feature/ui-v2`; see [status.md](status.md) and decisions 68 to 78). This file stays as the brief behind it: the visual rules, the glossary and §9, the before / after record to refresh when the UI changes again.
 
 ## Why
 
