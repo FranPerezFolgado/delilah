@@ -238,7 +238,7 @@ parallel (different files, no dependency on an unfinished task).
   - pending: the first tagged release verifying `SHA256SUMS` + attestation end to end (SC-007), community profile at 100% after merge (SC-008), and the pre-announcement audit (separate task);
   - known problems: none new.
 - [X] T046 Add the decision on the docs layout to `docs/decisions.md`: README for newcomers and the reference in `docs/usage.md`; history labelled or archived (`docs/archive/`, `specs/README.md`); personal agent rules in the git-ignored `CLAUDE.local.md`; changelog via git-cliff in the version bump.
-- [ ] T047 Run every check:
+- [X] T047 Run every check:
   - `cargo test --workspace`;
   - `cargo test --manifest-path app/src-tauri/Cargo.toml`;
   - `cd app && npx tsc --noEmit && npx vitest run`;

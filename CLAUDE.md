@@ -97,7 +97,7 @@ scripts/preview.sh            # this worktree's daemon + UI, in the first free s
 scripts/preview.sh --fresh    # from an empty state
 ```
 
-It prints the UI URL (http://localhost:150N) and the API (http://127.0.0.1:750N),
+It prints the UI URL (`http://localhost:150N`) and the API (`http://127.0.0.1:750N`),
 with its own state in `fixtures/preview-home-N` and the fixture repos to register
 as projects. Open the UI in a browser (or the browser pane) to try the feature;
 use `DELILAH_URL=<API> target/debug/delilah …` or curl for the API. Run it in the
