@@ -371,7 +371,7 @@ for (const theme of THEMES) {
     // Tarea: overview, chat, terminal, Cambios, PR
     await openTask(page, K.live);
     await page.getByRole("tab", { name: "Tarea", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Ver cambios" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Abrir cambios" }).first()).toBeVisible();
     await shot(page, "Tarea-tarea", theme);
 
     await chatTab(page);
@@ -385,7 +385,7 @@ for (const theme of THEMES) {
     await shot(page, "Tarea-zsh", theme);
 
     await page.getByRole("tab", { name: "Tarea", exact: true }).click();
-    await page.getByRole("button", { name: "Ver cambios" }).first().click();
+    await page.getByRole("button", { name: "Abrir cambios" }).first().click();
     await expect(page.getByRole("tab", { name: "Cambios" })).toBeVisible();
     await expect(page.getByText("README.md").first()).toBeVisible();
     await shot(page, "Tarea-cambios", theme);

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { ENV_FILE, type E2eEnv } from "./setup";
 
 const E2E_ENV_BIN = path.resolve(import.meta.dirname, "..", "..", "target", "debug", "e2e-env");
@@ -101,3 +101,27 @@ export const test = base.extend<{
 });
 
 export { expect };
+
+/** Creates a free task through the «New task» dialog (English UI) and waits for it to close. */
+export async function startFreeTask(page: Page, project: Project, title: string, kind: "repo" | "parent" = "repo") {
+  await page.goto("/");
+  await page.getByRole("button", { name: "New task", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "New task" });
+  await dialog.getByRole("radio", { name: "Free task" }).click();
+  await dialog.getByPlaceholder("Try a rates cache in svc-billing").fill(title);
+  await dialog.getByRole("combobox", { name: /^Project/ }).selectOption({ label: `${project.name} · ${kind}` });
+  await dialog.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+/**
+ * The board card of a task. The daemon is shared by every spec, so a column may hold more
+ * cards than it shows: expand the «N more» buttons first.
+ */
+export async function boardCard(page: Page, title: string | RegExp) {
+  const link = page.getByRole("link", { name: typeof title === "string" ? new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) : title });
+  const more = page.getByRole("button", { name: /^\d+ (more|más)$/ });
+  await expect(page.getByRole("region").first()).toBeVisible();
+  for (let i = 0; i < 20 && (await link.count()) === 0 && (await more.count()) > 0; i++) await more.first().click();
+  return link;
+}

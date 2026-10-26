@@ -41,29 +41,29 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
 | WP-33 | 5 | 5B | done | 1 | 3d93e8a | Chat tab |
 | WP-34 | 5 | 5C | done | 1 | 191d0de | Task screen integration |
-| WP-35 | 5 | 5D | implementing | 1 |  | E2E selectors for the task screen |
-| WP-36 | 5 | 5D | implementing | 1 |  | E2E task-screen flow |
+| WP-35 | 5 | 5D | done | 1 |  | E2E selectors for the task screen |
+| WP-36 | 5 | 5D | done | 1 |  | E2E task-screen flow |
 | WP-37 | 6 | 6A | done | 1 | a54c617 | Bandeja |
 | WP-38 | 6 | 6A | done | 1 | 8b4f80a | First run and board |
 | WP-39 | 6 | 6A | done | 1 | 8797d5f | Jira |
-| WP-40 | 6 | 6B | implementing | 1 |  | E2E Bandeja |
-| WP-41 | 6 | 6B | implementing | 1 |  | E2E board |
+| WP-40 | 6 | 6B | done | 1 |  | E2E Bandeja |
+| WP-41 | 6 | 6B | done | 1 |  | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
 | WP-43 | 7 | 7A | done | 1 | da2920b | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | done | 1 | e4bd446 | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | done | 1 | ab5a100 | Nueva tarea dialog |
 | WP-47 | 7 | 7B | done | 1 | f80fe4c | Backlog task and project settings |
-| WP-48 | 7 | 7C | implementing | 1 |  | E2E dialogs and projects |
-| WP-49 | 7 | 7C | implementing | 1 |  | E2E new task |
+| WP-48 | 7 | 7C | done | 1 |  | E2E dialogs and projects |
+| WP-49 | 7 | 7C | done | 1 |  | E2E new task |
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
 | WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
 | WP-52 | 8 | 8A | done | 1 | 5c2a3fa | Task screen and board at width |
 | WP-53 | 8 | 8A | done | 2 | 42e2199 | Global notices |
-| WP-54 | 8 | 8B | implementing | 1 |  | E2E widths |
+| WP-54 | 8 | 8B | done | 1 |  | E2E widths |
 | WP-55 | 9 | 9A | done | 1 |  | Remove replaced code and i18n cleanup |
 | WP-56 | 9 | 9A | done | 1 | d18fb28 | Preview seed |
-| WP-57 | 9 | 9A | done | 0 |  | Decisions, status, README, architecture docs |
+| WP-57 | 9 | 9A | done | 0 | 93f18e2 | Decisions, status, README, architecture docs |
 | WP-58 | 9 | 9B | pending | 0 | | Full checks |
 | WP-59 | 9 | 9C | pending | 0 | | Before/after record |
 | WP-60 | 9 | 9D | pending | 0 | | Version bump |

@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { boardCard, expect, test } from "./fixtures";
 
 // The UI follows the browser language and these specs read the Spanish texts.
 test.use({ locale: "es-ES" });
@@ -14,7 +14,7 @@ test("quick open finds a workspace file by part of its name and Enter opens it",
 
   await page.goto("/");
   await page.getByRole("button", { name: /^Tareas/ }).click();
-  await page.locator(".board .kcard", { hasText: title }).click();
+  await (await boardCard(page, title)).click();
   await expect(page.getByRole("tab", { name: "PR", exact: true })).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+p");
