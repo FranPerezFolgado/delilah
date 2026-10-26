@@ -74,11 +74,11 @@ to FR-005, research R2/R3).
 
 **Independent Test**: Render `TaskView` with a primary `implement` session. Its `.tv-sname` reads «Implementación».
 
-- [ ] T006 [P] [US3] Add failing tests in `app/src/components/TaskView.test.tsx`, using the file's `show(...)` helper and `session(...)` factory:
+- [X] T006 [P] [US3] Add failing tests in `app/src/components/TaskView.test.tsx`, using the file's `show(...)` helper and `session(...)` factory:
   - a primary `claude` session with `step: "implement"` → its `.tv-sname` text is «Implementación»;
   - a non-primary stopped session with `step: "plan"` → «Spec y plan»;
   - a primary `claude` with `step: null` → «Claude principal» (regression guard).
-- [ ] T007 [US3] In `app/src/components/TaskView.tsx` (around line 269), replace `x.primary && x.kind === "claude" ? t("Claude principal") : x.label` with `sessionName(x)` (import from `../chain`). Make T006 pass and keep the existing `TaskView` tests green.
+- [X] T007 [US3] In `app/src/components/TaskView.tsx` (around line 269), replace `x.primary && x.kind === "claude" ? t("Claude principal") : x.label` with `sessionName(x)` (import from `../chain`). Make T006 pass and keep the existing `TaskView` tests green.
 
 **Checkpoint**: For any session list, `TaskView` row names equal `TaskScreen` tab labels.
 
