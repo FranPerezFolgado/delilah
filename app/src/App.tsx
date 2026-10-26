@@ -6,7 +6,7 @@ import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
 import { onOpenTask } from "./platform";
 import { setLanguage, t, type LangSetting } from "./i18n";
-import { CHANGES, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
+import { CHANGES, OFFICE, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
 import { ideaToOpen } from "./components/ideas";
 import { BoardView } from "./components/BoardView";
 import { JiraView } from "./components/JiraView";
@@ -219,10 +219,10 @@ export function App() {
   };
 
   /** Shows a task's screen, on one of its session tabs if given. */
-  const openTask = (key: string, sessionId?: string) => {
-    if (sessionId) {
+  const openTask = (key: string, target?: string) => {
+    if (target) {
       const ts = sessionFor(key);
-      ts.active = sessionTab(sessionId);
+      ts.active = target === OFFICE ? OFFICE : sessionTab(target);
       persist(key, ts);
     }
     setSelected(key);

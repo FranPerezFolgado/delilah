@@ -16,7 +16,7 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-05 | 2 | 2C | verified | 1 | 41827dc | needs 02,04 |
 | WP-09 | 3 | 2B | verified | 1 | b03fa7f | early: needs 06 |
 | WP-10 | 3 | 3B | verified | 1 | 0ebdb82 |  |
-| WP-11 | 3 | 3C | implementing | 1 | |  |
+| WP-11 | 3 | 3C | verified | 1 | PENDING |  |
 | WP-12 | 4 | 3C | verified | 1 | 31a41fa | early: with 11 |
 | WP-13 | 4 | 4B | pending | 0 | |  |
 | WP-14 | 5 | 2B | verified | 1 | 5bbdcd9 | early: needs 06 |

@@ -5,7 +5,7 @@ import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind,
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, PRS, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
+import { CHANGES, OFFICE, OVERVIEW, PRS, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
 import { on } from "../live";
 import { isMarkdown } from "../markdown";
@@ -20,6 +20,7 @@ import { SessionChain } from "./SessionChain";
 import { SessionViewSwitch } from "./SessionViewSwitch";
 import { TaskHeader } from "./TaskHeader";
 import { useBreakpoints } from "../useWidth";
+import { OfficeTab } from "../playground/OfficeTab";
 import { TaskTabs, type TaskTabItem } from "./TaskTabs";
 import { headerPhaseOf } from "../phases";
 import { isSetupRunning } from "./sessionLabels";
@@ -218,6 +219,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   const activeSession = sessionOf(session.active);
   const exists =
     session.active === OVERVIEW ||
+    session.active === OFFICE ||
     (session.active === CHANGES && session.changesOpen) ||
     (session.active === PRS && prTab) ||
     !!tab(session.active) ||
@@ -396,6 +398,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   // Tabs in strip order: the task, its sessions, the changes, the files.
   const order = () => [
     OVERVIEW,
+    OFFICE,
     ...sessions.map((s) => sessionTab(s.id)),
     ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
     ...session.tabs.map((t) => t.path),
@@ -404,7 +407,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   ];
 
   const close = async (id: string, force = false) => {
-    if (id === OVERVIEW) return;
+    if (id === OVERVIEW || id === OFFICE) return;
     const strip = order();
     const at = strip.indexOf(id);
     const sid = sessionOf(id);
@@ -627,6 +630,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
 
   const tabItems: TaskTabItem[] = [
     { id: OVERVIEW, kind: project ? "project" : "task", label: project ? t("Proyecto") : t("Tarea") },
+    { id: OFFICE, kind: "office", label: t("Oficina"), attention: sessions.some((s) => sessionDot(s) === "wait") },
     ...sessions.map((s): TaskTabItem => ({
       id: sessionTab(s.id),
       kind: "session",
@@ -734,6 +738,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
               onOpenTask={onOpenTask}
             />
           )}
+          {shown === OFFICE && <OfficeTab owner={owner} onOpenSession={showSession} />}
           {shown === PRS && <PrView owner={owner} onOpenTerminal={openTerminal} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 

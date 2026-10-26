@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ApiError, DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type Session, type SpecSummary, type Task, type TaskStatus } from "../api";
-import { sessionFor, sessionTab } from "../editor/session";
+import { OFFICE, sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 import { ToastHost, clearToasts } from "./ui";
@@ -54,6 +54,13 @@ vi.mock("./TaskView", () => ({
   ),
 }));
 vi.mock("./ProjectView", () => ({ ProjectView: () => <div data-testid="projectview" /> }));
+vi.mock("../playground/OfficeTab", () => ({
+  OfficeTab: (p: { owner: string; onOpenSession: (id: string) => void }) => (
+    <div data-testid="office" data-owner={p.owner}>
+      <button onClick={() => p.onOpenSession("s9")}>open-lead</button>
+    </div>
+  ),
+}));
 vi.mock("./QuickOpen", () => ({ QuickOpen: () => null }));
 vi.mock("./AskCard", () => ({
   AskCard: (p: { ask: { proposal?: { title: string } | null }; onOpenTask?: (k: string) => void }) => (
@@ -153,14 +160,14 @@ describe("TaskScreen tabs", () => {
 
   it("lists Tarea, the primary as Claude principal and the other sessions", () => {
     taskScreen([sess("a", { primary: true }), sess("b", { label: "Review" })]);
-    expect(labels()).toEqual(["Tarea", "Claude principal", "Review", "PR"]);
+    expect(labels()).toEqual(["Tarea", "Oficina", "Claude principal", "Review", "PR"]);
   });
 
   it("orders the tabs Tarea, sessions, files, Cambios, PR", () => {
     sessionFor("PROJ-1").changesOpen = true;
     sessionFor("PROJ-1").tabs = [{ path: "src/a.rs", dirty: false } as never];
     taskScreen([sess("a", { primary: true })]);
-    expect(labels().map((l) => l?.replace(/\d+$/, ""))).toEqual(["Tarea", "Claude principal", "a.rs", "Cambios", "PR"]);
+    expect(labels().map((l) => l?.replace(/\d+$/, ""))).toEqual(["Tarea", "Oficina", "Claude principal", "a.rs", "Cambios", "PR"]);
     sessionFor("PROJ-1").tabs = [];
   });
 
@@ -682,5 +689,24 @@ describe("TaskScreen at 1280 (tree hidden below 1300)", () => {
   it("shows the tree on a wide window", () => {
     narrow(false);
     expect(screenFor().container.querySelector(".tscreen")!.className).toContain("with-tree");
+  });
+});
+
+describe("TaskScreen Oficina tab", () => {
+  it("is right after the task tab, not closable, and opens the floor", () => {
+    head(task({ type: "running" }));
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[0].textContent).toBe("Tarea");
+    expect(tabs[1].textContent).toBe("Oficina");
+    expect(screen.queryByLabelText("Cerrar Oficina")).toBeNull();
+    fireEvent.click(tabs[1]);
+    expect(screen.getByTestId("office").dataset.owner).toBe("PROJ-1");
+  });
+
+  it("is also on a project screen and is restored when persisted as active", () => {
+    sessionFor("@web").active = OFFICE;
+    head();
+    expect(screen.getAllByRole("tab")[1].textContent).toBe("Oficina");
+    expect(screen.getByTestId("office")).not.toBeNull();
   });
 });

@@ -25,6 +25,7 @@ const PATHS = {
   inbox: "M4 13l2.5-7h11l2.5 7v6H4zM4 13h5l1 2h4l1-2h5",
   trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
   idea: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z",
+  office: "M4 20V8l8-4 8 4v12M9 20v-5h6v5M9 10h.01M15 10h.01",
   backlog: C + "M12 7.5V12l3 2",
 } as const;
 

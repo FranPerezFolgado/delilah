@@ -8,12 +8,14 @@ import "./TaskTabs.css";
 export interface TaskTabItem {
   /** Unique: a path for files, a session id, or "task" | "project" | "changes" | "pr". */
   id: string;
-  kind: "task" | "project" | "session" | "file" | "changes" | "pr";
+  kind: "task" | "project" | "session" | "file" | "changes" | "pr" | "office";
   label: string;
   /** Session tabs. */
   dot?: SessionDot;
   /** File tabs with unsaved edits. */
   dirty?: boolean;
+  /** Oficina: an agent of the owner waits. */
+  attention?: boolean;
   /** Cambios: changed files. */
   count?: number;
   /** Files and Cambios can be closed. */
@@ -89,7 +91,9 @@ export function TaskTabs({ tabs, active, onSelect, onClose, onNewSession }: Task
                 onClick={() => onSelect(tab.id)}
               >
                 {tab.kind === "session" && <span className={`ttab-dot ${tab.dot ?? "neutral"}`} aria-hidden="true" />}
+                {tab.kind === "office" && <Icon name="office" className="ttab-icon" />}
                 <span className="ttab-label">{tab.label}</span>
+                {tab.kind === "office" && tab.attention && <span className="ttab-attn" aria-label={t("Un agente te espera")} />}
                 {tab.kind === "changes" && <Count n={tab.count ?? 0} />}
               </button>
               {tab.closable && (

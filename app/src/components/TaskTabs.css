@@ -22,3 +22,5 @@
 .ttabs-more { border: 0; }
 .ttabs-new { border: 1px dashed var(--bd2); }
 .ttabs-more:hover, .ttabs-new:hover { background: var(--hov); color: var(--tx); }
+.ttab-icon { width: 13px; height: 13px; flex: none; }
+.ttab-attn { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--wait); }
