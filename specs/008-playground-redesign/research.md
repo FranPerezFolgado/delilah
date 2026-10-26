@@ -192,3 +192,8 @@ implements in `styles.css`):
   down by integer steps (×5 → ×4 → ×3) to fit, and the flow graph fits on open.
 - **Themes**: the pixel art keeps its own colours inside the `--term` inset in both themes;
   everything around it (frame, labels, bubbles, nodes) uses the tokens of `.dk` / `.lt`.
+- **Token names in the app** (`app/src/styles.css`, UI v2) differ from the mock-ups: accent /
+  "needs you" = `--wait` (`--wait-bg`, `--wait-tx`), paused = `--pause` (`--pause-bg`),
+  running = `--run`, error = `--err`, done = `--ok`, terminal inset = `--term-bg`
+  (`--term-tx`), plus `--panel`, `--bd`, `--bd2`, `--sel`, `--tx`/`--tx2`/`--tx3`. Use
+  these wherever R10 above says `--acc`, `--done` or `--term`.
