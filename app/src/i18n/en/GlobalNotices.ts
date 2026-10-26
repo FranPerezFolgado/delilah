@@ -1,6 +1,9 @@
 export const EN: Record<string, string> = {
   "{key} te espera": "{key} is waiting for you",
   Responder: "Reply",
+  "{n} tarea te espera": "{n} task is waiting for you",
+  "{n} tareas te esperan": "{n} tasks are waiting for you",
+  Ver: "View",
   "Claude {window} al {pct} %": "Claude {window} at {pct} %",
   "Quedan pocas peticiones en esta ventana de uso": "Few requests are left in this usage window",
   "Límite de {window} alcanzado · se reanuda a las {time}": "{window} limit reached · resumes at {time}",

@@ -18,7 +18,7 @@ export { ConfirmDialog } from "./ConfirmDialog";
 export type { ConfirmDialogProps } from "./ConfirmDialog";
 export { Menu } from "./Menu";
 export type { MenuItem, MenuProps, MenuTriggerProps } from "./Menu";
-export { ToastHost, useToast, pushToast, dismissToast, clearToasts } from "./Toast";
+export { ToastHost, useToast, pushToast, dismissToast, dismissToastByKey, clearToasts } from "./Toast";
 export type { ToastInput, ToastItem } from "./Toast";
 export { StatusBadge } from "./StatusBadge";
 export type { StatusBadgeProps } from "./StatusBadge";

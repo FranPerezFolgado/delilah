@@ -387,7 +387,7 @@ export function App() {
             </div>
           )}
           <div className={`shell-content${offline ? " is-offline" : ""}`} aria-disabled={offline || undefined} {...(offline ? { inert: true } : {})}>
-          <GlobalNotices tasks={tasks} usage={usage} current={view === "tasks" ? selected : null} onOpenTask={openTask} />
+          <GlobalNotices tasks={tasks} usage={usage} current={view === "tasks" ? selected : null} onOpenTask={openTask} onOpenInbox={() => setView("inbox")} />
           <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
           {view === "inbox" && <InboxView items={inbox} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
           {view === "board" && (

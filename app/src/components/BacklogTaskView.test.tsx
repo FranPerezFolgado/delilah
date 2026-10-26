@@ -62,7 +62,7 @@ describe("BacklogTaskView", () => {
     expect(run.mock.calls[0][0]).toMatchObject({ key: "LIBRE-9", project: "web", in_checkout: true });
     await waitFor(() => expect(container.querySelector(".badge")?.textContent).toBe("Trabajando"));
     expect(onChanged).not.toHaveBeenCalled();
-    const status = container.querySelector("[role=status].toast")!;
+    const status = container.querySelector(".toast-host .toast")!;
     expect(status.textContent).toContain("LIBRE-9 iniciada");
     fireEvent.click(btn(status as HTMLElement, "Abrir"));
     expect(onOpen).toHaveBeenCalledWith("LIBRE-9");
