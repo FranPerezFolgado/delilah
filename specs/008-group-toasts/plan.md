@@ -79,7 +79,7 @@ resets the item to the full `ttl`. Errors, `wait` and keyed toasts have no deadl
 - `pushToast(input)`:
   1. `key` set and an item with that key exists → update it in place, return its id.
   2. No `key`, no `action`, and an item with same `kind` (default info) and `text` exists →
-     `count++`, `bump++`, add the new id to `aliases`, move it to the end, return the new id.
+     `count++`, reset its deadline to the full `ttl`, add the new id to `aliases`, move it to the end, return the new id.
   3. Otherwise append; if over `MAX` (3), evict the oldest item that is `info` with no action
      and no key; if none, the oldest item **without a key** (keyed toasts are never evicted,
      so the waiting toast can't vanish while GlobalNotices still holds a group).
