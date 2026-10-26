@@ -131,7 +131,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the community profile at 100% after merge (SC-008);
   - the pre-announcement audit (a separate task);
   - the `delilah` CLI is not shipped with the app: it only comes from source;
-  - security hardening of the installer and release workflow: pin third-party actions to SHAs, split the release job (build apart from publish, so the publish step has fewer permissions), and `--proto-redir` on the installer's `curl`.
+  - security hardening of the installer and release workflow: pin third-party actions to SHAs, split the release job (build apart from publish, so the publish step has fewer permissions).
 - **Fresh bases, known limits:**
   - parent worktrees still need the network to init submodules;
   - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;

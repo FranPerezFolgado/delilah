@@ -68,7 +68,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | spec | LOW | CHANGELOG entries keep Spanish labels from old commit subjects (history) | CHANGELOG.md:41,47,53 |
 | 5 | spec | LOW | no automated test for the git-cliff guard in bump-version.sh | scripts/bump-version.sh |
 | 3 | spec | HIGH | Spanish UI labels left in current docs (Abrir PR, Rama, Restaurar, …) → fixed in eb3eb40 | docs/decisions.md, status.md, architecture.md, usage.md |
-| 6 | implementer WP-19F | LOW | AppState::new defaults to Es under cfg!(test) only (≈800 tests assert Spanish), so production (En) and test defaults differ | crates/delilah-daemon/src/state.rs |
+| 6 | implementer WP-19F | LOW | AppState::new defaults to Es under cfg!(test) only (≈800 tests assert Spanish), so production (En) and test defaults differ → fixed in the branch review | crates/delilah-daemon/src/state.rs |
 | 6 | architecture (re-review) | LOW | first_language duplicated between daemon lang.rs and shell daemon.rs (guarded by mirrored tests) | crates/delilah-daemon/src/lang.rs:52 |
 | 8 | orchestrator | LOW | CHANGELOG 1.1.0 lists the orchestration commits (feat(008): WP-xx …) and progress commits; consider rewording or squash-merging | CHANGELOG.md:5 |
 | review | code-quality | MEDIUM | `make release BUMP=`/`VERSION=` always failed: cut.mjs bumped without regenerating CHANGELOG.md, so check.mjs rejected it → fixed in the branch review (cut.mjs runs git cliff) | scripts/release/cut.mjs |
