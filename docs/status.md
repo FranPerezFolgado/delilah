@@ -79,9 +79,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Shared entries are copied or linked into new worktrees.
 - A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
 
-**Playground** (`app/src/playground/`, spec `004-agent-playground`; decisions [#79](decisions.md) to [#81](decisions.md)):
-- A view of every live session as a pixel character at a desk, by project, with poses for starting, thinking, editing, reading, running, supervising, waiting and paused, and a caption of the current tool.
-- Helpers for sub-agents, the waiting counter, click to open the task's terminal, and "Abrir en ventana" (a separate Tauri window, or a named tab in a browser).
+**Playground** (`app/src/playground/`, specs `004-agent-playground` and `008-playground-redesign`; decisions [#79](decisions.md) to [#85](decisions.md)):
+- A building with one floor per task or project (newest on top, a miniature of each). A floor is an office of pixel characters at desks (pixtuoid's art, MIT, 1x), with poses for starting, thinking, editing, reading, running, supervising, waiting and paused, and a caption of the current tool. Desk slots stay fixed.
+- The task screen has an "Oficina" tab right after Overview (a dot when an agent of the owner waits) with the floor and "Flujo", a toggle remembered in `localStorage` (`delilah.office.view`). Flujo draws the agents, helpers and every tool call as a graph (pan, zoom, fit) with a timeline of buttons; a failed call is marked.
+- Helpers for sub-agents walk to the lounge when they finish; a stack of paper on each desk grows with the session's tokens (fresh spend from the transcript, #83).
+- Activity history in memory (200 events x 64 sessions) behind `GET /api/v1/activity/history`; `GET /api/v1/activity` also carries `tokens`.
+- The waiting counter, click to open the task's terminal, and "Abrir en ventana" (a separate Tauri window where a floor opens in place, or a named tab in a browser).
 - Stale banner while offline, still poses with reduced motion, animations paused when hidden.
 
 **Other:**
@@ -188,11 +191,14 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - **Structure:** `TaskScreen.tsx` (~900 lines) and `App.tsx` (~570) should be split (a data hook plus panes; `useRoute` / `useAppData` / a shell). Deferred on purpose to its own behaviour-neutral PR. Also ~60 raw `<button>` outside the kit and Spanish literals as kind keys where neutral keys would do.
   - **Bandeja avisos:** the `turn-done` / `pr-opened` rows in `pr_notices` accumulate (never resolved) and their text-hash ids change with the language; `pr_notices` is still the table of those two avisos, and a rename to a neutral `notices` is pending ([#74](decisions.md)). Downgrade: an older binary refuses a database at version 21 (say it in the release notes).
   - **Colour:** light `--tx3` on `--side` is 4.43:1 (listed in `KNOWN_LOW` in `tokens.test.ts`); darken to #686b72 and drop the entry. A colour-blind mode is not built.
-  - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). Run vitest with `--no-cache` after adding files under `i18n/en/` (the glob list is cached).
+  - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). After adding a file under `i18n/en/`, run `rm -rf app/node_modules/.vitest-cache` (the glob list is cached; `--no-cache` does not bypass it).
 - **Playground limits:**
-  - only the last of several parallel tool calls is shown as the action;
+  - the office shows only the last of several parallel tool calls as the action (Flujo shows each);
+  - tokens count the session's own transcript only: sub-agent (helper) spend is missing, so a stack can look low during heavy delegation;
+  - the art is the 1x pixtuoid set, so there are no hairstyles (hair colour varies);
   - agents launched before the update have no `PreToolUse` hook in their settings, so they show no actions until relaunched;
-  - the native "playground" window and the pixel art have not been checked visually yet (no browser was available when it was built);
+  - history `seq` and `started_at` restart with the daemon (clients refetch on reconnect); a malformed `history` query gets a plain-text 400;
+  - the pixel art and the native "playground" window have not been checked visually yet;
   - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.

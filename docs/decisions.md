@@ -628,12 +628,18 @@ in the React tree: it is accessible (real buttons with names), follows reduced
 motion and costs nothing while hidden. Ruled out: a canvas (no accessibility, a
 render loop for a handful of desks), game engines (a heavy dependency for a view
 that shows a few sprites) and third-party sprite sheets (licences, and a look we
-could not change).
+could not change). The "no third-party sprite sheets" part was replaced by #82.
 
 **80. Activity is in memory, on its own topic.** What a session is doing right now
 lasts seconds and is rebuilt by the next hook, so it is not stored in SQLite and
 not mixed into `sessions`. It has its own `activity` topic and
-`GET /api/v1/activity`, so the frequent tool events refetch only that.
+`GET /api/v1/activity`, so the frequent tool events refetch only that. Revised
+(spec `008-playground-redesign`): the recent history is kept too, still only in
+memory: `ActivityLog` holds the last 200 events of each of at most 64 sessions
+(the oldest non-live one goes first, live ones never), outside `Live` so that ended
+sessions stay viewable without touching the session-end paths. Appends mark a
+dirty flag and the transcript watcher's 1 s tick emits `activity` once, so a burst
+of hooks is one refetch (`GET /api/v1/activity/history?owner=&after=`).
 
 **81. "Supervising" is derived from a foreground `Agent` call.** While Claude is
 inside a foreground `Agent` call it is waiting on a sub-agent and has no tool
@@ -641,3 +647,38 @@ event of its own, so the desk shows the phone pose and "Supervisando". An `Agent
 call run in the background does not block Claude, so that desk keeps its thinking
 pose. Ruled out: a dedicated hook (none exists) and guessing from silence
 (thinking looks the same).
+
+**82. The office art is pixtuoid's (MIT), ported by a script.** The 1x sprites,
+palette and ramps of [pixtuoid](https://github.com/ivanwang123/pixtuoid) (pinned commit, © Ivan Wang) are
+converted by `scripts/port-pixtuoid.py` into the checked-in
+`app/src/playground/art/pixtuoid.ts`; the licence and commit are in
+`app/src/playground/CREDITS.md`. This supersedes #79's "no third-party sprite
+sheets"; rendering stays DOM + SVG (#79). Colours of shirt, pants, hair and skin are
+re-derived per character (OKLab steps in `art/ramp.ts`), the outfit is seeded by the
+project name. Hairstyles exist only in the 4x art, which was left out (16 times the
+pixels), so there are none. Ruled out: copying the 4x art, drawing our own set again.
+
+**83. Tokens come from the transcript: fresh spend, once per message.** The
+transcript watcher reads the appended bytes of each session's trusted transcript
+(at most 1 MiB per tick, complete lines only) and sums `input + cache creation +
+output` tokens. Claude Code writes one line per content block repeating the same
+usage, so a line whose `message.id` equals the last one counted is skipped.
+Cache reads are kept apart and not in the total (they would put every session at
+the top tier). Sub-agent files (`<session>/subagents/*.jsonl`) are not read, so
+helpers' spend is missing. When a transcript shrinks or is replaced the meter
+restarts from 0. The totals sit in `AppState` independent of the live sessions and
+come in `GET /api/v1/activity` as `tokens`. Ruled out: hook payloads (no usage),
+a chars/4 estimate, counting cache reads.
+
+**84. Flow is drawn without a graph library.** Nodes (agents, helpers, tool calls
+paired by tool use id) and edges come from the history entries (`flowModel.ts`);
+`flowLayout.ts` is a deterministic tree plus a column of tool rows per agent, drawn as
+SVG with pan/zoom, and a timeline of buttons beside it. A node never moves once
+placed. Ruled out: d3-force (jitter, dependency), React Flow (heavy), canvas
+(accessibility).
+
+**85. A building of floors, one floor per owner.** The playground is a building:
+one floor per task or project (owner), newest on top, each with its own desks that keep
+fixed slots. In the app, a floor opens the task's "Oficina" tab (office and Flow
+with a toggle remembered in `localStorage` as `delilah.office.view`); in the separate
+window it opens in place with a back button, because that window has no task screen.
