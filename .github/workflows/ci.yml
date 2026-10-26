@@ -24,6 +24,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Install script (shellcheck and tests)
+        run: |
+          command -v shellcheck >/dev/null || brew install shellcheck
+          shellcheck scripts/install.sh scripts/test-install.sh
+          scripts/test-install.sh
 
   web:
     name: Web UI

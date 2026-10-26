@@ -38,8 +38,9 @@ is what it does and does not defend against, checked against the code.
   site, are in the SQLite settings table.
 - **Updates.** The app's updater verifies each update against the public key in
   `app/src-tauri/tauri.conf.json`; releases are built and signed by the release workflow
-  with the private key held as a repository secret. Releases do not currently publish
-  separate checksums or build attestations.
+  with the private key held as a repository secret. Releases carry a
+  `SHA256SUMS` file and a build provenance attestation (verify with
+  `shasum -a 256 -c SHA256SUMS --ignore-missing` and `gh attestation verify`).
 
 ## Known limits
 

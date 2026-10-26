@@ -2,7 +2,8 @@
 # Needs repository secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 # (the updater signing key and its password); GITHUB_TOKEN is provided by Actions.
 # Builds and signs the app, uploads a draft release, and only promotes it to
-# published (and latest) once everything before it has passed.
+# published (and latest) once everything before it has passed. Before publishing it
+# also uploads SHA256SUMS (over the release assets) and attests their build provenance.
 name: release
 
 on:
@@ -11,6 +12,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency: release-${{ github.ref }}
 
@@ -102,6 +105,22 @@ jobs:
             exit 1
           }
           gh release upload "$GITHUB_REF_NAME" "$out" --clobber
+
+      - name: Checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm -rf "$RUNNER_TEMP/dist"
+          gh release download "$GITHUB_REF_NAME" -D "$RUNNER_TEMP/dist"
+          for f in Delilah_aarch64.app.tar.gz latest.json; do
+            test -f "$RUNNER_TEMP/dist/$f" || { echo "release $GITHUB_REF_NAME has no $f" >&2; exit 1; }
+          done
+          (cd "$RUNNER_TEMP/dist" && shasum -a 256 * | sort -k2) > "$RUNNER_TEMP/SHA256SUMS"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/SHA256SUMS" --clobber
+
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: '${{ runner.temp }}/dist/*'
 
       - name: Publish release
         env:

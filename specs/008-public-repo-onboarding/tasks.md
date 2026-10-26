@@ -99,8 +99,8 @@ parallel (different files, no dependency on an unfinished task).
 ### Implementation
 
 - [X] T017 [US2] Write `scripts/install.sh` per [contracts/install-script.md](contracts/install-script.md): bash 3.2-compatible, `set -euo pipefail`, `--yes`/`-h`, the environment variables in the contract, the exit codes 0–9, `mktemp -d` + `trap`, `curl -fL --retry 2`, `shasum -a 256` against the archive's line, `tar -xzf`, the `pgrep -x delilah-app` check, moving the old app aside and `ditto`, restoring it on failure, `xattr -dr com.apple.quarantine` (errors ignored), and printing the installed version. No `sudo`. Make it executable. Then `scripts/test-install.sh` and `shellcheck scripts/install.sh scripts/test-install.sh` must pass.
-- [ ] T018 [P] [US2] Add to `.github/workflows/ci.yml`, in the macOS "Rust workspace" job only, a step that runs `shellcheck scripts/install.sh scripts/test-install.sh` (`brew install shellcheck` if the runner lacks it) and then `scripts/test-install.sh`.
-- [ ] T019 [P] [US2] In `.github/workflows/release.yml`:
+- [X] T018 [P] [US2] Add to `.github/workflows/ci.yml`, in the macOS "Rust workspace" job only, a step that runs `shellcheck scripts/install.sh scripts/test-install.sh` (`brew install shellcheck` if the runner lacks it) and then `scripts/test-install.sh`.
+- [X] T019 [P] [US2] In `.github/workflows/release.yml`:
   1. Add `id-token: write` and `attestations: write` to `permissions`.
   2. After "Build and upload latest.json", add a "Checksums" step:
      - `rm -rf "$RUNNER_TEMP/dist"`, then `gh release download "$GITHUB_REF_NAME" -D "$RUNNER_TEMP/dist"`;
@@ -111,7 +111,7 @@ parallel (different files, no dependency on an unfinished task).
   4. Keep "Publish release" as the last step.
 
   Update the header comment to list the new steps.
-- [ ] T020 [P] [US2] Update `scripts/release.sh` (the dry run) to also write a local `SHA256SUMS` for the bundle outputs and print it, so the rehearsal shows what the release will publish (no upload, no attestation).
+- [X] T020 [P] [US2] Update `scripts/release.sh` (the dry run) to also write a local `SHA256SUMS` for the bundle outputs and print it, so the rehearsal shows what the release will publish (no upload, no attestation).
 - [ ] T021 [P] [US2] Add to `docs/development.md` "Releasing": what each release now publishes (`SHA256SUMS`, attestation), how to verify (`shasum -a 256 -c SHA256SUMS --ignore-missing`, `gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`), and how to test the install script (`scripts/test-install.sh`).
 - [ ] T022 [P] [US2] Add decisions to `docs/decisions.md` (next numbers after #78):
   - **Unsigned distribution**: no Apple Developer account; `install.sh` via curl, which sets no quarantine; checksums and build-provenance attestation for trust; ad-hoc signature kept. *Ruled out*: notarization (cost).
