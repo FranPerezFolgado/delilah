@@ -19,8 +19,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09F | 3 | fix | done | 1 | 9ee01f0 | Phase 3 review fixes; manual forward holds per-task autofix slot (InFlight → 409) |
 | WP-10 | 4 | 4A | verified | 1 | f65133f | turn start unknown: started=None proxy (first turn end after sent_at counts) |
 | WP-11 | 4 | 4B | verified | 1 | dc3dc77 | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
-| WP-12 | 4 | 4B | verified | 1 | | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
-| WP-13 | 4 | 4C | implementing | 0 | | |
+| WP-12 | 4 | 4B | verified | 1 | 3902f30 | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
+| WP-13 | 4 | 4C | verified | 1 | | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
 | WP-14 | 5 | 5A | pending | 0 | | |
 | WP-15 | 5 | 5A | pending | 0 | | |
 | WP-16 | 5 | 5A | pending | 0 | | |
@@ -57,3 +57,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | architecture | LOW | evaluate that loses claim_autofix returns silently (dropped until next poll); consider dirty flag / re-run on guard drop | crates/delilah-daemon/src/autofix/mod.rs |
 | 3 | architecture | LOW | Two-way dependency autofix ↔ pr_api::forward; move delivery primitives to a shared module | crates/delilah-daemon/src/pr_api/forward.rs |
 | 3 | architecture | LOW | RunRequest.ci_autofix must be exposed in app/src/api.ts (WP-16) | app/src/api.ts |
+| 4 | orchestrator | LOW | e2e scenarios depend on the autofix prompt being 7 lines (fake Claude reads one line per wait_input; extra lines fire Stop hooks) | crates/delilah-e2e/tests/autofix.rs prompt_lines() |

@@ -90,7 +90,7 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 - [X] T032 [US2] Implement `autofix::on_turn_ended` (spawned; forced waiting check; judge `no-push` only from a snapshot checked after the turn end, for the attempt's session) and call it for the primary session from `handoff::on_turn_ended` in `crates/delilah-daemon/src/handoff.rs`, then `evaluate`
 - [X] T033 [US2] Implement `autofix::cancel(app, key, repo?)` and call it from toggle off, the merge/close path in `crates/delilah-daemon/src/pr_loop/notices.rs` / `merge.rs`, archive (`archive.rs`), delete and back-to-backlog (`actions.rs`)
 - [X] T034 [US2] `pr-autofix` inbox item (kind, reason, attempts, text) in `crates/delilah-daemon/src/inbox.rs`; `forward` refuses it with 409 in `crates/delilah-daemon/src/pr_api/forward.rs`
-- [ ] T035 [US2] E2E in `crates/delilah-e2e/tests/autofix.rs`: always-failing checks → 3 prompts, one stopped item, no 4th prompt; a fake Claude turn that doesn't push → `no-push` item
+- [X] T035 [US2] E2E in `crates/delilah-e2e/tests/autofix.rs`: always-failing checks → 3 prompts, one stopped item, no 4th prompt; a fake Claude turn that doesn't push → `no-push` item
 
 **Checkpoint**: MVP complete (US1 + US2): bounded, visible stops.
 
