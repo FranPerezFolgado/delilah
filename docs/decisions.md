@@ -636,3 +636,11 @@ same rule (so an unreadable `defaults` output now gives English, not Spanish), a
 `<html lang>` defaults to `en`. *Why:* the repo is public and most users are not Spanish
 speakers, while Spanish systems still get Spanish. *Ruled out:* English-only default even
 for Spanish systems.
+
+**82. Docs layout for a public repo.** The README is for newcomers (what it is, install,
+quickstart, screenshots) and the reference lives in `docs/usage.md`; `docs/README.md`
+indexes the rest. History is labelled or archived, not deleted: `docs/archive/` and
+`specs/README.md` say what is past. Personal agent rules go in the git-ignored
+`CLAUDE.local.md`, so the checked-in `CLAUDE.md` is safe to publish. The changelog is
+generated with git-cliff inside the version bump, so a release cannot go out without its
+section. *Ruled out:* a hand-written changelog and keeping personal notes in `CLAUDE.md`.

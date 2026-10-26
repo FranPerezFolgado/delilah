@@ -233,11 +233,11 @@ parallel (different files, no dependency on an unfinished task).
 
 ## Phase 8: Polish & cross-cutting
 
-- [ ] T045 Update `docs/status.md`:
+- [X] T045 Update `docs/status.md`:
   - built: public-repo docs, community files, English fallback, install script, checksums and attestation;
   - pending: the first tagged release verifying `SHA256SUMS` + attestation end to end (SC-007), community profile at 100% after merge (SC-008), and the pre-announcement audit (separate task);
   - known problems: none new.
-- [ ] T046 Add the decision on the docs layout to `docs/decisions.md`: README for newcomers and the reference in `docs/usage.md`; history labelled or archived (`docs/archive/`, `specs/README.md`); personal agent rules in the git-ignored `CLAUDE.local.md`; changelog via git-cliff in the version bump.
+- [X] T046 Add the decision on the docs layout to `docs/decisions.md`: README for newcomers and the reference in `docs/usage.md`; history labelled or archived (`docs/archive/`, `specs/README.md`); personal agent rules in the git-ignored `CLAUDE.local.md`; changelog via git-cliff in the version bump.
 - [ ] T047 Run every check:
   - `cargo test --workspace`;
   - `cargo test --manifest-path app/src-tauri/Cargo.toml`;

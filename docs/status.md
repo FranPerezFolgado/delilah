@@ -2,9 +2,18 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-26
-(UI v2, the redesign of `docs/archive/ui-redesign.md`, on `feature/ui-v2`; before it, 0.12.0).
+(public-repo onboarding, spec `008-public-repo-onboarding`, on its branch; before it, UI v2).
 
 ## Built
+
+**Public-repo onboarding** (spec `008-public-repo-onboarding`; decisions [#79](decisions.md) to [#82](decisions.md)):
+- **Docs:** README rewritten for newcomers (under 200 lines: badges, English screenshots, Install, Quickstart); the full reference in [usage.md](usage.md); an index in [docs/README.md](README.md); docs translated to English; history moved to `docs/archive/` and `specs/` with their own READMEs. The English board screenshots come from `app/e2e/screens.spec.ts` (`DELILAH_SCREENS_LANG`, `DELILAH_SCREENS_ONLY`, `DELILAH_SCREENS_OUT`).
+- **Install:** `scripts/install.sh` and `scripts/test-install.sh` (both run in CI, with shellcheck). `release.yml` publishes `SHA256SUMS` and a build-provenance attestation; the `release.sh` dry run prints the `SHA256SUMS`.
+- **Community files:** `LICENSE` (MIT), `CODE_OF_CONDUCT`, `CONTRIBUTING`, `SECURITY`, issue forms, a PR template, dependabot. Repo description and topics set; private vulnerability reporting enabled.
+- **Changelog:** `CHANGELOG.md` via git-cliff (`cliff.toml`); `scripts/bump-version.sh` regenerates it and the release check requires the version's section.
+- **CLAUDE.md** has no personal notes (those go in the ignored `CLAUDE.local.md`).
+- **English fallback** in the UI and the native menu ([#81](decisions.md)).
+- Secret scan of the history: 0 findings.
 
 **UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](archive/ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
 - **Tokens and themes:** `styles.css` holds only the tokens (dark and light, following the OS) and the base; every component has its own CSS. The terminal and the editor read the same tokens (`theme.ts`) and change theme live. Guards in `tokens.test.ts` (contrast), `styles.test.ts` (type/radius scale, allowed colours) and `inline-style.test.ts` (inline-style ratchet).
@@ -117,6 +126,12 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Pending and known problems
 
+- **Public repo, pending:**
+  - the first tagged release, to verify `SHA256SUMS` and the attestation end to end (SC-007);
+  - the community profile at 100% after merge (SC-008);
+  - the pre-announcement audit (a separate task);
+  - the `delilah` CLI is not shipped with the app: it only comes from source;
+  - security hardening of the installer and release workflow: pin third-party actions to SHAs, split the release job (build apart from publish, so the publish step has fewer permissions), and `--proto-redir` on the installer's `curl`.
 - **Fresh bases, known limits:**
   - parent worktrees still need the network to init submodules;
   - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
