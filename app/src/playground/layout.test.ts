@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Action, Activity, Helper, Project, Session, SpecSummary, Task } from "../api";
 import { t } from "../i18n";
 import type { DeskModel } from "./layout";
-import { accessibleName, assignSlots, caption, deskState, groupByProject, roleLook, slotMaps, visibleHelpers } from "./layout";
+import { accessibleName, assignSlots, caption, deskState, floorState, groupByProject, roleLook, slotMaps, visibleHelpers } from "./layout";
 
 describe("assignSlots", () => {
   it("numbers from 0 in input order when nothing was assigned", () => {
@@ -199,5 +199,26 @@ describe("accessibleName with helpers", () => {
     expect(accessibleName(desk, activity)).toBe(
       `K, ${t("Pensando")}, ${t("{n} ayudantes", { n: 2 })}: code-researcher ${t("Leyendo").toLowerCase()}, implementer ${t("Editando").toLowerCase()}`,
     );
+  });
+});
+
+describe("floorState", () => {
+  it("maps the session state to the office table", () => {
+    expect(floorState(session("a", "T-1", { state: "starting" }))).toBe("starting");
+    expect(floorState(session("a", "T-1", { state: "waiting" }))).toBe("waiting");
+    expect(floorState(session("a", "T-1", { state: "paused" }))).toBe("paused");
+    expect(floorState(session("a", "T-1", { state: "working" }))).toBe("working");
+  });
+});
+
+describe("accessibleName with tokens", () => {
+  const desk = { session: session("a", "T-1"), owner: "T-1", key: "T-1", title: "x", phase: null, project: null, slot: 0 } as DeskModel;
+
+  it("appends the formatted tokens when given", () => {
+    expect(accessibleName(desk, undefined, 1_200_000)).toBe(accessibleName(desk) + ", 1.2M tokens");
+  });
+
+  it("adds nothing without tokens", () => {
+    expect(accessibleName(desk, undefined, 0)).toBe(accessibleName(desk));
   });
 });

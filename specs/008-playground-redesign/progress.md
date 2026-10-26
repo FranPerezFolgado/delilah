@@ -14,14 +14,14 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-07 | 2 | 2B | verified | 1 | 730e028 | needs 01 |
 | WP-08 | 2 | 2C | verified | 1 | 0376212 | needs 01,07 |
 | WP-05 | 2 | 2C | pending | 0 | | needs 02,04 |
-| WP-09 | 3 | 2B | implementing | 1 | | early: needs 06 |
+| WP-09 | 3 | 2B | verified | 1 | PENDING | early: needs 06 |
 | WP-10 | 3 | 3B | pending | 0 | |  |
 | WP-11 | 3 | 3C | pending | 0 | |  |
 | WP-12 | 4 | 3C | pending | 0 | | early: with 11 |
 | WP-13 | 4 | 4B | pending | 0 | |  |
 | WP-14 | 5 | 2B | verified | 1 | 5bbdcd9 | early: needs 06 |
 | WP-15 | 5 | 2B | verified | 1 | 5533380 | early: needs 06 |
-| WP-16 | 5 | 5B | verified | 1 | PENDING |  |
+| WP-16 | 5 | 5B | verified | 1 | d2c88da |  |
 | WP-17 | 5 | 5C | pending | 0 | |  |
 | WP-18 | 6 | 6A | pending | 0 | |  |
 | WP-19 | 6 | 6A | pending | 0 | |  |

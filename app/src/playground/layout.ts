@@ -3,6 +3,7 @@ import type { DeskState, Pose } from "./poses";
 import type { Look } from "./sprites";
 import { t, tn } from "../i18n";
 import { columnOf, type Column } from "../phases";
+import { formatTokens } from "./art/kinds";
 
 export interface DeskModel {
   session: Session;
@@ -32,6 +33,21 @@ export function deskState(session: Session, activity?: Activity): DeskState {
       if (action.kind === "delegate") return action.background ? "thinking" : "supervising";
       return action.kind;
     }
+  }
+}
+
+/** A lead desk's state on the office floor: the session's state, working while it runs. */
+export type FloorState = "starting" | "working" | "waiting" | "paused";
+
+/** The office table's state for a session (the action is shown separately). */
+export function floorState(session: Session): FloorState {
+  switch (session.state) {
+    case "starting":
+    case "waiting":
+    case "paused":
+      return session.state;
+    default:
+      return "working";
   }
 }
 
@@ -94,15 +110,16 @@ export function visibleHelpers(helpers: Helper[]): { shown: Helper[]; rest: Help
 export const helperName = (h: Helper): string =>
   `${roleLook(h.role).label} ${t(h.action ? HELPER_WORD[h.action.kind] : "Pensando").toLowerCase()}`;
 
-/** The character's accessible name: the task (or project), what it is doing, the action and the helpers. */
-export function accessibleName(desk: DeskModel, activity?: Activity): string {
+/** The character's accessible name: the task (or project), what it is doing, the action, the helpers and the tokens used. */
+export function accessibleName(desk: DeskModel, activity?: Activity, tokens?: number): string {
   const state = deskState(desk.session, activity);
   const cap = state === "waiting" ? null : caption(activity?.action);
   const helpers = activity?.helpers ?? [];
   const extra = helpers.length
     ? `, ${tn(helpers.length, "{n} ayudante", "{n} ayudantes")}: ${[...helpers].sort((a, b) => a.since.localeCompare(b.since)).map(helperName).join(", ")}`
     : "";
-  return `${desk.key}, ${t(STATE_WORD[state])}${cap ? `, ${cap}` : ""}${extra}`;
+  const used = tokens ? `, ${formatTokens(tokens)} tokens` : "";
+  return `${desk.key}, ${t(STATE_WORD[state])}${cap ? `, ${cap}` : ""}${extra}${used}`;
 }
 
 /** Slot maps per project (session id -> slot) of `areas`, to pass back to `groupByProject`. */
