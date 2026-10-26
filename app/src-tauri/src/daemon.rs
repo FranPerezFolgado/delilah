@@ -231,7 +231,11 @@ pub fn english_for(pref: Option<&str>, apple_languages: &str) -> bool {
         Some("en") => true,
         Some("es") => false,
         _ => {
-            let first = apple_languages.split('"').nth(1).unwrap_or("").to_lowercase();
+            // First array element, quoted or not: `(\n    es,\n    "en-US"\n)`.
+            let trim = |c: char| c == '(' || c == ')' || c == '"' || c == ',' || c.is_whitespace();
+            let inner = apple_languages.trim_start_matches(trim);
+            let end = inner.find(|c: char| c == '"' || c == ',' || c == ')' || c.is_whitespace());
+            let first = inner[..end.unwrap_or(inner.len())].to_lowercase();
             !first.starts_with("es")
         }
     }
@@ -254,13 +258,13 @@ fn wait_for_health(timeout: Duration) -> Result<(), String> {
 mod tests {
     use super::english_for;
 
-    // The table of contracts/language.md, mirrored in app/src/i18n.test.ts.
+    // The table of contracts/language.md, mirrored in app/src/i18n.test.ts and crates/delilah-daemon/src/lang.rs.
     fn apple(first: &str) -> String {
         format!("(\n    \"{first}\",\n    \"en-US\"\n)")
     }
 
     #[test]
-    fn explicit_preference_wins() {
+    fn english_for_explicit_preference_wins() {
         for sys in ["es-ES", "en-US", "", "garbage"] {
             let langs = if sys.is_empty() || sys == "garbage" { sys.to_string() } else { apple(sys) };
             assert!(english_for(Some("en"), &langs));
@@ -269,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn other_preferences_follow_the_system() {
+    fn english_for_other_preferences_follow_the_system() {
         for pref in [None, Some("auto"), Some("fr")] {
             for (sys, en) in [
                 ("es-ES", false),
@@ -281,6 +285,9 @@ mod tests {
             ] {
                 assert_eq!(english_for(pref, &apple(sys)), en, "{pref:?} {sys}");
             }
+            assert!(!english_for(pref, "(\n    es,\n    \"en-US\"\n)"));
+            assert!(english_for(pref, "(\n    en,\n    \"es-ES\"\n)"));
+            assert!(!english_for(pref, "es-ES"));
             assert!(english_for(pref, ""));
             assert!(english_for(pref, "not a plist"));
         }

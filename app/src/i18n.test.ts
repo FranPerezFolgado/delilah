@@ -2,7 +2,7 @@
 // The language resolution table of specs/008-public-repo-onboarding/contracts/language.md.
 // It is mirrored in the `english_for` tests in app/src-tauri/src/daemon.rs.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { detect, lang, setLanguage } from "./i18n";
+import { detect, lang, parseSetting, setLanguage } from "./i18n";
 
 const MISSING = Symbol("missing");
 const prefs: unknown[] = [MISSING, null, "auto", "fr", 42, "es", "en"];
@@ -50,5 +50,13 @@ describe("module load", () => {
     document.documentElement.lang = "xx";
     await import("./i18n");
     expect(document.documentElement.lang).toBe("en");
+  });
+});
+
+describe("parseSetting", () => {
+  it("keeps es/en and turns anything else into auto", () => {
+    expect(parseSetting("es")).toBe("es");
+    expect(parseSetting("en")).toBe("en");
+    for (const v of ["auto", "fr", 42, null, undefined]) expect(parseSetting(v)).toBe("auto");
   });
 });

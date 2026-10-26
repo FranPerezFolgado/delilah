@@ -1,12 +1,13 @@
 # Contract: UI language resolution
 
-The rule is the same in the web UI (`app/src/i18n.ts`) and the desktop shell's native menu
-(`app/src-tauri/src/daemon.rs`).
+The rule is the same in the web UI (`app/src/i18n.ts`), the desktop shell's native menu
+(`app/src-tauri/src/daemon.rs`) and the daemon's own texts and agent prompts
+(`crates/delilah-daemon/src/lang.rs`).
 
 Inputs:
 - `pref`: the daemon's `language` preference (`GET /api/v1/preferences/language`), which may
   be missing, `null`, `"auto"`, `"es"`, `"en"`, or any other JSON value. The API is unchanged.
-- `system`: the UI uses `navigator.language`; the shell uses the first entry of
+- `system`: the UI uses `navigator.language`; the shell and the daemon use the first entry of
   `defaults read -g AppleLanguages`. Either may be missing or empty.
 
 Resolution:

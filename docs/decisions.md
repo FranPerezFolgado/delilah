@@ -632,7 +632,7 @@ release step for the same trust trade as `install.sh`. *Ruled out:* the official
 **81. English is the fallback language.** The language is `auto`, `es` or `en`. `auto`
 (or a missing or unknown value) follows the system: Spanish only when the system language
 starts with `es`, English otherwise and when it cannot be read; the native menu follows the
-same rule (so an unreadable `defaults` output now gives English, not Spanish), and
+same rule, as does the daemon's `lang.rs` for its texts and prompts (so an unreadable `defaults` output now gives English, not Spanish), and
 `<html lang>` defaults to `en`. *Why:* the repo is public and most users are not Spanish
 speakers, while Spanish systems still get Spanish. *Ruled out:* English-only default even
 for Spanish systems.

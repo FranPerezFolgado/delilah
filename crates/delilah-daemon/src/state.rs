@@ -102,7 +102,15 @@ impl AppState {
             events,
             asks: Arc::default(),
             permissions: Arc::default(),
-            lang: crate::lang::Current::default(),
+            // English unless told otherwise (decision 81); unit tests keep their Spanish
+            // fixtures and set English where they need it.
+            lang: {
+                let lang = crate::lang::Current::default();
+                if cfg!(test) {
+                    lang.set(crate::lang::Lang::Es);
+                }
+                lang
+            },
             review_hints: Arc::default(),
             transcript_seen: Arc::default(),
             handoffs: Arc::default(),
@@ -135,7 +143,7 @@ impl AppState {
         let lang =
             tokio::task::spawn_blocking(move || crate::lang::from_setting(setting.as_deref()))
                 .await
-                .unwrap_or(crate::lang::Lang::Es);
+                .unwrap_or(crate::lang::Lang::En);
         self.lang.set(lang);
     }
 

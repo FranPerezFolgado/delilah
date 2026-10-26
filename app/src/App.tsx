@@ -4,7 +4,7 @@ import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
-import { setLanguage, t, type LangSetting } from "./i18n";
+import { parseSetting, setLanguage, t, type LangSetting } from "./i18n";
 import { CHANGES, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
 import { ideaToOpen } from "./components/ideas";
 import { BoardView } from "./components/BoardView";
@@ -165,8 +165,8 @@ export function App() {
   };
   useEffect(() => {
     api
-      .preference<LangSetting>("language")
-      .then((l) => l && applyLanguage(l))
+      .preference<unknown>("language")
+      .then((l) => l != null && applyLanguage(parseSetting(l)))
       .catch(() => {});
   }, []);
 

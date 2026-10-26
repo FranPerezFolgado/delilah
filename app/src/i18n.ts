@@ -9,6 +9,11 @@ export type Lang = "es" | "en";
 /** What the user picked in Ajustes: "auto" follows the Mac's language. */
 export type LangSetting = "auto" | Lang;
 
+/** The stored `language` preference as a setting: "es"/"en" as is, anything else "auto". */
+export function parseSetting(v: unknown): LangSetting {
+  return v === "es" || v === "en" ? v : "auto";
+}
+
 let current: Lang = "en";
 
 /** The rule is in specs/008-public-repo-onboarding/contracts/language.md. */
