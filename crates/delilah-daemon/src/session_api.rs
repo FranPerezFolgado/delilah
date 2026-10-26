@@ -69,8 +69,8 @@ pub async fn activity(State(app): State<AppState>) -> Json<serde_json::Value> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
-        .filter(|(id, p)| live.contains(*id) && p.meter.offset > 0)
-        .map(|(id, p)| (id.clone(), p.meter.usage))
+        .filter(|(id, _)| live.contains(*id))
+        .filter_map(|(id, p)| p.tokens().map(|t| (id.clone(), t)))
         .collect();
     Json(serde_json::json!({ "sessions": sessions, "tokens": tokens }))
 }

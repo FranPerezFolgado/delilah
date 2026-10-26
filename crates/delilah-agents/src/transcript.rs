@@ -806,11 +806,11 @@ pub struct TokenUsage {
 
 impl TokenUsage {
     pub fn add(&mut self, other: &TokenUsage) {
-        self.total += other.total;
-        self.input += other.input;
-        self.output += other.output;
-        self.cache_write += other.cache_write;
-        self.cache_read += other.cache_read;
+        self.total = self.total.saturating_add(other.total);
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
     }
 }
 
@@ -851,7 +851,7 @@ pub fn usage_delta(bytes: &[u8], last_id: Option<&str>) -> UsageDelta {
         let (input, output, cache_write) =
             (n("input_tokens"), n("output_tokens"), n("cache_creation_input_tokens"));
         usage.add(&TokenUsage {
-            total: input + cache_write + output,
+            total: input.saturating_add(cache_write).saturating_add(output),
             input,
             output,
             cache_write,
@@ -883,6 +883,19 @@ mod tests {
             d.usage,
             TokenUsage { total: 30, input: 6, output: 10, cache_write: 14, cache_read: 200 }
         );
+    }
+
+    #[test]
+    fn usage_sums_saturate() {
+        let big = u64::MAX - 1;
+        let u = serde_json::json!({"input_tokens":big,"output_tokens":big,"cache_creation_input_tokens":big});
+        let text = asst("m1", u.clone()) + &asst("m2", u);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.usage.total, u64::MAX);
+        assert_eq!(d.usage.input, u64::MAX);
+        let mut t = TokenUsage { total: u64::MAX, ..Default::default() };
+        t.add(&TokenUsage { total: 5, ..Default::default() });
+        assert_eq!(t.total, u64::MAX);
     }
 
     #[test]

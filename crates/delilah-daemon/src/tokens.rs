@@ -5,12 +5,30 @@ use delilah_agents::transcript::{TokenUsage, UsageDelta};
 
 #[derive(Debug, Clone, Default)]
 pub struct TokenMeter {
-    pub offset: u64,
-    pub usage: TokenUsage,
-    pub last_id: Option<String>,
+    offset: u64,
+    usage: TokenUsage,
+    last_id: Option<String>,
 }
 
 impl TokenMeter {
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub fn last_id(&self) -> Option<&str> {
+        self.last_id.as_deref()
+    }
+
+    /// The count so far, `None` while no byte of the transcript was consumed.
+    pub fn usage(&self) -> Option<TokenUsage> {
+        (self.offset > 0).then_some(self.usage)
+    }
+
+    /// Forgets everything (the transcript shrank or was replaced): counts again from 0.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     /// Adds what was read from `from`. Does nothing (false) if the meter moved since;
     /// otherwise returns whether the total changed.
     pub fn apply(&mut self, from: u64, delta: UsageDelta) -> bool {
@@ -19,7 +37,7 @@ impl TokenMeter {
         }
         let before = self.usage.total;
         self.usage.add(&delta.usage);
-        self.offset += delta.consumed as u64;
+        self.offset = self.offset.saturating_add(delta.consumed as u64);
         self.last_id = delta.last_id;
         self.usage.total != before
     }
@@ -52,5 +70,16 @@ mod tests {
         assert!(m.apply(0, delta(10, 100, "a")));
         assert!(!m.apply(0, delta(10, 100, "a")));
         assert_eq!((m.offset, m.usage.total), (100, 10));
+    }
+
+    #[test]
+    fn reset_forgets_everything() {
+        let mut m = TokenMeter::default();
+        m.apply(0, delta(10, 100, "a"));
+        assert!(m.usage().is_some());
+        m.reset();
+        assert_eq!((m.offset(), m.last_id(), m.usage()), (0, None, None));
+        assert!(m.apply(0, delta(4, 10, "b")));
+        assert_eq!(m.usage().unwrap().total, 4);
     }
 }

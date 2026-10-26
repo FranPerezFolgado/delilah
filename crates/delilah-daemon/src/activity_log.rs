@@ -3,11 +3,37 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{DateTime, Utc};
-use delilah_agents::claude::{Action, ActivityEvent, AgentRef};
+use delilah_agents::claude::{Action, ActivityEvent, AgentRef, shorten};
 use serde::Serialize;
 
 const MAX_ENTRIES: usize = 200;
 const MAX_LOGS: usize = 64;
+
+/// Caps every free-text field of an event at 40 chars (FR-023), as `activity.rs` does.
+fn capped(event: ActivityEvent) -> ActivityEvent {
+    let agent = |a: AgentRef| AgentRef {
+        id: shorten(&a.id),
+        role: shorten(&a.role),
+    };
+    match event {
+        ActivityEvent::ToolStarted { agent: a, mut action } => {
+            // The id pairs with the capped `ToolEnded` id, so it is cut the same way.
+            action.id = shorten(&action.id);
+            action.tool = shorten(&action.tool);
+            ActivityEvent::ToolStarted { agent: a.map(agent), action }
+        }
+        ActivityEvent::ToolEnded { agent: a, id, failed } => ActivityEvent::ToolEnded {
+            agent: a.map(agent),
+            id: shorten(&id),
+            failed,
+        },
+        ActivityEvent::HelperStarted { agent: a } => {
+            ActivityEvent::HelperStarted { agent: agent(a) }
+        }
+        ActivityEvent::HelperEnded { id } => ActivityEvent::HelperEnded { id: shorten(&id) },
+        ActivityEvent::TurnOver => ActivityEvent::TurnOver,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -145,7 +171,11 @@ impl ActivityLog {
             log.entries.pop_front();
             log.dropped = true;
         }
-        log.entries.push_back(Entry { seq, at, event });
+        log.entries.push_back(Entry {
+            seq,
+            at,
+            event: capped(event),
+        });
     }
 
     /// Logs of `owner` with entries `seq > after`, ordered by their oldest kept entry.
@@ -301,5 +331,81 @@ mod tests {
         assert_eq!(e[2]["type"], "turn_over");
         assert_eq!(v[0]["live"], false);
         assert_eq!(v[0]["dropped"], false);
+    }
+
+    #[test]
+    fn tool_started_json_matches_contract() {
+        use delilah_agents::claude::ActionKind;
+        let mut log = ActivityLog::new(t(0));
+        let none = live(&[]);
+        let event = ActivityEvent::ToolStarted {
+            agent: Some(AgentRef { id: "a1".into(), role: "r".into() }),
+            action: Action {
+                id: "toolu_1".into(),
+                kind: ActionKind::Edit,
+                tool: "Edit".into(),
+                target: Some("src/a.rs".into()),
+                background: false,
+                since: t(1),
+            },
+        };
+        log.record("s", "T-1", t(1), event, &none);
+        let v = serde_json::to_value(log.for_owner("T-1", None, &none)).unwrap();
+        let e = &v[0]["entries"][0];
+        assert_eq!(e["type"], "tool_started");
+        assert_eq!(e["seq"], 1);
+        assert_eq!(e["agent"], serde_json::json!({"id": "a1", "role": "r"}));
+        let a = &e["action"];
+        assert_eq!(a["id"], "toolu_1");
+        assert_eq!(a["kind"], "edit");
+        assert_eq!(a["tool"], "Edit");
+        assert_eq!(a["target"], "src/a.rs");
+        assert_eq!(a["background"], false);
+        assert_eq!(a["since"], serde_json::to_value(t(1)).unwrap());
+        assert_eq!(a.as_object().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn stored_fields_are_capped_at_40_chars() {
+        use delilah_agents::claude::ActionKind;
+        let long = "x".repeat(100);
+        let mut log = ActivityLog::new(t(0));
+        let none = live(&[]);
+        let agent = || AgentRef { id: long.clone(), role: long.clone() };
+        log.record(
+            "s",
+            "T-1",
+            t(1),
+            ActivityEvent::ToolStarted {
+                agent: Some(agent()),
+                action: Action {
+                    id: long.clone(),
+                    kind: ActionKind::Other,
+                    tool: long.clone(),
+                    target: None,
+                    background: false,
+                    since: t(1),
+                },
+            },
+            &none,
+        );
+        log.record("s", "T-1", t(2), ActivityEvent::ToolEnded { agent: Some(agent()), id: long.clone(), failed: false }, &none);
+        log.record("s", "T-1", t(3), ActivityEvent::HelperStarted { agent: agent() }, &none);
+        log.record("s", "T-1", t(4), ActivityEvent::HelperEnded { id: long.clone() }, &none);
+        let v = serde_json::to_value(log.for_owner("T-1", None, &none)).unwrap();
+        let mut strings = Vec::new();
+        for e in v[0]["entries"].as_array().unwrap() {
+            for key in ["id", "agent", "action"] {
+                match &e[key] {
+                    serde_json::Value::String(s) => strings.push(s.clone()),
+                    serde_json::Value::Object(o) => strings.extend(
+                        o.values().filter_map(|x| x.as_str()).map(String::from),
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        assert!(strings.len() >= 9);
+        assert!(strings.iter().all(|s| s.chars().count() <= 40), "{strings:?}");
     }
 }
