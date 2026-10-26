@@ -107,7 +107,7 @@ waits and no nudge or pause.
   - a `StopFailure` payload with a running `background_tasks` entry still pauses (FR-005).
 
   These are regression guards: they pass both before and after T011–T012, so check that each one asserts the state it names.
-- [ ] T014 [P] [US2] Add `autopilot_still_catches_a_real_stall` to `crates/delilah-e2e/tests/autopilot.rs`. The scenario `<KEY>.feature.json` writes spec, plan and tasks with all tasks unchecked, and launches implement. The scenario `<KEY>.orchestrate.json` does `stop` with `[]` → `wait_input` → `stop` with `[]`. Assert, in order:
+- [X] T014 [P] [US2] Add `autopilot_still_catches_a_real_stall` to `crates/delilah-e2e/tests/autopilot.rs`. The scenario `<KEY>.feature.json` writes spec, plan and tasks with all tasks unchecked, and launches implement. The scenario `<KEY>.orchestrate.json` does `stop` with `[]` → `wait_input` → `stop` with `[]`. Assert, in order:
   - exactly one `autopilot-nudged` (implement), then `autopilot-paused`;
   - `autopilot.state == "paused"`, with a reason that names the unchecked tasks;
   - the fake's record (`<fake-dir>` record file, as the existing fake tests read it) shows the nudge text among its inputs.

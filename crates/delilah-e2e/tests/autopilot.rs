@@ -94,3 +94,69 @@ fn autopilot_waits_on_background_work() {
     assert_eq!(step_started(&events), ["implement", "review"], "{names:?}");
     assert_ne!(api.task(KEY)["autopilot"]["state"], "paused");
 }
+
+#[test]
+fn autopilot_still_catches_a_real_stall() {
+    let key = "E2E-81";
+    let env = Env::start(EnvOptions::default());
+    env.register_fixtures();
+    let dir = format!("specs/{}-x", key.to_lowercase());
+    env.scenario(
+        &format!("{key}.feature"),
+        &json!({"steps": [
+            {"write": {"path": format!("{dir}/spec.md"), "content": "# Spec\n"}},
+            {"write": {"path": format!("{dir}/plan.md"), "content": "# Plan\n"}},
+            {"write": {"path": format!("{dir}/tasks.md"),
+                "content": "- [ ] T001 One\n- [ ] T002 Two\n- [ ] T003 Three\n"}},
+            {"stop": {"message": "planned", "background": []}},
+        ]}),
+    );
+    // The implement session ends its turn with nothing running and the tasks unchecked.
+    env.scenario(
+        &format!("{key}.orchestrate"),
+        &json!({"steps": [
+            {"stop": {"message": "idle", "background": []}},
+            {"wait_input": true},
+            {"stop": {"message": "idle again", "background": []}},
+        ]}),
+    );
+    env.scenario(key, &json!({"steps": [{"wait_input": true}]}));
+    let api = env.api();
+    api.set_preference("save-notes", json!(false));
+    api.start_run(json!({"key": key, "title": "Stall", "project": "signal", "autopilot": true}));
+
+    let (events, task) = env.wait_for("the autopilot pauses", T, || {
+        let task = api.task(key);
+        let events = api.task_events(key);
+        if task["autopilot"]["state"] == "paused" {
+            Ok((events, task))
+        } else {
+            Err((task["autopilot"].clone(), event_names(&events)))
+        }
+    });
+
+    let names = event_names(&events);
+    let nudges = names.iter().filter(|n| *n == "autopilot-nudged").count();
+    assert_eq!(nudges, 1, "{names:?}");
+    let nudged = names.iter().position(|n| n == "autopilot-nudged").unwrap();
+    let paused = names.iter().position(|n| n == "autopilot-paused").unwrap();
+    assert!(nudged < paused, "{names:?}");
+    assert_eq!(
+        names.iter().filter(|n| *n == "autopilot-paused").count(),
+        1,
+        "{names:?}"
+    );
+    let reason = task["autopilot"]["reason"].to_string();
+    assert!(
+        reason.contains('3') && (reason.contains("unchecked") || reason.contains("sin marcar")),
+        "{reason}"
+    );
+
+    let rec = env.wait_for("the nudge reaches the fake", T, || {
+        match env.record_for(key) {
+            Some(r) if r.inputs.iter().any(|i| i.contains("Autopilot:")) => Ok(r),
+            other => Err(other.map(|r| r.inputs)),
+        }
+    });
+    assert!(rec.inputs.iter().any(|i| i.contains("Autopilot:")));
+}

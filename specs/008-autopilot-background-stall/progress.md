@@ -11,9 +11,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2A | done | 1 | 929ef46 | |
 | WP-05 | 3 | 3A | done | 1 | 8c8a7e3 | |
 | WP-06 | 4 | 4A | implementing | 1 | | |
-| WP-07 | 4 | 4A | implementing | 1 | | |
+| WP-07 | 4 | 4A | verified | 1 | | |
 | WP-08 | 5 | 5A | pending | 0 | | |
-| WP-09 | 6 | 6A | verified | 1 | | |
+| WP-09 | 6 | 6A | verified | 1 | db2cc68 | |
 | WP-10 | 6 | 6B | pending | 0 | | |
 
 ## Open findings
