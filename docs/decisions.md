@@ -693,3 +693,20 @@ folder of several GB that git had forgotten, so no retry could ever remove it. D
 only happens after the same checks as before (or `force`), so it loses nothing git would have
 kept. *Ruled out:* only retrying `git worktree remove` (it refuses a forgotten worktree), and a
 periodic sweep of `workspaces/` (it would have to guess which folders are still in use).
+
+**87. Agent permission mode is a Delilah setting applied to both runtimes, Auto by default
+(2026-10-26).** `claude -p` (chat mode's print mode) ignores the user's interactive default
+permission mode and runs in `default`, so it asked for every action: a probe gave 5 asks
+without a flag and 0 with `--permission-mode auto`; the spike
+([chat permission mode](archive/spikes/2026-10-26-chat-permission-mode.md)) 11 of 11 asked against 0 of
+11. The terminal reports `permission_mode: "auto"`. The preference `agent-permissions`
+(`auto` default, also when unset; `default` passes no flag) sets the mode of task and project
+sessions in PTY and chat alike; idea conversations (`dontAsk`) and read-only sessions (`plan`)
+are unchanged. It applies to new or relaunched sessions only. A start the CLI rejects fails
+with a hint to "Claude's default" (only the CLI's "invalid mode" text has been seen; not the
+one for an account without auto). *Why a setting:* always
+auto in chat would hide the choice and leave the two runtimes different; reading
+`~/.claude.json` would depend on a private file whose format Claude may change. *Cost:* the
+default widens the terminal for users whose Claude default is not auto. Auto mode's own
+classifier decides what it escalates; Delilah turns `can_use_tool` into a card; `system/permission_denied` is currently ignored. [#43](decisions.md) is
+unchanged: Delilah's autopilot still never answers a permission prompt.

@@ -127,8 +127,10 @@ test("a chat-mode task shows the chat view, live text grows in a bubble and beco
   await expect(sw.getByRole("button", { name: "Terminal", exact: true })).toBeEnabled();
 });
 
+// These tests are about the permission card, so each command is one Claude's auto mode
+// escalates (`auto: "ask"`); under the default Auto setting a routine one would just run.
 const bash = (command: string, output = "", extra: Record<string, unknown> = {}) => ({
-  tool: { name: "Bash", input: { command }, output, ...extra },
+  tool: { name: "Bash", input: { command }, output, auto: "ask", ...extra },
 });
 const say = (text: string) => ({ say: { text } });
 
