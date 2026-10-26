@@ -26,7 +26,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19 | 6 | 6A | verified | 1 | d7954db | T041 PASS in preview (headless Playwright, en-US/es-ES, fr→en); native menu = unit tests only; empty defaults output now → English |
 | WP-20 | 6 | 6B | verified | 1 | bbc08f3 | decision #81 |
 | WP-21 | 7 | 7A | verified | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
-| WP-22 | 8 | 8A | pending | 0 | | |
+| WP-22 | 8 | 8A | verified | 1 | 41285a5 | decision #82 |
 | WP-23 | 8 | 8B | pending | 0 | | |
 | WP-24 | 8 | 8C | pending | 0 | | |
 
