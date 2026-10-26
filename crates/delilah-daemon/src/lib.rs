@@ -45,6 +45,7 @@ mod runtime_api;
 pub mod scheduler;
 pub mod secrets;
 mod session_api;
+pub mod skills;
 pub mod sessions;
 mod setup;
 pub use setup::recover_interrupted as recover_interrupted_setups;

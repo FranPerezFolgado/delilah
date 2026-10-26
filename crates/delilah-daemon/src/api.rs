@@ -209,6 +209,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/projects/{name}/settings",
             axum::routing::put(projects::update_settings),
         )
+        .route("/api/v1/projects/{name}/skills", get(projects::skills))
         .route(
             "/api/v1/projects/{name}/submodules",
             get(projects::submodules),
