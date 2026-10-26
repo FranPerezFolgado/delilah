@@ -14,19 +14,19 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 3 | 3A | done | 1 | 20cb4c1 | live.ts emitter exported, view uses own socket |
 | WP-05F | 2 | fix | done | 1 | ed96262 | phase 1-2 review mediums |
 | WP-07F | 3 | fix | done | 1 | 8610596 | live.rs busy loop when progress sender drops; live.ts wiring goes in WP-08 |
-| WP-16F | 6 | fix | implementing | 0 | | phase 6 HIGH + mediums (Rust) |
+| WP-16F | 6 | fix | done | 1 | f4dbd6f | phase 6 HIGH + mediums (Rust) |
 | WP-16G | 6 | fix | done | 1 | 8302a60 | phase 6 contract medium (UI 409 text) |
 | WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
 | WP-09 | 5 | 5A | done | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
 | WP-10 | 5 | 5A | done | 1 | 25bffc7 | |
-| WP-11 | 6 | 6A | verified | 1 | aee4c6a | +phase-5 arch MEDIUM (mid-turn notification side effects) |
-| WP-13 | 6 | 6A | verified | 1 | 7e87d3c | also refuses POST /sessions/{id}/runtime |
-| WP-15 | 6 | 6A | verified | 1 | 9a00f21 | |
-| WP-12 | 6 | 6B | verified | 1 | b907202 | +sessions.rs (fallback token); any Init cancels held Stop |
-| WP-14 | 6 | 6B | verified | 1 | 48410be | stop_task per running row after interrupt |
-| WP-16 | 6 | 6B | verified | 1 | 76dea57 | |
-| WP-17 | 7 | 7A | verified | 1 | SHA17 | decision #80 |
-| WP-18 | 7 | 7B | pending | 0 | | |
+| WP-11 | 6 | 6A | done | 1 | aee4c6a | +phase-5 arch MEDIUM (mid-turn notification side effects) |
+| WP-13 | 6 | 6A | done | 1 | 7e87d3c | also refuses POST /sessions/{id}/runtime |
+| WP-15 | 6 | 6A | done | 1 | 9a00f21 | |
+| WP-12 | 6 | 6B | done | 1 | b907202 | +sessions.rs (fallback token); any Init cancels held Stop |
+| WP-14 | 6 | 6B | done | 1 | 48410be | stop_task per running row after interrupt |
+| WP-16 | 6 | 6B | done | 1 | 76dea57 | |
+| WP-17 | 7 | 7A | verified | 1 | f1e8492 | decision #80 |
+| WP-18 | 7 | 7B | blocked | 1 | SHA18 | T058 pass; T059 Detener variant FAILS (task stays running) |
 
 ## Open findings
 

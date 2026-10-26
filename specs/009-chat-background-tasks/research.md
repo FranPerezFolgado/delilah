@@ -218,3 +218,47 @@ begin 0.1-0.3 s after the previous `result`. With `--permission-prompt-tool stdi
 allow rules, the `find`/`ls` of a sub-agent asked via `can_use_tool` (the spike allows);
 Read did not. The user's PreToolUse hooks (rtk) may rewrite Bash input, visible in
 `updatedInput` echoes.
+
+## R10 Quickstart run (2026-10-26)
+
+Run in `scripts/preview.sh --fresh` (slot 1: UI 1501, API 7501), fixture repo `signal`
+registered as a project, chat-mode tasks started with `delilah run --chat`, observed through
+the API and CLI only (no browser, no websocat/wscat). Real Claude Code.
+
+**Matched**
+- US1: `progress.turn` present from the start of the turn (`by: user`, `started_at`,
+  `last_signal_at`) and `step` = `sleep 60` once the tool call arrived (~20 s in, after
+  Claude's own latency); `last_signal_at` moved with the stream; `turn` is `null` after the end.
+- US2: `progress.subagents` had one entry (`running`, then `completed`) with 5 steps and 5
+  `recent`; `turn.step` showed `Subagente: <description> · Leyendo <file>`.
+- US3: after the turn ended with a background command: `progress.background` row `running`,
+  `turn: null`, session and task stayed `working`/`running`, the Bandeja was empty,
+  `POST /api/v1/tasks/T-1/runtime {"mode":"terminal"}` gave 409 "Background work is running:
+  wait for it to finish or press Stop".
+- US4: on completion a `background-done` marker ("Background command ... completed (exit
+  code 0)") appeared, history got `agent-resumed`, a new Claude turn followed, the task
+  ended `waiting-for-user` with the usual `agent-asked` and a Bandeja question item.
+  Seen for the `sleep 60` of US1 (T-1) and for the `sleep 90 && echo ok` prompt (T-3).
+
+**Differed**
+- US1: Claude Code 2.1.292 refuses a standalone foreground `sleep 60` ("Blocked: standalone
+  sleep 60") and reruns it with `run_in_background`, so the foreground "indicator for 60 s"
+  case never happens with that prompt; it turned into the US3/US4 case. A foreground
+  indicator over 30 s (the "sin novedades" text) was not exercised. Use a command that is
+  not a bare sleep (e.g. `sh -c 'sleep 60'`) in quickstart.md.
+- The runtime API body is `{"mode":"terminal"}`, not `{"runtime":...}` as quickstart.md shows.
+- The stop route is `POST /api/v1/sessions/<id>/stop` (there is no `/tasks/<KEY>/stop`).
+- Two chat tasks cannot share a project checkout; use `--worktree`.
+- **Detener variant FAILED (twice, T-5 and T-6)**: `POST /sessions/<id>/stop` (204) while the
+  row ran (turn already ended, 25 s after start in T-6) marked the row `stopped` within 1 s and
+  added a `stopped` marker, but the task stayed `running` for 2+ minutes (session state
+  `waiting`, no `agent-asked`, no Bandeja item, no history event, nothing in the daemon
+  log). Expected: normal state (`waiting-for-user`) within ~30 s. Not yet diagnosed; the
+  turn end held by Stop hook seems not to be released when the row is stopped by Detener.
+  For T-5 the stop came 4 s after start (turn maybe still open); T-6 rules that out.
+
+**Not checked**
+- Visual UI rendering (indicator, clock, "sin novedades" ticking, Agent card, strip,
+  divider): no browser.
+- `/live` websocket `progress` messages and the 4/s limit: no websocat/wscat.
+- The "sin novedades desde hace 30 s" text with a silent foreground tool.

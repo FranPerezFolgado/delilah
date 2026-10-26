@@ -141,7 +141,7 @@ Done before US3 because US3's ending relies on it; independently testable.
 - [X] T055 [P] Update `README.md` chat mode section with what the user now sees (indicator, sub-agent cards, "En segundo plano")
 - [X] T056 [P] Add a decision to `docs/decisions.md`: background work holds the turn end in memory instead of a new task state (alternatives from research R6), and progress is live-only (R7)
 - [X] T057 [P] Make sure every new Spanish string has its English entry: run `cd app && npx vitest run src/i18n/coverage.test.ts`
-- [ ] T058 Run all checks: `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, `cd app && npx tsc --noEmit && npx vitest run`
+- [X] T058 Run all checks: `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, `cd app && npx tsc --noEmit && npx vitest run`
 - [ ] T059 Run quickstart.md end to end in a preview (`scripts/preview.sh --fresh`, never the installed daemon), US1–US4 and the "Detener" variant; record anything that differs in `specs/009-chat-background-tasks/research.md`
 
 ---

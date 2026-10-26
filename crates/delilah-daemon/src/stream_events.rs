@@ -189,12 +189,13 @@ pub fn spawn_pump(
             }
         }
         // The process is gone even if no `Exited` said so: its running work is over.
-        if !exit_applied && owns(&app, &session, runtime.as_ref()) {
-            if let Some(live) = &live {
-                live.update_progress(|p| {
-                    progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now())
-                });
-            }
+        if !exit_applied
+            && owns(&app, &session, runtime.as_ref())
+            && let Some(live) = &live
+        {
+            live.update_progress(|p| {
+                progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now())
+            });
         }
         // However it ended, nobody is left to answer what the agent asked (unless the
         // session already runs a new process, whose asks are not this pump's).
