@@ -226,6 +226,6 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - history `seq` and `started_at` restart with the daemon (clients refetch on reconnect); a malformed `history` query gets a plain-text 400;
   - the native "playground" window (Tauri) has not been checked; the office floor, building and Flujo were checked in a browser preview with live agents;
   - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
-- **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
+- **Mobile access:** analysed (decision 96, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth.
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
 - **Testing:** test the whole flow on a real project with a real ticket.
