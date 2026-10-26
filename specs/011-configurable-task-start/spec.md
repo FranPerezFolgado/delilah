@@ -165,7 +165,11 @@ phased project still need a lighter start, which is the original complaint.
   message not kept) start idle when launched with no message, instead of failing.
 - When a project's workflow changes while a phased task is running, the task's next
   hand-off uses the project's current commands. A task that has already started never
-  switches between phased and single start.
+  switches between phased and single start; if the project is no longer phased when the
+  hand-off comes, the task stops handing off and stays in its current session, with a notice
+  that the project's workflow changed.
+- A literal brace in a message is written doubled (`{{` and `}}`); only `{ticket}`,
+  `{title}` and `{spec_dir}` are placeholders.
 - Skill discovery failing (unreadable folder, no plugins) leaves the list shorter, never
   blocks the settings screen; free text always works.
 - The workflow setting lives in Delilah, not in the project's repository.
@@ -188,14 +192,17 @@ phased project still need a lighter start, which is the original complaint.
   field.
 - **FR-005**: Delilah MUST list the skills and slash commands available to Claude Code for a
   project — from the user's Claude Code configuration, the project's repository and installed
-  plugins — with their invocable name, description and source. Picking one fills in the
+  plugins — with their invocable name (plugin skills as `plugin:skill`), description and
+  source. When the same name exists in more than one source, the list shows each with its
+  source; the command is the name, as Claude Code would resolve it. Picking one fills in the
   command; the field stays editable and free text is always accepted.
 - **FR-006**: A command naming a skill not found MUST show a warning but MUST NOT block
   saving or starting.
 - **FR-007**: At task start the first message MUST be chosen in this order: the message in
   the start request, then the start stored on the task, then the project's workflow, then the
   built-in prompt; the notes pointer MUST be appended whenever a message is sent and the task
-  has notes.
+  has notes. A start request (UI, API or CLI) MUST be able to say "follow the project's
+  workflow", "this message" or "nothing".
 - **FR-008**: "Nothing" MUST start the agent in the task's workspace without a first message,
   in the chosen view, with the task shown as waiting for the user.
 - **FR-009**: Saving mode and autopilot MUST be offered and applied only to tasks that follow
@@ -210,10 +217,14 @@ phased project still need a lighter start, which is the original complaint.
   and "Spec Kit (oficial)" (Spec Kit's own commands); applying one fills in the fields, which
   stay editable.
 - **FR-012**: The new-task form MUST show the start the task will get and let the user
-  override it for this task with the same picker; the backlog MUST keep the task's start and
-  show and edit it before starting.
+  override it for this task with the same picker and the same validation as the project
+  settings; the backlog MUST keep the task's start and show and edit it before starting.
 - **FR-013**: The CLI MUST keep `--prompt` as a per-task override and MUST show a project's
   workflow.
+- **FR-015**: Tasks created before this feature MUST keep working: tasks on the `feature`
+  workflow follow their project's workflow (the migrated preset), tasks with a typed first
+  message keep it if it was stored and start idle otherwise, and running tasks keep their
+  saving mode and autopilot.
 - **FR-014**: Documentation (usage, status, decisions, README for newcomers) MUST describe
   the setting and amend decision 15 ("always `/feature`") and decision 46 ("autopilot means
   the `feature` workflow").
