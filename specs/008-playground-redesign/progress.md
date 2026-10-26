@@ -23,11 +23,12 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-15 | 5 | 2B | verified | 1 | 5533380 | early: needs 06 |
 | WP-16 | 5 | 5B | verified | 1 | d2c88da |  |
 | WP-17 | 5 | 5C | verified | 1 | 41ee732 | also fix Timeline.css --acc → --focus/--wait |
-| WP-18 | 6 | 6A | verified | 1 | PENDING |  |
+| WP-18 | 6 | 6A | verified | 1 | 3bf2a49 |  |
 | WP-19 | 6 | 6A | pending | 0 | |  |
 | WP-05F | 2 | fix | done | 1 | fb83f58 | phase 2 review fixes |
 | WP-10F | 3 | fix | verified | 1 | 27fbd7d | styles.test scale/token fixes (also carries WP-13's staged deletions) |
 | WP-13F | 4 | fix | verified | 1 | 7db48bb | inline styles, test locale, role i18n |
+| WP-17F | 5 | fix | implementing | 1 | | phase 5 review fixes |
 
 ## Open findings
 
@@ -41,3 +42,5 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | 2 | architecture | LOW | ROLE_LOOKS keyed by hardcoded Spanish role names | art/outfit.ts |
 | 2 | spec | LOW | research R2 says emit on every append; implementation coalesces via dirty flag (tasks.md) | research.md |
 | 2 | spec | LOW | PixelSprite reduced-motion / .pg-paused only in CSS, untested | PixelSprite.css |
+| 5 | spec | LOW | flow layout is columns per agent with tools below, not a left-to-right tree (stable, intent kept) | flowLayout.ts |
+| 5 | spec | LOW | node/frame radius 7 (project radius scale) instead of R10's 6/8 | FlowView.css |
