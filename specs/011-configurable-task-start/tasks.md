@@ -15,7 +15,7 @@ task comes before the task that implements it.
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `crates/delilah-core/src/workflow.rs` (empty module with doc comment) and export it from `crates/delilah-core/src/lib.rs`
+- [X] T001 Create `crates/delilah-core/src/workflow.rs` (empty module with doc comment) and export it from `crates/delilah-core/src/lib.rs`
 
 ---
 
@@ -23,13 +23,13 @@ task comes before the task that implements it.
 
 **⚠️ Blocks every user story.**
 
-- [ ] T002 Write failing tests in `crates/delilah-core/src/workflow.rs`: serde of `ProjectWorkflow` (`single`/`builtin|message|nothing`, `phased`) matching data-model.md JSON; `TaskWorkflow::parse` (`project`, `prompt`, `none`, `feature`→`Project`, unknown → error) and `as_str`; `render` with `{ticket}` `{title}` `{task}` `{spec_dir}` and `{{`/`}}` literals; `{task}` is the ticket for a Jira key and the title for a free key; `validate` codes `workflow.blank`, `workflow.unknown_placeholder`, `workflow.placeholder_not_allowed` (`{spec_dir}` outside `implement`), `workflow.unbalanced_brace` with field names `workflow.start.template`, `workflow.plan|implement|review`
-- [ ] T003 Implement T002 in `crates/delilah-core/src/workflow.rs` (`ProjectWorkflow`, `Start`, `TaskWorkflow`, `Vars`, `render`, `validate`)
-- [ ] T004 Write failing tests in `crates/delilah-core/src/workflow.rs` for `is_phased(TaskWorkflow, &ProjectSettings)` and `resolve(request, task, project, builtin_text)` covering every row of the precedence table in data-model.md (request prompt / `prompt` / `none` / `project` / `feature`; stored `prompt` with and without `start_message`; project single builtin/message/nothing and phased; no project), asserting `prompt: Option<String>`, `phased` and the stored `(workflow, start_message)`
-- [ ] T005 Implement T004 in `crates/delilah-core/src/workflow.rs` (`is_phased`, `ResolvedStart`, `resolve`)
-- [ ] T006 Write failing tests in `crates/delilah-core/src/project.rs`: `ProjectSettings` with no `workflow` key deserialises to `None` and `workflow()` returns `single{builtin}`; `validate` reports the T002 workflow errors next to the existing ones
-- [ ] T007 Implement T006 in `crates/delilah-core/src/project.rs` (`workflow: Option<ProjectWorkflow>` with `#[serde(default)]`, `workflow()`, `validate` calls `workflow::validate`)
-- [ ] T008 Add `start_message: Option<String>` (`#[serde(default)]`) to `Task` in `crates/delilah-core/src/task.rs`, update the `workflow` doc (`project|prompt|none`) and the JSON fixtures in its tests
+- [X] T002 Write failing tests in `crates/delilah-core/src/workflow.rs`: serde of `ProjectWorkflow` (`single`/`builtin|message|nothing`, `phased`) matching data-model.md JSON; `TaskWorkflow::parse` (`project`, `prompt`, `none`, `feature`→`Project`, unknown → error) and `as_str`; `render` with `{ticket}` `{title}` `{task}` `{spec_dir}` and `{{`/`}}` literals; `{task}` is the ticket for a Jira key and the title for a free key; `validate` codes `workflow.blank`, `workflow.unknown_placeholder`, `workflow.placeholder_not_allowed` (`{spec_dir}` outside `implement`), `workflow.unbalanced_brace` with field names `workflow.start.template`, `workflow.plan|implement|review`
+- [X] T003 Implement T002 in `crates/delilah-core/src/workflow.rs` (`ProjectWorkflow`, `Start`, `TaskWorkflow`, `Vars`, `render`, `validate`)
+- [X] T004 Write failing tests in `crates/delilah-core/src/workflow.rs` for `is_phased(TaskWorkflow, &ProjectSettings)` and `resolve(request, task, project, builtin_text)` covering every row of the precedence table in data-model.md (request prompt / `prompt` / `none` / `project` / `feature`; stored `prompt` with and without `start_message`; project single builtin/message/nothing and phased; no project), asserting `prompt: Option<String>`, `phased` and the stored `(workflow, start_message)`
+- [X] T005 Implement T004 in `crates/delilah-core/src/workflow.rs` (`is_phased`, `ResolvedStart`, `resolve`)
+- [X] T006 Write failing tests in `crates/delilah-core/src/project.rs`: `ProjectSettings` with no `workflow` key deserialises to `None` and `workflow()` returns `single{builtin}`; `validate` reports the T002 workflow errors next to the existing ones
+- [X] T007 Implement T006 in `crates/delilah-core/src/project.rs` (`workflow: Option<ProjectWorkflow>` with `#[serde(default)]`, `workflow()`, `validate` calls `workflow::validate`)
+- [X] T008 Add `start_message: Option<String>` (`#[serde(default)]`) to `Task` in `crates/delilah-core/src/task.rs`, update the `workflow` doc (`project|prompt|none`) and the JSON fixtures in its tests
 - [ ] T009 Add `feature_preset(Lang) -> ProjectWorkflow` and `builtin_start(Lang) -> &'static str` to `crates/delilah-daemon/src/lang.rs` (texts from research R5/R6; the preset's review is today's `step_prompt` review text), with unit tests
 - [ ] T010 Write a failing migration test in `crates/delilah-daemon/src/store.rs` (tests module): seed a DB migrated to 0021 with projects (`settings` `{}` and with a branch template) and tasks (`feature`, `prompt`, `bugfix`), and `pref:language` unset / `"en"`; after migrating, projects have `$.workflow` equal to `feature_preset(Lang::Es)` / `(Lang::En)`, existing keys kept; tasks are `project`, `prompt`, `prompt`; `start_message` is NULL; running the migration SQL twice changes nothing
 - [ ] T011 Implement T010: `crates/delilah-daemon/migrations/0022_workflow_commands.sql` per data-model.md §Migration (`CASE` on `settings` `pref:language`)

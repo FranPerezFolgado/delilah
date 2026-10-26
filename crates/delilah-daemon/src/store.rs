@@ -622,6 +622,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         phase: row.try_get("phase")?,
         status: task_status.clone(),
         notes: row.try_get("notes")?,
+        start_message: None,
         in_checkout: row.try_get("in_checkout")?,
         branch: row.try_get("branch")?,
         saving_mode: row.try_get("saving_mode")?,

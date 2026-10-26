@@ -397,13 +397,17 @@ pub struct Task {
     /// Name of the project the task runs against, if it has a workspace.
     #[serde(default)]
     pub project: Option<String>,
-    /// Name of the workflow that drives the task, e.g. `feature`.
+    /// How the task starts: `project` (follow the project's workflow), `prompt`
+    /// (its own message, in `start_message`) or `none`.
     pub workflow: String,
     pub phase: Option<String>,
     pub status: TaskStatus,
     /// What the user keeps with the task (free text); handed to the agent on start.
     #[serde(default)]
     pub notes: Option<String>,
+    /// The task's own first-message template, when `workflow` is `prompt`.
+    #[serde(default)]
+    pub start_message: Option<String>,
     /// Where it will work once started, chosen while in the backlog: the project's
     /// checkout (`true`) or a worktree (`false`); `None` if not chosen yet.
     #[serde(default)]
@@ -457,6 +461,7 @@ impl Task {
             phase: None,
             status: TaskStatus::Queued,
             notes: None,
+            start_message: None,
             in_checkout: None,
             branch: None,
             saving_mode: false,
