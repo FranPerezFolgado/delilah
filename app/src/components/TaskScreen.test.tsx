@@ -55,8 +55,8 @@ vi.mock("./TaskView", () => ({
 }));
 vi.mock("./ProjectView", () => ({ ProjectView: () => <div data-testid="projectview" /> }));
 vi.mock("../playground/OfficeTab", () => ({
-  OfficeTab: (p: { owner: string; onOpenSession: (id: string) => void }) => (
-    <div data-testid="office" data-owner={p.owner}>
+  OfficeTab: (p: { owner: string; online?: boolean; onOpenSession: (id: string) => void }) => (
+    <div data-testid="office" data-owner={p.owner} data-online={String(p.online)}>
       <button onClick={() => p.onOpenSession("s9")}>open-lead</button>
     </div>
   ),
@@ -701,6 +701,13 @@ describe("TaskScreen Oficina tab", () => {
     expect(screen.queryByLabelText("Cerrar Oficina")).toBeNull();
     fireEvent.click(tabs[1]);
     expect(screen.getByTestId("office").dataset.owner).toBe("PROJ-1");
+  });
+
+  it("hands the app's connection state to the floor, so it opens no feed of its own", () => {
+    const t = task({ type: "running" });
+    sessionFor("PROJ-1").active = OFFICE;
+    render(<TaskScreen owner="PROJ-1" task={t} online={false} sessions={[]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />);
+    expect(screen.getByTestId("office").dataset.online).toBe("false");
   });
 
   it("is also on a project screen and is restored when persisted as active", () => {

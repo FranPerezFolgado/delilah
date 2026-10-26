@@ -5,21 +5,24 @@ export interface Point {
   y: number;
 }
 
-/** A helper that ended: it walks from its (already free) slot to the lounge until `since + LEAVER_MS`. */
+/** A helper that ended: it walks from its desk to the lounge until `since + LEAVER_MS`. */
 export interface Leaver {
   id: string;
   slot: number;
+  /** The helper's role, so it keeps its outfit while it walks. */
+  role?: string;
   /** Epoch ms when the helper ended. */
   since: number;
 }
 
-export const LEAVER_MS = 5000;
+/** A leaver's whole stay on the floor: ~3 s walking to the lounge, ~5 s there, fading in the last 0.5 s. */
+export const LEAVER_MS = 8500;
 
 // Desks and pods: 2x2 desks, one pod per four slots.
 export const DESK_W = 14;
 export const DESK_H = 9;
 export const DESK_GAP_X = 12;
-export const DESK_GAP_Y = 6;
+const DESK_GAP_Y = 6;
 export const POD_W = 2 * DESK_W + DESK_GAP_X;
 export const POD_H = 2 * DESK_H + DESK_GAP_Y;
 /** Aisles between pods. */
@@ -32,8 +35,8 @@ export const MARGIN = 10;
 const SEAT_DROP = 3;
 
 // The lounge corner, right of the pods.
-export const LOUNGE_W = 40;
-export const LOUNGE_H = 66;
+const LOUNGE_W = 40;
+const LOUNGE_H = 66;
 export const SOFA = { x: 0, y: 14, w: 20, h: 7 };
 export const SIDE_TABLE = { x: 24, y: 16, w: 7, h: 4 };
 export const PANTRY = { x: 10, y: 0, w: 20, h: 8 };
@@ -96,14 +99,16 @@ export function loungePath(slot: number): [Point, Point, Point] {
 }
 
 /** Slots for the ids: one already in `prev` keeps its slot; new leads take the lowest free
- *  slots first, then new helpers. A freed slot is reused. */
-export function assignSlots(prev: Map<string, number>, leads: string[], helpers: string[]): Map<string, number> {
+ *  slots first, then new helpers. A freed slot is reused, except the `reserved` ones (a leaver
+ *  is still walking away from them). */
+export function assignSlots(prev: Map<string, number>, leads: string[], helpers: string[], reserved: number[] = []): Map<string, number> {
   const ids = [...leads, ...helpers];
   const next = new Map<string, number>();
+  const held = new Set(reserved);
   const used = new Set<number>();
   for (const id of ids) {
     const slot = prev.get(id);
-    if (slot !== undefined && !used.has(slot)) {
+    if (slot !== undefined && !used.has(slot) && !held.has(slot)) {
       next.set(id, slot);
       used.add(slot);
     }
@@ -111,7 +116,7 @@ export function assignSlots(prev: Map<string, number>, leads: string[], helpers:
   let free = 0;
   for (const id of ids) {
     if (next.has(id)) continue;
-    while (used.has(free)) free++;
+    while (used.has(free) || held.has(free)) free++;
     next.set(id, free);
     used.add(free);
   }
@@ -121,14 +126,14 @@ export function assignSlots(prev: Map<string, number>, leads: string[], helpers:
 /** The leavers at time `at` (ms): the unexpired ones of before, plus the helpers of `prev`
  *  that are not in `nowHelpers` any more. */
 export function trackLeavers(
-  prev: { helpers: { id: string; slot: number }[]; leaving: Leaver[] },
+  prev: { helpers: { id: string; slot: number; role?: string }[]; leaving: Leaver[] },
   nowHelpers: string[],
   at: number,
 ): Leaver[] {
   const now = new Set(nowHelpers);
   const kept = prev.leaving.filter((l) => !now.has(l.id) && at < l.since + LEAVER_MS);
   const known = new Set(kept.map((l) => l.id));
-  const gone = prev.helpers.filter((h) => !now.has(h.id) && !known.has(h.id)).map((h) => ({ id: h.id, slot: h.slot, since: at }));
+  const gone = prev.helpers.filter((h) => !now.has(h.id) && !known.has(h.id)).map((h) => ({ id: h.id, slot: h.slot, role: h.role, since: at }));
   return [...kept, ...gone];
 }
 

@@ -4,9 +4,7 @@ import { type Column } from "../phases";
 import { formatTokens } from "./art/kinds";
 
 /** What a desk's character is doing, from the session's state. */
-export type DeskState = "starting" | "thinking" | "waiting" | "paused" | "edit" | "read" | "run" | "delegate" | "other" | "supervising";
-
-type Look = "researcher" | "implementer" | "reviewer" | "generic";
+type DeskState = "starting" | "thinking" | "waiting" | "paused" | "edit" | "read" | "run" | "delegate" | "other" | "supervising";
 
 export interface DeskModel {
   session: Session;
@@ -74,18 +72,9 @@ const STATE_WORD: Record<DeskState, string> = {
   other: "Trabajando",
 };
 
-const LOOK_OF: Record<string, Look> = {
-  "code-researcher": "researcher",
-  Explore: "researcher",
-  "doc-searcher": "researcher",
-  implementer: "implementer",
-  "code-quality-reviewer": "reviewer",
-  "spec-compliance-reviewer": "reviewer",
-};
-
-/** How a helper looks and is called, from its role; an empty role is just "Ayudante". */
-export function roleLook(role: string): { look: Look; label: string } {
-  return { look: LOOK_OF[role] ?? "generic", label: role || t("Ayudante") };
+/** How a helper is called, from its role; an empty role is just "Ayudante". */
+export function roleLabel(role: string): string {
+  return role || t("Ayudante");
 }
 
 const HELPER_WORD: Record<Action["kind"], string> = {
@@ -97,8 +86,8 @@ const HELPER_WORD: Record<Action["kind"], string> = {
 };
 
 /** "code-researcher leyendo": a helper's role and what it is doing. */
-export const helperName = (h: Helper): string =>
-  `${roleLook(h.role).label} ${t(h.action ? HELPER_WORD[h.action.kind] : "Pensando").toLowerCase()}`;
+const helperName = (h: Helper): string =>
+  `${roleLabel(h.role)} ${t(h.action ? HELPER_WORD[h.action.kind] : "Pensando").toLowerCase()}`;
 
 /** The character's accessible name: the task (or project), what it is doing, the action, the helpers and the tokens used. */
 export function accessibleName(desk: DeskModel, activity?: Activity, tokens?: number): string {

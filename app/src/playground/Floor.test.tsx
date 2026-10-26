@@ -72,6 +72,56 @@ describe("Floor", () => {
     expect(screen.getByText("Ningún agente trabajando en esta tarea")).toBeTruthy();
   });
 
+  it("asks for a project in the empty text of a project floor", () => {
+    show(model({ owner: "@web" }));
+    expect(screen.getByText("Ningún agente trabajando en este proyecto")).toBeTruthy();
+    expect(screen.queryByText(/tarea/)).toBeNull();
+  });
+
+  it("turns the monitor off on a paused desk whatever the last action", () => {
+    const { container } = show(model({ leads: [lead(0, { state: "paused", action: action("run") })] }));
+    expect(container.querySelector(".fl-halo")).toBeNull();
+    expect(container.querySelector(".fl-desk")?.getAttribute("data-kind")).toBe("");
+  });
+
+  it("walks a starting lead in from the aisle, then seats it", () => {
+    vi.useFakeTimers();
+    const { container } = show(model({ leads: [lead(0, { state: "starting" })] }));
+    const walk = () => container.querySelector(".fl-char")?.getAttribute("data-walk");
+    expect(walk()).toBe("from");
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(walk()).toBe("walking");
+    expect((container.querySelector(".fl-char") as HTMLElement).style.transition).toContain("transform");
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(walk()).toBe("seated");
+  });
+
+  it("a working lead is seated at once", () => {
+    const { container } = show(model({ leads: [lead(0)] }));
+    expect(container.querySelector(".fl-char")?.getAttribute("data-walk")).toBe("seated");
+  });
+
+  it("with reduced motion a starting lead appears seated", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    const { container } = show(model({ leads: [lead(0, { state: "starting" })] }));
+    expect(container.querySelector(".fl-char")?.getAttribute("data-walk")).toBe("seated");
+    vi.unstubAllGlobals();
+  });
+
+  it("names a leaving helper by its role and gives it that role's outfit", () => {
+    const base = { id: "h1", slot: 1, since: Date.now() };
+    const { container, rerender } = show(model({ leads: [lead(0)], leaving: [{ ...base, role: "Explore" }] }));
+    expect(screen.getByRole("img", { name: "Explore, se va" })).toBeTruthy();
+    const fills = (c: HTMLElement) => c.querySelector(".fl-leaver")?.innerHTML;
+    const explore = fills(container);
+    rerender(<Floor floor={model({ leads: [lead(0)], leaving: [{ ...base, role: "Plan" }] })} online onOpenSession={() => {}} />);
+    expect(fills(container)).not.toBe(explore);
+  });
+
   it("opens the session on click", () => {
     const onOpen = vi.fn();
     show(model({ leads: [lead(0)] }), true, onOpen);

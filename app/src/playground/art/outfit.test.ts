@@ -21,9 +21,12 @@ describe("outfit", () => {
     expect(a.P).toBe(b.P);
     expect(a.B).toBe(OUTFITS[5].B);
   });
-  it("roleLook is fixed per role", () => {
-    expect(roleLook("investigar")).toEqual(roleLook("investigar"));
-    expect(roleLook("implementar")).not.toEqual(roleLook("revisar"));
-    expect(roleLook("whatever")).toEqual(roleLook("other"));
+  it("roleLook is stable per role and differs between roles", () => {
+    expect(roleLook("Explore")).toEqual(roleLook("Explore"));
+    const roles = ["Explore", "code-researcher", "Plan", "general-purpose", "implementer"];
+    const looks = new Set(roles.map((r) => JSON.stringify(roleLook(r))));
+    expect(looks.size).toBe(roles.length);
+    expect(roleLook("Explore")).not.toEqual(roleLook("Plan"));
+    expect(OUTFITS.map((o) => o.B)).toContain(roleLook("Plan").B);
   });
 });

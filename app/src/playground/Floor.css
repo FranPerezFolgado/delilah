@@ -27,10 +27,10 @@ button.fl-char:hover, button.fl-char:focus-visible { outline: 2px solid var(--fo
 .fl-caption, .fl-role { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; background: color-mix(in srgb, var(--term-bg) 85%, transparent); }
 .fl-caption { color: var(--term-tx); }
 .fl-role { color: var(--tx3); }
-.fl-leaver { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; animation: fl-leave-fade 5s linear forwards; }
-@keyframes fl-leave-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.fl-leaver { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; animation: fl-leave-fade 8.5s linear forwards; }
+@keyframes fl-leave-fade { 0%, 94% { opacity: 1; } 100% { opacity: 0; } }
 .fl--stale .fl-floor { opacity: .55; }
 .fl--stale .fl-leaver { animation-play-state: paused; }
 .pg-paused .fl-leaver { animation-play-state: paused; }
-@media (prefers-reduced-motion: reduce) { .fl-leaver { animation: none; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .fl-leaver, .fl-char { animation: none; transition: none !important; } }
 .fl-key i { background: var(--tint); }

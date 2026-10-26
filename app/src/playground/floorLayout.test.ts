@@ -5,6 +5,12 @@ import {
 } from "./floorLayout";
 
 describe("assignSlots", () => {
+  it("does not hand a reserved slot (a leaver still walking from it) to a new id", () => {
+    const m = assignSlots(new Map(), ["l1"], ["h3"], [1]);
+    expect(m.get("l1")).toBe(0);
+    expect(m.get("h3")).toBe(2);
+  });
+
   it("puts leads first, then helpers", () => {
     const m = assignSlots(new Map(), ["l1", "l2"], ["h1"]);
     expect([...m]).toEqual([["l1", 0], ["l2", 1], ["h1", 2]]);
@@ -95,9 +101,13 @@ describe("loungePath", () => {
 describe("trackLeavers", () => {
   const seat = (id: string, slot: number) => ({ id, slot });
 
-  it("a helper that is gone becomes a leaver for 5 s from its slot", () => {
-    const out = trackLeavers({ helpers: [seat("h1", 2), seat("h2", 3)], leaving: [] }, ["h2"], 1000);
-    expect(out).toEqual([{ id: "h1", slot: 2, since: 1000 }]);
+  it("a helper that is gone becomes a leaver from its slot, keeping its role", () => {
+    const out = trackLeavers({ helpers: [{ ...seat("h1", 2), role: "Explore" }, seat("h2", 3)], leaving: [] }, ["h2"], 1000);
+    expect(out).toEqual([{ id: "h1", slot: 2, role: "Explore", since: 1000 }]);
+  });
+
+  it("a leaver stays ~8.5 s: ~3 s walking, ~5 s in the lounge, a fade", () => {
+    expect(LEAVER_MS).toBe(8500);
   });
 
   it("keeps a leaver until it expires", () => {

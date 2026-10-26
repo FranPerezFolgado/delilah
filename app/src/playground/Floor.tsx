@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { Action, ActionKind, Activity, Session } from "../api";
+import type { ActionKind, Activity, Session } from "../api";
 import { t } from "../i18n";
 import { KIND_COLOURS, formatTokens, tokenTier } from "./art/kinds";
-import { lookFor, roleLook as roleOutfit } from "./art/outfit";
+import { lookFor, roleLook } from "./art/outfit";
 import { recolour } from "./art/ramp";
 import { SPRITES } from "./art/pixtuoid";
 import {
@@ -10,8 +10,10 @@ import {
   deskPosition, floorSize, loungePath, podCount, seatPosition, type Point,
 } from "./floorLayout";
 import { PixelSprite } from "./PixelSprite";
+import { usePageHidden } from "./usePageHidden";
 import type { DeskSeat, FloorModel } from "./useOffice";
-import { accessibleName, caption, roleLook, type DeskModel } from "./layout";
+import type { Leaver as LeaverModel } from "./floorLayout";
+import { accessibleName, caption, roleLabel, type DeskModel } from "./layout";
 import "./Floor.css";
 
 export interface FloorProps {
@@ -32,19 +34,9 @@ const KINDS: { kind: ActionKind; name: string }[] = [
   { kind: "delegate", name: "Delegación" },
   { kind: "other", name: "Otra" },
 ];
+/** How long a starting lead takes to walk from the aisle to its chair. */
+const WALK_IN_MS = 1400;
 const STATE_WORD = { starting: "Arrancando", working: "Trabajando", waiting: "Esperándote", paused: "En pausa" } as const;
-
-/** True while the page is hidden, so the floor can stop animating. */
-function useHidden(): boolean {
-  const [hidden, setHidden] = useState(() => document.hidden);
-  useEffect(() => {
-    const on = () => setHidden(document.hidden);
-    on();
-    document.addEventListener("visibilitychange", on);
-    return () => document.removeEventListener("visibilitychange", on);
-  }, []);
-  return hidden;
-}
 
 const reducedMotion = (): boolean => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -68,8 +60,9 @@ function useScale(pods: number) {
 const px = (n: number, scale: number): string => `${n * scale}px`;
 const at = (p: Point, scale: number): CSSProperties => ({ left: px(p.x, scale), top: px(p.y, scale) });
 
-function glowOf(action: Action | null): string | null {
-  return action ? KIND_COLOURS[action.kind] : null;
+/** The glass's colour: the action's kind; a paused desk's monitor is off whatever the last action was. */
+function glowOf(seat: DeskSeat): string | null {
+  return seat.action && seat.state !== "paused" ? KIND_COLOURS[seat.action.kind] : null;
 }
 
 interface DeskProps {
@@ -85,32 +78,44 @@ interface DeskProps {
 function Desk({ seat, scale, look, label, name, onOpen }: DeskProps) {
   const d = deskPosition(seat.slot);
   const s = seatPosition(seat.slot);
-  const glow = glowOf(seat.action);
+  const glow = glowOf(seat);
   const tier = seat.tokens !== undefined ? tokenTier(seat.tokens) : 0;
   const desk = SPRITES.desk;
   const cap = seat.state === "waiting" || seat.state === "paused" ? null : caption(seat.action);
-  const charProps =
-    seat.state === "starting"
-      ? { sprite: "standing" }
-      : seat.state === "paused"
-        ? { sprite: "seated_sleeping" }
-        : seat.state === "working" && seat.action
-          ? { animation: "typing" }
-          : { sprite: "seated" };
+  // A starting lead walks in from the aisle to its chair, then sits; with reduced motion it just sits.
+  const [walk, setWalk] = useState<"from" | "walking" | "seated">(() => (seat.state === "starting" && !reducedMotion() ? "from" : "seated"));
+  const walkIn = useRef(walk === "from");
+  useEffect(() => {
+    if (!walkIn.current) return;
+    const ids = [setTimeout(() => setWalk("walking"), 30), setTimeout(() => setWalk("seated"), WALK_IN_MS + 100)];
+    return () => ids.forEach(clearTimeout);
+  }, []);
+  const walking = walk !== "seated";
+  const charProps = walking
+    ? { animation: "walking" }
+    : seat.state === "paused"
+      ? { sprite: "seated_sleeping" }
+      : seat.state === "working" && seat.action
+        ? { animation: "typing" }
+        : { sprite: "seated" };
   const character = <PixelSprite {...(charProps as { sprite: string })} scale={scale} recolour={recolour(look)} />;
-  const charStyle: CSSProperties = at({ x: s.x - 4, y: seat.state === "starting" ? s.y - 12 : s.y - 10 }, scale);
+  const charStyle: CSSProperties = {
+    ...at({ x: s.x - 4, y: walking ? s.y - 12 : s.y - 10 }, scale),
+    transform: walk === "from" ? `translate(0, ${px(loungePath(seat.slot)[1].y - s.y, scale)})` : undefined,
+    transition: walk === "walking" ? `transform ${WALK_IN_MS}ms linear` : undefined,
+  };
   return (
-    <div className={`fl-desk fl-desk--${seat.state}`} data-slot={seat.slot} data-state={seat.state} data-kind={seat.action?.kind ?? ""}>
+    <div className={`fl-desk fl-desk--${seat.state}`} data-slot={seat.slot} data-state={seat.state} data-kind={glow ? seat.action!.kind : ""}>
       {seat.state === "waiting" && (
         <span className="fl-bar" style={{ ...at({ x: d.x - 2, y: d.y }, scale), height: px(DESK_H + 6, scale) }} aria-hidden="true" />
       )}
       <PixelSprite sprite="desk_chair" scale={scale} className="fl-abs" style={at({ x: s.x - 4, y: s.y - 5 }, scale)} />
       {onOpen ? (
-        <button type="button" className="fl-char" style={charStyle} aria-label={name} onClick={onOpen}>
+        <button type="button" className="fl-char" data-walk={walk} style={charStyle} aria-label={name} onClick={onOpen}>
           {character}
         </button>
       ) : (
-        <div className="fl-char fl-char--helper" style={charStyle} role="img" aria-label={name}>
+        <div className="fl-char fl-char--helper" data-walk={walk} style={charStyle} role="img" aria-label={name}>
           {character}
         </div>
       )}
@@ -136,8 +141,9 @@ function Desk({ seat, scale, look, label, name, onOpen }: DeskProps) {
   );
 }
 
-/** A helper that left: walks desk, aisle, lounge seat; the data drops it after LEAVER_MS. */
-function Leaver({ slot, scale, still }: { slot: number; scale: number; still: boolean }) {
+/** A helper that left: walks desk, aisle, lounge seat and stays there; the data drops it after LEAVER_MS. */
+function Leaver({ leaver, scale, still }: { leaver: LeaverModel; scale: number; still: boolean }) {
+  const { slot } = leaver;
   const path = loungePath(slot);
   const [step, setStep] = useState(0);
   useEffect(() => {
@@ -151,9 +157,10 @@ function Leaver({ slot, scale, still }: { slot: number; scale: number; still: bo
     transition: step === 1 ? "transform 1.3s linear" : step === 2 ? "transform 1.7s linear" : "none",
   };
   const walking = !still && step < 3;
+  const look = recolour(roleLook(leaver.role ?? ""));
   return (
-    <div className="fl-leaver" data-step={still ? "still" : step} style={style}>
-      {walking ? <PixelSprite animation="walking" scale={scale} /> : <PixelSprite sprite="standing" scale={scale} />}
+    <div className="fl-leaver" data-step={still ? "still" : step} style={style} role="img" aria-label={t("{role}, se va", { role: roleLabel(leaver.role ?? "") })}>
+      {walking ? <PixelSprite animation="walking" scale={scale} recolour={look} /> : <PixelSprite sprite="standing" scale={scale} recolour={look} />}
     </div>
   );
 }
@@ -176,7 +183,7 @@ function Lounge({ scale }: { scale: number }) {
 
 /** One owner's office floor: framed, with its desks, helpers, leavers and lounge. */
 export function Floor({ floor, online, onOpenSession, headerExtra, className }: FloorProps) {
-  const hidden = useHidden();
+  const hidden = usePageHidden();
   const slots = [...floor.leads, ...floor.helpers, ...floor.leaving].map((d) => d.slot);
   const { ref, scale } = useScale(podCount(Math.max(-1, ...slots) + 1));
   const size = floorSize(podCount(Math.max(-1, ...slots) + 1));
@@ -207,7 +214,7 @@ export function Floor({ floor, online, onOpenSession, headerExtra, className }: 
         </div>
       )}
       <div className="fl-body" ref={ref}>
-        {empty && <p className="fl-empty">{t("Ningún agente trabajando en esta tarea")}</p>}
+        {empty && <p className="fl-empty">{floor.owner.startsWith("@") ? t("Ningún agente trabajando en este proyecto") : t("Ningún agente trabajando en esta tarea")}</p>}
         <div className="fl-floor" style={{ width: px(size.width, scale), height: px(size.height, scale) }} data-scale={scale}>
           <Lounge scale={scale} />
           {floor.leads.map((seat) => {
@@ -225,21 +232,21 @@ export function Floor({ floor, online, onOpenSession, headerExtra, className }: 
             );
           })}
           {floor.helpers.map((seat) => {
-            const { label } = roleLook(seat.lookKey);
+            const label = roleLabel(seat.lookKey);
             const cap = caption(seat.action);
             return (
               <Desk
                 key={seat.helperId}
                 seat={seat}
                 scale={scale}
-                look={roleOutfit(seat.lookKey)}
+                look={roleLook(seat.lookKey)}
                 label={label}
                 name={`${label}, ${t(STATE_WORD[seat.state])}${cap ? `, ${cap}` : ""}`}
               />
             );
           })}
           {floor.leaving.map((l) => (
-            <Leaver key={l.id} slot={l.slot} scale={scale} still={still} />
+            <Leaver key={l.id} leaver={l} scale={scale} still={still} />
           ))}
         </div>
       </div>

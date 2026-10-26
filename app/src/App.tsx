@@ -147,7 +147,7 @@ export function App() {
       prs: () => api.prSummaries().then(setPrs),
       // The open conversation view subscribes to this topic itself.
       conversations: () => Promise.resolve(),
-      activity: async () => {}, // only the playground uses it
+      activity: async () => {}, // nothing here reads it; the playground views fetch it themselves
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
@@ -448,6 +448,7 @@ export function App() {
               <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
                 <TaskScreen
                   key={owner}
+                  online={!offline}
                   owner={owner}
                   task={task}
                   spec={specs[owner]}

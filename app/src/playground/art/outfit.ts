@@ -58,13 +58,13 @@ export function lookFor(project: string, sessionId: string): Look {
   };
 }
 
-const ROLE_LOOKS: Record<string, Look> = {
-  investigar: { ...OUTFITS[13], H: HAIR_PRESETS[1], S: SKIN_PRESETS[0] },
-  implementar: { ...OUTFITS[5], H: HAIR_PRESETS[2], S: SKIN_PRESETS[1] },
-  revisar: { ...OUTFITS[11], H: HAIR_PRESETS[7], S: SKIN_PRESETS[4] },
-};
-const GENERIC_LOOK: Look = { ...OUTFITS[8], H: HAIR_PRESETS[0], S: SKIN_PRESETS[2] };
-
+/** A helper's look: outfit, hair and skin from its role (the hook's agent type), so each
+ *  role has its own stable look. */
 export function roleLook(role: string): Look {
-  return ROLE_LOOKS[role] ?? GENERIC_LOOK;
+  const s = stringSeed(role);
+  return {
+    ...OUTFITS[Number(s % 16n)],
+    H: HAIR_PRESETS[Number((s / 7n) % 8n)],
+    S: SKIN_PRESETS[Number((s / 13n) % 5n)],
+  };
 }

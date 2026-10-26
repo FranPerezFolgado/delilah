@@ -28,8 +28,8 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-05F | 2 | fix | done | 1 | fb83f58 | phase 2 review fixes |
 | WP-10F | 3 | fix | verified | 1 | 27fbd7d | styles.test scale/token fixes (also carries WP-13's staged deletions) |
 | WP-13F | 4 | fix | verified | 1 | 7db48bb | inline styles, test locale, role i18n |
-| WP-17F | 5 | fix | verified | 1 | PENDING | phase 5 review fixes |
-| WP-13G | 4 | fix | implementing | 1 | | phase 3-4 review fixes (shared store, online, looks, walk-in) |
+| WP-17F | 5 | fix | verified | 1 | da7d743 | phase 5 review fixes |
+| WP-13G | 4 | fix | verified | 1 | PENDING | phase 3-4 review fixes (shared store, online, looks, walk-in) |
 
 ## Open findings
 

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { t } from "../i18n";
 import { FloorMini } from "./FloorMini";
 import { floorOrder } from "./floorLayout";
 import { useOffice } from "./useOffice";
+import { usePageHidden } from "./usePageHidden";
 import "./Building.css";
 
 interface Props {
@@ -14,22 +15,10 @@ interface Props {
   headerExtra?: ReactNode;
 }
 
-/** True while the page is hidden, so the building can stop animating. */
-function useHidden(): boolean {
-  const [hidden, setHidden] = useState(() => document.hidden);
-  useEffect(() => {
-    const on = () => setHidden(document.hidden);
-    on();
-    document.addEventListener("visibilitychange", on);
-    return () => document.removeEventListener("visibilitychange", on);
-  }, []);
-  return hidden;
-}
-
 /** The building: a compact row per floor, newest on top, in a stable order. */
 export function Building({ onOpenFloor, online, headerExtra }: Props) {
   const { floors, online: connected } = useOffice(online);
-  const hidden = useHidden();
+  const hidden = usePageHidden();
   const order = useRef<string[]>([]);
   order.current = floorOrder(order.current, floors.map((f) => f.owner));
   const rank = new Map(order.current.map((o, i) => [o, i]));

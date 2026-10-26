@@ -33,6 +33,8 @@ import { TerminalPane } from "./TerminalPane";
 import "./TaskScreen.css";
 
 interface Props {
+  /** The app's connection state, for the Oficina tab (the app already holds the change feed). */
+  online?: boolean;
   /** The task's key, or `@<project>` for a project's own checkout. */
   owner: string;
   /** The task, when the owner is one. */
@@ -146,7 +148,7 @@ function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: 
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
+export function TaskScreen({ online, owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -738,7 +740,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
               onOpenTask={onOpenTask}
             />
           )}
-          {shown === OFFICE && <OfficeTab owner={owner} onOpenSession={showSession} />}
+          {shown === OFFICE && <OfficeTab owner={owner} online={online} onOpenSession={showSession} />}
           {shown === PRS && <PrView owner={owner} onOpenTerminal={openTerminal} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 

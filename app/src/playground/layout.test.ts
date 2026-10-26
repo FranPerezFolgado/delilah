@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Action, Activity, Helper, Session } from "../api";
 import { t } from "../i18n";
 import type { DeskModel } from "./layout";
-import { accessibleName, caption, deskState, floorState, roleLook } from "./layout";
+import { accessibleName, caption, deskState, floorState, roleLabel } from "./layout";
 
 const session = (id: string, task: string, over: Partial<Session> = {}): Session =>
   ({
@@ -87,15 +87,10 @@ const helper = (id: string, role: string, since = "2026-01-01T00:00:0" + id.slic
   action: kind && { id: "a" + id, kind, tool: "T", target: null, background: false, since },
 });
 
-describe("roleLook", () => {
-  it("maps known roles to a look", () => {
-    for (const r of ["code-researcher", "Explore", "doc-searcher"]) expect(roleLook(r).look).toBe("researcher");
-    expect(roleLook("implementer").look).toBe("implementer");
-    for (const r of ["code-quality-reviewer", "spec-compliance-reviewer"]) expect(roleLook(r).look).toBe("reviewer");
-  });
-  it("gives other roles the generic look labelled with the role", () => {
-    expect(roleLook("foo")).toEqual({ look: "generic", label: "foo" });
-    expect(roleLook("")).toEqual({ look: "generic", label: t("Ayudante") });
+describe("roleLabel", () => {
+  it("is the role, or Ayudante when empty", () => {
+    expect(roleLabel("Explore")).toBe("Explore");
+    expect(roleLabel("")).toBe(t("Ayudante"));
   });
 });
 
