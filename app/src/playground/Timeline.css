@@ -1,0 +1,23 @@
+.timeline { display: flex; flex-direction: column; overflow-y: auto; font-size: 12px; }
+.timeline-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--tx2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.timeline-row:hover { background: var(--hover, transparent); }
+.timeline-row:focus-visible { outline: 1px solid var(--acc); outline-offset: -1px; }
+.timeline-row[aria-selected="true"] { background: var(--sel); box-shadow: inset 2px 0 0 var(--acc); }
+.timeline-time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--tx3); }
+.timeline-kind { display: inline-flex; align-items: center; gap: 5px; color: var(--tx); }
+.timeline-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.timeline-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-target { color: var(--tx3); }
+.timeline-row.failed .timeline-fail { color: var(--err); font-weight: 600; }

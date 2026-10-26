@@ -1,0 +1,15 @@
+export const EN: Record<string, string> = {
+  "Línea de tiempo": "Timeline",
+  "Edición": "Edit",
+  "Lectura": "Read",
+  "Comando": "Command",
+  "Delegación": "Delegation",
+  "Otra": "Other",
+  "empieza": "starts",
+  "termina": "ends",
+  "ayudante entra": "helper joins",
+  "ayudante sale": "helper leaves",
+  "fin del turno": "end of turn",
+  "fallida": "failed",
+  "falla": "fails",
+};
