@@ -14,22 +14,22 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-07 | 2 | 2B | done | 1 | 730e028 | needs 01 |
 | WP-08 | 2 | 2C | done | 1 | 0376212 | needs 01,07 |
 | WP-05 | 2 | 2C | done | 1 | 41827dc | needs 02,04 |
-| WP-09 | 3 | 2B | verified | 1 | b03fa7f | early: needs 06 |
-| WP-10 | 3 | 3B | verified | 1 | 0ebdb82 |  |
-| WP-11 | 3 | 3C | verified | 1 | 30a0d03 |  |
-| WP-12 | 4 | 3C | verified | 1 | 31a41fa | early: with 11 |
-| WP-13 | 4 | 4B | verified | 1 | a1d0ab9 |  |
-| WP-14 | 5 | 2B | verified | 1 | 5bbdcd9 | early: needs 06 |
-| WP-15 | 5 | 2B | verified | 1 | 5533380 | early: needs 06 |
-| WP-16 | 5 | 5B | verified | 1 | d2c88da |  |
-| WP-17 | 5 | 5C | verified | 1 | 41ee732 | also fix Timeline.css --acc → --focus/--wait |
-| WP-18 | 6 | 6A | verified | 1 | 3bf2a49 |  |
-| WP-19 | 6 | 6A | pending | 0 | |  |
+| WP-09 | 3 | 2B | done | 1 | b03fa7f | early: needs 06 |
+| WP-10 | 3 | 3B | done | 1 | 0ebdb82 |  |
+| WP-11 | 3 | 3C | done | 1 | 30a0d03 |  |
+| WP-12 | 4 | 3C | done | 1 | 31a41fa | early: with 11 |
+| WP-13 | 4 | 4B | done | 1 | a1d0ab9 |  |
+| WP-14 | 5 | 2B | done | 1 | 5bbdcd9 | early: needs 06 |
+| WP-15 | 5 | 2B | done | 1 | 5533380 | early: needs 06 |
+| WP-16 | 5 | 5B | done | 1 | d2c88da |  |
+| WP-17 | 5 | 5C | done | 1 | 41ee732 | also fix Timeline.css --acc → --focus/--wait |
+| WP-18 | 6 | 6A | done | 1 | 3bf2a49 |  |
+| WP-19 | 6 | 6A | partial | 1 | | T031 green (952 Rust, 1020 vitest); T032 not checked: no browser in this session — preview 3 left running |
 | WP-05F | 2 | fix | done | 1 | fb83f58 | phase 2 review fixes |
-| WP-10F | 3 | fix | verified | 1 | 27fbd7d | styles.test scale/token fixes (also carries WP-13's staged deletions) |
-| WP-13F | 4 | fix | verified | 1 | 7db48bb | inline styles, test locale, role i18n |
-| WP-17F | 5 | fix | verified | 1 | da7d743 | phase 5 review fixes |
-| WP-13G | 4 | fix | verified | 1 | PENDING | phase 3-4 review fixes (shared store, online, looks, walk-in) |
+| WP-10F | 3 | fix | done | 1 | 27fbd7d | styles.test scale/token fixes (also carries WP-13's staged deletions) |
+| WP-13F | 4 | fix | done | 1 | 7db48bb | inline styles, test locale, role i18n |
+| WP-17F | 5 | fix | done | 1 | da7d743 | phase 5 review fixes |
+| WP-13G | 4 | fix | done | 1 | bd5b9df | phase 3-4 review fixes (shared store, online, looks, walk-in) |
 
 ## Open findings
 
