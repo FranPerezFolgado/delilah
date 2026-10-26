@@ -58,10 +58,21 @@ pub async fn list_all(State(app): State<AppState>) -> Result<Json<Vec<SessionVie
     Ok(Json(views(&app, records).await))
 }
 
-/// What each live Claude session's agents are doing, for those doing something.
+/// What each live Claude session's agents are doing, for those doing something, and the
+/// tokens of each live session whose transcript was read (`tokens`, independent of it).
 pub async fn activity(State(app): State<AppState>) -> Json<serde_json::Value> {
     let sessions: std::collections::BTreeMap<_, _> = app.sessions.busy().into_iter().collect();
-    Json(serde_json::json!({ "sessions": sessions }))
+    let live: std::collections::HashSet<String> =
+        app.sessions.all().into_iter().map(|l| l.id).collect();
+    let tokens: std::collections::BTreeMap<_, _> = app
+        .transcript_progress
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(id, p)| live.contains(*id) && p.meter.offset > 0)
+        .map(|(id, p)| (id.clone(), p.meter.usage))
+        .collect();
+    Json(serde_json::json!({ "sessions": sessions, "tokens": tokens }))
 }
 
 #[derive(Deserialize)]
@@ -489,6 +500,29 @@ mod tests {
             .unwrap()
             .unwrap()
             .status
+    }
+
+    #[tokio::test]
+    async fn activity_carries_the_tokens_of_a_live_session_with_a_transcript() {
+        let (app, _) = task_with_two_sessions().await;
+        let (_, a) = call(&app, "GET", "/api/v1/activity", None).await;
+        assert_eq!(a, json!({ "sessions": {}, "tokens": {} }));
+
+        let root = &app.config.claude_projects;
+        std::fs::create_dir_all(root).unwrap();
+        let path = root.join(format!("delilah-sa-{}.jsonl", uuid::Uuid::new_v4()));
+        let line = json!({"type":"assistant","message":{"id":"m1","usage":{
+            "input_tokens":3,"output_tokens":4,"cache_creation_input_tokens":5,
+            "cache_read_input_tokens":100}}});
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+        let live = app.sessions.of_task("PROJ-1").remove(0);
+        live.set_transcript(path);
+        crate::transcript_watch::tick(&app).await;
+
+        let (_, a) = call(&app, "GET", "/api/v1/activity", None).await;
+        let t = &a["tokens"][live.id.as_str()];
+        assert_eq!((t["total"].as_u64(), t["cache_read"].as_u64()), (Some(12), Some(100)));
+        assert_eq!(a["tokens"].as_object().unwrap().len(), 1);
     }
 
     #[tokio::test]

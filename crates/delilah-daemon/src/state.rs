@@ -47,8 +47,9 @@ pub struct AppState {
     pub lang: crate::lang::Current,
     /// Tasks the inbox suggests moving to review (see `phases.rs`).
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
-    /// Last size seen of each live session's transcript (see `transcript_watch.rs`).
-    pub(crate) transcript_seen: Arc<Mutex<HashMap<String, u64>>>,
+    /// Per live session: the transcript size seen and its token meter (see `transcript_watch.rs`).
+    pub(crate) transcript_progress:
+        Arc<Mutex<HashMap<String, crate::transcript_watch::TranscriptProgress>>>,
     /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
     pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
     /// One lock per task for the branch and name triggers (see `branching.rs`).
@@ -109,7 +110,7 @@ impl AppState {
             permissions: Arc::default(),
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
-            transcript_seen: Arc::default(),
+            transcript_progress: Arc::default(),
             handoffs: Arc::default(),
             branching: Arc::default(),
             finishing: Arc::default(),

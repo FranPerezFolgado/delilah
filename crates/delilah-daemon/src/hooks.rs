@@ -601,7 +601,7 @@ mod tests {
             json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
         )
         .await;
-        assert_eq!(activity(&state).await, json!({ "sessions": {} }));
+        assert_eq!(activity(&state).await, json!({ "sessions": {}, "tokens": {} }));
     }
 
     #[tokio::test]
@@ -611,7 +611,7 @@ mod tests {
         post(&state, LIVE, pre_edit()).await;
         assert!(activity(&state).await["sessions"]["s-1"].is_object());
         post(&state, LIVE, json!({ "hook_event_name": "Notification" })).await;
-        assert_eq!(activity(&state).await, json!({ "sessions": {} }));
+        assert_eq!(activity(&state).await, json!({ "sessions": {}, "tokens": {} }));
         assert_eq!(
             state.sessions.get("s-1").unwrap().state(),
             LiveState::Waiting
@@ -628,7 +628,7 @@ mod tests {
         )
         .await;
         assert_eq!(code, StatusCode::NO_CONTENT);
-        assert_eq!(activity(&state).await, json!({ "sessions": {} }));
+        assert_eq!(activity(&state).await, json!({ "sessions": {}, "tokens": {} }));
     }
 
     #[tokio::test]

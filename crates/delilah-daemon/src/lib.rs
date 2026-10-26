@@ -58,6 +58,7 @@ pub mod store_sessions;
 mod store_settings;
 mod stream_events;
 mod terminal;
+mod tokens;
 pub mod transcript_watch;
 mod transitions;
 pub mod upgrade;

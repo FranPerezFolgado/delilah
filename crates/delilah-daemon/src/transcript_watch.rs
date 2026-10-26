@@ -1,19 +1,36 @@
 //! Tells the conversation views when a live session's transcript gained a complete
-//! line: one daemon-wide loop (and a poke from the hooks) that only stats the file and
-//! looks at the new bytes for a newline, never parses it.
+//! line: one daemon-wide loop (and a poke from the hooks) that stats the file and
+//! looks at the new bytes for a newline. It also keeps each session's token meter
+//! (`tokens.rs`): from the meter's offset it reads at most 1 MiB per check (outside the
+//! lock, on a blocking thread), sums the usage of the new complete lines and tells the
+//! activity topic when the total changed. The activity dirty flag is announced once per
+//! tick too.
 
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tokio::time::MissedTickBehavior;
 
-use delilah_agents::transcript;
+use delilah_agents::transcript::{self, UsageDelta};
 
 use crate::conversation::candidate_transcript;
 use crate::events::Topic;
 use crate::sessions::Live;
 use crate::state::AppState;
 use crate::store_sessions::SessionKind;
+use crate::tokens::TokenMeter;
+
+/// The most one check reads of a transcript; a bigger file catches up over ticks.
+const MAX_READ: usize = 1024 * 1024;
+
+/// What the watcher knows of one live session's transcript.
+#[derive(Debug, Default)]
+pub struct TranscriptProgress {
+    /// Last size seen.
+    seen: u64,
+    pub(crate) meter: TokenMeter,
+}
 
 pub const INTERVAL: Duration = Duration::from_secs(1);
 
@@ -35,12 +52,15 @@ pub fn spawn_with(app: AppState, interval: Duration) {
 /// Checks every live Claude session and forgets the ones that are gone.
 pub async fn tick(app: &AppState) {
     let live = app.sessions.all();
-    app.transcript_seen
+    app.transcript_progress
         .lock()
         .unwrap()
         .retain(|id, _| live.iter().any(|l| &l.id == id));
     for l in live {
         check(app, &l).await;
+    }
+    if app.activity_dirty.swap(false, Ordering::Relaxed) {
+        app.events.emit(Topic::Activity);
     }
 }
 
@@ -69,21 +89,25 @@ async fn check(app: &AppState, live: &Live) {
         .as_ref()
         .and_then(|p| std::fs::metadata(p).ok())
         .map(|m| m.len());
-    let before = {
-        let mut seen = app.transcript_seen.lock().unwrap();
-        match seen.get_mut(&live.id) {
-            Some(last) => {
-                let before = *last;
+    let (before, offset, last_id) = {
+        let mut map = app.transcript_progress.lock().unwrap();
+        match map.get_mut(&live.id) {
+            Some(p) => {
+                let before = p.seen;
                 if let Some(size) = size {
-                    *last = size;
+                    p.seen = size;
                 }
-                Some(before)
+                (Some(before), p.meter.offset, p.meter.last_id.clone())
             }
             None => {
-                // First sight: the lines already there are not news (a file still to
-                // be created counts as empty, so its first line is).
-                seen.insert(live.id.clone(), size.unwrap_or(0));
-                None
+                // First sight: the lines already there are not news for the
+                // conversation (a file still to be created counts as empty, so its
+                // first line is), but they do count as tokens.
+                map.insert(
+                    live.id.clone(),
+                    TranscriptProgress { seen: size.unwrap_or(0), meter: TokenMeter::default() },
+                );
+                (None, 0, None)
             }
         }
     };
@@ -93,7 +117,40 @@ async fn check(app: &AppState, live: &Live) {
     {
         app.events.emit(Topic::Conversations);
     }
+    let Some(path) = path else {
+        return;
+    };
+    let read = tokio::task::spawn_blocking(move || read_usage(&path, offset, last_id.as_deref()))
+        .await
+        .ok()
+        .flatten();
+    let Some(delta) = read else {
+        return;
+    };
+    let changed = {
+        let mut map = app.transcript_progress.lock().unwrap();
+        map.get_mut(&live.id)
+            .is_some_and(|p| p.meter.apply(offset, delta))
+    };
+    if changed {
+        app.events.emit(Topic::Activity);
+    }
 }
+
+/// The usage of the complete lines in the next `MAX_READ` bytes from `offset`. A line
+/// bigger than that is skipped whole (its bytes are consumed) so the meter never sticks.
+fn read_usage(path: &std::path::Path, offset: u64, last_id: Option<&str>) -> Option<UsageDelta> {
+    let mut file = std::fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(offset)).ok()?;
+    let mut buf = Vec::new();
+    file.take(MAX_READ as u64).read_to_end(&mut buf).ok()?;
+    let mut delta = transcript::usage_delta(&buf, last_id);
+    if delta.consumed == 0 && buf.len() == MAX_READ && !buf.contains(&b'\n') {
+        delta.consumed = buf.len();
+    }
+    Some(delta)
+}
+
 /// Whether the file has a `\n` from `offset` on.
 fn has_newline_from(path: &std::path::Path, offset: u64) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
@@ -242,5 +299,125 @@ mod tests {
         append(&path, "{\"b\":2}\n");
         poke(&app, &live.id);
         assert!(next_event(&mut rx).await);
+    }
+
+    fn usage_line(id: &str, out: u64) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"assistant","message":{"id":id,"usage":{"output_tokens":out}}})
+        )
+    }
+
+    fn total(app: &AppState, id: &str) -> Option<u64> {
+        let map = app.transcript_progress.lock().unwrap();
+        map.get(id).map(|p| p.meter.usage.total)
+    }
+
+    async fn activity_event(rx: &mut tokio::sync::broadcast::Receiver<Topic>) -> bool {
+        tokio::time::timeout(Duration::from_millis(400), async {
+            loop {
+                if let Ok(Topic::Activity) = rx.recv().await {
+                    return;
+                }
+            }
+        })
+        .await
+        .is_ok()
+    }
+
+    #[tokio::test]
+    async fn first_sight_counts_the_existing_lines() {
+        let app = app().await;
+        let (live, _) = session(&app, SessionKind::Claude, &usage_line("m1", 7));
+        tick(&app).await;
+        assert_eq!(total(&app, &live.id), Some(7));
+    }
+
+    #[tokio::test]
+    async fn an_appended_line_is_counted_in_one_tick_and_emits() {
+        let app = app().await;
+        let (live, path) = session(&app, SessionKind::Claude, &usage_line("m1", 7));
+        tick(&app).await;
+        let mut rx = events(&app);
+        append(&path, &usage_line("m2", 5));
+        tick(&app).await;
+        assert_eq!(total(&app, &live.id), Some(12));
+        assert!(activity_event(&mut rx).await);
+    }
+
+    #[tokio::test]
+    async fn a_partial_line_is_not_counted_until_completed() {
+        let app = app().await;
+        let (live, path) = session(&app, SessionKind::Claude, "");
+        tick(&app).await;
+        let full = usage_line("m1", 9);
+        let (a, b) = full.split_at(20);
+        append(&path, a);
+        tick(&app).await;
+        assert_eq!(total(&app, &live.id), Some(0));
+        append(&path, b);
+        tick(&app).await;
+        assert_eq!(total(&app, &live.id), Some(9));
+    }
+
+    #[tokio::test]
+    async fn a_big_file_catches_up_over_ticks() {
+        let app = app().await;
+        let line = usage_line("m1", 1);
+        // Distinct ids so every line counts; enough lines to pass 1 MiB.
+        let n = MAX_READ / line.len() * 2;
+        let text: String = (0..n).map(|i| usage_line(&format!("m{i}"), 1)).collect();
+        let (live, _) = session(&app, SessionKind::Claude, &text);
+        tick(&app).await;
+        let first = total(&app, &live.id).unwrap();
+        assert!(first > 0 && first < n as u64);
+        for _ in 0..5 {
+            tick(&app).await;
+        }
+        assert_eq!(total(&app, &live.id), Some(n as u64));
+    }
+
+    #[tokio::test]
+    async fn an_oversized_line_is_skipped_not_stuck() {
+        let app = app().await;
+        let giant = "x".repeat(MAX_READ + 10);
+        let text = format!("{giant}\n{}", usage_line("m1", 3));
+        let (live, _) = session(&app, SessionKind::Claude, &text);
+        for _ in 0..4 {
+            tick(&app).await;
+        }
+        assert_eq!(total(&app, &live.id), Some(3));
+    }
+
+    #[tokio::test]
+    async fn two_concurrent_checks_count_once() {
+        let app = app().await;
+        let (live, _) = session(&app, SessionKind::Claude, &usage_line("m1", 7));
+        tokio::join!(check(&app, &live), check(&app, &live), check(&app, &live));
+        assert_eq!(total(&app, &live.id), Some(7));
+    }
+
+    #[tokio::test]
+    async fn shell_and_outside_transcripts_are_never_read() {
+        let app = app().await;
+        let (shell, _) = session(&app, SessionKind::Shell, &usage_line("m1", 7));
+        let (claude, _) = session(&app, SessionKind::Claude, "");
+        let outside = std::env::temp_dir().join(format!("delilah-out-{}.jsonl", claude.id));
+        std::fs::write(&outside, usage_line("m1", 7)).unwrap();
+        claude.set_transcript(outside);
+        tick(&app).await;
+        assert_eq!(total(&app, &shell.id), None);
+        assert_eq!(total(&app, &claude.id), None);
+    }
+
+    #[tokio::test]
+    async fn the_dirty_flag_gives_one_emit_per_tick() {
+        let app = app().await;
+        let mut rx = events(&app);
+        app.activity_dirty.store(true, Ordering::Relaxed);
+        tick(&app).await;
+        assert!(activity_event(&mut rx).await);
+        tick(&app).await;
+        assert!(!activity_event(&mut rx).await);
     }
 }
