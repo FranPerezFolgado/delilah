@@ -18,8 +18,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-09 | 2 | 2B | done | 1 | 47ffad7 | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
-| WP-12 | 2 | 2C | done | 1 |  | Session activity and per-session runtime |
-| WP-13 | 2 | 2D | pending | 0 | | CLI |
+| WP-12 | 2 | 2C | done | 1 | c1339b7 | Session activity and per-session runtime |
+| WP-13 | 2 | 2D | done | 1 |  | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | done | 1 | 8801386 | Vocabulary, relative time, icons |
@@ -93,3 +93,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 2 | WP-05 | MEDIUM | `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in full daemon runs (maybe WP-10 setup.json write order or load); investigate in WP-14/58. | crates/delilah-daemon/src/setup.rs |
 | 4 | WP-26F | MEDIUM | Delete with unpushed work: sidebar confirm, then DeleteTaskDialog opens at step 1 again before «Eliminar igualmente». Add a `startForced` prop to DeleteTaskDialog and use it from App/TaskView. | app/src/components/DeleteTaskDialog.tsx, App.tsx |
 | 9 | WP-SCALE | LOW | Round dots and the first-run mark lost `50%` (not in the allow-list): allow `border-radius: 50%` for dots/marks in styles.test.ts and restore circles; secondary text mapped 13px→13.5 could be 12 in places (jv-sub, tv-meta, qo-dir). | app/src/styles.test.ts, component css |
+| 2 | migration-reviewer | MEDIUM | 30-day purge of dismissals by `dismissed_at` makes still-open causes (failed/paused/base-stale, unresolved turn-done/pr-opened notices) reappear; resolve the backing pr_notice on dismiss and purge only ids no longer listed. | store_inbox.rs:55, inbox.rs |
+| 2 | migration-reviewer | MEDIUM | `dismiss` silently drops dismissals for items whose owner is not a task (projects) but returns 204; return 409/404 or confirm unreachable. Add tests: migrations on a DB with existing rows; task delete cascades dismissals. | store_inbox.rs:17 |
+| 2 | migration-reviewer | LOW | turn-done/pr-opened rows accumulate (never resolved); text-hash ids change with language. Note downgrade (old binary refuses DB at v21) in release notes. | store_prs.rs, inbox.rs |
+| 2 | security-reviewer | LOW→fix | Merge account guard only fires with a cached gh user; with an empty cache (after restart) a swapped login merges as the other account. Refuse (409 `account-unknown`) when nothing is cached. Also put `--` before the url / check https in `pr_merge`. | pr_api/merge.rs:~58, gh/mod.rs:~431 |

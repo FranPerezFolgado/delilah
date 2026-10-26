@@ -140,6 +140,13 @@ impl RuntimeMode {
         }
     }
 
+    fn session_done_line(self, id: &str) -> String {
+        match self {
+            Self::Chat => format!("Session {id} now runs in chat mode."),
+            Self::Terminal => format!("Session {id} now runs in the terminal."),
+        }
+    }
+
     fn done_line(self, key: &str) -> String {
         match self {
             Self::Chat => format!("{key} now runs in chat mode."),
@@ -169,10 +176,10 @@ enum Command {
         /// A task without a Jira ticket: Delilah names it LIBRE-<n>.
         #[arg(long)]
         free: bool,
-        /// Work in the project's checkout once started (default: the project's setting, else a worktree).
+        /// Work in the project's checkout once started (default: the project's setting, else the checkout).
         #[arg(long, conflicts_with = "worktree")]
         checkout: bool,
-        /// Work in an isolated worktree once started (default: the project's setting, else a worktree).
+        /// Work in an isolated worktree once started (default: the project's setting, else the checkout).
         #[arg(long)]
         worktree: bool,
         /// Defaults to the project's workflow.
@@ -216,10 +223,10 @@ enum Command {
         #[arg(long)]
         prompt: Option<String>,
         /// Work in the project's checkout (default: the backlog task's choice, else the
-        /// project's setting, else a worktree).
+        /// project's setting, else the checkout).
         #[arg(long, conflicts_with = "worktree")]
         checkout: bool,
-        /// Work in an isolated worktree (default: as with --checkout).
+        /// Work in an isolated worktree (default: the checkout, unless the project or backlog task says otherwise).
         #[arg(long)]
         worktree: bool,
         /// Attach to the agent's terminal right away.
@@ -237,7 +244,17 @@ enum Command {
     Attach { key: String },
     /// Moves a task's live agent between chat (experimental) and the terminal, keeping
     /// the conversation. Refused while the agent works or waits for an answer.
-    Runtime { key: String, mode: RuntimeMode },
+    /// With `--session <ID>` it moves only that session (no key needed).
+    Runtime {
+        /// `<KEY> <chat|terminal>`, or just `<chat|terminal>` with `--session`.
+        #[arg(required = true, num_args = 1..=2)]
+        words: Vec<String>,
+        /// Move only this session instead of the whole task.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Reopens a finished task (done) so it can be worked on again.
+    Reopen { key: String },
     /// Resumes a task paused by the usage limit now, without waiting for the reset.
     Resume { key: String },
     /// Turns a task's autopilot on or off, or resumes it when paused.
@@ -313,7 +330,7 @@ enum ProjectCommand {
 
 #[derive(Subcommand)]
 enum SetCommand {
-    /// Where tasks work: `checkout` or `worktree` (unset: worktree).
+    /// Where tasks work: `checkout` or `worktree` (unset: checkout).
     Workspace { mode: WorkspaceArg },
     /// Branch template, e.g. 'feature/{ticket}-{slug}' (unset it to let Delilah propose a name).
     Branch { template: String },
@@ -487,7 +504,8 @@ fn settings_lines(s: &ProjectSettings) -> Vec<String> {
             "workspace:  {}{}",
             match s.workspace {
                 Some(WorkspaceMode::Checkout) => "checkout",
-                Some(WorkspaceMode::Worktree) | None => "worktree",
+                Some(WorkspaceMode::Worktree) => "worktree",
+                None => "checkout",
             },
             mark(s.workspace == d.workspace)
         ),
@@ -530,6 +548,10 @@ fn settings_lines(s: &ProjectSettings) -> Vec<String> {
 #[derive(Deserialize)]
 struct Health {
     version: String,
+    /// The daemon's home directory (newer daemons).
+    #[serde(default)]
+    #[allow(dead_code)]
+    home: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -589,6 +611,27 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Reads `runtime`'s words: `<KEY> <mode>`, or `<mode>` alone with `--session`.
+/// Returns the task key (None for a session), the mode and the session id.
+fn runtime_target(
+    words: &[String],
+    session: Option<&str>,
+) -> Result<(Option<String>, RuntimeMode, Option<String>), String> {
+    let parse = |w: &str| {
+        RuntimeMode::from_str(w, true)
+            .map_err(|_| format!("mode must be chat or terminal, not {w}"))
+    };
+    match (words, session) {
+        ([mode], Some(id)) => Ok((None, parse(mode)?, Some(id.to_string()))),
+        ([_, mode], Some(id)) => Ok((None, parse(mode)?, Some(id.to_string()))),
+        ([key, mode], None) => Ok((Some(key.clone()), parse(mode)?, None)),
+        _ => Err(
+            "usage: delilah runtime <KEY> <chat|terminal>, or --session <ID> <chat|terminal>"
+                .into(),
+        ),
     }
 }
 
@@ -667,6 +710,12 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             println!("  workflow: {}", task.workflow);
             println!("  phase:    {}", task.phase.as_deref().unwrap_or("-"));
             println!("  status:   {}", status_label(&task.status));
+            println!(
+                "  created:  {}",
+                task.created_at
+                    .with_timezone(&Local)
+                    .format("%Y-%m-%d %H:%M:%S")
+            );
             println!("  history:");
             for record in events {
                 let at = record.at.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S");
@@ -721,12 +770,26 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/resume"), &json!({}))?;
             println!("{} is {} again.", task.key, status_label(&task.status));
         }
-        Command::Runtime { key, mode } => {
-            api.post_empty(
-                &format!("/api/v1/tasks/{key}/runtime"),
-                &json!({ "mode": mode.name() }),
-            )?;
-            println!("{}", mode.done_line(&key));
+        Command::Runtime { words, session } => match runtime_target(&words, session.as_deref())? {
+            (None, mode, Some(id)) => {
+                api.post_empty(
+                    &format!("/api/v1/sessions/{id}/runtime"),
+                    &json!({ "mode": mode.name() }),
+                )?;
+                println!("{}", mode.session_done_line(&id));
+            }
+            (Some(key), mode, _) => {
+                api.post_empty(
+                    &format!("/api/v1/tasks/{key}/runtime"),
+                    &json!({ "mode": mode.name() }),
+                )?;
+                println!("{}", mode.done_line(&key));
+            }
+            (None, _, None) => unreachable!("runtime_target needs a key or a session"),
+        },
+        Command::Reopen { key } => {
+            let task: Task = api.post(&format!("/api/v1/tasks/{key}/reopen"), &json!({}))?;
+            println!("{} is {} again.", task.key, status_label(&task.status));
         }
         Command::Autopilot { key, action } => {
             let task: Task = api.post(
@@ -1370,7 +1433,7 @@ mod tests {
     fn show_marks_defaults() {
         let mut s = ProjectSettings::default();
         assert!(settings_lines(&s)[0].ends_with("(default)"));
-        assert!(settings_lines(&s)[0].starts_with("workspace:  worktree"));
+        assert!(settings_lines(&s)[0].starts_with("workspace:  checkout"));
         s.workspace = Some(WorkspaceMode::Worktree);
         assert!(!settings_lines(&s)[0].contains("(default)"));
         s.workspace = Some(WorkspaceMode::Checkout);
@@ -1430,15 +1493,29 @@ mod tests {
         for word in ["chat", "terminal"] {
             let cli = Cli::try_parse_from(["delilah", "runtime", "K-1", word]).unwrap();
             match cli.command {
-                Command::Runtime { key, mode } => {
-                    assert_eq!(key, "K-1");
+                Command::Runtime { words, session } => {
+                    let (key, mode, id) = runtime_target(&words, session.as_deref()).unwrap();
+                    assert_eq!(key.as_deref(), Some("K-1"));
                     assert_eq!(mode.name(), word);
+                    assert!(id.is_none());
                 }
                 _ => panic!("not runtime"),
             }
         }
-        assert!(Cli::try_parse_from(["delilah", "runtime", "K-1", "gui"]).is_err());
-        assert!(Cli::try_parse_from(["delilah", "runtime", "K-1"]).is_err());
+        let gui = Cli::try_parse_from(["delilah", "runtime", "K-1", "gui"]).unwrap();
+        match gui.command {
+            Command::Runtime { words, session } => {
+                assert!(runtime_target(&words, session.as_deref()).is_err())
+            }
+            _ => panic!("not runtime"),
+        }
+        let one = Cli::try_parse_from(["delilah", "runtime", "K-1"]).unwrap();
+        match one.command {
+            Command::Runtime { words, session } => {
+                assert!(runtime_target(&words, session.as_deref()).is_err())
+            }
+            _ => panic!("not runtime"),
+        }
         assert_eq!(
             RuntimeMode::Chat.done_line("K-1"),
             "K-1 now runs in chat mode."
@@ -1494,5 +1571,92 @@ mod tests {
                 .command,
         );
         assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn runtime_session_form_and_reopen_parse() {
+        let cli = Cli::try_parse_from(["delilah", "runtime", "--session", "S-1", "chat"]).unwrap();
+        match cli.command {
+            Command::Runtime { words, session } => {
+                let (key, mode, id) = runtime_target(&words, session.as_deref()).unwrap();
+                assert!(key.is_none());
+                assert_eq!(mode.name(), "chat");
+                assert_eq!(id.as_deref(), Some("S-1"));
+            }
+            _ => panic!("not runtime"),
+        }
+        assert!(matches!(
+            Cli::try_parse_from(["delilah", "reopen", "K-1"]).unwrap().command,
+            Command::Reopen { key } if key == "K-1"
+        ));
+        assert!(Cli::try_parse_from(["delilah", "reopen"]).is_err());
+    }
+
+    #[test]
+    fn session_runtime_and_reopen_show_the_daemon_messages() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        fn serve(reply: String) -> (String, std::thread::JoinHandle<String>) {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let h = std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap();
+                s.write_all(reply.as_bytes()).unwrap();
+                String::from_utf8_lossy(&buf[..n]).to_string()
+            });
+            (base, h)
+        }
+        let conflict = |msg: &str| {
+            let body = format!("{{\"error\":\"{msg}\"}}");
+            format!(
+                "HTTP/1.1 409 Conflict\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        };
+        let api = |base| Api {
+            client: Client::new(),
+            base,
+        };
+        let (base, h) = serve(conflict("already runs in chat"));
+        let err = run(
+            &api(base),
+            Cli::try_parse_from(["delilah", "runtime", "--session", "S-1", "chat"])
+                .unwrap()
+                .command,
+        )
+        .unwrap_err();
+        assert_eq!(err, "already runs in chat");
+        assert!(
+            h.join()
+                .unwrap()
+                .starts_with("POST /api/v1/sessions/S-1/runtime")
+        );
+        let (base, h) = serve("HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n".into());
+        assert!(
+            run(
+                &api(base),
+                Cli::try_parse_from(["delilah", "runtime", "--session", "S-1", "terminal"])
+                    .unwrap()
+                    .command,
+            )
+            .is_ok()
+        );
+        h.join().unwrap();
+        let (base, h) = serve(conflict("task is not done"));
+        let err = run(
+            &api(base),
+            Cli::try_parse_from(["delilah", "reopen", "K-1"])
+                .unwrap()
+                .command,
+        )
+        .unwrap_err();
+        assert_eq!(err, "task is not done");
+        assert!(
+            h.join()
+                .unwrap()
+                .starts_with("POST /api/v1/tasks/K-1/reopen")
+        );
     }
 }
