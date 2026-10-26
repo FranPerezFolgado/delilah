@@ -43,13 +43,13 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-34 | 5 | 5C | implementing | 1 |  | Task screen integration |
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
-| WP-37 | 6 | 6A | done | 1 |  | Bandeja |
+| WP-37 | 6 | 6A | done | 1 | a54c617 | Bandeja |
 | WP-38 | 6 | 6A | done | 1 | 8b4f80a | First run and board |
 | WP-39 | 6 | 6A | done | 1 | 8797d5f | Jira |
 | WP-40 | 6 | 6B | pending | 0 | | E2E Bandeja |
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
-| WP-43 | 7 | 7A | implementing | 1 |  | ProposalCard, delete task, Quick Open |
+| WP-43 | 7 | 7A | done | 1 |  | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | implementing | 1 |  | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | implementing | 1 |  | Nueva tarea dialog |

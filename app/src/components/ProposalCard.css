@@ -1,0 +1,7 @@
+.pc { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--bd2); border-radius: 10px; background: var(--card); color: var(--tx); }
+.pc-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--tx-strong); }
+.pc-brief { font-size: 13px; color: var(--tx2); }
+.pc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pc-created { font-size: 13px; color: var(--ok-tx); }
+.pc-created a { color: var(--run-tx); }
+.pc-error { font-size: 12.5px; color: var(--err-tx); }

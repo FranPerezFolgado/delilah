@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
+import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { api } from "../api";
 import { setLanguage } from "../i18n";
+import { ToastHost, clearToasts } from "./ui/Toast";
 import { ProposalCard } from "./ProposalCard";
 
 beforeEach(() => setLanguage("es"));
 
 afterEach(() => {
   cleanup();
+  clearToasts();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -19,11 +23,11 @@ const proposal = {
 };
 
 describe("ProposalCard", () => {
-  it("renders title, open brief and three buttons", () => {
+  it("renders title, open brief and four buttons", () => {
     const { getByRole, getByText } = render(<ProposalCard ask={proposal} />);
     expect(getByRole("heading").textContent).toBe("Reintentos");
     expect(getByText("brief").tagName).toBe("STRONG");
-    for (const b of ["Crear", "Cambiar algo", "Descartar"]) expect(getByText(b)).toBeTruthy();
+    for (const b of ["Crear", "Crear con autopiloto", "Cambiar algo", "Descartar"]) expect(getByText(b)).toBeTruthy();
   });
 
   it("Crear answers and shows the created task as a link", async () => {
@@ -52,10 +56,12 @@ describe("ProposalCard", () => {
     expect(onDone).toHaveBeenCalled();
   });
 
-  it("Crear y lanzar en autopiloto answers Crear with launch autopilot and links the task", async () => {
+  it("Crear con autopiloto asks first, then answers Crear with launch autopilot and links the task", async () => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-8" });
     const { getByText, findByText } = render(<ProposalCard ask={proposal} />);
-    fireEvent.click(getByText("Crear y lanzar en autopiloto"));
+    fireEvent.click(getByText("Crear con autopiloto"));
+    expect(answer).not.toHaveBeenCalled();
+    fireEvent.click(getByText("Iniciar"));
     const link = await findByText("LIBRE-8");
     expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": "Crear" }, "autopilot");
     expect(link.tagName).toBe("A");
@@ -64,7 +70,8 @@ describe("ProposalCard", () => {
   it("launch error shows the error and still links the backlog task", async () => {
     vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-9", error: "no arrancó" });
     const { getByText, findByText, queryByText } = render(<ProposalCard ask={proposal} />);
-    fireEvent.click(getByText("Crear y lanzar en autopiloto"));
+    fireEvent.click(getByText("Crear con autopiloto"));
+    fireEvent.click(getByText("Iniciar"));
     expect(await findByText("no arrancó")).toBeTruthy();
     expect((await findByText("LIBRE-9")).tagName).toBe("A");
     expect(queryByText("Descartar")).toBeNull();
@@ -73,19 +80,52 @@ describe("ProposalCard", () => {
   it("disables all buttons while busy", async () => {
     vi.spyOn(api, "answerAsk").mockReturnValue(new Promise(() => {}));
     const { getByText } = render(<ProposalCard ask={proposal} />);
-    fireEvent.click(getByText("Crear y lanzar en autopiloto"));
+    fireEvent.click(getByText("Crear"));
     await waitFor(() => expect((getByText("Crear") as HTMLButtonElement).disabled).toBe(true));
-    expect((getByText("Crear y lanzar en autopiloto") as HTMLButtonElement).disabled).toBe(true);
+    expect((getByText("Crear con autopiloto") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it.each(["Cambiar algo", "Descartar"])("%s answers with it, creates nothing and shows no error", async (label) => {
+  it("Cancelar in the autopilot confirmation answers nothing", () => {
+    const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
+    const { getByText, queryByText } = render(<ProposalCard ask={proposal} />);
+    fireEvent.click(getByText("Crear con autopiloto"));
+    fireEvent.click(getByText("Cancelar"));
+    expect(queryByText("Iniciar")).toBeNull();
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("Descartar hides the card, sends after the undo window and Deshacer brings it back", async () => {
+    vi.useFakeTimers();
+    const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
+    const onDone = vi.fn();
+    const { getByText, queryByRole } = render(
+      <>
+        <ProposalCard ask={proposal} onDone={onDone} />
+        <ToastHost />
+      </>,
+    );
+    fireEvent.click(getByText("Descartar"));
+    expect(queryByRole("heading")).toBeNull();
+    expect(answer).not.toHaveBeenCalled();
+    fireEvent.click(document.body.querySelector(".toast button")!);
+    expect(queryByRole("heading")).not.toBeNull();
+    await act(async () => void vi.advanceTimersByTime(7000));
+    expect(answer).not.toHaveBeenCalled();
+
+    fireEvent.click(getByText("Descartar"));
+    await act(async () => void vi.advanceTimersByTime(7000));
+    expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": "Descartar" });
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it.each(["Cambiar algo"])("%s answers with it, creates nothing and shows no error", async (label) => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
     const onDone = vi.fn();
     const { getByText, container } = render(<ProposalCard ask={proposal} onDone={onDone} />);
     fireEvent.click(getByText(label));
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": label });
-    expect(container.querySelector(".ask-created")).toBeNull();
-    expect(container.querySelector(".error")).toBeNull();
+    expect(container.querySelector(".pc-created")).toBeNull();
+    expect(container.querySelector(".pc-error")).toBeNull();
   });
 });
