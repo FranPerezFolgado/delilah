@@ -82,19 +82,20 @@ Updates install from inside the app and are not quarantined; see
 
 ## Quickstart
 
-```bash
-# 1. Install (see above) and open Delilah.app: it starts the daemon.
-#    The `delilah` command is not installed by the app; build it from source
-#    (`cargo build --release -p delilah-cli`) and use target/release/delilah,
-#    or put it on your PATH.
-# 2. Register a project (a repo, or a parent repo with submodules)
-delilah project add ~/work/platform --kind parent
-# 3. Run a task: builds its workspace and starts Claude Code on it
-delilah run PROJ-1234 --project platform --title "Card retries"
-# 4. Open the app to follow it on the board and answer from the Inbox
-```
+1. Install (see above) and open Delilah.app: it starts the daemon.
+2. On first run, "Getting started" opens: choose "Add a project" and pick a git repo
+   (or a parent repo with submodules).
+3. Press "New task", type the ticket, a title and what you want done, then "Start":
+   Delilah builds the task's workspace and starts Claude Code on it.
+4. Follow it on the board and answer its questions and permission requests from the Inbox.
 
-The full command line and the desktop app are described in [docs/usage.md](docs/usage.md).
+The desktop app is described in [docs/usage.md](docs/usage.md#desktop-app).
+
+### Command line (optional)
+
+The `delilah` command is not installed by the app. Build it from source (needs Rust):
+`cargo build --release -p delilah-cli`, then use `target/release/delilah` or put it on your
+PATH. See [Command line](docs/usage.md#command-line).
 
 ## Documentation
 

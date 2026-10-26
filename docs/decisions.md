@@ -112,8 +112,8 @@ keeps project and user MCP servers out. `rg` and `git log/show/diff` were droppe
 a prompt starting with `-` is never read as an option.
 
 **35. Tasks from ideas: the daemon creates them on the confirmation card.**
-Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card
-(title and brief in the `Crear` option's preview); when the user answers `Crear`, the
+Claude does not create the task. It shows a `Nueva tarea` ("New task" card) AskUserQuestion card
+(title and brief in the `Crear` ("Create") option's preview); when the user answers `Crear`, the
 daemon creates the backlog task and then returns the answer, with the key, to Claude.
 So a task exists only after a click, and the same code serves the idea
 conversation and project sessions. Rejected: Claude calling the `delilah` CLI or
@@ -145,7 +145,7 @@ ask.**
 - **(A) Checkout.** Most work happens in the developer's own folder, as they would by hand: a branch there, the checkout clean to start, one task at a time.
 - **(B) Worktree.** For parallel work.
 - **(C) Project sessions.** Questions about the code are not tasks: a project session (`@project`) runs Claude read-only (`--permission-mode plan`) in the checkout. It can be allowed to edit, or turned into a free task, keeping the conversation.
-- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Create and launch on autopilot") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Iniciar en un worktree".
+- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Create and launch on autopilot") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Start in a worktree".
 
 **17. Phases: the user decides; files and signals only move forward.** The user
 sets any phase (the phase bar, or asking for a review).
@@ -155,7 +155,7 @@ sets any phase (the phase bar, or asking for a review).
 **18. Archiving never traps a task in the checkout, but a worktree asks before
 losing work.**
 - **Checkout:** the user's own folder is never deleted, so archiving always lets go of it. Uncommitted files simply stay.
-- **Worktree:** removing it deletes unpushed work, so it needs an explicit force ("Archivar igualmente", `--force`).
+- **Worktree:** removing it deletes unpushed work, so it needs an explicit force ("Archive anyway", `--force`).
 
 **19. The backlog is the `Queued` status.** A task can be saved with notes and a
 chosen place (checkout or worktree) and started later. A failed start goes back
@@ -373,7 +373,7 @@ labelled "(Recommended)" is answered in the AskUserQuestion hook (no inbox item,
 workflow's own phases.
 
 **40. Autopilot pushes and opens a draft PR with the user's own `gh` (2026-10-22).** It
-does so without asking at that moment, like "Abrir PR" (#26): the user opted in per task,
+does so without asking at that moment, like "Open PR" (#26): the user opted in per task,
 the PR is a draft, and nothing is merged. The stage `opening_pr` is persisted and PRs are
 re-detected first, so a restart never opens a second one.
 
@@ -414,7 +414,7 @@ proposal card) with a 409 `not-spec-workflow`.
 
 **47. Recovering an interrupted finish needs `Autopilot.review_session` (2026-10-22).** It
 names the outcome file to read. Autopilots stored before the field existed do not
-auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
+auto-recover a finish (the PR can still be opened by hand with "Open PR").
 
 **48. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
 project sessions create tasks, so a card is not tied to an idea conversation; only a
@@ -433,7 +433,7 @@ normalised by 37's `custom_for` when there is no template; with a template it is
 typed (case, `/`, `.`, `_`) and only made safe for git (`sanitize_typed`), because the
 dialog fills the field with the template's full branch and slugging that again would turn
 `fix/PROJ-1-x` into `feature/fix-proj-1-x`. `POST …/branch-name` returns the
-template-expanded branch when there is a template, so the "Rama" field shows what will be
+template-expanded branch when there is a template, so the "Branch" field shows what will be
 used; the dialog shows the TypeScript mirror's guess until it answers and sends the field
 only if the answer arrived or the user typed. A blank template is not saved: the screen
 and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
@@ -490,7 +490,7 @@ the one named like the spec folder ([research](../specs/005-task-name-from-spec/
 - **Branch:** adopted if Spec Kit's `before_specify` hook made it, else created by Delilah from the spec folder; the task's title as a slug only when the guard needs a branch and there is no spec yet. A taken name gets `-2`, `-3`. A provisional branch renamed later was ruled out: the hook would have created a second one.
 - **The worktree folder keeps the key** (`workspaces/<KEY>`): moving it under a running agent was ruled out. Jira tasks (`feature/<KEY>-<short-name>`) and tasks started before keep their branch.
 - **Guard:** a PreToolUse hook makes the branch before the first code edit, commit, push, merge, rebase or PR, so nothing lands on the base. Failing closed (deny with the reason) was chosen over letting the edit through. It is best-effort: substring match on commands, symlinks not resolved; a full shell parser was judged not worth it.
-- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restaurar" brings it back. Any manual edit (`title_source = manual`) is final.
+- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restore" brings it back. Any manual edit (`title_source = manual`) is final.
 
 ## Fresh task bases
 
@@ -536,7 +536,7 @@ Decided while applying [ui-redesign.md](archive/ui-redesign.md) (spec `007-ui-v2
 **68. One colour, one meaning.** Amber (`--wait`) only means "waiting for you"; blue (`--run`)
 only the status "Working" and the focus ring; the primary button is light grey and
 stands out by lightness, one per view; everything else in progress (a running check, the
-current spec task, a PR "Abierta") is neutral. Tokens are guarded by tests (`tokens.test.ts`
+current spec task, a PR "Open") is neutral. Tokens are guarded by tests (`tokens.test.ts`
 contrast, `styles.test.ts` scale and allowed colours). *Why:* amber and blue were used for
 buttons, tabs and phases, so a glance told nothing. *Ruled out:* an accent colour per area;
 a colour-blind mode for now (pending in status.md).
@@ -595,7 +595,7 @@ end of each setup run, overwritten on retry and removed with the task folder on 
 *Why:* it is a log-like artefact next to `setup.log`, read only for one panel, and a table
 would need a migration for data that never joins anything. *Ruled out:* a `setups` table.
 
-**76. Updating a task's branch is a merge, never a rebase.** "Actualizar rama"
+**76. Updating a task's branch is a merge, never a rebase.** "Update branch"
 (`POST /tasks/{key}/update-branch`) merges the base into the branch; with tracked changes in
 the workspace, off the task's branch, or on a conflict it refuses (the merge is aborted and the
 branch left as it was), and it settles the `base-stale` notice. *Why:* the branch may be

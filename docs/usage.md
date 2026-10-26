@@ -394,7 +394,7 @@ screen shows "Before: ..." with "Restore", and you can edit the title in place a
 time) and a branch named like the spec folder (`005-my-feature`), also in the chosen
 submodules of a parent. If the agent edits code or commits before that, Delilah makes
 the branch first. If it cannot, the Inbox shows it with "Retry". Without a
-branch, "Abrir PR" is refused. A typed branch, a project's template, and Jira tasks follow the paragraph above
+branch, "Open PR" is refused. A typed branch, a project's template, and Jira tasks follow the paragraph above
 (and keep the ticket's title).
 
 **New task with Claude.** Third option in the "New task" dialog, next to Jira

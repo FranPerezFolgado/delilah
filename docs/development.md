@@ -119,7 +119,7 @@ test("my flow", async ({ page, project, scenario }) => {
 | `print` | writes text to the terminal |
 | `hook` | runs the settings' hook for that event with a minimal payload |
 | `sleep_ms` | waits (at most 5000) |
-| `ask` | runs the `AskUserQuestion` `PreToolUse` hook, records the answer, then `PostToolUse`. Each option is a string or `{label, description?, preview?}` (`Nueva tarea` + `Crear` with a `preview` is the task-from-idea card) |
+| `ask` | runs the `AskUserQuestion` `PreToolUse` hook, records the answer, then `PostToolUse`. Each option is a string or `{label, description?, preview?}` (`Nueva tarea` ("New task" card) + `Crear` ("Create") with a `preview` is the task-from-idea card) |
 | `stop` | runs the `Stop` hook with the message |
 | `wait_input` | reads one line from the terminal, records it, runs `UserPromptSubmit` |
 | `fail` | prints the message and runs `StopFailure`, then stays alive reading input (later steps are skipped; the error item stays in the inbox until the session ends) |

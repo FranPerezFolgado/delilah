@@ -21,9 +21,9 @@ Read these before changing anything; keep them true when you change behaviour:
 - [docs/development.md](docs/development.md): running, testing, conventions,
   releasing, gotchas.
 - [docs/vision.md](docs/vision.md): the original plan, for what is not built yet.
-- [README.md](README.md): every feature as the user sees it.
+- [docs/usage.md](docs/usage.md): every feature as the user sees it (the README is a short newcomer page).
 
-When a feature lands, update `docs/status.md` (and the README for user-facing
+When a feature lands, update `docs/status.md` (and docs/usage.md for user-facing
 behaviour); when a decision is taken, add it to `docs/decisions.md`.
 
 ## Versioning: every Spec Kit task bumps the version

@@ -22,7 +22,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - **Every screen redone:** Inbox, board, task screen (header with phase and PR chip, task tab, Chat / Terminal tab, Changes, PR, setup), Jira, projects and project view, settings (with the auto-update preference), "New task", backlog task, project settings, quick open, delete task, idea proposals.
 - **Inbox:** the three-axis vocabulary (`vocab.ts`), notices you can remove one by one or all with "Clear notices" and bring back with "Undo" (`inbox_dismissals`), the new notices "Finished its turn" (a secondary session finished its turn) and PR opened, and the empty state with the last activity.
 - **Chat | Terminal per session**, with `sessions.runtime` as the session's own override (`POST /sessions/{id}/runtime`, `delilah runtime --session`); inline answers to questions and permissions; a pending permission makes the task "Waiting for you".
-- **Tasks:** reopen a done task (`Done → WaitingForUser`, "Undo" after "Mark as done", `delilah reopen`); PR merge from the PR tab ("Merge", with the repo's allowed method and the `gh` account guard); setup failure detail (command, exit code, duration, tail, full log); base update ("main moved ahead N commits · Update branch", a merge, never a rebase); Jira sub-tasks; the board's PR chip and "Hecha" dates (`PrSummary.number`, `Task.finished_at`).
+- **Tasks:** reopen a done task (`Done → WaitingForUser`, "Undo" after "Mark as done", `delilah reopen`); PR merge from the PR tab ("Merge", with the repo's allowed method and the `gh` account guard); setup failure detail (command, exit code, duration, tail, full log); base update ("main moved ahead N commits · Update branch", a merge, never a rebase); Jira sub-tasks; the board's PR chip and "Done" dates (`PrSummary.number`, `Task.finished_at`).
 - **Checkout is now the default** when nothing says otherwise (`POST /runs`, `delilah run|new`; decisions 16 and 57).
 - **Widths and scale:** breakpoints at 1300 px (rail) and 1200 px (overlays), the task header compacts at 960 px of main area (`useWidth.ts`); the sidebar, Inbox, Jira, task screen and board at width.
 - **Per-component English** in `i18n/en/` (a coverage test finds literals missing a translation); the old code, LEGACY CSS and orphan keys are gone.
@@ -61,7 +61,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
-- "New task with Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Stop". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Created from the conversation «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). The sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea. See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md), [#59](decisions.md).
+- "New task with Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Stop". Claude ends with a `Nueva tarea` ("New task" card) confirmation card; `Crear` ("Create") makes a backlog task with the brief as notes and the history event "Created from the conversation «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). The sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea. See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md), [#59](decisions.md).
 
 **Chat view and chat mode (experimental):**
 - Every Claude session of a task or project has a chat view next to the terminal (a Chat / Terminal switch per session, remembered as the task's view): your messages, Claude's text, tool cards (Bash, Edit/Write diffs, Read, Glob…, the full input and result on demand) and question cards, built from the session's transcript; a text field with queued messages and "Stop". `tasks.view` only sets what opens first.
@@ -73,18 +73,18 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
 - A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
 - The Inbox shows failed CI, changes requested and new comments (from anyone but the signed-in account), and "Ask the agent to fix it" sends them to the agent, only when the user chooses.
-- "Abrir PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
+- "Open PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
 - A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
 
 **Branch names:**
 - A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`; a free task gets that proposal only when it is started with a branch typed or a project template, else it starts without a branch and takes the spec folder's name (decision 65).
 - A taken name (local or remote, in any repo of the workspace) gets `-2`, `-3`…; a branch is never reused or renamed.
-- A "Rama" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
+- A "Branch" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
 - `Task.branch` (from the stored workspace) is shown on the task view.
 
 **Project settings** (spec `004-project-config`, personal to the install, in `projects.settings`):
 - A settings screen (Projects › Settings) and `delilah project show|set|unset`: default workspace mode, optional branch template, shared entries, setup command, always/never submodules.
-- A project's optional branch template (null by default, then the proposal above applies) decides the branch format; the "Rama" field of the new task form shows the template's branch at once and then the daemon's answer (decision 49); `delilah new|run` take `--checkout` / `--worktree`.
+- A project's optional branch template (null by default, then the proposal above applies) decides the branch format; the "Branch" field of the new task form shows the template's branch at once and then the daemon's answer (decision 49); `delilah new|run` take `--checkout` / `--worktree`.
 - Shared entries are copied or linked into new worktrees.
 - A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
 
@@ -101,7 +101,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
 
 **Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
-- Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restaurar".
+- Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restore".
 - A guard hook makes the branch before the first edit outside `specs/` or a commit/push/PR; failures show in the Inbox with "Retry".
 - The title is editable in the task screen on any non-archived task.
 
@@ -193,7 +193,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - **PR loop follow-ups:**
   - cross-linked PRs of a changeset (each PR names the others);
   - saving lessons to QMD when a task merges;
-  - "Abrir PR" against a base other than the default branch.
+  - "Open PR" against a base other than the default branch.
 - **UI v2, open items** (from the reviews in `specs/007-ui-v2/progress.md`):
   - **Structure:** `TaskScreen.tsx` (~900 lines) and `App.tsx` (~570) should be split (a data hook plus panes; `useRoute` / `useAppData` / a shell). Deferred on purpose to its own behaviour-neutral PR. Also ~60 raw `<button>` outside the kit and Spanish literals as kind keys where neutral keys would do.
   - **Inbox notices:** the `turn-done` / `pr-opened` rows in `pr_notices` accumulate (never resolved) and their text-hash ids change with the language; `pr_notices` is still the table of those two notices, and a rename to a neutral `notices` is pending ([#74](decisions.md)). Downgrade: an older binary refuses a database at version 21 (say it in the release notes).
