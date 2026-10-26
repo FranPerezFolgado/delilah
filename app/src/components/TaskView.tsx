@@ -11,6 +11,7 @@ import { historyEntry } from "../history";
 import { relativeTime } from "../time";
 import { sessionDot } from "../vocab";
 import { t } from "../i18n";
+import { sessionName } from "../chain";
 import "./TaskView.css";
 
 interface Props {
@@ -266,7 +267,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
             {sessions.map((x) => (
               <div className="tv-srow" key={x.id}>
                 <span className={`tv-dot tv-dot-${sessionDot(x)}`} aria-hidden="true" />
-                <span className="tv-sname">{x.primary && x.kind === "claude" ? t("Claude principal") : x.label}</span>
+                <span className="tv-sname">{sessionName(x)}</span>
                 <span className="tv-skind">{kindLabel(x)}</span>
                 {x.live ? (
                   <Button variant="ghost" size={28} onClick={() => onOpenSession(x.id)}>{t("Abrir")}</Button>

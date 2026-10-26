@@ -488,7 +488,10 @@ included) and opens it in a tab.
   and shells. "+ Claude" and "+ Terminal" in the task, or ⌘⇧T and ⌘T, start one
   as a new tab. ⌘W closes the active tab: a terminal closes at once, a working
   Claude asks first, and the primary one never closes (it ends with the task). A
-  stopped session offers "Reopen". ⌃Tab and ⌃⇧Tab move between tabs.
+  stopped session offers "Reopen". ⌃Tab and ⌃⇧Tab move between tabs. In saving
+  mode each phase's session is named after its phase ("Spec y plan",
+  "Implementación", "Revisión"), also once it is no longer the current one; outside
+  saving mode the primary reads "Claude principal".
 - **Changes** lists what the branch changed in each repo of the workspace (each
   submodule of a parent), with line counts and the diff of each file. It compares
   against where the branch started (its merge-base with `origin/HEAD`, or `main`), so

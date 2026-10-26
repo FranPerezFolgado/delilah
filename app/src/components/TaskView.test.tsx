@@ -258,6 +258,21 @@ describe("sessions", () => {
     fireEvent.click(byText(rows[1] as HTMLElement, "button", "Open")!);
     expect(onOpenSession).toHaveBeenCalledWith("s2");
   });
+
+  it("names phase sessions after their phase, same rule as the tab bar", () => {
+    const sessions = [
+      session({ step: "implement" }),
+      session({ id: "s2", label: "Whatever", primary: false, live: false, state: null, step: "plan" }),
+    ];
+    const { container } = show(running, { sessions });
+    const names = [...container.querySelectorAll(".tv-sessions .tv-sname")].map((e) => e.textContent);
+    expect(names).toEqual(["Implement", "Spec and plan"]);
+  });
+
+  it("keeps «Main Claude» for a primary Claude without a step", () => {
+    const { container } = show(running, { sessions: [session({ step: null })] });
+    expect(container.querySelector(".tv-sessions .tv-sname")?.textContent).toBe("Main Claude");
+  });
 });
 
 describe("failed task", () => {
