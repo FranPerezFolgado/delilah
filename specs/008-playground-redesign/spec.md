@@ -15,6 +15,18 @@ characters, desks that never move). The brief's decisions are settled: per-task 
 the task screen, a building overview in the Playground, Office ↔ Flow toggle, and
 pixtuoid's art (MIT).
 
+## Clarifications
+
+### Session 2026-10-26
+
+- Q: In the separate Playground window, what does clicking a floor do? → A: It opens
+  that floor (with the Oficina/Flujo toggle) inside the separate window, with a way back
+  to the building; the main window is not touched. Clicking a lead character there still
+  opens its terminal in the main window.
+- Q: What drives the token paper stack, given tokens are not tracked per session? → A:
+  Real tokens: the daemon starts tracking the tokens each agent session has used, and
+  the lead desk shows a paper stack by tiers (250K / 2M / 16M).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A task's own office floor (Priority: P1)
@@ -58,6 +70,8 @@ colour with the tool; when a helper ends it walks to the lounge and its desk emp
 7. **Given** two tasks of the same project, **When** their floors are shown, **Then**
    their lead characters wear the same outfit colours; tasks of different projects
    usually wear different ones.
+8. **Given** an agent session that has used 3M tokens, **When** its floor is shown,
+   **Then** its lead desk has the medium paper stack, and hovering it says "3M tokens".
 
 ---
 
@@ -66,9 +80,9 @@ colour with the tool; when a helper ends it walks to the lounge and its desk emp
 The Playground (the sidebar view and its separate window) becomes a building: one small
 floor per task with a live agent, stacked, each labelled with the task key, title and
 phase, showing its agents in miniature and how many of them wait for the user. A counter
-at the top says how many agents in total wait. Clicking a floor opens that task's screen
-on its Oficina tab (in the main window, brought to the front when clicked from the
-separate window).
+at the top says how many agents in total wait. In the main window, clicking a floor opens
+that task's screen on its Oficina tab; in the separate window, it opens the floor right
+there (with the Oficina/Flujo toggle and a way back to the building).
 
 **Why this priority**: the overview of everything running is what the Playground is for;
 without it the per-task floors are only reachable task by task.
@@ -86,7 +100,9 @@ click one and the main window shows that task's Oficina tab.
 3. **Given** an agent waits for the user, **When** the Playground is shown, **Then** its
    floor is highlighted and the top counter includes it.
 4. **Given** the separate Playground window, **When** the user clicks a floor, **Then**
-   the main window comes to the front on that task's Oficina tab.
+   the window shows that floor with the Oficina/Flujo toggle and a way back to the
+   building, and the main window does not change; **When** the user then clicks a lead
+   character, **Then** the main window comes to the front on that agent's terminal.
 5. **Given** no agent is running, **When** the user opens the Playground, **Then** it
    shows an empty building with a short message saying no agent is working.
 
@@ -161,6 +177,8 @@ its details.
   dimmed, under the reconnecting banner, and refresh (history included) on reconnect.
 - The view is hidden (other tab, window minimised): animations and walking stop; they
   resume from the current state when shown.
+- A session's usage records cannot be read (missing, unreadable, other agent): its desk
+  shows no paper stack and nothing else changes.
 - A long or sensitive tool argument: captions, nodes and details show only the short
   prefix already used for captions; nothing beyond what the terminal shows.
 
@@ -185,6 +203,11 @@ its details.
   lounge, stay there briefly, and leave; its desk MUST become free.
 - **FR-006**: The lead characters of agents of the same project MUST wear the same outfit
   colours, chosen deterministically from the project; helpers keep a look per role.
+- **FR-025**: The system MUST know how many tokens each live agent session has used so far
+  (input, output and cache, as the agent reports them), updated as the session works.
+- **FR-026**: Each lead desk MUST show a paper stack that grows with its session's tokens:
+  none below 250K, then a small, medium and large stack from 250K, 2M and 16M; the exact
+  count MUST be in the desk's hover text and accessible name (for example "1.2M tokens").
 - **FR-007**: Clicking a lead character (or focusing it and pressing Enter) MUST open that
   agent's terminal in the task screen.
 
@@ -198,9 +221,11 @@ its details.
   hover), phase, its characters in miniature with their state, and how many of its agents
   wait for the user; floors with a waiting agent MUST be highlighted.
 - **FR-010**: The building MUST show the total number of agents waiting for the user.
-- **FR-011**: Clicking a floor (or focusing it and pressing Enter) MUST open that owner's
-  screen on its Oficina tab; from the separate window this MUST bring the main window to
-  the front.
+- **FR-011**: Clicking a floor (or focusing it and pressing Enter) MUST, in the main
+  window, open that owner's screen on its Oficina tab; in the separate window, show that
+  floor in the window itself (with the Oficina/Flujo toggle and a control back to the
+  building) without changing the main window. Clicking a lead character in the separate
+  window MUST bring the main window to the front on that agent's terminal.
 
 **Flow view**
 
@@ -239,7 +264,7 @@ its details.
 - **FR-023**: Captions, node labels and details MUST show at most the short target already
   used for captions (40 characters), never full commands or file contents.
 - **FR-024**: The current Playground view (desks grouped by project) is replaced by the
-  building; the separate Playground window MUST show the building.
+  building; the separate Playground window MUST open on the building.
 
 ### Key Entities
 
@@ -250,6 +275,8 @@ its details.
 - **Activity event**: one thing an agent session did: tool call started or ended (kind,
   tool, short target, background or not), helper started or ended (role), or turn over;
   with its time and, for helpers' events, which helper.
+- **Session token usage**: tokens used so far by one agent session (total, and by kind:
+  input, output, cache), updated while it works.
 - **Session activity history**: the last 200 activity events of one agent session, kept
   in memory only.
 - **Flow graph**: agents, helpers and tool calls of one owner as nodes with their links,
@@ -282,8 +309,10 @@ its details.
   (decision #79 stays: DOM/SVG, not a canvas); only the subset needed is ported:
   characters (seated, typing, standing, walking, waiting, sleeping) with a few hairstyles
   and outfits recoloured per project, desks with monitors, a lounge corner, plants.
-- The token paper stack from the brief is left out: Delilah does not track tokens per
-  session today. If wanted later it is its own feature.
+- Tokens per session are read from what the agent itself records about its usage (Claude
+  Code's session transcript), not estimated; a session whose usage cannot be read shows no
+  stack. Helpers' tokens count towards their agent's session when the agent records them
+  there.
 - Ambient extras (day/night skyline, weather, pet, sound) are out of scope.
 - The file heatmap of agent-flow is out of scope.
 - "Idle" for `zzz` means an agent session that is live but has finished its turn and is not
