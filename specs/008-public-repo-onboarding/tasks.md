@@ -180,7 +180,7 @@ parallel (different files, no dependency on an unfinished task).
   - add `CHANGELOG.md` to the `--commit` file list;
   - update its header comment.
 - [ ] T035 [US3] Extend `scripts/release/check.mjs`: fail if `CHANGELOG.md` has no line starting with `## [X.Y.Z]` for the version being released, with the message "CHANGELOG.md has no X.Y.Z section: run scripts/bump-version.sh (or git cliff --tag vX.Y.Z -o CHANGELOG.md) on a branch". If `check.mjs` has tests (`scripts/release/*.test.*`), add a case. Document both changes in `docs/development.md` "Releasing".
-- [ ] T036 [US3] Clean `CLAUDE.md`:
+- [X] T036 [US3] Clean `CLAUDE.md`:
   1. Move the personal rules into a new git-ignored `CLAUDE.local.md`: developed on a personal Mac and tested on the work Mac, never copying from work repos, git/gh as the personal account FranPerezFolgado, work credentials on the machine. That file is not committed; check with `git status`.
   2. In `CLAUDE.md` keep the generic versions: "never copy code or data from private repos; use `scripts/make-fixture-parent.sh` and the Jira JSON fixtures"; "if several GitHub accounts are configured, confirm the one gh uses before any remote operation".
   3. Replace the two claude.ai links at the top with `docs/vision.md` (design) and `docs/redesign/` (UI screenshots).

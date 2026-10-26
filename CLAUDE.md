@@ -1,8 +1,7 @@
 # Delilah
 
-Native macOS orchestrator for coding agents, written in Rust. Design doc:
-https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204
-UI mock-ups: https://claude.ai/artifact/6kgvh73UPJWaboZVJiddre
+Native macOS orchestrator for coding agents, written in Rust. Design:
+[docs/vision.md](docs/vision.md). UI screenshots: `docs/redesign/`.
 
 ## Current scope
 
@@ -46,13 +45,12 @@ building and publishing are `make release` on `main` and the tag workflow, as in
 
 ## Ground rules
 
-- Developed on a personal Mac, tested on the work Mac. Never reference or copy
-  anything from the work repos; use `scripts/make-fixture-parent.sh` and Jira
-  JSON fixtures instead.
+- Never copy code or data from private repos; use `scripts/make-fixture-parent.sh` and
+  the Jira JSON fixtures.
 - Agent hooks go in a settings file outside the repo, passed with `claude --settings`;
   never in the worktree or the global `~/.claude`. Spawn agents with a clean env.
-- Git and gh here run as the personal account (FranPerezFolgado). The machine
-  also has work credentials: confirm the account before any remote operation.
+- If several GitHub accounts are configured, confirm the one `gh` uses before any
+  remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.
 
 ## Parallelize by default
