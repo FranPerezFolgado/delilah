@@ -27,6 +27,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-20 | 6 | 6B | verified | 1 | bbc08f3 | decision #81 |
 | WP-21 | 7 | 7A | verified | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
 | WP-22 | 8 | 8A | verified | 1 | 41285a5 | decision #82 |
+| WP-19F | 6 | 6F | verified | 1 | a688a90 | lang.rs/state.rs → English fallback; bare AppleLanguages entries; parseSetting in App |
 | WP-23 | 8 | 8B | pending | 0 | | |
 | WP-24 | 8 | 8C | pending | 0 | | |
 
@@ -45,3 +46,24 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | security | LOW | on re-run, gh release download fetches a stale SHA256SUMS into dist and hashes/attests it; rm it after download | .github/workflows/release.yml:113-122 |
 | 4 | security | LOW | ci.yml has no permissions block; add contents: read | .github/workflows/ci.yml:3-12 |
 | 3 | implementer WP-08 | MEDIUM | the app/DMG/install.sh ship only delilahd; the `delilah` CLI used in the Quickstart must be built from source (documented, not fixed) | README.md, app/src-tauri/tauri.conf.json |
+| 4 | spec | MEDIUM | on a re-run the stale SHA256SUMS in the draft is downloaded, listed and attested (contract: covers every *other* asset, not attested) | .github/workflows/release.yml:113-116 |
+| 4 | spec | MEDIUM | README one-line install exits 3 until a release with SHA256SUMS exists (v1.0.0 has none): tag 1.1.0 soon after merge | README.md:40 |
+| 4 | spec | LOW | any SHA256SUMS fetch failure → exit 3; contract says 404 → 3, download failures → 9 | scripts/install.sh:84 |
+| 4 | spec | LOW | mktemp failure exits 1 (usage code) | scripts/install.sh:54 |
+| 4 | spec | LOW | README advertises DELILAH_INSTALL_DIR; contract says env vars aren't advertised | README.md:36 |
+| 4 | spec | LOW | README build-from-source shows no clone / copy to /Applications (linked to usage.md) | README.md:72-76 |
+| 4 | spec | LOW | test-install.sh has no cases for exit 6/7/9; the no-quarantine assertion can't fail | scripts/test-install.sh:69 |
+| 2 | spec | LOW | history line sits above the title | docs/redesign/README.md:1 |
+| 1 | spec | LOW | tasks/quickstart still say `npx --yes lychee`; lychee is called directly | specs/008-public-repo-onboarding/tasks.md, quickstart.md |
+| 6 | architecture | MEDIUM | shell re-implements the rule instead of reading the daemon's resolved language (e.g. GET /api/v1/language); otherwise record the duplication | app/src-tauri/src/daemon.rs:219-246 |
+| 6 | architecture | MEDIUM | setLanguage("auto") at import mutates the DOM; could move to main.tsx; double navigator guard | app/src/i18n.ts:26 |
+| 6 | architecture | MEDIUM | App stores the raw preference ("fr", 42) in state; Settings then has no matching option. Normalise with parseSetting() | app/src/App.tsx:161-170 |
+| 6 | architecture | LOW | contract table mirrored by hand across TS/Rust; a shared JSON fixture would remove drift | app/src/i18n.test.ts, daemon.rs tests |
+| 3 | spec | MEDIUM | Quickstart needs a hidden build from source for the CLI (Rust not in Requirements) → in WP-04F | README.md:83-95 |
+| 3 | spec | LOW | proposal protocol strings `Nueva tarea`/`Crear` quoted without English label → in WP-04F | docs/*.md |
+| 5 | spec | MEDIUM | CLAUDE.md still points to README as "every feature" → in WP-04F | CLAUDE.md:24,26 |
+| 7 | spec | MEDIUM | secret-scan report predates 23 later commits (re-run: 650 commits, no leaks) → refresh at the end | ~/.delilah/tasks/LIBRE-15/secret-scan.md |
+| 5 | spec | LOW | committed CHANGELOG.md isn't reproducible from cliff.toml (omits 0.2.0); next bump rewrites it | CHANGELOG.md |
+| 5 | spec | LOW | CHANGELOG entries keep Spanish labels from old commit subjects (history) | CHANGELOG.md:41,47,53 |
+| 5 | spec | LOW | no automated test for the git-cliff guard in bump-version.sh | scripts/bump-version.sh |
+| 3 | spec | HIGH | Spanish UI labels left in current docs (Abrir PR, Rama, Restaurar, …) → WP-04F | docs/decisions.md, status.md, architecture.md, usage.md |
