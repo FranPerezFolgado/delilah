@@ -4,11 +4,13 @@
 //! too; the pump only handles what the hooks do not carry (the end of an interrupted
 //! turn, rate limits). Permission requests go to `permissions.rs`.
 
+use chrono::Utc;
 use delilah_agents::runtime::Runtime;
 use delilah_agents::stream::{LimitWindow, StreamEvent};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::progress::{self, Progress};
 use crate::sessions::LiveState;
 use crate::state::AppState;
 
@@ -27,6 +29,18 @@ pub enum Started {
 /// How long, once the process is gone, the pump waits for what it said last to arrive.
 const DRAIN: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// How often, while finished background rows wait to expire, the progress is ticked.
+#[cfg(not(test))]
+const TICK: std::time::Duration = std::time::Duration::from_secs(5);
+#[cfg(test)]
+const TICK: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether a finished row or sub-agent still waits to expire from the progress.
+fn final_rows_wait(p: &Progress) -> bool {
+    p.background.iter().any(|b| b.state != "running")
+        || p.subagents.iter().any(|s| s.state != "running")
+}
+
 /// Starts the session's pump over its lossless events (see `StreamSession::take_events`:
 /// every event but the text, none dropped). The receiver resolves at the first sign of
 /// the agent working, or when the process exits before one.
@@ -42,13 +56,26 @@ pub fn spawn_pump(
     let session = session.to_string();
     let task = task.to_string();
     // The process, to end the pump when it exits even if the `Exited` event never comes.
-    let runtime = app.sessions.get(&session).map(|live| live.runtime);
+    let live = app.sessions.get(&session);
+    let runtime = live.as_ref().map(|live| live.runtime.clone());
     tokio::spawn(async move {
         // Once the process is gone, what it said last is still read; then the pump is done.
         let mut gone = false;
         // Whether the agent has shown any sign of work yet.
         let mut worked = false;
+        // Ticks the progress so finished rows expire; it only runs while some wait.
+        let mut ticker = tokio::time::interval(TICK);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut ticking = false;
+        let mut exit_applied = false;
         loop {
+            let waiting = live
+                .as_ref()
+                .is_some_and(|live| final_rows_wait(&live.progress()));
+            if waiting && !ticking {
+                ticker.reset();
+            }
+            ticking = waiting;
             let event = if gone {
                 tokio::time::timeout(DRAIN, events.recv())
                     .await
@@ -61,9 +88,19 @@ pub fn spawn_pump(
                         gone = true;
                         continue;
                     }
+                    _ = ticker.tick(), if waiting => {
+                        if let Some(live) = &live {
+                            live.update_progress(|p| progress::tick(p, Utc::now()));
+                        }
+                        continue;
+                    }
                 }
             };
             let Some(event) = event else { break };
+            if let Some(live) = &live {
+                live.update_progress(|p| progress::apply(p, &event, Utc::now()));
+            }
+            exit_applied |= matches!(event, StreamEvent::Exited { .. });
             let outcome = match &event {
                 StreamEvent::Exited { .. } => Some(Started::Exited),
                 StreamEvent::RateLimit { .. } => None,
@@ -96,6 +133,14 @@ pub fn spawn_pump(
             }
             if ended {
                 break;
+            }
+        }
+        // The process is gone even if no `Exited` said so: its running work is over.
+        if !exit_applied {
+            if let Some(live) = &live {
+                live.update_progress(|p| {
+                    progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now())
+                });
             }
         }
         // However it ended, nobody is left to answer what the agent asked (unless the
@@ -364,6 +409,73 @@ mod tests {
             kind: Some("five_hour".into()),
             resets_at: Some(4_000_000_000),
         }
+    }
+
+    fn bg_started(id: &str) -> StreamEvent {
+        StreamEvent::Task(delilah_agents::stream::TaskEvent::Started {
+            task_id: id.into(),
+            tool_use_id: None,
+            kind: delilah_agents::stream::TaskKind::Command,
+            description: "sleep".into(),
+            background: true,
+        })
+    }
+
+    fn bg_ended(id: &str) -> StreamEvent {
+        StreamEvent::Task(delilah_agents::stream::TaskEvent::Ended {
+            task_id: id.into(),
+            status: delilah_agents::stream::TaskStatus::Completed,
+            summary: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn every_event_feeds_the_progress() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        assert!(live.progress().has_background());
+        tx.send(bg_ended("b1")).unwrap();
+        until(|| !live.progress().has_background()).await;
+        assert!(!live.progress().has_background());
+        assert_eq!(live.progress().background[0].state, "completed");
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_tick_drops_final_rows_once_they_are_old() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["300"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        tx.send(bg_ended("b1")).unwrap();
+        until(|| live.progress().background.len() == 1).await;
+        assert_eq!(live.progress().background.len(), 1);
+        // The tick judges ages by the wall clock: make the row old.
+        live.update_progress(|p| {
+            p.background[0].ended_at = Some(chrono::Utc::now() - chrono::Duration::seconds(120));
+            true
+        });
+        until(|| live.progress().background.is_empty()).await;
+        assert!(live.progress().background.is_empty());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn the_pump_marks_running_rows_stopped_when_the_process_exits() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        tx.send(StreamEvent::Exited { code: Some(0) }).unwrap();
+        until(|| !live.progress().has_background()).await;
+        assert!(!live.progress().has_background());
     }
 
     #[tokio::test]
