@@ -193,6 +193,32 @@ on the current code and pass after the fix.
 - **SC-004**: The new tests fail on the code before the fix and pass after it, and the
   whole existing test suite still passes.
 
+## Clarifications
+
+### Session 2026-10-26 (from the permissions checklist)
+
+- **Routine actions (SC-001, FR-001, FR-007).** The fixed set used everywhere:
+  1. write a new file inside the workspace;
+  2. edit a file there with a shell command (`sed -i`);
+  3. run a script from the repo;
+  4. `git add` and `git commit`.
+
+  The "needs permission" control action is one that terminal mode also asks about on the
+  same setup. The spike picks it and records it.
+- **The spike gates the fix.** The plan's mechanism must be one the spike showed to give
+  parity. If the spike contradicts the hypothesis, the plan is revised before any code
+  changes.
+- **Which default counts.** The behaviour is the one in effect when the session starts. A
+  session that is relaunched (runtime switch, resume) picks up the current one. Delilah
+  does not store a copy of the user's default.
+- **Denials without an ask.** If the automatic mode refuses an action, the refusal reaches
+  the agent as a tool error and shows in the conversation like any other tool result.
+  There is no card, no autopilot pause, and no new history event, the same as terminal
+  mode.
+- **Detecting a future CLI change.** The fake agent's tests pin the arguments chat mode
+  passes. The spike record names the CLI version, and can be re-run when the CLI is
+  upgraded.
+
 ## Assumptions
 
 - "Terminal mode's behaviour" means what Claude Code applies to an interactive session that
