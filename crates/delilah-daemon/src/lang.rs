@@ -6,6 +6,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use delilah_core::workflow::ProjectWorkflow;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
     Es,
@@ -24,6 +26,30 @@ impl Lang {
     /// The language's name in English, for prompts written in English.
     pub fn name(self) -> &'static str {
         self.pick("Spanish", "English")
+    }
+}
+
+/// The built-in start prompt (a template: `{ticket}`, `{title}`), without slash commands.
+pub fn builtin_start(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Es => "Trabaja en la tarea {ticket}: {title}.",
+        Lang::En => "Work on the task {ticket}: {title}.",
+    }
+}
+
+/// The "Spec Kit (`/feature`)" preset: what projects had before commands were
+/// configurable. The review text is the one of `handoff::step_prompt`, and the
+/// JSON in migration 0022 must stay equal to this (a test checks it).
+pub fn feature_preset(lang: Lang) -> ProjectWorkflow {
+    ProjectWorkflow::Phased {
+        plan: "/feature {task}".to_string(),
+        implement: "/orchestrate {spec_dir}".to_string(),
+        review: lang
+            .pick(
+                "/review de la rama de esta tarea. Después aplica los hallazgos confirmados, actualiza la documentación que hayan dejado obsoleta y haz commit. No hagas push ni abras una PR.",
+                "/review the branch of this task. Then apply the confirmed findings, update the docs they made stale and commit. Do not push or open a PR.",
+            )
+            .to_string(),
     }
 }
 
@@ -97,6 +123,39 @@ impl Current {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_start_names_the_task_and_has_no_command() {
+        for lang in [Lang::Es, Lang::En] {
+            let t = builtin_start(lang);
+            assert!(t.contains("{ticket}") && t.contains("{title}"));
+            assert!(!t.contains('/'));
+            assert!(delilah_core::workflow::validate("f", t, false).is_empty());
+        }
+        assert!(builtin_start(Lang::Es).starts_with("Trabaja"));
+        assert!(builtin_start(Lang::En).starts_with("Work"));
+    }
+
+    #[test]
+    fn feature_preset_is_valid_and_keeps_todays_review_text() {
+        for lang in [Lang::Es, Lang::En] {
+            let w = feature_preset(lang);
+            assert!(delilah_core::workflow::validate_workflow(&w).is_empty());
+            let ProjectWorkflow::Phased {
+                plan,
+                implement,
+                review,
+            } = w
+            else {
+                panic!("phased")
+            };
+            assert_eq!(plan, "/feature {task}");
+            assert_eq!(implement, "/orchestrate {spec_dir}");
+            // Same text as handoff::step_prompt's Review arm.
+            assert!(review.starts_with(lang.pick("/review de la rama", "/review the branch")));
+            assert!(review.ends_with(lang.pick("abras una PR.", "open a PR.")));
+        }
+    }
 
     #[test]
     fn the_default_is_english() {

@@ -5,9 +5,9 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | | run with WP-02 (same file) |
-| WP-02 | 2 | 2A | verified | 1 | | run with WP-01; store.rs literal allowed |
-| WP-03 | 2 | 2B | pending | 0 | | |
+| WP-01 | 1 | 1A | verified | 1 | a1a0733 | run with WP-02 (same file) |
+| WP-02 | 2 | 2A | verified | 1 | a1a0733 | run with WP-01; store.rs literal allowed |
+| WP-03 | 2 | 2B | verified | 1 | | set_start_message instead of BacklogChange field; review text duplicated from handoff::step_prompt (WP-10 to dedupe) |
 | WP-04 | 2 | 2C | pending | 0 | | |
 | WP-05 | 3 | 3A | pending | 0 | | |
 | WP-06 | 4 | 4A | pending | 0 | | |
