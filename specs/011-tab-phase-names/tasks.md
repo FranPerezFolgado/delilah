@@ -86,9 +86,9 @@ to FR-005, research R2/R3).
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T008 [P] Update `docs/usage.md`, in the task screen's "Sessions" bullet (around line 477). Say that in saving mode each phase's session is named after its phase («Spec y plan», «Implementación», «Revisión»), that this also holds once a session is no longer the current one, and that outside saving mode the primary reads «Claude principal».
-- [ ] T009 [P] Add a line to `docs/status.md` (the task screen / saving mode part) saying that session tabs and the Sessions list name phase sessions after their step (LIBRE-24).
-- [ ] T010 [P] Check the e2e selectors in `app/e2e/chat.spec.ts` (lines 89, 170) and `app/e2e/screens.spec.ts` (line 218), which look up the tab «Claude principal». Confirm that the tasks those tests create are not in saving mode, so the selector still matches. If one creates a saving-mode task, change its selector to the step's name. Don't run the e2e suite against the installed app.
+- [X] T008 [P] Update `docs/usage.md`, in the task screen's "Sessions" bullet (around line 477). Say that in saving mode each phase's session is named after its phase («Spec y plan», «Implementación», «Revisión»), that this also holds once a session is no longer the current one, and that outside saving mode the primary reads «Claude principal».
+- [X] T009 [P] Add a line to `docs/status.md` (the task screen / saving mode part) saying that session tabs and the Sessions list name phase sessions after their step (LIBRE-24).
+- [X] T010 [P] Check the e2e selectors in `app/e2e/chat.spec.ts` (lines 89, 170) and `app/e2e/screens.spec.ts` (line 218), which look up the tab «Claude principal». Confirm that the tasks those tests create are not in saving mode, so the selector still matches. If one creates a saving-mode task, change its selector to the step's name. Don't run the e2e suite against the installed app.
 - [ ] T011 Run the full checks: `cd app && npx tsc --noEmit && npx vitest run`. All green.
 - [ ] T012 Try it in a preview following `specs/011-tab-phase-names/quickstart.md` (`scripts/preview.sh --fresh`; never port 7420), or hand the scenarios to `ui-verifier` with the preview URL.
 
