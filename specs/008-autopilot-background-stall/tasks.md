@@ -132,7 +132,7 @@ waits and no nudge or pause.
 - [ ] T017 [P] Add a sentence to decision #39 in `docs/decisions.md`: a turn that ends with background tasks running (`Stop` hook `background_tasks`, `status: "running"`) is not a stall. Say the field is Claude Code's, observed rather than documented, that an unknown shape falls back to the stall rule, and point to `specs/008-autopilot-background-stall/contracts/stop-hook.md`.
 - [ ] T018 [P] Update `docs/status.md`: the fix (autopilot no longer pauses while subagents run), the new fake-claude `stop`/`write` steps and per-command scenarios, and the autopilot e2e test.
 - [ ] T019 [P] Add one line to the autopilot section of `README.md`: autopilot waits while the agent's background subagents run, and only nudges or pauses when the agent has really stopped.
-- [ ] T020 Run every check: `cargo test --workspace`, `cargo fmt --check` and `cargo clippy --workspace -- -D warnings` (as `docs/development.md` lists them). Fix any failures inside this feature's files.
+- [ ] T020 Run every check: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` (docs/development.md). Fix any failures inside this feature's files.
 - [ ] T021 Bump the version with `scripts/bump-version.sh patch --commit` (bug fix: no new behaviour, API or data change), from the version on `main`.
 
 ---
