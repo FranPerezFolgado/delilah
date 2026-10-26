@@ -84,7 +84,7 @@ parallel (different files, no dependency on an unfinished task).
 
 ### Tests first
 
-- [ ] T016 [US2] Write `scripts/test-install.sh` (bash, `set -euo pipefail`, temp dirs only, cleaned with `trap`). It builds a fake release dir: a dummy `Delilah.app` (with `Contents/Info.plist` `CFBundleShortVersionString=9.9.9`) packed as `Delilah_aarch64.app.tar.gz`, plus `SHA256SUMS`. It runs `scripts/install.sh --yes` with `DELILAH_BASE_URL=file://<dir>`, `DELILAH_INSTALL_DIR=<tmp>` and `DELILAH_ARCH` set, and asserts:
+- [X] T016 [US2] Write `scripts/test-install.sh` (bash, `set -euo pipefail`, temp dirs only, cleaned with `trap`). It builds a fake release dir: a dummy `Delilah.app` (with `Contents/Info.plist` `CFBundleShortVersionString=9.9.9`) packed as `Delilah_aarch64.app.tar.gz`, plus `SHA256SUMS`. It runs `scripts/install.sh --yes` with `DELILAH_BASE_URL=file://<dir>`, `DELILAH_INSTALL_DIR=<tmp>` and `DELILAH_ARCH` set, and asserts:
   - (a) a fresh install creates the app and exits 0 with no `com.apple.quarantine` attribute;
   - (b) a reinstall replaces it, exit 0;
   - (c) a tampered archive → exit 4, and the previous app is untouched;
@@ -98,7 +98,7 @@ parallel (different files, no dependency on an unfinished task).
 
 ### Implementation
 
-- [ ] T017 [US2] Write `scripts/install.sh` per [contracts/install-script.md](contracts/install-script.md): bash 3.2-compatible, `set -euo pipefail`, `--yes`/`-h`, the environment variables in the contract, the exit codes 0–9, `mktemp -d` + `trap`, `curl -fL --retry 2`, `shasum -a 256` against the archive's line, `tar -xzf`, the `pgrep -x delilah-app` check, moving the old app aside and `ditto`, restoring it on failure, `xattr -dr com.apple.quarantine` (errors ignored), and printing the installed version. No `sudo`. Make it executable. Then `scripts/test-install.sh` and `shellcheck scripts/install.sh scripts/test-install.sh` must pass.
+- [X] T017 [US2] Write `scripts/install.sh` per [contracts/install-script.md](contracts/install-script.md): bash 3.2-compatible, `set -euo pipefail`, `--yes`/`-h`, the environment variables in the contract, the exit codes 0–9, `mktemp -d` + `trap`, `curl -fL --retry 2`, `shasum -a 256` against the archive's line, `tar -xzf`, the `pgrep -x delilah-app` check, moving the old app aside and `ditto`, restoring it on failure, `xattr -dr com.apple.quarantine` (errors ignored), and printing the installed version. No `sudo`. Make it executable. Then `scripts/test-install.sh` and `shellcheck scripts/install.sh scripts/test-install.sh` must pass.
 - [ ] T018 [P] [US2] Add to `.github/workflows/ci.yml`, in the macOS "Rust workspace" job only, a step that runs `shellcheck scripts/install.sh scripts/test-install.sh` (`brew install shellcheck` if the runner lacks it) and then `scripts/test-install.sh`.
 - [ ] T019 [P] [US2] In `.github/workflows/release.yml`:
   1. Add `id-token: write` and `attestations: write` to `permissions`.
