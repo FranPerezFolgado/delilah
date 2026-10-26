@@ -30,6 +30,20 @@ pub enum StreamStep {
     SleepMs(u64),
     /// The process exits with this code, without finishing the turn.
     Exit(i32),
+    /// The process writes `message` to stderr and exits with `code` before saying
+    /// anything on stdout (not even `system/init`): a CLI that rejects its flags.
+    ExitWithStderr(ExitWithStderr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ExitWithStderr {
+    #[serde(default = "one")]
+    pub code: i32,
+    pub message: String,
+}
+
+fn one() -> i32 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -82,6 +96,8 @@ pub enum Step {
     WaitInput(bool),
     Fail(String),
     Exit(i32),
+    /// Writes `message` to the terminal (it is stderr, for a real CLI) and exits.
+    ExitWithStderr(ExitWithStderr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

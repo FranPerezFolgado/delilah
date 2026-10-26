@@ -7,11 +7,11 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | 32944f0 | R1 confirmed; no escalating control action found |
 | WP-02 | 2 | 2A | done | 1 | a345669 | red weak: agents/fake tests written with code; 2 daemon flakes pass alone |
-| WP-03 | 3 | 3A | implementing | 0 | | |
+| WP-03 | 3 | 3A | verified | 1 | | T015 code-first (no red); e2e needs cargo build -p delilah-daemon first |
 | WP-04 | 4 | 4A | pending | 0 | | |
 | WP-05 | 4 | 4A | verified | 1 | | tests written with code (no red seen) |
 | WP-06 | 5 | 5A | pending | 0 | | |
-| WP-07 | 6 | 6A | pending | 0 | | |
+| WP-07 | 6 | 6A | verified | 1 | 7ac18fa | decision #80 |
 | WP-08 | 6 | 6B | pending | 0 | | |
 
 ## Open findings
@@ -40,3 +40,11 @@ Daemon tests were written first. The agents and fake-scenario tests were written
 - `cargo test -p delilah-daemon`: 813 passed, 2 failed (`conversation::tests::a_message_sent_while_a_card_is_pending_is_queued`, `pr_loop::tests::nudges_in_the_window_make_one_delayed_check`). Both pass when re-run alone, so they are flaky under load.
 - `cargo fmt --all` and `cargo clippy --workspace --all-targets -- -D warnings`: clean.
 - `npx tsc --noEmit` in `app/`: not run, `node_modules` is not installed in this worktree.
+
+### WP-03 Red
+With the call site in `spawn_session` temporarily passing `AgentPermissions::Default` (edited back by hand afterwards; `cargo build -p delilah-daemon` first, since the e2e uses the built `delilahd`): `routine_work_in_chat_mode_raises_no_permission_card` failed (no `--permission-mode auto` in argv), `a_runtime_switch_relaunches_with_the_current_mode` failed, and so did `chat_mode_autopilot_runs_routine_work_and_pauses_only_on_a_real_ask`. The T015 code was written before its tests (only the unit tests and the two start-failure e2e tests cover it, all green); no red run for it.
+
+### WP-03 Green
+- `cargo test -p delilah-e2e`: 79 lib + 6 `chat_permissions` passed.
+- `cargo test -p delilah-daemon`: 817 passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check`: clean.

@@ -1356,8 +1356,10 @@ impl Spawned {
             Err(e) => Some(e),
             Ok(()) => match start.wait(self.timeout).await {
                 Wait::Up => None,
-                Wait::Failed(said) => Some(start_failure(&self.runtime, Some(&said)).await),
-                Wait::Exited | Wait::TimedOut => Some(start_failure(&self.runtime, None).await),
+                Wait::Failed(said) => Some(start_failure(app, &self.runtime, Some(&said)).await),
+                Wait::Exited | Wait::TimedOut => {
+                    Some(start_failure(app, &self.runtime, None).await)
+                }
             },
         };
         match failure {
@@ -1372,7 +1374,7 @@ impl Spawned {
 
 /// The error of a chat-mode agent that did not come up: what it said as its error result,
 /// or else on stderr.
-async fn start_failure(runtime: &Runtime, said: Option<&str>) -> ApiError {
+async fn start_failure(app: &AppState, runtime: &Runtime, said: Option<&str>) -> ApiError {
     let _ = runtime.kill();
     runtime.wait().await;
     let tail = match said.filter(|s| !s.trim().is_empty()) {
@@ -1386,7 +1388,61 @@ async fn start_failure(runtime: &Runtime, said: Option<&str>) -> ApiError {
         "" => "claude printed nothing before it stopped",
         tail => tail,
     };
+    let tail = with_permission_hint(app, tail);
     ApiError::unprocessable(format!("chat mode could not start: {tail}"))
+}
+
+/// Whether `text` is the CLI refusing the `--permission-mode` it was launched with (an
+/// unknown or unavailable mode). Keyed on the rejection's shape, not on the mode named:
+/// `error: option '--permission-mode <mode>' argument '<x>' is invalid. Allowed choices
+/// are ...` (docs/spikes/2026-10-26-chat-permission-mode.md).
+fn rejects_permission_mode(text: &str) -> bool {
+    let text = text.to_lowercase();
+    text.contains("--permission-mode")
+        && ["invalid", "not available", "unavailable"]
+            .iter()
+            .any(|w| text.contains(w))
+}
+
+/// `text` with the hint that names the setting that changes the mode, when the CLI
+/// rejected it (FR-008); any other text as it is.
+fn with_permission_hint(app: &AppState, text: &str) -> String {
+    if !rejects_permission_mode(text) {
+        return text.to_string();
+    }
+    let hint = app.lang().pick(
+        "Ajustes → Permisos de los agentes: prueba \"Por defecto de Claude\"",
+        "Settings → Agent permissions: try \"Claude's default\"",
+    );
+    format!("{text}\n{hint}")
+}
+
+/// A terminal agent that exited with the CLI's rejection of the permission mode on its
+/// screen: the task fails with that line and the hint (FR-008). That text is only printed
+/// at start, so it is an exit before any work.
+async fn fail_if_mode_rejected(app: &AppState, task: &str, pty: &PtySession) {
+    if pty.exit_code().is_none_or(|c| c == 0) || project_of(task).is_some() {
+        return;
+    }
+    let (screen, _) = pty.attach();
+    let screen = String::from_utf8_lossy(&screen).replace('\r', "\n");
+    let said = screen
+        .lines()
+        .map(str::trim)
+        .filter(|l| rejects_permission_mode(l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if said.is_empty() {
+        return;
+    }
+    let key = TaskKey::new(task);
+    let reason = format!(
+        "the agent could not start: {}",
+        with_permission_hint(app, &start_error_tail(&said))
+    );
+    if let Err(e) = app.transition(&key, Event::Fail { reason }).await {
+        tracing::warn!(task = %key, "cannot fail the task: {e}");
+    }
 }
 
 /// Starts the session's process and registers it, but a chat-mode agent is not given its
@@ -1494,10 +1550,17 @@ pub(crate) async fn spawn_session(
     let sessions = Arc::clone(&app.sessions);
     let id = session.id.clone();
     let watched = runtime.clone();
+    let rejection_watch = (session.kind == SessionKind::Claude && kind == RuntimeKind::Pty)
+        .then(|| (app.clone(), session.task.clone()));
     tokio::spawn(async move {
         watched.wait().await;
         sessions.remove_if_same(&id, &watched);
         tracing::info!(session = %id, "session exited");
+        if let Some((app, task)) = rejection_watch
+            && let Some(pty) = watched.as_pty()
+        {
+            fail_if_mode_rejected(&app, &task, pty).await;
+        }
     });
 
     let mut spawned = Spawned {
@@ -1519,7 +1582,7 @@ pub(crate) async fn spawn_session(
             Wait::Up | Wait::TimedOut => None,
         };
         if let Some(said) = early {
-            let e = start_failure(&runtime, said.as_deref()).await;
+            let e = start_failure(app, &runtime, said.as_deref()).await;
             spawned.discard(app).await;
             return Err(e);
         }
@@ -1827,6 +1890,40 @@ mod tests {
         let (p, dir, prompt) = launch_flags(&extra, &config, Auto);
         assert_eq!(p, claude::Permission::Plan);
         assert_eq!((dir, prompt), (None, None));
+    }
+
+    const SPIKE_REJECTION: &str = "error: option '--permission-mode <mode>' argument 'bogus' is invalid. Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.";
+
+    #[test]
+    fn the_cli_rejecting_the_permission_mode_is_recognised_and_nothing_else_is() {
+        assert!(rejects_permission_mode(SPIKE_REJECTION));
+        assert!(rejects_permission_mode(
+            "--permission-mode auto is not available for this account"
+        ));
+        assert!(!rejects_permission_mode("Invalid API key"));
+        assert!(!rejects_permission_mode("no such flag"));
+        assert!(!rejects_permission_mode("--permission-mode auto"));
+    }
+
+    #[tokio::test]
+    async fn a_rejected_permission_mode_gets_the_settings_hint_in_each_language() {
+        let app = app().await;
+        app.lang.set(crate::lang::Lang::En);
+        let said = with_permission_hint(&app, SPIKE_REJECTION);
+        assert!(said.starts_with(SPIKE_REJECTION), "{said}");
+        assert!(
+            said.ends_with("Settings → Agent permissions: try \"Claude's default\""),
+            "{said}"
+        );
+        app.lang.set(crate::lang::Lang::Es);
+        assert!(
+            with_permission_hint(&app, SPIKE_REJECTION)
+                .ends_with("Ajustes → Permisos de los agentes: prueba \"Por defecto de Claude\""),
+        );
+        assert_eq!(
+            with_permission_hint(&app, "Invalid API key"),
+            "Invalid API key"
+        );
     }
 
     #[test]

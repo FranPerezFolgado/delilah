@@ -168,7 +168,7 @@ autopilot.
 
 **Independent Test**: the e2e tests below, with the fake agent, through the whole daemon.
 
-- [ ] T014 [US1] Create `crates/delilah-e2e/tests/chat_permissions.rs`, modelled on
+- [X] T014 [US1] Create `crates/delilah-e2e/tests/chat_permissions.rs`, modelled on
   `a_pending_permission_makes_the_task_wait_and_the_answer_runs_it` in
   `crates/delilah-e2e/tests/ui_v2.rs` (helpers `run_in_worktree`, `wait_item`,
   `event_types`; copy what is needed, don't edit ui_v2.rs). Add these failing-first
@@ -195,7 +195,7 @@ autopilot.
   Show that (a) and (d) fail without the fix. Run them on a temporary WIP commit that
   reverts T012's call-site change (pass `AgentPermissions::Default`), see them fail,
   drop that commit, and record the result in `progress.md`.
-- [ ] T015 [US1] Start-failure hint (FR-008). In `crates/delilah-daemon/src/run.rs`, next
+- [X] T015 [US1] Start-failure hint (FR-008). In `crates/delilah-daemon/src/run.rs`, next
   to the spawn-failure handling, add one function. It matches the CLI's rejection text
   recorded in the spike (T002) and adds the hint «Ajustes → Permisos de los agentes:
   prueba "Por defecto de Claude"» / "Settings → Agent permissions: try "Claude's

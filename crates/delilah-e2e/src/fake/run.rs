@@ -137,6 +137,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 return Flow::Idle;
             }
             Step::Exit(code) => return Flow::Exit(self.end("exit", *code)),
+            Step::ExitWithStderr(e) => {
+                self.print(&format!("{}\n", e.message));
+                return Flow::Exit(self.end("exit", e.code));
+            }
         }
         Flow::Next
     }

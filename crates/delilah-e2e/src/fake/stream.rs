@@ -335,6 +335,11 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     fn turn(&mut self, text: &str) -> Flow {
         let (session, cwd) = (self.record.session_id.clone(), self.record.cwd.clone());
         let steps = self.steps_for(text);
+        // A CLI that rejects its flags dies before it says anything on stdout.
+        if let Some(StreamStep::ExitWithStderr(e)) = steps.first() {
+            eprintln!("{}", e.message);
+            return Flow::Exit(self.end("exit", e.code));
+        }
         self.emit(&json!({"type": "system", "subtype": "init", "session_id": session, "cwd": cwd}));
         self.append("user", &json!({"role": "user", "content": text}));
         self.record.inputs.push(text.to_string());
@@ -353,6 +358,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 },
                 StreamStep::SleepMs(ms) => std::thread::sleep(Duration::from_millis(*ms)),
                 StreamStep::Exit(code) => return Flow::Exit(self.end("exit", *code)),
+                StreamStep::ExitWithStderr(e) => {
+                    eprintln!("{}", e.message);
+                    return Flow::Exit(self.end("exit", e.code));
+                }
             }
             self.record.steps_done += 1;
             self.save();
