@@ -259,12 +259,12 @@ after a relaunch.
 
 **Goal**: the evidence and the tests agree, and stay that way.
 
-- [ ] T019 [US3] Compare the fake's `auto` semantics (T009) and the e2e expectations
+- [X] T019 [US3] Compare the fake's `auto` semantics (T009) and the e2e expectations
   (T014, T016) with the spike table (T002). If escalations arrive as
   `permission_denied` and not as `can_use_tool`, adjust `Tool.auto`'s `ask` semantics
   and T014(b)/(c) to what was observed, and note it in the spike doc. Record the
   comparison in `progress.md`.
-- [ ] T020 [US3] Run the whole suite:
+- [X] T020 [US3] Run the whole suite:
   - `cargo test --workspace`;
   - `cargo test --manifest-path app/src-tauri/Cargo.toml`;
   - `cd app && npx vitest run`;

@@ -96,3 +96,13 @@ Exit code **1**, stdout empty, the message on stderr only (before any session st
 - `git commit` and `sed -i ""` both worked in the throwaway folders; the model rewrote
   `git ...` as `rtk git ...` in the `can_use_tool` input in the no-flag run (the user's
   PreToolUse RTK hook): allow rules must match the rewritten form.
+
+## Escalation channel and the e2e fake (WP-06 check)
+
+Because no escalation was observed, the escalation channel of auto mode is
+**unverified**. The fake (`Tool.auto: "ask"`) models it as a `can_use_tool`
+`control_request`, the channel Delilah's pause logic handles (a card, autopilot
+pauses). The daemon has no handling of `system/permission_denied` at all (no match
+in `crates/delilah-daemon`); it ignores the event, so if auto ever refused that way
+the model would just see the refusal and no card would appear. Nothing is broken
+today; revisit if a real escalation shows up.

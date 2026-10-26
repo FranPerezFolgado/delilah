@@ -11,14 +11,15 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 4 | 4A | done | 1 | 88dfd94 | PERM-9, PERM-10 |
 | WP-05 | 4 | 4A | done | 1 | dbab98f | tests written with code (no red seen) |
 | WP-03F | 3 | 3F | done | 1 | | FR-008 for project sessions, sleep → poll |
-| WP-06 | 5 | 5A | implementing | 0 | | |
+| WP-06 | 5 | 5A | done | 1 | | full suite green |
 | WP-07 | 6 | 6A | verified | 1 | 7ac18fa | decision #80 |
-| WP-08 | 6 | 6B | pending | 0 | | |
+| WP-08 | 6 | 6B | implementing | 0 | | |
 
 ## Open findings
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 5 | evidence | MEDIUM | daemon ignores `system/permission_denied` (no card, no pause, nothing shown); escalation channel under auto is unverified (spike found no escalating action) | crates/delilah-daemon |
 | 4 | spec-compliance | LOW | `deny` under "default" has no e2e | crates/delilah-e2e/tests/chat_permissions.rs |
 | 4 | spec-compliance | LOW | "null shows Auto" vitest passes even if the preference never loads (initial state is auto) | app/src/components/SettingsView.test.tsx |
 | 3 | test | LOW | "no restart" check is a bounded 3 s sleep (justified in a comment) | crates/delilah-e2e/tests/chat_permissions.rs |
@@ -55,4 +56,14 @@ With the call site in `spawn_session` temporarily passing `AgentPermissions::Def
 ### WP-03 Green
 - `cargo test -p delilah-e2e`: 79 lib + 6 `chat_permissions` passed.
 - `cargo test -p delilah-daemon`: 817 passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check`: clean.
+
+### WP-06 Evidence check
+T019: the fake's `auto` semantics (T009: `allow` runs without asking, `ask` raises `can_use_tool`) and the e2e expectations (T014, T016) agree with the spike table (T002): with `--permission-mode auto` routine actions run with no `control_request`, without the flag they all arrive as `can_use_tool`. The spike found NO action that auto escalates, so the escalation channel (`can_use_tool` vs `system/permission_denied`) is **unverified**. Kept `auto: "ask"` as `can_use_tool`. `grep permission_denied crates/delilah-daemon`: no match, so the daemon ignores that event (no card, no pause); nothing broken, no daemon change. Noted in the spike doc.
+
+### WP-06 Full suite
+- `cargo build --workspace` first (e2e runs the built `delilahd`).
+- `cargo test --workspace`: all green (agents 91, daemon 818, e2e 79 lib + `chat_permissions` 6 and the other e2e suites 9/4/22/8/59/19, 28 + 60 in smaller crates). The two WP-02 flakes (`a_message_sent_while_a_card_is_pending_is_queued`, `nudges_in_the_window_make_one_delayed_check`) passed this time.
+- `cargo test --manifest-path app/src-tauri/Cargo.toml`: 4 passed. It first failed to build because the gitignored sidecar `app/src-tauri/binaries/delilahd-aarch64-apple-darwin` was missing; I copied `target/debug/delilahd` there (and made an empty `app/dist`), both gitignored.
+- `cd app && npx tsc --noEmit`: clean. `npx vitest run`: 83 files, 857 tests passed (permission-card, remembered-rule and autopilot-pause tests included, SC-004).
 - `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check`: clean.
