@@ -16,10 +16,4 @@ export function tokenTier(total: number): 0 | 1 | 2 | 3 {
   return 0;
 }
 
-const trim = (n: number) => n.toFixed(1).replace(/\.0$/, "");
-
-export function formatTokens(n: number): string {
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${trim(n / 1000)}K`;
-  return `${trim(n / 1_000_000)}M`;
-}
+export { formatTokens } from "../../format";

@@ -23,8 +23,8 @@ builds on US1's item; US3 only needs the foundational phase.
 **Purpose**: the new module and the shared formatter, with no behaviour change.
 
 - [ ] T001 Create `crates/delilah-agents/src/transcript/background.rs` as a submodule of `crates/delilah-agents/src/transcript.rs` (`mod background;` with `pub use` of what later tasks export), holding only a `#[cfg(test)] mod tests {}` for now; `cargo test -p delilah-agents` stays green
-- [ ] T002 [P] Write failing tests in a new `app/src/format.test.ts` for `duration(secs)` ("0 s", "59 s", "1 min 00 s", "3 min 05 s", negative → "0 s") and `formatTokens(n)` ("950", "1K", "12.3K", "1.2M")
-- [ ] T003 Implement T002: create `app/src/format.ts`, moving `duration` out of `app/src/components/BackgroundStrip.tsx` (which now imports it) and `formatTokens` out of `app/src/playground/art/kinds.ts` (which re-exports it from `../../format`); `BackgroundStrip.test.tsx` and the playground tests stay green unchanged
+- [X] T002 [P] Write failing tests in a new `app/src/format.test.ts` for `duration(secs)` ("0 s", "59 s", "1 min 00 s", "3 min 05 s", negative → "0 s") and `formatTokens(n)` ("950", "1K", "12.3K", "1.2M")
+- [X] T003 Implement T002: create `app/src/format.ts`, moving `duration` out of `app/src/components/BackgroundStrip.tsx` (which now imports it) and `formatTokens` out of `app/src/playground/art/kinds.ts` (which re-exports it from `../../format`); `BackgroundStrip.test.tsx` and the playground tests stay green unchanged
 
 ---
 

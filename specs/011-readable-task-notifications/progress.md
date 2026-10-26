@@ -6,7 +6,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | implementing | 0 | | |
-| WP-02 | 1 | 1A | implementing | 0 | | |
+| WP-02 | 1 | 1A | verified | 1 | | |
 | WP-03 | 2 | 2A | implementing | 0 | | |
 | WP-04 | 2 | 2A | verified | 1 | | |
 | WP-05 | 3 | 3A | pending | 0 | | |
