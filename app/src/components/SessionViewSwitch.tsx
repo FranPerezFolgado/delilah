@@ -22,6 +22,7 @@ export interface SessionViewSwitchProps {
 export function humanError(e: unknown): string {
   const m = e instanceof ApiError ? e.message.toLowerCase() : "";
   if (m.includes("wait for the turn")) return t("Espera a que termine el turno");
+  if (m.includes("segundo plano") || m.includes("background work")) return t("Hay trabajo en segundo plano: espera a que termine o pulsa Detener");
   if (m.includes("switch runtime")) return t("Solo las sesiones de Claude de una tarea cambian de modo.");
   if (m.includes("already runs in")) return t("La sesión ya está en ese modo.");
   if (m.includes("does not exist") || m.includes("not found")) return t("Ya no existe.");

@@ -71,6 +71,11 @@
 //!   payloads report: the terminal baseline.
 //! - `remote`: `--remote-control <name>` together with `-p`. [h] Does it start, what does
 //!   `stderr.log` / `stream.jsonl` say?
+//! - `background` / `background-stop` (specs/010-chat-background-tasks, research.md R9):
+//!   background Bash `sleep 25`, a background sub-agent, a foreground sub-agent, in a
+//!   `make-fixture-parent.sh` workspace; stdin stays open 150 s so self-started turns show.
+//!   `background-stop` also sends `stop_task` for the first background task. Besides the
+//!   usual files, `stdout-stream.jsonl` has the raw stdout lines (the parser fixtures).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -145,6 +150,8 @@ fn main() {
         "routine",
         "pty-baseline",
         "remote",
+        "background",
+        "background-stop",
     ]
     .contains(&scenario.as_str())
     {
@@ -155,8 +162,11 @@ fn main() {
     let prompt_tool = match prompt_tool.as_deref() {
         Some("none") => None,
         Some(other) => Some(other.to_string()),
-        None => matches!(scenario.as_str(), "permission" | "ask" | "routine")
-            .then(|| "stdio".to_string()),
+        None => matches!(
+            scenario.as_str(),
+            "permission" | "ask" | "routine" | "background" | "background-stop"
+        )
+        .then(|| "stdio".to_string()),
     };
     let out = out.unwrap_or_else(|| {
         let secs = chrono::Utc::now().timestamp();
@@ -171,7 +181,7 @@ fn main() {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: claude_stream_spike <turns|resume|permission|interrupt|trust|ask|ask-pty|routine|pty-baseline|remote> \
+        "usage: claude_stream_spike <turns|resume|permission|interrupt|trust|ask|ask-pty|routine|pty-baseline|remote|background|background-stop> \
          [--out <dir>] [--prompt-tool stdio|none] [--permission-mode <mode>]"
     );
     std::process::exit(2);
@@ -240,6 +250,8 @@ fn run(
         "routine" => routine(&ctx),
         "pty-baseline" => pty_baseline(&ctx),
         "remote" => remote(&ctx),
+        "background" => background(&ctx, false),
+        "background-stop" => background(&ctx, true),
         _ => unreachable!(),
     };
     if let Err(err) = &result {
@@ -473,8 +485,12 @@ impl StreamProc {
         let (tx, rx) = channel();
         let log = Arc::clone(&ctx.stream_log);
         let (thread_log, thread_label) = (Arc::clone(&log), label.to_string());
+        let mut raw = std::fs::File::create(ctx.out.join(format!("stdout-{label}.jsonl"))).ok();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Some(f) = raw.as_mut() {
+                    let _ = writeln!(f, "{line}");
+                }
                 let msg = serde_json::from_str(&line).unwrap_or_else(|_| json!({ "raw": line }));
                 log_line(&thread_log, &thread_label, "out", &msg);
                 if tx.send(msg).is_err() {
@@ -1040,6 +1056,83 @@ fn remote(ctx: &Ctx) -> Result<(), String> {
         println!("stderr.log:\n{}", err.trim());
     }
     turn.map(|_| ())
+}
+
+const BACKGROUND_PROMPT: &str = "Do these in order. 1) Start a background Bash command \
+`sleep 25` (run_in_background). 2) Start a background sub-agent (run_in_background) that \
+globs for all files in the workspace and reads three of them. 3) Run a foreground \
+sub-agent that reads one file and reports its first line. Then end your turn right away \
+without waiting. When the background work has finished, write one short line ending with \
+ALL-DONE.";
+
+/// Background work in the stream: prompt, then keep stdin open 150 s answering permission
+/// requests; with `stop` sends `stop_task` for the first background task.
+fn background(ctx: &Ctx, stop: bool) -> Result<(), String> {
+    let parent = ctx.out.join("fixture-env");
+    let ok = Command::new("bash")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/make-fixture-parent.sh"
+        ))
+        .arg(&parent)
+        .stdout(Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?
+        .success();
+    if !ok {
+        return Err("make-fixture-parent.sh failed".into());
+    }
+    let workspace = parent.join("parent");
+    let mut p = StreamProc::spawn(ctx, "stream", &workspace, &new_session(), false, &[])?;
+    p.send_prompt(BACKGROUND_PROMPT);
+    let start = Instant::now();
+    let mut stopped = false;
+    let (mut results, mut inits) = (0, 0);
+    while start.elapsed() < Duration::from_secs(150) {
+        let msg = match p.rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(m) => m,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => {
+                println!("[stream] stdout closed after {:?}", start.elapsed());
+                break;
+            }
+        };
+        let (ty, sub) = (
+            msg["type"].as_str().unwrap_or(""),
+            msg["subtype"].as_str().unwrap_or(""),
+        );
+        match (ty, sub) {
+            ("control_request", _) => answer_control(&mut p, &msg, true),
+            ("result", _) => {
+                results += 1;
+                println!("[stream] result #{results} at {:?}", start.elapsed());
+            }
+            ("system", "init") => {
+                inits += 1;
+                println!("[stream] init #{inits} at {:?}", start.elapsed());
+            }
+            ("system", "task_started") => {
+                println!(
+                    "[stream] task_started {} bg={}",
+                    msg["task_id"], msg["is_backgrounded"]
+                );
+                if stop && !stopped && msg["is_backgrounded"] == true {
+                    stopped = true;
+                    println!("[stream] sending stop_task for {}", msg["task_id"]);
+                    p.send(&json!({
+                        "type": "control_request",
+                        "request_id": "s1",
+                        "request": { "subtype": "stop_task", "task_id": msg["task_id"].clone() }
+                    }));
+                }
+            }
+            ("control_response", _) => println!("[stream] control_response {msg}"),
+            _ => {}
+        }
+    }
+    println!("[stream] done: {inits} inits, {results} results");
+    p.finish();
+    Ok(())
 }
 
 // ------------------------------------------------------------------------ PTY leg

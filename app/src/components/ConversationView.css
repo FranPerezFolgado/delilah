@@ -14,3 +14,9 @@
 
 /* Moved from the pre-v2 stylesheet. */
 .conv { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+
+.conv-working { padding: 4px 16px; font-size: 12px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.conv-working-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: conv-working-pulse 1.2s ease-in-out infinite; }
+.conv-working-clock { font-variant-numeric: tabular-nums; }
+.conv-working-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes conv-working-pulse { 50% { opacity: .3; } }

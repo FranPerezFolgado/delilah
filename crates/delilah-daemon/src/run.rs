@@ -1587,11 +1587,16 @@ pub(crate) async fn spawn_session(
     let sessions = Arc::clone(&app.sessions);
     let id = session.id.clone();
     let watched = runtime.clone();
+    let exit_app = app.clone();
+    let exiting = live.clone();
     let rejection_watch = (session.kind == SessionKind::Claude && kind == RuntimeKind::Pty)
         .then(|| (app.clone(), session.task.clone(), session.id.clone()));
     let spawned_at = std::time::Instant::now();
     tokio::spawn(async move {
         watched.wait().await;
+        // A Stop held behind background work applies first, as after a normal turn end;
+        // this process's own session, even if already out of the registry, never a newer one's.
+        crate::stream_events::on_process_exit(&exit_app, &exiting).await;
         sessions.remove_if_same(&id, &watched);
         tracing::info!(session = %id, "session exited");
         if let Some((app, task, session)) = rejection_watch
@@ -3676,6 +3681,68 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(app.sessions.get("sess-1").is_none(), "gone once it died");
+    }
+
+    #[tokio::test]
+    async fn a_stream_exit_with_a_held_stop_replays_it_after_stopping_the_rows() {
+        let (app, ws) = chat_app("sleep 1.5\nexit 0", true).await;
+        let key = TaskKey::new("PROJ-1");
+        for event in [Event::Start, Event::WorkspaceReady] {
+            app.transition(&key, event).await.unwrap();
+        }
+        let record = session("PROJ-1", "Main");
+        app.store.create_session(&record).await.unwrap();
+        spawn_session(
+            &app,
+            &record,
+            &ws,
+            None,
+            true,
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+            false,
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        let live = app.sessions.get("sess-1").expect("up");
+        live.set_state(crate::sessions::LiveState::Working);
+        live.update_progress(|p| {
+            crate::progress::apply(
+                p,
+                &delilah_agents::stream::StreamEvent::Task(
+                    delilah_agents::stream::TaskEvent::Started {
+                        task_id: "b1".into(),
+                        tool_use_id: None,
+                        kind: delilah_agents::stream::TaskKind::Command,
+                        description: "sleep".into(),
+                        background: true,
+                    },
+                ),
+                chrono::Utc::now(),
+            )
+        });
+        assert!(live.hold_stop_if_background(
+            serde_json::json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" })
+        ));
+        for _ in 0..100 {
+            if app.sessions.get("sess-1").is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(app.sessions.get("sess-1").is_none(), "gone once it exited");
+        assert_eq!(
+            live.state(),
+            crate::sessions::LiveState::Waiting,
+            "the Stop applied"
+        );
+        assert!(!live.has_held_stop());
+        assert_eq!(live.progress().background[0].state, "stopped");
+        assert_eq!(
+            app.store.get_task(&key).await.unwrap().unwrap().status,
+            TaskStatus::WaitingForUser
+        );
     }
 
     #[tokio::test]
