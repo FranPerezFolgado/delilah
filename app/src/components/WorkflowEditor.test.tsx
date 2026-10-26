@@ -60,6 +60,36 @@ describe("WorkflowEditor", () => {
     expect(onChange).toHaveBeenLastCalledWith({ kind: "phased", plan: "/a", implement: "/z", review: "/c" });
   });
 
+  it("fetches the skills once for all three phased fields, each with a picker", async () => {
+    const spy = vi.spyOn(api, "projectSkills").mockResolvedValue(skills);
+    const onChange = setup({ kind: "phased", plan: "/a", implement: "/b", review: "/c" });
+    await screen.findAllByText("/fix");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText("/fix")).toHaveLength(3);
+    fireEvent.click(screen.getAllByText("/fix")[2].closest("button")!);
+    expect(onChange).toHaveBeenLastCalledWith({ kind: "phased", plan: "/a", implement: "/b", review: "/fix {ticket}" });
+  });
+
+  it("mentions {spec_dir} only on implement, and {ticket}, {title}, {task} everywhere", () => {
+    const { container } = render(
+      <WorkflowEditor project="web" value={{ kind: "phased", plan: "", implement: "", review: "" }} errors={[]} onChange={() => {}} />,
+    );
+    const helps = Array.from(container.querySelectorAll(".field .ps-help")).map((e) => e.textContent ?? "");
+    expect(helps).toHaveLength(3);
+    expect(helps.filter((h) => h.includes("{spec_dir}"))).toHaveLength(1);
+    expect(helps.every((h) => h.includes("{ticket}") && h.includes("{title}") && h.includes("{task}"))).toBe(true);
+    expect(helps[1]).toContain("{spec_dir}");
+  });
+
+  it("shows the blank errors of implement and review next to their fields", () => {
+    const { container } = render(
+      <WorkflowEditor project="web" value={{ kind: "phased", plan: "", implement: "", review: "" }}
+        errors={[{ field: "workflow.implement", code: "workflow.blank", message: "blank" }, { field: "workflow.review", code: "workflow.blank", message: "blank" }]} onChange={() => {}} />,
+    );
+    expect(container.querySelector('[data-field="workflow.implement"]')).toBeTruthy();
+    expect(container.querySelector('[data-field="workflow.review"]')).toBeTruthy();
+  });
+
   it("warns when the skill is not found, and only then", async () => {
     const { rerender } = render(
       <WorkflowEditor project="web" value={{ kind: "single", start: { type: "message", template: "/nope {ticket}" } }} errors={[]} onChange={() => {}} />,
@@ -74,6 +104,13 @@ describe("WorkflowEditor", () => {
 
   it("no warning when the skills failed to load", async () => {
     vi.spyOn(api, "projectSkills").mockRejectedValue(new Error("x"));
+    setup({ kind: "single", start: { type: "message", template: "/nope" } });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("no warning when the skill list is empty", async () => {
+    vi.spyOn(api, "projectSkills").mockResolvedValue([]);
     setup({ kind: "single", start: { type: "message", template: "/nope" } });
     await new Promise((r) => setTimeout(r, 10));
     expect(screen.queryByRole("alert")).toBeNull();

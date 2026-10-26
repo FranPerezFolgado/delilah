@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, hhmm, type Handoff, type InboxItem } from "../api";
 import { HandoffActions } from "./HandoffActions";
 import { Button, Count, Icon, InboxKind, pushToast, Row, Skeleton } from "./ui";
-import { AskCard } from "./AskCard";
+import { AskCard, useProjectSettings } from "./AskCard";
 import { locale, t } from "../i18n";
 import { isSendKey } from "../keys";
 import { on } from "../live";
@@ -289,6 +289,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
       live = false;
     };
   }, [item.kind, item.task, item.text]);
+  const projectSettings = useProjectSettings(item.task.startsWith("@") ? item.task.slice(1) : null, !!item.ask?.proposal);
   const view = kindOf(item.kind);
   const s = item.session;
   const canReply = (item.kind === "question" || item.kind === "waiting") && s?.live && !item.ask;
@@ -334,7 +335,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
       </header>
 
       {item.ask ? (
-        <AskCard variant="inbox" keys nav={nav} ask={item.ask} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />
+        <AskCard variant="inbox" keys nav={nav} ask={item.ask} projectSettings={projectSettings} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />
       ) : item.permission && s ? (
         <AskCard variant="inbox" keys nav={nav} permission={{ sessionId: s.id, ask: item.permission }} onDone={onChanged} />
       ) : (

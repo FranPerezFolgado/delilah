@@ -75,7 +75,8 @@ describe("NewTaskDialog origins", () => {
   });
 });
 
-const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS }];
+const phasedSettings = { ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased" as const, plan: "/p", implement: "/i", review: "/r" } };
+const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature", settings: phasedSettings }];
 const started: Task = {
   created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "LIBRE-1",
   title: "t",
@@ -190,13 +191,26 @@ describe("NewTaskDialog autopilot", () => {
     expect(run.mock.calls[0][0].autopilot).toBe(false);
   });
 
-  it("is hidden outside the spec workflow", () => {
+  it("is hidden, with a reason, when the project's workflow is not phased", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const { container } = render(
       <NewTaskDialog projects={[{ ...web, workflow: "custom" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
     expect(btn(container, "Autopiloto")).toBeUndefined();
-    expect(btn(container, "Ahorro")).toBeDefined();
+    expect(btn(container, "Ahorro")).toBeUndefined();
+    expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
+  });
+
+  it("a non-phased task is sent with saving mode off even if the preference is on", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(true);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = render(
+      <NewTaskDialog projects={[web]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    await Promise.resolve();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].saving_mode).toBe(false);
   });
 });
 

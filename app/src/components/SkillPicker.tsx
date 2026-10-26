@@ -1,7 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Skill } from "../api";
 import { t } from "../i18n";
 import "./SkillPicker.css";
+
+/** Loads a project's skills once. `null` while loading or when the request failed (free text still works). */
+export function useSkills(project: string): Skill[] | null {
+  const [skills, setSkills] = useState<Skill[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    setSkills(null);
+    api.projectSkills(project).then(
+      (list) => live && setSkills(list),
+      () => live && setSkills(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [project]);
+  return skills;
+}
 
 const sourceLabel = (s: Skill): string =>
   s.source === "project" ? t("proyecto") : s.source === "user" ? t("usuario") : t("plugin");
@@ -11,38 +28,19 @@ const sourceLabel = (s: Skill): string =>
  * list of the skills and commands Claude Code can run in the project. Picking one fills the
  * field with `/<name> {ticket}`.
  */
-export function SkillPicker({ project, value, onChange, label, onSkills }: {
-  project: string;
+export function SkillPicker({ skills, value, onChange, label }: {
+  /** The project's skills (see `useSkills`); null while loading or when the list failed. */
+  skills: Skill[] | null;
   value: string;
   onChange: (command: string) => void;
   /** Accessible name of the field. */
   label?: string;
-  /** Called with the loaded list, or `null` while loading / when it failed to load. */
-  onSkills?: (skills: Skill[] | null) => void;
 }) {
-  const [skills, setSkills] = useState<Skill[]>([]);
   const [query, setQuery] = useState("");
-  const report = useRef(onSkills);
-  report.current = onSkills;
-
-  useEffect(() => {
-    let live = true;
-    report.current?.(null);
-    api.projectSkills(project).then(
-      (list) => {
-        if (!live) return;
-        setSkills(list);
-        report.current?.(list);
-      },
-      () => live && setSkills([]),
-    );
-    return () => {
-      live = false;
-    };
-  }, [project]);
+  const all = skills ?? [];
 
   const q = query.trim().toLowerCase();
-  const shown = skills.filter((s) => !q || `${s.name} ${s.description}`.toLowerCase().includes(q));
+  const shown = all.filter((s) => !q || `${s.name} ${s.description}`.toLowerCase().includes(q));
 
   return (
     <div className="skill-picker">

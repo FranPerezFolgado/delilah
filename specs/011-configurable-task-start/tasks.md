@@ -90,9 +90,9 @@ task comes before the task that implements it.
 - [ ] T033 [US3] Write failing tests in `crates/delilah-daemon/src/handoff.rs`: `step_prompt` renders the project's `implement` with `{spec_dir}` and `review` from a phased workflow (custom commands, not `/orchestrate`/`/review`); with the `/feature` preset the output equals today's (`/orchestrate specs/x`, the review text); `try_start` on a project that is no longer phased fails with the localised "el flujo del proyecto ya no es por fases" error through the existing hand-off error path; update the existing `step_prompt` tests
 - [ ] T034 [US3] Implement T033 in `crates/delilah-daemon/src/handoff.rs` (`step_prompt(lang, step, dir, &ProjectWorkflow, vars)`, project lookup in `try_start`)
 - [ ] T035 [US3] Add a run test in `crates/delilah-daemon/src/run.rs`: phased project with custom plan command → first prompt is the rendered plan + saving-mode note; `PUT /settings` with a phased workflow missing `review` → `workflow.blank` (test in `projects.rs`)
-- [ ] T036 [US3] Extend `app/src/components/WorkflowEditor.tsx` and its tests with the phased mode (three fields, each with the `SkillPicker`, `{spec_dir}` hint on implement)
-- [ ] T037 [US3] In `app/src/components/NewTaskDialog.tsx` and `app/src/components/BacklogTaskView.tsx`, compute `autopilotAllowed`/saving-mode visibility with `isPhased` (replacing `workflow === "feature"`), with a short reason when hidden; update `NewTaskDialog.test.tsx` and `BacklogTaskView.test.tsx`
-- [ ] T038 [US3] Offer "Create and launch on autopilot" in `app/src/components/ProposalCard.tsx` only when the project is phased (`isPhased`), with a test in `app/src/components/ProposalCard.test.tsx`
+- [X] T036 [US3] Extend `app/src/components/WorkflowEditor.tsx` and its tests with the phased mode (three fields, each with the `SkillPicker`, `{spec_dir}` hint on implement)
+- [X] T037 [US3] In `app/src/components/NewTaskDialog.tsx` and `app/src/components/BacklogTaskView.tsx`, compute `autopilotAllowed`/saving-mode visibility with `isPhased` (replacing `workflow === "feature"`), with a short reason when hidden; update `NewTaskDialog.test.tsx` and `BacklogTaskView.test.tsx`
+- [X] T038 [US3] Offer "Create and launch on autopilot" in `app/src/components/ProposalCard.tsx` only when the project is phased (`isPhased`), with a test in `app/src/components/ProposalCard.test.tsx`
 
 **Checkpoint**: a phased project with Spec Kit's official commands hands off with them; single-start projects never show saving mode or autopilot.
 

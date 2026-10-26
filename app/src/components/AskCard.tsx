@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, type AskQuestion, type PermissionAsk, type PermissionDecision } from "../api";
+import { api, type AskQuestion, type Project, type PermissionAsk, type PermissionDecision } from "../api";
 import { t } from "../i18n";
 import { Markdown } from "./Markdown";
-import { ProposalCard } from "./ProposalCard";
+import { ProposalCard, type ProposalProps } from "./ProposalCard";
 import { Button, IconButton } from "./ui";
 import "./AskCard.css";
+
+/** The settings of a project (an idea conversation's task key is `@name`), fetched only when `enabled`. */
+export function useProjectSettings(project: string | null | undefined, enabled: boolean): Project["settings"] | undefined {
+  const [settings, setSettings] = useState<Project["settings"]>();
+  useEffect(() => {
+    if (!enabled || !project) return;
+    let live = true;
+    api.projects().then((ps) => live && setSettings(ps.find((p) => p.name === project)?.settings), () => {});
+    return () => {
+      live = false;
+    };
+  }, [project, enabled]);
+  return settings;
+}
 
 export type AskVariant = "inbox" | "inline" | "chat";
 
@@ -27,6 +41,8 @@ export interface AskCardProps {
   nav?: { index: number; total: number; onChange: (index: number) => void };
   /** Listens to 1–3 and ⌫ outside text fields, and says so in a hint line. */
   keys?: boolean;
+  /** Settings of the project a proposal creates its task in (autopilot needs a phased workflow). */
+  projectSettings?: ProposalProps["projectSettings"];
   /** Opens the task a proposal created. */
   onOpenTask?: (key: string) => void;
   /** Called once answered or sent back to the terminal. */
@@ -57,8 +73,8 @@ function useCardKeys(enabled: boolean | undefined, pick: (n: number) => void, re
 /** One card for everything that waits on the user, by kind: Pregunta, Permiso, Aviso.
  *  The Bandeja, the Tarea tab and the chat all use it. */
 export function AskCard(props: AskCardProps) {
-  const { ask, permission, notice, variant = "inline", nav, keys, onDone, onOpenTask } = props;
-  if (ask?.proposal) return <ProposalCard ask={{ ...ask, proposal: ask.proposal }} onDone={onDone} onOpenTask={onOpenTask} />;
+  const { ask, permission, notice, variant = "inline", nav, keys, onDone, onOpenTask, projectSettings } = props;
+  if (ask?.proposal) return <ProposalCard ask={{ ...ask, proposal: ask.proposal }} projectSettings={projectSettings} onDone={onDone} onOpenTask={onOpenTask} />;
   const hint = keys && !permission?.ended ? <p className="ac-hint">{t("Teclas 1–3 y ⌫: solo funcionan fuera de los campos de texto.")}</p> : null;
   return (
     <div className={`ac ac-${variant} ask`}>

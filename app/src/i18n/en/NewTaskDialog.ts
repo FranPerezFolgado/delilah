@@ -10,4 +10,6 @@ export const EN: Record<string, string> = {
   "Tu checkout tiene cambios sin guardar. Guárdalos o descártalos, o inicia la tarea en un worktree aislado.":
     "Your checkout has unsaved changes. Save or discard them, or start the task in an isolated worktree.",
   "Iniciar en un worktree": "Start in a worktree",
+  "Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).":
+    "Saving mode and autopilot are only available with a phased workflow (set it in the project settings).",
 };

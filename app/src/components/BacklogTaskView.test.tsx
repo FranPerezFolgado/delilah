@@ -8,7 +8,7 @@ import { ToastHost, clearToasts } from "./ui";
 
 vi.mock("./WherePicker", async (orig) => ({ ...(await orig<typeof import("./WherePicker")>()), WherePicker: () => null }));
 
-const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS };
+const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: { ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased", plan: "/p", implement: "/i", review: "/r" } } };
 const task: Task = {
   key: "LIBRE-9",
   created_at: new Date(Date.now() - 26 * 3_600_000).toISOString(),
@@ -142,8 +142,17 @@ describe("BacklogTaskView autopilot", () => {
     expect(toggle(container, "Ahorro").title).toBe("Una sesión de Claude nueva por fase, para gastar menos contexto");
   });
 
-  it("is hidden for a task outside the spec workflow", () => {
+  it("is hidden, with a reason, for a task outside the project workflow", () => {
     const { container } = mount({ ...task, workflow: "prompt" });
-    expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Ahorro"]);
+    expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
+    expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
+  });
+
+  it("is hidden when the project's workflow is not phased", () => {
+    const { container } = render(
+      <BacklogTaskView task={task} projects={[{ ...web, settings: DEFAULT_PROJECT_SETTINGS }]} onChanged={() => {}} />,
+    );
+    expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
+    expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
   });
 });

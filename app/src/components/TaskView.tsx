@@ -6,7 +6,7 @@ import { isSetupRunning, kindLabel } from "./sessionLabels";
 import { on } from "../live";
 import { Button, ConfirmDialog, dismissToast, Icon, Menu, pushToast, Skeleton, StatusBadge } from "./ui";
 import { SpecPanel } from "./SpecPanel";
-import { AskCard } from "./AskCard";
+import { AskCard, useProjectSettings } from "./AskCard";
 import { historyEntry } from "../history";
 import { relativeTime } from "../time";
 import { sessionDot } from "../vocab";
@@ -136,6 +136,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
   const pending = asks.filter((a) => a.ask || a.permission);
   const at = Math.min(askAt, Math.max(0, pending.length - 1));
   const current = pending[at];
+  const projectSettings = useProjectSettings(task.project, !!current?.ask?.proposal);
   const menu = [
     { label: t("Abrir cambios"), onSelect: onViewChanges, disabled: !hasWorkspace },
     { label: t("Archivar workspace"), onSelect: () => archive(false), disabled: !canArchive(s) || busy },
@@ -209,6 +210,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
           key={current.ask?.id ?? current.id}
           variant="inline"
           ask={current.ask}
+          projectSettings={projectSettings}
           permission={!current.ask && current.permission && current.session ? { sessionId: current.session.id, ask: current.permission } : undefined}
           nav={{ index: at, total: pending.length, onChange: setAskAt }}
           onOpenTask={onOpenTask}

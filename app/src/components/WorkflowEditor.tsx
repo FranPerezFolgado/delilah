@@ -1,8 +1,7 @@
-import { useState } from "react";
-import type { ProjectSettings, SettingsError, Skill, Start } from "../api";
+import type { ProjectSettings, SettingsError, Start } from "../api";
 import { t } from "../i18n";
 import { workflowPresets } from "../workflowPresets";
-import { SkillPicker } from "./SkillPicker";
+import { SkillPicker, useSkills } from "./SkillPicker";
 import "./WorkflowEditor.css";
 
 type ProjectWorkflow = NonNullable<ProjectSettings["workflow"]>;
@@ -26,7 +25,7 @@ export function WorkflowEditor({ project, value, errors, onChange }: {
   errors: Fields;
   onChange: (w: ProjectWorkflow) => void;
 }) {
-  const [skills, setSkills] = useState<Skill[] | null>(null);
+  const skills = useSkills(project);
   const workflow: ProjectWorkflow = value ?? { kind: "single", start: { type: "builtin" } };
   const presets = workflowPresets();
 
@@ -47,18 +46,23 @@ export function WorkflowEditor({ project, value, errors, onChange }: {
 
   const template = workflow.kind === "single" && workflow.start.type === "message" ? workflow.start.template : null;
   const name = template === null ? null : leadingSkill(template);
-  const missing = name !== null && skills !== null && !skills.some((s) => s.name === name);
+  const missing = name !== null && skills !== null && skills.length > 0 && !skills.some((s) => s.name === name);
+
+  const help = (key: "plan" | "implement" | "review") =>
+    key === "implement"
+      ? t("Usa {ticket}, {title} y {task}; {spec_dir} es la carpeta de la spec.", { ticket: "{ticket}", title: "{title}", task: "{task}", spec_dir: "{spec_dir}" })
+      : t("Usa {ticket}, {title} y {task}.", { ticket: "{ticket}", title: "{title}", task: "{task}" });
 
   const phasedField = (key: "plan" | "implement" | "review", label: string) => {
     if (workflow.kind !== "phased") return null;
     return (
-      <label className="field" key={key}>
+      <div className="field" key={key}>
         <span>{label}</span>
-        {/* T036 puts a SkillPicker here. */}
-        <input className="input mono" name={`workflow-${key}`} value={workflow[key]}
-          onChange={(e) => onChange({ ...workflow, [key]: e.target.value })} />
+        <SkillPicker skills={skills} value={workflow[key]} label={label}
+          onChange={(v) => onChange({ ...workflow, [key]: v })} />
+        <span className="ps-help">{help(key)}</span>
         <Err field={`workflow.${key}`} />
-      </label>
+      </div>
     );
   };
 
@@ -88,14 +92,13 @@ export function WorkflowEditor({ project, value, errors, onChange }: {
           {template !== null && (
             <div className="field">
               <SkillPicker
-                project={project}
+                skills={skills}
                 value={template}
                 label={t("Comando")}
-                onSkills={setSkills}
                 onChange={(v) => onChange({ kind: "single", start: { type: "message", template: v } })}
               />
               {missing && <span role="alert" className="wf-warning">{t("Delilah no encuentra la skill {name}; puedes guardar igualmente.", { name: `/${name}` })}</span>}
-              <span className="ps-help">{t("Se envía al empezar la tarea. Usa {ticket} para el número del ticket.", { ticket: "{ticket}" })}</span>
+              <span className="ps-help">{t("Se envía al empezar la tarea. Usa {ticket}, {title} y {task}.", { ticket: "{ticket}", title: "{title}", task: "{task}" })}</span>
               <Err field="workflow.start.template" />
             </div>
           )}

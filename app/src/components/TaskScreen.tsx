@@ -840,7 +840,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
                       <div className="ask-bar">
                         <div className="sec">{t("El agente te pregunta")}</div>
                         {sessionAsks.map((a) => (
-                          <AskCard key={a.ask!.id} ask={a.ask!} onDone={onChanged} onOpenTask={onOpenTask} />
+                          <AskCard key={a.ask!.id} ask={a.ask!} projectSettings={project?.settings} onDone={onChanged} onOpenTask={onOpenTask} />
                         ))}
                       </div>
                     )}

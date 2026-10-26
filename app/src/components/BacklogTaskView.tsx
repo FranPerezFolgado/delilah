@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, isCheckoutDirty, type Project, type Task } from "../api";
 import { t } from "../i18n";
+import { isPhased } from "../workflowPresets";
 import { relativeTime } from "../time";
 import { AutopilotControls } from "./AutopilotControls";
-import { isSpecWorkflow } from "./NewTaskDialog";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
-import { Button, ConfirmDialog, StatusBadge, Toggle, useToast } from "./ui";
+import { Button, ConfirmDialog, StatusBadge, useToast } from "./ui";
 import "./BacklogTaskView.css";
 
 interface Props {
@@ -54,8 +54,8 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     where !== whereOf(task.in_checkout, savedProject) ||
     savingMode !== task.saving_mode ||
     autopilot !== !!task.autopilot;
-  // Only the spec workflow has autopilot.
-  const autopilotAllowed = isSpecWorkflow(task.workflow);
+  // Saving mode and autopilot only exist in a phased workflow (of the selected project).
+  const autopilotAllowed = isPhased(task.workflow, projects.find((p) => p.name === project)?.settings);
   const locked = busy || !!started;
   const open = (key: string) => (onOpen ?? onChanged)(key);
 
@@ -76,7 +76,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
 
   const save = () =>
     guard(async () => {
-      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: where === "checkout", saving_mode: savingMode || autopilot, autopilot: autopilot && autopilotAllowed });
+      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: where === "checkout", saving_mode: autopilotAllowed && (savingMode || autopilot), autopilot: autopilot && autopilotAllowed });
       onChanged();
     });
 
@@ -88,7 +88,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
         project,
         submodules: [],
         in_checkout: inCheckout,
-        saving_mode: savingMode || autopilot,
+        saving_mode: autopilotAllowed && (savingMode || autopilot),
         ...(autopilotAllowed ? { autopilot } : {}),
         notes,
       });
@@ -140,9 +140,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
             onSavingMode={setSavingMode}
           />
         ) : (
-          <div className="apc">
-            <Toggle label={t("Ahorro")} pressed={savingMode} disabled={locked} onChange={setSavingMode} title={t("Una sesión de Claude nueva por fase, para gastar menos contexto")} />
-          </div>
+          <p className="muted small">{t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</p>
         )}
         <label className="field">
           <span>{t("Notas (el agente las recibe al empezar)")}</span>

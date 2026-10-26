@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api, isCheckoutDirty, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
+import { isPhased } from "../workflowPresets";
 import { t } from "../i18n";
 import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
-import { Button, Dialog, Segmented, Toggle } from "./ui";
+import { Button, Dialog, Segmented } from "./ui";
 import "./NewTaskDialog.css";
-
-// The spec workflow: "project", or its legacy name "feature".
-export const isSpecWorkflow = (w: string | undefined | null) => w === "project" || w === "feature";
 
 /** A ticket to start from, e.g. picked in the Jira view. */
 export interface TaskDraft {
@@ -86,9 +84,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     if (!whereTouched.current && project) setWhere(whereOf(null, project, unsetWhere));
   }, [project?.name]);
 
-  // Only the spec workflow has autopilot; a custom prompt runs outside it.
+  // Saving mode and autopilot only exist in a phased workflow; a custom prompt runs outside it.
   const workflow = prompt.trim() ? "prompt" : (existing?.workflow ?? project?.workflow);
-  const autopilotAllowed = isSpecWorkflow(workflow);
+  const autopilotAllowed = isPhased(workflow ?? "", project?.settings);
   const autopilotOn = autopilot && autopilotAllowed;
   // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
   const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
@@ -246,7 +244,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: inCheckout,
-        saving_mode: savingMode || autopilotOn,
+        saving_mode: autopilotAllowed && (savingMode || autopilotOn),
         ...autopilotField,
         view,
         ...(chat || existing ? { chat_mode: chat } : {}),
@@ -277,7 +275,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode || autopilotOn,
+        saving_mode: autopilotAllowed && (savingMode || autopilotOn),
         ...autopilotField,
         view,
         ...(chatMode ? { chat_mode: true } : {}),
@@ -408,9 +406,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                     onSavingMode={setSaving}
                   />
                 ) : (
-                  <Toggle label={t("Ahorro")} pressed={savingMode} onChange={setSaving} />
+                  <span className="muted ntd-help">{t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
                 )}
-                <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>
+                {autopilotAllowed && <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>}
               </div>
             )}
             {origin !== "claude" && project?.kind === "parent" && (
