@@ -14,12 +14,12 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 3 | 3A | done | 1 | 20cb4c1 | live.ts emitter exported, view uses own socket |
 | WP-05F | 2 | fix | done | 1 | ed96262 | phase 1-2 review mediums |
 | WP-07F | 3 | fix | done | 1 | 8610596 | live.rs busy loop when progress sender drops; live.ts wiring goes in WP-08 |
-| WP-08 | 4 | 4A | verified | 1 | SHA8 | live.ts progress helper removed; duration() copied |
-| WP-09 | 5 | 5A | implementing | 0 | | |
-| WP-10 | 5 | 5A | pending | 0 | | |
+| WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
+| WP-09 | 5 | 5A | verified | 1 | SHA9 | +delilah-core task.rs (Event::AgentResumed) allowed |
+| WP-10 | 5 | 5A | implementing | 0 | | |
 | WP-11 | 6 | 6A | pending | 0 | | |
-| WP-13 | 6 | 6A | pending | 0 | | |
-| WP-15 | 6 | 6A | pending | 0 | | |
+| WP-13 | 6 | 6A | implementing | 0 | | |
+| WP-15 | 6 | 6A | implementing | 0 | | |
 | WP-12 | 6 | 6B | pending | 0 | | |
 | WP-14 | 6 | 6B | pending | 0 | | |
 | WP-16 | 6 | 6B | pending | 0 | | |
@@ -43,3 +43,5 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | contract | LOW | BackgroundItem.kind typed "command"\|"agent"\|string collapses to string | app/src/api.ts |
 | 3 | spec | LOW | Reload test checks the clock after load only, not against the pre-reload value | app/src/components/ConversationView.test.tsx |
 | 3 | ui-verifier | NOT CHECKED | US1 scenarios 1-5 verified via API on a real chat session only; no browser tools in this environment, UI render not seen | app/src/components/WorkingIndicator.tsx |
+| 4 | spec | LOW | Finished sub-agent duration rounded to whole minutes (min 1): 15 s shows "1 min" | app/src/components/ToolCard.tsx |
+| 4 | spec | LOW | Expanded step list shows summary only, not tool name (fine while summaries carry the verb) | app/src/components/ToolCard.tsx |

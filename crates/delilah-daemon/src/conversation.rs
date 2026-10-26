@@ -794,10 +794,12 @@ pub async fn on_hook(
     // The live state emits by itself when it changes; entries recorded emit here.
     match signal {
         Signal::PromptSubmitted => {
+            // Not the user's text: a turn Claude started itself, or a task notification
+            // (the transcript shows it as a background-done marker).
             if let Some(text) = hook["prompt"]
                 .as_str()
                 .map(str::trim)
-                .filter(|t| !t.is_empty())
+                .filter(|t| !t.is_empty() && !crate::hooks::agent_prompt(hook))
             {
                 if let Err(e) = prompt_submitted(app, session, text, idea).await {
                     tracing::warn!(session, "cannot record the prompt: {e}");
@@ -2538,6 +2540,41 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         live
+    }
+
+    #[tokio::test]
+    async fn a_prompt_hook_the_agent_made_up_resets_the_turn_state_and_records_nothing() {
+        let f = Fixture::new().await;
+        f.live.update_convo(|c| {
+            c.activity = Some("Reading".into());
+            c.needs_terminal = true;
+        });
+        let notification = json!({ "hook_event_name": "UserPromptSubmit",
+            "prompt": "<task-notification>\n<task-id>b1</task-id>" });
+        on_hook(
+            &f.app,
+            "conv",
+            Some(&f.live),
+            Signal::PromptSubmitted,
+            &notification,
+        )
+        .await;
+        assert!(f.app.store.entries("conv").await.unwrap().is_empty());
+        f.live.update_convo(|c| c.needs_terminal = true);
+        let hook = json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" });
+        on_hook(
+            &f.app,
+            "conv",
+            Some(&f.live),
+            Signal::PromptSubmitted,
+            &hook,
+        )
+        .await;
+        assert_eq!(
+            *f.live.convo.lock().unwrap(),
+            crate::sessions::ConvoState::default()
+        );
+        assert!(f.app.store.entries("conv").await.unwrap().is_empty());
     }
 
     #[tokio::test]

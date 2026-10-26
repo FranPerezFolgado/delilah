@@ -63,7 +63,7 @@ async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
 
 /// What a hook (or a stream event that stands for one) does to the session, the inbox and
 /// the task, without logging it.
-async fn apply_signal(
+pub(crate) async fn apply_signal(
     app: AppState,
     task: &str,
     session: Option<&str>,
@@ -190,11 +190,23 @@ async fn apply_signal(
     }
 }
 
+/// Whether a prompt hook is not the user's: the one the daemon makes up for a turn Claude
+/// started by itself (`delilah_origin`), or the `<task-notification>` XML the CLI posts
+/// as a prompt when a background task ends.
+pub(crate) fn agent_prompt(hook: &Value) -> bool {
+    hook["delilah_origin"].as_str() == Some("agent")
+        || hook["prompt"]
+            .as_str()
+            .is_some_and(|p| p.trim_start().starts_with("<task-notification>"))
+}
+
 /// A finished turn or a submitted prompt is the session's last activity; Claude's closing
 /// message (or the prompt) is what its row shows.
 async fn note_activity(app: &AppState, session: &str, signal: Signal, hook: &Value) {
     let message = match signal {
         Signal::TurnEnded => hook["last_assistant_message"].as_str(),
+        // A turn Claude started itself has no prompt of the user's to show.
+        Signal::PromptSubmitted if agent_prompt(hook) => return,
         Signal::PromptSubmitted => hook["prompt"].as_str(),
         _ => return,
     };
@@ -540,6 +552,27 @@ mod tests {
         .await;
         let extras = state.store.session_extras("s-1").await.unwrap();
         assert_eq!(extras.last_message.unwrap().chars().count(), 200);
+    }
+
+    #[tokio::test]
+    async fn a_prompt_the_agent_made_up_or_a_task_notification_is_not_the_users_last_message() {
+        let state = running_task().await;
+        state
+            .store
+            .create_session(&session_record("s-1", true))
+            .await
+            .unwrap();
+        let url = "/hooks/claude?task=PROJ-1&session=s-1";
+        for hook in [
+            json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" }),
+            json!({ "hook_event_name": "UserPromptSubmit",
+                    "prompt": "<task-notification>\n<task-id>b1</task-id>" }),
+        ] {
+            post(&state, url, hook).await;
+            let extras = state.store.session_extras("s-1").await.unwrap();
+            assert_eq!(extras.last_message, None);
+            assert_eq!(extras.last_activity_at, None);
+        }
     }
 
     #[tokio::test]
