@@ -47,27 +47,27 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 
 ## Versioning
 
-Every feature or fix ends with a version bump on its branch, as its own commit
-`chore: bump version to X.Y.Z`. Pick the level (semver) from what the change does:
+Don't bump the version in your PR: several changes ship in one release, and the maintainer
+bumps when releasing, as its own commit `chore: bump version to X.Y.Z`. The level (semver)
+comes from what the release contains:
 
 - **major**: breaks something in use (API or CLI changes old clients can't handle, data
   that needs manual migration, removed features).
 - **minor**: a new user-facing feature, backwards compatible.
 - **patch**: fixes, docs, internal refactors with no new behaviour.
 
-Run `scripts/bump-version.sh <level> --commit`. It updates every place that carries the
-version plus the lockfiles, and regenerates [CHANGELOG.md](CHANGELOG.md) with
-[git-cliff](https://git-cliff.org/), so install it first (`brew install git-cliff`).
-Bump from the version on `main`, and re-check it if `main` moved. Tagging and publishing
-are the maintainer's job (see the releasing section of
+`scripts/bump-version.sh <level> --commit` updates every place that carries the version plus
+the lockfiles, and regenerates [CHANGELOG.md](CHANGELOG.md) with
+[git-cliff](https://git-cliff.org/) (`brew install git-cliff`). Bumping, tagging and
+publishing are the maintainer's job (see the releasing section of
 [docs/development.md](docs/development.md#releasing)).
 
 ## Pull requests
 
 1. Branch from `main`.
 2. Make the change with its tests; update the docs and README if behaviour changed.
-3. Open a PR and fill in the [template](.github/pull_request_template.md). Say which
-   version level you picked and why. Write the title as a
+3. Open a PR and fill in the [template](.github/pull_request_template.md). Say whether
+   it breaks anything already in use. Write the title as a
    [Conventional Commit](https://www.conventionalcommits.org/) (`feat: …`, `fix: …`):
    PRs are squash-merged, so the title becomes the commit on `main` and the changelog line.
 4. CI must be green. A maintainer reviews and squash-merges.

@@ -236,6 +236,15 @@ with "Remove" or all at once with "Clear notices" (a toast offers "Undo"); what 
 an answer stays. With nothing waiting it says "Nothing is waiting for you" and the last activity. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
 
+**Toasts.** Tasks that wait for you show one grouped toast, not one per task: "{key} is waiting
+for you" with "Answer" for one, "{n} tasks are waiting for you" with "View" (opens the Inbox) for
+several. A task leaves the group when it stops waiting or you open its screen; closing the toast
+empties it. Identical repeated toasts merge into one with "×N" (up to "×99+"). With more than one
+toast they collapse into stacked cards (the newest in full plus a "+N" button); hover, focus or
+click expands the stack and the button becomes "Hide notices". "Close all" shows whenever there
+is more than one toast, collapsed or expanded. Timers pause while it is expanded. Info toasts
+last 6 s; errors and the waiting toast stay until closed.
+
 **Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
 token) and checks every 30 s. When the task's branch has a PR, it links it, per
 submodule for a parent, and moves the task to Review. You can also paste a PR's URL

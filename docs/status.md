@@ -6,7 +6,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Built
 
-**Public-repo onboarding** (spec `008-public-repo-onboarding`; decisions [#79](decisions.md) to [#82](decisions.md)):
+**Public-repo onboarding** (spec `008-public-repo-onboarding`; decisions [#79](decisions.md) to [#83](decisions.md)):
 - **Docs:** README rewritten for newcomers (under 200 lines: badges, English screenshots, Install, Quickstart); the full reference in [usage.md](usage.md); an index in [docs/README.md](README.md); docs translated to English; history moved to `docs/archive/` and `specs/` with their own READMEs. The English board screenshots come from `app/e2e/screens.spec.ts` (`DELILAH_SCREENS_LANG`, `DELILAH_SCREENS_ONLY`, `DELILAH_SCREENS_OUT`).
 - **Install:** `scripts/install.sh` and `scripts/test-install.sh` (both run in CI, with shellcheck). `release.yml` publishes `SHA256SUMS` and a build-provenance attestation; the `release.sh` dry run prints the `SHA256SUMS`.
 - **Community files:** `LICENSE` (MIT), `CODE_OF_CONDUCT`, `CONTRIBUTING`, `SECURITY`, issue forms, a PR template, dependabot. Repo description and topics set; private vulnerability reporting enabled.
@@ -15,9 +15,9 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - **English fallback** in the UI and the native menu ([#81](decisions.md)).
 - Secret scan of the history: 0 findings.
 
-**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](archive/ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
+**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](archive/ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md), and [#84](decisions.md) for the toasts):
 - **Tokens and themes:** `styles.css` holds only the tokens (dark and light, following the OS) and the base; every component has its own CSS. The terminal and the editor read the same tokens (`theme.ts`) and change theme live. Guards in `tokens.test.ts` (contrast), `styles.test.ts` (type/radius scale, allowed colours) and `inline-style.test.ts` (inline-style ratchet).
-- **Kit** (`components/ui/`, one barrel): Button, IconButton, Toggle, Segmented, Menu, Dialog, ConfirmDialog, Toast, Skeleton, Row, OptionCard, StatusBadge, InboxKind, PrChip, PhaseBars, Icon.
+- **Kit** (`components/ui/`, one barrel): Button, IconButton, Toggle, Segmented, Menu, Dialog, ConfirmDialog, Toast (store with keyed/merged toasts, "×N", collapsed stack with "+N" and "Close all", timers paused while expanded: hover, focus or "+N"), Skeleton, Row, OptionCard, StatusBadge, InboxKind, PrChip, PhaseBars, Icon.
 - **Shell:** the sidebar (collapses to a rail with ⌘\ or below 1300 px, a task filter, the 6 most urgent tasks per project with "Show N more"), the statusbar (connection, "N working · N waiting for you · N paused · N with errors", usage, "Logs"), and the disconnected state (a banner over the content with the age of the data and "Retry now"; `connection.ts`). Logs, first run ("Getting started") and the global notices (a task waits, usage almost out, limit reached, paused autopilot).
 - **Every screen redone:** Inbox, board, task screen (header with phase and PR chip, task tab, Chat / Terminal tab, Changes, PR, setup), Jira, projects and project view, settings (with the auto-update preference), "New task", backlog task, project settings, quick open, delete task, idea proposals.
 - **Inbox:** the three-axis vocabulary (`vocab.ts`), notices you can remove one by one or all with "Clear notices" and bring back with "Undo" (`inbox_dismissals`), the new notices "Finished its turn" (a secondary session finished its turn) and PR opened, and the empty state with the last activity.

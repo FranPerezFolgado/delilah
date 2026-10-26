@@ -6,9 +6,9 @@
 
 <!-- Checks run (cargo test, vitest, tsc) and what you tried in a preview. -->
 
-## Version bump
+## Compatibility
 
-<!-- Level (major / minor / patch) and the reason, per CONTRIBUTING.md. -->
+<!-- Does it break anything in use (HTTP API, CLI, stored data)? Don't bump the version: see CONTRIBUTING.md. -->
 
 ## Docs updated
 
@@ -18,5 +18,5 @@
 
 - [ ] Tests added or updated
 - [ ] Checks pass locally
-- [ ] Version bumped in its own commit
+- [ ] Title is a Conventional Commit (`feat: …`, `fix: …`)
 - [ ] Docs updated

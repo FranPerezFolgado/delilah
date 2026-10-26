@@ -79,3 +79,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | review | architecture | LOW | `cfg!(test)` made AppState::new Spanish in unit tests → fixed in the branch review (fixtures set Spanish) | crates/delilah-daemon/src/state.rs |
 | review | architecture | LOW | dependabot `chore(deps)` commits landed in the CHANGELOG → fixed in the branch review | cliff.toml |
 | review | architecture | LOW | architecture.md sent readers to the README for behaviour → fixed in the branch review (usage.md) | docs/architecture.md |
+| review | orchestrator | LOW | cliff.toml: `"^chore\(deps"` was an invalid TOML escape, so git-cliff (bump-version.sh, make release BUMP=) failed → fixed while merging main | cliff.toml |

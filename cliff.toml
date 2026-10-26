@@ -38,7 +38,7 @@ topo_order = false
 commit_parsers = [
   { message = "^chore: bump version", skip = true },
   { message = "^chore: release", skip = true },
-  { message = "^chore\(deps", skip = true },
+  { message = '^chore\(deps', skip = true },
   { message = "^Merge", skip = true },
   { message = "^feat", group = "Features" },
   { message = "^fix", group = "Fixes" },

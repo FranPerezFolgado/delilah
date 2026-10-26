@@ -651,3 +651,16 @@ merges. *Why:* the changelog is generated from `main`'s commit subjects, and a f
 branch carries work-package, progress and fix-up commits that don't belong there, so the
 PR title, written as a Conventional Commit, is the one changelog line. *Ruled out:* merge
 commits and rebase merges (they bring the branch's commits onto `main`).
+**84. One grouped "te espera" toast, owned by `GlobalNotices`.** All waiting tasks share a
+single persistent toast ("{key} te espera · Responder", or "{n} tareas te esperan · Ver" opening
+the Inbox) instead of one per task; closing it empties the group, and a task leaves it when it
+stops waiting, its screen is opened or it leaves the list. The toast store merges repeats only
+for the same kind and exact text with no action or key ("×N", capped "×99+"), keeps at most 3
+(evicting plain info first, then toasts without an action, never a keyed one such as the waiting
+toast; an undo action is time-bound and cannot be raised again, an error can) and shows more than one collapsed
+as stacked cards ("+N", "Cerrar todo" whenever there is more than one). *Why:* several waiting tasks flooded the corner and buried the rest;
+the kit stays task-agnostic, so the group lives in `GlobalNotices` as one keyed toast. Actions
+carry closures (each "Deshacer" undoes a different thing), so toasts with an action never merge;
+exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
+centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
+Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).

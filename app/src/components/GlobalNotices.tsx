@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import type { Task, UsageReport } from "../api";
 import { t, tn } from "../i18n";
-import { Button, pushToast } from "./ui";
+import { Button, dismissToastByKey, pushToast } from "./ui";
 import "./GlobalNotices.css";
 
 const HOT = 90;
+/** The one grouped «te espera» toast, updated in place by key. */
+const WAITING_TOAST_KEY = "waiting";
 const MAX_PAUSED = 3;
 const WINDOWS: Record<string, string> = { five_hour: "5 h", seven_day: "Semana" };
 
@@ -18,13 +20,15 @@ interface Props {
   /** The task whose screen is showing, if any: it needs no «te espera» toast. */
   current: string | null;
   onOpenTask: (key: string) => void;
+  onOpenInbox: () => void;
 }
 
 /** Quota and autopilot-pause notices, and the «te espera» toast; only existing /usage and /tasks data. */
-export function GlobalNotices({ tasks, usage, current, onOpenTask }: Props) {
+export function GlobalNotices({ tasks, usage, current, onOpenTask, onOpenInbox }: Props) {
   const seen = useRef<Set<string> | null>(null);
-  const open = useRef({ current, onOpenTask });
-  open.current = { current, onOpenTask };
+  const group = useRef<string[]>([]);
+  const open = useRef({ current, onOpenTask, onOpenInbox });
+  open.current = { current, onOpenTask, onOpenInbox };
 
   // A task that starts waiting while you are elsewhere; the first loaded list only seeds.
   useEffect(() => {
@@ -34,15 +38,42 @@ export function GlobalNotices({ tasks, usage, current, onOpenTask }: Props) {
     const before = seen.current;
     seen.current = waiting;
     if (!before) return;
-    for (const key of waiting) {
-      if (before.has(key) || open.current.current === key) continue;
+    for (const key of waiting) if (!before.has(key) && !group.current.includes(key)) group.current.push(key);
+  }, [tasks]);
+
+  // The waiting group: one toast for every task waiting that you have not seen.
+  useEffect(() => {
+    const waiting = new Set(tasks.filter((k) => k.status.type === "waiting-for-user").map((k) => k.key));
+    const g = group.current.filter((key) => waiting.has(key) && key !== current);
+    group.current = g;
+    if (g.length === 0) {
+      dismissToastByKey(WAITING_TOAST_KEY);
+      return;
+    }
+    const onDismiss = () => {
+      group.current = [];
+    };
+    if (g.length === 1) {
+      const key = g[0];
       pushToast({
-        text: t("{key} te espera", { key }),
+        key: WAITING_TOAST_KEY,
         kind: "wait",
+        text: t("{key} te espera", { key }),
         action: { label: t("Responder"), run: () => open.current.onOpenTask(key) },
+        onDismiss,
+      });
+    } else {
+      pushToast({
+        key: WAITING_TOAST_KEY,
+        kind: "wait",
+        text: tn(g.length, "{n} tarea te espera", "{n} tareas te esperan"),
+        action: { label: t("Ver"), run: () => open.current.onOpenInbox() },
+        onDismiss,
       });
     }
-  }, [tasks]);
+  }, [tasks, current]);
+
+  useEffect(() => () => dismissToastByKey(WAITING_TOAST_KEY), []);
 
   const hot = Object.entries(usage?.rate_limits ?? {}).filter(([, w]) => (w.used_percentage ?? 0) >= HOT);
   const paused = tasks.filter((k) => k.autopilot?.state === "paused");
