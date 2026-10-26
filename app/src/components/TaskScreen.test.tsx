@@ -11,17 +11,18 @@ const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 // A spy that returns a rejected promise reports it as unhandled: record the calls apart.
-const runtime = vi.hoisted(() => ({ calls: vi.fn(), result: (): Promise<unknown> => Promise.resolve(null) }));
-const setRuntime = vi.hoisted(() => (...a: unknown[]) => {
-  runtime.calls(...a);
-  return runtime.result();
-});
 const fileApi = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const openSession = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const sessionRuntime = vi.hoisted(() => ({ calls: vi.fn(), result: (): Promise<unknown> => Promise.resolve(null) }));
+const setSessionRuntime = vi.hoisted(() => (...a: unknown[]) => {
+  sessionRuntime.calls(...a);
+  return sessionRuntime.result();
+});
 vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setRuntime" ? setRuntime : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setSessionRuntime" ? setSessionRuntime : name === "openSession" ? openSession : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -42,8 +43,14 @@ vi.mock("./ConversationView", async () => {
 });
 vi.mock("./FileTree", () => ({ FileTree: () => null }));
 vi.mock("./ChangesView", () => ({ ChangesView: () => null }));
-vi.mock("./TaskView", () => ({ TaskView: () => null }));
-vi.mock("./ProjectView", () => ({ ProjectView: () => null }));
+vi.mock("./TaskView", () => ({
+  TaskView: (p: { asks?: unknown[]; onOpenTask?: (k: string) => void }) => (
+    <div data-testid="taskview" data-asks={p.asks?.length ?? -1}>
+      <button onClick={() => p.onOpenTask?.("LIBRE-7")}>open-task-view</button>
+    </div>
+  ),
+}));
+vi.mock("./ProjectView", () => ({ ProjectView: () => <div data-testid="projectview" /> }));
 vi.mock("./QuickOpen", () => ({ QuickOpen: () => null }));
 vi.mock("./AskCard", () => ({
   AskCard: (p: { ask: { proposal?: { title: string } | null }; onOpenTask?: (k: string) => void }) => (
@@ -83,7 +90,7 @@ function head(t?: Task, s?: SpecSummary) {
       onChanged={() => {}}
     />,
   );
-  return container.querySelector(".view-head")!;
+  return container.querySelector(".th, .ts-head")!;
 }
 
 beforeEach(() => {
@@ -91,35 +98,106 @@ beforeEach(() => {
   setSavingMode.mockClear();
   updateTask.mockClear();
   setAutopilot.mockClear();
+  setSavingMode.mockClear();
 });
 afterEach(() => {
   cleanup();
   localStorage.clear();
 });
 
-describe("TaskScreen header phase", () => {
-  it("shows the phase pill before the status pill for a running task with a spec", () => {
-    const pills = [...head(task({ type: "running" }), spec).querySelectorAll(".pill")];
-    expect(pills).toHaveLength(2);
-    expect(pills[0].classList.contains("phase-pill")).toBe(true);
-    expect(pills[1].classList.contains("phase-pill")).toBe(false);
+describe("TaskScreen header", () => {
+  it("uses the task header: key, title and the phase bars of a running task with a spec", () => {
+    const h = head(task({ type: "running" }), spec);
+    expect(h.classList.contains("th")).toBe(true);
+    expect(h.textContent).toContain("PROJ-1");
+    expect(h.querySelector('[aria-label="Cambiar de fase"]')).not.toBeNull();
   });
 
-  it("shows no phase pill for a queued task", () => {
-    expect(head(task({ type: "queued" }), spec).querySelector(".phase-pill")).toBeNull();
+  it("shows no phase menu for a queued or a done task", () => {
+    expect(head(task({ type: "queued" }), spec).querySelector('[aria-label="Cambiar de fase"]')).toBeNull();
+    cleanup();
+    expect(head(task({ type: "done" }), spec).querySelector('[aria-label="Cambiar de fase"]')).toBeNull();
   });
 
-  it("shows no phase pill for a done task", () => {
-    expect(head(task({ type: "done" }), spec).querySelector(".phase-pill")).toBeNull();
+  it("has no experimental chat-mode pill", () => {
+    expect(head({ ...task({ type: "running" }), chat_mode: true }).textContent).not.toContain("experimental");
   });
 
-  it("marks a chat-mode task as experimental", () => {
-    expect(head({ ...task({ type: "running" }), chat_mode: true }).textContent).toContain("experimental: modo chat");
-    expect(head(task({ type: "running" })).textContent).not.toContain("experimental: modo chat");
+  it("uses a project header on the project screen", () => {
+    const h = head();
+    expect(h.classList.contains("ts-head")).toBe(true);
+    expect(h.textContent).toContain("web");
+    expect(h.querySelector('[aria-label="Cambiar de fase"]')).toBeNull();
+  });
+});
+
+describe("TaskScreen tabs", () => {
+  const sess = (id: string, over: Partial<Session> = {}): Session => ({
+    id, task: "PROJ-1", kind: "claude", label: id, primary: false, closed: false, live: true, read_only: false, conversation: false, state: "working", step: null, ...over,
+  });
+  const taskScreen = (sessions: Session[], t = task({ type: "running" }), extra: Partial<React.ComponentProps<typeof TaskScreen>> = {}) =>
+    render(<TaskScreen owner="PROJ-1" task={t} sessions={sessions} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} {...extra} />);
+  const labels = () => screen.getAllByRole("tab").map((x) => x.textContent);
+
+  beforeEach(() => {
+    openSession.mockClear();
+    localStorage.clear();
+    sessionFor("PROJ-1").active = "\0overview";
+    sessionFor("PROJ-1").changesOpen = false;
   });
 
-  it("shows no phase pill on the project screen", () => {
-    expect(head().querySelector(".phase-pill")).toBeNull();
+  it("lists Tarea, the primary as Claude principal and the other sessions", () => {
+    taskScreen([sess("a", { primary: true }), sess("b", { label: "Review" })]);
+    expect(labels()).toEqual(["Tarea", "Claude principal", "Review", "PR"]);
+  });
+
+  it("only non-primary sessions can be closed", () => {
+    taskScreen([sess("a", { primary: true }), sess("b", { label: "Review" })]);
+    expect(screen.queryByRole("button", { name: "Cerrar Claude principal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cerrar Review" })).not.toBeNull();
+  });
+
+  it("starts a terminal from the + Sesión menu, and has no + Claude / + Terminal buttons", () => {
+    taskScreen([sess("a", { primary: true })]);
+    expect(screen.queryByText("+ Claude")).toBeNull();
+    expect(screen.queryByText("+ Terminal")).toBeNull();
+    fireEvent.click(screen.getByText("+ Sesión"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Terminal/ }));
+    expect(openSession).toHaveBeenCalledWith("PROJ-1", expect.objectContaining({ kind: "shell" }));
+  });
+
+  it("passes the asks and onOpenTask to the Tarea tab", () => {
+    const onOpenTask = vi.fn();
+    const ask = { kind: "question", task: "PROJ-1", title: "", session: null, text: null, since: null, ask: { id: "a", questions: [] } } as unknown as InboxItem;
+    const r = taskScreen([sess("a", { primary: true })], undefined, { asks: [ask], onOpenTask });
+    expect(r.getByTestId("taskview").getAttribute("data-asks")).toBe("1");
+    fireEvent.click(r.getByText("open-task-view"));
+    expect(onOpenTask).toHaveBeenCalledWith("LIBRE-7");
+  });
+
+  it("hides the file tree while the Cambios tab shows and brings it back on the others", () => {
+    const s = sessionFor("PROJ-1");
+    const r = taskScreen([sess("a", { primary: true })]);
+    expect(r.container.querySelector(".tpanel")).not.toBeNull();
+    cleanup();
+    s.changesOpen = true;
+    s.active = "\0changes";
+    const c = taskScreen([sess("a", { primary: true })]);
+    expect(c.container.querySelector(".tpanel")).toBeNull();
+    expect(labels().some((l) => l?.startsWith("Cambios"))).toBe(true);
+    fireEvent.click(screen.getByRole("tab", { name: "Tarea" }));
+    expect(c.container.querySelector(".tpanel")).not.toBeNull();
+  });
+
+  it("shows the Proyecto tab with the project view on the project screen", () => {
+    const r = render(<TaskScreen owner="@web" project={project} sessions={[]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />);
+    expect(screen.getAllByRole("tab")[0].textContent).toBe("Proyecto");
+    expect(r.queryByTestId("projectview")).not.toBeNull();
+  });
+
+  it("keeps a single inline style (the tree width)", () => {
+    const r = taskScreen([sess("a", { primary: true })]);
+    expect([...r.container.querySelectorAll("[style]")].filter((e) => !e.closest(".ehost")).map((e) => e.className)).toEqual(["tscreen with-tree"]);
   });
 });
 
@@ -158,21 +236,20 @@ describe("TaskScreen conversation sessions", () => {
     expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
   });
 
-  it("Terminal on a stream session asks for the switch instead of showing a terminal it has not", () => {
-    const { queryByTestId, getByRole } = open({ ...conv, runtime: "stream" });
-    const btn = getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
-    expect(btn.title).toBe("Pasa la tarea a terminal: Claude sigue con la misma conversación");
-    fireEvent.click(btn);
+  it("Terminal on a stream session asks to confirm instead of showing a terminal it has not", () => {
+    const { queryByTestId, getByRole, queryByText } = open({ ...conv, runtime: "stream" });
+    fireEvent.click(getByRole("button", { name: /^Terminal$/ }));
+    expect(queryByText("Pasar a terminal")).not.toBeNull();
     expect(queryByTestId("terminal")).toBeNull();
     expect(queryByTestId("conversation")).not.toBeNull();
   });
 
   it("toggles to the terminal and back with the Chat / Terminal switch", () => {
     const { queryByTestId, getByRole } = open(conv);
-    fireEvent.click(getByRole("button", { name: "Terminal" }));
+    fireEvent.click(getByRole("button", { name: /^Terminal$/ }));
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
-    fireEvent.click(getByRole("button", { name: "Chat" }));
+    fireEvent.click(getByRole("button", { name: /^Chat/ }));
     expect(queryByTestId("conversation")).not.toBeNull();
     expect(queryByTestId("terminal")).toBeNull();
   });
@@ -187,7 +264,7 @@ describe("TaskScreen conversation sessions", () => {
     const { queryByTestId, queryByRole } = open({ ...conv, kind: "shell", conversation: false });
     expect(queryByTestId("terminal")).not.toBeNull();
     expect(queryByTestId("conversation")).toBeNull();
-    expect(queryByRole("button", { name: "Chat" })).toBeNull();
+    expect(queryByRole("button", { name: /^Chat/ })).toBeNull();
   });
 
   const inTask = (s: Session, view?: "chat" | "terminal") => {
@@ -204,9 +281,9 @@ describe("TaskScreen conversation sessions", () => {
     const b = inTask(conv, "terminal");
     expect(b.queryByTestId("terminal")).not.toBeNull();
     expect(b.queryByTestId("conversation")).toBeNull();
-    fireEvent.click(b.getByRole("button", { name: "Chat" }));
+    fireEvent.click(b.getByRole("button", { name: /^Chat/ }));
     expect(b.queryByTestId("conversation")).not.toBeNull();
-    fireEvent.click(b.getByRole("button", { name: "Terminal" }));
+    fireEvent.click(b.getByRole("button", { name: /^Terminal$/ }));
     expect(b.queryByTestId("terminal")).not.toBeNull();
   });
 
@@ -214,7 +291,7 @@ describe("TaskScreen conversation sessions", () => {
     updateTask.mockClear();
     const r = inTask(conv, "chat");
     expect(r.queryByLabelText("Vista")).toBeNull();
-    fireEvent.click(r.getByRole("button", { name: "Terminal" }));
+    fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
     expect(updateTask).toHaveBeenCalledWith("PROJ-1", { view: "terminal" });
   });
 
@@ -269,59 +346,62 @@ describe("TaskScreen saving mode", () => {
     );
     return container;
   };
+  const ahorro = () => screen.getByRole("button", { name: "Ahorro" });
 
-  it("shows the marker and the chain with saving mode", () => {
+  it("shows the toggle on and the chain with saving mode, with no pill", () => {
     const c = saving({ type: "running" });
-    expect(c.querySelector(".saving-pill")?.textContent).toContain("Modo ahorro");
+    expect(ahorro().getAttribute("aria-pressed")).toBe("true");
     expect(c.querySelector(".chain")).not.toBeNull();
-    expect(c.textContent).not.toContain("Activar modo ahorro");
-  });
-
-  it("shows neither without it, only the activate action while running", () => {
-    const c = saving({ type: "running" }, false);
     expect(c.querySelector(".saving-pill")).toBeNull();
+  });
+
+  it("shows the toggle off and no chain without it", () => {
+    const c = saving({ type: "running" }, false);
+    expect(ahorro().getAttribute("aria-pressed")).toBe("false");
     expect(c.querySelector(".chain")).toBeNull();
-    expect(c.textContent).toContain("Activar modo ahorro");
   });
 
-  it("offers no activate action on a done task", () => {
-    expect(saving({ type: "done" }, false).textContent).not.toContain("Activar modo ahorro");
+  it("offers no toggles on a done task", () => {
+    saving({ type: "done" }, false);
+    expect(screen.queryByRole("button", { name: "Ahorro" })).toBeNull();
   });
 
-  it("turns saving mode off and on while running", () => {
+  it("turns saving mode off and on", () => {
     saving({ type: "running" });
-    fireEvent.click(screen.getByText("Desactivar"));
+    fireEvent.click(ahorro());
     expect(setSavingMode).toHaveBeenCalledWith("PROJ-1", false);
     cleanup();
     saving({ type: "running" }, false);
-    fireEvent.click(screen.getByText("Activar modo ahorro"));
+    fireEvent.click(ahorro());
     expect(setSavingMode).toHaveBeenLastCalledWith("PROJ-1", true);
   });
 });
 
 describe("TaskScreen autopilot control", () => {
   const withAp = (over: Partial<Task>) => head({ ...task({ type: "running" }), ...over });
+  const since = "2026-10-21T10:00:00Z";
 
-  it("offers to turn it on when off, in a spec-workflow task only", () => {
+  it("turns it on after confirming", () => {
     withAp({});
-    fireEvent.click(screen.getByText("Activar autopiloto"));
+    fireEvent.click(screen.getByRole("button", { name: "Autopiloto" }));
+    expect(setAutopilot).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Activar" }));
     expect(setAutopilot).toHaveBeenCalledWith("PROJ-1", "on");
-    cleanup();
-    withAp({ workflow: "prompt" });
-    expect(screen.queryByText("Activar autopiloto")).toBeNull();
-    cleanup();
-    withAp({ status: { type: "done" } });
-    expect(screen.queryByText("Activar autopiloto")).toBeNull();
   });
 
-  it("offers to turn it off while running, and leaves a paused one to the banner", () => {
-    withAp({ saving_mode: true, autopilot: { state: "running", since: "2026-10-21T10:00:00Z" } });
-    fireEvent.click(screen.getByTitle("Desactiva el autopiloto y sigue a mano"));
+  it("turns it off while running, and resumes a paused one", () => {
+    withAp({ saving_mode: true, autopilot: { state: "running", since } });
+    fireEvent.click(screen.getByRole("button", { name: "Autopiloto" }));
     expect(setAutopilot).toHaveBeenCalledWith("PROJ-1", "off");
     cleanup();
-    withAp({ saving_mode: true, autopilot: { state: "paused", since: "2026-10-21T10:00:00Z" } });
-    expect(screen.queryByTitle("Desactiva el autopiloto y sigue a mano")).toBeNull();
-    expect(screen.queryByText("Activar autopiloto")).toBeNull();
+    withAp({ saving_mode: true, autopilot: { state: "paused", since } });
+    fireEvent.click(screen.getByRole("button", { name: /en pausa · Reanudar/ }));
+    expect(setAutopilot).toHaveBeenLastCalledWith("PROJ-1", "resume");
+  });
+
+  it("has no autopilot controls on a done task", () => {
+    withAp({ status: { type: "done" } });
+    expect(screen.queryByRole("button", { name: "Autopiloto" })).toBeNull();
   });
 });
 
@@ -356,7 +436,7 @@ describe("TaskScreen follows the primary session", () => {
     const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
     expect(selected()).toBe("Tarea");
     rerender(screenOf("PROJ-1", [sess("a", false), sess("b", true)]));
-    expect(selected()).toBe("b");
+    expect(selected()).toBe("Claude principal");
   });
 
   it("does not steal the tab when the screen switches to another task", () => {
@@ -399,7 +479,7 @@ describe("TaskScreen editable title", () => {
   const edit = (t: Task) => {
     const h = head(t);
     fireEvent.click(h.querySelector("h1")!);
-    return screen.getByRole("textbox") as HTMLInputElement;
+    return screen.getByLabelText("Título de la tarea") as HTMLInputElement;
   };
 
   it("saves the new title with Enter", () => {
@@ -414,7 +494,7 @@ describe("TaskScreen editable title", () => {
     fireEvent.change(input, { target: { value: "Other" } });
     fireEvent.keyDown(input, { key: "Escape" });
     expect(updateTask).not.toHaveBeenCalled();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByLabelText("Título de la tarea")).toBeNull();
     expect(document.querySelector("h1")!.textContent).toBe("A task");
   });
 
@@ -447,65 +527,49 @@ describe("TaskScreen runtime switch", () => {
   const chatTask = { ...task({ type: "running" }), chat_mode: true };
 
   beforeEach(() => {
-    runtime.calls.mockClear();
-    runtime.result = () => Promise.resolve(null);
-  });
-
-  beforeEach(() => {
+    sessionRuntime.calls.mockClear();
+    sessionRuntime.result = () => Promise.resolve(null);
     sessionFor("PROJ-1").active = sessionTab("s1");
   });
 
-  it("has no runtime button in the header: Terminal on a chat-mode session switches the task", async () => {
+  it("has no Probar modo chat button: the switch lives in the header", () => {
+    const r = render(screen1(task({ type: "running" }), { ...stream, runtime: "pty" }));
+    expect(r.queryByRole("button", { name: /Probar modo chat/ })).toBeNull();
+    expect(r.container.querySelector(".th .svs")).not.toBeNull();
+    expect(r.container.querySelector(".etabs .svs")).toBeNull();
+  });
+
+  it("is left out of the Tarea tab", () => {
+    sessionFor("PROJ-1").active = "\0overview";
     const r = render(screen1(chatTask, stream));
-    expect(r.queryByRole("button", { name: /Pasar a/ })).toBeNull();
-    const term = r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement;
-    expect(term.disabled).toBe(false);
-    expect(term.title).toContain("Pasa la tarea a terminal");
-    fireEvent.click(term);
-    expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "terminal");
-    await waitFor(() => expect((r.getByRole("button", { name: "Terminal" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(r.container.querySelector(".svs")).toBeNull();
+  });
+
+  it("Terminal on a chat-mode session confirms, changes the session's runtime and shows the terminal", async () => {
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
+    expect(sessionRuntime.calls).not.toHaveBeenCalled();
+    fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
+    expect(sessionRuntime.calls).toHaveBeenCalledWith("s1", "terminal");
+    await waitFor(() => expect(r.queryByText("Pasar a terminal")).toBeNull());
     r.rerender(screen1({ ...chatTask, chat_mode: false }, { ...stream, runtime: "pty" }));
     // The terminal is what shows, not the chat the session no longer has.
-    expect(r.getByRole("button", { name: "Terminal" }).getAttribute("aria-pressed")).toBe("true");
-    expect(r.getByRole("button", { name: "Chat" }).getAttribute("aria-pressed")).toBe("false");
+    expect(r.getByRole("button", { name: /^Terminal$/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(r.getByRole("button", { name: /^Chat/ }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("Chat on a chat-mode session does not switch anything", () => {
     const r = render(screen1(chatTask, stream));
-    fireEvent.click(r.getByRole("button", { name: "Chat" }));
-    expect(runtime.calls).not.toHaveBeenCalled();
+    fireEvent.click(r.getByRole("button", { name: /^Chat/ }));
+    expect(sessionRuntime.calls).not.toHaveBeenCalled();
   });
 
-  it("offers Probar modo chat in the chat view of a PTY task, disabled while it switches", async () => {
-    let done!: () => void;
-    const pending = new Promise<null>((res) => (done = () => res(null)));
-    runtime.result = () => pending;
-    const r = render(screen1(task({ type: "running" }), { ...stream, runtime: "pty" }));
-    const btn = r.getByRole("button", { name: "Probar modo chat (experimental)" }) as HTMLButtonElement;
-    expect(btn.title).toContain("Experimental");
-    fireEvent.click(btn);
-    expect(runtime.calls).toHaveBeenCalledWith("PROJ-1", "chat");
-    expect(btn.disabled).toBe(true);
-    done();
-    await waitFor(() => expect(btn.disabled).toBe(false));
-  });
-
-  it("does not offer Probar modo chat in the terminal view nor on a chat-mode task", () => {
-    const a = render(screen1({ ...task({ type: "running" }), view: "terminal" }, { ...stream, runtime: "pty" }));
-    expect(a.queryByRole("button", { name: "Probar modo chat (experimental)" })).toBeNull();
-    cleanup();
-    const b = render(screen1(chatTask, stream));
-    expect(b.queryByRole("button", { name: "Probar modo chat (experimental)" })).toBeNull();
-  });
-
-  it("shows a refused switch next to the Chat / Terminal switch", async () => {
-    runtime.result = () => Promise.reject(new ApiError("wait for the turn to end or press Detener", 409));
+  it("shows a refused switch in an alert", async () => {
+    sessionRuntime.result = () => Promise.reject(new ApiError("wait for the turn to end", 409));
     const r = render(screen1(chatTask, stream));
-    fireEvent.click(r.getByRole("button", { name: "Terminal" }));
+    fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
+    fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
     const alert = await r.findByRole("alert");
-    expect(alert.closest(".view-switch-wrap")).not.toBeNull();
-    expect(alert.textContent).toContain("Espera a que acabe el turno");
-    fireEvent.click(r.getByRole("button", { name: "Cerrar" }));
-    expect(r.queryByRole("alert")).toBeNull();
+    expect(alert.textContent).toContain("wait for the turn to end");
   });
 });

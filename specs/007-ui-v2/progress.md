@@ -14,7 +14,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
 | WP-07 | 2 | 2B | done | 1 | a3b376d | created_at exposed and reopen |
-| WP-08 | 2 | 2B | done | 1 |  | Inbox store, ids, removal and new avisos |
+| WP-08 | 2 | 2B | done | 1 | a224417 | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | done | 1 | 47ffad7 | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
@@ -40,7 +40,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-31 | 5 | 5B | done | 1 | c313d31 | Task header |
 | WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
 | WP-33 | 5 | 5B | done | 1 | 3d93e8a | Chat tab |
-| WP-34 | 5 | 5C | implementing | 1 |  | Task screen integration |
+| WP-34 | 5 | 5C | done | 1 |  | Task screen integration |
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | done | 1 | a54c617 | Bandeja |
