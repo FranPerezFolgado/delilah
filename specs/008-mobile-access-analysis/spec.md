@@ -160,13 +160,19 @@ which stay desktop-only, and why.
 - **FR-001**: The analysis MUST compare at least four access options (private-network
   browser, installable home-screen web app, sideloaded/self-signed native wrapper, hosted
   relay) on: cost, developer account or store needed, phone platforms, setup steps, live
-  updates, push notifications, behaviour in background, terminal usability, security exposure.
+  updates, push notifications, behaviour in background, behaviour when the Mac is asleep, off
+  or unreachable, terminal usability, security exposure.
 - **FR-002**: The analysis MUST recommend exactly one option and record the ruled-out ones
   with their reason.
 - **FR-003**: The analysis MUST define the security model for the recommended option:
   reachability (never the public internet unless explicitly justified), device pairing,
   revocation, session lifetime, what a paired device may and may not do, and how today's
-  protections (origin and host checks) are kept or replaced.
+  protections (origin and host checks) are kept or replaced. It MUST also cover:
+  - launch actions (start an agent, create a task, move a phase) run code on the Mac, so the
+    model says what extra guard they need from the phone (confirmation, re-authentication);
+  - content an agent shows (from a repo, ticket or web page) is displayed on the phone as
+    text only and never becomes a command or link that acts on the Mac by itself;
+  - what a notification may show on a locked phone (work content on the lock screen).
 - **FR-004**: The analysis MUST define the mobile scope: which screens and actions are
   available on the phone and which stay desktop-only, with destructive actions desktop-only
   by default.
@@ -189,7 +195,9 @@ which stay desktop-only, and why.
   changes the recommendation.
 - **FR-011**: The analysis MUST cover **both the personal and the work Mac**: what works on
   the work Mac if IT does not allow a VPN or tunnel (e.g. Tailscale), what the fallback is
-  (same-Wi-Fi only, or nothing), and must not depend on anything from the work repos.
+  (same-Wi-Fi only, or nothing), and must not depend on anything from the work repos. For each
+  option it MUST state what data leaves the work Mac and through which third parties
+  (coordination servers, relays, push services).
 - **FR-012**: The mobile scope MUST cover **seeing, answering and launching work**: inbox,
   permissions, questions, plan approvals, plus creating a task, starting an agent and moving a
   phase. Destructive actions (delete, discard a workspace, force operations) stay
