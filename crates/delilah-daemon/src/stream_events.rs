@@ -37,6 +37,40 @@ const TICK: std::time::Duration = std::time::Duration::from_secs(5);
 #[cfg(test)]
 const TICK: std::time::Duration = std::time::Duration::from_millis(50);
 
+/// How long, once the last background item ended with a Stop held, Claude has to start a
+/// follow-up turn before the Stop applies as a normal end of turn.
+#[cfg(not(test))]
+const FALLBACK: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const FALLBACK: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Replays the Stop held behind background work as a normal end of turn. Call only once
+/// the background set is empty (or its rows were marked stopped). The take is the single
+/// claim: whoever gets the payload replays it, nobody twice.
+pub async fn replay_held_stop(app: &AppState, task: &str, session: &str, held: Option<Value>) {
+    if let Some(held) = held {
+        crate::hooks::apply_signal(
+            app.clone(),
+            task,
+            Some(session),
+            delilah_agents::claude::Signal::TurnEnded,
+            &held,
+        )
+        .await;
+    }
+}
+
+/// A stream process is gone: its running rows become stopped and the Stop held behind them
+/// applies first, as after a normal turn end, before the exit is handled.
+pub async fn on_process_exit(app: &AppState, session: &str) {
+    let Some(live) = app.sessions.get(session) else {
+        return;
+    };
+    live.update_progress(|p| progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now()));
+    let held = live.take_held_stop();
+    replay_held_stop(app, &live.task, session, held).await;
+}
+
 /// Whether a finished row or sub-agent still waits to expire from the progress.
 fn final_rows_wait(p: &Progress) -> bool {
     p.background.iter().any(|b| b.state != "running")
@@ -100,7 +134,18 @@ pub fn spawn_pump(
             };
             let Some(event) = event else { break };
             if let Some(live) = &live {
+                let before = live.progress().has_background();
                 live.update_progress(|p| progress::apply(p, &event, Utc::now()));
+                if matches!(event, StreamEvent::Init { .. }) {
+                    // A turn began: the held Stop (and its timer) belong to the last one.
+                    live.cancel_held_stop();
+                } else if before
+                    && !live.progress().has_background()
+                    && !matches!(event, StreamEvent::Exited { .. })
+                    && live.has_held_stop()
+                {
+                    arm_fallback(&app, live.clone(), &task);
+                }
             }
             exit_applied |= matches!(event, StreamEvent::Exited { .. });
             let outcome = match &event {
@@ -152,6 +197,19 @@ pub fn spawn_pump(
         }
     });
     started_rx
+}
+
+/// The last background item ended with a Stop held: if no turn begins within `FALLBACK`,
+/// the Stop applies as a normal end of turn (waiting, Bandeja, autopilot).
+fn arm_fallback(app: &AppState, live: crate::sessions::Live, task: &str) {
+    let token = live.arm_fallback();
+    let app = app.clone();
+    let task = task.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(FALLBACK).await;
+        let held = live.take_held_stop_unless_cancelled(&token);
+        replay_held_stop(&app, &task, &live.id, held).await;
+    });
 }
 
 /// Resolves when the process is gone; never for a pump without a process to watch.
@@ -948,6 +1006,88 @@ mod tests {
             resumed(&app, &key).await,
             vec![Some("background-done".to_string())]
         );
+        let _ = live.runtime.kill();
+    }
+
+    fn stop_hook() -> Value {
+        json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" })
+    }
+
+    /// A working session with one background item running and a Stop held behind it.
+    async fn held_behind_background(
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+        live: &crate::sessions::Live,
+    ) {
+        live.set_state(LiveState::Working);
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        assert!(live.hold_stop_if_background(stop_hook()));
+    }
+
+    #[tokio::test]
+    async fn a_held_stop_is_replayed_when_no_turn_follows_the_last_background_item() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        tx.send(bg_ended("b1")).unwrap();
+        until(|| live.state() == LiveState::Waiting).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        for _ in 0..100 {
+            if status(&app, &key).await == TaskStatus::WaitingForUser {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_new_turn_before_the_fallback_drops_the_held_stop_and_its_timer() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        tx.send(bg_ended("b1")).unwrap();
+        tx.send(init(false)).unwrap();
+        until(|| !live.has_held_stop()).await;
+        assert!(!live.has_held_stop());
+        tokio::time::sleep(FALLBACK * 3).await;
+        assert_eq!(live.state(), LiveState::Working, "the timer did not fire");
+        assert_eq!(status(&app, &key).await, TaskStatus::Running);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_self_started_turn_with_a_held_stop_drops_it_and_stays_working() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        tx.send(bg_ended("b1")).unwrap();
+        tx.send(init(true)).unwrap();
+        for _ in 0..100 {
+            if !resumed(&app, &key).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            resumed(&app, &key).await,
+            vec![Some("background-done".to_string())]
+        );
+        assert!(!live.has_held_stop());
+        tokio::time::sleep(FALLBACK * 3).await;
+        assert_eq!(live.state(), LiveState::Working);
+        assert_eq!(status(&app, &key).await, TaskStatus::Running);
         let _ = live.runtime.kill();
     }
 

@@ -20,8 +20,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-11 | 6 | 6A | verified | 1 | aee4c6a | +phase-5 arch MEDIUM (mid-turn notification side effects) |
 | WP-13 | 6 | 6A | verified | 1 | 7e87d3c | also refuses POST /sessions/{id}/runtime |
 | WP-15 | 6 | 6A | verified | 1 | 9a00f21 | |
-| WP-12 | 6 | 6B | implementing | 0 | | |
-| WP-14 | 6 | 6B | verified | 1 | SHA14 | stop_task per running row after interrupt |
+| WP-12 | 6 | 6B | verified | 1 | SHA12 | +sessions.rs (fallback token); any Init cancels held Stop |
+| WP-14 | 6 | 6B | verified | 1 | 48410be | stop_task per running row after interrupt |
 | WP-16 | 6 | 6B | verified | 1 | 76dea57 | |
 | WP-17 | 7 | 7A | pending | 0 | | |
 | WP-18 | 7 | 7B | pending | 0 | | |

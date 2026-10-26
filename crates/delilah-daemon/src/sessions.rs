@@ -40,6 +40,8 @@ pub struct ConvoState {
 struct ProgressState {
     progress: Progress,
     held_stop: Option<serde_json::Value>,
+    /// Cancels the timer that replays the held Stop if no follow-up turn comes.
+    fallback: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Clone)]
@@ -161,6 +163,37 @@ impl Live {
 
     pub fn drop_held_stop(&self) {
         self.progress.lock().unwrap().held_stop = None;
+    }
+
+    /// A new turn began: the held Stop is stale and the fallback timer is cancelled,
+    /// both under one lock so a timer that fires meanwhile finds nothing.
+    pub fn cancel_held_stop(&self) {
+        let mut state = self.progress.lock().unwrap();
+        state.held_stop = None;
+        if let Some(token) = state.fallback.take() {
+            token.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Arms the fallback timer's token (cancelling any earlier one).
+    pub fn arm_fallback(&self) -> Arc<AtomicBool> {
+        let mut state = self.progress.lock().unwrap();
+        if let Some(old) = state.fallback.take() {
+            old.store(true, Ordering::SeqCst);
+        }
+        let token = Arc::new(AtomicBool::new(false));
+        state.fallback = Some(Arc::clone(&token));
+        token
+    }
+
+    /// The held Stop for the fallback timer, unless it was cancelled meanwhile.
+    pub fn take_held_stop_unless_cancelled(&self, token: &AtomicBool) -> Option<serde_json::Value> {
+        let mut state = self.progress.lock().unwrap();
+        if token.load(Ordering::SeqCst) {
+            return None;
+        }
+        state.fallback = None;
+        state.held_stop.take()
     }
 
     pub fn take_held_stop(&self) -> Option<serde_json::Value> {
