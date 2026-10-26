@@ -1,57 +1,59 @@
-# Capturas del rediseño
+This folder records the v2 redesign; its screenshots show the UI in Spanish.
 
-Capturas de todas las pantallas de la UI web, para comparar antes y después del rediseño.
+# Redesign screenshots
 
-- `antes/`: la UI en el tag local `ui-v1` (commit `793e4cf`, versión 0.11.0).
-- `despues/`: la misma batería con el rediseño aplicado.
+Screenshots of every screen of the web UI, to compare before and after the redesign.
 
-Cada pantalla sale dos veces, `<Pantalla>-oscuro.png` y `<Pantalla>-claro.png` (23 por tema),
-con los nombres de los tableros del lienzo del rediseño. Ventana de 1440×900 salvo
-`Tablero1280` y `Tarea1280` (1280×800) y `Jira1024` (1024×700). UI en español, zona horaria
-Europe/Madrid, animaciones y cursor desactivados.
+- `antes/`: the UI at the local tag `ui-v1` (commit `793e4cf`, version 0.11.0).
+- `despues/`: the same set with the redesign applied.
 
-## Regenerarlas
+Each screen appears twice, `<Screen>-oscuro.png` (dark) and `<Screen>-claro.png` (light), 23 per theme,
+named after the boards of the redesign canvas. The window is 1440×900 except
+`Tablero1280` and `Tarea1280` (1280×800) and `Jira1024` (1024×700). The UI is in Spanish, the time zone is
+Europe/Madrid, and animations and the cursor are turned off.
 
-El script es `app/e2e/screens.spec.ts` (Playwright). Arranca su propio daemon aislado y su
-Vite (`app/e2e/setup.ts`, con el Claude, el `gh` y el Jira falsos de los e2e), así que no toca
-la app instalada (7420) ni las previews, y no deja nada corriendo. Sin `DELILAH_SCREENS` se salta.
+## Regenerating them
+
+The script is `app/e2e/screens.spec.ts` (Playwright). It starts its own isolated daemon and its
+own Vite (`app/e2e/setup.ts`, with the fake Claude, `gh` and Jira of the e2e tests), so it does not touch
+the installed app (7420) or the previews, and leaves nothing running. Without `DELILAH_SCREENS` it is skipped.
 
 ```bash
 cargo build -p delilah-daemon -p delilah-cli -p delilah-e2e
-cd app && DELILAH_SCREENS=despues npx playwright test screens   # o antes
+cd app && DELILAH_SCREENS=despues npx playwright test screens   # or antes
 ```
 
-Ejecútalo solo (con el filtro `screens`): necesita un daemon vacío para que las claves salgan
-igual (`LIBRE-1`…`LIBRE-8`, `PROJ-1246`), y falla si encuentra proyectos o tareas.
-Para volver a la UI de antes: `git checkout ui-v1`.
+Run it alone (with the `screens` filter): it needs an empty daemon so the keys come out
+the same (`LIBRE-1`…`LIBRE-8`, `PROJ-1246`), and it fails if it finds projects or tasks.
+To go back to the old UI: `git checkout ui-v1`.
 
-## Datos
+## Data
 
-Proyectos `signal` (repo) y `delilah` (parent, con submódulos), sobre los repos de prueba del e2e.
+Projects `signal` (repo) and `delilah` (parent, with submodules), on the e2e test repos.
 
-| Tarea | Estado |
+| Task | State |
 |---|---|
 | LIBRE-1/2/3 | backlog |
-| LIBRE-4 | hecha, con PR #12 fusionada |
-| LIBRE-5 «Chat: tarjetas de permiso en vivo» | modo chat con una tarjeta de permiso pendiente, cambios en README.md, una terminal y la PR #14 (CI fallido, cambios pedidos, un comentario) |
-| LIBRE-6 | en ejecución (agente de terminal) |
-| LIBRE-7 | pausada por el límite de uso |
-| LIBRE-8 | setup fallido |
-| PROJ-1246 | ticket de Jira en `delilah`, te espera |
+| LIBRE-4 | done, with PR #12 merged |
+| LIBRE-5 "Chat: tarjetas de permiso en vivo" | chat mode with a pending permission card, changes in README.md, a terminal and PR #14 (CI failed, changes requested, one comment) |
+| LIBRE-6 | running (terminal agent) |
+| LIBRE-7 | paused by the usage limit |
+| LIBRE-8 | setup failed |
+| PROJ-1246 | Jira ticket in `delilah`, waiting for you |
 
-Jira conectado con los datos de ejemplo (modo `sample`), con PROJ-1242 seleccionado.
+Jira is connected with the sample data (`sample` mode), with PROJ-1242 selected.
 
-## Lo que no sale igual que en las maquetas, y por qué
+## What differs from the mock-ups, and why
 
-- **LIBRE-5 aparece «En ejecución», no «Te espera»**: con una tarjeta de permiso pendiente el
-  daemon deja la tarea en ejecución (la espera se ve en la tarjeta y en la Bandeja).
-  La tarea que «te espera» es PROJ-1246.
-- **Tarea con estado «Fallida»**: no hay un camino con los falsos de los e2e para llegar a él; no se captura.
-- **Logs**: en la app nativa se abren desde Ayuda › Ver logs; en la web se abren con el botón
-  «Logs» de la barra de estado, que es el que pulsa el script.
-- **Jira-conectar** es el formulario de un Jira sin configurar (se captura antes de conectarlo).
-- **Horas relativas** («hace N min», «Pausada hasta las HH:MM», el historial de la tarea) y
-  los logs dependen de cuándo se ejecuta, y las rutas de los proyectos (Proyectos, vista del
-  proyecto, tarjeta de checkout) son carpetas temporales: cambian entre ejecuciones.
-- Lo nativo de macOS (notificaciones, menú, Dock, ⌘P global) no se ve en la UI web.
-- **Proyectos con worktree**: el seed pone `workspace: "worktree"` en los dos proyectos, como en la captura «antes» (entonces era el valor por defecto; ahora lo es el checkout), para que los pares sean comparables.
+- **LIBRE-5 shows "En ejecución" (running), not "Te espera" (waiting for you)**: with a permission card pending,
+  the daemon keeps the task running (the wait shows on the card and in the Inbox).
+  The task that is "waiting for you" is PROJ-1246.
+- **A task in the "Fallida" (failed) state**: the e2e fakes have no way to reach it, so it is not captured.
+- **Logs**: in the native app they open from Help › Ver logs; on the web they open with the
+  "Logs" button in the status bar, which is the one the script clicks.
+- **Jira-conectar** is the form of an unconfigured Jira (captured before connecting it).
+- **Relative times** ("hace N min", "Pausada hasta las HH:MM", the task history) and
+  the logs depend on when the script runs, and the project paths (Proyectos, project view,
+  checkout card) are temporary folders: they change between runs.
+- What is native to macOS (notifications, menu, Dock, global ⌘P) does not show in the web UI.
+- **Projects with worktree**: the seed sets `workspace: "worktree"` on both projects, as in the "before" capture (then it was the default; now the default is checkout), so the pairs are comparable.

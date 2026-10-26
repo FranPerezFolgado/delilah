@@ -26,11 +26,11 @@ parallel (different files, no dependency on an unfinished task).
 
 ## Phase 2: Foundational (docs layout that US1 and US3 link into)
 
-- [ ] T003 Move the historical docs with `git mv`: `docs/spikes/` → `docs/archive/spikes/`, `docs/next-moves.md` → `docs/archive/next-moves.md`, `docs/ui-redesign.md` → `docs/archive/ui-redesign.md`.
-- [ ] T004 Update every link to the moved files (find them with `git grep -nE 'spikes/|next-moves|ui-redesign'` outside `specs/`) in `CLAUDE.md`, `docs/decisions.md`, `docs/status.md`, `docs/architecture.md`, `docs/development.md` and `docs/redesign/README.md`. Fix relative paths inside the moved files too.
-- [ ] T005 [P] Create `docs/archive/README.md`: one paragraph saying these are records of past spikes, the old roadmap and the v2 redesign, kept for history and not maintained, and listing each entry in one line.
-- [ ] T006 [P] Create `specs/README.md`: one paragraph explaining that `specs/` holds the Spec Kit spec, plan and tasks of each feature as it was built, and `.specify/` holds Spec Kit's config and templates. Both are a historical record (and in Spanish in places); current behaviour is in `docs/`.
-- [ ] T007 [P] Rewrite `docs/redesign/README.md` in English with the same content: what `antes/` and `despues/` hold, how to regenerate them with `app/e2e/screens.spec.ts`, and the data used. Add a first line saying it records the v2 redesign and that its screenshots show the UI in Spanish.
+- [X] T003 Move the historical docs with `git mv`: `docs/spikes/` → `docs/archive/spikes/`, `docs/next-moves.md` → `docs/archive/next-moves.md`, `docs/ui-redesign.md` → `docs/archive/ui-redesign.md`.
+- [X] T004 Update every link to the moved files (find them with `git grep -nE 'spikes/|next-moves|ui-redesign'` outside `specs/`) in `CLAUDE.md`, `docs/decisions.md`, `docs/status.md`, `docs/architecture.md`, `docs/development.md` and `docs/redesign/README.md`. Fix relative paths inside the moved files too.
+- [X] T005 [P] Create `docs/archive/README.md`: one paragraph saying these are records of past spikes, the old roadmap and the v2 redesign, kept for history and not maintained, and listing each entry in one line.
+- [X] T006 [P] Create `specs/README.md`: one paragraph explaining that `specs/` holds the Spec Kit spec, plan and tasks of each feature as it was built, and `.specify/` holds Spec Kit's config and templates. Both are a historical record (and in Spanish in places); current behaviour is in `docs/`.
+- [X] T007 [P] Rewrite `docs/redesign/README.md` in English with the same content: what `antes/` and `despues/` hold, how to regenerate them with `app/e2e/screens.spec.ts`, and the data used. Add a first line saying it records the v2 redesign and that its screenshots show the UI in Spanish.
 
 **Checkpoint**: `git grep -nE '(spikes|next-moves|ui-redesign)' -- . ':!specs' ':!docs/archive'` shows only paths that exist.
 
@@ -66,7 +66,7 @@ parallel (different files, no dependency on an unfinished task).
   - `npx --yes lychee --offline` over `README.md` and `docs/**/*.md`, excluding only `docs/archive` (not `docs/redesign`).
 
   Fix every hit and broken link, including anchors into `docs/usage.md`.
-- [ ] T015 [US1] Repo metadata (remote):
+- [X] T015 [US1] Repo metadata (remote):
   1. Run `gh auth status` and continue only if the active account for github.com is `FranPerezFolgado`; otherwise stop and record it in `progress.md`.
   2. `gh repo edit FranPerezFolgado/delilah --description "Lightweight macOS app that runs Claude Code agents in parallel, each in its own git worktree, and pauses/resumes them around usage limits"`.
   3. Add the topics with `--add-topic` for each of claude-code, ai-agents, tauri, rust, macos, orchestrator and git-worktree.

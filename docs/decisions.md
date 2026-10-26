@@ -508,7 +508,7 @@ branch started from whatever the folder had checked out, often a stale `main`.
 - **A branchless start (65)** gets the fresh base too: its worktree, and each chosen submodule, is detached there, so the branch the first analysis makes starts from it. A branchless start in checkout mode fetches and switches nothing (the folder is the user's, and #65 leaves it as it is), so its branch starts from where the folder is.
 
 **67. Chat mode (stream-json): go, adjusted (2026-10-24).** Spike on claude 2.1.292
-([docs/spikes/2026-10-24-claude-stream.md](spikes/2026-10-24-claude-stream.md)): hooks
+([docs/archive/spikes/2026-10-24-claude-stream.md](archive/spikes/2026-10-24-claude-stream.md)): hooks
 fire in `-p`, one process takes several turns and writes the transcript (stream
 `uuid`s equal transcript `uuid`s), `--resume` works PTY -> stream -> PTY, interrupt keeps
 the process up. So US3 and US4 go ahead, with these adjustments to research.md R7:
@@ -533,7 +533,7 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
 
 ## UI v2
 
-Decided while applying [ui-redesign.md](ui-redesign.md) (spec `007-ui-v2`, 2026-10-26).
+Decided while applying [ui-redesign.md](archive/ui-redesign.md) (spec `007-ui-v2`, 2026-10-26).
 
 **68. One colour, one meaning.** Amber (`--wait`) only means "te espera"; blue (`--run`)
 only the status "Trabajando" and the focus ring; the primary button is light grey and

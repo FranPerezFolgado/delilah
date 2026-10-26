@@ -2,11 +2,11 @@
 
 What Delilah does today, what is pending, and the known problems. Update this
 page when a feature lands or a decision is taken. Last updated: 2026-10-26
-(UI v2, the redesign of `docs/ui-redesign.md`, on `feature/ui-v2`; before it, 0.12.0).
+(UI v2, the redesign of `docs/archive/ui-redesign.md`, on `feature/ui-v2`; before it, 0.12.0).
 
 ## Built
 
-**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
+**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](archive/ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
 - **Tokens and themes:** `styles.css` holds only the tokens (dark and light, following the OS) and the base; every component has its own CSS. The terminal and the editor read the same tokens (`theme.ts`) and change theme live. Guards in `tokens.test.ts` (contrast), `styles.test.ts` (type/radius scale, allowed colours) and `inline-style.test.ts` (inline-style ratchet).
 - **Kit** (`components/ui/`, one barrel): Button, IconButton, Toggle, Segmented, Menu, Dialog, ConfirmDialog, Toast, Skeleton, Row, OptionCard, StatusBadge, InboxKind, PrChip, PhaseBars, Icon.
 - **Shell:** the sidebar (collapses to a rail with ⌘\ or below 1300 px, a task filter, the 6 most urgent tasks per project with "Mostrar N más"), the statusbar (connection, "N trabajando · N te espera · N en pausa · N con error", usage, "Logs"), and the disconnected state (a banner over the content with the age of the data and "Reintentar ahora"; `connection.ts`). Logs, first run ("Primeros pasos") and the global notices (a task waits, usage almost out, limit reached, paused autopilot).
@@ -156,7 +156,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the English history says "Moved to Implement" (it reuses the phase-name keys);
   - a CLI older than the daemon fails on `step-started` events: ship them together;
   - rolling the daemon back after using saving mode needs the `step-started` rows tolerated.
-- **The real usage-limit payload** has never been observed. When it first happens on the work Mac, check `hooks.jsonl` against `delilah-agents::limits` (see the [spike](spikes/2026-10-19-claude-pty.md)).
+- **The real usage-limit payload** has never been observed. When it first happens on the work Mac, check `hooks.jsonl` against `delilah-agents::limits` (see the [spike](archive/spikes/2026-10-19-claude-pty.md)).
 - **SpecKit dirties the checkout.** Each `/speckit-plan` writes its block into CLAUDE.md, and a dirty checkout blocks new checkout tasks. Proposed: ignore that block in the clean-checkout check.
 - **The archive refusal message** (`workspace: . has uncommitted changes…`) names neither the task nor the files. It should list them.
 - **Moved state:** the installed app's state was copied from `fixtures/dev-home` on 2026-10-20. Those tasks' worktrees still live in `fixtures/dev-home/workspaces/` (absolute paths in the DB): do not delete that folder. The fixture `PROJ-*` tasks need `DELILAH_ALLOW_FILE_PROTOCOL`, which the installed daemon lacks.

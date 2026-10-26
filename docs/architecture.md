@@ -48,7 +48,7 @@ done or pending is in [status.md](status.md).
 | `.github/workflows/release.yml`, `Makefile` | The release: the workflow that builds, signs and publishes a `v*.*.*` tag, and `make release` / `make release-dry-run`, which run `scripts/release/*.mjs` and `scripts/release.sh`. |
 | `scripts/` | Test fixtures (`make-fixture-parent.sh`), the dev daemon (`dev-daemon.sh`), previews (`preview.sh`), the bundled daemon build (`build-sidecar.sh`), the end-to-end tests (`e2e.sh`). |
 | `specs/`, `.specify/` | SpecKit's setup and the specs of features built with it. |
-| `docs/` | These docs, spikes (`docs/spikes/`), and local-only session notes (`docs/sessions/`, git-excluded). |
+| `docs/` | These docs, spikes (`docs/archive/spikes/`), and local-only session notes (`docs/sessions/`, git-excluded). |
 
 ### Daemon modules (`crates/delilah-daemon/src`)
 
@@ -208,7 +208,7 @@ and only changes while the task is under way (see `phases.rs`):
 
 ## Chat mode
 
-An experimental runtime for a task's Claude sessions ([#67](decisions.md), [spike](spikes/2026-10-24-claude-stream.md), spec `specs/006-chat-view`). Instead of a PTY the daemon owns a long-lived `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio` process (`delilah_agents::stream::StreamSession`), with partial messages on. `Runtime` (`runtime.rs`) is an enum over `Pty(PtySession)` and `Stream(StreamSession)`; the PTY-only operations (resize, attach, scrollback) answer "not available" through `as_pty()`.
+An experimental runtime for a task's Claude sessions ([#67](decisions.md), [spike](archive/spikes/2026-10-24-claude-stream.md), spec `specs/006-chat-view`). Instead of a PTY the daemon owns a long-lived `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio` process (`delilah_agents::stream::StreamSession`), with partial messages on. `Runtime` (`runtime.rs`) is an enum over `Pty(PtySession)` and `Stream(StreamSession)`; the PTY-only operations (resize, attach, scrollback) answer "not available" through `as_pty()`.
 
 - **Which runtime.** `run::runtime_kind` decides per session: `Stream` only for a Claude session of a task (not a shell or setup, not an idea conversation, not a project session) whose `tasks.chat_mode` is set; everything else is `Pty`. `chat_mode` is chosen at creation (`chat_mode` in `POST /api/v1/tasks` and `POST /api/v1/runs`; CLI `--chat`; the "Modo chat (experimental)" checkbox) and changed with the switch below. Session JSON carries `runtime` (`pty` / `stream`).
 - **What stays the same.** Hooks fire in print mode, so states, phases, Bandeja, saving mode, autopilot, the PR flow and `--resume` work from the same signals. Entries still come from the transcript (the stream's `uuid`s equal the transcript's); the stream gives only live text. Not the same: the status line never runs in print mode, so usage windows come from the stream's `rate_limit_event` (`stream_events.rs`); "Detener" sends an interrupt and the turn ends on the `result` (no `Stop` hook fires); Remote Control is hidden; `GET /sessions/{id}/terminal` and `GET /tasks/{key}/terminal` answer 409 naming chat mode (and `delilah attach` says so).
@@ -233,7 +233,7 @@ An experimental runtime for a task's Claude sessions ([#67](decisions.md), [spik
 | `TurnFailed` (StopFailure) | inbox error, or a usage limit |
 | a turn ending while a usage window is at 100 % | `LimitReached` (any session: the subscription is shared) |
 
-**Usage limits** (`limits.rs`, [spike](spikes/2026-10-19-claude-pty.md)):
+**Usage limits** (`limits.rs`, [spike](archive/spikes/2026-10-19-claude-pty.md)):
 1. The latest `rate_limits` of each session comes from the status line.
 2. A turn that ends with `five_hour` or `seven_day` at 100 % pauses the task until the latest `resets_at` among the full windows.
 3. The scheduler resumes it and sends the "carry on" prompt in the current language.
