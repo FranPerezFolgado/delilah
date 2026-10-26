@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path as AxPath, State};
-use delilah_core::workflow::{ProjectWorkflow, Vars, render};
+use delilah_core::workflow::{ProjectWorkflow, TaskWorkflow, Vars, render};
 use delilah_core::{Handoff, HandoffStage, Step, Task, TaskKey};
 use delilah_git::{GitOptions, Workspace};
 
@@ -159,6 +159,10 @@ async fn phased_commands(app: &AppState, task: &Task) -> Result<Commands, String
     let Some(project) = task.project.as_deref() else {
         return Err(not_phased());
     };
+    // A task on its own message (or none) runs outside the project's phases.
+    if TaskWorkflow::parse(&task.workflow) != Ok(TaskWorkflow::Project) {
+        return Err(not_phased());
+    }
     let workflow = match app.store.project(project).await {
         Ok(p) => p.settings.workflow(),
         Err(crate::store::StoreError::ProjectNotFound(_)) => return Err(not_phased()),
@@ -616,6 +620,19 @@ pub(crate) async fn set_saving_mode(
     Ok(Json(apply_saving_mode(&app, &key, req.on).await?))
 }
 
+/// The 409 for saving mode asked for on a task that does not run in phases.
+pub(crate) fn not_phased(app: &AppState, key: &TaskKey) -> ApiError {
+    ApiError::conflict_reason(
+        app.lang()
+            .pick(
+                &format!("{key} no tiene un flujo por fases, así que no puede tener modo ahorro"),
+                &format!("{key} is not on a phased workflow, so it cannot have saving mode"),
+            )
+            .to_string(),
+        "not-phased",
+    )
+}
+
 /// Turns saving mode on or off on a task, under the handoff guard; off drops a
 /// pending handoff (the sessions stay). Returns the task as stored.
 pub(crate) async fn apply_saving_mode(
@@ -625,6 +642,10 @@ pub(crate) async fn apply_saving_mode(
 ) -> Result<Task, ApiError> {
     let _guard = app.handoffs.guard.lock().await;
     task_of(app, key).await?;
+    // Saving mode exists only in a phased workflow (FR-009).
+    if on && !crate::run::is_phased_task(app, key).await {
+        return Err(not_phased(app, key));
+    }
     app.store.set_saving_mode(key, on).await?;
     if !on {
         app.store.set_handoff(key, None).await?;

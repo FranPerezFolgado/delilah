@@ -48,7 +48,7 @@ Body: the whole `ProjectSettings`, now with `workflow`. Errors: 422 `{error, fie
 |---|---|---|
 | `workflow` | free string, default project's (`feature`) | `project` \| `prompt` \| `none`; `feature` accepted = `project`; anything else 400. **`POST /tasks` without `workflow` stores `project`** (follows the project's workflow) |
 | `prompt` | runs: first message, sent as typed | runs: first message (implies `prompt`) and now **a template**: `{title}` `{ticket}` `{task}` expand, an unknown placeholder or a lone brace is a 422, literal braces are doubled (`{{` `}}`); **tasks: new**, stored as `start_message`. `workflow: "prompt"` needs a non-blank `prompt` |
-| `saving_mode`, `autopilot` | — | ignored/forced off when the resolved start is not phased; `autopilot: true` there → 409 `not-spec-workflow` (unchanged code) |
+| `saving_mode`, `autopilot` | — | ignored/forced off when the resolved start is not phased; `autopilot: true` there → 409 `not-spec-workflow` (unchanged code); turning saving mode on later (`PATCH`, `POST …/saving-mode`) on a task that is not phased → 409 `not-phased` |
 
 ## `Task` (all task responses)
 

@@ -176,8 +176,9 @@ change the outgoing session saves its notes with `/save-session`. If a handoff
 fails, the Inbox shows it with "Retry"; after a restart Delilah finishes or
 re-offers it. In Settings: "Saving mode by default" (new tasks) and "Save notes
 before switching session" (on by default). Needs the spec files: without a
-`specs/` folder there are no handoffs. Only for projects with a phased workflow (see
-"Project settings"); the handoffs send the project's own implement and review commands.
+`specs/` folder there are no handoffs. Only for tasks that follow a project with a phased
+workflow (see "Project settings"): turning it on elsewhere is refused. The handoffs send the
+project's own implement and review commands.
 
 **Autopilot.** A task can run on its own up to the PR: "Autopilot" (next to "Saving
 mode", which it turns on; a toggle on a running task, `--autopilot` /
@@ -388,7 +389,8 @@ Whatever is not set keeps its default, which `show` marks.
   Each command field has a list of the skills and slash commands found for the project (the
   project's `.claude`, yours in `~/.claude`, and enabled plugins' as `plugin:name`, with
   their descriptions and where each comes from; `CLAUDE_CONFIG_DIR` is ignored on purpose
-  and symlinked skills are skipped), or type any text. A command naming a skill that is
+  and symlinked skills are skipped, as is a project `.claude` folder that links elsewhere;
+  a folded multi-line `description` is shown on one line), or type any text. A command naming a skill that is
   not found shows a warning but can be saved. Placeholders: `{ticket}` (the key),
   `{title}`, `{task}` (the title for a free task, the key otherwise: so
   `/feature {task}` on a free task starts `/feature <title>`) and `{spec_dir}` (the task's
@@ -464,7 +466,8 @@ message for this task, chosen from the same list as in the project settings, wit
 placeholders) or "Nada". A custom message must not be blank (Start and Save are disabled
 until it has text). A backlog task keeps its choice: starting it later runs it even if the
 project's workflow changed in between; "El del proyecto" follows the project's workflow at
-that moment. From the terminal, `--no-prompt` (same as `--workflow none`) starts with no first
+that moment. A Jira task started with the built-in prompt or a phased plan command also gets
+where its ticket was saved; a message you wrote is sent as written (plus the notes). From the terminal, `--no-prompt` (same as `--workflow none`) starts with no first
 message and `--prompt <text>` gives the task's own message; `--workflow` accepts
 `project`, `prompt`, `none` or `feature` (an alias of `project`). A request prompt
 (`delilah run --prompt`, `prompt` in `POST /runs`) is a template like the settings'

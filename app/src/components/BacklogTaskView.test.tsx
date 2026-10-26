@@ -207,7 +207,7 @@ describe("BacklogTaskView start", () => {
     expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
     fireEvent.click(btn(container, "Guardar"));
     await waitFor(() => expect(update).toHaveBeenCalled());
-    expect(update.mock.calls[0][1]).toMatchObject({ workflow: "none", start_message: null });
+    expect(update.mock.calls[0][1]).toMatchObject({ workflow: "none", start_message: "" });
   });
 
   it("starts with the chosen start", async () => {

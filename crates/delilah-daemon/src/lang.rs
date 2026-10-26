@@ -161,6 +161,24 @@ mod tests {
         }
     }
 
+    /// The app's presets (app/src/workflowPresets.ts) carry their own copy of the
+    /// `/feature` preset; this keeps the two from drifting.
+    #[test]
+    fn the_apps_feature_preset_matches() {
+        let ts = include_str!("../../../app/src/workflowPresets.ts");
+        for lang in [Lang::Es, Lang::En] {
+            assert!(ts.contains(review_text(lang)), "review text ({lang:?})");
+        }
+        let ProjectWorkflow::Phased {
+            plan, implement, ..
+        } = feature_preset(Lang::En)
+        else {
+            unreachable!()
+        };
+        assert!(ts.contains(&format!("plan: \"{plan}\"")));
+        assert!(ts.contains(&format!("implement: \"{implement}\"")));
+    }
+
     #[test]
     fn the_default_is_english() {
         assert_eq!(Current::default().get(), Lang::En);

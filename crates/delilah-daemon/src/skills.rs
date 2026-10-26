@@ -36,26 +36,41 @@ pub struct Skill {
 }
 
 /// Every skill and command available for the project at `project_path`, with `home`
-/// the user's home folder. The same name in two sources is listed once per source.
-/// Anything unreadable or malformed is skipped.
-pub fn list(home: &Path, project_path: &Path) -> Vec<Skill> {
-    let user_root = home.join(".claude");
+/// the user's home folder (`None`: only the project's). The same name in two sources is
+/// listed once per source. Anything unreadable or malformed is skipped.
+pub fn list(home: Option<&Path>, project_path: &Path) -> Vec<Skill> {
     let mut out = Vec::new();
-    scan_root(
-        &project_path.join(".claude"),
-        SkillSource::Project,
-        None,
-        &mut out,
-    );
-    scan_root(&user_root, SkillSource::User, None, &mut out);
-    for (plugin, install) in enabled_plugins(&user_root) {
-        scan_root(&install, SkillSource::Plugin, Some(&plugin), &mut out);
+    // A cloned repo is not trusted to point its folders elsewhere; the user's own config
+    // (often a dotfiles symlink) is.
+    let project_root = project_path.join(".claude");
+    if !is_link(&project_root) {
+        scan_root(&project_root, SkillSource::Project, None, false, &mut out);
+    }
+    if let Some(home) = home {
+        let user_root = home.join(".claude");
+        scan_root(&user_root, SkillSource::User, None, true, &mut out);
+        for (plugin, install) in enabled_plugins(&user_root) {
+            scan_root(&install, SkillSource::Plugin, Some(&plugin), true, &mut out);
+        }
     }
     out.sort_by(|a, b| (a.source, &a.name).cmp(&(b.source, &b.name)));
     out
 }
 
-fn scan_root(root: &Path, source: SkillSource, plugin: Option<&str>, out: &mut Vec<Skill>) {
+fn is_link(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// Scans `root`'s `skills` and `commands` folders; with `links` false, a folder that is
+/// a symlink is skipped.
+fn scan_root(
+    root: &Path,
+    source: SkillSource,
+    plugin: Option<&str>,
+    links: bool,
+    out: &mut Vec<Skill>,
+) {
+    let folder = |name: &str| Some(root.join(name)).filter(|p| links || !is_link(p));
     let prefix = |name: String| match plugin {
         Some(p) => format!("{p}:{name}"),
         None => name,
@@ -69,7 +84,7 @@ fn scan_root(root: &Path, source: SkillSource, plugin: Option<&str>, out: &mut V
         });
     };
     // skills/<dir>/SKILL.md
-    for (dir, is_dir) in entries(&root.join("skills")) {
+    for (dir, is_dir) in folder("skills").map(|p| entries(&p)).unwrap_or_default() {
         if !is_dir {
             continue;
         }
@@ -88,7 +103,9 @@ fn scan_root(root: &Path, source: SkillSource, plugin: Option<&str>, out: &mut V
     }
     // commands/**/*.md, subfolders joined with `:`
     let mut found = Vec::new();
-    collect_commands(&root.join("commands"), &mut Vec::new(), &mut found);
+    if let Some(commands) = folder("commands") {
+        collect_commands(&commands, &mut Vec::new(), &mut found);
+    }
     for (parts, file) in found {
         let Some(text) = read_head(&file) else {
             continue;
@@ -161,16 +178,35 @@ fn frontmatter(text: &str) -> std::collections::HashMap<String, String> {
     if lines.next().map(str::trim) != Some("---") {
         return map;
     }
+    // The key of an open YAML block scalar (`key: >` or `key: |`), whose indented
+    // lines are its value, joined with spaces.
+    let mut block: Option<String> = None;
     for line in lines {
         if line.trim() == "---" {
             break;
         }
-        if let Some((k, v)) = line.split_once(':') {
-            if line.starts_with(char::is_whitespace) {
-                continue;
+        if line.starts_with(char::is_whitespace) {
+            if let Some(value) = block.as_ref().and_then(|k| map.get_mut(k)) {
+                let part = line.trim();
+                if !part.is_empty() {
+                    if !value.is_empty() {
+                        value.push(' ');
+                    }
+                    value.push_str(part);
+                }
             }
+            continue;
+        }
+        block = None;
+        if let Some((k, v)) = line.split_once(':') {
             let v = v.trim().trim_matches(|c| c == '"' || c == '\'').trim();
-            map.insert(k.trim().to_string(), v.to_string());
+            let k = k.trim().to_string();
+            if matches!(v, ">" | "|" | ">-" | "|-" | ">+" | "|+") {
+                map.insert(k.clone(), String::new());
+                block = Some(k);
+            } else {
+                map.insert(k, v.to_string());
+            }
         }
     }
     map
@@ -300,7 +336,7 @@ mod tests {
             r#"{"enabledPlugins":{"pl@m":true,"off@m":false}}"#,
         );
 
-        let got = list(&home, &proj);
+        let got = list(Some(&home), &proj);
         assert_eq!(
             names(&got),
             vec![
@@ -336,7 +372,7 @@ mod tests {
         fs::create_dir_all(c.join("skills/broken/SKILL.md")).unwrap();
         fs::create_dir_all(c.join("commands/dir.md")).unwrap();
         write(&c.join("plugins/installed_plugins.json"), "{not json");
-        let got = list(&home, &proj);
+        let got = list(Some(&home), &proj);
         assert_eq!(names(&got), vec![("stemmed".into(), SkillSource::User)]);
     }
 
@@ -351,12 +387,67 @@ mod tests {
         fs::create_dir_all(c.join("commands")).unwrap();
         std::os::unix::fs::symlink(&outside, c.join("commands/link")).unwrap();
         std::os::unix::fs::symlink(outside.join("x.md"), c.join("commands/x.md")).unwrap();
-        assert!(list(&home, &proj).is_empty());
+        assert!(list(Some(&home), &proj).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_cannot_link_its_folders_elsewhere() {
+        let t = tempfile::tempdir().unwrap();
+        let (home, proj) = (t.path().join("home"), t.path().join("proj"));
+        let outside = t.path().join("outside");
+        write(&outside.join("commands/x.md"), "secret\n");
+        write(&outside.join("y.md"), "secret\n");
+        // The project's `.claude/commands`, and a second project's whole `.claude`.
+        fs::create_dir_all(proj.join(".claude")).unwrap();
+        std::os::unix::fs::symlink(&outside, proj.join(".claude/commands")).unwrap();
+        assert!(list(Some(&home), &proj).is_empty());
+        let other = t.path().join("other");
+        fs::create_dir_all(&other).unwrap();
+        std::os::unix::fs::symlink(&outside, other.join(".claude")).unwrap();
+        assert!(list(Some(&home), &other).is_empty());
+        // The user's own folders may be links (dotfiles).
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        std::os::unix::fs::symlink(outside.join("commands"), home.join(".claude/commands"))
+            .unwrap();
+        assert_eq!(
+            names(&list(Some(&home), &proj)),
+            vec![("x".into(), SkillSource::User)]
+        );
+    }
+
+    #[test]
+    fn block_scalar_descriptions_are_joined() {
+        let t = tempfile::tempdir().unwrap();
+        let (home, proj) = (t.path().join("home"), t.path().join("proj"));
+        write(
+            &proj.join(".claude/skills/a/SKILL.md"),
+            "---\nname: a\ndescription: >\n  Folded over\n  two lines.\nmodel: x\n---\nBody\n",
+        );
+        write(
+            &proj.join(".claude/commands/b.md"),
+            "---\ndescription: |-\n  Literal\n---\nBody\n",
+        );
+        let got = list(Some(&home), &proj);
+        let by = |n: &str| got.iter().find(|s| s.name == n).unwrap();
+        assert_eq!(by("a").description, "Folded over two lines.");
+        assert_eq!(by("b").description, "Literal");
+    }
+
+    #[test]
+    fn without_a_home_only_the_project_is_listed() {
+        let t = tempfile::tempdir().unwrap();
+        let proj = t.path().join("proj");
+        write(&proj.join(".claude/commands/fix.md"), "Fix\n");
+        assert_eq!(
+            names(&list(None, &proj)),
+            vec![("fix".into(), SkillSource::Project)]
+        );
     }
 
     #[test]
     fn missing_folders_give_an_empty_list() {
         let t = tempfile::tempdir().unwrap();
-        assert!(list(&t.path().join("nohome"), &t.path().join("noproj")).is_empty());
+        assert!(list(Some(&t.path().join("nohome")), &t.path().join("noproj")).is_empty());
     }
 }

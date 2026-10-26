@@ -228,7 +228,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - history `seq` and `started_at` restart with the daemon (clients refetch on reconnect); a malformed `history` query gets a plain-text 400;
   - the native "playground" window (Tauri) has not been checked; the office floor, building and Flujo were checked in a browser preview with live agents;
   - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
-- **Deprecated, kept:** the `projects.workflow` column and `Project.workflow` (a free string, always `feature` before) are ignored for new tasks and still returned by the API; `delilah project add --workflow` only warns. Remove them in a later migration.
+- **Deprecated, kept:** the `projects.workflow` column and `Project.workflow` (a free string, always `feature` before; migration 0022 normalised it to `project`/`prompt`) are ignored for new tasks and still returned by the API; `delilah project add --workflow` only warns. Remove them in a later migration.
 - **Workflow commands, known limit:** the "Spec Kit (oficial)" preset does not reach `tasks.md` by itself in saving mode (`/speckit-specify` stops after `spec.md`); the user extends the plan command (see usage).
 - **Mobile access:** analysed (decision 96, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth.
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.

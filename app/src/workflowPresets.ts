@@ -10,7 +10,7 @@ export interface WorkflowPreset {
 
 /**
  * The review message of today's `/feature` flow; it must equal the daemon's
- * `feature_preset` (crates/delilah-daemon/src/lang.rs) in both languages.
+ * `feature_preset` (crates/delilah-daemon/src/lang.rs) in both languages; a test there checks it.
  */
 const REVIEW_ES =
   "/review de la rama de esta tarea. Después aplica los hallazgos confirmados, actualiza la documentación que hayan dejado obsoleta y haz commit. No hagas push ni abras una PR.";

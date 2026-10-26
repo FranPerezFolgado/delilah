@@ -21,9 +21,9 @@ interface Props {
 }
 
 /** The PATCH fields for a start: `workflow` and the stored `start_message`. */
-const startChange = (c: StartChoice): { workflow: string; start_message: string | null } => {
+const startChange = (c: StartChoice): { workflow: string; start_message: string } => {
   const f = startFields(c, true);
-  return { workflow: f.workflow!, start_message: f.prompt ?? null };
+  return { workflow: f.workflow!, start_message: f.prompt ?? "" };
 };
 
 /** A task saved to the backlog: what it is about, editable until it starts. */

@@ -375,7 +375,7 @@ pub(crate) async fn start_run_with(
     let autopilot = autopilot && resolved.phased;
     let workflow = resolved.workflow.as_str().to_string();
     let prompt = resolved.prompt.clone().unwrap_or_default();
-    let custom_prompt = resolved.workflow == TaskWorkflow::Prompt;
+    let custom_prompt = written_by_user(resolved.workflow, &project.settings);
 
     // Named before anything is created, so a refused name leaves a backlog task as it is.
     let notes = req
@@ -1800,7 +1800,23 @@ fn point_to_notes(app: &AppState, key: &TaskKey, prompt: String, notes: Option<&
 }
 
 /// Whether the stored task follows a phased project workflow.
-async fn is_phased_task(app: &AppState, key: &TaskKey) -> bool {
+/// Whether the first message is one the user wrote (the task's or the project's single
+/// message): it is sent as written, without the Jira ticket pointer that the built-in
+/// prompt and a phased plan command get (US2 AC2).
+fn written_by_user(workflow: TaskWorkflow, settings: &delilah_core::ProjectSettings) -> bool {
+    match workflow {
+        TaskWorkflow::Prompt => true,
+        TaskWorkflow::Project => matches!(
+            settings.workflow(),
+            delilah_core::ProjectWorkflow::Single {
+                start: delilah_core::Start::Message { .. }
+            }
+        ),
+        TaskWorkflow::None => false,
+    }
+}
+
+pub(crate) async fn is_phased_task(app: &AppState, key: &TaskKey) -> bool {
     let Ok(Some(task)) = app.store.get_task(key).await else {
         return false;
     };
@@ -1910,6 +1926,27 @@ fn effective_submodules(
 mod tests {
     use super::*;
     use crate::state::AgentPermissions::Auto;
+
+    #[test]
+    fn only_a_message_the_user_wrote_goes_without_the_ticket_pointer() {
+        use delilah_core::{ProjectSettings, ProjectWorkflow, Start};
+        let with = |workflow| ProjectSettings {
+            workflow,
+            ..ProjectSettings::default()
+        };
+        let message = with(Some(ProjectWorkflow::Single {
+            start: Start::Message {
+                template: "/fix {ticket}".into(),
+            },
+        }));
+        let builtin = with(None);
+        let phased = crate::autopilot::feature_settings();
+        assert!(written_by_user(TaskWorkflow::Prompt, &builtin));
+        assert!(written_by_user(TaskWorkflow::Project, &message));
+        assert!(!written_by_user(TaskWorkflow::Project, &builtin));
+        assert!(!written_by_user(TaskWorkflow::Project, &phased));
+        assert!(!written_by_user(TaskWorkflow::None, &message));
+    }
 
     #[test]
     fn every_selected_submodule_is_on_the_task_branch() {

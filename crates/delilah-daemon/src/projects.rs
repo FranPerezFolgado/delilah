@@ -352,12 +352,15 @@ pub async fn skills(
 ) -> Result<Json<Vec<crate::skills::Skill>>, ApiError> {
     let project = app.store.project(&name).await?;
     // The user's Claude Code config lives under their own home, not Delilah's.
+    // Without a HOME only the project's own are listed (an empty path would resolve
+    // `.claude` against the daemon's working folder).
     let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    let list = tokio::task::spawn_blocking(move || crate::skills::list(&home, &project.path))
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from);
+    let list =
+        tokio::task::spawn_blocking(move || crate::skills::list(home.as_deref(), &project.path))
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(list))
 }
 

@@ -211,7 +211,8 @@ export interface BacklogChange {
   view?: TaskView;
   /** `project`, `prompt` (with `start_message`) or `none`. */
   workflow?: string;
-  start_message?: string | null;
+  /** A blank one clears it (`null` would mean "no change"). */
+  start_message?: string;
 }
 
 export interface RunRequest {

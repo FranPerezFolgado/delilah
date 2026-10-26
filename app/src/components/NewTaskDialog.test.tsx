@@ -155,6 +155,14 @@ describe("NewTaskDialog autopilot", () => {
     expect(btn(container, "Autopiloto")).toBeDefined();
   });
 
+  it("follows the project's settings, not its legacy workflow column", () => {
+    // Migration 0022 rewrote an old `custom` column to `prompt` and gave the project the phased preset.
+    const { container } = render(
+      <NewTaskDialog projects={[{ ...projects[0], workflow: "prompt" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(btn(container, "Autopiloto")).toBeDefined();
+  });
+
   it("is sent with the run together with saving mode", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);

@@ -89,7 +89,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
 
   // Saving mode and autopilot only exist in a phased workflow; a custom message or no start runs outside it.
   const startKind = start.kind;
-  const workflow = startKind === "project" ? (project?.workflow ?? "project") : startKind;
+  // The project's start comes from its settings, never from the legacy `projects.workflow` column.
+  const workflow = startKind;
   const autopilotAllowed = isPhased(workflow, project?.settings);
   const autopilotOn = autopilot && autopilotAllowed;
   // Sent as a boolean whenever there is something to clear: absent keeps the stored one.

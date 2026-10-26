@@ -585,6 +585,16 @@ async fn update_task(
     let key = TaskKey::new(key);
     // Everything about the start is checked before anything is written.
     let phased = check_start_change(&app, &key, &mut change, autopilot).await?;
+    // Saving mode exists only in a phased workflow (FR-009); refused before any write.
+    if saving_mode == Some(true) {
+        let phased = match phased {
+            Some(p) => p,
+            None => crate::run::is_phased_task(&app, &key).await,
+        };
+        if !phased {
+            return Err(crate::handoff::not_phased(&app, &key));
+        }
+    }
     // A view-only change works in any state; a title alone, on any task but an archived
     // one; the rest edits the backlog.
     let title_only = change.notes.is_none()
@@ -1506,6 +1516,7 @@ mod tests {
         let (app, state) = app_with_project().await;
         let key = TaskKey::new("PROJ-1");
         let mut t = Task::new(key.clone(), "t", "project");
+        t.project = Some("web".into());
         t.saving_mode = true;
         state.store.create_task(&t).await.unwrap();
         let offered = delilah_core::Handoff {
@@ -1555,6 +1566,60 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn saving_mode_is_refused_on_a_task_that_is_not_phased() {
+        let (app, state) = app_with_project().await;
+        // A task on its own message, in the phased project; and one with no project.
+        let mut own = Task::new(TaskKey::new("PROJ-1"), "t", "prompt");
+        own.project = Some("web".into());
+        own.start_message = Some("/fix {ticket}".into());
+        state.store.create_task(&own).await.unwrap();
+        state
+            .store
+            .create_task(&Task::new(TaskKey::new("PROJ-2"), "t", "project"))
+            .await
+            .unwrap();
+        for key in ["PROJ-1", "PROJ-2"] {
+            let uri = format!("/api/v1/tasks/{key}/saving-mode");
+            let (status, body) = call(&app, "POST", &uri, Some(json!({"on": true}))).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{key}: {body}");
+            let uri = format!("/api/v1/tasks/{key}");
+            let (status, _) = call(&app, "PATCH", &uri, Some(json!({"saving_mode": true}))).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{key}");
+        }
+        // Moving to `none` and asking for saving mode at once is refused, and nothing is written.
+        let (status, _) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"workflow": "none", "saving_mode": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let task = state
+            .store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (task.workflow.as_str(), task.saving_mode),
+            ("prompt", false)
+        );
+        // Back to the project's phased workflow: allowed.
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            "/api/v1/tasks/PROJ-1",
+            Some(json!({"workflow": "project", "saving_mode": true})),
+        )
+        .await;
+        assert_eq!(
+            (status, &task["saving_mode"]),
+            (StatusCode::OK, &json!(true))
+        );
     }
 
     #[tokio::test]

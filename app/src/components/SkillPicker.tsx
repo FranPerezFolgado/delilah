@@ -9,6 +9,8 @@ export function useSkills(project: string): Skill[] | null {
   useEffect(() => {
     let live = true;
     setSkills(null);
+    // No project chosen yet: nothing to list.
+    if (!project) return;
     api.projectSkills(project).then(
       (list) => live && setSkills(list),
       () => live && setSkills(null),
@@ -63,8 +65,9 @@ export function SkillPicker({ skills, value, onChange, label }: {
         <p className="muted small">{t("No hay skills")}</p>
       ) : (
         <ul className="skill-list">
-          {shown.map((s) => (
-            <li key={`${s.source}:${s.plugin ?? ""}:${s.name}`}>
+          {/* A skill and a command may share a name in one source, hence the index. */}
+          {shown.map((s, i) => (
+            <li key={`${s.source}:${s.plugin ?? ""}:${s.name}:${i}`}>
               <button type="button" className="skill" onClick={() => onChange(`/${s.name} {ticket}`)}>
                 <span className="mono skill-name">{`/${s.name}`}</span>
                 <span className="badge skill-source">{sourceLabel(s)}</span>

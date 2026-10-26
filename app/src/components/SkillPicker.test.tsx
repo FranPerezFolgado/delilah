@@ -81,4 +81,11 @@ describe("useSkills", () => {
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.getByText('"none"')).toBeTruthy();
   });
+
+  it("asks nothing while no project is chosen", () => {
+    const spy = vi.spyOn(api, "projectSkills").mockResolvedValue(skills);
+    render(<Probe project="" />);
+    expect(spy).not.toHaveBeenCalled();
+    expect(screen.getByText('"none"')).toBeTruthy();
+  });
 });
