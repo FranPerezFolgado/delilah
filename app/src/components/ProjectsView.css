@@ -1,0 +1,17 @@
+.pv-spacer { flex: 1; }
+.pv-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 0; color: var(--tx2); }
+.pv-empty p { margin: 0; }
+.pv-table td { vertical-align: middle; }
+.pv-row { cursor: pointer; }
+.pv-row:hover { background: var(--hov); }
+.pv-name { display: flex; align-items: center; gap: 10px; color: var(--tx2); }
+.pv-names { display: flex; flex-direction: column; min-width: 0; }
+.pv-open { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; color: var(--tx-strong); text-align: left; cursor: pointer; }
+.pv-open:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 7px; }
+.pv-path { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; white-space: nowrap; }
+.apd { display: flex; flex-direction: column; gap: 14px; min-width: 420px; }
+.apd-folder { display: flex; gap: 8px; }
+.apd-path { flex: 1; min-width: 0; }
+.apd-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.apd-error { margin: 0; font-size: 12px; color: var(--err-tx); }

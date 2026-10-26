@@ -50,7 +50,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-41 | 6 | 6B | pending | 0 | | E2E board |
 | WP-42 | 7 | 7A | done | 1 | e360e8a | WherePicker |
 | WP-43 | 7 | 7A | done | 1 | da2920b | ProposalCard, delete task, Quick Open |
-| WP-44 | 7 | 7A | implementing | 1 |  | Projects and project view |
+| WP-44 | 7 | 7A | done | 1 |  | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | done | 1 | ab5a100 | Nueva tarea dialog |
 | WP-47 | 7 | 7B | done | 1 | f80fe4c | Backlog task and project settings |
@@ -58,7 +58,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
 | WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
-| WP-52 | 8 | 8A | done | 1 |  | Task screen and board at width |
+| WP-52 | 8 | 8A | done | 1 | 5c2a3fa | Task screen and board at width |
 | WP-53 | 8 | 8A | pending | 1 |  | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |
 | WP-55 | 9 | 9A | pending | 0 | | Remove replaced code and i18n cleanup |
