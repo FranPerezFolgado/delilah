@@ -444,7 +444,7 @@ describe("TaskScreen autopilot control", () => {
 });
 
 describe("TaskScreen follows the primary session", () => {
-  const sess = (id: string, primary: boolean): Session => ({
+  const sess = (id: string, primary: boolean, step: Session["step"] = "plan"): Session => ({
     effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id,
     task: "PROJ-1",
     kind: "claude",
@@ -455,7 +455,7 @@ describe("TaskScreen follows the primary session", () => {
     read_only: false,
     conversation: false,
     state: "working",
-    step: "plan",
+    step,
   });
   const screenOf = (owner: string, sessions: Session[]) => (
     <TaskScreen
@@ -473,8 +473,8 @@ describe("TaskScreen follows the primary session", () => {
   it("selects the new primary's tab after a handoff", () => {
     const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
     expect(selected()).toBe("Tarea");
-    rerender(screenOf("PROJ-1", [sess("a", false), sess("b", true)]));
-    expect(selected()).toBe("Spec y plan");
+    rerender(screenOf("PROJ-1", [sess("a", false), sess("b", true, "implement")]));
+    expect(selected()).toBe("Implementación");
   });
 
   it("does not steal the tab when the screen switches to another task", () => {

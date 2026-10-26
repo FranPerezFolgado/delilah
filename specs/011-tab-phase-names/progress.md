@@ -15,3 +15,6 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 2–5 | spec-compliance | MEDIUM (fixed in WP-03F) | Handoff test no longer discriminated which tab is selected | app/src/components/TaskScreen.test.tsx |
+| 2–5 | spec-compliance | LOW | Language switch tested only in chain.test.ts, not re-rendered in TaskScreen | app/src/components/TaskScreen.test.tsx |
+| 2–5 | spec-compliance | LOW | No explicit test for two sessions with the same step | app/src/components/TaskScreen.test.tsx |
