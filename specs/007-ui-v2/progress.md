@@ -64,8 +64,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-55 | 9 | 9A | done | 1 |  | Remove replaced code and i18n cleanup |
 | WP-56 | 9 | 9A | done | 1 | d18fb28 | Preview seed |
 | WP-57 | 9 | 9A | done | 0 | 93f18e2 | Decisions, status, README, architecture docs |
-| WP-58 | 9 | 9B | done | 1 |  | Full checks |
-| WP-59 | 9 | 9C | pending | 0 | | Before/after record |
+| WP-58 | 9 | 9B | done | 1 | 58467f7 | Full checks |
+| WP-59 | 9 | 9C | done | 1 |  | Before/after record |
 | WP-60 | 9 | 9D | pending | 0 | | Version bump |
 
 ## Open findings

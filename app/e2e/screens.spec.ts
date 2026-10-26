@@ -328,12 +328,15 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
   const shell = await call<{ label: string }>(env, "POST", `/api/v1/tasks/${K.live}/sessions`, { kind: "shell" });
   seeded.shellLabel = shell.label;
 
-  // Both PRs linked before LIBRE-4 is done.
+  // LIBRE-5's PR is linked, then LIBRE-4's: its merged PR marks it done by itself. The fake gh
+  // answers `--head <branch>` with that branch's PR only, and a lookup below review needs
+  // `refresh`; linking moves LIBRE-5 to review, as it was when the «antes» was taken.
+  await call(env, "POST", `/api/v1/tasks/${K.live}/prs/refresh`, {});
   await expect
-    .poll(async () => (await call<unknown[]>(env, "GET", "/api/v1/prs")).length, { message: "both PRs linked", timeout: 30_000 })
-    .toBeGreaterThanOrEqual(2);
+    .poll(async () => (await call<{ task: string }[]>(env, "GET", "/api/v1/prs")).some((p) => p.task === K.live), { message: "LIBRE-5's PR linked", timeout: 30_000 })
+    .toBe(true);
   await waitStatus(env, K.done, "waiting-for-user");
-  await call(env, "POST", `/api/v1/tasks/${K.done}/done`, {});
+  await call(env, "POST", `/api/v1/tasks/${K.done}/prs/refresh`, {});
   await waitStatus(env, K.done, "done");
 });
 
