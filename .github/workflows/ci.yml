@@ -1,7 +1,7 @@
 # The same checks as "Stack & checks" in CLAUDE.md, on every PR and on main, as parallel jobs.
 # The Rust jobs that build the workspace run on macOS: the daemon has macOS-only code
 # (cfg(target_os = "macos")) and its tests rely on macOS behaviour (/bin/zsh, cp flags,
-# process reaping), so ~10 of them fail on Linux. fmt and the web UI run on Linux.
+# process reaping), so ~10 of them fail on Linux. fmt, the web UI and the UI e2e run on Linux.
 name: CI
 
 on:
@@ -82,6 +82,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # The UI layer (scripts/e2e.sh ui) is not here yet: chat.spec.ts's permission flows are
-      # flaky on the Linux runner (an element not visible within 15 s, ~1 run in 4).
       - run: scripts/e2e.sh api
+
+  e2e-ui:
+    name: E2E UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # The runner image already has Chrome's system libraries, so no `--with-deps` (its apt
+      # step alone took 2-5 min); e2e.sh downloads Chromium unless this cache has it.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+      - run: npm --prefix app ci
+      - run: scripts/e2e.sh ui
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: app/playwright-report/
+          retention-days: 7
