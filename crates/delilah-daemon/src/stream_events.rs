@@ -450,6 +450,7 @@ mod tests {
         let started = spawn_pump(&app, "s-1", "PROJ-1", rx);
         tx.send(StreamEvent::Init {
             session_id: "s-1".into(),
+            self_started: false,
         })
         .unwrap();
         assert_eq!(started.await.unwrap(), Started::Up);
@@ -588,6 +589,7 @@ mod tests {
         let started = spawn_pump(&app, "s-1", "PROJ-1", rx);
         tx.send(StreamEvent::Init {
             session_id: "s-1".into(),
+            self_started: false,
         })
         .unwrap();
         assert_eq!(started.await.unwrap(), Started::Up);
