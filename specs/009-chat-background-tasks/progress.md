@@ -11,7 +11,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2B | verified | 1 | 79ba591 | |
 | WP-05 2 2C |  |  | pending | 0 | | |
 | WP-06 | 3 | 3A | pending | 0 | | |
-| WP-07 | 3 | 3A | pending | 0 | | |
+| WP-07 | 3 | 3A | verified | 1 | SHA7 | live.ts emitter exported, view uses own socket |
 | WP-08 | 4 | 4A | pending | 0 | | |
 | WP-09 | 5 | 5A | pending | 0 | | |
 | WP-10 | 5 | 5A | pending | 0 | | |

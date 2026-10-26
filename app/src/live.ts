@@ -1,17 +1,39 @@
 // The daemon's change feed (`/api/v1/events`): it says what changed and each part of
 // the UI fetches that again. The connection comes back by itself; when it does,
 // everything is fetched again, as messages may have been missed meanwhile.
-import { DAEMON_URL } from "./api";
+import { DAEMON_URL, type Progress } from "./api";
 
 export type Topic = "tasks" | "sessions" | "inbox" | "specs" | "usage" | "projects" | "prs" | "conversations";
 
 const listeners = new Map<Topic, Set<() => void>>();
 
+const progressListeners = new Map<string, Set<(p: Progress) => void>>();
+
 /** Calls `cb` whenever `topic` changes (and after a reconnection). Returns the unsubscribe. */
-export function on(topic: Topic, cb: () => void): () => void {
+export function on(topic: Topic, cb: () => void): () => void;
+/** Calls `cb` with each `progress` the live socket of session `id` delivers. */
+export function on(id: string, event: "progress", cb: (p: Progress) => void): () => void;
+export function on(a: string, b: unknown, c?: (p: Progress) => void): () => void {
+  if (typeof b === "string") {
+    if (!progressListeners.has(a)) progressListeners.set(a, new Set());
+    progressListeners.get(a)!.add(c!);
+    return () => progressListeners.get(a)!.delete(c!);
+  }
+  const topic = a as Topic;
   if (!listeners.has(topic)) listeners.set(topic, new Set());
-  listeners.get(topic)!.add(cb);
-  return () => listeners.get(topic)!.delete(cb);
+  listeners.get(topic)!.add(b as () => void);
+  return () => listeners.get(topic)!.delete(b as () => void);
+}
+
+/** Routes a raw message of a session's live socket: `{"progress": …}` goes to its subscribers. */
+export function handleSessionMessage(id: string, raw: string): void {
+  let m: { progress?: Progress };
+  try {
+    m = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (m && m.progress) progressListeners.get(id)?.forEach((cb) => cb(m.progress!));
 }
 
 const ALL: Topic[] = ["tasks", "sessions", "inbox", "specs", "usage", "projects", "prs", "conversations"];

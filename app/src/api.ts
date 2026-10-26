@@ -423,7 +423,7 @@ export type ConversationEntry =
   | { id: string; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" | "terminal" }
   | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
   | ToolEntry
-  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" }
+  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" | "background-done"; detail?: string }
   | QuestionCardEntry
   | PermissionCardEntry;
 
@@ -469,6 +469,50 @@ export interface PermissionAsk {
   rule: string | null;
 }
 
+/** One step of a turn or sub-agent, as the daemon summarises it. */
+export interface ProgressStep {
+  tool: string;
+  summary: string;
+  at: string;
+}
+
+/** The turn in progress; times are RFC3339 UTC. */
+export interface TurnProgress {
+  started_at: string;
+  by: "user" | "claude";
+  reason: string | null;
+  step: string | null;
+  last_signal_at: string;
+}
+
+/** A command or agent running in the background. */
+export interface BackgroundItem {
+  task_id: string;
+  tool_use_id: string | null;
+  kind: "command" | "agent" | string;
+  description: string;
+  state: "running" | "completed" | "failed" | "stopped" | "unknown";
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface SubagentProgress {
+  tool_use_id: string;
+  description: string;
+  state: "running" | "completed" | "failed" | "stopped" | "unknown";
+  started_at: string;
+  ended_at: string | null;
+  steps: number;
+  recent: ProgressStep[];
+}
+
+/** What the agent is doing now; absent for PTY sessions and older daemons. */
+export interface Progress {
+  turn: TurnProgress | null;
+  background: BackgroundItem[];
+  subagents: SubagentProgress[];
+}
+
 export interface Conversation {
   entries: ConversationEntry[];
   /** Resume point for the next call. */
@@ -476,6 +520,7 @@ export interface Conversation {
   complete: boolean;
   transcript: "present" | "pending" | "missing";
   activity: string | null;
+  progress?: Progress | null;
   needs_terminal: boolean;
   runtime: "pty" | "stream";
 }

@@ -60,13 +60,13 @@ self-started handling for its ending; both are kept separate so US4 can ship alo
 - [ ] T016 [US1] Implement T015 in `crates/delilah-daemon/src/live.rs` (`relay` selects on the stream broadcast, the progress `watch` receiver with a 250 ms throttle, and the socket)
 - [ ] T017 [P] [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): a `PreToolUse` hook on a PTY session sets `activity` with `tool_step_summary` (today only `PostToolUse` does); `Stop` still clears it
 - [ ] T018 [US1] Implement T017 in `conversation::on_hook` in `crates/delilah-daemon/src/conversation.rs`
-- [ ] T019 [P] [US1] Add the types to `app/src/api.ts`: `Progress`, `TurnProgress`, `BackgroundItem`, `SubagentProgress`, `ProgressStep`; `Conversation.progress?: Progress | null`; marker union adds `"background-done"` and `detail?: string`
-- [ ] T020 [P] [US1] Write failing tests in `app/src/live.test.ts` (create if missing): a `{"progress": …}` socket message reaches `on(id, "progress", fn)` subscribers; existing text/done/reset handling unchanged
-- [ ] T021 [US1] Implement T020 in `app/src/live.ts`
-- [ ] T022 [P] [US1] Write failing tests in `app/src/components/WorkingIndicator.test.tsx`: hidden when `turn` is null; shows a clock from `turn.started_at` that advances with fake timers; shows `step`; shows "sin novedades desde hace 30 s" when `now - last_signal_at ≥ 30 s` and not before; English text through `t()`
-- [ ] T023 [US1] Implement T022 in `app/src/components/WorkingIndicator.tsx` (+ styles in `app/src/components/ConversationView.css`) and its English texts in `app/src/i18n/en/WorkingIndicator.ts`
-- [ ] T024 [US1] Write failing tests in `app/src/components/ConversationView.test.tsx`: with `progress` from the conversation load the indicator shows; a socket `progress` message replaces it; without `progress` (PTY, older daemon) the old `conv-activity` line still shows; a reload mid-turn shows the server's `started_at`, not a reset clock
-- [ ] T025 [US1] Implement T024 in `app/src/components/ConversationView.tsx`
+- [X] T019 [P] [US1] Add the types to `app/src/api.ts`: `Progress`, `TurnProgress`, `BackgroundItem`, `SubagentProgress`, `ProgressStep`; `Conversation.progress?: Progress | null`; marker union adds `"background-done"` and `detail?: string`
+- [X] T020 [P] [US1] Write failing tests in `app/src/live.test.ts` (create if missing): a `{"progress": …}` socket message reaches `on(id, "progress", fn)` subscribers; existing text/done/reset handling unchanged
+- [X] T021 [US1] Implement T020 in `app/src/live.ts`
+- [X] T022 [P] [US1] Write failing tests in `app/src/components/WorkingIndicator.test.tsx`: hidden when `turn` is null; shows a clock from `turn.started_at` that advances with fake timers; shows `step`; shows "sin novedades desde hace 30 s" when `now - last_signal_at ≥ 30 s` and not before; English text through `t()`
+- [X] T023 [US1] Implement T022 in `app/src/components/WorkingIndicator.tsx` (+ styles in `app/src/components/ConversationView.css`) and its English texts in `app/src/i18n/en/WorkingIndicator.ts`
+- [X] T024 [US1] Write failing tests in `app/src/components/ConversationView.test.tsx`: with `progress` from the conversation load the indicator shows; a socket `progress` message replaces it; without `progress` (PTY, older daemon) the old `conv-activity` line still shows; a reload mid-turn shows the server's `started_at`, not a reset clock
+- [X] T025 [US1] Implement T024 in `app/src/components/ConversationView.tsx`
 
 **Checkpoint**: US1 works alone in a preview (quickstart US1).
 

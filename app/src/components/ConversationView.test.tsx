@@ -461,6 +461,45 @@ describe("ConversationView chat mode", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  const turnP = (started_at = "2026-01-01T00:00:00Z", step: string | null = null) => ({
+    turn: { started_at, by: "user" as const, reason: null, step, last_signal_at: started_at },
+    background: [],
+    subagents: [],
+  });
+
+  it("shows the working indicator from the loaded progress and replaces it from the socket", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([], { progress: turnP(new Date(Date.now() - 125000).toISOString()), activity: "old line" }));
+    const { findByTestId, queryByText, container } = render(
+      <ConversationView session={session({ runtime: "stream", state: "working" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    const ind = await findByTestId("working-indicator");
+    expect(ind.textContent).toMatch(/2 min 0\d s/);
+    expect(queryByText("old line")).toBeNull();
+    FakeSocket.last.push({ progress: turnP(new Date().toISOString(), "Bash: ls") });
+    expect(container.querySelector("[data-testid=working-indicator]")!.textContent).toContain("Bash: ls");
+    FakeSocket.last.push({ progress: { turn: null, background: [], subagents: [] } });
+    expect(container.querySelector("[data-testid=working-indicator]")).toBeNull();
+  });
+
+  it("renders nothing for unknown and background-done markers", async () => {
+    const mk = (id: string, marker: string) => ({ id, at: "2025-01-01T00:00:00Z", kind: "marker", marker }) as unknown as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([mk("m1", "stopped"), mk("m2", "background-done"), mk("m3", "weird")]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("Detenida: detuviste a Claude.");
+    expect(container.querySelectorAll(".conv-marker").length).toBe(1);
+  });
+
+  it("keeps the old activity line without progress", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([], { activity: "old line" }));
+    const { findByText, queryByTestId } = render(
+      <ConversationView session={session({ runtime: "stream", state: "working" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("old line");
+    expect(queryByTestId("working-indicator")).toBeNull();
+  });
+
   it("grows a writing bubble from deltas and replaces it with the transcript entry", async () => {
     const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));
     const { findByText, queryByTestId, getByTestId } = render(

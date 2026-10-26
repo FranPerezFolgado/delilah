@@ -4,12 +4,14 @@ import {
   liveSocket,
   type Conversation,
   type ConversationEntry,
+  type Progress,
   type Session,
 } from "../api";
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
 import { Markdown } from "./Markdown";
+import { WorkingIndicator } from "./WorkingIndicator";
 import { ToolCard } from "./ToolCard";
 import { Button, Skeleton } from "./ui";
 import "./ConversationView.css";
@@ -73,6 +75,9 @@ export function ConversationView({
   onOpenFile,
 }: Props) {
   const [conv, setConv] = useState<Conversation | null>(null);
+  // What the agent is doing now: the last of the conversation load and the live socket.
+  // Absent for PTY sessions and older daemons.
+  const [progress, setProgress] = useState<Progress | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -92,6 +97,7 @@ export function ConversationView({
       (c) => {
         if (mine !== seq.current) return;
         cursor.current = c.cursor;
+        setProgress(c.progress ?? null);
         setConv((prev) => ({
           ...c,
           entries: merge(prev?.entries ?? [], c.entries, !!from),
@@ -109,6 +115,7 @@ export function ConversationView({
   useEffect(() => {
     cursor.current = null;
     setConv(null);
+    setProgress(null);
     setError(null);
     stick.current = true;
   }, [id]);
@@ -137,10 +144,14 @@ export function ConversationView({
       ws = sock;
       sock.onmessage = (ev) => {
         delay = 1000;
-        let m: { message?: string; text?: string; done?: boolean; reset?: boolean };
+        let m: { message?: string; text?: string; done?: boolean; reset?: boolean; progress?: Progress };
         try {
           m = JSON.parse(String(ev.data));
         } catch {
+          return;
+        }
+        if (m.progress) {
+          setProgress(m.progress);
           return;
         }
         // The daemon dropped deltas (a slow socket): the bubbles have gaps, the
@@ -301,11 +312,12 @@ export function ConversationView({
               />
             );
           if (e.kind === "marker") {
+            // Unknown markers (and "background-done", rendered elsewhere) show nothing.
+            if (e.marker !== "compacted" && e.marker !== "stopped") return null;
             return (
               <div key={e.id} className="conv-marker muted">
-                {e.marker === "compacted"
-                  ? t("Conversación compactada")
-                  : t("Detenida: detuviste a Claude.")}
+                {e.marker === "compacted" && t("Conversación compactada")}
+                {e.marker === "stopped" && t("Detenida: detuviste a Claude.")}
               </div>
             );
           }
@@ -385,8 +397,10 @@ export function ConversationView({
           </div>
         ))}
       </div>
-      {working && conv?.activity && (
-        <div className="conv-activity muted">{conv.activity}</div>
+      {progress?.turn ? (
+        <WorkingIndicator turn={progress.turn} />
+      ) : (
+        !progress && working && conv?.activity && <div className="conv-activity muted">{conv.activity}</div>
       )}
       {conv?.needs_terminal && (
         <div className="conv-notice">
