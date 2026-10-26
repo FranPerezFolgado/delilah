@@ -190,6 +190,16 @@ describe("BacklogTaskView start", () => {
     expect(update.mock.calls[0][1]).toMatchObject({ workflow: "prompt", start_message: "/fix {ticket}" });
   });
 
+  it("disables Iniciar and Guardar while the custom message is blank", () => {
+    const { container } = mount({ ...task, workflow: "project" });
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    expect(btn(container, "Iniciar").disabled).toBe(true);
+    expect(btn(container, "Guardar").disabled).toBe(true);
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/fix" } });
+    expect(btn(container, "Iniciar").disabled).toBe(false);
+    expect(btn(container, "Guardar").disabled).toBe(false);
+  });
+
   it("Nada saves workflow none and hides autopilot", async () => {
     const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
     const { container } = mount({ ...task, workflow: "project" });

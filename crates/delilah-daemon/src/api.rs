@@ -506,6 +506,12 @@ async fn build_task_with(
         }
     }
     use delilah_core::workflow::TaskWorkflow;
+    // An explicit `prompt` start needs its message; only stored legacy tasks go without.
+    if requested == Some(TaskWorkflow::Prompt) && message.is_none() {
+        return Err(template_error(delilah_core::workflow::validate(
+            "prompt", "", false,
+        )));
+    }
     let workflow = match (requested, &message) {
         (Some(TaskWorkflow::None), _) => TaskWorkflow::None,
         (Some(TaskWorkflow::Prompt), _) | (_, Some(_)) => TaskWorkflow::Prompt,
@@ -1739,16 +1745,16 @@ mod tests {
         assert_eq!(task["workflow"], "project");
         assert!(task["start_message"].is_null());
         assert_eq!(task["saving_mode"], true, "the phased project keeps it");
-        // The legacy shape is accepted: no message, it starts with nothing.
-        let (status, task) = call(
-            &app,
-            "POST",
-            "/api/v1/tasks",
-            Some(new_task(json!({"workflow": "prompt"}))),
-        )
-        .await;
-        assert_eq!(status, StatusCode::CREATED, "{task}");
-        assert!(task["start_message"].is_null());
+        // A `prompt` start without a message is refused, absent or blank.
+        for body in [
+            json!({"workflow": "prompt"}),
+            json!({"workflow": "prompt", "prompt": "  "}),
+        ] {
+            let (status, err) = call(&app, "POST", "/api/v1/tasks", Some(new_task(body))).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+            assert_eq!(err["fields"][0]["field"], "prompt");
+            assert_eq!(err["fields"][0]["code"], "workflow.blank");
+        }
     }
 
     #[tokio::test]
@@ -1869,7 +1875,9 @@ mod tests {
             &app,
             "POST",
             "/api/v1/tasks",
-            Some(body(json!({"autopilot": true, "workflow": "prompt"}))),
+            Some(body(
+                json!({"autopilot": true, "workflow": "prompt", "prompt": "hi"}),
+            )),
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
@@ -1878,7 +1886,7 @@ mod tests {
             &app,
             "POST",
             "/api/v1/tasks",
-            Some(body(json!({"workflow": "prompt"}))),
+            Some(body(json!({"workflow": "prompt", "prompt": "hi"}))),
         )
         .await;
         let uri = format!("/api/v1/tasks/{}", plain["key"].as_str().unwrap());

@@ -647,6 +647,16 @@ describe("NewTaskDialog start override", () => {
     expect(run.mock.calls[0][0]).toMatchObject({ workflow: "prompt", prompt: "/fix {ticket}", saving_mode: false });
   });
 
+  it("disables Iniciar and Guardar en backlog while the custom message is blank", () => {
+    const { container, getByText } = mountWith(projects);
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    expect(btn(container, "Iniciar").disabled).toBe(true);
+    expect((getByText("Guardar en backlog") as HTMLButtonElement).closest("button")!.disabled).toBe(true);
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/fix" } });
+    expect(btn(container, "Iniciar").disabled).toBe(false);
+    expect((getByText("Guardar en backlog") as HTMLButtonElement).closest("button")!.disabled).toBe(false);
+  });
+
   it("Nada is sent as workflow none and hides the phased controls; it is also saved to the backlog", async () => {
     const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
     const { container, getByText } = mountWith(projects);

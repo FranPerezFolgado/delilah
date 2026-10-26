@@ -22,7 +22,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-11F | 5 | fix | done | 1 | 1b5054d | settings from App.tsx, ProposalCard reason |
 | WP-12 | 6 | 6A | verified | 1 | 8b45368 | |
 | WP-13 | 6 | 6A | verified | 1 | 32649b4 | |
-| WP-14 | 6 | 6A | verified | 1 | | |
+| WP-14 | 6 | 6A | verified | 1 | a608e92 | |
+| WP-12F | 6 | 6F | verified | 1 | | blank custom message refused (3 reviewers, FR-012) |
 | WP-15 | 7 | 7A | pending | 0 | | |
 | WP-16 | 7 | 7B | pending | 0 | | |
 
@@ -83,3 +84,17 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | spec-compliance | LOW | hidden-autopilot reason says "set a phased workflow" also when the cause is a custom prompt → WP-11F | app/src/components/NewTaskDialog.tsx:409 |
 | 5 | orchestrator | LOW | flaky under full parallel load (pass alone, 959/959 on re-run): conversation a_message_sent_while_a_card_is_pending_is_queued, preview stop_and_wait_returns_once_the_group_is_gone_even_if_it_ignores_term, setup retry_runs_it_again_in_the_worktree — pre-existing, not in this feature's files | crates/delilah-daemon/src/{conversation,preview,setup}.rs |
 | 5 | spec-compliance | LOW | TaskView gets project?.settings only for @name owners: a proposal inside a regular task's overview gets no settings (no autopilot, no reason); use the task's own project (arch re-review: MEDIUM) → WP-14 | app/src/components/TaskScreen.tsx:734 |
+| 6 | spec-compliance+contract+arch | MEDIUM | POST /tasks with workflow "prompt" and a blank prompt is silently accepted (task starts with nothing), unlike PATCH (422) and /runs (400) → WP-12F | crates/delilah-daemon/src/api.rs:502 |
+| 6 | spec-compliance | LOW | /runs blank prompt with workflow "prompt" is a generic 400, not a field 422 → WP-12F | crates/delilah-daemon/src/run.rs:346 |
+| 6 | spec-compliance | LOW | NewTaskDialog decides "free task" by the LIBRE- key prefix; use the task's origin/free flag | app/src/components/NewTaskDialog.tsx |
+| 6 | contract | RISK | POST /runs `prompt` is now a template (unknown {x} and lone braces → 422; {title}/{ticket} expand); contract and CLI help say "unchanged" → WP-15 docs + changelog | crates/delilah-daemon/src/run.rs:328 |
+| 6 | contract | RISK | POST /tasks without workflow now stores "project" (was the legacy column); PATCH workflow strictly validated; CLI --workflow restricted → WP-15 contract notes | crates/delilah-daemon/src/api.rs:497 |
+| 6 | contract | LOW | UI may show a 422 message twice (inline + generic error); no test round-trips the PATCH 422 body | app/src/components/NewTaskDialog.tsx |
+| 6 | architecture | MEDIUM | (workflow?, prompt?) → start mapping written three times (create, PATCH, run); move into one pure fn in delilah-core workflow.rs | crates/delilah-daemon/src/api.rs:493 |
+| 6 | architecture | MEDIUM | UI preview (projectStart/fillTemplate) re-implements workflow::resolve; move next to isPhased in workflowPresets.ts or preview server-side | app/src/components/WorkflowEditor.tsx:152 |
+| 6 | architecture | MEDIUM | StartPicker duplicates WorkflowEditor's single-start UI; extract a MessageStart component, move startChoiceOf/startFields out | app/src/components/WorkflowEditor.tsx:118 |
+| 6 | architecture | LOW | "join messages then invalid_fields" repeated 3× (api.rs, run.rs:297, projects.rs:215); add ApiError::from_fields | crates/delilah-daemon/src/api.rs:346 |
+| 6 | architecture | LOW | BacklogChange.start_message Some("") means clear; check_start_change returns Option<bool>; double task read | crates/delilah-daemon/src/api.rs:628 |
+| 6 | architecture | LOW | api.rs keeps growing (2117 lines); start logic could move to a task_start.rs module | crates/delilah-daemon/src/api.rs |
+| 6 | security | LOW | no length limit on prompt/start_message (local trusted clients only) | crates/delilah-daemon/src/api.rs |
+| 6 | WP-12F | LOW | the /runs 422 for workflow "prompt" with a blank prompt has no test | crates/delilah-daemon/src/run.rs:346 |

@@ -343,7 +343,11 @@ pub(crate) async fn start_run_with(
             (TaskWorkflow::Project, None) => StartRequest::Project,
             (TaskWorkflow::Prompt, None) if stored_message.is_some() => StartRequest::Inherit,
             (TaskWorkflow::Prompt, None) => {
-                return Err(ApiError::bad_request("workflow `prompt` needs a --prompt"));
+                return Err(crate::api::template_error(vec![delilah_core::FieldError {
+                    field: "prompt".into(),
+                    code: "workflow.blank".into(),
+                    message: "workflow `prompt` needs a --prompt".into(),
+                }]));
             }
         },
         (None, Some(p)) => StartRequest::Prompt(p.to_string()),

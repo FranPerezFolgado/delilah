@@ -309,7 +309,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       setError((err as Error).message);
     }
   };
-  const canSave = !!project && !!title.trim() && (origin === "libre" || !!key.trim());
+  const blankStart = start.kind === "prompt" && !start.prompt.trim();
+  const canSave = !blankStart && !!project && !!title.trim() && (origin === "libre" || !!key.trim());
 
   const formId = "new-task-form";
   const title0 = fromSession ? t("Convertir en tarea") : existing ? t("Iniciar {key}", { key: existing.key }) : t("Nueva tarea");
@@ -324,7 +325,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           {t("Guardar en backlog")}
         </Button>
       )}
-      <Button variant="primary" type="submit" form={formId} disabled={busy || !project}>{startLabel}</Button>
+      <Button variant="primary" type="submit" form={formId} disabled={busy || !project || blankStart}>{startLabel}</Button>
     </>
   );
   const setSaving = (on: boolean) => {
@@ -485,7 +486,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           <div className="ntd-dirty" role="alert">
             <div>{t("Tu checkout tiene cambios sin guardar. Guárdalos o descártalos, o inicia la tarea en un worktree aislado.")}</div>
             <div className="ntd-dirty-actions">
-              <Button variant="secondary" size={28} disabled={busy} onClick={startInWorktree}>{t("Iniciar en un worktree")}</Button>
+              <Button variant="secondary" size={28} disabled={busy || blankStart} onClick={startInWorktree}>{t("Iniciar en un worktree")}</Button>
               <Button variant="ghost" size={28} icon="console" disabled={busy} onClick={openTerminal}>{t("Abrir una terminal")}</Button>
             </div>
           </div>

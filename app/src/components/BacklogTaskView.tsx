@@ -68,6 +68,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     autopilot !== !!task.autopilot ||
     startDirty;
   const workflow = startChoice.kind;
+  const blankStart = startChoice.kind === "prompt" && !startChoice.prompt.trim();
   // Saving mode and autopilot only exist in a phased workflow (of the selected project).
   const autopilotAllowed = isPhased(workflow, projects.find((p) => p.name === project)?.settings);
   const locked = busy || !!started;
@@ -169,16 +170,16 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
         {refused && (
           <div className="error selectable bt-refused" role="alert">
             <span>{t("Tu checkout tiene cambios sin guardar. Guárdalos o trabaja en un worktree.")}</span>
-            <Button variant="secondary" size={28} disabled={busy} onClick={() => start(false)}>{t("Iniciar en un worktree")}</Button>
+            <Button variant="secondary" size={28} disabled={busy || blankStart} onClick={() => start(false)}>{t("Iniciar en un worktree")}</Button>
           </div>
         )}
         {error && <div className="error selectable">{error}</div>}
         {started && <div className="bt-started" role="status">{t("{key} iniciada", { key: task.key })}</div>}
         <div className="bt-actions">
-          <Button variant="primary" icon="run" disabled={locked || !title.trim() || !project} onClick={() => start(where === "checkout")}>
+          <Button variant="primary" icon="run" disabled={locked || blankStart || !title.trim() || !project} onClick={() => start(where === "checkout")}>
             {t("Iniciar")}
           </Button>
-          <Button variant="secondary" disabled={locked || !dirty || !title.trim()} onClick={save}>
+          <Button variant="secondary" disabled={locked || blankStart || !dirty || !title.trim()} onClick={save}>
             {t("Guardar")}
           </Button>
           <Button variant="danger" className="bt-delete" disabled={locked} onClick={() => setDeleting(true)}>
