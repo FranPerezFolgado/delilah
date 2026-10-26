@@ -270,11 +270,20 @@ mod tests {
             "---\nname: zeta\ndescription: The last one\n---\nbody",
         );
         write(&c.join("commands/a/b.md"), "# Do the thing\nmore");
-        write(&c.join("commands/plain.md"), "---\ndescription: \"Quoted\"\n---\nx");
+        write(
+            &c.join("commands/plain.md"),
+            "---\ndescription: \"Quoted\"\n---\nx",
+        );
         write(&proj.join(".claude/commands/fix.md"), "Fix a bug\n");
-        write(&proj.join(".claude/skills/fix/SKILL.md"), "no frontmatter\n");
+        write(
+            &proj.join(".claude/skills/fix/SKILL.md"),
+            "no frontmatter\n",
+        );
         let plug = t.path().join("cache/pl");
-        write(&plug.join("skills/design/SKILL.md"), "---\nname: design\n---\nPretty");
+        write(
+            &plug.join("skills/design/SKILL.md"),
+            "---\nname: design\n---\nPretty",
+        );
         write(&plug.join("commands/go.md"), "Go\n");
         let off = t.path().join("cache/off");
         write(&off.join("commands/no.md"), "No\n");
@@ -318,7 +327,10 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let (home, proj) = (t.path().join("home"), t.path().join("proj"));
         let c = home.join(".claude");
-        write(&c.join("skills/stemmed/SKILL.md"), "---\ndescription: d\n---\n");
+        write(
+            &c.join("skills/stemmed/SKILL.md"),
+            "---\ndescription: d\n---\n",
+        );
         // Not UTF-8, a folder where a file should be, and broken JSON: none may fail the call.
         fs::create_dir_all(c.join("skills/broken")).unwrap();
         fs::create_dir_all(c.join("skills/broken/SKILL.md")).unwrap();
