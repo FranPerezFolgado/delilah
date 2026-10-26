@@ -52,6 +52,10 @@ building and publishing are `make release` on `main` and the tag workflow, as in
 - If several GitHub accounts are configured, confirm the one `gh` uses before any
   remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.
+- PRs are always squash-merged (`gh pr merge --squash`; the repo allows nothing else). The
+  PR title becomes the commit on `main` and the changelog line, so write it as a
+  Conventional Commit (`feat: …`, `fix: …`), and keep the body as the commit message
+  (decision 83).
 
 ## Parallelize by default
 

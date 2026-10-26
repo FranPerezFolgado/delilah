@@ -644,3 +644,10 @@ indexes the rest. History is labelled or archived, not deleted: `docs/archive/` 
 `CLAUDE.local.md`, so the checked-in `CLAUDE.md` is safe to publish. The changelog is
 generated with git-cliff inside the version bump, so a release cannot go out without its
 section. *Ruled out:* a hand-written changelog and keeping personal notes in `CLAUDE.md`.
+
+**83. Pull requests are squash-merged.** Each PR lands on `main` as one commit whose title
+is the PR title and whose message is the PR body; the GitHub repo allows only squash
+merges. *Why:* the changelog is generated from `main`'s commit subjects, and a feature
+branch carries work-package, progress and fix-up commits that don't belong there, so the
+PR title, written as a Conventional Commit, is the one changelog line. *Ruled out:* merge
+commits and rebase merges (they bring the branch's commits onto `main`).

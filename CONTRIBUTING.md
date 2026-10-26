@@ -67,8 +67,10 @@ are the maintainer's job (see the releasing section of
 1. Branch from `main`.
 2. Make the change with its tests; update the docs and README if behaviour changed.
 3. Open a PR and fill in the [template](.github/pull_request_template.md). Say which
-   version level you picked and why.
-4. CI must be green. A maintainer reviews and merges.
+   version level you picked and why. Write the title as a
+   [Conventional Commit](https://www.conventionalcommits.org/) (`feat: …`, `fix: …`):
+   PRs are squash-merged, so the title becomes the commit on `main` and the changelog line.
+4. CI must be green. A maintainer reviews and squash-merges.
 
 ## Spec Kit (optional)
 

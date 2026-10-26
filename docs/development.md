@@ -163,7 +163,7 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    (config in `cliff.toml`; needs `brew install git-cliff`, the script stops without it),
    and with `--commit` commits only those files (changelog included), whatever else is staged. Check what is merged since the last tag
    with `git log vX.Y.Z..HEAD`.
-2. Merge the PR into `main`, then `git switch main && git pull`.
+2. Squash-merge the PR into `main` (`gh pr merge --squash`, the only method the repo allows; decision 83), then `git switch main && git pull`.
 3. `make release` on `main`. With neither `BUMP` nor `VERSION` it releases the version
    already in the files, which is the normal path after the branch bump. Use
    `BUMP=major|minor|patch` or `VERSION=X.Y.Z` only when the branch was not bumped (see
