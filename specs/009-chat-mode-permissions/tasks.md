@@ -225,7 +225,7 @@ behaviour exactly. Cards and remembered rules still work.
 **Independent Test**: the e2e and vitest tests below, plus the preview check in
 quickstart.md.
 
-- [ ] T016 [P] [US2] In `crates/delilah-e2e/tests/chat_permissions.rs`, add
+- [X] T016 [P] [US2] In `crates/delilah-e2e/tests/chat_permissions.rs`, add
   `claudes_default_brings_back_todays_cards`. Set the preference to `"default"`, then
   run the same four-tool chat scenario as T014(a). Expect four permission asks in turn,
   each answered "allow once" through `/api/v1/sessions/{id}/permissions/{ask}`. The

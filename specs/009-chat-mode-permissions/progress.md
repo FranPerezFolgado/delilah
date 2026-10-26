@@ -8,7 +8,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01 | 1 | 1A | done | 1 | 32944f0 | R1 confirmed; no escalating control action found |
 | WP-02 | 2 | 2A | done | 1 | a345669 | red weak: agents/fake tests written with code; 2 daemon flakes pass alone |
 | WP-03 | 3 | 3A | verified | 1 | | T015 code-first (no red); e2e needs cargo build -p delilah-daemon first |
-| WP-04 | 4 | 4A | pending | 0 | | |
+| WP-04 | 4 | 4A | verified | 1 | | PERM-9, PERM-10 |
 | WP-05 | 4 | 4A | verified | 1 | | tests written with code (no red seen) |
 | WP-06 | 5 | 5A | pending | 0 | | |
 | WP-07 | 6 | 6A | verified | 1 | 7ac18fa | decision #80 |
@@ -18,6 +18,9 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 3 | spec-compliance | MEDIUM | FR-008 hint skipped for project sessions (fail_if_mode_rejected returns early when project_of(task)) | crates/delilah-daemon/src/run.rs |
+| 3 | spec-compliance | LOW | T015 written code-first, no red run | crates/delilah-daemon/src/run.rs |
+| 3 | spec-compliance | LOW | T014(c) checks the no-pause-after-routine-turn condition only indirectly | crates/delilah-e2e/tests/chat_permissions.rs |
 | 2 | spec-compliance | MEDIUM | no real red run for agents/fake tests (written with code) | specs/009-chat-mode-permissions/progress.md |
 | 2 | spec-compliance | MEDIUM | 2 daemon tests failed in full run, pass alone (conversation::a_message_sent_while_a_card_is_pending_is_queued, pr_loop::nudges_in_the_window_make_one_delayed_check); recheck in WP-06. tsc was run by the orchestrator: OK | crates/delilah-daemon |
 | 2 | spec-compliance | LOW | fake reads auto mode by scanning record.args instead of args.rs permission_mode | crates/delilah-e2e/src/fake/stream.rs |

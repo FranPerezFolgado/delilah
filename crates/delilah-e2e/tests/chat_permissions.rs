@@ -114,6 +114,27 @@ fn tool_ask(command: &str) -> Value {
         "output": "ok", "auto": "ask"}})
 }
 
+/// Answers the permission card of `task` that is not in `seen`, remembering its id.
+fn answer_next_card(env: &Env, task: &str, seen: &mut Vec<String>, decision: &str) {
+    let item = env.wait_for(
+        &format!("a new permission card of {task}"),
+        T,
+        || match inbox_item(env, task, "permission") {
+            Some(i) if !seen.iter().any(|s| i["permission"]["id"] == s.as_str()) => Ok(i),
+            _ => Err(()),
+        },
+    );
+    let session = item["session"]["id"].as_str().unwrap();
+    let ask = item["permission"]["id"].as_str().unwrap().to_string();
+    let (code, body) = env.api().raw(
+        Method::POST,
+        &format!("/api/v1/sessions/{session}/permissions/{ask}"),
+        Some(json!({"decision": decision})),
+    );
+    assert_eq!(code, 204, "{body}");
+    seen.push(ask);
+}
+
 #[test]
 fn routine_work_in_chat_mode_raises_no_permission_card() {
     let env = Env::start(EnvOptions::default());
@@ -314,4 +335,72 @@ fn a_cli_rejecting_the_mode_fails_a_terminal_start_with_the_settings_hint() {
         assert!(text.contains("--permission-mode"), "{task}");
         assert!(text.ends_with(hint), "{lang}: {text}");
     }
+}
+
+#[test]
+fn claudes_default_brings_back_todays_cards() {
+    let env = Env::start(EnvOptions::default());
+    env.register_fixtures();
+    set_preference(&env, "agent-permissions", "default");
+    let mut steps = routine_tools();
+    steps.push(json!({"say": {"text": "Hecho."}}));
+    env.scenario("routine-default", &json!({"turns": [steps]}));
+    run_in_worktree(
+        &env,
+        "PERM-9",
+        "Rutina [fake:routine-default]",
+        json!({"chat_mode": true}),
+    );
+
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        answer_next_card(&env, "PERM-9", &mut seen, "allow_once");
+    }
+    wait_status(&env, "PERM-9", "waiting-for-user");
+    let record = env.record_for("PERM-9").expect("a fake session record");
+    assert!(
+        !record.args.iter().any(|a| a == "--permission-mode"),
+        "{:?}",
+        record.args
+    );
+    assert_eq!(record.permissions.len(), 4, "{:?}", record.permissions);
+    let asked = event_types(&env, "PERM-9")
+        .iter()
+        .filter(|t| *t == "permission-asked")
+        .count();
+    assert_eq!(asked, 4);
+}
+
+#[test]
+fn a_remembered_rule_still_answers_without_a_card() {
+    let env = Env::start(EnvOptions::default());
+    env.register_fixtures();
+    set_preference(&env, "agent-permissions", "default");
+    let same =
+        || json!({"tool": {"name": "Bash", "input": {"command": "./run.sh"}, "output": "ran"}});
+    env.scenario(
+        "remembered",
+        &json!({"turns": [[same(), same(), {"say": {"text": "Hecho."}}]]}),
+    );
+    run_in_worktree(
+        &env,
+        "PERM-10",
+        "Recuerda [fake:remembered]",
+        json!({"chat_mode": true}),
+    );
+
+    let mut seen = Vec::new();
+    answer_next_card(&env, "PERM-10", &mut seen, "allow_always");
+    // The second, identical command runs under the remembered rule: no second card.
+    // The fake's turn ended (it said its last line) with no card ever raised again.
+    env.wait_for("PERM-10 done with its turn", T, || {
+        let settled = status(&env, "PERM-10") == "waiting-for-user"
+            && inbox_item(&env, "PERM-10", "permission").is_none();
+        if settled { Ok(()) } else { Err(()) }
+    });
+    let asked = event_types(&env, "PERM-10")
+        .iter()
+        .filter(|t| *t == "permission-asked")
+        .count();
+    assert_eq!(asked, 1, "{:?}", event_types(&env, "PERM-10"));
 }
