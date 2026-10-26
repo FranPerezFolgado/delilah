@@ -37,11 +37,23 @@ describe("FloorMini", () => {
     expect(screen.getByRole("button", { name: "LIBRE-3, Implementación, 2 agentes, 1 esperando" })).toBeTruthy();
   });
 
-  it("shows at most 6 characters and +N", () => {
-    const f = floor({ leads: [lead(0)], helpers: [1, 2, 3, 4, 5, 6, 7].map(helper), waiting: 0 });
+  it("draws the floor in miniature, sized to its content, not stretched", () => {
+    const { container } = render(<FloorMini floor={floor()} onOpen={() => {}} />);
+    const scene = container.querySelector<HTMLElement>(".fm-scene")!;
+    expect(scene.getAttribute("aria-hidden")).toBe("true");
+    expect(scene.style.width).toBe("180px");
+    expect(scene.style.height).toBe("72px");
+    expect(scene.querySelectorAll(".fl-desk")).toHaveLength(2);
+    expect(scene.querySelector("svg.fl-bg")).toBeTruthy();
+    expect(scene.querySelector(".fl-bubble--wait")?.textContent).toBe("?");
+  });
+
+  it("grows to three pod columns for a third pod but shows only the first row, with +N", () => {
+    const f = floor({ leads: [lead(0)], helpers: [1, 2, 13].map(helper), waiting: 0 });
     const { container } = render(<FloorMini floor={f} onOpen={() => {}} />);
-    expect(container.querySelectorAll(".fm-mini")).toHaveLength(6);
-    expect(container.querySelector(".fm-more")?.textContent).toBe("+2");
+    expect(container.querySelectorAll(".fl-desk")).toHaveLength(3);
+    expect(container.querySelector(".fm-more")?.textContent).toBe("+1");
+    expect(container.querySelector<HTMLElement>(".fm-scene")!.style.width).toBe("180px");
   });
 
   it("marks a waiting floor with the pill and highlight", () => {
@@ -61,10 +73,5 @@ describe("FloorMini", () => {
     render(<FloorMini floor={floor()} onOpen={onOpen} />);
     fireEvent.click(screen.getByRole("button"));
     expect(onOpen).toHaveBeenCalledWith("LIBRE-3");
-  });
-
-  it("draws the room's wall and floor colours behind the strip", () => {
-    const { container } = render(<FloorMini floor={floor()} onOpen={() => {}} />);
-    expect(container.querySelectorAll(".fm-strip svg.fm-bg rect")).toHaveLength(3);
   });
 });

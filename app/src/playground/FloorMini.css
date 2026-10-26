@@ -1,15 +1,15 @@
-.fm { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 8px 10px; text-align: left; font: inherit; color: var(--tx); background: var(--card); border: 1px solid var(--bd); border-radius: 10px; cursor: pointer; }
+/* A storey of the building: its office floor in miniature on the left, at its natural size, and the
+   text on the right. Storeys share their walls (a thin divider), newest on top. */
+.fm { display: flex; align-items: center; gap: 14px; width: 100%; padding: 8px 10px; text-align: left; font: inherit; color: var(--tx); background: var(--card); border: 0; border-bottom: 1px solid var(--bd); cursor: pointer; }
 .fm:hover { background: var(--hov); }
-.fm:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.fm-selected { background: var(--sel); border-color: var(--bd2); }
-.fm-wait { box-shadow: inset 2px 0 0 var(--wait); }
-.fm-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; }
-.fm-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tx-strong); flex: none; }
-.fm-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx2); }
-.fm-phase { flex: none; margin-left: auto; color: var(--tx2); }
-.fm-pill { flex: none; padding: 1px 7px; border-radius: 10px; background: var(--wait-bg); }
-.fm-strip { position: relative; overflow: hidden; display: flex; align-items: flex-end; gap: 6px; min-height: 36px; padding: 4px 6px; background: var(--term-bg); border-radius: 7px; }
-.fm-mini { position: relative; display: inline-flex; }
-.fm-q { position: absolute; top: -4px; right: -4px; font-size: 12px; line-height: 1; color: var(--wait); }
-.fm-more { position: relative; align-self: center; font-size: 12px; color: var(--tx2); }
-.fm-bg { position: absolute; left: 0; top: 0; }
+.fm:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.fm-selected { background: var(--sel); }
+.fm-wait { box-shadow: inset 3px 0 0 var(--wait); }
+.fm-scene { position: relative; flex: none; display: block; overflow: hidden; border-radius: 7px; pointer-events: none; }
+.fm-scene svg { display: block; }
+.fm-text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; flex: 1; font-size: 12px; }
+.fm-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tx-strong); }
+.fm-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx2); }
+.fm-phase { color: var(--tx2); }
+.fm-pill { padding: 1px 7px; border-radius: 10px; background: var(--wait-bg); }
+.fm-more { position: absolute; right: 3px; bottom: 2px; z-index: 2; padding: 0 4px; border-radius: 7px; font-size: 12px; line-height: 14px; color: var(--term-tx); background: color-mix(in srgb, var(--term-bg) 85%, transparent); }

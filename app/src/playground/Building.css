@@ -5,7 +5,8 @@
 .bld-spacer { flex: 1; }
 .bld-empty { margin: auto; color: var(--tx3); }
 .bld-body { gap: 8px; padding: 12px 20px; }
-.bld-floors { display: flex; flex-direction: column; gap: 8px; }
+.bld-floors { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; }
+.bld-floors .fm:last-child { border-bottom: 0; }
 
 /* Connection lost: keep the last picture, dimmed and still, under a banner. */
 .bld-banner { flex: none; padding: 8px 16px; background: var(--err-bg); border-bottom: 1px solid var(--err); color: var(--err-tx); font-size: 12px; font-weight: 600; text-align: center; }

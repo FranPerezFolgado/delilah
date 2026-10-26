@@ -1,7 +1,8 @@
-import { OFFICE_COLOURS } from "./art/office";
-import { PixelSprite } from "./PixelSprite";
 import { lookFor, roleLook } from "./art/outfit";
 import { recolour } from "./art/ramp";
+import { DeskArt, SceneArt, Backdrop, feetStyle, seatedProps } from "./FloorScene";
+import { POD_COLS, floorSize, podCount, seatPosition } from "./floorLayout";
+import { PixelSprite } from "./PixelSprite";
 import type { DeskSeat, FloorModel } from "./useOffice";
 import { phaseLabel } from "../phases";
 import { t, tn } from "../i18n";
@@ -13,29 +14,31 @@ export interface FloorMiniProps {
   selected?: boolean;
 }
 
-const MAX_MINIS = 6;
+/** The miniature's scale: 1 art px = 1 css px, so six floors fit a 900 px window. */
+const MINI_SCALE = 1;
+/** Seats of the first pod row; the miniature shows no further rows. */
+const FIRST_ROW_SEATS = POD_COLS * 4;
 
-function Mini({ seat, project }: { seat: DeskSeat; project: string | null }) {
+/** One seated character in the miniature: static art, the same as the full floor's. */
+function MiniDesk({ seat, project }: { seat: DeskSeat; project: string | null }) {
   const look = seat.session ? lookFor(project ?? "", seat.session) : roleLook(seat.lookKey);
-  const props =
-    seat.state === "paused"
-      ? { animation: "seated_sleeping" }
-      : seat.state === "working" && seat.action
-        ? { animation: "typing" }
-        : { animation: "seated" };
   return (
-    <span className={`fm-mini fm-${seat.state}`}>
-      <PixelSprite {...props} scale={2} recolour={recolour(look)} />
-      {seat.state === "waiting" && <b className="fm-q">?</b>}
-    </span>
+    <DeskArt seat={seat} scale={MINI_SCALE}>
+      <span className="fl-char fl-char--helper" style={feetStyle(seatPosition(seat.slot), MINI_SCALE)}>
+        <PixelSprite {...(seatedProps(seat) as { sprite: string })} scale={MINI_SCALE} recolour={recolour(look)} />
+      </span>
+    </DeskArt>
   );
 }
 
-/** A floor of the building as one button: key, title, phase and its first characters. */
+/** A floor of the building as one button: a miniature of its office floor (wall, desks with the
+ *  agents behind them, lounge) at its natural size on the left; key, title, phase and pill on the right. */
 export function FloorMini({ floor, onOpen, selected }: FloorMiniProps) {
   const seats = [...floor.leads, ...floor.helpers];
-  const shown = seats.slice(0, MAX_MINIS);
+  const shown = seats.filter((s) => s.slot < FIRST_ROW_SEATS);
   const more = seats.length - shown.length;
+  const pods = podCount(Math.max(-1, ...shown.map((s) => s.slot)) + 1);
+  const size = floorSize(pods);
   const isTask = !floor.owner.startsWith("@");
   const key = isTask ? floor.owner : floor.title;
   const phase = floor.phase ? phaseLabel(floor.phase) : null;
@@ -45,22 +48,19 @@ export function FloorMini({ floor, onOpen, selected }: FloorMiniProps) {
   const cls = ["fm", floor.waiting > 0 && "fm-wait", selected && "fm-selected"].filter(Boolean).join(" ");
   return (
     <button type="button" className={cls} aria-label={label} title={floor.title} aria-pressed={selected} onClick={() => onOpen(floor.owner)}>
-      <span className="fm-head">
+      <span className="fm-scene" aria-hidden="true" style={{ width: size.width * MINI_SCALE, height: size.height * MINI_SCALE }}>
+        <Backdrop scale={MINI_SCALE} />
+        <SceneArt scale={MINI_SCALE} pods={pods} />
+        {shown.map((s) => (
+          <MiniDesk key={s.session ?? s.helperId} seat={s} project={floor.project} />
+        ))}
+        {more > 0 && <span className="fm-more">+{more}</span>}
+      </span>
+      <span className="fm-text">
         <span className="fm-key">{key}</span>
         {isTask && <span className="fm-title">{floor.title}</span>}
         {phase && <span className="fm-phase">{phase}</span>}
         {waiting && <span className="pill c-wait fm-pill">{waiting}</span>}
-      </span>
-      <span className="fm-strip" aria-hidden="true">
-        <svg className="fm-bg" width="100%" height="100%" focusable="false" shapeRendering="crispEdges">
-          <rect width="100%" height="100%" fill={OFFICE_COLOURS.floor} />
-          <rect width="100%" height="34%" fill={OFFICE_COLOURS.wall} />
-          <rect y="30%" width="100%" height="4%" fill={OFFICE_COLOURS.wallTrim} />
-        </svg>
-        {shown.map((s) => (
-          <Mini key={s.session ?? s.helperId} seat={s} project={floor.project} />
-        ))}
-        {more > 0 && <span className="fm-more">+{more}</span>}
       </span>
     </button>
   );

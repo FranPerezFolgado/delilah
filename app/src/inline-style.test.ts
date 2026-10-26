@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 // Only values that are computed at run time may be inline; everything else is a class.
 const ALLOWED: Record<string, number> = {
   "components/TaskScreen.tsx": 1, // --tree-w, the dragged width of the project tree
-  "playground/Floor.tsx": 5, // art-px × scale positions and sizes (bar, halo, label, floor), per-kind colour var in the legend
+  "playground/Floor.tsx": 3, // art-px × scale positions and sizes (label, floor), per-kind colour var in the legend
+  "playground/FloorMini.tsx": 1, // art-px × scale size of the miniature's scene
+  "playground/FloorScene.tsx": 2, // art-px × scale positions and sizes (bar, halo) of the desk art
   "playground/Timeline.tsx": 1, // per-kind colour var
 };
 
