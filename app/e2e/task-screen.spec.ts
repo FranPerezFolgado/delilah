@@ -1,4 +1,4 @@
-import { boardCard, expect, test } from "./fixtures";
+import { boardCard, clickToastButton, expect, test } from "./fixtures";
 
 test.use({ locale: "en-GB" });
 
@@ -51,7 +51,7 @@ test("Mark as done then Undo brings the task back to waiting for you", async ({ 
   await page.getByRole("button", { name: "Mark as done" }).click();
   await expect(header(page).getByText("Done", { exact: true })).toBeVisible();
 
-  await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
+  await clickToastButton(page, "Undo");
   await expect(header(page).getByText("Waiting for you", { exact: true })).toBeVisible();
   await expect.poll(async () => (await api.get<Task>(`/api/v1/tasks/${task.key}`)).status.type).toBe("waiting-for-user");
 });
