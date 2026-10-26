@@ -65,10 +65,77 @@ pub enum Step {
     Hook(String),
     SleepMs(u64),
     Ask(Ask),
-    Stop(String),
+    Stop(StopStep),
+    /// Writes `content` to `path`, relative to the session's cwd.
+    Write {
+        path: String,
+        content: String,
+    },
     WaitInput(bool),
     Fail(String),
     Exit(i32),
+}
+
+/// A `stop` step: the message alone, or the message plus the background tasks the
+/// end-of-turn report lists (`[]` allowed; left out: no `background_tasks` field).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopStep {
+    Text(String),
+    Full {
+        message: String,
+        background: Option<Vec<serde_json::Value>>,
+    },
+}
+
+impl StopStep {
+    pub fn message(&self) -> &str {
+        match self {
+            StopStep::Text(m) | StopStep::Full { message: m, .. } => m,
+        }
+    }
+
+    pub fn background(&self) -> Option<&[serde_json::Value]> {
+        match self {
+            StopStep::Text(_) => None,
+            StopStep::Full { background, .. } => background.as_deref(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StopStep {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let v = serde_json::Value::deserialize(d)?;
+        match v {
+            serde_json::Value::String(s) => Ok(StopStep::Text(s)),
+            serde_json::Value::Object(mut o) => {
+                let message = match o.remove("message") {
+                    Some(serde_json::Value::String(m)) => m,
+                    _ => {
+                        return Err(D::Error::custom(
+                            "invalid `stop` step: the object needs a string `message`",
+                        ));
+                    }
+                };
+                let background = match o.remove("background") {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(serde_json::Value::Array(a)) => Some(a),
+                    Some(_) => {
+                        return Err(D::Error::custom(
+                            "invalid `stop` step: `background` must be a list",
+                        ));
+                    }
+                };
+                Ok(StopStep::Full {
+                    message,
+                    background,
+                })
+            }
+            _ => Err(D::Error::custom(
+                "invalid `stop` step: expected a string or an object with `message`",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -168,8 +235,16 @@ pub fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-/// Picks the scenario: `[fake:<name>]` in the prompt, else `<task>.json`,
-/// else `default.json`. Returns the name chosen and the scenario.
+/// The `<command>` of a prompt that starts with `/<command>`, without the slash.
+fn command(prompt: &str) -> Option<&str> {
+    let rest = prompt.trim_start().strip_prefix('/')?;
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let word = &rest[..end];
+    (!word.is_empty()).then_some(word)
+}
+
+/// Picks the scenario: `[fake:<name>]` in the prompt, else `<task>.<command>.json`
+/// (`<command>` is the prompt's leading `/word`), else `<task>.json`, else `default.json`. Returns the name chosen and the scenario.
 pub fn select(
     fake_dir: &Path,
     prompt: Option<&str>,
@@ -193,6 +268,16 @@ pub fn select(
         let s = load(name)?
             .ok_or_else(|| format!("scenario `{name}` not found in {}", dir.display()))?;
         return Ok((name.to_string(), s));
+    }
+    if let Some(task) = task
+        && let Some(cmd) = prompt.and_then(command)
+    {
+        let name = format!("{task}.{cmd}");
+        if valid_name(&name)
+            && let Some(s) = load(&name)?
+        {
+            return Ok((name, s));
+        }
     }
     if let Some(task) = task
         && let Some(s) = load(task)?
@@ -245,7 +330,7 @@ mod tests {
                         },
                     ]
                 }),
-                Step::Stop("done".into()),
+                Step::Stop(StopStep::Text("done".into())),
                 Step::WaitInput(true),
                 Step::Fail("boom".into()),
                 Step::Exit(3),
@@ -340,5 +425,61 @@ mod tests {
             assert!(e.contains("invalid scenario name"), "{bad}: {e}");
         }
         select(d.path(), Some("[fake:default]"), Some("PROJ-1.x_y")).unwrap();
+    }
+
+    #[test]
+    fn stop_object_form_and_write_step() {
+        let s = Scenario::parse(
+            r#"{"steps":[{"stop":"a"},{"stop":{"message":"b"}},
+            {"stop":{"message":"c","background":[{"id":"x"}]}},{"stop":{"message":"d","background":[]}},
+            {"write":{"path":"specs/k/tasks.md","content":"hi"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            s.steps,
+            vec![
+                Step::Stop(StopStep::Text("a".into())),
+                Step::Stop(StopStep::Full {
+                    message: "b".into(),
+                    background: None
+                }),
+                Step::Stop(StopStep::Full {
+                    message: "c".into(),
+                    background: Some(vec![serde_json::json!({"id":"x"})])
+                }),
+                Step::Stop(StopStep::Full {
+                    message: "d".into(),
+                    background: Some(vec![])
+                }),
+                Step::Write {
+                    path: "specs/k/tasks.md".into(),
+                    content: "hi".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_stop_is_an_error_naming_the_step() {
+        for bad in [r#"{"stop":3}"#, r#"{"stop":{"background":[]}}"#] {
+            let e = Scenario::parse(&format!(r#"{{"steps":[{bad}]}}"#)).unwrap_err();
+            assert!(e.contains("stop"), "{e}");
+        }
+    }
+
+    #[test]
+    fn command_scenario_beats_task_and_falls_back() {
+        let d = dir(&[("default", A), ("K-1", B), ("K-1.feature", C)]);
+        let (n, s) = select(d.path(), Some("/feature K-1 do it"), Some("K-1")).unwrap();
+        assert_eq!(
+            (n.as_str(), s.steps),
+            ("K-1.feature", vec![Step::Print("c".into())])
+        );
+        let (n, _) = select(d.path(), Some("/orchestrate specs/x"), Some("K-1")).unwrap();
+        assert_eq!(n, "K-1");
+        let (n, _) = select(d.path(), Some("no command"), Some("K-1")).unwrap();
+        assert_eq!(n, "K-1");
+        let (n, _) = select(d.path(), Some("/feature"), Some("K-1")).unwrap();
+        assert_eq!(n, "K-1.feature");
     }
 }

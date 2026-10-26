@@ -1,5 +1,5 @@
 // The one vocabulary for task status, inbox item kinds, PR state and session dots
-// (docs/ui-redesign.md §3). Labels are Spanish `t()` keys; the kit renders what these return.
+// (docs/archive/ui-redesign.md §3). Labels are Spanish `t()` keys; the kit renders what these return.
 import { BLOCKING, type InboxKind, type PullRequest, type Session, type TaskStatus } from "./api";
 import { locale, t } from "./i18n";
 

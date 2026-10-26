@@ -1,8 +1,7 @@
 # Vision: where Delilah is going
 
-This page summarises the original design sketch, the
-[Delilah design doc](https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204)
-of 2026-10-19, in Spanish, as far as it still applies. It covers what was planned
+This page is the public summary of the original design sketch
+of 2026-10-19, as far as it still applies. It covers what was planned
 but **is not built yet**. Where the sketch and the code disagree, the code and
 [decisions.md](decisions.md) win: hooks go in `--settings` rather than
 `.claude/settings.local.json`, and questions go through AskUserQuestion rather
@@ -20,14 +19,14 @@ PR per submodule, linked to each other and to the ticket.
 
 **More agents.** One `AgentAdapter` trait, with the methods `launch`, `send`,
 `resume`, `install_hooks`, `sync_context` and `read_usage`, and implementations
-for Claude Code, Codex and Pi.
-- **Connecting:** a structured protocol where the agent offers one (ACP, Claude's `stream-json`, Codex JSON), with the PTY as the universal fallback.
+for Claude Code and other coding agents.
+- **Connecting:** a structured protocol where the agent offers one (ACP, Claude's `stream-json`, other agents' JSON streams), with the PTY as the universal fallback.
 - **Agents without hooks:** their state would be read from OSC 7501 terminal sequences, as Orca does.
 - **Compatibility:** keep a matrix of agent versions, because these CLIs change every month.
 
 **Portable context.** One source of skills, instructions, MCP servers and commands,
 translated into each agent's format when the workspace is prepared:
-- `SKILL.md` is shared with Codex;
+- `SKILL.md` is shared across agents;
 - `CLAUDE.md` maps to `AGENTS.md`;
 - MCP config is written per agent.
 
@@ -69,7 +68,7 @@ workspace"). The state machine was meant to leave room for them.
 per task in tokens or time with a warning at 80 %, and optionally resuming with
 another agent or account when a task is urgent.
 
-**Mobile, through Tailscale (decided, [decision 79](decisions.md)).** The daemon is already
+**Mobile, through Tailscale (decided, [decision 87](decisions.md)).** The daemon is already
 API-first, so a phone is just one more client. Analysed and tried on an iPhone on 2026-10-26
 ([research](../specs/008-mobile-access-analysis/research.md)):
 - **Exposure:** `tailscale serve` on the personal Mac: HTTPS inside the tailnet only, never
@@ -92,4 +91,4 @@ Still open:
 - Linux and Windows too, or macOS only? (This decides notifications and installers.)
 - Which other workflows come after SpecKit?
 - Is it worth integrating the company's own autonomous agent as one more agent?
-- Does RTK work with Codex and Pi, or only with Claude?
+- Does RTK work with other agents, or only with Claude?

@@ -257,10 +257,25 @@ pub mod payload {
     }
 
     pub fn stop(session: &str, cwd: &str, last_assistant_message: &str) -> Value {
-        with(
+        stop_with(session, cwd, last_assistant_message, None)
+    }
+
+    /// A `Stop` payload; `background` (when given) is the end-of-turn list of
+    /// background tasks, sent as `background_tasks` exactly as given.
+    pub fn stop_with(
+        session: &str,
+        cwd: &str,
+        last_assistant_message: &str,
+        background: Option<&[Value]>,
+    ) -> Value {
+        let mut p = with(
             base("Stop", session, cwd),
             json!({"last_assistant_message": last_assistant_message}),
-        )
+        );
+        if let Some(b) = background {
+            p["background_tasks"] = Value::Array(b.to_vec());
+        }
+        p
     }
 
     pub fn stop_failure(session: &str, cwd: &str, error: &str) -> Value {

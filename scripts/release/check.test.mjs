@@ -40,3 +40,11 @@ test("already published tag", () => {
 test("placeholder pubkey", () => {
   assert.equal(problems({ ...ok, pubkey: "REPLACE_WITH_UPDATER_PUBKEY" }).length, 1);
 });
+
+test("changelog without the version's section", () => {
+  const changelog = "# Changelog\n\n## [0.4.0] - 2026-01-01\n";
+  const p = problems({ ...ok, changelog });
+  assert.equal(p.length, 1);
+  assert.match(p[0], /CHANGELOG\.md has no 0\.5\.0 section: run scripts\/bump-version\.sh/);
+  assert.deepEqual(problems({ ...ok, changelog: "## [0.5.0] - 2026-01-02\n" }), []);
+});

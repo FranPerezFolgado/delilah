@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
 import { Markdown } from "./Markdown";
-import { Button, ConfirmDialog, pushToast } from "./ui";
+import { Button, ConfirmDialog, dismissToast, pushToast } from "./ui";
 import "./ProposalCard.css";
 
 /** How long «Deshacer» works before the discard is sent to the daemon. */
@@ -27,7 +27,7 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
   const [asking, setAsking] = useState(false);
   // Descartar hides the card and sends the answer after the undo window.
   const [discarding, setDiscarding] = useState(false);
-  const pending = useRef<{ timer: ReturnType<typeof setTimeout> } | null>(null);
+  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; toastId: number } | null>(null);
   const q = ask.questions[0]?.question ?? "";
 
   const send = async (answer: string, launch?: "autopilot") => {
@@ -55,6 +55,7 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
     () => () => {
       if (pending.current) {
         clearTimeout(pending.current.timer);
+        dismissToast(pending.current.toastId);
         pending.current = null;
         void sendRef.current("Descartar");
       }
@@ -64,12 +65,13 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
 
   const discard = () => {
     setDiscarding(true);
+    // The toast can be paused by hover; the discard can't, so it closes the toast itself.
     const timer = setTimeout(() => {
+      if (pending.current) dismissToast(pending.current.toastId);
       pending.current = null;
       void sendRef.current("Descartar");
     }, UNDO_MS);
-    pending.current = { timer };
-    pushToast({
+    const toastId = pushToast({
       text: t("Tarea descartada"),
       ttl: UNDO_MS,
       action: {
@@ -82,6 +84,7 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
         },
       },
     });
+    pending.current = { timer, toastId };
   };
 
   if (discarding && !error) return null;

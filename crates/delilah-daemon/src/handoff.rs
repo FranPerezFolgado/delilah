@@ -21,6 +21,10 @@ use crate::specs::SpecSummary;
 use crate::state::AppState;
 use crate::store_sessions::{SessionKind, SessionRecord};
 
+/// What the debug log says when a turn ends with background work running; the hooks tests
+/// count lines with it.
+pub(crate) const BACKGROUND_WAIT_LOG: &str = "turn ended with background work running: no stall";
+
 /// How long the stopped session gets to exit before the new one is launched.
 const KILL_WAIT: Duration = Duration::from_secs(3);
 
@@ -238,11 +242,32 @@ async fn enter<L: Launcher>(
 
 /// The primary session finished a turn (not on the usage limit): see whether its step
 /// is over. Offers the next step or starts it, as `boundary` says.
+#[cfg(test)]
 pub(crate) async fn on_turn_ended(app: &AppState, key: &TaskKey) {
-    on_turn_ended_with(app, key, &crate::run::launch_session).await;
+    on_turn_end(app, key, TurnEnd::default()).await;
 }
 
 pub(crate) async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKey, launch: &L) {
+    on_turn_end_with(app, key, TurnEnd::default(), launch).await;
+}
+
+/// What the hook said about the turn that ended.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct TurnEnd {
+    /// Background work (subagents, shells) was still running when the turn ended.
+    pub background: bool,
+}
+
+pub(crate) async fn on_turn_end(app: &AppState, key: &TaskKey, end: TurnEnd) {
+    on_turn_end_with(app, key, end, &crate::run::launch_session).await;
+}
+
+pub(crate) async fn on_turn_end_with<L: Launcher>(
+    app: &AppState,
+    key: &TaskKey,
+    end: TurnEnd,
+    launch: &L,
+) {
     // The stage is read under the guard: a save turn that ends right after the
     // prompt was typed finds `saving` already written.
     let guard = app.handoffs.guard.lock().await;
@@ -263,6 +288,12 @@ pub(crate) async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKe
     };
     let Some(found) = autopilot::shape(&task, boundary(&task, primary.step, &spec)) else {
         drop(guard);
+        // Waiting only skips the stall; it never blocks `finish_save`, the boundary or
+        // a handoff, which all ran above or below on every turn end.
+        if end.background {
+            tracing::debug!(task = %key, "{BACKGROUND_WAIT_LOG}");
+            return;
+        }
         // No boundary on autopilot is a stall (which does nothing off autopilot or
         // while a handoff is under way).
         autopilot::stall(app, key, &task, primary.step, &spec).await;
@@ -829,6 +860,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         let mut t = Task::new(key.clone(), "t", "feature");
         t.saving_mode = true;

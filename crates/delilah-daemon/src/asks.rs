@@ -377,6 +377,7 @@ pub(crate) mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         app.store
             .create_task(&Task::new(key.clone(), "Card retries", "feature"))

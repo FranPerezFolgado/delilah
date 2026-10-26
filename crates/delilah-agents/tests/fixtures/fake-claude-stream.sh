@@ -1,6 +1,6 @@
 #!/bin/bash
 # A stand-in for `claude -p --input-format stream-json --output-format stream-json`, with the
-# wire shapes recorded in docs/spikes/2026-10-24-claude-stream.md. Tests only.
+# wire shapes recorded in docs/archive/spikes/2026-10-24-claude-stream.md. Tests only.
 #   - like the real CLI it prints `system` hook lines at spawn and the `system` init line once
 #     per turn, AFTER it has read the turn's user line (nothing but hooks before that);
 #   - a user turn prints message_start, two text deltas, the assistant message, a

@@ -88,6 +88,14 @@ function run(root) {
   const { version, needsBump } = picked;
   const tag = `v${version}`;
   if (tags.includes(tag)) fail(`${tag} ya existe`);
+  // check.mjs wants a CHANGELOG.md section for the version, so a bump here regenerates it.
+  if (needsBump) {
+    try {
+      sh("git", ["cliff", "--version"], { stdio: "ignore" });
+    } catch {
+      fail("BUMP/VERSION regenera CHANGELOG.md y necesita git-cliff: brew install git-cliff");
+    }
+  }
 
   const start = git("rev-parse", "HEAD");
   let tagged = false;
@@ -116,7 +124,8 @@ function run(root) {
         }
         sh("npm", ["install", "--package-lock-only"], { cwd: join(root, "app"), stdio: "inherit" });
       }
-      git("add", "--", ...Object.keys(versions), ...LOCKFILES);
+      sh("git", ["cliff", "--tag", tag, "-o", "CHANGELOG.md"], { stdio: ["ignore", "ignore", "inherit"] });
+      git("add", "--", ...Object.keys(versions), ...LOCKFILES, "CHANGELOG.md");
       git("commit", "-m", `chore: release ${version}`);
     }
 

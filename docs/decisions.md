@@ -16,7 +16,7 @@ reviewing and touching up.
 - agents as CLIs in terminals;
 - state from hooks;
 - a daemon that outlives the window;
-- the board, Bandeja and tabs.
+- the board, Inbox and tabs.
 
 What it adds: workspaces of a parent repo with submodules, automatic resume after
 a usage limit, and starting from a Jira ticket. Forking Orca (about 2M lines of
@@ -77,7 +77,7 @@ one place, and a client that missed messages just refetches.
 - File access is confined to the workspace, symlinks included.
 - The Jira token lives in the Keychain.
 
-Mobile access (via Tailscale) needs device tokens first (79).
+Mobile access (via Tailscale) needs device tokens first (87).
 
 ## Agents
 
@@ -112,8 +112,8 @@ keeps project and user MCP servers out. `rg` and `git log/show/diff` were droppe
 a prompt starting with `-` is never read as an option.
 
 **35. Tasks from ideas: the daemon creates them on the confirmation card.**
-Claude does not create the task. It shows a `Nueva tarea` AskUserQuestion card
-(title and brief in the `Crear` option's preview); when the user answers `Crear`, the
+Claude does not create the task. It shows a `Nueva tarea` ("New task" card) AskUserQuestion card
+(title and brief in the `Crear` ("Create") option's preview); when the user answers `Crear`, the
 daemon creates the backlog task and then returns the answer, with the key, to Claude.
 So a task exists only after a click, and the same code serves the idea
 conversation and project sessions. Rejected: Claude calling the `delilah` CLI or
@@ -131,7 +131,7 @@ of plan mode; a plugin passed to project-owned sessions.**
   - Edit and Write in `deny` are removed from the session, and `npm install` is refused without a prompt;
   - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #34;
   - AskUserQuestion reaches PreToolUse in `dontAsk`, with the preview intact, and the answer returns verbatim (accents and dashes included);
-  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
+  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Stop";
   - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
 
 ## Workflows and tasks
@@ -145,17 +145,17 @@ ask.**
 - **(A) Checkout.** Most work happens in the developer's own folder, as they would by hand: a branch there, the checkout clean to start, one task at a time.
 - **(B) Worktree.** For parallel work.
 - **(C) Project sessions.** Questions about the code are not tasks: a project session (`@project`) runs Claude read-only (`--permission-mode plan`) in the checkout. It can be allowed to edit, or turned into a free task, keeping the conversation.
-- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Crear y lanzar en autopiloto") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Iniciar en un worktree".
+- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Create and launch on autopilot") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Start in a worktree".
 
 **17. Phases: the user decides; files and signals only move forward.** The user
 sets any phase (the phase bar, or asking for a review).
 - **Forward only:** SpecKit files, the first code edit (implement) and `gh pr create` or `git push` (review) only advance the phase, so they never undo the user's choice.
-- **Suggest, don't move:** when the agent stops with commits on its branch, the Bandeja suggests review instead of moving the task. Commits alone do not mean "done".
+- **Suggest, don't move:** when the agent stops with commits on its branch, the Inbox suggests review instead of moving the task. Commits alone do not mean "done".
 
 **18. Archiving never traps a task in the checkout, but a worktree asks before
 losing work.**
 - **Checkout:** the user's own folder is never deleted, so archiving always lets go of it. Uncommitted files simply stay.
-- **Worktree:** removing it deletes unpushed work, so it needs an explicit force ("Archivar igualmente", `--force`).
+- **Worktree:** removing it deletes unpushed work, so it needs an explicit force ("Archive anyway", `--force`).
 
 **19. The backlog is the `Queued` status.** A task can be saved with notes and a
 chosen place (checkout or worktree) and started later. A failed start goes back
@@ -209,19 +209,19 @@ settings.
 else the project's `workspace` setting, else the checkout.** `settings.workspace` is
 optional (`null` by default). The CLI sends the mode only when `--checkout` or
 `--worktree` is given, so the daemon decides otherwise (this also covers idea proposals
-and "Crear y lanzar en autopiloto"). *Amended by UI v2 (2026-10-26):* the last step was
+and "Create and launch on autopilot"). *Amended by UI v2 (2026-10-26):* the last step was
 "else a worktree"; it is now the checkout, matching decision 16 and what the new-task
 form always preselected. This is a behaviour change for `POST /runs` and `delilah run`
 (no shape change): a caller that never said where and relied on a worktree now works in
 the user's folder, with its one-task-at-a-time rule and its clean-checkout check. The
-`WherePicker` labels the options "(por defecto)" / "(por defecto del proyecto)", and a
+`WherePicker` labels the options "(default)" / "(project default)", and a
 backlog task with no saved choice shows "checkout", which is what the daemon will do.
 *Ruled out:* keeping the worktree default for the API only (the UI would show one thing
 and the CLI another).
 
 ## UI
 
-**20. Hand-rolled i18n.** `t("texto en español")`, with English in `i18n/en.ts`
+**20. Hand-rolled i18n.** `t("<Spanish text>")`, with English in `i18n/en.ts`
 keyed by the Spanish text. It needs no library, and a missing translation shows
 the Spanish text instead of breaking. What Delilah writes to Claude is translated
 too, so the agent answers in the user's language. The shell's menu language is
@@ -244,7 +244,7 @@ state. Nobody restarts, stops or `pkill`s a `delilahd` to try something; one suc
 they used to be local-only. The block SpecKit writes into CLAUDE.md is not kept:
 it points at whichever feature is current.
 
-**24. Develop on the personal Mac, test on the work Mac.** Nothing from the work
+**24. Develop on the personal Mac, test on a real project.** Nothing from the work
 repos is ever referenced or copied. Development uses
 `scripts/make-fixture-parent.sh` (a parent with four fake submodules over
 `file://`) and Jira sample data.
@@ -276,7 +276,7 @@ macOS-only dependencies; that costs more runner minutes than Linux.
 - **Isolation:** each run has a temp `HOME` (the daemon reads `~/.claude/settings.json` and the login shell's rc files), its own `DELILAH_HOME`, fixtures and a free port, never 7420 nor 7501-7509. A tripwire `claude`/`gh` first on PATH fails the test if the real one is reached; the one-shot Claude calls (`DELILAH_CLAUDE_BIN`) get a fake that always fails, so branch names are the daemon's deterministic fallback. The only exception is the opt-in real-Claude smoke test.
 - **A separate crate, `delilah-e2e`, with an `e2e` feature**, so `cargo test --workspace` stays as fast as before and the flows are not mixed with the `#[ignore]`d smoke test.
 - **UI: one daemon and one Vite per run, tests serial.** `VITE_DELILAH_URL` is fixed when Vite starts; each test makes its own repos and projects instead.
-- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI.
+- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI. *(Superseded by 85: both layers now run in CI.)*
 - **Ruled out:** a shell fake (hard to handle JSON and to keep in step with `claude.rs`); a fake that posts to `/hooks/claude` itself (skips the settings file); a `claude` shim on PATH (the agent's PATH comes from the login shell); replaying real sessions (they depend on the real Claude and its cost); reusing `preview.sh` (user's `HOME`, fixed slots, interactive); tests in `crates/delilah-daemon/tests/` (bloats its dev-dependencies); CI on macOS runners (cost, and the checks run locally anyway); a runtime daemon switch in the UI (`?daemon=`, code that exists only for tests); Cypress (Playwright has traces and runs from Node).
 
 ## Pull requests
@@ -288,7 +288,7 @@ holds the tokens, honours `gh repo set-default` and talks to Enterprise hosts
 like the agent's own `gh pr create`. Storing a GitHub token in the daemon
 (Keychain or settings) and calling the API with `reqwest` or octocrab was ruled
 out: it copies a credential and adds a client. When `gh` is missing, signed out
-or without access, the PR tab says so and the Bandeja notifies once.
+or without access, the PR tab says so and the Inbox notifies once.
 
 **27. PRs are polled every 30 s, not pushed by webhooks (2026-10-20).** The daemon
 is on loopback behind no public address, so GitHub cannot reach it; a tunnel or
@@ -303,8 +303,7 @@ from the snapshot: one already sent to the agent or dismissed must stay gone
 after a restart.
 
 **29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
-A failed CI or a review only reaches the Bandeja; "Pedir al agente que lo
-arregle" sends it, as comments to consider, not as instructions from the user.
+A failed CI or a review only reaches the Inbox; "Ask the agent to fix it" sends it, as comments to consider, not as instructions from the user.
 Auto-forwarding was ruled out: it would spend the subscription and let a
 reviewer's text steer the agent unseen.
 
@@ -371,10 +370,14 @@ The workflow's approval stops are plain text, so without it nearly every plan st
 pause; unlimited nudges could loop. A question whose every item has exactly one option
 labelled "(Recommended)" is answered in the AskUserQuestion hook (no inbox item, history
 `autopilot-answered`); any other question pauses. Delilah still never drives the
-workflow's own phases.
+workflow's own phases. A turn that ends with background tasks running (the `Stop` hook's
+`background_tasks`, an entry with `status: "running"`) is not a stall: waiting on
+subagents gets no nudge and no pause. The field is Claude Code's, observed rather than
+documented; an unknown shape falls back to the stall rule. See
+`specs/008-autopilot-background-stall/contracts/stop-hook.md`.
 
 **40. Autopilot pushes and opens a draft PR with the user's own `gh` (2026-10-22).** It
-does so without asking at that moment, like "Abrir PR" (#26): the user opted in per task,
+does so without asking at that moment, like "Open PR" (#26): the user opted in per task,
 the PR is a draft, and nothing is merged. The stage `opening_pr` is persisted and PRs are
 re-detected first, so a restart never opens a second one.
 
@@ -415,7 +418,7 @@ proposal card) with a 409 `not-spec-workflow`.
 
 **47. Recovering an interrupted finish needs `Autopilot.review_session` (2026-10-22).** It
 names the outcome file to read. Autopilots stored before the field existed do not
-auto-recover a finish (the PR can still be opened by hand with "Abrir PR").
+auto-recover a finish (the PR can still be opened by hand with "Open PR").
 
 **48. Proposal cards reject only closed sessions (2026-10-22).** Spec 004 FR-013 lets plain
 project sessions create tasks, so a card is not tied to an idea conversation; only a
@@ -434,7 +437,7 @@ normalised by 37's `custom_for` when there is no template; with a template it is
 typed (case, `/`, `.`, `_`) and only made safe for git (`sanitize_typed`), because the
 dialog fills the field with the template's full branch and slugging that again would turn
 `fix/PROJ-1-x` into `feature/fix-proj-1-x`. `POST …/branch-name` returns the
-template-expanded branch when there is a template, so the "Rama" field shows what will be
+template-expanded branch when there is a template, so the "Branch" field shows what will be
 used; the dialog shows the TypeScript mirror's guess until it answers and sends the field
 only if the answer arrived or the user typed. A blank template is not saved: the screen
 and `delilah project unset <name> branch` store `null`; the daemon rejects `""` as
@@ -454,8 +457,7 @@ a key baked into the build. The repo is public so no token ships in the app.
 - **Ruled out:** Sparkle (a second updater beside Tauri's, for the same job); a private repo with a token in the app (it would have to be embedded in every install).
 
 **61. Updates need the user's confirmation, with a session warning (2026-10-24).**
-The notice says how many sessions are open and offers "Más tarde" and "Cuando
-terminen" (polls every 10 s). The count includes shell terminals on purpose: the
+The notice says how many sessions are open and offers "Later" and "When they finish" (polls every 10 s). The count includes shell terminals on purpose: the
 relaunch restarts the daemon and stops them too.
 - **Ruled out:** a silent update, which would kill running agents without warning.
 
@@ -492,7 +494,7 @@ the one named like the spec folder ([research](../specs/005-task-name-from-spec/
 - **Branch:** adopted if Spec Kit's `before_specify` hook made it, else created by Delilah from the spec folder; the task's title as a slug only when the guard needs a branch and there is no spec yet. A taken name gets `-2`, `-3`. A provisional branch renamed later was ruled out: the hook would have created a second one.
 - **The worktree folder keeps the key** (`workspaces/<KEY>`): moving it under a running agent was ruled out. Jira tasks (`feature/<KEY>-<short-name>`) and tasks started before keep their branch.
 - **Guard:** a PreToolUse hook makes the branch before the first code edit, commit, push, merge, rebase or PR, so nothing lands on the base. Failing closed (deny with the reason) was chosen over letting the edit through. It is best-effort: substring match on commands, symlinks not resolved; a full shell parser was judged not worth it.
-- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restaurar" brings it back. Any manual edit (`title_source = manual`) is final.
+- **Title once, with restore:** only a title still `initial` is renamed, to the spec's heading; the old one is kept (`previous_title`) and "Restore" brings it back. Any manual edit (`title_source = manual`) is final.
 
 ## Fresh task bases
 
@@ -502,13 +504,13 @@ branch started from whatever the folder had checked out, often a stale `main`.
 - **A failed fetch warns and continues:** the task starts from the last known `origin` state, with a `base-stale` notice. A repo with no origin gets none. One 30 s deadline covers the whole start.
 - **Local `main` is never fast-forwarded:** it is the user's, and may hold unpushed work.
 - **Ruled out:** a per-project base branch (out of scope for now); blocking the start on a failed fetch (offline work must still start).
-- **Why `pr_notices` was reused** for the warning: it already gives a Bandeja item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the moment of the start, so each start can warn again.
+- **Why `pr_notices` was reused** for the warning: it already gives an Inbox item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the moment of the start, so each start can warn again.
 - **The warning notifies but does not block:** it raises a desktop notification like any new item, and is not in `BLOCKING`, since the task goes on.
 - **The repo's own config is trusted during the fetch** (`core.sshCommand`, credential helpers, `insteadOf`): it is the same config the user's own `git fetch` runs, and an agent able to write it can already run anything as the user. What Delilah adds is that nothing may ask: no terminal prompt, no askpass, no interactive credential helper, and a 30 s limit.
 - **A branchless start (65)** gets the fresh base too: its worktree, and each chosen submodule, is detached there, so the branch the first analysis makes starts from it. A branchless start in checkout mode fetches and switches nothing (the folder is the user's, and #65 leaves it as it is), so its branch starts from where the folder is.
 
 **67. Chat mode (stream-json): go, adjusted (2026-10-24).** Spike on claude 2.1.292
-([docs/spikes/2026-10-24-claude-stream.md](spikes/2026-10-24-claude-stream.md)): hooks
+([docs/archive/spikes/2026-10-24-claude-stream.md](archive/spikes/2026-10-24-claude-stream.md)): hooks
 fire in `-p`, one process takes several turns and writes the transcript (stream
 `uuid`s equal transcript `uuid`s), `--resume` works PTY -> stream -> PTY, interrupt keeps
 the process up. So US3 and US4 go ahead, with these adjustments to research.md R7:
@@ -521,7 +523,7 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
 - **Usage limits from `rate_limit_event`**, because the status line never runs in
   print mode (it does in the PTY). Its `utilization` is a fraction; resets are epoch
   seconds, as in the status line.
-- **"Detener" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
+- **"Stop" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
   interrupted turn (same as ESC, decision 36).
 - **Entries still come from the transcript**; the stream gives only live text. Deltas
   carry no message id: it is the `message_start`'s `message.id`.
@@ -533,12 +535,12 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
 
 ## UI v2
 
-Decided while applying [ui-redesign.md](ui-redesign.md) (spec `007-ui-v2`, 2026-10-26).
+Decided while applying [ui-redesign.md](archive/ui-redesign.md) (spec `007-ui-v2`, 2026-10-26).
 
-**68. One colour, one meaning.** Amber (`--wait`) only means "te espera"; blue (`--run`)
-only the status "Trabajando" and the focus ring; the primary button is light grey and
+**68. One colour, one meaning.** Amber (`--wait`) only means "waiting for you"; blue (`--run`)
+only the status "Working" and the focus ring; the primary button is light grey and
 stands out by lightness, one per view; everything else in progress (a running check, the
-current spec task, a PR "Abierta") is neutral. Tokens are guarded by tests (`tokens.test.ts`
+current spec task, a PR "Open") is neutral. Tokens are guarded by tests (`tokens.test.ts`
 contrast, `styles.test.ts` scale and allowed colours). *Why:* amber and blue were used for
 buttons, tabs and phases, so a glance told nothing. *Ruled out:* an accent colour per area;
 a colour-blind mode for now (pending in status.md).
@@ -547,21 +549,21 @@ a colour-blind mode for now (pending in status.md).
 `aria-pressed`, `aria-selected` and `aria-current`; option cards add a check; tabs are the
 only exception (a neutral 2 px underline). The terminal and the editor take their colours
 from the same tokens (`theme.ts`) and change live with the OS scheme. *Ruled out:* amber
-selection (it collided with "te espera").
+selection (it collided with "waiting for you").
 
 **70. Status vocabulary in three axes.** A task's status is a `StatusBadge` (Backlog,
-Trabajando, Te espera, En pausa, Hecha, Error); a Bandeja item is an `InboxKind` (Pregunta,
-Permiso, Aviso); a PR is a `PrChip` (Borrador, Abierta, Checks fallan, Fusionada); a session
-is only a dot. One mapping in `vocab.ts`, never a word from another axis. "Limpiar avisos"
-removes only non-blocking avisos. *Why:* "Pendiente", "Esperando" and "Aviso" meant three
-things each. The glossary of brief section 3 is the copy rule (Iniciar, Detener, Abrir…,
-Recargar, Omitir, Quitar, "N más" instead of "Ver N más").
+Working, Waiting for you, Paused, Done, Error); an Inbox item is an `InboxKind` (Question,
+Permission, Notice); a PR is a `PrChip` (Draft, Open, Checks failing, Merged); a session
+is only a dot. One mapping in `vocab.ts`, never a word from another axis. "Clear notices"
+removes only non-blocking notices. *Why:* "To do", "Waiting" and "Notice" meant three
+things each. The glossary of brief section 3 is the copy rule (Start, Stop, Open…,
+Reload, Skip, Remove, "N more" instead of "See N more").
 
-**71. A pending permission makes the task "Te espera".** An ask inserted while the task
+**71. A pending permission makes the task "Waiting for you".** An ask inserted while the task
 runs fires `AgentAsked` (history `permission-asked`); the last pending ask of the task
 answered, withdrawn or expired fires `UserAnswered`. At daemon start the permission asks
 are reconciled: a `waiting-for-user` task whose latest ask has no answer and no live ask
-gets `permission-expired` and stays resumable. *Why:* the status said "Trabajando" while
+gets `permission-expired` and stays resumable. *Why:* the status said "Working" while
 the agent was blocked on you. The session with the ask lists only the `permission` item,
 no extra `waiting` one.
 
@@ -574,17 +576,17 @@ client-side change with no route). `POST /sessions/{id}/runtime` and `delilah ru
 --session`; the task route stays. *Ruled out:* one switch per task (a task has several
 sessions, and only some should leave the terminal).
 
-**73. "Detener" is the one word for stopping.** For a session or an agent, everywhere
-(never "Parar"); the preview's "Parar" became "Detener" too. Transcript line "Detenida:
+**73. "Stop" is the one word for stopping.** For a session or an agent, everywhere
+(never "Parar"); the preview's "Parar" became "Stop" too. Transcript line "Detenida:
 detuviste a Claude". It keeps the meaning of 36 / 67 (an interrupt; the turn ends without a
 `Stop` hook).
 
-**74. Dismissals live in `inbox_dismissals`, the only source of truth.** Removing an aviso
-("Quitar", "Limpiar avisos") stores its computed id (`kind:task:source:since_ms`), so a new
-occurrence of the same cause has a new id and shows again, and "Deshacer" restores by id.
+**74. Dismissals live in `inbox_dismissals`, the only source of truth.** Removing a notice
+("Remove", "Clear notices") stores its computed id (`kind:task:source:since_ms`), so a new
+occurrence of the same cause has a new id and shows again, and "Undo" restores by id.
 Notice-backed items are filtered by joining the same table, and `POST /pr-notices/{id}/dismiss`
 writes a dismissal row, so every route and restore agree. Blocking kinds cannot be dismissed
-(409). The two new avisos (a secondary session finished its turn: `turn-done`; a PR was
+(409). The two new notices (a secondary session finished its turn: `turn-done`; a PR was
 opened or linked: `pr-opened`) are stored in `pr_notices`, **reused on purpose** as for
 `base-stale` (65/66): it gives the item, its resolution and the cascade for free. Pending:
 rename it to a neutral `notices` table (status.md). *Ruled out:* a `dismissed` flag on each
@@ -597,7 +599,7 @@ end of each setup run, overwritten on retry and removed with the task folder on 
 *Why:* it is a log-like artefact next to `setup.log`, read only for one panel, and a table
 would need a migration for data that never joins anything. *Ruled out:* a `setups` table.
 
-**76. Updating a task's branch is a merge, never a rebase.** "Actualizar rama"
+**76. Updating a task's branch is a merge, never a rebase.** "Update branch"
 (`POST /tasks/{key}/update-branch`) merges the base into the branch; with tracked changes in
 the workspace, off the task's branch, or on a conflict it refuses (the merge is aborted and the
 branch left as it was), and it settles the `base-stale` notice. *Why:* the branch may be
@@ -606,19 +608,93 @@ touches local `main` (66).
 
 **77. Reopen after done; per-component CSS and English.** A done task can be reopened
 (`Done → WaitingForUser`, history `reopened`; `POST /tasks/{key}/reopen`, `delilah reopen`,
-"Deshacer" after "Marcar como hecha"): it needs its workspace, so an archived task cannot.
+"Undo" after "Mark as done"): it needs its workspace, so an archived task cannot.
 In the app, `styles.css` keeps only tokens and base; each component has its own CSS file and
 its own `i18n/en/<Component>.ts` (merged into `en.ts`, with a coverage test), so a change
 touches one component. *Why:* one global sheet and one long dictionary meant every
 change touched the same files (and the same merge conflicts).
 
-**78. Merge from the PR tab, with the user's `gh`.** "Fusionar" (`POST /tasks/{key}/prs/{id}/merge`)
+**78. Merge from the PR tab, with the user's `gh`.** "Merge" (`POST /tasks/{key}/prs/{id}/merge`)
 runs only on a non-draft open PR with passing checks, with a method the repo allows
 (`snapshot.merge_methods`; none known, no merge), and only if the `gh` account for the host
 is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
 draft PR). *Ruled out:* a merge queue or auto-merge.
 
-**79. Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26).**
+**79. Unsigned distribution, with checksums and attestation for trust.** There is no Apple
+Developer account, so the app keeps only its ad-hoc signature and is not notarized. The
+supported install is `scripts/install.sh` via `curl`, which sets no quarantine flag, so
+Gatekeeper does not block the result. Trust comes from `SHA256SUMS` (checked by the script
+and by hand) and a build-provenance attestation on every release
+(`gh attestation verify`). *Ruled out:* notarization (the paid Apple Developer Program).
+
+**80. No Homebrew tap for now.** Homebrew removed `--no-quarantine` and ends support for
+casks that fail Gatekeeper on 2026-09-01 (Homebrew/brew#20755). A tap of our own with a
+`postflight` that clears the quarantine attribute is possible, but it adds a repo and a
+release step for the same trust trade as `install.sh`. *Ruled out:* the official cask
+(it cannot pass Gatekeeper) and an own tap, until there is a signed build.
+
+**81. English is the fallback language.** The language is `auto`, `es` or `en`. `auto`
+(or a missing or unknown value) follows the system: Spanish only when the system language
+starts with `es`, English otherwise and when it cannot be read; the native menu follows the
+same rule, as does the daemon's `lang.rs` for its texts and prompts (so an unreadable `defaults` output now gives English, not Spanish), and
+`<html lang>` defaults to `en`. *Why:* the repo is public and most users are not Spanish
+speakers, while Spanish systems still get Spanish. *Ruled out:* English-only default even
+for Spanish systems.
+
+**82. Docs layout for a public repo.** The README is for newcomers (what it is, install,
+quickstart, screenshots) and the reference lives in `docs/usage.md`; `docs/README.md`
+indexes the rest. History is labelled or archived, not deleted: `docs/archive/` and
+`specs/README.md` say what is past. Personal agent rules go in the git-ignored
+`CLAUDE.local.md`, so the checked-in `CLAUDE.md` is safe to publish. The changelog is
+generated with git-cliff inside the version bump, so a release cannot go out without its
+section. *Ruled out:* a hand-written changelog and keeping personal notes in `CLAUDE.md`.
+
+**83. Pull requests are squash-merged.** Each PR lands on `main` as one commit whose title
+is the PR title and whose message is the PR body; the GitHub repo allows only squash
+merges. *Why:* the changelog is generated from `main`'s commit subjects, and a feature
+branch carries work-package, progress and fix-up commits that don't belong there, so the
+PR title, written as a Conventional Commit, is the one changelog line. *Ruled out:* merge
+commits and rebase merges (they bring the branch's commits onto `main`).
+**84. One grouped "te espera" toast, owned by `GlobalNotices`.** All waiting tasks share a
+single persistent toast ("{key} te espera · Responder", or "{n} tareas te esperan · Ver" opening
+the Inbox) instead of one per task; closing it empties the group, and a task leaves it when it
+stops waiting, its screen is opened or it leaves the list. The toast store merges repeats only
+for the same kind and exact text with no action or key ("×N", capped "×99+"), keeps at most 3
+(evicting plain info first, then toasts without an action, never a keyed one such as the waiting
+toast; an undo action is time-bound and cannot be raised again, an error can) and shows more than one collapsed
+as stacked cards ("+N", "Cerrar todo" whenever there is more than one). *Why:* several waiting tasks flooded the corner and buried the rest;
+the kit stays task-agnostic, so the group lives in `GlobalNotices` as one keyed toast. Actions
+carry closures (each "Deshacer" undoes a different thing), so toasts with an action never merge;
+exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
+centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
+Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).
+
+**85. CI as parallel jobs; Rust tests on macOS, sharded (2026-10-26).** `ci.yml` runs fmt,
+clippy, the tests, the web UI and both e2e layers as separate jobs at the same time. Tests use
+`cargo nextest`, split in three macOS shards (`--partition count:N/3`) that share one cache.
+fmt, the web UI and the UI e2e run on Linux; clippy, the tests and the API e2e on macOS.
+Running the UI e2e there showed a real race (`chat.spec.ts`, ~1 run in 4), fixed in
+`permissions::answer`.
+*Why:* the old single job ran fmt → clippy → tests one after another, and the tests alone
+(~1 200, CPU-bound on git subprocesses) saturate one 3-core macOS runner. The repo is public,
+so macOS minutes cost nothing (which also lifts 58's reason for keeping e2e out of CI).
+*Ruled out:* tests on Linux (48 s instead of ~3 min, but ~10 tests fail there on macOS-only
+behaviour, `/bin/zsh`, `cp` flags and process reaping, and the app only ships for macOS);
+one unsharded nextest job on macOS (slower than `cargo test`: a process per test costs more
+on macOS); `playwright install --with-deps` (its apt step took 2-5 min; the runner already
+has Chrome's libraries); Playwright retries (they hid that race instead of finding it).
+
+**86. A worktree goes even when git cannot remove it.** Before the removal, everything of the
+task that could write in the folder is ended and awaited (agents' process groups, the preview's
+group); if `git worktree remove --force` still fails and the folder is there, it is deleted by
+hand and pruned, and a worktree git no longer knows passes the archive checks. *Why:* a build
+or dev server still writing in `target/` made git stop halfway ("Directory not empty"), leaving a
+folder of several GB that git had forgotten, so no retry could ever remove it. Deleting by hand
+only happens after the same checks as before (or `force`), so it loses nothing git would have
+kept. *Ruled out:* only retrying `git worktree remove` (it refuses a forgotten worktree), and a
+periodic sweep of `workspaces/` (it would have to guess which folders are still in use).
+
+**87. Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26).**
 The phone reaches the daemon with `tailscale serve` (tailnet only, never Funnel) and uses the
 UI as a web app added to the home screen. The daemon serves the built UI itself, same-origin,
 because the macOS Tailscale app refuses to serve folders (found in the experiment). *Rule:* a

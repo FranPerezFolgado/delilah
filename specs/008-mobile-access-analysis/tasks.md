@@ -53,8 +53,8 @@ Tests: none (not requested; nothing executable ships).
 ## Phase 4: Docs (US2 scenario 3, FR-008)
 
 - [X] T014 [P] [US2] Rewrite the "Mobile, through Tailscale" section of `docs/vision.md` with the decided approach (serve + home-screen web app, device tokens first, scope see/answer/launch, work Mac only if IT allows), link `../specs/008-mobile-access-analysis/research.md`, and remove the answered open questions (which Mac/IT, iPhone or Android, answer-only vs launching); keep "Proposed but not decided" only for what is still open
-- [X] T015 [P] [US2] Add decision **79** at the end of `docs/decisions.md`: "Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26)", with why, the local-vs-remote rule, and ruled out (LAN, Cloudflare Tunnel, sideloaded wrapper, Funnel, identity headers alone); change the last line of decision 12 to point to 79
-- [X] T016 [P] [US2] In `docs/status.md`, replace the line starting `- **Mobile access:**` (find it by content) with "analysed (decision 79, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth"
+- [X] T015 [P] [US2] Add decision **87** at the end of `docs/decisions.md`: "Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26)", with why, the local-vs-remote rule, and ruled out (LAN, Cloudflare Tunnel, sideloaded wrapper, Funnel, identity headers alone); change the last line of decision 12 to point to 87
+- [X] T016 [P] [US2] In `docs/status.md`, replace the line starting `- **Mobile access:**` (find it by content) with "analysed (decision 87, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth"
 - [X] T017 Check that `docs/architecture.md` and `README.md` need no change (nothing built) and that links added in T014–T016 resolve
 
 ---
@@ -86,4 +86,4 @@ After T013: T014 (docs/vision.md) ∥ T015 (docs/decisions.md) ∥ T016 (docs/st
 - **MVP**: Phases 1, 2, T013 (skipped path) and 4. That already gives a decision recorded in the
   docs, with unverified claims marked.
 - **Full**: add Phase 3 when Tailscale is installed. It can also run later as a follow-up that
-  only edits research.md and, if something changed, decision 79.
+  only edits research.md and, if something changed, decision 87.

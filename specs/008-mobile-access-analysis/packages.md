@@ -60,7 +60,7 @@ Docs-only feature (FR-009): no code, no tests. Checks for every package: none ex
 - Files: docs/decisions.md
 - Depends on: WP-04
 - Parallel group: 4A
-- Acceptance: FR-002, FR-008 — decision 79 added at the end (why, local-vs-remote rule, ruled out); last line of decision 12 points to 79
+- Acceptance: FR-002, FR-008 — decision 87 added at the end (why, local-vs-remote rule, ruled out); last line of decision 12 points to 79
 - Checks: none (docs only)
 - Reviewers: —
 
@@ -70,7 +70,7 @@ Docs-only feature (FR-009): no code, no tests. Checks for every package: none ex
 - Files: docs/status.md
 - Depends on: WP-04
 - Parallel group: 4A
-- Acceptance: FR-008 — the `- **Mobile access:**` line replaced with "analysed (decision 79, research); next: roadmap step 1, device auth"
+- Acceptance: FR-008 — the `- **Mobile access:**` line replaced with "analysed (decision 87, research); next: roadmap step 1, device auth"
 - Checks: none (docs only)
 - Reviewers: —
 
