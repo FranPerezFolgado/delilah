@@ -24,7 +24,7 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP-16 | 5 | 5B | done | 1 | d2c88da |  |
 | WP-17 | 5 | 5C | done | 1 | 41ee732 | also fix Timeline.css --acc → --focus/--wait |
 | WP-18 | 6 | 6A | done | 1 | 3bf2a49 |  |
-| WP-19 | 6 | 6A | partial | 1 | | T031 green (952 Rust, 1020 vitest); T032 not checked: no browser in this session — preview 3 left running |
+| WP-19 | 6 | 6A | done | 1 | 4c1b35c, d5e074f | T031 green; T032 checked by the user in preview 3 with two live agents: floor backdrop and composition (WP-20) and building miniatures (WP-21) fixed from that look |
 | WP-05F | 2 | fix | done | 1 | fb83f58 | phase 2 review fixes |
 | WP-10F | 3 | fix | done | 1 | 27fbd7d | styles.test scale/token fixes (also carries WP-13's staged deletions) |
 | WP-13F | 4 | fix | done | 1 | 7db48bb | inline styles, test locale, role i18n |

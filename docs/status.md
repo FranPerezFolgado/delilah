@@ -198,7 +198,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the art is the 1x pixtuoid set, so there are no hairstyles (hair colour varies);
   - agents launched before the update have no `PreToolUse` hook in their settings, so they show no actions until relaunched;
   - history `seq` and `started_at` restart with the daemon (clients refetch on reconnect); a malformed `history` query gets a plain-text 400;
-  - the pixel art and the native "playground" window have not been checked visually yet;
+  - the native "playground" window (Tauri) has not been checked; the office floor, building and Flujo were checked in a browser preview with live agents;
   - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
