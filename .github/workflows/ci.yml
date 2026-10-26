@@ -40,16 +40,23 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    name: Rust tests
+    name: Rust tests (${{ matrix.shard }}/3)
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # The shards build the same thing: one cache for all of them.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-test
       - uses: taiki-e/install-action@nextest
-      # nextest runs every test binary at once (cargo test runs them one after another);
-      # the crates have no doc tests, so `cargo test --doc` is not needed.
-      - run: cargo nextest run --workspace --no-fail-fast
+      # The suite is CPU-bound (git subprocesses) and saturates one 3-core macOS runner, so it is
+      # split in three. The crates have no doc tests, so `cargo test --doc` is not needed.
+      - run: cargo nextest run --workspace --no-fail-fast --partition count:${{ matrix.shard }}/3
 
   web:
     name: Web UI
