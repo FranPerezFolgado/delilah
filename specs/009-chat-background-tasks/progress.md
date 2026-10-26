@@ -16,6 +16,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07F | 3 | fix | done | 1 | 8610596 | live.rs busy loop when progress sender drops; live.ts wiring goes in WP-08 |
 | WP-16F | 6 | fix | done | 1 | f4dbd6f | phase 6 HIGH + mediums (Rust) |
 | WP-16G | 6 | fix | done | 1 | 8302a60 | phase 6 contract medium (UI 409 text) |
+| WP-18F | 7 | fix | done | 1 | 4b36a9a | Detener drops held Stop (R10) + stop() no-turn race + docs |
 | WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
 | WP-09 | 5 | 5A | done | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
 | WP-10 | 5 | 5A | done | 1 | 25bffc7 | |
@@ -25,8 +26,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12 | 6 | 6B | done | 1 | b907202 | +sessions.rs (fallback token); any Init cancels held Stop |
 | WP-14 | 6 | 6B | done | 1 | 48410be | stop_task per running row after interrupt |
 | WP-16 | 6 | 6B | done | 1 | 76dea57 | |
-| WP-17 | 7 | 7A | verified | 1 | f1e8492 | decision #80 |
-| WP-18 | 7 | 7B | blocked | 1 | SHA18 | T058 pass; T059 Detener variant FAILS (task stays running) |
+| WP-17 | 7 | 7A | done | 1 | f1e8492 | decision #80 |
+| WP-18 | 7 | 7B | done | 2 | 6fe29a1 | T058 pass; T059 pass after WP-18F (Detener re-run) |
 
 ## Open findings
 
@@ -61,3 +62,6 @@ Mode: format=markdown commits=yes autonomy=auto
 | 6 | contract | LOW | api.setRuntime (task route) has no UI caller; CLI BUSY test string hardcoded English | app/src/api.ts |
 | 6 | spec | LOW | US3-5 says unconfirmed rows show "estado desconocido" on session end; code marks them "detenido" (matches US3-6/FR-011/T007) — spec contradicts itself | specs/009-chat-background-tasks/spec.md |
 | 6 | spec | LOW | No test asserts autopilot/review hint/saving-mode not triggered while Stop held; fallback tests use real sleeps (300 ms), not paused time | crates/delilah-daemon/src/hooks.rs |
+| 7 | orchestrator | LOW | run::tests::a_stream_exit_with_a_held_stop_replays_it_after_stopping_the_rows failed once under full-suite load, passes alone and in 2 further full runs (timing-sensitive until() polling) | crates/delilah-daemon/src/run.rs |
+| 7 | WP-18F | LOW | No task-level test asserts waiting-for-user after Detener with a held Stop (conversation fixture uses an idea); covered by run.rs exit-replay test and the R10 re-run | crates/delilah-daemon/src/conversation.rs |
+| 7 | spec gap | INFO | Detener mid-turn with no held Stop leaves the task running until the next Stop (pre-feature behaviour, out of scope) | crates/delilah-daemon/src/conversation.rs |
