@@ -13,9 +13,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 4 | 4A | done | 2 | 7c14b5f | flake fixed: event polling + log signal |
 | WP-07 | 4 | 4A | done | 1 | be0ce95 | |
 | WP-08 | 5 | 5A | done | 1 | 6df251c | |
-| WP-09 | 6 | 6A | verified | 1 | db2cc68 | |
-| WP-10 | 6 | 6B | pending | 0 | | |
-| WP-06F | 4 | fix | done | 1 | | review fixes: shared skip-log const, tighter e2e asserts |
+| WP-09 | 6 | 6A | done | 1 | db2cc68 | |
+| WP-10 | 6 | 6B | done | 1 | | |
+| WP-06F | 4 | fix | done | 1 | a37f01d | review fixes: shared skip-log const, tighter e2e asserts |
 
 ## Open findings
 
@@ -64,4 +64,4 @@ T016: grep for `/Users/`, `LIBRE-`, `PROJ-` and hex ids of 9+ chars in the hook 
 | 4 | test-reviewer | LOW | reviewer's race/polling MEDIUMs judged not real (log emitted after the skip decision; join test waits for nudge + skip) | crates/delilah-daemon/src/hooks.rs:788-943 |
 | 4 | spec-compliance | LOW | e2e doesn't assert the nudge is for implement; reason check loose → WP-06F | crates/delilah-e2e/tests/autopilot.rs:136-150 |
 | 4 | spec-compliance | LOW | FR-005 usage-limit and non-main-session paths not retested with a running entry (code path untouched) | crates/delilah-daemon/src/phases.rs:178 |
-| 6 | debugger | LOW (pre-existing) | flaky under --workspace load: pr_loop nudges_in_the_window_make_one_delayed_check (claim race, fixed 200ms sleep) and setup exit_zero_runs_the_task_and_launches_the_agent (login shell + 10s wait; leaks $TMPDIR/delilah-setup-* dirs); not touched by this branch | crates/delilah-daemon/src/pr_loop/mod.rs:591; setup.rs:556,656 |
+| 6 | debugger | LOW (pre-existing) | flaky under --workspace load: pr_loop nudges_in_the_window_make_one_delayed_check (claim race, fixed 200ms sleep) and setup exit_zero_runs_the_task_and_launches_the_agent (login shell + 10s wait; leaks $TMPDIR/delilah-setup-* dirs); not touched by this branch; both green on 2 full runs once the disk had space (failures coincided with ENOSPC) | crates/delilah-daemon/src/pr_loop/mod.rs:591; setup.rs:556,656 |
