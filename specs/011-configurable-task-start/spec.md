@@ -169,7 +169,7 @@ phased project still need a lighter start, which is the original complaint.
   hand-off comes, the task stops handing off and stays in its current session, with a notice
   that the project's workflow changed.
 - A literal brace in a message is written doubled (`{{` and `}}`); only `{ticket}`,
-  `{title}` and `{spec_dir}` are placeholders.
+  `{title}`, `{task}` and `{spec_dir}` are placeholders.
 - Skill discovery failing (unreadable folder, no plugins) leaves the list shorter, never
   blocks the settings screen; free text always works.
 - The workflow setting lives in Delilah, not in the project's repository.
@@ -186,7 +186,8 @@ phased project still need a lighter start, which is the original complaint.
   phased "Spec Kit (`/feature`)" preset so their behaviour does not change.
 - **FR-003**: The built-in prompt MUST be in the app's language, name the task's ticket and
   title, ask the agent to work on the task, and contain no slash command.
-- **FR-004**: Command/message templates MUST support `{ticket}` and `{title}`; the
+- **FR-004**: Command/message templates MUST support `{ticket}`, `{title}` and `{task}` (the
+  ticket for a Jira task, the title for a task without one — what `/feature` gets today); the
   implementation command MUST also support `{spec_dir}`. Any other `{…}` placeholder, or a
   blank command where one is required, MUST be refused on save with the error tied to the
   field.
@@ -246,7 +247,9 @@ phased project still need a lighter start, which is the original complaint.
 - **SC-001**: On a fresh install with no custom skills, the first task of a newly
   registered project starts with a message the agent can act on, with zero configuration.
 - **SC-002**: 100% of projects registered before this feature run the same commands at
-  start and at every hand-off as before.
+  start and at every hand-off as before. One deliberate exception: a free task started from the
+  backlog gets its title after `/feature`, as one started from the new-task form already does,
+  instead of its `LIBRE-n` key.
 - **SC-003**: A user can switch a project to one of their own skills, from the list, and see
   it used on the next task in under 1 minute, without editing any file.
 - **SC-004**: 0 tasks outside a phased workflow receive the saving-mode or autopilot note or
