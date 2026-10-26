@@ -408,7 +408,7 @@ export function App() {
           {view === "inbox" && <InboxView items={inbox} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
           {view === "playground" && (
             <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
-              <PlaygroundView onOpen={(task, session) => openTask(task, session)} online={!offline} />
+              <PlaygroundView onOpenFloor={(owner) => openTask(owner, OFFICE)} online={!offline} />
             </Suspense>
           )}
           {view === "board" && (

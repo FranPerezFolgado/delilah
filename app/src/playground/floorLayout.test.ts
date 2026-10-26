@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AISLE_X, AISLE_Y, DESK_H, DESK_W, LEAVER_MS, LOUNGE_SEATS, POD_COLS, POD_H, POD_W, assignSlots, deskPosition, floorSize,
-  loungePath, podCount, seatPosition, trackLeavers,
+  floorOrder, loungePath, podCount, seatPosition, trackLeavers,
 } from "./floorLayout";
 
 describe("assignSlots", () => {
@@ -109,5 +109,18 @@ describe("trackLeavers", () => {
   it("does not duplicate a leaver and ignores one that came back", () => {
     const prev = { helpers: [], leaving: [{ id: "h1", slot: 2, since: 1000 }] };
     expect(trackLeavers(prev, ["h1"], 2000)).toEqual([]);
+  });
+});
+
+describe("floorOrder", () => {
+  it("puts new owners on top, newest first, and keeps the others in place", () => {
+    expect(floorOrder([], ["a", "b"])).toEqual(["b", "a"]);
+    expect(floorOrder(["b", "a"], ["a", "b", "c"])).toEqual(["c", "b", "a"]);
+  });
+  it("does not reorder when the input order changes", () => {
+    expect(floorOrder(["c", "b", "a"], ["a", "c", "b"])).toEqual(["c", "b", "a"]);
+  });
+  it("drops the owners that are gone", () => {
+    expect(floorOrder(["c", "b", "a"], ["a", "c"])).toEqual(["c", "a"]);
   });
 });

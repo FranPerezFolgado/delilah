@@ -131,3 +131,13 @@ export function trackLeavers(
   const gone = prev.helpers.filter((h) => !now.has(h.id) && !known.has(h.id)).map((h) => ({ id: h.id, slot: h.slot, since: at }));
   return [...kept, ...gone];
 }
+
+/** The building's floors, newest on top: a new owner goes first (the last new one topmost),
+ *  the ones already in `prev` keep their relative order, and the gone ones are removed. */
+export function floorOrder(prev: string[], owners: string[]): string[] {
+  const now = new Set(owners);
+  const kept = prev.filter((o) => now.has(o));
+  const known = new Set(kept);
+  const fresh = owners.filter((o) => !known.has(o)).reverse();
+  return [...fresh, ...kept];
+}
