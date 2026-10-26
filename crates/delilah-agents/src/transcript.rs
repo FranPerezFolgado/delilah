@@ -12,6 +12,9 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff};
 
+mod background;
+pub use background::{BackgroundInfo, BackgroundKind, BackgroundSource};
+
 /// Tool results and long input strings are cut to this many bytes in entries.
 pub const MAX_TEXT: usize = 4096;
 /// Longest one-line summary, in characters.
@@ -114,6 +117,9 @@ pub enum Entry {
         /// Why, when known (the first line of a task notification's summary).
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
+        /// What a background-task notification said, when this marker is one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        background: Option<BackgroundInfo>,
     },
 }
 
@@ -387,6 +393,7 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             at,
             marker: MarkerKind::Compacted,
             detail: None,
+            background: None,
         })];
     }
     if line.get("type").and_then(Value::as_str) == Some("user")
@@ -401,6 +408,7 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
                 at,
                 marker: MarkerKind::BackgroundDone,
                 detail: notification_summary(&text),
+                background: None,
             })];
         }
     }

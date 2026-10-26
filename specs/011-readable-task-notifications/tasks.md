@@ -22,7 +22,7 @@ builds on US1's item; US3 only needs the foundational phase.
 
 **Purpose**: the new module and the shared formatter, with no behaviour change.
 
-- [ ] T001 Create `crates/delilah-agents/src/transcript/background.rs` as a submodule of `crates/delilah-agents/src/transcript.rs` (`mod background;` with `pub use` of what later tasks export), holding only a `#[cfg(test)] mod tests {}` for now; `cargo test -p delilah-agents` stays green
+- [X] T001 Create `crates/delilah-agents/src/transcript/background.rs` as a submodule of `crates/delilah-agents/src/transcript.rs` (`mod background;` with `pub use` of what later tasks export), holding only a `#[cfg(test)] mod tests {}` for now; `cargo test -p delilah-agents` stays green
 - [X] T002 [P] Write failing tests in a new `app/src/format.test.ts` for `duration(secs)` ("0 s", "59 s", "1 min 00 s", "3 min 05 s", negative → "0 s") and `formatTokens(n)` ("950", "1K", "12.3K", "1.2M")
 - [X] T003 Implement T002: create `app/src/format.ts`, moving `duration` out of `app/src/components/BackgroundStrip.tsx` (which now imports it) and `formatTokens` out of `app/src/playground/art/kinds.ts` (which re-exports it from `../../format`); `BackgroundStrip.test.tsx` and the playground tests stay green unchanged
 
@@ -32,8 +32,8 @@ builds on US1's item; US3 only needs the foundational phase.
 
 **Purpose**: the `background` field every story reads and writes. Blocks all stories.
 
-- [ ] T004 Write failing tests in `crates/delilah-agents/src/transcript/background.rs` (tests module) that serialize `Entry::Marker { marker: BackgroundDone, detail, background: Some(BackgroundInfo { … }) }` to the three JSON shapes of `contracts/api.md` (agent with usage and report, command with `exit_code: 0`, hand-back) and check that `None`/`false` fields are absent, and that a `Compacted` marker with `background: None` serializes exactly as before (no `background` key)
-- [ ] T005 Implement T004: `pub struct BackgroundInfo` with `BackgroundSource { Notification, Handback }` and `BackgroundKind { Agent, Command, Task }` (serde lowercase), fields from `data-model.md` with `skip_serializing_if` (`Option::is_none`, `std::ops::Not::not` for the bools), in `background.rs`; add `background: Option<BackgroundInfo>` (`skip_serializing_if = "Option::is_none"`) to `Entry::Marker` in `crates/delilah-agents/src/transcript.rs` and set it to `None` at every existing construction (grep `Entry::Marker {` across `crates/`)
+- [X] T004 Write failing tests in `crates/delilah-agents/src/transcript/background.rs` (tests module) that serialize `Entry::Marker { marker: BackgroundDone, detail, background: Some(BackgroundInfo { … }) }` to the three JSON shapes of `contracts/api.md` (agent with usage and report, command with `exit_code: 0`, hand-back) and check that `None`/`false` fields are absent, and that a `Compacted` marker with `background: None` serializes exactly as before (no `background` key)
+- [X] T005 Implement T004: `pub struct BackgroundInfo` with `BackgroundSource { Notification, Handback }` and `BackgroundKind { Agent, Command, Task }` (serde lowercase), fields from `data-model.md` with `skip_serializing_if` (`Option::is_none`, `std::ops::Not::not` for the bools), in `background.rs`; add `background: Option<BackgroundInfo>` (`skip_serializing_if = "Option::is_none"`) to `Entry::Marker` in `crates/delilah-agents/src/transcript.rs` and set it to `None` at every existing construction (grep `Entry::Marker {` across `crates/`)
 - [X] T006 [P] Add `export type BackgroundInfo` (exactly as in `contracts/api.md`) to `app/src/api.ts` and `background?: BackgroundInfo` on the `kind: "marker"` member of `ConversationEntry` (~l.428); `npx tsc --noEmit` passes
 
 **Checkpoint**: the field exists end to end, always absent; behaviour unchanged.
