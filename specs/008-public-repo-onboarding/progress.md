@@ -25,7 +25,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
 | WP-19 | 6 | 6A | verified | 1 | d7954db | T041 pending: preview check via ui-verifier; native menu = unit tests only; empty defaults output now → English |
 | WP-20 | 6 | 6B | pending | 0 | | |
-| WP-21 | 7 | 7A | implementing | 0 | | |
+| WP-21 | 7 | 7A | verified | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
 | WP-22 | 8 | 8A | pending | 0 | | |
 | WP-23 | 8 | 8B | pending | 0 | | |
 | WP-24 | 8 | 8C | pending | 0 | | |
