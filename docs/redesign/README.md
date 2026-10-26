@@ -47,10 +47,11 @@ Jira conectado con los datos de ejemplo (modo `sample`), con PROJ-1242 seleccion
   daemon deja la tarea en ejecución (la espera se ve en la tarjeta y en la Bandeja).
   La tarea que «te espera» es PROJ-1246.
 - **Tarea con estado «Fallida»**: no hay un camino con los falsos de los e2e para llegar a él; no se captura.
-- **Logs**: en la app nativa se abren desde Ayuda › Ver logs; en la web no hay botón, así
-  que el script lanza el mismo evento (`delilah:show-logs`).
+- **Logs**: en la app nativa se abren desde Ayuda › Ver logs; en la web se abren con el botón
+  «Logs» de la barra de estado, que es el que pulsa el script.
 - **Jira-conectar** es el formulario de un Jira sin configurar (se captura antes de conectarlo).
 - **Horas relativas** («hace N min», «Pausada hasta las HH:MM», el historial de la tarea) y
   los logs dependen de cuándo se ejecuta, y las rutas de los proyectos (Proyectos, vista del
   proyecto, tarjeta de checkout) son carpetas temporales: cambian entre ejecuciones.
 - Lo nativo de macOS (notificaciones, menú, Dock, ⌘P global) no se ve en la UI web.
+- **Proyectos con worktree**: el seed pone `workspace: "worktree"` en los dos proyectos, como en la captura «antes» (entonces era el valor por defecto; ahora lo es el checkout), para que los pares sean comparables.

@@ -170,11 +170,11 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
   const addProject = () => (onAddProject ? onAddProject() : onView("projects"));
   const navItems: { view: View; icon: IconName; label: string; action?: ActionId; count?: number; hot?: boolean }[] = [
     { view: "inbox", icon: "inbox", label: t("Bandeja"), action: "view-inbox", count: waiting, hot: true },
-    { view: "tasks", icon: "tasks", label: t("Tareas"), action: "view-tasks", count: tasks.length },
+    { view: "board", icon: "tasks", label: t("Tareas"), action: "view-tasks", count: tasks.length },
     { view: "jira", icon: "ticket", label: "Jira", action: "view-jira" },
     { view: "projects", icon: "folder", label: t("Proyectos"), action: "view-projects" },
   ];
-  const isOn = (v: View) => view === v || (v === "tasks" && view === "board");
+  const isOn = (v: View) => view === v;
   const collapseLabel = rail ? t("Desplegar barra lateral") : t("Plegar barra lateral");
   const toggleBtn = (
     <IconButton

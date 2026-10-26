@@ -13,7 +13,7 @@ const web: Project = {
   settings: DEFAULT_PROJECT_SETTINGS,
 };
 const task = (key: string, status: TaskStatus): Task => ({
-  key,
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key,
   title: key,
   project: "web",
   workflow: "feature",
@@ -78,6 +78,16 @@ describe("Sidebar nav", () => {
     const tasks = getByRole("button", { name: /^Tareas/ }).querySelector(".cnt")!;
     expect(tasks.textContent).toBe("1");
     expect(tasks.classList.contains("hot")).toBe(false);
+  });
+
+  it("opens the board from Tareas, and is current only on the board", () => {
+    const { getByRole, onView, unmount } = setup([]);
+    fireEvent.click(getByRole("button", { name: /^Tareas/ }));
+    expect(onView).toHaveBeenCalledWith("board");
+    expect(getByRole("button", { name: /^Tareas/ }).getAttribute("aria-current")).toBeNull();
+    unmount();
+    const on = setup([], [], { view: "board" });
+    expect(on.getByRole("button", { name: /^Tareas/ }).getAttribute("aria-current")).toBe("true");
   });
 
   it("has no + Tarea button; adding a project is the + next to Proyectos", () => {

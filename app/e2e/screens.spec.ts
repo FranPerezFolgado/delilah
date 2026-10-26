@@ -191,13 +191,19 @@ async function shot(page: Page, name: string, theme: Theme) {
 /** A task's row in the sidebar. */
 const row = (page: Page, key: string) => nav(page).getByRole("button", { name: new RegExp(`^${key}\\b`) });
 
+/** The board, by its shortcut (⌘1): the sidebar's «Tareas» shows the selected task's screen. */
+async function board(page: Page) {
+  await page.keyboard.press("ControlOrMeta+1");
+  await expect(page.getByRole("heading", { name: "Tareas" })).toBeVisible();
+}
+
 async function openTask(page: Page, key: string) {
   await row(page, key).click();
   await expect(page.getByRole("tab", { name: "Tarea", exact: true })).toBeVisible();
 }
 
 async function chatTab(page: Page) {
-  await page.getByRole("tab", { name: /^(Principal|Main)$/ }).click();
+  await page.getByRole("tab", { name: /^(Claude principal|Principal|Main)$/ }).click();
   await expect(page.getByRole("textbox", { name: "Mensaje" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Permitir una vez" }).first()).toBeVisible();
 }
@@ -221,6 +227,10 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
   await call(env, "PUT", "/api/v1/preferences/language", "es");
   await call(env, "POST", "/api/v1/projects", { path: env.fixtures.repo, kind: "repo", name: "signal" });
   await call(env, "POST", "/api/v1/projects", { path: env.fixtures.parent, kind: "parent", name: "delilah" });
+  // The «antes» capture ran when a project defaulted to isolated worktrees; the default is the checkout now.
+  for (const p of await call<{ name: string; settings: Record<string, unknown> }[]>(env, "GET", "/api/v1/projects")) {
+    await call(env, "PUT", `/api/v1/projects/${p.name}/settings`, { ...p.settings, workspace: "worktree" });
+  }
 
   // PRs first: the daemon links them by branch as soon as the tasks exist.
   writePrs(env.gh_dir, [
@@ -348,8 +358,7 @@ for (const theme of THEMES) {
     const { ctx, page } = await open(browser, env, theme);
 
     // Tablero
-    await nav(page).getByRole("button", { name: /^Tareas/ }).click();
-    await expect(page.getByRole("heading", { name: "Tareas" })).toBeVisible();
+    await board(page);
     await expect(page.getByText(LIVE_TITLE).last()).toBeVisible();
     await shot(page, "Tablero", theme);
 
@@ -415,9 +424,8 @@ for (const theme of THEMES) {
     await shot(page, "Ajustes", theme);
 
     // Nueva tarea, each origin, over the board
-    await nav(page).getByRole("button", { name: /^Tareas/ }).click();
-    await expect(page.getByRole("heading", { name: "Tareas" })).toBeVisible();
-    await nav(page).getByRole("button", { name: /^Tarea\b(?!s)/ }).first().click();
+    await board(page);
+    await page.getByRole("button", { name: "Nueva tarea", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Nueva tarea" });
     await expect(dialog).toBeVisible();
     for (const [mode, label] of [["jira", "Ticket de Jira"], ["libre", "Tarea libre"], ["claude", "Con Claude"]] as const) {
@@ -429,22 +437,22 @@ for (const theme of THEMES) {
     await expect(dialog).toBeHidden();
 
     // A backlog task
-    await nav(page).getByRole("button", { name: /Backlog \(2\)/ }).click();
+    await nav(page).getByRole("button", { name: /^Backlog · 2/ }).click();
     await row(page, K.backlogChat).click();
-    await expect(page.getByRole("button", { name: "Empezar" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Iniciar" })).toBeVisible();
     await shot(page, "BacklogTarea", theme);
 
     // Delete dialog, from the row's context menu (cancelled)
     await row(page, K.backlogPty).click({ button: "right" });
-    await page.getByRole("button", { name: `Eliminar ${K.backlogPty}…` }).click();
-    const del = page.getByRole("alertdialog", { name: "Eliminar tarea" });
+    await page.getByRole("menuitem", { name: "Eliminar tarea…" }).click();
+    const del = page.getByRole("dialog", { name: `¿Eliminar ${K.backlogPty}?` });
     await expect(del).toBeVisible();
     await shot(page, "Eliminar", theme);
     await del.getByRole("button", { name: "Cancelar" }).click();
     await expect(del).toBeHidden();
 
-    // Logs: the native menu's Ayuda › Ver logs sends this event
-    await page.evaluate(() => window.dispatchEvent(new Event("delilah:show-logs")));
+    // Logs: the statusbar's button
+    await page.getByRole("button", { name: "Logs", exact: true }).click();
     const logs = page.getByRole("dialog", { name: "Logs de delilahd" });
     await expect(logs).toBeVisible();
     await expect(logs.getByText("Sin logs todavía.")).toHaveCount(0);
@@ -460,10 +468,12 @@ for (const theme of THEMES) {
     // Smaller windows
     {
       const { ctx, page } = await open(browser, env, theme, 1280, 800);
-      await nav(page).getByRole("button", { name: /^Tareas/ }).click();
+      await board(page);
       await expect(page.getByText(LIVE_TITLE).last()).toBeVisible();
       await shot(page, "Tablero1280", theme);
-      await openTask(page, K.live);
+      // At this width the sidebar folds into the rail, which has no task rows: from the board.
+      await page.getByRole("link", { name: new RegExp(`^${K.live}\\b`) }).click();
+      await expect(page.getByRole("tab", { name: "Tarea", exact: true })).toBeVisible();
       await chatTab(page);
       await shot(page, "Tarea1280", theme);
       await ctx.close();
