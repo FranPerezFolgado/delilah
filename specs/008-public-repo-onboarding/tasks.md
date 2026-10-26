@@ -19,8 +19,8 @@ parallel (different files, no dependency on an unfinished task).
 
 ## Phase 1: Setup
 
-- [ ] T001 Check the tools needed later and note any missing one in `specs/008-public-repo-onboarding/progress.md`: `git cliff --version`, `gitleaks version`, `shellcheck --version`, `npx --yes lychee --version`. Install them with `brew install git-cliff gitleaks shellcheck`; lychee runs through npx.
-- [ ] T002 [P] Add `CLAUDE.local.md` to `.gitignore` (root), next to the existing `.claude/settings.local.json` entry.
+- [X] T001 Check the tools needed later and note any missing one in `specs/008-public-repo-onboarding/progress.md`: `git cliff --version`, `gitleaks version`, `shellcheck --version`, `npx --yes lychee --version`. Install them with `brew install git-cliff gitleaks shellcheck`; lychee runs through npx.
+- [X] T002 [P] Add `CLAUDE.local.md` to `.gitignore` (root), next to the existing `.claude/settings.local.json` entry.
 
 ---
 
