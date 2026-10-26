@@ -205,22 +205,6 @@ pub async fn forward(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Discards a notice without telling the agent. Idempotent: 204 if it was resolved
-/// already, 404 only if it never existed.
-pub async fn dismiss(
-    State(app): State<AppState>,
-    Path(id): Path<i64>,
-) -> Result<StatusCode, ApiError> {
-    if app.store.notice(id).await?.is_none() {
-        return Err(ApiError::not_found(format!("notice {id} does not exist")));
-    }
-    // Already resolved is fine: dismissing twice leaves the same result.
-    if app.store.resolve_notice(id).await? {
-        app.emit(Topic::Inbox);
-    }
-    Ok(StatusCode::NO_CONTENT)
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -421,21 +405,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dismissing_resolves_and_unknown_is_404() {
+    async fn dismissing_records_a_dismissal_and_unknown_is_404() {
         let (router, app, _dir) = setup(fake()).await;
         let id = notice(&app, "comments", json!({ "comments": [] })).await;
         let uri = format!("/api/v1/pr-notices/{id}/dismiss");
         let (s, _) = call(&router, "POST", &uri, None).await;
         assert_eq!(s, StatusCode::NO_CONTENT);
-        assert!(
-            app.store
-                .notice(id)
-                .await
-                .unwrap()
-                .unwrap()
-                .resolved_at
-                .is_some()
-        );
+        // The dismissal is a row of its own; the notice stays open.
+        let n = app.store.notice(id).await.unwrap().unwrap();
+        assert!(n.resolved_at.is_none());
+        let item = crate::inbox::notice_item_id(&n).unwrap();
+        assert!(app.store.dismissed().await.unwrap().contains(&item));
         let (s, _) = call(&router, "POST", "/api/v1/pr-notices/9999/dismiss", None).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
         let (s, _) = call(&router, "POST", "/api/v1/pr-notices/9999/forward", None).await;

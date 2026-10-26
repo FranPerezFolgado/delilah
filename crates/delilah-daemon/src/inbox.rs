@@ -351,10 +351,14 @@ fn item_id(i: &InboxItem) -> String {
         Some(t) => t.timestamp_millis(),
         None => {
             // FNV-1a: stable across runs, unlike the std hashers.
-            let hash = i.text.as_deref().unwrap_or("").bytes().fold(
-                0xcbf2_9ce4_8422_2325_u64,
-                |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3),
-            );
+            let hash = i
+                .text
+                .as_deref()
+                .unwrap_or("")
+                .bytes()
+                .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+                    (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+                });
             (hash % 1_000_000_000_000) as i64
         }
     };
@@ -577,7 +581,7 @@ async fn collect(app: &AppState) -> Result<Vec<InboxItem>, ApiError> {
             items.push(InboxItem {
                 text,
                 // When the event that raised it happened.
-                since: last_event(&app, t, event).await,
+                since: last_event(app, t, event).await,
                 ..InboxItem::new(kind, key.to_string(), t.title.clone())
             });
         }
@@ -1266,7 +1270,10 @@ mod tests {
     async fn old_dismissals_are_purged() {
         let app = app_with_pr_task().await;
         app.store
-            .dismiss(&[("old".into(), "PROJ-1".into()), ("new".into(), "PROJ-1".into())])
+            .dismiss(&[
+                ("old".into(), "PROJ-1".into()),
+                ("new".into(), "PROJ-1".into()),
+            ])
             .await
             .unwrap();
         sqlx::query("UPDATE inbox_dismissals SET dismissed_at = ? WHERE id = 'old'")
