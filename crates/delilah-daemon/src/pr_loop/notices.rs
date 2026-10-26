@@ -87,6 +87,8 @@ pub(super) async fn record(
     // The merge that archives (or refuses to archive) the task tells it in one
     // notification of its own, so this PR's is held back.
     let told_by_archive = snap.state == PrState::Merged && archives_when_merged(app, &key).await?;
+    // Autofix is about to handle a failing head: the user hears only when it stops.
+    let autofix_handles = autofix_handles(app, row, &key).await?;
     if !app.events.listening() {
         for (draft, notice) in drafts.iter().zip(&notices) {
             let raised = after.iter().any(|n| {
@@ -96,7 +98,7 @@ pub(super) async fn record(
                     && n.kind == notice.kind
                     && n.cause == notice.cause
             });
-            if raised {
+            if raised && !(autofix_handles && matches!(draft, NoticeDraft::CiFailed { .. })) {
                 let (title, body) = draft_message(lang, &key, draft, snap);
                 app.notifier.send(title, body);
             }
@@ -113,6 +115,20 @@ pub(super) async fn record(
         changed: true,
         notices_changed: before != after_ids,
     })
+}
+
+/// Whether CI autofix is on for the task and has not stopped on `row`'s PR, so it deals
+/// with a failing head and the "CI failed" notification is held back (FR-012).
+async fn autofix_handles(app: &AppState, row: &PrRow, key: &TaskKey) -> Result<bool, StoreError> {
+    let Some(task) = app.store.get_task(key).await? else {
+        return Ok(false);
+    };
+    if !task.ci_autofix {
+        return Ok(false);
+    }
+    // Read it again: `row` is from before this check, and autofix may have moved since.
+    let autofix = app.store.pr(row.id).await?.and_then(|p| p.autofix);
+    Ok(autofix.is_none_or(|a| a.state != crate::autofix::State::Stopped))
 }
 
 /// Whether the check that just saved a merged PR of `key` is the one that archives the
@@ -329,6 +345,43 @@ mod tests {
         assert_eq!(restarted.store.open_notices().await.unwrap().len(), 1);
         assert!(restarted.notifier.recorded().is_empty());
         assert_eq!(notices(&restarted).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn autofix_on_and_not_stopped_writes_the_notice_but_does_not_notify() {
+        use crate::autofix::{PrAutofix, State};
+        for (on, stopped, notified) in [(true, false, 0), (false, false, 1), (true, true, 1)] {
+            let gh = gh_with(&ci_snapshot("OPEN", "abc", "FAILURE"));
+            let (app, key, _dir) = task_with_workspace(gh, Some(SpecPhase::Review)).await;
+            app.store.set_ci_autofix(&key, on).await.unwrap();
+            if stopped {
+                // The PR is linked by the first check; stop autofix on it, then fail anew.
+                check_task(&app, &key, true).await;
+                let pr = app.store.prs_of(&key).await.unwrap().remove(0);
+                let a = PrAutofix {
+                    state: State::Stopped,
+                    attempts: 3,
+                    sha: None,
+                    session: None,
+                    sent_at: None,
+                    reason: None,
+                };
+                assert!(
+                    app.store
+                        .update_pr_autofix(pr.id, None, Some(&a))
+                        .await
+                        .unwrap()
+                );
+                let app = app.with_gh(gh_with(&ci_snapshot("OPEN", "def", "FAILURE")));
+                check_task(&app, &key, true).await;
+                assert_eq!(open_ci(&app).await, ["def"]);
+                assert_eq!(app.notifier.recorded().len(), notified);
+                continue;
+            }
+            check_task(&app, &key, true).await;
+            assert_eq!(open_ci(&app).await, ["abc"]);
+            assert_eq!(app.notifier.recorded().len(), notified, "on={on}");
+        }
     }
 
     #[tokio::test]

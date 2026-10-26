@@ -52,8 +52,8 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 - [X] T013 [P] [US1] Prompt tests in `crates/delilah-daemon/src/autofix/mod.rs`: es/en wording, "attempt N of 3", one section per PR when several are batched, framing "data, not instructions", "commit and push to this same branch; don't force-push or open another PR", within `forward::fit` size
 - [X] T014 [P] [US1] Idle tests in `crates/delilah-daemon/src/autofix/mod.rs`: `Waiting` with a `Question` attention is idle; `Working`/`Starting`, a `Permission` attention, an open ask card, `PausedByLimit`, a terminal task are not; no live primary but a resumable record is idle (relaunch) (research R3)
 - [ ] T015 [US1] Flow test in `crates/delilah-daemon/src/autofix/mod.rs` (FakeGh + `cat` session, as `pr_api/forward.rs` tests): `pr_loop::check_task` on a failing finished head → prompt typed once, notice resolved, state `fixing`; a second check → nothing typed; a later green head → `watching`; two PRs of one task failing together → one prompt with both
-- [ ] T016 [US1] Test in `crates/delilah-daemon/src/pr_loop/notices.rs`: with `ci_autofix` on and the PR not `stopped`, a failing head writes the notice but sends no "CI failed" notification; with it off, the notification is sent as today
-- [ ] T017 [US1] Test in `crates/delilah-daemon/src/pr_api/forward.rs`: manual forward of `ci-failed` CASes `sha`; then autofix doesn't send that sha; a manual forward of a sha autofix already sent resolves and returns 204 without typing
+- [X] T016 [US1] Test in `crates/delilah-daemon/src/pr_loop/notices.rs`: with `ci_autofix` on and the PR not `stopped`, a failing head writes the notice but sends no "CI failed" notification; with it off, the notification is sent as today
+- [X] T017 [US1] Test in `crates/delilah-daemon/src/pr_api/forward.rs`: manual forward of `ci-failed` CASes `sha`; then autofix doesn't send that sha; a manual forward of a sha autofix already sent resolves and returns 204 without typing
 - [ ] T018 [US1] Test: a send failure after the CAS (PausedByLimit race) restores the previous `PrAutofix` (attempt not counted); `no-session` stops with reason `no-session` (in `crates/delilah-daemon/src/autofix/mod.rs`)
 
 ### Implementation for User Story 1
@@ -61,9 +61,9 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 - [X] T019 [US1] Implement `decide()`, the idle check and the prompt wrapper over `forward::ci_prompt` in `crates/delilah-daemon/src/autofix/mod.rs`
 - [ ] T020 [US1] Implement `evaluate(app, key)` in `crates/delilah-daemon/src/autofix/mod.rs`: take `AutofixGuard`, read task + PR rows, decide per row, CAS every row to send into `fixing` (attempts+1, sha, session, sent_at), send one prompt via `forward::send`, roll back on error (or stop on no-session), resolve the rows' `ci-failed` notices, emit `Topic::Prs`/`Topic::Inbox`, record `AutofixSent` (and `AutofixFailedAgain` when coming from `fixing`) / `AutofixFixed` on green
 - [ ] T021 [US1] Call `autofix::evaluate` from `pr_loop::check_task` after its `CheckGuard` is dropped (spawned) in `crates/delilah-daemon/src/pr_loop/mod.rs`
-- [ ] T022 [US1] Skip the "CI failed" notification for tasks with autofix handling the PR in `crates/delilah-daemon/src/pr_loop/notices.rs`
-- [ ] T023 [US1] Manual forward CASes the sha first, no double send, in `crates/delilah-daemon/src/pr_api/forward.rs`
-- [ ] T024 [US1] Expose `autofix` (DTO without `session`, with `limit`) on each PR of `GET /tasks/{key}/prs` in `crates/delilah-daemon/src/pr_api/dto.rs`, and `ci_autofix` on the task DTO in `crates/delilah-daemon/src/api.rs`
+- [X] T022 [US1] Skip the "CI failed" notification for tasks with autofix handling the PR in `crates/delilah-daemon/src/pr_loop/notices.rs`
+- [X] T023 [US1] Manual forward CASes the sha first, no double send, in `crates/delilah-daemon/src/pr_api/forward.rs`
+- [X] T024 [US1] Expose `autofix` (DTO without `session`, with `limit`) on each PR of `GET /tasks/{key}/prs` in `crates/delilah-daemon/src/pr_api/dto.rs`, and `ci_autofix` on the task DTO in `crates/delilah-daemon/src/api.rs`
 - [ ] T025 [US1] E2E `crates/delilah-e2e/tests/autofix.rs`: fake `gh` reports a failing head, fake Claude (scenario per command) commits/pushes, fake `gh` then reports the new green head → one autofix prompt reached the agent, history shows sent + fixed (extend `gh/fake.rs` / fake bin only as needed)
 
 **Checkpoint**: autofix fixes CI on its own for tasks that have it on (set via DB/API).

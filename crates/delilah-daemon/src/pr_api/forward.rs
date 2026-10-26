@@ -6,6 +6,7 @@ use delilah_core::{TaskKey, TaskStatus};
 use serde_json::Value;
 
 use crate::api::ApiError;
+use crate::autofix::{self, PrAutofix};
 use crate::events::Topic;
 use crate::lang::Lang;
 use crate::prs;
@@ -179,6 +180,61 @@ pub(crate) async fn send(app: &AppState, key: &TaskKey, prompt: &str) -> Result<
     Ok(())
 }
 
+/// Most times `send_once` re-reads the PR's autofix state after losing a compare-and-set.
+const CAS_TRIES: usize = 3;
+
+/// Sends the failure of commit `sha` unless it was sent already (by autofix or by hand):
+/// the sha is claimed on the PR's autofix state first, so autofix never sends it again,
+/// and given back if the send fails (the agent never got that commit). Returns whether
+/// it was sent.
+async fn send_once(
+    app: &AppState,
+    key: &TaskKey,
+    pr_id: i64,
+    sha: &str,
+    prompt: &str,
+) -> Result<bool, ApiError> {
+    for _ in 0..CAS_TRIES {
+        let Some(pr) = app.store.pr(pr_id).await? else {
+            // The PR is gone; nothing to claim.
+            send(app, key, prompt).await?;
+            return Ok(true);
+        };
+        let prev = pr.autofix;
+        if prev.as_ref().and_then(|a| a.sha.as_deref()) == Some(sha) {
+            return Ok(false);
+        }
+        let mut next = prev.clone().unwrap_or(PrAutofix {
+            state: autofix::State::Watching,
+            attempts: 0,
+            sha: None,
+            session: None,
+            sent_at: None,
+            reason: None,
+        });
+        next.sha = Some(sha.to_string());
+        if !app
+            .store
+            .update_pr_autofix(pr_id, prev.as_ref(), Some(&next))
+            .await?
+        {
+            continue;
+        }
+        if let Err(e) = send(app, key, prompt).await {
+            // Best effort: if the row changed meanwhile, whoever changed it decides.
+            let _ = app
+                .store
+                .update_pr_autofix(pr_id, Some(&next), prev.as_ref())
+                .await;
+            return Err(e);
+        }
+        return Ok(true);
+    }
+    Err(ApiError::conflict(format!(
+        "{key}: the PR's autofix state keeps changing, try again"
+    )))
+}
+
 /// Sends the notice's failures or comments to the task's primary session, on the
 /// user's say-so (never on its own), and resolves it.
 pub async fn forward(
@@ -188,14 +244,13 @@ pub async fn forward(
     let notice = open_notice(&app, id).await?;
     let key = TaskKey::new(&notice.task_key);
     let lang = app.lang();
-    let url = app
+    let pr = app
         .store
         .prs_of(&key)
         .await?
         .into_iter()
-        .find(|p| p.repo == notice.repo)
-        .map(|p| p.url)
-        .unwrap_or_default();
+        .find(|p| p.repo == notice.repo);
+    let url = pr.as_ref().map(|p| p.url.clone()).unwrap_or_default();
     let detail = notice.detail.clone().unwrap_or(Value::Null);
     let prompt = match notice.kind.as_str() {
         "ci-failed" => ci_prompt(lang, &url, &detail),
@@ -207,7 +262,15 @@ pub async fn forward(
         }
     };
 
-    send(&app, &key, &prompt).await?;
+    let sha = (notice.kind == "ci-failed")
+        .then(|| detail.get("sha").and_then(Value::as_str))
+        .flatten();
+    match (sha, pr.as_ref()) {
+        (Some(sha), Some(pr)) => {
+            send_once(&app, &key, pr.id, sha, &prompt).await?;
+        }
+        _ => send(&app, &key, &prompt).await?,
+    }
     app.store.resolve_notice(id).await?;
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
@@ -316,6 +379,100 @@ mod tests {
         // Already resolved: gone.
         let (s, _) = call(&router, "POST", &uri, None).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
+    }
+
+    fn pr_autofix(sha: &str) -> PrAutofix {
+        PrAutofix {
+            state: autofix::State::Watching,
+            attempts: 1,
+            sha: Some(sha.into()),
+            session: None,
+            sent_at: None,
+            reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn forwarding_a_ci_failure_claims_its_sha_so_autofix_will_not_send_it_again() {
+        let (router, app, _dir) = setup(fake()).await;
+        link_pr(&app).await;
+        let mut out = cat_session(&app);
+        let id = notice(&app, "ci-failed", json!({ "sha": "abc", "checks": [] })).await;
+        let uri = format!("/api/v1/pr-notices/{id}/forward");
+        let (s, _) = call(&router, "POST", &uri, None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        read_until(&mut out, &["gh run view --log-failed"]).await;
+        let pr = app
+            .store
+            .prs_of(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .remove(0);
+        let a = pr.autofix.unwrap();
+        assert_eq!(
+            (a.state, a.attempts, a.sha.as_deref()),
+            (autofix::State::Watching, 0, Some("abc"))
+        );
+    }
+
+    #[tokio::test]
+    async fn forwarding_a_sha_autofix_already_sent_resolves_without_typing() {
+        let (router, app, _dir) = setup(fake()).await;
+        link_pr(&app).await;
+        // No session: typing would be a 409.
+        let pr = app
+            .store
+            .prs_of(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .remove(0);
+        let sent = pr_autofix("abc");
+        assert!(
+            app.store
+                .update_pr_autofix(pr.id, None, Some(&sent))
+                .await
+                .unwrap()
+        );
+        let id = notice(&app, "ci-failed", json!({ "sha": "abc", "checks": [] })).await;
+        let uri = format!("/api/v1/pr-notices/{id}/forward");
+        let (s, _) = call(&router, "POST", &uri, None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        assert!(
+            app.store
+                .notice(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .resolved_at
+                .is_some()
+        );
+        let after = app.store.pr(pr.id).await.unwrap().unwrap();
+        assert_eq!(after.autofix, Some(sent));
+    }
+
+    #[tokio::test]
+    async fn a_failed_send_gives_the_claimed_sha_back() {
+        let (router, app, _dir) = setup(fake()).await;
+        link_pr(&app).await;
+        let pr = app
+            .store
+            .prs_of(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .remove(0);
+        let before = pr_autofix("old");
+        assert!(
+            app.store
+                .update_pr_autofix(pr.id, None, Some(&before))
+                .await
+                .unwrap()
+        );
+        let id = notice(&app, "ci-failed", json!({ "sha": "abc", "checks": [] })).await;
+        let uri = format!("/api/v1/pr-notices/{id}/forward");
+        let (s, _) = call(&router, "POST", &uri, None).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        let after = app.store.pr(pr.id).await.unwrap().unwrap();
+        assert_eq!(after.autofix, Some(before));
     }
 
     #[tokio::test]
