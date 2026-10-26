@@ -187,7 +187,7 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    then publishes it (`gh release edit --draft=false --latest`). A failed run leaves
    at most a draft; re-running the same tag is safe. tauri-action's own
    `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 62).
-5. Installed apps check for it within 6 h (or at once with "Buscar actualizaciones…").
+5. Installed apps check for it within 6 h (or at once with "Check for updates…").
 
 **Rehearsal:** `make release-dry-run VERSION=X.Y.Z` (`scripts/release.sh`) runs the
 checks, builds and signs the app and writes `latest.json` locally. It never uploads.
@@ -229,7 +229,7 @@ update artefacts: export `TAURI_SIGNING_PRIVATE_KEY` (the key's contents or path
 `$DELILAH_HOME/backups/delilah-<previous version>.db` before migrating (`VACUUM INTO`;
 never overwrites; keeps the 3 newest; a failure only logs a warning). A downgrade also
 makes a copy, named after the version in the marker. To go back:
-1. Stop the daemon (Delilah → "Detener el daemon") **and** quit the app (⌘Q). Do not
+1. Stop the daemon (Delilah → "Stop the daemon") **and** quit the app (⌘Q). Do not
    reopen it until the copy is in place.
 2. Move `delilah.db` (and any `-wal`/`-shm`) aside.
 3. Copy the backup to `$DELILAH_HOME/delilah.db`.

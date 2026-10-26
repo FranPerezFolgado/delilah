@@ -16,7 +16,7 @@ reviewing and touching up.
 - agents as CLIs in terminals;
 - state from hooks;
 - a daemon that outlives the window;
-- the board, Bandeja and tabs.
+- the board, Inbox and tabs.
 
 What it adds: workspaces of a parent repo with submodules, automatic resume after
 a usage limit, and starting from a Jira ticket. Forking Orca (about 2M lines of
@@ -131,7 +131,7 @@ of plan mode; a plugin passed to project-owned sessions.**
   - Edit and Write in `deny` are removed from the session, and `npm install` is refused without a prompt;
   - a user-level hook that rewrites commands (RTK) breaks allow matching, hence the RTK forms in #34;
   - AskUserQuestion reaches PreToolUse in `dontAsk`, with the preview intact, and the answer returns verbatim (accents and dashes included);
-  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Detener";
+  - **no `Stop` hook fires after ESC**, so the daemon ends the turn itself on "Stop";
   - the plugin's skill is listed and runs, both typed (`/delilah:task-from-idea`) and through Claude's `Skill` tool.
 
 ## Workflows and tasks
@@ -145,12 +145,12 @@ ask.**
 - **(A) Checkout.** Most work happens in the developer's own folder, as they would by hand: a branch there, the checkout clean to start, one task at a time.
 - **(B) Worktree.** For parallel work.
 - **(C) Project sessions.** Questions about the code are not tasks: a project session (`@project`) runs Claude read-only (`--permission-mode plan`) in the checkout. It can be allowed to edit, or turned into a free task, keeping the conversation.
-- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Crear y lanzar en autopiloto") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Iniciar en un worktree".
+- **Amended by UI v2 (2026-10-26):** the checkout is now the default in the daemon too, not only in the UI. A request with no workspace choice (`POST /api/v1/runs`, `delilah run|new` without `--checkout` / `--worktree`, idea proposals, "Create and launch on autopilot") works in the checkout unless the backlog task or the project's `workspace` setting says otherwise (see 57). Before, only the new-task form preselected the checkout and everything else got a worktree. It matters for old scripts: a dirty checkout is refused as it always was, and the UI shows that as one error with "Iniciar en un worktree".
 
 **17. Phases: the user decides; files and signals only move forward.** The user
 sets any phase (the phase bar, or asking for a review).
 - **Forward only:** SpecKit files, the first code edit (implement) and `gh pr create` or `git push` (review) only advance the phase, so they never undo the user's choice.
-- **Suggest, don't move:** when the agent stops with commits on its branch, the Bandeja suggests review instead of moving the task. Commits alone do not mean "done".
+- **Suggest, don't move:** when the agent stops with commits on its branch, the Inbox suggests review instead of moving the task. Commits alone do not mean "done".
 
 **18. Archiving never traps a task in the checkout, but a worktree asks before
 losing work.**
@@ -209,19 +209,19 @@ settings.
 else the project's `workspace` setting, else the checkout.** `settings.workspace` is
 optional (`null` by default). The CLI sends the mode only when `--checkout` or
 `--worktree` is given, so the daemon decides otherwise (this also covers idea proposals
-and "Crear y lanzar en autopiloto"). *Amended by UI v2 (2026-10-26):* the last step was
+and "Create and launch on autopilot"). *Amended by UI v2 (2026-10-26):* the last step was
 "else a worktree"; it is now the checkout, matching decision 16 and what the new-task
 form always preselected. This is a behaviour change for `POST /runs` and `delilah run`
 (no shape change): a caller that never said where and relied on a worktree now works in
 the user's folder, with its one-task-at-a-time rule and its clean-checkout check. The
-`WherePicker` labels the options "(por defecto)" / "(por defecto del proyecto)", and a
+`WherePicker` labels the options "(default)" / "(project default)", and a
 backlog task with no saved choice shows "checkout", which is what the daemon will do.
 *Ruled out:* keeping the worktree default for the API only (the UI would show one thing
 and the CLI another).
 
 ## UI
 
-**20. Hand-rolled i18n.** `t("texto en español")`, with English in `i18n/en.ts`
+**20. Hand-rolled i18n.** `t("<Spanish text>")`, with English in `i18n/en.ts`
 keyed by the Spanish text. It needs no library, and a missing translation shows
 the Spanish text instead of breaking. What Delilah writes to Claude is translated
 too, so the agent answers in the user's language. The shell's menu language is
@@ -244,7 +244,7 @@ state. Nobody restarts, stops or `pkill`s a `delilahd` to try something; one suc
 they used to be local-only. The block SpecKit writes into CLAUDE.md is not kept:
 it points at whichever feature is current.
 
-**24. Develop on the personal Mac, test on the work Mac.** Nothing from the work
+**24. Develop on the personal Mac, test on a real project.** Nothing from the work
 repos is ever referenced or copied. Development uses
 `scripts/make-fixture-parent.sh` (a parent with four fake submodules over
 `file://`) and Jira sample data.
@@ -288,7 +288,7 @@ holds the tokens, honours `gh repo set-default` and talks to Enterprise hosts
 like the agent's own `gh pr create`. Storing a GitHub token in the daemon
 (Keychain or settings) and calling the API with `reqwest` or octocrab was ruled
 out: it copies a credential and adds a client. When `gh` is missing, signed out
-or without access, the PR tab says so and the Bandeja notifies once.
+or without access, the PR tab says so and the Inbox notifies once.
 
 **27. PRs are polled every 30 s, not pushed by webhooks (2026-10-20).** The daemon
 is on loopback behind no public address, so GitHub cannot reach it; a tunnel or
@@ -303,8 +303,7 @@ from the snapshot: one already sent to the agent or dismissed must stay gone
 after a restart.
 
 **29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
-A failed CI or a review only reaches the Bandeja; "Pedir al agente que lo
-arregle" sends it, as comments to consider, not as instructions from the user.
+A failed CI or a review only reaches the Inbox; "Ask the agent to fix it" sends it, as comments to consider, not as instructions from the user.
 Auto-forwarding was ruled out: it would spend the subscription and let a
 reviewer's text steer the agent unseen.
 
@@ -454,8 +453,7 @@ a key baked into the build. The repo is public so no token ships in the app.
 - **Ruled out:** Sparkle (a second updater beside Tauri's, for the same job); a private repo with a token in the app (it would have to be embedded in every install).
 
 **61. Updates need the user's confirmation, with a session warning (2026-10-24).**
-The notice says how many sessions are open and offers "Más tarde" and "Cuando
-terminen" (polls every 10 s). The count includes shell terminals on purpose: the
+The notice says how many sessions are open and offers "Later" and "When they finish" (polls every 10 s). The count includes shell terminals on purpose: the
 relaunch restarts the daemon and stops them too.
 - **Ruled out:** a silent update, which would kill running agents without warning.
 
@@ -502,7 +500,7 @@ branch started from whatever the folder had checked out, often a stale `main`.
 - **A failed fetch warns and continues:** the task starts from the last known `origin` state, with a `base-stale` notice. A repo with no origin gets none. One 30 s deadline covers the whole start.
 - **Local `main` is never fast-forwarded:** it is the user's, and may hold unpushed work.
 - **Ruled out:** a per-project base branch (out of scope for now); blocking the start on a failed fetch (offline work must still start).
-- **Why `pr_notices` was reused** for the warning: it already gives a Bandeja item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the moment of the start, so each start can warn again.
+- **Why `pr_notices` was reused** for the warning: it already gives an Inbox item, a dismiss action and resolution on archive, so no table or migration was needed. The kind is `base-stale`, not tied to a PR: PR changes leave it, and its cause is the moment of the start, so each start can warn again.
 - **The warning notifies but does not block:** it raises a desktop notification like any new item, and is not in `BLOCKING`, since the task goes on.
 - **The repo's own config is trusted during the fetch** (`core.sshCommand`, credential helpers, `insteadOf`): it is the same config the user's own `git fetch` runs, and an agent able to write it can already run anything as the user. What Delilah adds is that nothing may ask: no terminal prompt, no askpass, no interactive credential helper, and a 30 s limit.
 - **A branchless start (65)** gets the fresh base too: its worktree, and each chosen submodule, is detached there, so the branch the first analysis makes starts from it. A branchless start in checkout mode fetches and switches nothing (the folder is the user's, and #65 leaves it as it is), so its branch starts from where the folder is.
@@ -521,7 +519,7 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
 - **Usage limits from `rate_limit_event`**, because the status line never runs in
   print mode (it does in the PTY). Its `utilization` is a fraction; resets are epoch
   seconds, as in the status line.
-- **"Detener" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
+- **"Stop" = interrupt, and the turn ends on `result`**: no `Stop` hook fires for an
   interrupted turn (same as ESC, decision 36).
 - **Entries still come from the transcript**; the stream gives only live text. Deltas
   carry no message id: it is the `message_start`'s `message.id`.
@@ -535,8 +533,8 @@ the process up. So US3 and US4 go ahead, with these adjustments to research.md R
 
 Decided while applying [ui-redesign.md](archive/ui-redesign.md) (spec `007-ui-v2`, 2026-10-26).
 
-**68. One colour, one meaning.** Amber (`--wait`) only means "te espera"; blue (`--run`)
-only the status "Trabajando" and the focus ring; the primary button is light grey and
+**68. One colour, one meaning.** Amber (`--wait`) only means "waiting for you"; blue (`--run`)
+only the status "Working" and the focus ring; the primary button is light grey and
 stands out by lightness, one per view; everything else in progress (a running check, the
 current spec task, a PR "Abierta") is neutral. Tokens are guarded by tests (`tokens.test.ts`
 contrast, `styles.test.ts` scale and allowed colours). *Why:* amber and blue were used for
@@ -547,21 +545,21 @@ a colour-blind mode for now (pending in status.md).
 `aria-pressed`, `aria-selected` and `aria-current`; option cards add a check; tabs are the
 only exception (a neutral 2 px underline). The terminal and the editor take their colours
 from the same tokens (`theme.ts`) and change live with the OS scheme. *Ruled out:* amber
-selection (it collided with "te espera").
+selection (it collided with "waiting for you").
 
 **70. Status vocabulary in three axes.** A task's status is a `StatusBadge` (Backlog,
-Trabajando, Te espera, En pausa, Hecha, Error); a Bandeja item is an `InboxKind` (Pregunta,
-Permiso, Aviso); a PR is a `PrChip` (Borrador, Abierta, Checks fallan, Fusionada); a session
-is only a dot. One mapping in `vocab.ts`, never a word from another axis. "Limpiar avisos"
-removes only non-blocking avisos. *Why:* "Pendiente", "Esperando" and "Aviso" meant three
-things each. The glossary of brief section 3 is the copy rule (Iniciar, Detener, Abrir…,
-Recargar, Omitir, Quitar, "N más" instead of "Ver N más").
+Working, Waiting for you, Paused, Done, Error); an Inbox item is an `InboxKind` (Question,
+Permission, Notice); a PR is a `PrChip` (Draft, Open, Checks failing, Merged); a session
+is only a dot. One mapping in `vocab.ts`, never a word from another axis. "Clear notices"
+removes only non-blocking notices. *Why:* "To do", "Waiting" and "Notice" meant three
+things each. The glossary of brief section 3 is the copy rule (Start, Stop, Open…,
+Reload, Skip, Remove, "N more" instead of "See N more").
 
-**71. A pending permission makes the task "Te espera".** An ask inserted while the task
+**71. A pending permission makes the task "Waiting for you".** An ask inserted while the task
 runs fires `AgentAsked` (history `permission-asked`); the last pending ask of the task
 answered, withdrawn or expired fires `UserAnswered`. At daemon start the permission asks
 are reconciled: a `waiting-for-user` task whose latest ask has no answer and no live ask
-gets `permission-expired` and stays resumable. *Why:* the status said "Trabajando" while
+gets `permission-expired` and stays resumable. *Why:* the status said "Working" while
 the agent was blocked on you. The session with the ask lists only the `permission` item,
 no extra `waiting` one.
 
@@ -574,17 +572,17 @@ client-side change with no route). `POST /sessions/{id}/runtime` and `delilah ru
 --session`; the task route stays. *Ruled out:* one switch per task (a task has several
 sessions, and only some should leave the terminal).
 
-**73. "Detener" is the one word for stopping.** For a session or an agent, everywhere
-(never "Parar"); the preview's "Parar" became "Detener" too. Transcript line "Detenida:
+**73. "Stop" is the one word for stopping.** For a session or an agent, everywhere
+(never "Parar"); the preview's "Parar" became "Stop" too. Transcript line "Detenida:
 detuviste a Claude". It keeps the meaning of 36 / 67 (an interrupt; the turn ends without a
 `Stop` hook).
 
-**74. Dismissals live in `inbox_dismissals`, the only source of truth.** Removing an aviso
-("Quitar", "Limpiar avisos") stores its computed id (`kind:task:source:since_ms`), so a new
-occurrence of the same cause has a new id and shows again, and "Deshacer" restores by id.
+**74. Dismissals live in `inbox_dismissals`, the only source of truth.** Removing a notice
+("Remove", "Clear notices") stores its computed id (`kind:task:source:since_ms`), so a new
+occurrence of the same cause has a new id and shows again, and "Undo" restores by id.
 Notice-backed items are filtered by joining the same table, and `POST /pr-notices/{id}/dismiss`
 writes a dismissal row, so every route and restore agree. Blocking kinds cannot be dismissed
-(409). The two new avisos (a secondary session finished its turn: `turn-done`; a PR was
+(409). The two new notices (a secondary session finished its turn: `turn-done`; a PR was
 opened or linked: `pr-opened`) are stored in `pr_notices`, **reused on purpose** as for
 `base-stale` (65/66): it gives the item, its resolution and the cascade for free. Pending:
 rename it to a neutral `notices` table (status.md). *Ruled out:* a `dismissed` flag on each
@@ -606,13 +604,13 @@ touches local `main` (66).
 
 **77. Reopen after done; per-component CSS and English.** A done task can be reopened
 (`Done → WaitingForUser`, history `reopened`; `POST /tasks/{key}/reopen`, `delilah reopen`,
-"Deshacer" after "Marcar como hecha"): it needs its workspace, so an archived task cannot.
+"Undo" after "Mark as done"): it needs its workspace, so an archived task cannot.
 In the app, `styles.css` keeps only tokens and base; each component has its own CSS file and
 its own `i18n/en/<Component>.ts` (merged into `en.ts`, with a coverage test), so a change
 touches one component. *Why:* one global sheet and one long dictionary meant every
 change touched the same files (and the same merge conflicts).
 
-**78. Merge from the PR tab, with the user's `gh`.** "Fusionar" (`POST /tasks/{key}/prs/{id}/merge`)
+**78. Merge from the PR tab, with the user's `gh`.** "Merge" (`POST /tasks/{key}/prs/{id}/merge`)
 runs only on a non-draft open PR with passing checks, with a method the repo allows
 (`snapshot.merge_methods`; none known, no merge), and only if the `gh` account for the host
 is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
