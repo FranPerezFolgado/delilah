@@ -18,7 +18,7 @@ with failing Vitest tests (jsdom, fake timers).
 
 ## Phase 1: Setup
 
-- [ ] T001 Create `app/src/i18n/en/Toast.ts` exporting `EN` (empty record for now, same shape as `app/src/i18n/en/GlobalNotices.ts`); it is picked up by the `./en/*.ts` glob in `app/src/i18n/en.ts`
+- [X] T001 Create `app/src/i18n/en/Toast.ts` exporting `EN` (empty record for now, same shape as `app/src/i18n/en/GlobalNotices.ts`); it is picked up by the `./en/*.ts` glob in `app/src/i18n/en.ts`
 
 ---
 
@@ -26,11 +26,11 @@ with failing Vitest tests (jsdom, fake timers).
 
 **Purpose**: the store features every story builds on: keyed toasts, user-dismiss callback, store-level timers, eviction rule. No visible change yet.
 
-- [ ] T002 Write failing tests in `app/src/components/ui/Toast.test.tsx`: (a) `pushToast({key, …})` twice keeps one toast, updates its text/action in place and returns the same id; (b) `dismissToastByKey(key)` removes it without calling `onDismiss`; (c) the × button calls `onDismiss` once, auto-expiry and `dismissToast(id)` don't; (d) info toasts still expire after 6 s / `ttl` with timers owned by the store (they expire even if `ToastHost` is not mounted); errors, `wait` and keyed toasts never expire; (e) eviction over 3 drops the oldest info toast without action or key first, else the oldest non-keyed toast, and never a keyed toast. Replace per-toast `getAllByRole("status")` counts with text queries (the host gets a single announcer in US3)
-- [ ] T003 In `app/src/components/ui/Toast.tsx` extend `ToastInput` with `key?: string` and `onDismiss?: () => void`, and `ToastItem` with `count`, `aliases`, `deadline?`, `remaining?` (data-model.md); implement keyed in-place update in `pushToast`, `dismissToastByKey(key)`, export `WAITING_TOAST_KEY = "waiting"`, and internal `closeToast(id)` (calls `onDismiss`, then removes) used by the × button
-- [ ] T004 In `app/src/components/ui/Toast.tsx` move auto-dismiss timers from `ToastView` into the store: one timeout for the earliest `deadline`, removing expired items and rescheduling; add `setToastsPaused(paused: boolean)` converting `deadline` ↔ `remaining`; `clearToasts()` also clears the timeout; `ToastView` becomes presentational
-- [ ] T005 In `app/src/components/ui/Toast.tsx` implement the eviction rule (research R6, keyed never evicted) and make `dismissToast(id)` resolve ids in `aliases`
-- [ ] T006 Export `dismissToastByKey` and `WAITING_TOAST_KEY` from `app/src/components/ui/index.ts` (keep every existing export)
+- [X] T002 Write failing tests in `app/src/components/ui/Toast.test.tsx`: (a) `pushToast({key, …})` twice keeps one toast, updates its text/action in place and returns the same id; (b) `dismissToastByKey(key)` removes it without calling `onDismiss`; (c) the × button calls `onDismiss` once, auto-expiry and `dismissToast(id)` don't; (d) info toasts still expire after 6 s / `ttl` with timers owned by the store (they expire even if `ToastHost` is not mounted); errors, `wait` and keyed toasts never expire; (e) eviction over 3 drops the oldest info toast without action or key first, else the oldest non-keyed toast, and never a keyed toast. Replace per-toast `getAllByRole("status")` counts with text queries (the host gets a single announcer in US3)
+- [X] T003 In `app/src/components/ui/Toast.tsx` extend `ToastInput` with `key?: string` and `onDismiss?: () => void`, and `ToastItem` with `count`, `aliases`, `deadline?`, `remaining?` (data-model.md); implement keyed in-place update in `pushToast`, `dismissToastByKey(key)`, export `WAITING_TOAST_KEY = "waiting"`, and internal `closeToast(id)` (calls `onDismiss`, then removes) used by the × button
+- [X] T004 In `app/src/components/ui/Toast.tsx` move auto-dismiss timers from `ToastView` into the store: one timeout for the earliest `deadline`, removing expired items and rescheduling; add `setToastsPaused(paused: boolean)` converting `deadline` ↔ `remaining`; `clearToasts()` also clears the timeout; `ToastView` becomes presentational
+- [X] T005 In `app/src/components/ui/Toast.tsx` implement the eviction rule (research R6, keyed never evicted) and make `dismissToast(id)` resolve ids in `aliases`
+- [X] T006 Export `dismissToastByKey` and `WAITING_TOAST_KEY` from `app/src/components/ui/index.ts` (keep every existing export)
 
 **Checkpoint**: `npx vitest related --run src/components/ui/Toast.tsx` green; all existing call sites compile unchanged (`npx tsc --noEmit`).
 
