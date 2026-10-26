@@ -461,6 +461,16 @@ pub async fn answer(
         }
     };
     let allowed = matches!(decision, Decision::Allow { .. });
+    // The agent works again once it has the answer, so it is set before replying: a fast
+    // turn can end (its Stop hook sets Waiting and flushes the queue) before this returns,
+    // and setting it afterwards would leave the session working, its next message queued.
+    let others_wait = app.permissions.list().iter().any(|a| a.session == session);
+    if allowed
+        && !others_wait
+        && let Some(live) = app.sessions.get(&session)
+    {
+        live.set_state(LiveState::Working);
+    }
     let result = reply(&app, &session, &ask.request_id, decision).await;
     // Remembered only once the agent has the answer.
     if result.is_ok()
@@ -505,9 +515,6 @@ pub async fn answer(
         let _ = app.store.set_attention(&session, Some(&attention)).await;
     } else {
         clear_attention(&app, &session).await;
-        if allowed && let Some(live) = app.sessions.get(&session) {
-            live.set_state(LiveState::Working);
-        }
     }
     app.emit(Topic::Inbox);
     app.emit(Topic::Conversations);
