@@ -95,7 +95,10 @@ mod tests {
     async fn an_unknown_task_is_ignored() {
         let store = store().await;
         store
-            .dismiss(&[("x".into(), "@project".into()), ("y".into(), "NOPE-1".into())])
+            .dismiss(&[
+                ("x".into(), "@project".into()),
+                ("y".into(), "NOPE-1".into()),
+            ])
             .await
             .unwrap();
         assert!(store.dismissed().await.unwrap().is_empty());

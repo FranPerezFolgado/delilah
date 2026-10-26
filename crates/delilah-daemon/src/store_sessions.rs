@@ -1,6 +1,7 @@
 //! The sessions opened in each task's workspace.
 
 use chrono::{DateTime, Utc};
+use delilah_agents::runtime::RuntimeKind;
 use delilah_core::{Event, Step, TaskKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -329,6 +330,94 @@ impl Store {
     }
 }
 
+/// What a session has beyond its record: its own runtime and its last activity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionExtras {
+    /// The stored per-session runtime; `None` follows the task's `chat_mode`.
+    pub runtime_override: Option<RuntimeKind>,
+    pub last_activity_at: Option<DateTime<Utc>>,
+    /// Claude's last message, or the last prompt; at most [`MAX_LAST_MESSAGE`] chars.
+    pub last_message: Option<String>,
+}
+
+pub const MAX_LAST_MESSAGE: usize = 200;
+
+pub fn clip_message(s: &str) -> String {
+    s.trim().chars().take(MAX_LAST_MESSAGE).collect()
+}
+
+fn runtime_word(kind: RuntimeKind) -> &'static str {
+    match kind {
+        RuntimeKind::Pty => "pty",
+        RuntimeKind::Stream => "stream",
+    }
+}
+
+impl Store {
+    pub async fn session_extras(&self, id: &str) -> Result<SessionExtras, StoreError> {
+        let row = sqlx::query(
+            "SELECT runtime, last_activity_at, last_message FROM sessions WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(SessionExtras::default());
+        };
+        let runtime: Option<String> = row.try_get("runtime")?;
+        let at: Option<String> = row.try_get("last_activity_at")?;
+        Ok(SessionExtras {
+            runtime_override: match runtime.as_deref() {
+                Some("pty") => Some(RuntimeKind::Pty),
+                Some("stream") => Some(RuntimeKind::Stream),
+                _ => None,
+            },
+            last_activity_at: at
+                .and_then(|a| DateTime::parse_from_rfc3339(&a).ok())
+                .map(|a| a.with_timezone(&Utc)),
+            last_message: row.try_get("last_message")?,
+        })
+    }
+
+    /// Stores the session's own runtime, or `None` to follow the task again.
+    pub async fn set_runtime_override(
+        &self,
+        id: &str,
+        runtime: Option<RuntimeKind>,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE sessions SET runtime = ? WHERE id = ?")
+            .bind(runtime.map(runtime_word))
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Follows the task again: every session of it loses its own runtime.
+    pub async fn clear_runtime_overrides(&self, task: &str) -> Result<(), StoreError> {
+        sqlx::query("UPDATE sessions SET runtime = NULL WHERE task_key = ?")
+            .bind(task)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Notes a turn event: now is its last activity; `message` (clipped) replaces the
+    /// last message when there is one.
+    pub async fn touch_session(&self, id: &str, message: Option<&str>) -> Result<(), StoreError> {
+        let message = message.map(clip_message).filter(|m| !m.is_empty());
+        sqlx::query(
+            "UPDATE sessions SET last_activity_at = ?, last_message = COALESCE(?, last_message) WHERE id = ?",
+        )
+        .bind(Utc::now().to_rfc3339())
+        .bind(message)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
 async fn insert_session<'e>(
     executor: impl sqlx::SqliteExecutor<'e>,
     s: &SessionRecord,
@@ -616,6 +705,53 @@ mod tests {
             conversation: false,
             step: None,
         }
+    }
+
+    #[tokio::test]
+    async fn the_activity_and_runtime_columns_round_trip() {
+        let store = Store::in_memory().await.unwrap();
+        store
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "t", "feature"))
+            .await
+            .unwrap();
+        store
+            .create_session(&session("a", SessionKind::Claude, true))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session_extras("a").await.unwrap(),
+            SessionExtras::default()
+        );
+
+        store
+            .set_runtime_override("a", Some(RuntimeKind::Stream))
+            .await
+            .unwrap();
+        store
+            .touch_session("a", Some(&"x".repeat(300)))
+            .await
+            .unwrap();
+        let extras = store.session_extras("a").await.unwrap();
+        assert_eq!(extras.runtime_override, Some(RuntimeKind::Stream));
+        assert!(extras.last_activity_at.is_some());
+        assert_eq!(extras.last_message.unwrap().chars().count(), 200);
+
+        // A touch without a message keeps the last one.
+        store.touch_session("a", None).await.unwrap();
+        assert!(
+            store
+                .session_extras("a")
+                .await
+                .unwrap()
+                .last_message
+                .is_some()
+        );
+
+        store.clear_runtime_overrides("PROJ-1").await.unwrap();
+        assert_eq!(
+            store.session_extras("a").await.unwrap().runtime_override,
+            None
+        );
     }
 
     #[test]

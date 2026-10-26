@@ -119,6 +119,7 @@ async fn apply_signal(
         .or_else(|| live.as_ref().map(|l| l.id.clone()));
     if let Some(id) = &session_id {
         crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
+        note_activity(&app, id, signal, &hook).await;
     }
 
     // What the session now waits on you for, for the inbox.
@@ -186,6 +187,20 @@ async fn apply_signal(
             Ok(_) | Err(StoreError::Transition(_)) => {}
             Err(e) => tracing::warn!(task = %q.task, "hook not applied: {e}"),
         }
+    }
+}
+
+/// A finished turn or a submitted prompt is the session's last activity; Claude's closing
+/// message (or the prompt) is what its row shows.
+async fn note_activity(app: &AppState, session: &str, signal: Signal, hook: &Value) {
+    let message = match signal {
+        Signal::TurnEnded => hook["last_assistant_message"].as_str(),
+        Signal::PromptSubmitted => hook["prompt"].as_str(),
+        _ => return,
+    };
+    match app.store.touch_session(session, message).await {
+        Ok(()) => app.emit(Topic::Sessions),
+        Err(e) => tracing::warn!(session, "cannot record the session's activity: {e}"),
     }
 }
 
@@ -498,6 +513,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stop_and_prompt_hooks_set_the_sessions_last_activity() {
+        let state = running_task().await;
+        state
+            .store
+            .create_session(&session_record("s-1", true))
+            .await
+            .unwrap();
+        let url = "/hooks/claude?task=PROJ-1&session=s-1";
+        post(
+            &state,
+            url,
+            json!({ "hook_event_name": "UserPromptSubmit", "prompt": "fix the bug" }),
+        )
+        .await;
+        let extras = state.store.session_extras("s-1").await.unwrap();
+        assert_eq!(extras.last_message.as_deref(), Some("fix the bug"));
+        assert!(extras.last_activity_at.is_some());
+
+        let long = "y".repeat(500);
+        post(
+            &state,
+            url,
+            json!({ "hook_event_name": "Stop", "last_assistant_message": long }),
+        )
+        .await;
+        let extras = state.store.session_extras("s-1").await.unwrap();
+        assert_eq!(extras.last_message.unwrap().chars().count(), 200);
+    }
+
+    #[tokio::test]
     async fn a_stop_of_a_non_primary_session_is_a_turn_done_aviso_and_a_primary_one_is_not() {
         let state = running_task().await;
         state
@@ -511,7 +556,12 @@ mod tests {
             .await
             .unwrap();
         let stop = json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" });
-        post(&state, "/hooks/claude?task=PROJ-1&session=s-1", stop.clone()).await;
+        post(
+            &state,
+            "/hooks/claude?task=PROJ-1&session=s-1",
+            stop.clone(),
+        )
+        .await;
         let items = inbox(&state).await;
         assert!(items.iter().all(|i| i["kind"] != "turn-done"), "{items:?}");
         assert!(items.iter().any(|i| i["kind"] == "question"));

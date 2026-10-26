@@ -18,7 +18,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-09 | 2 | 2B | done | 1 | 47ffad7 | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
-| WP-12 | 2 | 2C | implementing | 1 |  | Session activity and per-session runtime |
+| WP-12 | 2 | 2C | done | 1 |  | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
@@ -59,7 +59,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
 | WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
 | WP-52 | 8 | 8A | done | 1 | 5c2a3fa | Task screen and board at width |
-| WP-53 | 8 | 8A | done | 2 |  | Global notices |
+| WP-53 | 8 | 8A | done | 2 | 42e2199 | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |
 | WP-55 | 9 | 9A | pending | 0 | | Remove replaced code and i18n cleanup |
 | WP-56 | 9 | 9A | pending | 0 | | Preview seed |
@@ -92,3 +92,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 9 | orchestrator | HIGH | styles.test: ~40 font-size/radius values outside the scale across new component CSS (AskCard, AutopilotControls, BacklogTaskView, BoardView, ChangesView, ConversationView, …) and an old token/raw colour in BoardView.css. One fix package after WP-52/WP-44/WP-26. | app/src/components/*.css |
 | 2 | WP-05 | MEDIUM | `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in full daemon runs (maybe WP-10 setup.json write order or load); investigate in WP-14/58. | crates/delilah-daemon/src/setup.rs |
 | 4 | WP-26F | MEDIUM | Delete with unpushed work: sidebar confirm, then DeleteTaskDialog opens at step 1 again before «Eliminar igualmente». Add a `startForced` prop to DeleteTaskDialog and use it from App/TaskView. | app/src/components/DeleteTaskDialog.tsx, App.tsx |
+| 9 | WP-SCALE | LOW | Round dots and the first-run mark lost `50%` (not in the allow-list): allow `border-radius: 50%` for dots/marks in styles.test.ts and restore circles; secondary text mapped 13px→13.5 could be 12 in places (jv-sub, tv-meta, qo-dir). | app/src/styles.test.ts, component css |

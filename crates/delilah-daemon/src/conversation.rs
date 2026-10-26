@@ -657,6 +657,11 @@ pub async fn send(
         // hook has already flushed the queue without this message, so flush again.
         flush_locked(&app, &live).await;
     }
+    // A message sent from the view is activity of the session too.
+    if let Err(e) = app.store.touch_session(&id, Some(text)).await {
+        tracing::warn!(session = %id, "cannot record the session's activity: {e}");
+    }
+    app.emit(Topic::Sessions);
     app.emit(Topic::Conversations);
     let mut body = json!(entry);
     body["id"] = json!(entry.id.to_string());
@@ -1544,6 +1549,16 @@ mod tests {
         assert_eq!(f.typed(5).await, "hola\r");
         assert_eq!(f.entries().await.len(), 1);
         assert_eq!(f.send("  ").await.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_sent_message_updates_the_sessions_last_activity() {
+        let f = Fixture::new().await;
+        f.live.set_state(LiveState::Waiting);
+        assert_eq!(f.send("hola").await.0, StatusCode::CREATED);
+        let extras = f.app.store.session_extras("conv").await.unwrap();
+        assert_eq!(extras.last_message.as_deref(), Some("hola"));
+        assert!(extras.last_activity_at.is_some());
     }
 
     #[tokio::test]

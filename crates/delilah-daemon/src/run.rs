@@ -1177,11 +1177,20 @@ pub(crate) async fn runtime_kind(
     {
         return Ok(RuntimeKind::Pty);
     }
-    let chat = app
+    // The session's own runtime wins over the task's flag.
+    let chat = match app
         .store
-        .get_task(&TaskKey::new(&session.task))
+        .session_extras(&session.id)
         .await?
-        .is_some_and(|t| t.chat_mode);
+        .runtime_override
+    {
+        Some(kind) => kind == RuntimeKind::Stream,
+        None => app
+            .store
+            .get_task(&TaskKey::new(&session.task))
+            .await?
+            .is_some_and(|t| t.chat_mode),
+    };
     Ok(match chat {
         true => RuntimeKind::Stream,
         false => RuntimeKind::Pty,

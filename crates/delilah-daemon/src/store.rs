@@ -661,9 +661,16 @@ mod tests {
         let mut t = task("PROJ-1");
         t.created_at = "2026-01-02T03:04:05Z".parse().unwrap();
         store.create_task(&t).await.unwrap();
-        let got = store.get_task(&TaskKey::new("PROJ-1")).await.unwrap().unwrap();
+        let got = store
+            .get_task(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(got.created_at, t.created_at);
-        assert_eq!(store.list_tasks().await.unwrap()[0].created_at, t.created_at);
+        assert_eq!(
+            store.list_tasks().await.unwrap()[0].created_at,
+            t.created_at
+        );
     }
 
     fn task(key: &str) -> Task {

@@ -481,7 +481,10 @@ mod tests {
         assert_eq!(item["pr"]["url"], PR_URL);
 
         let uri = format!("/api/v1/pr-notices/{notice}/dismiss");
-        assert_eq!(call(&router, "POST", &uri, None).await.0, StatusCode::NO_CONTENT);
+        assert_eq!(
+            call(&router, "POST", &uri, None).await.0,
+            StatusCode::NO_CONTENT
+        );
         assert!(app.store.dismissed().await.unwrap().contains(&id));
         let (_, items) = call(&router, "GET", "/api/v1/inbox", None).await;
         assert!(opened(&items).is_none());

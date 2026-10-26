@@ -29,6 +29,13 @@ pub struct SessionView {
     /// `"stream"` for a chat-mode agent, else `"pty"`: what is running, or what a
     /// launch would use (the task's flag; project sessions are always terminals).
     pub runtime: RuntimeKind,
+    /// What the next launch uses: the session's own runtime, else the task's `chat_mode`.
+    /// It differs from `runtime` only between a switch and the relaunch.
+    pub effective_runtime: RuntimeKind,
+    /// The stored per-session choice; `None` follows the task.
+    pub runtime_override: Option<RuntimeKind>,
+    pub last_activity_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,8 +301,19 @@ async fn view(app: &AppState, record: SessionRecord) -> SessionView {
         .sessions
         .get(&record.id)
         .filter(|l| !l.runtime.has_exited());
+    let extras = app
+        .store
+        .session_extras(&record.id)
+        .await
+        .unwrap_or_default();
     SessionView {
         runtime: runtime_name(app, &record, live.as_ref()).await,
+        effective_runtime: crate::run::runtime_kind(app, &record)
+            .await
+            .unwrap_or(RuntimeKind::Pty),
+        runtime_override: extras.runtime_override,
+        last_activity_at: extras.last_activity_at,
+        last_message: extras.last_message,
         live: live.is_some(),
         state: live.map(|l| l.state()),
         record,
@@ -476,6 +494,35 @@ mod tests {
             step: None,
         };
         assert_eq!(view(&app, project).await.runtime, RuntimeKind::Pty);
+    }
+
+    #[tokio::test]
+    async fn effective_runtime_is_the_override_else_the_tasks_mode() {
+        let (app, _) = task_with_two_sessions().await;
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        for s in list.as_array().unwrap() {
+            assert_eq!(s["effective_runtime"], "pty");
+            assert!(s["runtime_override"].is_null());
+            assert!(s["last_activity_at"].is_null() && s["last_message"].is_null());
+        }
+        app.store
+            .set_runtime_override("main", Some(RuntimeKind::Stream))
+            .await
+            .unwrap();
+        app.store.touch_session("main", Some("done")).await.unwrap();
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        let main = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == "main")
+            .unwrap();
+        // The live process still runs on the terminal until the relaunch.
+        assert_eq!(main["runtime"], "pty");
+        assert_eq!(main["effective_runtime"], "stream");
+        assert_eq!(main["runtime_override"], "stream");
+        assert_eq!(main["last_message"], "done");
+        assert!(main["last_activity_at"].is_string());
     }
 
     #[tokio::test]
