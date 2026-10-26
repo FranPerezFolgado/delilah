@@ -184,6 +184,6 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - **Bandeja avisos:** the `turn-done` / `pr-opened` rows in `pr_notices` accumulate (never resolved) and their text-hash ids change with the language; `pr_notices` is still the table of those two avisos, and a rename to a neutral `notices` is pending ([#74](decisions.md)). Downgrade: an older binary refuses a database at version 21 (say it in the release notes).
   - **Colour:** light `--tx3` on `--side` is 4.43:1 (listed in `KNOWN_LOW` in `tokens.test.ts`); darken to #686b72 and drop the entry. A colour-blind mode is not built.
   - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). Run vitest with `--no-cache` after adding files under `i18n/en/` (the glob list is cached).
-- **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
+- **Mobile access:** analysed (decision 79, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth.
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
 - **Testing:** test the whole flow on the work Mac with a real ticket.
