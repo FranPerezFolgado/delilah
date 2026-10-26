@@ -617,3 +617,16 @@ runs only on a non-draft open PR with passing checks, with a method the repo all
 (`snapshot.merge_methods`; none known, no merge), and only if the `gh` account for the host
 is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
 draft PR). *Ruled out:* a merge queue or auto-merge.
+
+**79. One grouped "te espera" toast, owned by `GlobalNotices`.** All waiting tasks share a
+single persistent toast ("{key} te espera · Responder", or "{n} tareas te esperan · Ver" opening
+the Inbox) instead of one per task; closing it empties the group, and a task leaves it when it
+stops waiting, its screen is opened or it leaves the list. The toast store merges repeats only
+for the same kind and exact text with no action or key ("×N", capped "×99+"), keeps at most 3
+(evicting the oldest plain info toast, never the waiting one) and shows more than one collapsed
+("+N", "Cerrar todo"). *Why:* several waiting tasks flooded the corner and buried the rest;
+the kit stays task-agnostic, so the group lives in `GlobalNotices` as one keyed toast. Actions
+carry closures (each "Deshacer" undoes a different thing), so toasts with an action never merge;
+exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
+centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
+Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).

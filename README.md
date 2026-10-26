@@ -234,6 +234,14 @@ with "Quitar" or all at once with "Limpiar avisos" (a toast offers "Deshacer"); 
 an answer stays. With nothing waiting it says "Nada te espera" and the last activity. The daemon keeps what each session waits for from its hooks,
 so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply`).
 
+**Toasts.** Tasks that wait for you show one grouped toast, not one per task: "{key} te espera"
+with "Responder" for one, "{n} tareas te esperan" with "Ver" (opens the Inbox) for several. A
+task leaves the group when it stops waiting or you open its screen; closing the toast empties it.
+Identical repeated toasts merge into one with "×N" (up to "×99+"). With more than one toast they
+collapse into the newest plus a "+N" button; hover, focus or click expands the stack, with
+"Cerrar todo". Timers pause while it is expanded. Info toasts last 6 s; errors and the waiting
+toast stay until closed.
+
 **Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
 token) and checks every 30 s. When the task's branch has a PR, it links it, per
 submodule for a parent, and moves the task to Revisión. You can also paste a PR's URL

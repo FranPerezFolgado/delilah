@@ -98,9 +98,9 @@ with failing Vitest tests (jsdom, fake timers).
 ## Phase 7: Polish & cross-cutting
 
 - [ ] T022 Run `cd app && npx tsc --noEmit && npx vitest run`; fix any test that relied on one `role="status"` per toast or on per-task «te espera» toasts (e.g. `App.test.tsx`, `TaskView.test.tsx`, `InboxView.test.tsx`, `BacklogTaskView.test.tsx`, `TaskScreen.test.tsx`), without changing what they assert about behaviour
-- [ ] T023 [P] Update `README.md` (toasts / «te espera» section near «Limpiar avisos»): one grouped waiting toast, merged repeats «×N», collapsed stack with «+N» and «Cerrar todo», pause on hover
-- [ ] T024 [P] Update `docs/status.md` (Kit/Toast entry and built features) and `docs/architecture.md` (UI kit note: toast store with keyed/merged toasts, GlobalNotices owns the waiting group)
-- [ ] T025 [P] Add a decision to `docs/decisions.md`: one grouped «te espera» toast owned by GlobalNotices instead of one per task; merge rule (exact text+kind, no action); collapsed stack; alternatives ruled out (lower MAX, notification centre, moving waiting to gn-bar)
+- [X] T023 [P] Update `README.md` (toasts / «te espera» section near «Limpiar avisos»): one grouped waiting toast, merged repeats «×N», collapsed stack with «+N» and «Cerrar todo», pause on hover
+- [X] T024 [P] Update `docs/status.md` (Kit/Toast entry and built features) and `docs/architecture.md` (UI kit note: toast store with keyed/merged toasts, GlobalNotices owns the waiting group)
+- [X] T025 [P] Add a decision to `docs/decisions.md`: one grouped «te espera» toast owned by GlobalNotices instead of one per task; merge rule (exact text+kind, no action); collapsed stack; alternatives ruled out (lower MAX, notification centre, moving waiting to gn-bar)
 - [ ] T026 Try it in a preview per `specs/008-group-toasts/quickstart.md` (`scripts/preview.sh --fresh`, never the installed daemon on 7420); check scenarios 1–5 (ui-verifier)
 - [ ] T027 Bump the version (minor: new user-facing behaviour, backwards compatible) with `scripts/bump-version.sh minor --commit` as its own commit `chore: bump version to X.Y.Z`, from the version on `main`
 
