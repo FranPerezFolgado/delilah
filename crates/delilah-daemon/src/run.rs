@@ -446,9 +446,16 @@ pub(crate) async fn start_run_with(
         Ok(created) => created,
         Err(e) => {
             let reason = format!("workspace: {e}");
-            abort_start(&app, &key, existing, false, &reason).await?;
+            let fresh = existing.is_none();
             // A checkout with work in it is the user's to resolve, not an invalid request.
-            if in_checkout && matches!(e, delilah_git::GitError::Dirty { .. }) {
+            let dirty = in_checkout && matches!(e, delilah_git::GitError::Dirty { .. });
+            if dirty && fresh {
+                // Nothing started: the task made for this request goes, not an errored one.
+                app.store.delete_task(&key).await?;
+            } else {
+                abort_start(&app, &key, existing, false, &reason).await?;
+            }
+            if dirty {
                 return Err(ApiError::conflict_reason(reason, "checkout-dirty"));
             }
             return Err(ApiError::unprocessable(reason));
@@ -2039,6 +2046,10 @@ mod tests {
         assert_eq!(e.status, StatusCode::CONFLICT);
         assert_eq!(e.reason.as_deref(), Some("checkout-dirty"));
         assert!(e.message.contains("uncommitted changes"), "{}", e.message);
+        assert!(
+            app.store.get_task(&TaskKey::new("PROJ-9")).await.unwrap().is_none(),
+            "a refused start leaves no task behind"
+        );
     }
 
     #[test]

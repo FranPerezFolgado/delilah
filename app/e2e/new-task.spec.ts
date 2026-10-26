@@ -15,8 +15,7 @@ async function pollTask(api: import("./fixtures").Api, title: string): Promise<T
   let found: Task | undefined;
   await expect
     .poll(async () => {
-      // The newest one: a refused start can leave an errored record with the same title.
-      found = (await api.get<Task[]>("/api/v1/tasks")).filter((t) => t.title === title).at(-1);
+      found = (await api.get<Task[]>("/api/v1/tasks")).find((t) => t.title === title);
       return !!found;
     })
     .toBe(true);

@@ -152,7 +152,7 @@ export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged
       ) : items.length === 0 ? (
         <Empty />
       ) : (
-        <div className={`ib ${overlays ? "ib-narrow" : ""}`}>
+        <div className={`ib-root ${overlays ? "ib-narrow" : ""}`}>
           <div className="ib-list" role="listbox" aria-label={t("Bandeja")}>
             {groups.map((g) => (
               <div key={g.task} className="ib-group" role="group" aria-label={g.task}>

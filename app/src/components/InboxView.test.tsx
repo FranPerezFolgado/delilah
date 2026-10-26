@@ -409,6 +409,14 @@ describe("InboxView at width", () => {
     expect(document.querySelector(".ib-scrim")).toBeNull();
   });
 
+  it("uses its own root class, not the icon-button .ib (32x32) that squeezed the panes", () => {
+    setWidth(1280);
+    view();
+    const root = document.querySelector(".ib-list")!.parentElement!;
+    expect(root.classList.contains("ib-root")).toBe(true);
+    expect(root.classList.contains("ib")).toBe(false);
+  });
+
   it("opens the detail as an overlay below 1200, closed by «Cerrar» and Esc", () => {
     setWidth(1100);
     view();

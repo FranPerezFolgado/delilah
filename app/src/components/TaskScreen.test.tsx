@@ -630,6 +630,28 @@ describe("TaskScreen runtime switch", () => {
     expect(alert.textContent).toContain("Espera a que termine el turno");
     expect(alert.textContent).not.toContain("wait for the turn");
   });
+
+  it("clears the refusal bar after a later successful switch", async () => {
+    sessionRuntime.result = () => Promise.reject(new ApiError("wait for the turn to end or press Detener", 409));
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
+    fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
+    await r.findByRole("alert");
+    sessionRuntime.result = () => Promise.resolve(null);
+    fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
+    fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
+    await waitFor(() => expect(r.queryByRole("alert")).toBeNull());
+  });
+
+  it("clears the bar when the tab changes", async () => {
+    sessionRuntime.result = () => Promise.reject(new ApiError("wait for the turn to end or press Detener", 409));
+    const r = render(screen1(chatTask, stream));
+    fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
+    fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
+    await r.findByRole("alert");
+    fireEvent.click(r.getByRole("tab", { name: "Tarea" }));
+    await waitFor(() => expect(r.queryByRole("alert")).toBeNull());
+  });
 });
 
 describe("TaskScreen at 1280 (tree hidden below 1300)", () => {

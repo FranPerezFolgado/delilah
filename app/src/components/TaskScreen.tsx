@@ -225,6 +225,8 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   const shown = exists ? session.active : OVERVIEW;
   const shownRef = useRef(shown);
   shownRef.current = shown;
+  // An error belongs to the tab it came up in.
+  useEffect(() => setError(null), [shown]);
   const active = tab(shown);
   const shownSession = sessionOf(shown);
   const shownClaude = sessions.find((s) => s.id === shownSession && s.kind !== "shell");
@@ -647,7 +649,10 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
     <SessionViewSwitch
       session={shownClaude}
       busy={turnRunning}
-      onChanged={onChanged}
+      onChanged={() => {
+        setError(null);
+        onChanged();
+      }}
       onError={setError}
     />
   ) : undefined;

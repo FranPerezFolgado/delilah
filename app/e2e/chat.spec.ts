@@ -159,10 +159,9 @@ test("a permission card shows in the chat and the inbox; allow once runs the too
   const row = page.getByRole("option").filter({ hasText: "ls -la" });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.click();
-  // The detail is the permission card. Attached, not visible: the detail column of a permission
-  // item collapses to ~20 px in the current build (reported as an app bug).
-  await expect(page.locator(".ib-detail .ac").filter({ hasText: "ls -la" })).toBeAttached();
-  await expect(page.locator(".ib-detail").getByRole("button", { name: "Permitir una vez" })).toBeAttached();
+  // The detail is the permission card.
+  await expect(page.locator(".ib-detail .ac").filter({ hasText: "ls -la" })).toBeVisible();
+  await expect(page.locator(".ib-detail").getByRole("button", { name: "Permitir una vez" })).toBeVisible();
 
   await page.getByRole("button", { name: /^Tareas/ }).click();
   await (await boardCard(page, title)).click();
@@ -284,7 +283,7 @@ test("the runtime switch is refused while a card waits, then goes to the termina
   await page.getByRole("dialog", { name: "Pasar a terminal" }).getByRole("button", { name: "Cambiar" }).click();
   // The switch is per session now (the runtime API): the task's own chat_mode is not touched.
   await expect.poll(() => liveRuntime(api, key), { timeout: 20_000 }).toBe("pty");
-  // (The earlier refusal alert stays on screen after a successful switch: reported as an app issue.)
+  await expect(page.getByRole("alert").filter({ hasText: "Espera a que termine el turno" })).toHaveCount(0);
 
   // Back to chat from the chat view of the terminal session.
   await wrap.getByRole("button", { name: /^Chat/ }).click();
