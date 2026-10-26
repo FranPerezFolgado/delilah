@@ -64,8 +64,8 @@ failed-CI item is gone and the history shows one attempt, fixed.
 4. **Given** autofix already sent the failure of a commit, **When** the checks of
    that same commit are seen again (later polls, a restart of Delilah, a re-run
    that fails again), **Then** no second message is sent for that commit.
-5. **Given** the agent is working, or waiting on the user (a question or a
-   permission prompt), **When** CI fails, **Then** autofix waits and sends the
+5. **Given** the agent is working, or waiting on the user (a permission prompt or
+   an open question card), **When** CI fails, **Then** autofix waits and sends the
    failure only once the agent is idle, if the commit is still the PR's latest
    and still failing.
 
@@ -216,7 +216,8 @@ check the PR tab state at each step and the two history entries.
   across restarts and also when the user already forwarded that commit's failure
   by hand.
 - **FR-006**: Delilah MUST only send when the agent is idle (not working, not
-  waiting on a question or a permission prompt, not paused by the usage limit),
+  waiting on a permission prompt or an open question card, not paused by the
+  usage limit),
   and MUST re-check that the commit is still the PR's latest and still failing
   just before sending.
 - **FR-007**: Autofix MUST NOT forward review comments, review states or any text

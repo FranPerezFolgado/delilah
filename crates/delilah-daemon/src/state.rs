@@ -73,7 +73,6 @@ pub struct AppState {
 }
 
 /// Marks a task's autofix as being evaluated; dropping it lets the next one run.
-#[allow(dead_code)] // held by the autofix module
 pub(crate) struct AutofixGuard {
     running: Arc<Mutex<HashSet<String>>>,
     key: String,
@@ -145,7 +144,6 @@ impl AppState {
     }
 
     /// Takes the task's autofix evaluation; `None` when another one is running.
-    #[allow(dead_code)] // used by the autofix module
     pub(crate) fn claim_autofix(&self, key: &str) -> Option<AutofixGuard> {
         let fresh = self
             .autofix_running

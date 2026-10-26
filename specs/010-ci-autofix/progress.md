@@ -15,7 +15,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 3 | 3A | verified | 1 | d7fd9ad | prompt duplicated in autofix (forward::ci_prompt/fit private) → dedupe in WP-07; FR-006 vs R3: followed R3 |
 | WP-08 | 3 | 3A | verified | 1 | dabc503 | manual forward: CAS sha before send, restore on failure, 409 after 3 CAS tries |
 | WP-07 | 3 | 3B | verified | 1 | 39c4788 | no re-read from gh before send (uses just-saved snapshot, FR-006?); stopped notice hook for WP-12 |
-| WP-09 | 3 | 3C | verified | 1 | | POST /runs has no ci_autofix (test uses PATCH) |
+| WP-09 | 3 | 3C | verified | 1 | 3a4ee36 | POST /runs has no ci_autofix (test uses PATCH) |
+| WP-09F | 3 | fix | implementing | 0 | | Phase 3 review fixes |
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-12 | 4 | 4B | pending | 0 | | |
@@ -35,9 +36,19 @@ Mode: format=markdown commits=yes autonomy=auto
 | 1 | architecture | LOW | Placeholder fns with `#[allow(dead_code)]`; drop the attribute as each gets a caller (`cancel` not in plan's mod.rs description) | crates/delilah-daemon/src/autofix/mod.rs:8-15 |
 | 1 | migration | LOW | Backfill also matches autopilot `paused`; confirm intended | crates/delilah-daemon/migrations/0022_ci_autofix.sql:9 |
 | 1 | migration | LOW | PRs with NULL snapshot get no seeded sha: a pre-upgrade failure could fire on first check; PrAutofix.sha must accept null | crates/delilah-daemon/migrations/0022_ci_autofix.sql:16-19 |
-| 2 | orchestrator | LOW | One unidentified daemon test failed once after WP-05 (836/837), not reproduced in 4 reruns: possible flaky test | crates/delilah-daemon |
+| 2-3 | orchestrator | MEDIUM | Flaky test `conversation::tests::a_message_sent_while_a_card_is_pending_is_queued` (fails ~1 in 3–4 full runs); file untouched by this feature | crates/delilah-daemon/src/conversation.rs:2257 |
 | 2 | contract | HIGH (tracked) | UI settings PUT drops `ci_autofix` → resets to autopilot; must be fixed by WP-16 (TS type + DEFAULT_PROJECT_SETTINGS + round trip) before release | app/src/api.ts:101-109 |
 | 2 | contract | MEDIUM | Version skew: new CLI vs old daemon 422 on project set (deny_unknown_fields); ship together, note in release notes; event downgrade also fails | crates/delilah-cli/src/main.rs:924 |
 | 2 | spec-compliance | MEDIUM (tracked) | PATCH `ci_autofix` flips the column without the toggle's side effects/409 → WP-14 must route PATCH through the same toggle fn or limit it to backlog | crates/delilah-daemon/src/api.rs:563-566 |
 | 2 | spec-compliance | LOW | Core T003 test checks a serde parse error; field/code only checked in daemon test | crates/delilah-core/src/project.rs |
 | 2 | spec-compliance | LOW | PrAutofix.sha is Option (deliberate, backfill null head) | crates/delilah-daemon/src/autofix/mod.rs |
+| 3 | security | MEDIUM | Check names/URLs are attacker-controlled and now reach the agent without a human; only prompt framing defends. Document (no bypass modes on untrusted PRs), consider non-fork only, "don't fetch URLs" | crates/delilah-daemon/src/autofix/mod.rs prompt() |
+| 3 | security | LOW | fit() truncates the end, cutting the trailing instructions; cap listed checks / reserve footer | crates/delilah-daemon/src/pr_api/forward.rs fit() |
+| 3 | security | LOW | safe_url allows any https host; one_line keeps U+2028/2029 | crates/delilah-daemon/src/pr_api/forward.rs |
+| 3 | security | LOW | Green↔red cycles over new commits reset attempts: cost bounded per commit, not overall | crates/delilah-daemon/src/autofix/mod.rs |
+| 3 | architecture | MEDIUM | pr_loop hard-wires autofix::evaluate (detached spawn, no join handle in tests); consider an AppState hook/channel | crates/delilah-daemon/src/pr_loop/mod.rs:208-214 |
+| 3 | architecture | LOW | forward helpers (send/fit/safe_url) reached from autofix; move to a neutral module | crates/delilah-daemon/src/pr_api/forward.rs |
+| 3 | architecture | LOW | autofix_handles reads the store on every notice record, and the rule lives outside autofix | crates/delilah-daemon/src/pr_loop/notices.rs:120-132 |
+| 3 | spec-compliance | LOW | 4th red head stops at limit without recording attempt 3's autofix-failed-again (FR-013) → consider in Phase 4 | crates/delilah-daemon/src/autofix/mod.rs |
+| 3 | spec-compliance | LOW | Manual forward of an older ci-failed notice overwrites sha with the older one | crates/delilah-daemon/src/pr_api/forward.rs |
+| 3 | contract | LOW | TS `autofix?: PrAutofixView \| null` must be optional+nullable (WP-16) | app/src/api.ts |

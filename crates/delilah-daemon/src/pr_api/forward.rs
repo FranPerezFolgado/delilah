@@ -182,53 +182,69 @@ pub(crate) async fn send(app: &AppState, key: &TaskKey, prompt: &str) -> Result<
 
 /// Most times `send_once` re-reads the PR's autofix state after losing a compare-and-set.
 const CAS_TRIES: usize = 3;
+/// Times `send_once` waits for the task's autofix evaluation to end before it answers
+/// "in flight", and how long between looks.
+const BUSY_TRIES: usize = 10;
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// What `send_once` did with a commit's failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Once {
+    /// Typed into the agent now.
+    Sent,
+    /// The agent got that commit already (by autofix or by hand).
+    AlreadySent,
+    /// Autofix is sending for this task right now and may still give the commit back:
+    /// nothing is known yet, so the notice stays.
+    InFlight,
+}
 
 /// Sends the failure of commit `sha` unless it was sent already (by autofix or by hand):
 /// the sha is claimed on the PR's autofix state first, so autofix never sends it again,
-/// and given back if the send fails (the agent never got that commit). Returns whether
-/// it was sent.
+/// and given back if the send fails (the agent never got that commit).
+///
+/// A sha on the row only counts as "sent" when no claim can still be undone, so this
+/// holds the task's autofix slot (the one `autofix::evaluate` holds while it claims and
+/// sends). The marker is that slot, not a field of the row: rows migrated from before
+/// autofix carry a sha with no `sent_at` and are sent for good.
 async fn send_once(
     app: &AppState,
     key: &TaskKey,
     pr_id: i64,
     sha: &str,
     prompt: &str,
-) -> Result<bool, ApiError> {
+) -> Result<Once, ApiError> {
+    let mut slot = app.claim_autofix(key.as_str());
+    for _ in 0..BUSY_TRIES {
+        if slot.is_some() {
+            break;
+        }
+        tokio::time::sleep(BUSY_WAIT).await;
+        slot = app.claim_autofix(key.as_str());
+    }
+    let Some(_slot) = slot else {
+        return Ok(Once::InFlight);
+    };
     for _ in 0..CAS_TRIES {
         let Some(pr) = app.store.pr(pr_id).await? else {
             // The PR is gone; nothing to claim.
             send(app, key, prompt).await?;
-            return Ok(true);
+            return Ok(Once::Sent);
         };
         let prev = pr.autofix;
         if prev.as_ref().and_then(|a| a.sha.as_deref()) == Some(sha) {
-            return Ok(false);
+            return Ok(Once::AlreadySent);
         }
-        let mut next = prev.clone().unwrap_or(PrAutofix {
-            state: autofix::State::Watching,
-            attempts: 0,
-            sha: None,
-            session: None,
-            sent_at: None,
-            reason: None,
-        });
+        let mut next = prev.clone().unwrap_or_else(PrAutofix::watching);
         next.sha = Some(sha.to_string());
-        if !app
-            .store
-            .update_pr_autofix(pr_id, prev.as_ref(), Some(&next))
-            .await?
-        {
+        if !autofix::claim(app, pr_id, prev.as_ref(), &next).await? {
             continue;
         }
         if let Err(e) = send(app, key, prompt).await {
-            // Best effort: if the row changed meanwhile, whoever changed it decides.
-            let _ = app
-                .store
-                .update_pr_autofix(pr_id, Some(&next), prev.as_ref())
-                .await;
+            autofix::give_back_row(app, pr_id, &next, prev.as_ref()).await;
             return Err(e);
         }
-        return Ok(true);
+        return Ok(Once::Sent);
     }
     Err(ApiError::conflict(format!(
         "{key}: the PR's autofix state keeps changing, try again"
@@ -266,9 +282,14 @@ pub async fn forward(
         .then(|| detail.get("sha").and_then(Value::as_str))
         .flatten();
     match (sha, pr.as_ref()) {
-        (Some(sha), Some(pr)) => {
-            send_once(&app, &key, pr.id, sha, &prompt).await?;
-        }
+        (Some(sha), Some(pr)) => match send_once(&app, &key, pr.id, sha, &prompt).await? {
+            Once::Sent | Once::AlreadySent => {}
+            Once::InFlight => {
+                return Err(ApiError::conflict(format!(
+                    "{key}: the failure is being sent to the agent, try again"
+                )));
+            }
+        },
         _ => send(&app, &key, &prompt).await?,
     }
     app.store.resolve_notice(id).await?;
@@ -448,6 +469,73 @@ mod tests {
         );
         let after = app.store.pr(pr.id).await.unwrap().unwrap();
         assert_eq!(after.autofix, Some(sent));
+    }
+
+    #[tokio::test]
+    async fn a_commit_being_sent_by_autofix_is_409_and_keeps_the_notice() {
+        let (router, app, _dir) = setup(fake()).await;
+        link_pr(&app).await;
+        let pr = app
+            .store
+            .prs_of(&TaskKey::new("PROJ-1"))
+            .await
+            .unwrap()
+            .remove(0);
+        // Autofix has claimed "abc" and its send may still fail and give it back.
+        assert!(
+            app.store
+                .update_pr_autofix(pr.id, None, Some(&pr_autofix("abc")))
+                .await
+                .unwrap()
+        );
+        let id = notice(&app, "ci-failed", json!({ "sha": "abc", "checks": [] })).await;
+        let uri = format!("/api/v1/pr-notices/{id}/forward");
+        let busy = app.claim_autofix("PROJ-1").unwrap();
+        let (s, v) = call(&router, "POST", &uri, None).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("try again"));
+        let open = |app: &AppState| {
+            let app = app.clone();
+            async move {
+                app.store
+                    .notice(id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .resolved_at
+                    .is_none()
+            }
+        };
+        assert!(open(&app).await, "the notice stays");
+
+        // Autofix is done and the sha stayed: now it is a sent commit.
+        drop(busy);
+        let (s, _) = call(&router, "POST", &uri, None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        assert!(!open(&app).await);
+    }
+
+    #[tokio::test]
+    async fn send_once_tells_sent_from_already_sent_and_in_flight() {
+        let (_router, app, _dir) = setup(fake()).await;
+        link_pr(&app).await;
+        let key = TaskKey::new("PROJ-1");
+        let pr = app.store.prs_of(&key).await.unwrap().remove(0);
+        let mut out = cat_session(&app);
+        assert_eq!(
+            send_once(&app, &key, pr.id, "abc", "first").await.ok(),
+            Some(Once::Sent)
+        );
+        read_until(&mut out, &["first"]).await;
+        assert_eq!(
+            send_once(&app, &key, pr.id, "abc", "again").await.ok(),
+            Some(Once::AlreadySent)
+        );
+        let _busy = app.claim_autofix("PROJ-1").unwrap();
+        assert_eq!(
+            send_once(&app, &key, pr.id, "def", "x").await.ok(),
+            Some(Once::InFlight)
+        );
     }
 
     #[tokio::test]

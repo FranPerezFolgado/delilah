@@ -16,7 +16,7 @@ fn autofix_inputs(env: &Env) -> Vec<String> {
         .map(|r| {
             r.inputs
                 .into_iter()
-                .filter(|i| i.contains("attempt 1/3"))
+                .filter(|i| i.contains("attempt 1 of 3"))
                 .collect()
         })
         .unwrap_or_default()
@@ -58,16 +58,12 @@ fn autofix_types_one_prompt_then_sees_the_fix() {
     );
     let api = env.api();
     api.set_preference("language", json!("en"));
+    // `/runs` turns autofix on for this task, as the dialog's switch does.
     api.start_run(json!({
         "key": KEY, "title": "Autofix", "project": "signal", "prompt": "Autofix",
+        "ci_autofix": true,
     }));
-    // `/runs` has no autofix switch: the task's own PATCH turns it on.
-    let (code, task) = api.raw(
-        reqwest::Method::PATCH,
-        &format!("/api/v1/tasks/{KEY}"),
-        Some(json!({"ci_autofix": true})),
-    );
-    assert!(code == 200 && task["ci_autofix"] == true, "{code} {task}");
+    assert_eq!(api.task(KEY)["ci_autofix"], true);
     env.wait_for("the agent idle after its first turn", T, || {
         match env.record_for(KEY) {
             Some(r) if r.hooks.iter().any(|h| h.event == "Stop") => Ok(()),

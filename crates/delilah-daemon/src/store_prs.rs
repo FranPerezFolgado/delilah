@@ -196,7 +196,6 @@ impl Store {
     /// Compare-and-set of the PR's autofix state: writes `next` only if the stored
     /// state equals `expected` (compared by value, not as text: the migration's JSON
     /// differs from serde's). `false` when it differs, leaving the row as it was.
-    #[allow(dead_code)]
     pub(crate) async fn update_pr_autofix(
         &self,
         pr_id: i64,
@@ -537,7 +536,6 @@ impl Store {
         Ok(result.rows_affected())
     }
 
-    #[allow(dead_code)] // used by the archive in the next packages
     pub(crate) async fn resolve_notices_of(
         &self,
         key: &TaskKey,
