@@ -15,17 +15,17 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 3 | 3B | pending | 0 | | |
 | WP-08 | 3 | 3C | pending | 0 | | |
 | WP-10 | 4 | 4A | verified | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
-| WP-12 | 4 | 4A | pending | 0 | | |
-| WP-11 | 4 | 4B | pending | 0 | | |
+| WP-12 | 4 | 4A | implementing | 0 | | |
+| WP-11 | 4 | 4B | implementing | 0 | | |
 | WP-13 | 4 | 4B | pending | 0 | | |
 | WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
 | WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
 | WP-16 | 5 | 5A | pending | 0 | | |
-| WP-17 | 5 | 5A | pending | 0 | | |
+| WP-17 | 5 | 5A | implementing | 0 | | |
 | WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
-| WP-19 | 6 | 6A | implementing | 0 | | |
+| WP-19 | 6 | 6A | verified | 1 | d7954db | T041 pending: preview check via ui-verifier; native menu = unit tests only; empty defaults output now → English |
 | WP-20 | 6 | 6B | pending | 0 | | |
-| WP-21 | 7 | 7A | pending | 0 | | |
+| WP-21 | 7 | 7A | implementing | 0 | | |
 | WP-22 | 8 | 8A | pending | 0 | | |
 | WP-23 | 8 | 8B | pending | 0 | | |
 | WP-24 | 8 | 8C | pending | 0 | | |
