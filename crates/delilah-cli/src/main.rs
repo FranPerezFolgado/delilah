@@ -9,8 +9,8 @@ use std::time::Duration;
 use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use delilah_core::{
-    AutopilotState, Event, Project, ProjectSettings, ShareMode, SharedEntry, Task, TaskStatus,
-    WorkspaceMode,
+    AutofixDefault, AutopilotState, Event, Project, ProjectSettings, ShareMode, SharedEntry, Task,
+    TaskStatus, WorkspaceMode,
 };
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
@@ -100,6 +100,68 @@ fn with_autopilot(mut body: serde_json::Value, choice: Option<bool>) -> serde_js
         body["autopilot"] = json!(on);
     }
     body
+}
+
+/// The CI autofix choice for a task; neither flag means the project's default applies.
+#[derive(Args)]
+struct AutofixFlags {
+    /// Let the agent fix the PR's failing CI checks on its own.
+    #[arg(long, conflicts_with = "no_autofix")]
+    autofix: bool,
+    /// Don't fix the PR's failing CI checks, whatever the project's default says.
+    #[arg(long)]
+    no_autofix: bool,
+}
+
+impl AutofixFlags {
+    /// `None` when no flag was given: the daemon applies the project's default.
+    fn choice(&self) -> Option<bool> {
+        match (self.autofix, self.no_autofix) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// Adds `ci_autofix` to a request body only when the user chose it.
+fn with_ci_autofix(mut body: serde_json::Value, choice: Option<bool>) -> serde_json::Value {
+    if let Some(on) = choice {
+        body["ci_autofix"] = json!(on);
+    }
+    body
+}
+
+/// What `delilah autofix <KEY>` does.
+#[derive(Clone, Copy, ValueEnum)]
+enum AutofixAction {
+    /// Turns CI autofix on for the task.
+    On,
+    /// Turns CI autofix off for the task.
+    Off,
+    /// Starts a new fix attempt for a PR whose checks still fail (needs --repo).
+    Retry,
+}
+
+impl AutofixAction {
+    fn name(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Retry => "retry",
+        }
+    }
+}
+
+/// The body of `POST /tasks/{key}/autofix`; `retry` names the repo of the PR.
+fn autofix_body(action: AutofixAction, repo: Option<&str>) -> Result<serde_json::Value, String> {
+    match (action, repo) {
+        (AutofixAction::Retry, None) => Err(
+            "autofix retry needs --repo <REPO> (the repo of the PR, `.` for the task's own)".into(),
+        ),
+        (AutofixAction::Retry, Some(repo)) => Ok(json!({ "action": "retry", "repo": repo })),
+        (action, _) => Ok(json!({ "action": action.name() })),
+    }
 }
 
 /// What `delilah autopilot <KEY>` does.
@@ -192,6 +254,8 @@ enum Command {
         saving: SavingModeFlags,
         #[command(flatten)]
         autopilot: AutopilotFlags,
+        #[command(flatten)]
+        autofix: AutofixFlags,
     },
     /// Shows a task and its history.
     Show { key: String },
@@ -239,6 +303,8 @@ enum Command {
         saving: SavingModeFlags,
         #[command(flatten)]
         autopilot: AutopilotFlags,
+        #[command(flatten)]
+        autofix: AutofixFlags,
     },
     /// Opens the live terminal of a task's agent (Ctrl-] detaches).
     Attach { key: String },
@@ -261,6 +327,14 @@ enum Command {
     Autopilot {
         key: String,
         action: AutopilotAction,
+    },
+    /// Turns a task's CI autofix on or off, or retries it for a PR.
+    Autofix {
+        key: String,
+        action: AutofixAction,
+        /// The repo of the PR to retry (`.` for the task's own); required with `retry`.
+        #[arg(long)]
+        repo: Option<String>,
     },
     /// Marks a task as done and stops its agent.
     Done { key: String },
@@ -345,6 +419,8 @@ enum SetCommand {
         #[command(subcommand)]
         action: SubmoduleAction,
     },
+    /// Which tasks get CI autofix: `off`, `autopilot` (only autopilot tasks) or `always` (unset: autopilot).
+    CiAutofix { mode: AutofixArg },
 }
 
 #[derive(Subcommand)]
@@ -382,6 +458,13 @@ enum WorkspaceArg {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+enum AutofixArg {
+    Off,
+    Autopilot,
+    Always,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 enum SubmoduleRule {
     Always,
     Never,
@@ -394,6 +477,7 @@ enum SettingName {
     Setup,
     Shared,
     Submodules,
+    CiAutofix,
 }
 
 /// One change to a project's settings.
@@ -406,6 +490,7 @@ enum Change {
     SharedRm(String),
     SubmodulesAdd(SubmoduleRule, String),
     SubmodulesRm(SubmoduleRule, String),
+    CiAutofix(AutofixArg),
     Unset(SettingName),
 }
 
@@ -428,6 +513,7 @@ impl From<SetCommand> for Change {
                 SubmoduleAction::Add { path } => Change::SubmodulesAdd(rule, path),
                 SubmoduleAction::Rm { path } => Change::SubmodulesRm(rule, path),
             },
+            SetCommand::CiAutofix { mode } => Change::CiAutofix(mode),
         }
     }
 }
@@ -470,12 +556,20 @@ fn apply_change(mut s: ProjectSettings, change: Change) -> Result<ProjectSetting
                 return Err(format!("submodules: {path} is not in the {rule:?} list"));
             }
         }
+        Change::CiAutofix(mode) => {
+            s.ci_autofix = match mode {
+                AutofixArg::Off => AutofixDefault::Off,
+                AutofixArg::Autopilot => AutofixDefault::Autopilot,
+                AutofixArg::Always => AutofixDefault::Always,
+            }
+        }
         Change::Unset(name) => match name {
             SettingName::Workspace => s.workspace = defaults.workspace,
             SettingName::Branch => s.branch = defaults.branch,
             SettingName::Setup => s.setup = defaults.setup,
             SettingName::Shared => s.shared = defaults.shared,
             SettingName::Submodules => s.submodules = defaults.submodules,
+            SettingName::CiAutofix => s.ci_autofix = defaults.ci_autofix,
         },
     }
     Ok(s)
@@ -542,6 +636,15 @@ fn settings_lines(s: &ProjectSettings) -> Vec<String> {
     lines.push(format!("submodules:{}", mark(default_subs)));
     lines.push(format!("  always: {}", list(&s.submodules.always)));
     lines.push(format!("  never:  {}", list(&s.submodules.never)));
+    lines.push(format!(
+        "ci-autofix: {}{}",
+        match s.ci_autofix {
+            AutofixDefault::Off => "off",
+            AutofixDefault::Autopilot => "autopilot",
+            AutofixDefault::Always => "always",
+        },
+        mark(s.ci_autofix == d.ci_autofix)
+    ));
     lines
 }
 
@@ -671,29 +774,33 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             chat,
             saving,
             autopilot,
+            autofix,
         } => {
             if key.is_none() && !free {
                 return Err("say the ticket's KEY, or --free for a task without one".into());
             }
             let task: Task = api.post(
                 "/api/v1/tasks",
-                &with_autopilot(
-                    with_saving_mode(
-                        with_chat(
-                            new_body(
-                                key.unwrap_or_default(),
-                                title,
-                                project,
-                                notes,
-                                free,
-                                choice(checkout, worktree),
-                                workflow,
+                &with_ci_autofix(
+                    with_autopilot(
+                        with_saving_mode(
+                            with_chat(
+                                new_body(
+                                    key.unwrap_or_default(),
+                                    title,
+                                    project,
+                                    notes,
+                                    free,
+                                    choice(checkout, worktree),
+                                    workflow,
+                                ),
+                                chat,
                             ),
-                            chat,
+                            saving.choice(),
                         ),
-                        saving.choice(),
+                        autopilot.choice(),
                     ),
-                    autopilot.choice(),
+                    autofix.choice(),
                 ),
             )?;
             println!(
@@ -742,6 +849,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             chat,
             saving,
             autopilot,
+            autofix,
         } => {
             let mut body = json!({
                 "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
@@ -749,9 +857,12 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 "submodules": submodules, "branch": branch, "prompt": prompt,
             });
             with_choice(&mut body, choice(checkout, worktree));
-            let body = with_autopilot(
-                with_saving_mode(with_chat(body, chat), saving.choice()),
-                autopilot.choice(),
+            let body = with_ci_autofix(
+                with_autopilot(
+                    with_saving_mode(with_chat(body, chat), saving.choice()),
+                    autopilot.choice(),
+                ),
+                autofix.choice(),
             );
             let task: Task = api.post("/api/v1/runs", &body)?;
             println!(
@@ -797,6 +908,19 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 &json!({ "action": action.name() }),
             )?;
             println!("{}: autopilot {}", task.key, autopilot_label(&task));
+        }
+        Command::Autofix { key, action, repo } => {
+            let body = autofix_body(action, repo.as_deref())?;
+            let task: Task = api.post(&format!("/api/v1/tasks/{key}/autofix"), &body)?;
+            println!(
+                "{}: CI autofix {}",
+                task.key,
+                match action {
+                    AutofixAction::Retry => "retrying",
+                    _ if task.ci_autofix => "on",
+                    _ => "off",
+                }
+            );
         }
         Command::Done { key } => {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/done"), &json!({}))?;
@@ -1280,6 +1404,107 @@ mod tests {
                 Some(false)
             );
         }
+    }
+
+    fn autofix_choice(args: &[&str]) -> Result<Option<bool>, clap::Error> {
+        let mut argv = vec!["delilah"];
+        argv.extend_from_slice(args);
+        Cli::try_parse_from(argv).map(|cli| match cli.command {
+            Command::New { autofix, .. } | Command::Run { autofix, .. } => autofix.choice(),
+            _ => panic!("not new or run"),
+        })
+    }
+
+    #[test]
+    fn autofix_flags_on_new_and_run() {
+        let new = ["new", "K-1", "--title", "t", "--project", "p"];
+        let run = ["run", "K-1"];
+        for base in [&new[..], &run[..]] {
+            let with = |flag: &'static str| [base, &[flag]].concat();
+            assert_eq!(autofix_choice(base).unwrap(), None);
+            assert_eq!(autofix_choice(&with("--autofix")).unwrap(), Some(true));
+            assert_eq!(autofix_choice(&with("--no-autofix")).unwrap(), Some(false));
+            assert!(autofix_choice(&[base, &["--autofix", "--no-autofix"]].concat()).is_err());
+        }
+    }
+
+    #[test]
+    fn ci_autofix_is_sent_only_when_chosen() {
+        let body = || json!({"key": "K-1"});
+        assert!(with_ci_autofix(body(), None).get("ci_autofix").is_none());
+        assert_eq!(with_ci_autofix(body(), Some(true))["ci_autofix"], true);
+        assert_eq!(with_ci_autofix(body(), Some(false))["ci_autofix"], false);
+    }
+
+    #[test]
+    fn autofix_subcommand_takes_on_off_retry() {
+        for word in ["on", "off", "retry"] {
+            let cli =
+                Cli::try_parse_from(["delilah", "autofix", "K-1", word, "--repo", "."]).unwrap();
+            match cli.command {
+                Command::Autofix { key, action, repo } => {
+                    assert_eq!(key, "K-1");
+                    assert_eq!(action.name(), word);
+                    assert_eq!(repo.as_deref(), Some("."));
+                }
+                _ => panic!("not autofix"),
+            }
+        }
+        assert!(Cli::try_parse_from(["delilah", "autofix", "K-1", "maybe"]).is_err());
+        assert!(Cli::try_parse_from(["delilah", "autofix", "K-1"]).is_err());
+    }
+
+    #[test]
+    fn autofix_bodies() {
+        assert_eq!(
+            autofix_body(AutofixAction::On, None).unwrap(),
+            json!({"action": "on"})
+        );
+        assert_eq!(
+            autofix_body(AutofixAction::Off, None).unwrap(),
+            json!({"action": "off"})
+        );
+        assert_eq!(
+            autofix_body(AutofixAction::Retry, Some(".")).unwrap(),
+            json!({"action": "retry", "repo": "."})
+        );
+        assert!(autofix_body(AutofixAction::Retry, None).is_err());
+    }
+
+    #[test]
+    fn ci_autofix_project_setting() {
+        for (word, want) in [
+            ("off", AutofixDefault::Off),
+            ("autopilot", AutofixDefault::Autopilot),
+            ("always", AutofixDefault::Always),
+        ] {
+            let c = change(&["set", "p", "ci-autofix", word]);
+            assert_eq!(
+                c,
+                Change::CiAutofix(match want {
+                    AutofixDefault::Off => AutofixArg::Off,
+                    AutofixDefault::Autopilot => AutofixArg::Autopilot,
+                    AutofixDefault::Always => AutofixArg::Always,
+                })
+            );
+            let s = apply_change(ProjectSettings::default(), c).unwrap();
+            assert_eq!(s.ci_autofix, want);
+        }
+        assert!(
+            Cli::try_parse_from(["delilah", "project", "set", "p", "ci-autofix", "x"]).is_err()
+        );
+        let always = apply_change(
+            ProjectSettings::default(),
+            Change::CiAutofix(AutofixArg::Always),
+        )
+        .unwrap();
+        assert!(
+            settings_lines(&always)
+                .iter()
+                .any(|l| l.starts_with("ci-autofix: always"))
+        );
+        let back = apply_change(always, change(&["unset", "p", "ci-autofix"])).unwrap();
+        assert_eq!(back.ci_autofix, AutofixDefault::Autopilot);
     }
 
     #[test]

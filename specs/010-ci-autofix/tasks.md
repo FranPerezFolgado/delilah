@@ -105,13 +105,13 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 ### Tests for User Story 3
 
 - [ ] T036 [P] [US3] Route tests in `crates/delilah-daemon/src/autofix/api.rs`: `on`/`off`/`retry` per contracts/api.md (200 with the task; 404; 409 `terminal`; 422 retry without/unknown repo); `on` with a failed finished head and an idle agent sends attempt 1 (acceptance 3.3); `on` resets stopped PRs; `off` while `fixing` doesn't touch the session (3.4)
-- [ ] T037 [P] [US3] CLI tests in `crates/delilah-cli/src/main.rs`: `autofix <KEY> on|off|retry [--repo]`, `--autofix/--no-autofix` on `new`/`run` (neither → absent field), `project set <name> ci-autofix off|autopilot|always` and `unset`
+- [X] T037 [P] [US3] CLI tests in `crates/delilah-cli/src/main.rs`: `autofix <KEY> on|off|retry [--repo]`, `--autofix/--no-autofix` on `new`/`run` (neither → absent field), `project set <name> ci-autofix off|autopilot|always` and `unset`
 - [ ] T038 [P] [US3] Vitest `app/src/components/AutofixControl.test.tsx`: toggle calls `setAutofix`, shows on/off, disabled on terminal tasks; `NewTaskDialog.test.tsx`: the option follows the project default and autopilot, and is sent as `ci_autofix`; `ProjectSettings.test.tsx`: the three-value select saves `ci_autofix`
 
 ### Implementation for User Story 3
 
 - [ ] T039 [US3] Implement `POST /api/v1/tasks/{key}/autofix` in `crates/delilah-daemon/src/autofix/api.rs` (thin handler over `autofix::set` / `autofix::retry`) and register it in `crates/delilah-daemon/src/api.rs`
-- [ ] T040 [US3] CLI: `autofix` subcommand, `--autofix/--no-autofix` on `new`/`run`, `ci-autofix` key on `project set/unset` in `crates/delilah-cli/src/main.rs` (and its client module if separate)
+- [X] T040 [US3] CLI: `autofix` subcommand, `--autofix/--no-autofix` on `new`/`run`, `ci-autofix` key on `project set/unset` in `crates/delilah-cli/src/main.rs` (and its client module if separate)
 - [ ] T041 [US3] Client types and calls in `app/src/api.ts`: `Task.ci_autofix?`, `PrAutofix`, `Pr.autofix?`, `ProjectSettings.ci_autofix?`, `ci_autofix?` on create/backlog bodies, `setAutofix(key, action, repo?)`
 - [ ] T042 [US3] New `app/src/components/AutofixControl.tsx` (+ `.css`), used in `PrView.tsx`, `NewTaskDialog.tsx` (next to autopilot) and `BacklogTaskView.tsx`; three-value select in `ProjectSettings.tsx`; strings in `app/src/i18n/es/` and `app/src/i18n/en/`
 

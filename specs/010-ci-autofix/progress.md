@@ -20,10 +20,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-10 | 4 | 4A | verified | 1 | f65133f | turn start unknown: started=None proxy (first turn end after sent_at counts) |
 | WP-11 | 4 | 4B | verified | 1 | dc3dc77 | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
 | WP-12 | 4 | 4B | verified | 1 | 3902f30 | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
-| WP-13 | 4 | 4C | verified | 1 | | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
+| WP-13 | 4 | 4C | verified | 1 | 4868349 | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
+| WP-13F | 4 | fix | implementing | 0 | | Phase 4 review fixes |
 | WP-14 | 5 | 5A | pending | 0 | | |
-| WP-15 | 5 | 5A | pending | 0 | | |
-| WP-16 | 5 | 5A | pending | 0 | | |
+| WP-15 | 5 | 5A | verified | 1 | | retry requires --repo (CLI error); project show prints ci-autofix |
+| WP-16 | 5 | 5A | implementing | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |
 | WP-18 | 7 | 7A | pending | 0 | | |
 | WP-19 | 7 | 7B | pending | 0 | | |
@@ -58,3 +59,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | architecture | LOW | Two-way dependency autofix ↔ pr_api::forward; move delivery primitives to a shared module | crates/delilah-daemon/src/pr_api/forward.rs |
 | 3 | architecture | LOW | RunRequest.ci_autofix must be exposed in app/src/api.ts (WP-16) | app/src/api.ts |
 | 4 | orchestrator | LOW | e2e scenarios depend on the autofix prompt being 7 lines (fake Claude reads one line per wait_input; extra lines fire Stop hooks) | crates/delilah-e2e/tests/autofix.rs prompt_lines() |
+| 4 | contract | MEDIUM (tracked) | UI has no Retry/Dismiss for `pr-autofix`; TS InboxItem lacks repo/reason/attempts; no NOTICE_TITLE entry → WP-17 must add them | app/src/components/InboxView.tsx |
+| 4 | contract | LOW | No test of notice dismiss route for autofix-stopped | crates/delilah-daemon/src/pr_api/mod.rs:130 |
+| 4 | architecture | LOW | stop() takes 7 params; snapshot() returns (Checked, bool) tuple; notices::record cancels on every non-open record | crates/delilah-daemon/src/autofix/mod.rs, pr_loop |
+| 4 | spec-compliance | LOW | A push GitHub hasn't shown yet at the forced check looks like no-push (recovers on green) | crates/delilah-daemon/src/autofix/mod.rs judge |
+| 4 | spec-compliance | LOW | An attempt whose session exits/crashes/fails without a Stop hook stays `fixing` forever | crates/delilah-daemon/src/autofix/mod.rs |
+| 4 | spec-compliance | LOW | cancel resets attempts to 0 (data-model silent) | crates/delilah-daemon/src/autofix/mod.rs cancel |
