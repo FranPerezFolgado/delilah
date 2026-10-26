@@ -67,3 +67,5 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | spec | LOW | CHANGELOG entries keep Spanish labels from old commit subjects (history) | CHANGELOG.md:41,47,53 |
 | 5 | spec | LOW | no automated test for the git-cliff guard in bump-version.sh | scripts/bump-version.sh |
 | 3 | spec | HIGH | Spanish UI labels left in current docs (Abrir PR, Rama, Restaurar, …) → WP-04F | docs/decisions.md, status.md, architecture.md, usage.md |
+| 6 | implementer WP-19F | LOW | AppState::new defaults to Es under cfg!(test) only (≈800 tests assert Spanish), so production (En) and test defaults differ | crates/delilah-daemon/src/state.rs |
+| 6 | architecture (re-review) | LOW | first_language duplicated between daemon lang.rs and shell daemon.rs (guarded by mirrored tests) | crates/delilah-daemon/src/lang.rs:52 |
