@@ -432,6 +432,11 @@ pub async fn get(
         "complete": complete,
         "transcript": state,
         "activity": live.as_ref().and_then(Live::activity),
+        // The live progress of a chat-mode session; null for a terminal or closed one.
+        "progress": live
+            .as_ref()
+            .filter(|l| l.runtime.as_stream().is_some())
+            .map(|l| l.progress()),
         "needs_terminal": live.as_ref().is_some_and(Live::needs_terminal),
         "runtime": runtime,
     })))
@@ -841,6 +846,13 @@ pub async fn on_hook(
                 if let Some(live) = live {
                     flush_queue(app, live).await;
                 }
+            }
+        }
+        // PreToolUse is not a state change, but it names the tool that is about to run.
+        Signal::Other if hook["hook_event_name"] == "PreToolUse" => {
+            if let Some(live) = live {
+                let activity = activity_of(hook);
+                live.update_convo(|c| c.activity = activity);
             }
         }
         Signal::SessionStarted | Signal::Other => {}
@@ -2292,6 +2304,65 @@ mod tests {
         assert_eq!(f.conversation().await["activity"], "Leyendo src/a.rs");
         f.hook(stop("ok")).await;
         assert_eq!(f.conversation().await["activity"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn pre_tool_use_sets_activity_and_stop_clears_it() {
+        let f = Fixture::new().await;
+        f.hook(
+            json!({ "hook_event_name": "PreToolUse", "tool_name": "Read",
+            "tool_input": { "file_path": "src/a.rs" } }),
+        )
+        .await;
+        assert_eq!(f.conversation().await["activity"], "Leyendo src/a.rs");
+        f.hook(stop("ok")).await;
+        assert_eq!(f.conversation().await["activity"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_conversation_carries_the_live_progress_of_a_stream_session_only() {
+        let f = Fixture::new().await;
+        // A terminal session: null, but present.
+        assert_eq!(f.conversation().await["progress"], Value::Null);
+        assert!(
+            f.conversation()
+                .await
+                .as_object()
+                .unwrap()
+                .contains_key("progress")
+        );
+
+        let _ = f.live.runtime.kill();
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../delilah-agents/tests/fixtures/fake-claude-stream.sh"
+        );
+        let (session, _rx) =
+            delilah_agents::stream::StreamSession::spawn(tokio::process::Command::new(script))
+                .unwrap();
+        let live = f.app.sessions.insert(
+            "conv",
+            "@web",
+            SessionKind::Claude,
+            false,
+            std::sync::Arc::new(session),
+        );
+        let empty = f.conversation().await;
+        assert_eq!(empty["progress"]["turn"], Value::Null);
+        assert_eq!(empty["progress"]["background"], json!([]));
+        live.update_progress(|p| {
+            p.turn = Some(crate::progress::Turn {
+                started_at: Utc::now(),
+                by: "user",
+                reason: None,
+                step: Some("Leyendo x".into()),
+                last_signal_at: Utc::now(),
+            });
+            true
+        });
+        let body = f.conversation().await;
+        assert_eq!(body["progress"]["turn"]["step"], "Leyendo x");
+        assert_eq!(body["progress"]["turn"]["by"], "user");
     }
 
     #[test]

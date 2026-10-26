@@ -10,10 +10,18 @@ use axum::extract::{Path, State};
 use axum::response::Response;
 use delilah_agents::stream::StreamEvent;
 use serde_json::json;
+use std::time::Duration;
 use tokio::sync::broadcast::{self, error::RecvError};
+use tokio::sync::watch;
+use tokio::time::Instant;
+
+use crate::progress::Progress;
 
 use crate::api::ApiError;
 use crate::state::AppState;
+
+/// At most one progress message per this window; the latest state is never lost.
+const PROGRESS_WINDOW: Duration = Duration::from_millis(250);
 
 /// Close code for a session that is not in chat mode.
 const NOT_IN_CHAT_MODE: u16 = 4409;
@@ -29,9 +37,10 @@ pub async fn session_live(
         .ok_or_else(|| ApiError::not_found(format!("session {id} is not running")))?;
     // Subscribed before the upgrade finishes, so nothing said after the request is lost.
     let events = live.runtime.as_stream().map(|s| s.subscribe());
+    let progress = live.subscribe_progress();
     Ok(ws.on_upgrade(move |mut socket| async move {
         match events {
-            Some(events) => relay(socket, events).await,
+            Some(events) => relay(socket, events, progress).await,
             None => {
                 let _ = socket
                     .send(Message::Close(Some(CloseFrame {
@@ -44,9 +53,49 @@ pub async fn session_live(
     }))
 }
 
-async fn relay(mut socket: WebSocket, mut events: broadcast::Receiver<StreamEvent>) {
+async fn relay(
+    mut socket: WebSocket,
+    mut events: broadcast::Receiver<StreamEvent>,
+    mut progress: watch::Receiver<Progress>,
+) {
+    // The current state goes first, so a client that connects mid-turn is up to date.
+    let first = json!({ "progress": &*progress.borrow_and_update() });
+    if socket
+        .send(Message::Text(first.to_string().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let mut last_sent = Instant::now();
+    // A change that came inside the window: the latest value goes out when it ends.
+    let mut due: Option<Instant> = None;
     loop {
         tokio::select! {
+            changed = progress.changed() => {
+                if changed.is_err() {
+                    // The session is gone; the stream branch ends the relay.
+                    due = None;
+                    continue;
+                }
+                let at = last_sent + PROGRESS_WINDOW;
+                if Instant::now() >= at {
+                    if !send_progress(&mut socket, &mut progress).await {
+                        return;
+                    }
+                    last_sent = Instant::now();
+                    due = None;
+                } else {
+                    due.get_or_insert(at);
+                }
+            }
+            _ = async { tokio::time::sleep_until(due.unwrap()).await }, if due.is_some() => {
+                due = None;
+                if !send_progress(&mut socket, &mut progress).await {
+                    return;
+                }
+                last_sent = Instant::now();
+            }
             event = events.recv() => {
                 let text = match event {
                     Ok(StreamEvent::TextDelta { message, text }) => {
@@ -71,6 +120,15 @@ async fn relay(mut socket: WebSocket, mut events: broadcast::Receiver<StreamEven
         }
     }
     let _ = socket.send(Message::Close(None)).await;
+}
+
+/// Sends the latest progress; false when the client is gone.
+async fn send_progress(socket: &mut WebSocket, progress: &mut watch::Receiver<Progress>) -> bool {
+    let msg = json!({ "progress": &*progress.borrow_and_update() });
+    socket
+        .send(Message::Text(msg.to_string().into()))
+        .await
+        .is_ok()
 }
 
 #[cfg(test)]
@@ -137,6 +195,80 @@ mod tests {
         }
     }
 
+    fn step(text: &str) -> impl FnOnce(&mut crate::progress::Progress) -> bool + '_ {
+        move |p| {
+            p.turn = Some(crate::progress::Turn {
+                started_at: chrono::Utc::now(),
+                by: "user",
+                reason: None,
+                step: Some(text.into()),
+                last_signal_at: chrono::Utc::now(),
+            });
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_is_sent_on_open_and_changes_are_coalesced_to_the_latest() {
+        let (state, base) = serve().await;
+        insert_stream(&state);
+        let live = state.sessions.get("s-1").unwrap();
+        let (mut ws, _) =
+            tokio_tungstenite::connect_async(format!("{base}/api/v1/sessions/s-1/live"))
+                .await
+                .unwrap();
+        let first = next_json(&mut ws).await;
+        assert_eq!(first["progress"]["turn"], serde_json::Value::Null);
+
+        // Inside the window of the first send: ten changes, one message with the last.
+        for i in 0..10 {
+            live.update_progress(step(&format!("paso {i}")));
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let second = tokio::time::timeout(Duration::from_millis(600), next_json(&mut ws))
+            .await
+            .expect("a trailing send");
+        assert_eq!(second["progress"]["turn"]["step"], "paso 9");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(400), ws.next())
+                .await
+                .is_err(),
+            "the ten changes made one message"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sub_agent_turn_sends_no_text_or_done() {
+        let (state, base) = serve().await;
+        // Reads one line, then prints only lines of a sub-agent.
+        let body = concat!(
+            "read -r line; ",
+            r#"echo '{"type":"stream_event","parent_tool_use_id":"A","event":{"type":"message_start","message":{"id":"s1"}}}'; "#,
+            r#"echo '{"type":"stream_event","parent_tool_use_id":"A","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"sub"}}}'; "#,
+            r#"echo '{"type":"assistant","parent_tool_use_id":"A","message":{"id":"s1","content":[{"type":"text","text":"sub"}]}}'; "#,
+            "sleep 3"
+        );
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.args(["-c", body]);
+        let (session, _rx) = StreamSession::spawn(cmd).unwrap();
+        let session = std::sync::Arc::new(session);
+        state
+            .sessions
+            .insert("s-1", "PROJ-1", SessionKind::Claude, true, session.clone());
+        let (mut ws, _) =
+            tokio_tungstenite::connect_async(format!("{base}/api/v1/sessions/s-1/live"))
+                .await
+                .unwrap();
+        let _ = next_json(&mut ws).await; // the initial progress
+        session.send_user("go").await.unwrap();
+        while let Ok(Some(Ok(WsMessage::Text(t)))) =
+            tokio::time::timeout(Duration::from_millis(700), ws.next()).await
+        {
+            let v: serde_json::Value = serde_json::from_str(t.as_str()).unwrap();
+            assert!(v.get("message").is_none(), "{v}");
+        }
+    }
+
     #[tokio::test]
     async fn a_stream_session_relays_deltas_and_the_end_of_the_message() {
         let (state, base) = serve().await;
@@ -145,6 +277,7 @@ mod tests {
             tokio_tungstenite::connect_async(format!("{base}/api/v1/sessions/s-1/live"))
                 .await
                 .unwrap();
+        assert!(next_json(&mut ws).await.get("progress").is_some());
         session.send_user("hola").await.unwrap();
         let first = next_json(&mut ws).await;
         let second = next_json(&mut ws).await;
@@ -177,6 +310,8 @@ mod tests {
             tokio_tungstenite::connect_async(format!("{base}/api/v1/sessions/s-1/live"))
                 .await
                 .unwrap();
+        // Only the current progress arrives on open.
+        assert!(next_json(&mut ws).await.get("progress").is_some());
         assert!(
             tokio::time::timeout(Duration::from_millis(400), ws.next())
                 .await

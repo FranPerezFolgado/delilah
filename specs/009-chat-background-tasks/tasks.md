@@ -54,12 +54,12 @@ self-started handling for its ending; both are kept separate so US4 can ship alo
 
 **Independent Test**: quickstart US1 (a 60 s `sleep` in a chat-mode task).
 
-- [ ] T013 [P] [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): `GET /api/v1/sessions/{id}/conversation` returns `progress` (the live snapshot) for a stream session and `null` for a PTY or closed session
-- [ ] T014 [US1] Implement T013 in `crates/delilah-daemon/src/conversation.rs`
-- [ ] T015 [P] [US1] Write failing tests in `crates/delilah-daemon/src/live.rs` (tests module): the socket sends `{"progress": …}` right after opening, then on each change at most every 250 ms with the latest value (10 changes in 100 ms → one message with the last state); text/done/reset messages unchanged; no text/done for sub-agent messages
-- [ ] T016 [US1] Implement T015 in `crates/delilah-daemon/src/live.rs` (`relay` selects on the stream broadcast, the progress `watch` receiver with a 250 ms throttle, and the socket)
-- [ ] T017 [P] [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): a `PreToolUse` hook on a PTY session sets `activity` with `tool_step_summary` (today only `PostToolUse` does); `Stop` still clears it
-- [ ] T018 [US1] Implement T017 in `conversation::on_hook` in `crates/delilah-daemon/src/conversation.rs`
+- [X] T013 [P] [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): `GET /api/v1/sessions/{id}/conversation` returns `progress` (the live snapshot) for a stream session and `null` for a PTY or closed session
+- [X] T014 [US1] Implement T013 in `crates/delilah-daemon/src/conversation.rs`
+- [X] T015 [P] [US1] Write failing tests in `crates/delilah-daemon/src/live.rs` (tests module): the socket sends `{"progress": …}` right after opening, then on each change at most every 250 ms with the latest value (10 changes in 100 ms → one message with the last state); text/done/reset messages unchanged; no text/done for sub-agent messages
+- [X] T016 [US1] Implement T015 in `crates/delilah-daemon/src/live.rs` (`relay` selects on the stream broadcast, the progress `watch` receiver with a 250 ms throttle, and the socket)
+- [X] T017 [P] [US1] Write failing tests in `crates/delilah-daemon/src/conversation.rs` (tests module): a `PreToolUse` hook on a PTY session sets `activity` with `tool_step_summary` (today only `PostToolUse` does); `Stop` still clears it
+- [X] T018 [US1] Implement T017 in `conversation::on_hook` in `crates/delilah-daemon/src/conversation.rs`
 - [X] T019 [P] [US1] Add the types to `app/src/api.ts`: `Progress`, `TurnProgress`, `BackgroundItem`, `SubagentProgress`, `ProgressStep`; `Conversation.progress?: Progress | null`; marker union adds `"background-done"` and `detail?: string`
 - [X] T020 [P] [US1] Write failing tests in `app/src/live.test.ts` (create if missing): a `{"progress": …}` socket message reaches `on(id, "progress", fn)` subscribers; existing text/done/reset handling unchanged
 - [X] T021 [US1] Implement T020 in `app/src/live.ts`
