@@ -1,6 +1,7 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import type { DeskSeat } from "./useOffice";
-import { KIND_COLOURS, formatTokens, tokenTier } from "./art/kinds";
+import { formatTokens } from "../format";
+import { KIND_COLOURS, tokenTier } from "./art/kinds";
 import { OFFICE_COLOURS } from "./art/office";
 import { SPRITES } from "./art/pixtuoid";
 import {

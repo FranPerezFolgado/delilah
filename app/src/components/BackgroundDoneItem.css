@@ -1,0 +1,9 @@
+.bg-done { align-self: center; display: flex; flex-direction: column; gap: 4px; max-width: 100%; font-size: 12px; }
+.bg-done-head { display: flex; align-items: baseline; gap: 6px; }
+.bg-done-icon { flex: none; }
+.bg-done-text { min-width: 0; overflow-wrap: anywhere; }
+.bg-done.ok .bg-done-icon { color: var(--ok-tx); }
+.bg-done.warn { color: var(--wait-tx); }
+.bg-done-toggle { flex: none; background: none; border: 0; padding: 0 4px; color: inherit; cursor: pointer; font: inherit; }
+.bg-done-report { text-align: left; }
+.bg-done-note { opacity: 0.7; font-style: italic; }

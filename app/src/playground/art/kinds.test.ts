@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { KIND_COLOURS, tokenTier, formatTokens } from "./kinds";
+import { formatTokens } from "../../format";
+import { KIND_COLOURS, tokenTier } from "./kinds";
 
 describe("kinds", () => {
   it("colours", () => {

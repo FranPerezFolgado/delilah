@@ -295,7 +295,7 @@ pub(crate) fn agent_prompt(hook: &Value) -> bool {
     hook["delilah_origin"].as_str() == Some("agent")
         || hook["prompt"]
             .as_str()
-            .is_some_and(|p| p.trim_start().starts_with("<task-notification>"))
+            .is_some_and(delilah_agents::transcript::is_agent_message)
 }
 
 /// A finished turn or a submitted prompt is the session's last activity; Claude's closing
@@ -862,6 +862,10 @@ mod tests {
             json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" }),
             json!({ "hook_event_name": "UserPromptSubmit",
                     "prompt": "<task-notification>\n<task-id>b1</task-id>" }),
+            json!({ "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Another Claude session sent a message:\n<agent-message from=\"x\">hi</agent-message>" }),
+            json!({ "hook_event_name": "UserPromptSubmit",
+                    "prompt": "hola\n<task-notification>\n<task-id>b1</task-id>" }),
         ] {
             post(&state, url, hook).await;
             let extras = state.store.session_extras("s-1").await.unwrap();
