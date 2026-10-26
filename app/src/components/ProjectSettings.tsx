@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Project, type ProjectSettings as Settings, type SettingsError, type SharedMode, type Submodule } from "../api";
 import { t } from "../i18n";
+import { WorkflowEditor } from "./WorkflowEditor";
 import { Button, ConfirmDialog, Dialog, OptionCard } from "./ui";
 import "./ProjectSettings.css";
 
@@ -49,7 +50,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
   };
 
   const placed = (field: string) =>
-    field === "workspace" || field === "branch" || field === "setup" || /^shared\[\d+\]/.test(field) ||
+    field === "workspace" || field === "branch" || field === "setup" || /^shared\[\d+\]/.test(field) || /^workflow(\.|\[|$)/.test(field) ||
     (parent && /^submodules\.(always|never)(\.|\[|$)/.test(field));
   const unplaced = errors.filter((f) => !placed(f.field));
 
@@ -170,6 +171,12 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
           <input className="input mono" name="preview" value={preview} onChange={(e) => setPreview(e.target.value)} />
           <Help>{t("Delilah lo ejecuta en el workspace de una tarea para que puedas probarla. Déjalo vacío si el proyecto no tiene preview.")}</Help>
         </label>
+
+        <div className="field">
+          <span>{t("Flujo de trabajo")}</span>
+          <WorkflowEditor project={project.name} value={s.workflow} errors={errors} onChange={(workflow) => setS({ ...s, workflow })} />
+          <Help>{t("Qué envía Delilah al empezar una tarea de este proyecto.")}</Help>
+        </div>
 
         {parent && (["always", "never"] as const).map((list) => (
           <div className="field" key={list}>

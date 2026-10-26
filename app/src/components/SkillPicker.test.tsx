@@ -64,4 +64,12 @@ describe("SkillPicker", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Command" }), { target: { value: "/a" } });
     expect(onChange).toHaveBeenCalledWith("/a");
   });
+
+  it("reports the loaded list through onSkills", async () => {
+    vi.spyOn(api, "projectSkills").mockResolvedValue(skills);
+    const onSkills = vi.fn();
+    render(<SkillPicker project="web" value="" onChange={() => {}} onSkills={onSkills} />);
+    await waitFor(() => expect(onSkills).toHaveBeenLastCalledWith(skills));
+    expect(onSkills).toHaveBeenCalledWith(null);
+  });
 });

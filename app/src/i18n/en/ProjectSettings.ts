@@ -12,4 +12,6 @@ export const EN: Record<string, string> = {
   "Delilah lo ejecuta en el workspace de una tarea para que puedas probarla. Déjalo vacío si el proyecto no tiene preview.": "Delilah runs it in a task's workspace so you can try it. Leave it empty if the project has no preview.",
   "Entran en todo workspace de este proyecto.": "Included in every workspace of this project.",
   "Nunca se clonan ni se incluyen en un workspace.": "Never cloned or included in a workspace.",
+  "Flujo de trabajo": "Workflow",
+  "Qué envía Delilah al empezar una tarea de este proyecto.": "What Delilah sends when a task of this project starts.",
 };

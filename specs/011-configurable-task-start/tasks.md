@@ -72,10 +72,10 @@ task comes before the task that implements it.
 - [X] T026 [P] [US2] Create `app/src/workflowPresets.ts` (presets "Prompt integrado", "Nada", "Spec Kit (`/feature`)", "Spec Kit (oficial)" per research R6; `isPhased(taskWorkflow, settings)`) with `app/src/workflowPresets.test.ts`
 - [X] T027 [US2] Write failing tests `app/src/components/SkillPicker.test.tsx`: lists skills from a mocked `api.projectSkills` with source badges, filters by search, picking `fix` returns `/fix {ticket}`; empty/failed list still allows free text
 - [X] T028 [US2] Implement T027 in `app/src/components/SkillPicker.tsx`
-- [ ] T029 [US2] Write failing tests `app/src/components/WorkflowEditor.test.tsx`: single mode with built-in / message / nothing; applying a preset fills the fields; the "not found" warning when the template's leading `/name` is not in the list (still savable); daemon `FieldError`s shown next to `workflow.*` fields
-- [ ] T030 [US2] Implement T029 in `app/src/components/WorkflowEditor.tsx` (single-start part)
-- [ ] T031 [US2] Add the "Flujo de trabajo" section to `app/src/components/ProjectSettings.tsx` using `WorkflowEditor`, with the existing save/discard and error mapping; extend `app/src/components/ProjectSettings.test.tsx`
-- [ ] T032 [P] [US2] English strings for the new UI in `app/src/i18n/en/` (SkillPicker, WorkflowEditor, ProjectSettings); `app/src/i18n/coverage.test.ts` green
+- [X] T029 [US2] Write failing tests `app/src/components/WorkflowEditor.test.tsx`: single mode with built-in / message / nothing; applying a preset fills the fields; the "not found" warning when the template's leading `/name` is not in the list (still savable); daemon `FieldError`s shown next to `workflow.*` fields
+- [X] T030 [US2] Implement T029 in `app/src/components/WorkflowEditor.tsx` (single-start part)
+- [X] T031 [US2] Add the "Flujo de trabajo" section to `app/src/components/ProjectSettings.tsx` using `WorkflowEditor`, with the existing save/discard and error mapping; extend `app/src/components/ProjectSettings.test.tsx`
+- [X] T032 [P] [US2] English strings for the new UI in `app/src/i18n/en/` (SkillPicker, WorkflowEditor, ProjectSettings); `app/src/i18n/coverage.test.ts` green
 
 **Checkpoint**: a project can be switched to `/fix {ticket}` or "Nada" from settings and the next task uses it.
 

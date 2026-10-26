@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Skill } from "../api";
 import { t } from "../i18n";
 import "./SkillPicker.css";
@@ -11,20 +11,29 @@ const sourceLabel = (s: Skill): string =>
  * list of the skills and commands Claude Code can run in the project. Picking one fills the
  * field with `/<name> {ticket}`.
  */
-export function SkillPicker({ project, value, onChange, label }: {
+export function SkillPicker({ project, value, onChange, label, onSkills }: {
   project: string;
   value: string;
   onChange: (command: string) => void;
   /** Accessible name of the field. */
   label?: string;
+  /** Called with the loaded list, or `null` while loading / when it failed to load. */
+  onSkills?: (skills: Skill[] | null) => void;
 }) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [query, setQuery] = useState("");
+  const report = useRef(onSkills);
+  report.current = onSkills;
 
   useEffect(() => {
     let live = true;
+    report.current?.(null);
     api.projectSkills(project).then(
-      (list) => live && setSkills(list),
+      (list) => {
+        if (!live) return;
+        setSkills(list);
+        report.current?.(list);
+      },
       () => live && setSkills([]),
     );
     return () => {

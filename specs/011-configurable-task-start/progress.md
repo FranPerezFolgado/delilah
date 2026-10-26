@@ -12,10 +12,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04F | 2 | fix | done | 1 | b0a55dc | review fix: feature alias normalisation, projects.workflow migration; unknown workflow values now 400 |
 | WP-04F2 | 2 | fix | done | 1 | a5ba4b6 | 2nd fix round: UI autopilot check accepts "project" (interim until T037) |
 | WP-05 | 3 | 3A | done | 1 | 951e664 | +core workflow.rs, autopilot/api.rs; e2e autopilot+chat_permissions set preset per test (user); prompt+autopilot now 409 |
-| WP-06 | 4 | 4A | verified | 1 | | settings errors stay 422 (contract says 400); CLAUDE_CONFIG_DIR not honoured |
+| WP-06 | 4 | 4A | verified | 1 | 77f3857 | settings errors stay 422 (contract says 400); CLAUDE_CONFIG_DIR not honoured |
 | WP-07 | 4 | 4A | implementing | 0 | | +legacy projects.workflow fallback fix (run.rs) |
 | WP-08 | 4 | 4A | verified | 1 | ecb0950 | SkillPicker {project,value,onChange}; start_message optional in TS |
-| WP-09 | 4 | 4B | pending | 0 | | |
+| WP-09 | 4 | 4B | verified | 1 | | +SkillPicker onSkills callback |
 | WP-10 | 5 | 5A | pending | 0 | | |
 | WP-11 | 5 | 5A | pending | 0 | | |
 | WP-12 | 6 | 6A | pending | 0 | | |
