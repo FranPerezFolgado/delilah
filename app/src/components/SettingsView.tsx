@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ASK_POSITIONS, type AskPosition, type Health } from "../api";
+import { api, ASK_POSITIONS, type AgentPermissions, type AskPosition, type Health } from "../api";
 import { isDesktop, revealInFinder } from "../platform";
 import { Button, Row, Segmented, Toggle } from "./ui";
 import "./SettingsView.css";
@@ -66,6 +66,32 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
       setError((e as Error).message);
     } finally {
       setRemoteBusy(false);
+    }
+  };
+
+  const [perms, setPerms] = useState<AgentPermissions>("auto");
+  const [permsBusy, setPermsBusy] = useState(true);
+
+  useEffect(() => {
+    api
+      .preference<AgentPermissions>("agent-permissions")
+      // Auto unless the user chose Claude's default.
+      .then((v) => setPerms(v === "default" ? "default" : "auto"))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setPermsBusy(false));
+  }, []);
+
+  const choosePerms = async (value: AgentPermissions) => {
+    if (value === perms || permsBusy) return;
+    setError(null);
+    setPermsBusy(true);
+    try {
+      await api.setPreference("agent-permissions", value);
+      setPerms(value);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPermsBusy(false);
     }
   };
 
@@ -204,6 +230,22 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
                 </p>
                 <p className="settings-help">
                   {t("Quien entre en tu cuenta de claude.ai podrá pedirles cambios en tu Mac. Necesita que Claude Code tenga la sesión iniciada con una cuenta de claude.ai, no con una clave de API.")}
+                </p>
+              </div>
+              <div className="settings-field">
+                <h3>{t("Permisos de los agentes")}</h3>
+                <Segmented
+                  mode="radio"
+                  label={t("Permisos de los agentes")}
+                  value={perms}
+                  onChange={(v) => choosePerms(v as AgentPermissions)}
+                  options={[
+                    { value: "auto", label: t("Auto"), disabled: permsBusy },
+                    { value: "default", label: t("Por defecto de Claude"), disabled: permsBusy },
+                  ]}
+                />
+                <p className="settings-help">
+                  {t("Con Auto, el modo auto de Claude decide qué pedir: el trabajo rutinario en el espacio de trabajo no pregunta. Vale para las sesiones nuevas o relanzadas, en terminal y en chat.")}
                 </p>
               </div>
             </section>

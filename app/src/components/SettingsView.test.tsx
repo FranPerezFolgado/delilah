@@ -117,6 +117,54 @@ describe("SettingsView structure", () => {
   });
 });
 
+describe("SettingsView agent permissions", () => {
+  const prefIs = (v: unknown) =>
+    vi.mocked(api.preference).mockImplementation(((k: string) => Promise.resolve(k === "agent-permissions" ? v : null)) as never);
+  const radio = (name: string) => screen.findByRole("radio", { name });
+
+  afterEach(() => {
+    vi.mocked(api.preference).mockResolvedValue(null);
+    vi.mocked(api.setPreference).mockResolvedValue(undefined);
+  });
+
+  it("shows Auto selected when the preference is null or auto", async () => {
+    prefIs(null);
+    setup();
+    expect(screen.getByText("Permisos de los agentes")).toBeTruthy();
+    expect((await radio("Auto")).getAttribute("aria-checked")).toBe("true");
+    cleanup();
+    prefIs("auto");
+    setup();
+    expect((await radio("Auto")).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("shows «Por defecto de Claude» when the preference is default", async () => {
+    prefIs("default");
+    setup();
+    const def = await radio("Por defecto de Claude");
+    await waitFor(() => expect(def.getAttribute("aria-checked")).toBe("true"));
+    expect((await radio("Auto")).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("saves the chosen option", async () => {
+    prefIs(null);
+    setup();
+    fireEvent.click(await radio("Por defecto de Claude"));
+    await waitFor(() => expect(api.setPreference).toHaveBeenCalledWith("agent-permissions", "default"));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Por defecto de Claude" }).getAttribute("aria-checked")).toBe("true"));
+  });
+
+  it("on a failed save shows the error and keeps the previous choice", async () => {
+    prefIs("auto");
+    vi.mocked(api.setPreference).mockRejectedValue(new Error("boom"));
+    setup();
+    fireEvent.click(await radio("Por defecto de Claude"));
+    expect(await screen.findByText("boom")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Auto" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Por defecto de Claude" }).getAttribute("aria-checked")).toBe("false");
+  });
+});
+
 describe("SettingsView diagnostics", () => {
   it("«Abrir» asks the app to open the logs", () => {
     const seen = vi.fn();

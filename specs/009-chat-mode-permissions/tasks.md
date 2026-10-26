@@ -233,7 +233,7 @@ quickstart.md.
   `a_remembered_rule_still_answers_without_a_card`: under `"default"`, answer the first
   ask with "always in this task", then expect a second identical command to be answered
   without a card (ADR-001).
-- [ ] T017 [P] [US2] In `app/src/components/SettingsView.test.tsx`, write failing vitest
+- [X] T017 [P] [US2] In `app/src/components/SettingsView.test.tsx`, write failing vitest
   tests:
   - the section «Permisos de los agentes» / "Agent permissions" shows Auto selected
     when the preference is `null` or `"auto"`, and «Por defecto de Claude» when it is
@@ -242,7 +242,7 @@ quickstart.md.
   - a failed save shows the error and restores the previous choice.
 
   Follow the existing `remote-control` tests in that file.
-- [ ] T018 [US2] In `app/src/components/SettingsView.tsx`, implement the control after
+- [X] T018 [US2] In `app/src/components/SettingsView.tsx`, implement the control after
   T017, modelled on the `remote-control` toggle (lines 47–68): a two-option radio or
   segmented control, with a short explanation in both languages. The explanation says
   Auto lets Claude's auto mode decide, so routine work in the workspace does not ask,
