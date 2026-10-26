@@ -139,20 +139,47 @@ pub(crate) fn plan_note(lang: Lang) -> &'static str {
     )
 }
 
+/// The commands of a phased project that the hand-offs send.
+struct Commands {
+    implement: String,
+    review: String,
+}
+
+/// The task's project commands, or why it has none: the project is gone or no longer
+/// phased (the one place that guard lives), or the store failed.
+async fn phased_commands(app: &AppState, task: &Task) -> Result<Commands, String> {
+    let not_phased = || {
+        app.lang()
+            .pick(
+                "el proyecto de la tarea ya no tiene un flujo por fases",
+                "the task's project no longer has a phased workflow",
+            )
+            .to_string()
+    };
+    let Some(project) = task.project.as_deref() else {
+        return Err(not_phased());
+    };
+    let workflow = match app.store.project(project).await {
+        Ok(p) => p.settings.workflow(),
+        Err(crate::store::StoreError::ProjectNotFound(_)) => return Err(not_phased()),
+        Err(e) => return Err(e.to_string()),
+    };
+    match workflow {
+        ProjectWorkflow::Phased {
+            implement, review, ..
+        } => Ok(Commands { implement, review }),
+        _ => Err(not_phased()),
+    }
+}
+
 /// What a step's session is told to do: the project's own command for it, with
 /// `{spec_dir}` and the other placeholders filled in (`vars`). Nothing for the plan
-/// step (the start sends it) or for a workflow that is not phased.
-fn step_prompt(step: Step, workflow: &ProjectWorkflow, vars: &Vars) -> Option<String> {
-    let ProjectWorkflow::Phased {
-        implement, review, ..
-    } = workflow
-    else {
-        return None;
-    };
+/// step (the start sends it).
+fn step_prompt(step: Step, commands: &Commands, vars: &Vars) -> Option<String> {
     match step {
         Step::Plan => None,
-        Step::Implement => Some(render(implement, vars)),
-        Step::Review => Some(render(review, vars)),
+        Step::Implement => Some(render(&commands.implement, vars)),
+        Step::Review => Some(render(&commands.review, vars)),
     }
 }
 
@@ -702,35 +729,9 @@ async fn try_start<L: Launcher>(
         Ok(None) => return Err("the task does not exist".into()),
         Err(e) => return Err(e.to_string()),
     };
-    let not_phased = || {
-        lang.pick(
-            "el proyecto de la tarea ya no tiene un flujo por fases",
-            "the task's project no longer has a phased workflow",
-        )
-        .to_string()
-    };
-    let Some(project) = task.project.as_deref() else {
-        return Err(not_phased());
-    };
-    let workflow = match app.store.project(project).await {
-        Ok(p) => p.settings.workflow(),
-        Err(_) => return Err(not_phased()),
-    };
-    if !matches!(workflow, ProjectWorkflow::Phased { .. }) {
-        return Err(not_phased());
-    }
-    let title = task.title.trim();
-    let vars = Vars {
-        ticket: key.as_str(),
-        title,
-        task: if crate::branching::is_free(key) {
-            title
-        } else {
-            key.as_str()
-        },
-        spec_dir: Some(dir.as_deref().unwrap_or("")),
-    };
-    let prompt = match (step_prompt(step, &workflow, &vars), &dir) {
+    let commands = phased_commands(app, &task).await?;
+    let vars = crate::branching::task_vars(key, &task.title, Some(dir.as_deref().unwrap_or("")));
+    let prompt = match (step_prompt(step, &commands, &vars), &dir) {
         (Some(prompt), Some(_)) => prompt,
         (Some(prompt), None) if step == Step::Review => prompt,
         _ => {
@@ -949,9 +950,15 @@ mod tests {
 
     /// `step_prompt` for the `/feature` preset.
     fn preset_prompt(lang: Lang, step: Step, dir: &str) -> Option<String> {
+        let ProjectWorkflow::Phased {
+            implement, review, ..
+        } = crate::lang::feature_preset(lang)
+        else {
+            unreachable!("the preset is phased")
+        };
         step_prompt(
             step,
-            &crate::lang::feature_preset(lang),
+            &Commands { implement, review },
             &Vars {
                 ticket: "PROJ-1",
                 title: "t",
@@ -972,8 +979,7 @@ mod tests {
 
     #[test]
     fn step_prompt_renders_the_projects_own_commands() {
-        let w = ProjectWorkflow::Phased {
-            plan: "/plan {task}".into(),
+        let w = Commands {
             implement: "/build {spec_dir} for {ticket}".into(),
             review: "/check {title}".into(),
         };
@@ -992,7 +998,6 @@ mod tests {
             "/check Fix it"
         );
         assert!(step_prompt(Step::Plan, &w, &vars).is_none());
-        assert!(step_prompt(Step::Review, &ProjectWorkflow::default(), &vars).is_none());
     }
 
     #[tokio::test]

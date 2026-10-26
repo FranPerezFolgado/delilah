@@ -18,8 +18,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 4 | 4B | done | 1 | f1b269f | +SkillPicker onSkills callback |
 | WP-10 | 5 | 5A | verified | 1 | 92f6914 | +lang::review_text single source; autopilot/testkit.rs allowed by user (proj gets feature preset) |
 | WP-11 | 5 | 5A | verified | 1 | cfa17f0 | +AskCard callers (InboxView, TaskView, TaskScreen) allowed by user; useSkills hook |
-| WP-10F | 5 | fix | implementing | 0 | | Vars helper + one phased guard (arch HIGH x2) |
-| WP-11F | 5 | fix | verified | 1 | | settings from App.tsx, ProposalCard reason |
+| WP-10F | 5 | fix | verified | 1 | | Vars helper + one phased guard (arch HIGH x2) |
+| WP-11F | 5 | fix | verified | 1 | 1b5054d | settings from App.tsx, ProposalCard reason |
 | WP-12 | 6 | 6A | pending | 0 | | |
 | WP-13 | 6 | 6A | pending | 0 | | |
 | WP-14 | 6 | 6A | pending | 0 | | |
@@ -81,3 +81,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | spec-compliance | MEDIUM | ProposalCard hides "Crear con autopiloto" with no reason when not phased (and while settings load) → WP-11F | app/src/components/ProposalCard.tsx:120 |
 | 5 | spec-compliance | LOW | build_task stores saving_mode from the global pref for non-phased backlog tasks (clamped at start, but stale) → WP-12 | crates/delilah-daemon/src/api.rs:495 |
 | 5 | spec-compliance | LOW | hidden-autopilot reason says "set a phased workflow" also when the cause is a custom prompt → WP-11F | app/src/components/NewTaskDialog.tsx:409 |
+| 5 | orchestrator | LOW | flaky under full parallel load (pass alone, 959/959 on re-run): conversation a_message_sent_while_a_card_is_pending_is_queued, preview stop_and_wait_returns_once_the_group_is_gone_even_if_it_ignores_term, setup retry_runs_it_again_in_the_worktree — pre-existing, not in this feature's files | crates/delilah-daemon/src/{conversation,preview,setup}.rs |

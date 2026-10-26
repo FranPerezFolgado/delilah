@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_agents::runtime::{self, Runtime, RuntimeKind};
-use delilah_core::workflow::{self, StartRequest, TaskWorkflow, Vars};
+use delilah_core::workflow::{self, StartRequest, TaskWorkflow};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{Deadline, FetchOutcome, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
@@ -344,14 +344,7 @@ pub(crate) async fn start_run_with(
     if start_req == StartRequest::Inherit && TaskWorkflow::parse(stored_workflow).is_err() {
         tracing::warn!(task = %key, workflow = stored_workflow, "unknown stored workflow: starting with no message");
     }
-    let free_key = crate::branching::is_free(&key);
-    let title = req.title.trim().to_string();
-    let vars = Vars {
-        ticket: &req.key,
-        title: &title,
-        task: if free_key { &title } else { &req.key },
-        spec_dir: None,
-    };
+    let vars = crate::branching::task_vars(&key, &req.title, None);
     let builtin = delilah_core::workflow::render(crate::lang::builtin_start(app.lang()), &vars);
     let resolved = workflow::resolve(
         &start_req,
@@ -457,7 +450,7 @@ pub(crate) async fn start_run_with(
             task.chat_mode = req.chat_mode.unwrap_or(false);
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
             task.start_message = resolved.start_message.clone();
-            if free_key {
+            if crate::branching::is_free(&key) {
                 task.title_source = delilah_core::TitleSource::Initial;
             }
             app.store.create_task(&task).await?;
