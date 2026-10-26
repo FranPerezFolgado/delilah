@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import "./Menu.css";
 
 export interface MenuItem {
@@ -29,6 +30,8 @@ export function Menu({ trigger, items }: MenuProps) {
   const wrap = useRef<HTMLSpanElement>(null);
   const triggerEl = useRef<HTMLElement | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  // Rendered in a portal (fixed, under the trigger) so no panel or clipping ancestor covers it.
+  const [pos, setPos] = useState<CSSProperties>({});
 
   const buttons = () => [...(list.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
 
@@ -37,6 +40,14 @@ export function Menu({ trigger, items }: MenuProps) {
     if (refocus) triggerEl.current?.focus();
   };
 
+  useLayoutEffect(() => {
+    if (!open || !wrap.current) return;
+    const r = wrap.current.getBoundingClientRect();
+    const w = list.current?.offsetWidth ?? 180;
+    const left = Math.max(4, Math.min(r.left, window.innerWidth - w - 4));
+    setPos({ top: r.bottom + 4, left });
+  }, [open]);
+
   useEffect(() => {
     if (open) buttons()[0]?.focus();
   }, [open]);
@@ -44,7 +55,8 @@ export function Menu({ trigger, items }: MenuProps) {
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      const el = e.target as Node;
+      if (!wrap.current?.contains(el) && !list.current?.contains(el)) setOpen(false);
     };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
@@ -84,8 +96,9 @@ export function Menu({ trigger, items }: MenuProps) {
         "aria-haspopup": "menu",
         "aria-expanded": open,
       })}
-      {open && (
-        <div className="menu" role="menu" ref={list} onKeyDown={onKeyDown}>
+      {open &&
+        createPortal(
+        <div className="menu" role="menu" ref={list} style={pos} onKeyDown={onKeyDown}>
           {items.map((it) => (
             <button
               key={it.label}
@@ -103,7 +116,8 @@ export function Menu({ trigger, items }: MenuProps) {
               {it.shortcut && <span className="menu-kbd">{it.shortcut}</span>}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   );

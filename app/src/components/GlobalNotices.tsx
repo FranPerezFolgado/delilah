@@ -26,8 +26,10 @@ export function GlobalNotices({ tasks, usage, current, onOpenTask }: Props) {
   const open = useRef({ current, onOpenTask });
   open.current = { current, onOpenTask };
 
-  // A task that starts waiting while you are elsewhere; the first load only seeds.
+  // A task that starts waiting while you are elsewhere; the first loaded list only seeds.
   useEffect(() => {
+    // The tasks may arrive after the first render (empty list): seed on the first non-empty one.
+    if (!seen.current && tasks.length === 0) return;
     const waiting = new Set(tasks.filter((k) => k.status.type === "waiting-for-user").map((k) => k.key));
     const before = seen.current;
     seen.current = waiting;

@@ -203,7 +203,7 @@ describe("Sidebar task menu", () => {
     fireEvent.click(getByRole("menuitem", { name: "Abrir la tarea" }));
     expect(onSelect).toHaveBeenCalledWith("PROJ-2");
     const second = open(tasks, {});
-    fireEvent.click(within(second.container).getAllByRole("menuitem", { name: "Marcar como hecha" })[0]);
+    fireEvent.click(second.getAllByRole("menuitem", { name: "Marcar como hecha" })[0]);
     expect(second.onDone).toHaveBeenCalledWith(tasks[0]);
   });
 

@@ -1,5 +1,5 @@
 .menu-wrap { position: relative; display: inline-flex; }
-.menu { position: absolute; top: 100%; left: 0; margin-top: 4px; z-index: 40; min-width: 180px; padding: 6px; border-radius: 10px;
+.menu { position: fixed; z-index: 70; min-width: 180px; padding: 6px; border-radius: 10px;
   background: var(--dialog); border: 1px solid var(--bd2); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px; }
 .menu button, .menu a { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border: 0; border-radius: 6px;
   background: transparent; color: var(--tx); text-align: left; text-decoration: none; font: inherit; cursor: pointer; }

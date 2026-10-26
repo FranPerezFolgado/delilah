@@ -333,6 +333,10 @@ fi
 # task is marked done.
 tip() { git -C "$FIX/signal" rev-parse "$1"; }
 if [[ -n "${new_pr:-}" ]]; then
+  # The daemon may have suffixed the branch (-2) when an older seed left one: the fake PRs
+  # must name the branch the task really has, or gh --head matches no (or the wrong) task.
+  B_DONE=$(api GET "/api/v1/tasks/$k_done" | jq -r --arg d "$B_DONE" '.branch // $d')
+  B_PR=$(api GET "/api/v1/tasks/$k_live" | jq -r --arg d "$B_PR" '.branch // $d')
   pr12=$(fake_pr 12 "$B_DONE" "Reintentos con backoff en el webhook de Stripe" MERGED SUCCESS "" "$(tip "$B_DONE")")
   pr14=$(fake_pr 14 "$B_PR" "Chat: tarjetas de permiso en vivo" OPEN FAILURE "El test de la tarjeta de permiso falla en CI, ¿lo miras?" "$(tip "$B_PR")")
   gh_put pr-list.json "$(jq -n --argjson a "$pr12" --argjson b "$pr14" '[$a,$b]')"

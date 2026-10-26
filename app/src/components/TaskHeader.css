@@ -10,3 +10,5 @@
 .th-spacer { flex: none; }
 .th > :where(.apc, .svs, .preview-ctl, .badge, .prchip, .phasebars, .menu-wrap) { flex: none; }
 .th.compact { gap: 8px; padding: 0 12px; }
+.th .toggle, .th .apc { flex: none; white-space: nowrap; }
+.th-title { flex: 1 1 0; min-width: 40px; }

@@ -222,6 +222,17 @@ describe("pending asks inline", () => {
     expect(container.textContent).not.toMatch(/inbox/i);
   });
 
+  it("counts a permission item (real inbox shape) together with the questions", () => {
+    const perm = {
+      id: "permission:PROJ-1:p1:1", kind: "permission", task: "PROJ-1", title: "t",
+      session: { id: "s1", label: "Principal", primary: true, live: true }, text: "Bash: ls -la", since: null,
+      permission: { id: "p1", tool: "Bash", summary: "ls -la", suggestion: [], rule: "Bash(ls -la)" },
+    } as unknown as InboxItem;
+    const { container } = show(running, { asks: [perm, ask("a")] });
+    expect(container.textContent).toContain("1 of 2");
+    expect(container.textContent).toContain("ls -la");
+  });
+
   it("shows no ask card when nothing is pending", () => {
     const { container } = show(running, { asks: [] });
     expect(container.querySelector(".ac")).toBeNull();

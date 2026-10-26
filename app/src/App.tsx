@@ -433,7 +433,7 @@ export function App() {
                   project={project}
                   tasks={tasks}
                   sessions={sessions.filter((s) => s.task === owner)}
-                  asks={inbox.filter((i) => i.task === owner && i.ask)}
+                  asks={inbox.filter((i) => i.task === owner && (i.ask || i.permission))}
                   notices={baseStaleNotices(inbox, owner)}
                   askPosition={askPosition}
                   onChanged={refresh}

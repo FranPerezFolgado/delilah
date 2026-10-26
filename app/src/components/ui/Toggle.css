@@ -1,4 +1,4 @@
-.toggle { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--bd2); background: transparent; color: var(--tx2); font-size: 13.5px; }
+.toggle { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--bd2); background: transparent; color: var(--tx2); font-size: 13.5px; }
 .toggle:hover:not(:disabled) { background: var(--hov); }
 .toggle:disabled { opacity: 0.5; cursor: not-allowed; }
 .toggle .sw { width: 22px; height: 13px; border-radius: 7px; background: var(--bd2); position: relative; flex: none; }

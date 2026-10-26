@@ -68,3 +68,17 @@ it("toasts «te espera» when a task starts waiting elsewhere, not on first load
   fireEvent.click(screen.getByText("Responder"));
   expect(onOpen).toHaveBeenCalledWith("A-2");
 });
+
+it("does not toast tasks already waiting when the list arrives after an empty first render", () => {
+  const wait = (k: string) => task(k, { type: "waiting-for-user" } as TaskStatus);
+  const ui = (tasks: Task[]) => (
+    <>
+      <GlobalNotices tasks={tasks} usage={null} current={null} onOpenTask={vi.fn()} />
+      <ToastHost />
+    </>
+  );
+  const { rerender } = render(ui([]));
+  act(() => rerender(ui([wait("A-0"), wait("A-1")])));
+  expect(screen.queryByText("A-0 te espera")).toBeNull();
+  expect(screen.queryByText("A-1 te espera")).toBeNull();
+});
