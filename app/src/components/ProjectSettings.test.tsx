@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { api, ApiError, type Project } from "../api";
+import { setLanguage } from "../i18n";
 import { ProjectSettings } from "./ProjectSettings";
 
 const repo: Project = {
@@ -19,20 +20,56 @@ const repo: Project = {
 };
 const parent: Project = { ...repo, name: "mono", kind: "parent" };
 
+beforeEach(() => setLanguage("es"));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-const branch = (c: HTMLElement) => c.querySelector<HTMLInputElement>("input[name=branch]")!;
+const radios = (c: HTMLElement) => Array.from(c.ownerDocument.querySelectorAll<HTMLElement>("[role=radio][data-name=where]"));
+const form = () => document.querySelector("form")!;
+const branch = (_c: HTMLElement) => document.querySelector<HTMLInputElement>("input[name=branch]")!;
 
 describe("ProjectSettings", () => {
   it("shows the current settings", () => {
     const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
     expect(branch(container).value).toBe("feat/{ticket}");
-    expect(container.querySelector<HTMLInputElement>("input[name=setup]")!.value).toBe("npm ci");
-    expect(container.querySelector<HTMLInputElement>("input[name=shared-path-0]")!.value).toBe(".env");
-    expect(container.querySelector<HTMLInputElement>("input[type=radio][name=where]:checked")).not.toBeNull();
+    expect(document.querySelector<HTMLInputElement>("input[name=setup]")!.value).toBe("npm ci");
+    expect(document.querySelector<HTMLInputElement>("input[name=shared-path-0]")!.value).toBe(".env");
+    expect(document.querySelector<HTMLInputElement>("input[name=preview]")).not.toBeNull();
+    expect(radios(container).filter((r) => r.getAttribute("aria-checked") === "true").length).toBe(1);
+  });
+
+  it("is a real dialog and every field has a help line", () => {
+    const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    expect(document.querySelector("[role=dialog][aria-modal=true]")).not.toBeNull();
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain("Dónde trabaja por defecto");
+    expect(radios(container).length).toBe(2);
+    expect(document.querySelectorAll(".ps-help").length).toBe(5);
+  });
+
+  it("the preview command is saved on the project, so saving makes two calls", async () => {
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
+    const patch = vi.spyOn(api, "updateProject").mockResolvedValue({ ...repo, preview_command: "npm run dev" });
+    const onSaved = vi.fn();
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
+    fireEvent.change(document.querySelector("input[name=preview]")!, { target: { value: " npm run dev " } });
+    fireEvent.submit(form());
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(patch).toHaveBeenCalledWith("web", { preview_command: "npm run dev" });
+    expect(onSaved.mock.calls[0][0].preview_command).toBe("npm run dev");
+  });
+
+  it("an unchanged preview command makes no second call", async () => {
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
+    const patch = vi.spyOn(api, "updateProject");
+    const onSaved = vi.fn();
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
+    fireEvent.submit(form());
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(patch).not.toHaveBeenCalled();
   });
 
   it("an unset workspace shows the default option and is saved as null untouched", async () => {
@@ -41,33 +78,33 @@ describe("ProjectSettings", () => {
     const onSaved = vi.fn();
     const onClose = vi.fn();
     const { container } = render(<ProjectSettings project={unset} onClose={onClose} onSaved={onSaved} />);
-    const radios = Array.from(container.querySelectorAll<HTMLInputElement>("input[type=radio][name=where]"));
-    expect(radios.length).toBe(3);
-    expect(radios[0].checked).toBe(true);
-    expect(container.querySelector("[role=alertdialog]")).toBeNull();
-    fireEvent.submit(container.querySelector("form")!);
+    const cards = radios(container);
+    expect(cards.length).toBe(2);
+    expect(cards[0].getAttribute("aria-checked")).toBe("true");
+    fireEvent.submit(form());
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(put).toHaveBeenCalledWith("web", unset.settings);
     expect(put.mock.calls[0][1].workspace).toBeNull();
   });
 
-  it("picking a workspace sets it; the default option goes back to null", () => {
+  it("picking a workspace sets it; the checkout goes back to unset", async () => {
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
     const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
-    const radios = () => Array.from(container.querySelectorAll<HTMLInputElement>("input[type=radio][name=where]"));
-    expect(radios()[2].checked).toBe(true);
-    fireEvent.click(radios()[1]);
-    expect(radios()[1].checked).toBe(true);
-    fireEvent.click(radios()[0]);
-    expect(radios()[0].checked).toBe(true);
+    expect(radios(container)[1].getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(radios(container)[0]);
+    expect(radios(container)[0].getAttribute("aria-checked")).toBe("true");
+    fireEvent.submit(form());
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1].workspace).toBeNull();
   });
 
   it("hides the submodule settings for a repo project, shows them for a parent", async () => {
     vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "api" }]);
-    const a = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
-    expect(a.container.querySelector(".picks")).toBeNull();
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    expect(document.querySelector(".picks")).toBeNull();
     cleanup();
-    const b = render(<ProjectSettings project={parent} onClose={() => {}} onSaved={() => {}} />);
-    await waitFor(() => expect(b.container.querySelectorAll(".picks input").length).toBe(2));
+    render(<ProjectSettings project={parent} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(document.querySelectorAll(".picks input").length).toBe(2));
   });
 
   it("an empty branch template is saved as null (Delilah proposes the name)", async () => {
@@ -76,7 +113,7 @@ describe("ProjectSettings", () => {
     const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
     fireEvent.change(branch(container), { target: { value: "" } });
     expect(branch(container).placeholder).toBeTruthy();
-    fireEvent.submit(container.querySelector("form")!);
+    fireEvent.submit(form());
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(put).toHaveBeenCalledWith("web", { ...repo.settings, branch: null });
   });
@@ -86,7 +123,7 @@ describe("ProjectSettings", () => {
     const onSaved = vi.fn();
     const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
     fireEvent.change(branch(container), { target: { value: "x/{ticket}" } });
-    fireEvent.submit(container.querySelector("form")!);
+    fireEvent.submit(form());
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(put).toHaveBeenCalledWith("web", { ...repo.settings, branch: "x/{ticket}" });
   });
@@ -99,11 +136,11 @@ describe("ProjectSettings", () => {
       ]),
     );
     const onSaved = vi.fn();
-    const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
-    fireEvent.submit(container.querySelector("form")!);
-    await waitFor(() => expect(container.querySelectorAll(".field-error").length).toBe(2));
-    expect(container.querySelector("[data-field=branch]")?.textContent).toBe("falta {ticket}");
-    expect(container.querySelector("[data-field='shared[0].path']")?.textContent).toBe("fuera del proyecto");
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={onSaved} />);
+    fireEvent.submit(form());
+    await waitFor(() => expect(document.querySelectorAll(".field-error").length).toBe(2));
+    expect(document.querySelector("[data-field=branch]")?.textContent).toBe("falta {ticket}");
+    expect(document.querySelector("[data-field='shared[0].path']")?.textContent).toBe("fuera del proyecto");
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -111,16 +148,16 @@ describe("ProjectSettings", () => {
     const onClose = vi.fn();
     const { container } = render(<ProjectSettings project={repo} onClose={onClose} onSaved={() => {}} />);
     fireEvent.change(branch(container), { target: { value: "x/{ticket}" } });
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.querySelector("[role=dialog]")!, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
-    expect(container.querySelector("[role=alertdialog]")).not.toBeNull();
-    fireEvent.click(container.querySelector(".btn-danger")!);
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain("¿Descartar los cambios?");
+    fireEvent.click(document.querySelector(".btn-danger")!);
     expect(onClose).toHaveBeenCalledTimes(1);
 
     cleanup();
     const again = vi.fn();
     render(<ProjectSettings project={repo} onClose={again} onSaved={() => {}} />);
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.querySelector("[role=dialog]")!, { key: "Escape" });
     expect(again).toHaveBeenCalledTimes(1);
   });
 
@@ -128,12 +165,12 @@ describe("ProjectSettings", () => {
     vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "services/api" }, { name: "web", path: "services/web" }]);
     const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);
     const p: Project = { ...parent, settings: { ...parent.settings, submodules: { always: [], never: ["services/web"] } } };
-    const { container } = render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
-    await waitFor(() => expect(container.querySelectorAll(".picks input").length).toBe(4));
-    const boxes = container.querySelectorAll<HTMLInputElement>(".picks input");
+    render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(document.querySelectorAll(".picks input").length).toBe(4));
+    const boxes = document.querySelectorAll<HTMLInputElement>(".picks input");
     expect(boxes[3].checked).toBe(true);
     fireEvent.click(boxes[0]);
-    fireEvent.submit(container.querySelector("form")!);
+    fireEvent.submit(form());
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][1].submodules).toEqual({ always: ["services/api"], never: ["services/web"] });
   });
@@ -142,17 +179,17 @@ describe("ProjectSettings", () => {
     const spy = vi.spyOn(api, "submodules").mockResolvedValue([{ name: "web", path: "services/web" }]);
     const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);
     const p: Project = { ...parent, settings: { ...parent.settings, submodules: { always: [], never: ["services/web"] } } };
-    const { container } = render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
-    await waitFor(() => expect(container.querySelectorAll(".picks input").length).toBe(2));
+    render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(document.querySelectorAll(".picks input").length).toBe(2));
     expect(spy).toHaveBeenCalledWith(p.name, { all: true });
-    expect(container.querySelector("[data-stale]")).toBeNull();
-    const never = container.querySelectorAll<HTMLInputElement>(".picks input")[1];
+    expect(document.querySelector("[data-stale]")).toBeNull();
+    const never = document.querySelectorAll<HTMLInputElement>(".picks input")[1];
     expect(never.checked).toBe(true);
     fireEvent.click(never);
     expect(never.checked).toBe(false);
     fireEvent.click(never);
     expect(never.checked).toBe(true);
-    fireEvent.submit(container.querySelector("form")!);
+    fireEvent.submit(form());
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][1].submodules.never).toEqual(["services/web"]);
   });
@@ -161,10 +198,10 @@ describe("ProjectSettings", () => {
     vi.spyOn(api, "submodules").mockResolvedValue([{ name: "api", path: "api" }]);
     const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(parent);
     const p: Project = { ...parent, settings: { ...parent.settings, submodules: { always: ["gone"], never: [] } } };
-    const { container } = render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
-    await waitFor(() => expect(container.querySelector("[data-stale=gone]")).not.toBeNull());
-    fireEvent.click(container.querySelector("[data-stale=gone] input")!);
-    fireEvent.submit(container.querySelector("form")!);
+    render(<ProjectSettings project={p} onClose={() => {}} onSaved={() => {}} />);
+    await waitFor(() => expect(document.querySelector("[data-stale=gone]")).not.toBeNull());
+    fireEvent.click(document.querySelector("[data-stale=gone] input")!);
+    fireEvent.submit(form());
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][1].submodules.always).toEqual([]);
   });
@@ -176,10 +213,10 @@ describe("ProjectSettings", () => {
         { field: "submodules.unknown_key", code: "settings.invalid", message: "clave rara" },
       ]),
     );
-    const { container } = render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
-    fireEvent.submit(container.querySelector("form")!);
-    await waitFor(() => expect(container.querySelector(".error:not(.field-error)")).not.toBeNull());
-    const banner = container.querySelector(".error:not(.field-error)")!.textContent!;
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.submit(form());
+    await waitFor(() => expect(document.querySelector(".error:not(.field-error)")).not.toBeNull());
+    const banner = document.querySelector(".error:not(.field-error)")!.textContent!;
     expect(banner).toContain("cuerpo inválido");
     expect(banner).toContain("submodules.unknown_key: clave rara");
   });

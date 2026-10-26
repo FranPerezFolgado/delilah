@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Project, type ProjectSettings as Settings, type SettingsError, type SharedMode, type Submodule } from "../api";
 import { t } from "../i18n";
-import { WherePicker } from "./WherePicker";
+import { Button, ConfirmDialog, Dialog, OptionCard } from "./ui";
+import "./ProjectSettings.css";
 
 type Fields = SettingsError["fields"];
 
@@ -17,7 +18,8 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
   const [confirming, setConfirming] = useState(false);
 
   const parent = project.kind === "parent";
-  const dirty = JSON.stringify(s) !== JSON.stringify(saved);
+  const [preview, setPreview] = useState(project.preview_command ?? "");
+  const dirty = JSON.stringify(s) !== JSON.stringify(saved) || preview.trim() !== (project.preview_command ?? "");
 
   useEffect(() => {
     if (parent) api.submodules(project.name, { all: true }).then((l) => { setSubs(l); setSubsLoaded(true); }).catch(() => {});
@@ -28,11 +30,6 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
     if (dirty) setConfirming(true);
     else onClose();
   };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +37,10 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
     setError(null);
     setErrors([]);
     try {
-      onSaved(await api.updateProjectSettings(project.name, s));
+      let updated = await api.updateProjectSettings(project.name, s);
+      // The preview command lives on the project itself, not in the settings.
+      if (preview.trim() !== (project.preview_command ?? "")) updated = await api.updateProject(project.name, { preview_command: preview.trim() || null });
+      onSaved(updated);
     } catch (err) {
       if (err instanceof ApiError && err.fields.length > 0) setErrors(err.fields);
       else setError((err as Error).message);
@@ -75,33 +75,61 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
 
   if (confirming) {
     return (
-      <div className="backdrop">
-        <div className="dialog" role="alertdialog" aria-label={t("¿Descartar los cambios?")}>
-          <h2>{t("¿Descartar los cambios?")}</h2>
-          <p className="muted" style={{ margin: 0 }}>{t("Hay cambios sin guardar en los ajustes.")}</p>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button type="button" className="btn" onClick={() => setConfirming(false)}>{t("Seguir editando")}</button>
-            <button type="button" className="btn btn-danger" onClick={onClose}>{t("Descartar")}</button>
-          </div>
-        </div>
-      </div>
+      <ConfirmDialog
+        danger
+        title={t("¿Descartar los cambios?")}
+        body={t("Hay cambios sin guardar en los ajustes.")}
+        action={t("Descartar")}
+        onClose={() => setConfirming(false)}
+        onConfirm={onClose}
+      />
     );
   }
 
-  return (
-    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <form className="dialog settings" onSubmit={save} aria-label={t("Ajustes de {name}", { name: project.name })}>
-        <h2>{t("Ajustes de {name}", { name: project.name })}</h2>
+  const inCheckout = s.workspace !== "worktree";
+  const formId = "project-settings-form";
+  const Help = ({ children }: { children: string }) => <span className="ps-help">{children}</span>;
 
-        <div>
-          <WherePicker withDefault value={s.workspace} onChange={(workspace) => setS({ ...s, workspace })} project={project} />
+  return (
+    <Dialog
+      title={t("Ajustes de {name}", { name: project.name })}
+      size={{ w: 640, h: 720 }}
+      onClose={close}
+      footer={
+        <>
+          <Button variant="secondary" onClick={close} disabled={busy}>{t("Cancelar")}</Button>
+          <Button variant="primary" type="submit" form={formId} disabled={busy}>{busy ? t("Guardando…") : t("Guardar")}</Button>
+        </>
+      }
+    >
+      <form id={formId} className="ps" onSubmit={save}>
+        <div className="field">
+          <span id="ps-where">{t("Dónde trabaja por defecto")}</span>
+          <div className="ps-where" role="radiogroup" aria-labelledby="ps-where">
+            <OptionCard
+              name="where"
+              checked={inCheckout}
+              onClick={() => !inCheckout && setS({ ...s, workspace: null })}
+              title={t("En tu checkout") + t(" · por defecto")}
+              description={t("Crea la rama en {path} y trabaja ahí. Una tarea a la vez, con el checkout limpio.", { path: project.path })}
+            />
+            <OptionCard
+              name="where"
+              checked={!inCheckout}
+              onClick={() => setS({ ...s, workspace: "worktree" })}
+              title={t("Aislado (worktree)")}
+              description={t("Copia aparte. Varias tareas en paralelo sin tocar tu carpeta.")}
+            />
+          </div>
+          <Help>{t("Lo que se usa al empezar una tarea de este proyecto, salvo que elijas otra cosa en esa tarea.")}</Help>
           <Err field="workspace" />
         </div>
 
         <label className="field">
-          <span>{t("Plantilla de rama (opcional; usa {ticket})", { ticket: "{ticket}" })}</span>
+          <span>{t("Plantilla de rama")}</span>
           <input className="input mono" name="branch" value={s.branch ?? ""} placeholder={t("Delilah propone un nombre descriptivo (por defecto)")}
             onChange={(e) => setS({ ...s, branch: e.target.value.trim() === "" ? null : e.target.value })} />
+          <Help>{t("Opcional. Usa {ticket} para el número del ticket; vacía, Delilah propone el nombre.", { ticket: "{ticket}" })}</Help>
           <Err field="branch" />
         </label>
 
@@ -118,25 +146,29 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
                   <option value="copy">{t("Copiar")}</option>
                   <option value="link">{t("Enlazar")}</option>
                 </select>
-                <button type="button" className="btn btn-ghost" onClick={() => setS({ ...s, shared: s.shared.filter((_, j) => j !== i) })}>
-                  {t("Quitar")}
-                </button>
+                <Button variant="ghost" onClick={() => setS({ ...s, shared: s.shared.filter((_, j) => j !== i) })}>{t("Quitar")}</Button>
               </div>
               <GroupErr prefix={`shared[${i}]`} />
             </div>
           ))}
           <div>
-            <button type="button" className="btn" onClick={() => setS({ ...s, shared: [...s.shared, { path: "", mode: null }] })}>
-              {t("Añadir entrada")}
-            </button>
+            <Button variant="secondary" onClick={() => setS({ ...s, shared: [...s.shared, { path: "", mode: null }] })}>{t("Añadir entrada")}</Button>
           </div>
+          <Help>{t("Archivos que no están en git (.env, credenciales) y que cada worktree necesita: se copian o se enlazan.")}</Help>
         </div>
 
         <label className="field">
-          <span>{t("Comando de preparación")}</span>
+          <span>{t("Comando de setup")}</span>
           <input className="input mono" name="setup" value={s.setup ?? ""}
             onChange={(e) => setS({ ...s, setup: e.target.value === "" ? null : e.target.value })} />
+          <Help>{t("Se ejecuta al preparar el workspace de una tarea, antes de que el agente empiece (por ejemplo npm ci).")}</Help>
           <Err field="setup" />
+        </label>
+
+        <label className="field">
+          <span>{t("Comando de preview")}</span>
+          <input className="input mono" name="preview" value={preview} onChange={(e) => setPreview(e.target.value)} />
+          <Help>{t("Delilah lo ejecuta en el workspace de una tarea para que puedas probarla. Déjalo vacío si el proyecto no tiene preview.")}</Help>
         </label>
 
         {parent && (["always", "never"] as const).map((list) => (
@@ -154,6 +186,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
                 </label>
               ))}
             </div>
+            <Help>{list === "always" ? t("Entran en todo workspace de este proyecto.") : t("Nunca se clonan ni se incluyen en un workspace.")}</Help>
             <GroupErr prefix={`submodules.${list}`} />
           </div>
         ))}
@@ -164,11 +197,7 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
             {unplaced.map((f, i) => <div key={i}>{f.field ? `${f.field}: ${f.message}` : f.message}</div>)}
           </div>
         )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={close} disabled={busy}>{t("Cancelar")}</button>
-          <button className="btn btn-p" disabled={busy}>{busy ? t("Guardando…") : t("Guardar")}</button>
-        </div>
       </form>
-    </div>
+    </Dialog>
   );
 }

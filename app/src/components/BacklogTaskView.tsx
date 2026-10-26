@@ -1,20 +1,29 @@
 import { useEffect, useState } from "react";
 import { api, type Project, type Task } from "../api";
-import { Icon } from "./Icon";
-import { askToDelete } from "./TaskView";
 import { t } from "../i18n";
+import { relativeTime } from "../time";
+import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
+import { Button, ConfirmDialog, StatusBadge, Toggle, useToast } from "./ui";
+import "./BacklogTaskView.css";
 
 interface Props {
   task: Task;
   projects: Project[];
-  /** Opens the start dialog for it ("Empezar"). */
-  onStart: (task: Task) => void;
+  /** Kept for callers that still pass it; «Iniciar» starts the task here. */
+  onStart?: (task: Task) => void;
+  /** After a save or a delete (the caller refreshes). */
   onChanged: () => void;
+  /** Opens the started task («Abrir» in the toast); falls back to `onChanged`. */
+  onOpen?: (key: string) => void;
 }
 
+/** A refusal because the project's checkout has uncommitted changes. */
+const dirtyCheckout = (message: string) => /checkout/i.test(message) && /(cambios|changes|dirty|uncommitted)/i.test(message);
+
 /** A task saved to the backlog: what it is about, editable until it starts. */
-export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
+export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
+  const toast = useToast();
   const savedProject = projects.find((p) => p.name === task.project);
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes ?? "");
@@ -24,9 +33,14 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
   const [autopilot, setAutopilot] = useState(!!task.autopilot);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refused, setRefused] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  /** The task as the daemon returned it after «Iniciar». */
+  const [started, setStarted] = useState<Task | null>(null);
 
   // Edited elsewhere (another window, the CLI): show what is saved now.
   useEffect(() => {
+    if (started) return;
     setTitle(task.title);
     setNotes(task.notes ?? "");
     setProject(task.project ?? "");
@@ -42,40 +56,71 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
     where !== whereOf(task.in_checkout, savedProject) ||
     savingMode !== task.saving_mode ||
     autopilot !== !!task.autopilot;
-  const inCheckout = where === "checkout";
   // Only the spec workflow has autopilot.
   const autopilotAllowed = task.workflow === "feature";
-  const save = async () => {
+  const locked = busy || !!started;
+  const open = (key: string) => (onOpen ?? onChanged)(key);
+
+  const guard = async (run: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setRefused(false);
     try {
-      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: inCheckout, saving_mode: savingMode || autopilot, autopilot: autopilot && autopilotAllowed });
-      onChanged();
+      await run();
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      if (dirtyCheckout(message)) setRefused(true);
+      else setError(message);
     } finally {
       setBusy(false);
     }
   };
 
+  const save = () =>
+    guard(async () => {
+      await api.updateTask(task.key, { title: title.trim(), notes, project: project || undefined, in_checkout: where === "checkout", saving_mode: savingMode || autopilot, autopilot: autopilot && autopilotAllowed });
+      onChanged();
+    });
+
+  const start = (inCheckout: boolean) =>
+    guard(async () => {
+      const run = await api.run({
+        key: task.key,
+        title: title.trim(),
+        project,
+        submodules: [],
+        in_checkout: inCheckout,
+        saving_mode: savingMode || autopilot,
+        ...(autopilotAllowed ? { autopilot } : {}),
+        notes,
+      });
+      setStarted(run);
+      toast({ text: t("{key} iniciada", { key: task.key }), action: { label: t("Abrir"), run: () => open(task.key) } });
+    });
+
+  const remove = () =>
+    guard(async () => {
+      await api.deleteTask(task.key);
+      setDeleting(false);
+      onChanged();
+    });
+
   return (
     <>
-      <div className="view-head" data-tauri-drag-region>
-        <h1 data-tauri-drag-region>
-          <span className="mono muted">{task.key}</span> {task.title}
-        </h1>
-        <span className="muted" style={{ fontSize: 12 }}>
-          <Icon name="backlog" className="c-mut" /> {t("En el backlog: sin workspace ni agente")}
-        </span>
+      <div className="bt-head" data-tauri-drag-region>
+        <span className="bt-key mono">{task.key}</span>
+        <h1 className="bt-title" data-tauri-drag-region>{started?.title ?? task.title}</h1>
+        <StatusBadge status={started ? started.status : "backlog"} />
+        {task.created_at && <span className="bt-when">{t("Creada {when}", { when: relativeTime(task.created_at) })}</span>}
       </div>
-      <div className="view-body backlog-task">
+      <div className="view-body bt-body">
         <label className="field">
           <span>{t("Título")}</span>
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="input" value={title} disabled={locked} onChange={(e) => setTitle(e.target.value)} />
         </label>
         <label className="field">
           <span>{t("Proyecto")}</span>
-          <select className="input" value={project} onChange={(e) => setProject(e.target.value)}>
+          <select className="input" value={project} disabled={locked} onChange={(e) => setProject(e.target.value)}>
             {!task.project && <option value="">{t("Sin proyecto")}</option>}
             {projects.map((p) => (
               <option key={p.name} value={p.name}>
@@ -84,41 +129,57 @@ export function BacklogTaskView({ task, projects, onStart, onChanged }: Props) {
             ))}
           </select>
         </label>
-        <WherePicker value={where} onChange={(w) => setWhere(w ?? "worktree")} project={projects.find((p) => p.name === project)} />
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
-          <input type="checkbox" checked={savingMode || autopilot} disabled={autopilot} onChange={(e) => setSavingMode(e.target.checked)} />
-          <span>{t("Modo ahorro")}</span>
-        </label>
-        {autopilotAllowed && <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
-          <input
-            type="checkbox"
-            checked={autopilot}
-            onChange={(e) => {
-              if (e.target.checked) setSavingMode(true);
-              setAutopilot(e.target.checked);
+        <WherePicker value={where} onChange={(w) => setWhere(w ?? "checkout")} project={projects.find((p) => p.name === project)} />
+        {autopilotAllowed ? (
+          <AutopilotControls
+            autopilot={autopilot ? (task.autopilot ?? { state: "running", since: "" }) : null}
+            savingMode={savingMode}
+            busy={locked}
+            onAutopilot={(a) => {
+              if (a === "on") setSavingMode(true);
+              setAutopilot(a === "on");
             }}
+            onSavingMode={setSavingMode}
           />
-          <span>{t("Autopiloto")}</span>
-        </label>}
+        ) : (
+          <div className="apc">
+            <Toggle label={t("Ahorro")} pressed={savingMode} disabled={locked} onChange={setSavingMode} title={t("Ahorro: una sesión nueva por fase, para releer menos contexto")} />
+          </div>
+        )}
         <label className="field">
           <span>{t("Notas (el agente las recibe al empezar)")}</span>
-          <textarea className="input" rows={8} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <textarea className="input" rows={8} value={notes} disabled={locked} onChange={(e) => setNotes(e.target.value)} />
         </label>
+        {refused && (
+          <div className="error selectable bt-refused" role="alert">
+            <span>{t("Tu checkout tiene cambios sin guardar. Guárdalos o trabaja en un worktree.")}</span>
+            <Button variant="secondary" size={28} disabled={busy} onClick={() => start(false)}>{t("Iniciar en un worktree")}</Button>
+          </div>
+        )}
         {error && <div className="error selectable">{error}</div>}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-p" disabled={busy || !title.trim()} onClick={() => onStart({ ...task, title: title.trim(), notes, project: project || null, in_checkout: inCheckout, saving_mode: savingMode || autopilot, autopilot: autopilot ? (task.autopilot ?? { state: "running", since: "" }) : null })}>
-            <Icon name="run" /> {t("Empezar")}
-          </button>
-          {dirty && (
-            <button className="btn" disabled={busy || !title.trim()} onClick={save}>
-              {t("Guardar")}
-            </button>
-          )}
-          <button className="btn btn-ghost c-err" style={{ marginLeft: "auto" }} disabled={busy} onClick={() => askToDelete(task)}>
-            <Icon name="trash" /> {t("Eliminar")}
-          </button>
+        {started && <div className="bt-started" role="status">{t("{key} iniciada", { key: task.key })}</div>}
+        <div className="bt-actions">
+          <Button variant="primary" icon="run" disabled={locked || !title.trim() || !project} onClick={() => start(where === "checkout")}>
+            {t("Iniciar")}
+          </Button>
+          <Button variant="secondary" disabled={locked || !dirty || !title.trim()} onClick={save}>
+            {t("Guardar")}
+          </Button>
+          <Button variant="danger" className="bt-delete" disabled={locked} onClick={() => setDeleting(true)}>
+            {t("Eliminar…")}
+          </Button>
         </div>
       </div>
+      {deleting && (
+        <ConfirmDialog
+          danger
+          title={t("¿Eliminar {key}?", { key: task.key })}
+          body={t("Sale del backlog. No se puede deshacer.")}
+          action={t("Eliminar")}
+          onClose={() => setDeleting(false)}
+          onConfirm={remove}
+        />
+      )}
     </>
   );
 }
