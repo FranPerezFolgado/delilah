@@ -111,6 +111,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Option on new tasks, backlog items and running tasks (also `--saving-mode` / `--no-saving-mode` in the CLI), with its default and "save notes first" in Settings.
 - The session chain on the task screen; the planning → implementation handoff is offered (task screen and Inbox), the review starts on its own and is announced.
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
+- Session tabs and the task's Sessions list name phase sessions after their step ("Spec y plan", "Implementación", "Revisión"), live or stopped; the primary outside saving mode reads "Claude principal" (LIBRE-24).
 
 **Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
 - Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restore".

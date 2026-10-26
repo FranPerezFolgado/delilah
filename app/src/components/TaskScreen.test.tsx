@@ -164,6 +164,35 @@ describe("TaskScreen tabs", () => {
     expect(labels()).toEqual(["Tarea", "Oficina", "Claude principal", "Review", "PR"]);
   });
 
+  it.each([["implement", "Implementación"], ["review", "Revisión"], ["plan", "Spec y plan"]])("names the primary tab after its phase (%s)", (step, name) => {
+    taskScreen([sess("a", { primary: true, step: step as Session["step"], label: `${name}: Mi tarea` })]);
+    expect(labels()).toEqual(["Tarea", "Oficina", name, "PR"]);
+  });
+
+  it("keeps the stored label as the phase tab tooltip and does not allow closing it", () => {
+    taskScreen([sess("a", { primary: true, step: "implement", label: "Implementación: Mi tarea" })]);
+    expect(screen.getAllByRole("tab")[2].getAttribute("title")).toBe("Implementación: Mi tarea");
+    expect(screen.queryByRole("button", { name: "Cerrar Implementación" })).toBeNull();
+  });
+
+  it("keeps earlier phase sessions under their phase name, in order, and closable", () => {
+    taskScreen([sess("old", { step: "implement", live: false, closed: false }), sess("new", { primary: true, step: "review" })]);
+    expect(labels()).toEqual(["Tarea", "Oficina", "Implementación", "Revisión", "PR"]);
+    expect(screen.queryByRole("button", { name: "Cerrar Implementación" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Cerrar Revisión" })).toBeNull();
+  });
+
+  it("names a live earlier phase session after its phase when asking to close it", () => {
+    taskScreen([sess("old", { step: "implement", label: "Implementación: Mi tarea" }), sess("new", { primary: true, step: "review" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar Implementación" }));
+    expect(screen.getByText(/Cerrar «Implementación» detiene ese Claude/)).not.toBeNull();
+  });
+
+  it("keeps the own label of an extra Claude session with no step", () => {
+    taskScreen([sess("a", { primary: true, step: "review" }), sess("b", { label: "Review", step: null })]);
+    expect(labels()).toEqual(["Tarea", "Oficina", "Revisión", "Review", "PR"]);
+  });
+
   it("orders the tabs Tarea, sessions, files, Cambios, PR", () => {
     sessionFor("PROJ-1").changesOpen = true;
     sessionFor("PROJ-1").tabs = [{ path: "src/a.rs", dirty: false } as never];
@@ -421,7 +450,7 @@ describe("TaskScreen autopilot control", () => {
 });
 
 describe("TaskScreen follows the primary session", () => {
-  const sess = (id: string, primary: boolean): Session => ({
+  const sess = (id: string, primary: boolean, step: Session["step"] = "plan"): Session => ({
     effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id,
     task: "PROJ-1",
     kind: "claude",
@@ -432,7 +461,7 @@ describe("TaskScreen follows the primary session", () => {
     read_only: false,
     conversation: false,
     state: "working",
-    step: "plan",
+    step,
   });
   const screenOf = (owner: string, sessions: Session[]) => (
     <TaskScreen
@@ -450,8 +479,8 @@ describe("TaskScreen follows the primary session", () => {
   it("selects the new primary's tab after a handoff", () => {
     const { rerender } = render(screenOf("PROJ-1", [sess("a", true)]));
     expect(selected()).toBe("Tarea");
-    rerender(screenOf("PROJ-1", [sess("a", false), sess("b", true)]));
-    expect(selected()).toBe("Claude principal");
+    rerender(screenOf("PROJ-1", [sess("a", false), sess("b", true, "implement")]));
+    expect(selected()).toBe("Implementación");
   });
 
   it("does not steal the tab when the screen switches to another task", () => {

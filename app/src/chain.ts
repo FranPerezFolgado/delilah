@@ -17,6 +17,10 @@ const EXTRA_LABELS = { preview: "Preview", pr: "PR" };
 export const stepLabel = (step: ChainStepName) =>
   t((STEP_LABELS as Record<string, string>)[step] ?? (EXTRA_LABELS as Record<string, string>)[step] ?? String(step));
 
+/** The name a session shows in the UI: its step's, else "Claude principal" for the primary claude, else its label. */
+export const sessionName = (s: Session): string =>
+  s.step ? stepLabel(s.step) : s.primary && s.kind === "claude" ? t("Claude principal") : s.label;
+
 /** The handoff stages in which its target step is still waiting for the new session. */
 const WAITING: Handoff["stage"][] = ["offered", "saving", "starting", "failed"];
 
