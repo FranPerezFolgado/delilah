@@ -668,6 +668,160 @@ mod tests {
 }
 
 #[cfg(test)]
+mod background_tests {
+    use std::time::Duration;
+
+    use delilah_core::{Autopilot, AutopilotState, Step, Task};
+
+    use super::*;
+    use crate::config::Config;
+    use crate::store::Store;
+    use crate::store_sessions::{SessionKind, SessionRecord};
+
+    const STOP_BACKGROUND: &str =
+        include_str!("../tests/fixtures/hooks/stop-background-running.json");
+
+    /// A task on autopilot whose primary session `s-1` is on `step`; `tasks` is the
+    /// content of its `tasks.md`, if any.
+    async fn on_autopilot(
+        step: Step,
+        tasks: Option<&str>,
+    ) -> (AppState, TaskKey, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("delilah-bg-{}", uuid::Uuid::new_v4()));
+        let ws_path = dir.join("ws");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        // A launch that tries to start the next step must fail fast, not run a real agent.
+        let config = Config {
+            home: dir.join("home"),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            claude_bin: "/nonexistent/claude".into(),
+            agent_program: None,
+            ..crate::config::Config::test_defaults()
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        let key = TaskKey::new("PROJ-1");
+        app.store
+            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .await
+            .unwrap();
+        app.transition(&key, Event::Start).await.unwrap();
+        app.transition(&key, Event::WorkspaceReady).await.unwrap();
+        let ws = delilah_git::Workspace {
+            path: ws_path,
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store
+            .save_workspace(&key, std::path::Path::new("/parent"), &ws)
+            .await
+            .unwrap();
+        app.store.set_saving_mode(&key, true).await.unwrap();
+        let a = Autopilot {
+            state: AutopilotState::Running,
+            stage: None,
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+            review_session: None,
+        };
+        app.store.set_autopilot(&key, Some(&a)).await.unwrap();
+        app.store
+            .create_session(&SessionRecord {
+                id: "s-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Principal".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(step),
+            })
+            .await
+            .unwrap();
+        if let Some(tasks) = tasks {
+            let spec = dir.join("ws/specs/proj-1-x");
+            std::fs::create_dir_all(&spec).unwrap();
+            std::fs::write(spec.join("tasks.md"), tasks).unwrap();
+        }
+        (app, key, dir)
+    }
+
+    /// Posts the fixture (a turn end with a subagent running) through `apply_hook` and
+    /// gives the spawned turn-end work time to settle.
+    async fn post_background_stop(app: &AppState) {
+        let mut hook: Value = serde_json::from_str(STOP_BACKGROUND).unwrap();
+        hook["session_id"] = "s-1".into();
+        let q = HookQuery {
+            task: "PROJ-1".into(),
+            session: Some("s-1".into()),
+        };
+        assert_eq!(
+            apply_hook(app.clone(), q, hook).await,
+            StatusCode::NO_CONTENT
+        );
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+
+    async fn untouched(app: &AppState, key: &TaskKey) {
+        let task = app.store.get_task(key).await.unwrap().unwrap();
+        let a = task.autopilot.unwrap();
+        assert_eq!(a.state, AutopilotState::Running, "{a:?}");
+        assert_eq!(a.nudged, None);
+        let events = app.store.events(key).await.unwrap();
+        let names: Vec<_> = events.iter().map(|e| e.event.name()).collect();
+        assert!(
+            !names.contains(&"autopilot-nudged") && !names.contains(&"autopilot-paused"),
+            "{names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_plan_turn_end_with_background_work_is_not_a_stall() {
+        let (app, key, _dir) = on_autopilot(Step::Plan, None).await;
+        post_background_stop(&app).await;
+        untouched(&app, &key).await;
+    }
+
+    #[tokio::test]
+    async fn repeated_background_turn_ends_never_nudge_or_pause() {
+        let (app, key, _dir) = on_autopilot(Step::Plan, None).await;
+        for _ in 0..3 {
+            post_background_stop(&app).await;
+            untouched(&app, &key).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_implement_turn_end_with_background_work_is_not_a_stall() {
+        let (app, key, _dir) =
+            on_autopilot(Step::Implement, Some("- [ ] T001 One\n- [ ] T002 Two\n")).await;
+        for _ in 0..3 {
+            post_background_stop(&app).await;
+            untouched(&app, &key).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn the_plan_handoff_still_starts_with_background_work_running() {
+        let (app, key, _dir) = on_autopilot(Step::Plan, Some("- [ ] T001 One\n")).await;
+        post_background_stop(&app).await;
+        // The handoff ran: the implementation's session exists (or the handoff is on record).
+        let sessions = app.store.open_sessions(Some(key.as_str())).await.unwrap();
+        let task = app.store.get_task(&key).await.unwrap().unwrap();
+        assert!(
+            sessions.iter().any(|s| s.step == Some(Step::Implement))
+                || task.handoff.is_some_and(|h| h.to == Step::Implement),
+            "{sessions:?}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod limit_tests {
     use axum::body::Body;
     use axum::http::Request;

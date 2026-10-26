@@ -65,14 +65,14 @@ waits and no nudge or pause.
 
 ### Tests for User Story 1 (write first, see them fail)
 
-- [ ] T009 [US1] Add daemon tests that post `stop-background-running.json` (via `include_str!`) through `hooks::apply_hook`, in the tests module of `crates/delilah-daemon/src/hooks.rs`. Set up an autopilot task with a primary session using `autopilot/testkit.rs`; add a `post_hook`-and-wait helper there if needed. Cover:
+- [X] T009 [US1] Add daemon tests that post `stop-background-running.json` (via `include_str!`) through `hooks::apply_hook`, in the tests module of `crates/delilah-daemon/src/hooks.rs`. Set up an autopilot task with a primary session using `autopilot/testkit.rs`; add a `post_hook`-and-wait helper there if needed. Cover:
   - plan step with no tasks.md: autopilot stays `running`, `nudged` is `None`, and there is no `autopilot-nudged` event;
   - the same posted three times: still no nudge or pause;
   - implement step with unchecked tasks: the same;
   - plan step with tasks.md written and nothing checked, posted with background running: the handoff to implement still starts (FR-004).
 
   Wait for the spawned turn-end work, as the existing hook tests do. Run them and see the first three fail.
-- [ ] T010 [US1] Create `crates/delilah-e2e/tests/autopilot.rs` with `autopilot_waits_on_background_work`. Use `Env::start`, a fixture repo project and the fake Claude.
+- [X] T010 [US1] Create `crates/delilah-e2e/tests/autopilot.rs` with `autopilot_waits_on_background_work`. Use `Env::start`, a fixture repo project and the fake Claude.
   - Scenario `<KEY>.feature.json`: write `specs/<key lowercased>-x/spec.md` and `plan.md` → `stop` with a running `architecture-reviewer` → `sleep_ms` → `stop` with it running again → write `tasks.md` with three unchecked tasks → `stop` with `background: []`.
   - Scenario `<KEY>.orchestrate.json`: `stop` with two running implementers, twice with a sleep between → write `tasks.md` with all tasks checked → `stop` with `[]`.
 
@@ -85,8 +85,8 @@ waits and no nudge or pause.
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] In `crates/delilah-daemon/src/handoff.rs`, add `pub(crate) struct TurnEnd { pub background: bool }` (`Default`) and `on_turn_end(app, key, TurnEnd)` / `on_turn_end_with(app, key, TurnEnd, launch)` holding the body of `on_turn_ended_with`. Keep `on_turn_ended(app, key)` and `on_turn_ended_with(app, key, launch)` as wrappers passing `TurnEnd::default()`. In the no-boundary branch, return before `autopilot::stall` when `end.background`, with a `tracing::debug!`. Add a comment: waiting only skips the stall; it never blocks `finish_save`, the boundary or a handoff.
-- [ ] T012 [US1] In `crates/delilah-daemon/src/phases.rs` `on_hook`, `Signal::TurnEnded if primary && !limited`: build `TurnEnd { background: delilah_agents::claude::background_running(hook) }` before spawning and call `crate::handoff::on_turn_end`. `maybe_hint` stays after it. Make T009 and T010 green, and keep `cargo test -p delilah-daemon` green.
+- [X] T011 [US1] In `crates/delilah-daemon/src/handoff.rs`, add `pub(crate) struct TurnEnd { pub background: bool }` (`Default`) and `on_turn_end(app, key, TurnEnd)` / `on_turn_end_with(app, key, TurnEnd, launch)` holding the body of `on_turn_ended_with`. Keep `on_turn_ended(app, key)` and `on_turn_ended_with(app, key, launch)` as wrappers passing `TurnEnd::default()`. In the no-boundary branch, return before `autopilot::stall` when `end.background`, with a `tracing::debug!`. Add a comment: waiting only skips the stall; it never blocks `finish_save`, the boundary or a handoff.
+- [X] T012 [US1] In `crates/delilah-daemon/src/phases.rs` `on_hook`, `Signal::TurnEnded if primary && !limited`: build `TurnEnd { background: delilah_agents::claude::background_running(hook) }` before spawning and call `crate::handoff::on_turn_end`. `maybe_hint` stays after it. Make T009 and T010 green, and keep `cargo test -p delilah-daemon` green.
 
 **Checkpoint**: US1 works on its own. The false pause is gone, and the e2e run reaches review.
 
