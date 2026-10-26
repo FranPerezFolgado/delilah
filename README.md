@@ -212,6 +212,14 @@ task offers "Probar modo chat (experimental)" in its chat view (or `delilah runt
 chat`) to go the other way. Project sessions and
 idea conversations always use the terminal.
 
+While Claude works the chat shows what it is doing ("Claude está…" with the tool),
+sub-agents appear as cards with their latest steps (one line each, not their whole
+conversation), and background commands and sub-agents are listed in an "En segundo
+plano" strip with "Detener". The task stays "Trabajando" until that work ends; if Claude
+resumes on its own afterwards the chat says "Claude continúa: tarea en segundo plano
+terminada". While background work runs you can type to Claude, but the Chat / Terminal
+switch answers "Hay trabajo en segundo plano: espera a que termine o pulsa Detener".
+
 When a chat-mode agent needs a permission it shows a "¿Permitir?" card (also in the
 Bandeja) with the tool and what it will do: "Permitir una vez", "Denegar" (with an
 optional reason that Claude is told) or "Permitir siempre en esta tarea". The last one is

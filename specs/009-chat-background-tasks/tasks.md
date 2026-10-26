@@ -136,11 +136,11 @@ Done before US3 because US3's ending relies on it; independently testable.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T053 [P] Update `docs/architecture.md` (section "Chat mode"): parser routing and the new stream events, `progress.rs` and the `watch` relay, the held Stop (where, when released, never-held cases), self-started turns and `agent-resumed`, the `background-done` marker, the 409; update the "From hook to effect" table for `TurnEnded` with background running
-- [ ] T054 [P] Update `docs/status.md`: chat view/chat mode bullets (working indicator, sub-agent progress, background strip, self-started turns); in "Chat mode, limits and known problems" replace "a sub-agent's inner steps are not shown" with what is shown now (one-line steps, not full nested conversations), and add the 30 s fallback and the undocumented stream shapes
-- [ ] T055 [P] Update `README.md` chat mode section with what the user now sees (indicator, sub-agent cards, "En segundo plano")
-- [ ] T056 [P] Add a decision to `docs/decisions.md`: background work holds the turn end in memory instead of a new task state (alternatives from research R6), and progress is live-only (R7)
-- [ ] T057 [P] Make sure every new Spanish string has its English entry: run `cd app && npx vitest run src/i18n/coverage.test.ts`
+- [X] T053 [P] Update `docs/architecture.md` (section "Chat mode"): parser routing and the new stream events, `progress.rs` and the `watch` relay, the held Stop (where, when released, never-held cases), self-started turns and `agent-resumed`, the `background-done` marker, the 409; update the "From hook to effect" table for `TurnEnded` with background running
+- [X] T054 [P] Update `docs/status.md`: chat view/chat mode bullets (working indicator, sub-agent progress, background strip, self-started turns); in "Chat mode, limits and known problems" replace "a sub-agent's inner steps are not shown" with what is shown now (one-line steps, not full nested conversations), and add the 30 s fallback and the undocumented stream shapes
+- [X] T055 [P] Update `README.md` chat mode section with what the user now sees (indicator, sub-agent cards, "En segundo plano")
+- [X] T056 [P] Add a decision to `docs/decisions.md`: background work holds the turn end in memory instead of a new task state (alternatives from research R6), and progress is live-only (R7)
+- [X] T057 [P] Make sure every new Spanish string has its English entry: run `cd app && npx vitest run src/i18n/coverage.test.ts`
 - [ ] T058 Run all checks: `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, `cd app && npx tsc --noEmit && npx vitest run`
 - [ ] T059 Run quickstart.md end to end in a preview (`scripts/preview.sh --fresh`, never the installed daemon), US1–US4 and the "Detener" variant; record anything that differs in `specs/009-chat-background-tasks/research.md`
 

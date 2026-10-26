@@ -631,3 +631,19 @@ carry closures (each "Deshacer" undoes a different thing), so toasts with an act
 exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
 centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
 Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).
+
+**80. Background work holds the turn end in memory; progress is live-only.** In chat mode
+the `Stop` hook of a session with background tasks running is held by the daemon (released
+30 s after the set empties with no follow-up turn, or on process exit; dropped by a real new
+turn or "Detener") instead of adding a task state; the task stays `running`. Progress (activity,
+sub-agent steps, background rows) is a `watch` value per live session, relayed on `/live`
+at most every 250 ms and included in `GET …/conversation`; never persisted. A turn Claude
+starts by itself is detected from the stream (`init` without a user line since the previous
+`init`), not from hooks, which also fire for `<task-notification>` prompts mid-turn; it is
+recorded as the history event `agent-resumed`. *Why:* a new state needs a migration and
+touches every consumer (board, Bandeja, autopilot); hiding it in the UI alone leaves them
+wrong; persisting progress adds writes for data that is meaningless after a restart (the
+process is gone). History is the typed `Event` enum, so an older daemon cannot decode a
+history containing `agent-resumed` (accepted: downgrade or mixed versions only). *Ruled out:*
+a "background" task state; progress as messages on the stream-event broadcast (no throttle,
+lag resets would drop live text); polling the conversation route.

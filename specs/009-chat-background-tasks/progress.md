@@ -14,16 +14,18 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 3 | 3A | done | 1 | 20cb4c1 | live.ts emitter exported, view uses own socket |
 | WP-05F | 2 | fix | done | 1 | ed96262 | phase 1-2 review mediums |
 | WP-07F | 3 | fix | done | 1 | 8610596 | live.rs busy loop when progress sender drops; live.ts wiring goes in WP-08 |
+| WP-16F | 6 | fix | implementing | 0 | | phase 6 HIGH + mediums (Rust) |
+| WP-16G | 6 | fix | done | 1 | 8302a60 | phase 6 contract medium (UI 409 text) |
 | WP-08 | 4 | 4A | done | 1 | f8492bc | live.ts progress helper removed; duration() copied |
 | WP-09 | 5 | 5A | done | 1 | d69abec | +delilah-core task.rs (Event::AgentResumed) allowed |
 | WP-10 | 5 | 5A | done | 1 | 25bffc7 | |
 | WP-11 | 6 | 6A | verified | 1 | aee4c6a | +phase-5 arch MEDIUM (mid-turn notification side effects) |
 | WP-13 | 6 | 6A | verified | 1 | 7e87d3c | also refuses POST /sessions/{id}/runtime |
 | WP-15 | 6 | 6A | verified | 1 | 9a00f21 | |
-| WP-12 | 6 | 6B | verified | 1 | SHA12 | +sessions.rs (fallback token); any Init cancels held Stop |
+| WP-12 | 6 | 6B | verified | 1 | b907202 | +sessions.rs (fallback token); any Init cancels held Stop |
 | WP-14 | 6 | 6B | verified | 1 | 48410be | stop_task per running row after interrupt |
 | WP-16 | 6 | 6B | verified | 1 | 76dea57 | |
-| WP-17 | 7 | 7A | pending | 0 | | |
+| WP-17 | 7 | 7A | verified | 1 | SHA17 | decision #80 |
 | WP-18 | 7 | 7B | pending | 0 | | |
 
 ## Open findings
@@ -52,3 +54,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | 6 | review-note | LOW | Existing BUSY runtime refusal is hardcoded English, not via lang | crates/delilah-daemon/src/runtime_api.rs |
 | 5 | spec | LOW | US4-2 (self-started turn's end applies usual effects) has no specific test | crates/delilah-daemon/src/stream_events.rs |
 | 5 | spec | LOW | Divider only when transcript has a background-done marker; other self-started reasons get history only (consistent with "when known") | app/src/components/ConversationView.tsx |
+| 6 | architecture | LOW | Replayed Stop looks up the session by id; a replaced session under the same id could get it (safe today) | crates/delilah-daemon/src/stream_events.rs |
+| 6 | architecture | LOW | Timer replay racing a just-arrived Init can apply a stale Stop (heals at that turn's own Stop); on_process_exit replay may flush_queue into a dead process | crates/delilah-daemon/src/stream_events.rs |
+| 6 | architecture | LOW | hooks ↔ conversation ↔ stream_events call triangle; a Live::release_held_stop helper would centralise; test helpers duplicated across 3 test modules | crates/delilah-daemon/src/ |
+| 6 | contract | LOW | Session runtime switch `busy` prop ignores background after an interrupt (state waiting, rows running) | app/src/components/TaskScreen.tsx |
+| 6 | contract | LOW | api.setRuntime (task route) has no UI caller; CLI BUSY test string hardcoded English | app/src/api.ts |
+| 6 | spec | LOW | US3-5 says unconfirmed rows show "estado desconocido" on session end; code marks them "detenido" (matches US3-6/FR-011/T007) — spec contradicts itself | specs/009-chat-background-tasks/spec.md |
+| 6 | spec | LOW | No test asserts autopilot/review hint/saving-mode not triggered while Stop held; fallback tests use real sleeps (300 ms), not paused time | crates/delilah-daemon/src/hooks.rs |
