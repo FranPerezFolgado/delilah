@@ -193,6 +193,9 @@ export interface NewBacklogTask {
   view?: TaskView;
   /** Experimental chat mode: no terminal. */
   chat_mode?: boolean;
+  /** How it starts: `project` (default), `prompt` (with `prompt`, stored as its start message) or `none`. */
+  workflow?: string;
+  prompt?: string;
 }
 
 /** What can change in a backlog task before it starts. */
@@ -206,6 +209,9 @@ export interface BacklogChange {
   /** Implies saving mode. */
   autopilot?: boolean;
   view?: TaskView;
+  /** `project`, `prompt` (with `start_message`) or `none`. */
+  workflow?: string;
+  start_message?: string | null;
 }
 
 export interface RunRequest {

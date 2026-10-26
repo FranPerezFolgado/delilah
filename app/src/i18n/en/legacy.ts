@@ -267,8 +267,6 @@ export const EN: Record<string, string> = {
   "a partir de la clave": "from the key",
   "automática si la dejas vacía": "automatic if left empty",
   "la creará el análisis": "the analysis will create it",
-  "Primer mensaje (opcional; si lo dejas vacío usa": "First message (optional; if empty it uses",
-  "<lo que quieres hacer>": "<what you want to do>",
   "Preparando workspace…": "Preparing the workspace…",
   "Convertir": "Convert",
   "Elige la carpeta del repositorio": "Choose the repository's folder",

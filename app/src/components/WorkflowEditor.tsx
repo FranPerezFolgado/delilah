@@ -1,4 +1,4 @@
-import type { ProjectSettings, SettingsError, Start } from "../api";
+import type { ProjectSettings, SettingsError, Start, Task } from "../api";
 import { t } from "../i18n";
 import { workflowPresets } from "../workflowPresets";
 import { SkillPicker, useSkills } from "./SkillPicker";
@@ -112,6 +112,85 @@ export function WorkflowEditor({ project, value, errors, onChange }: {
         </>
       )}
       {other.map((f, i) => <span key={i} className="error field-error selectable" data-field={f.field}>{f.message}</span>)}
+    </div>
+  );
+}
+
+/** How one task starts: the project's own start, a message of its own, or nothing. */
+export interface StartChoice {
+  kind: "project" | "prompt" | "none";
+  /** The message when `kind` is "prompt". */
+  prompt: string;
+}
+
+/** The choice a stored task carries (the legacy `feature` workflow is the project's). */
+export const startChoiceOf = (task?: Pick<Task, "workflow" | "start_message"> | null): StartChoice =>
+  task?.workflow === "prompt" ? { kind: "prompt", prompt: task.start_message ?? "" }
+  : task?.workflow === "none" ? { kind: "none", prompt: "" }
+  : { kind: "project", prompt: "" };
+
+/** The `workflow`/`prompt` request fields; `always` also states the project's own start. */
+export const startFields = (c: StartChoice, always = false): { workflow?: string; prompt?: string } => {
+  const kind = c.kind;
+  if (kind === "prompt") return { workflow: "prompt", prompt: c.prompt.trim() };
+  if (kind === "none") return { workflow: "none" };
+  return always ? { workflow: "project" } : {};
+};
+
+/** A template as the task will send it: placeholders filled, doubled braces made single. */
+const fillTemplate = (template: string, vars: Record<string, string>): string =>
+  template.replace(/\{\{|\}\}|\{(\w+)\}/g, (m, name?: string) => (m === "{{" ? "{" : m === "}}" ? "}" : name && name in vars ? vars[name] : m));
+
+/** What the project's workflow sends when a task starts, for the typed ticket and title. */
+function projectStart(settings: Pick<ProjectSettings, "workflow"> | undefined, ticket: string, title: string): string {
+  const vars = { ticket, title, task: ticket || title };
+  const w = settings?.workflow;
+  if (!w || (w.kind === "single" && w.start.type === "builtin")) return t("Prompt integrado");
+  if (w.kind === "phased") return fillTemplate(w.plan, vars);
+  if (w.start.type === "message") return fillTemplate(w.start.template, vars);
+  return t("Nada");
+}
+
+/**
+ * The single start of one task: what the project's workflow resolves to (filled with the typed
+ * ticket and title), or a message of its own, or nothing. Same picker as the project settings.
+ */
+export function StartPicker({ project, settings, ticket, title, value, errors = [], disabled, onChange }: {
+  project: string;
+  settings?: Pick<ProjectSettings, "workflow">;
+  ticket: string;
+  title: string;
+  value: StartChoice;
+  errors?: Fields;
+  disabled?: boolean;
+  onChange: (c: StartChoice) => void;
+}) {
+  const skills = useSkills(project);
+  const name = value.kind === "prompt" ? leadingSkill(value.prompt) : null;
+  const missing = name !== null && skills !== null && skills.length > 0 && !skills.some((s) => s.name === name);
+  const own = errors.filter((f) => f.field === "workflow" || f.field.startsWith("workflow.") || f.field === "start_message" || f.field === "prompt");
+  return (
+    <div className="workflow-editor start-picker">
+      <label className="field">
+        <span>{t("Al empezar")}</span>
+        <select className="input" aria-label={t("Al empezar")} value={value.kind} disabled={disabled}
+          onChange={(e) => onChange({ ...value, kind: e.target.value as StartChoice["kind"] })}>
+          <option value="project">{t("El del proyecto")}</option>
+          <option value="prompt">{t("Mensaje propio")}</option>
+          <option value="none">{t("Nada")}</option>
+        </select>
+      </label>
+      {value.kind === "project" && (
+        <span className="ps-help start-resolved mono selectable">{projectStart(settings, ticket, title)}</span>
+      )}
+      {value.kind === "prompt" && (
+        <div className="field">
+          <SkillPicker skills={skills} value={value.prompt} label={t("Comando")} onChange={(v) => onChange({ kind: "prompt", prompt: v })} />
+          {missing && <span role="alert" className="wf-warning">{t("Delilah no encuentra la skill {name}; puedes guardar igualmente.", { name: `/${name}` })}</span>}
+          <span className="ps-help">{t("Se envía al empezar la tarea. Usa {ticket}, {title} y {task}.", { ticket: "{ticket}", title: "{title}", task: "{task}" })}</span>
+        </div>
+      )}
+      {own.map((f, i) => <span key={i} className="error field-error selectable" data-field={f.field}>{f.message}</span>)}
     </div>
   );
 }

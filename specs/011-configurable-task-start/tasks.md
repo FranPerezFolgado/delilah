@@ -108,10 +108,10 @@ task comes before the task that implements it.
 - [X] T040 [US4] Implement T039 in `crates/delilah-daemon/src/api.rs` (`CreateTask.prompt` → `start_message`, `TaskWorkflow::parse`, validation via `workflow::validate`), the `PATCH` path, and the `RunRequest.prompt` validation in `crates/delilah-daemon/src/run.rs`
 - [X] T041 [US4] Add a run test for the legacy case in `crates/delilah-daemon/src/run.rs`: a stored `prompt` task with no `start_message` and no request prompt starts with no message instead of a 400
 - [X] T042 [P] [US4] CLI in `crates/delilah-cli/src/main.rs`: `--no-prompt` on `run`/`new` (sends `workflow:"none"`), `--workflow` values `project|prompt|none|feature`, `project show` prints the workflow (kind and commands), `project unset <name> workflow`, `project add --workflow` prints a deprecation warning; parser tests in the same file
-- [ ] T043 [US4] Write failing tests in `app/src/components/NewTaskDialog.test.tsx`: the "Al empezar" field shows what the project's workflow resolves to (filled with the typed ticket/title); choosing another message (via `SkillPicker`) or "Nada" sends `workflow`/`prompt` accordingly; a non-phased choice in a phased project hides saving mode and autopilot
-- [ ] T044 [US4] Implement T043 in `app/src/components/NewTaskDialog.tsx` (replace the "Primer mensaje" textarea, reuse `WorkflowEditor`'s single-start part)
-- [ ] T045 [US4] Show and edit the stored start (`workflow`, `start_message`) in `app/src/components/BacklogTaskView.tsx` before starting, saving via `PATCH`; tests in `BacklogTaskView.test.tsx`
-- [ ] T046 [P] [US4] English strings for the new-task and backlog changes in `app/src/i18n/en/`
+- [X] T043 [US4] Write failing tests in `app/src/components/NewTaskDialog.test.tsx`: the "Al empezar" field shows what the project's workflow resolves to (filled with the typed ticket/title); choosing another message (via `SkillPicker`) or "Nada" sends `workflow`/`prompt` accordingly; a non-phased choice in a phased project hides saving mode and autopilot
+- [X] T044 [US4] Implement T043 in `app/src/components/NewTaskDialog.tsx` (replace the "Primer mensaje" textarea, reuse `WorkflowEditor`'s single-start part)
+- [X] T045 [US4] Show and edit the stored start (`workflow`, `start_message`) in `app/src/components/BacklogTaskView.tsx` before starting, saving via `PATCH`; tests in `BacklogTaskView.test.tsx`
+- [X] T046 [P] [US4] English strings for the new-task and backlog changes in `app/src/i18n/en/`
 
 **Checkpoint**: all four stories work independently.
 

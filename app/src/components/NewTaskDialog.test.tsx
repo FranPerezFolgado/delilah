@@ -512,13 +512,12 @@ describe("NewTaskDialog layout and errors", () => {
     expect(container.textContent).not.toContain("Lanzar");
   });
 
-  it("puts Vista, Rama and Primer mensaje under Opciones avanzadas", () => {
+  it("puts Vista and Rama under Opciones avanzadas", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const { container } = mount();
     const adv = container.querySelector("details")!;
     expect(adv.querySelector("summary")!.textContent).toBe("Opciones avanzadas");
     expect(adv.querySelector('input[aria-label="Rama"]')).not.toBeNull();
-    expect(adv.querySelector("textarea")).not.toBeNull();
     expect(adv.querySelector('[role="radiogroup"]')).not.toBeNull();
   });
 
@@ -599,5 +598,79 @@ describe("NewTaskDialog layout and errors", () => {
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => getByText("boom"));
     expect(queryByText("Iniciar en un worktree")).toBeNull();
+  });
+});
+
+describe("NewTaskDialog start override", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const withWorkflow = (workflow: Project["settings"]["workflow"]): Project[] => [{ ...projects[0], workflow: "project", settings: { ...DEFAULT_PROJECT_SETTINGS, workflow } }];
+  const mountWith = (ps: Project[]) =>
+    render(<NewTaskDialog projects={ps} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
+  const startSelect = (c: HTMLElement) => c.querySelector('select[aria-label="Al empezar"]') as HTMLSelectElement;
+
+  beforeEach(() => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    vi.spyOn(api, "projectSkills").mockResolvedValue([]);
+  });
+
+  it("shows what the project's workflow resolves to, filled with the typed ticket and title", () => {
+    const { container } = mountWith(withWorkflow({ kind: "single", start: { type: "message", template: "/fix {ticket} {title}" } }));
+    expect(startSelect(container).value).toBe("project");
+    expect(container.querySelector(".start-resolved")!.textContent).toBe("/fix PROJ-1 Algo");
+  });
+
+  it("shows the plan of a phased project", () => {
+    const { container } = mountWith(withWorkflow({ kind: "phased", plan: "/feature {task}", implement: "/i", review: "/r" }));
+    expect(container.querySelector(".start-resolved")!.textContent).toBe("/feature PROJ-1");
+  });
+
+  it("sends no override for the project's own start", async () => {
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = mountWith(projects);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].workflow).toBeUndefined();
+    expect(run.mock.calls[0][0].prompt).toBeUndefined();
+  });
+
+  it("another message is sent as workflow prompt, and hides saving mode and autopilot", async () => {
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = mountWith(projects);
+    expect(btn(container, "Autopiloto")).toBeDefined();
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/fix {ticket}" } });
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    expect(btn(container, "Ahorro")).toBeUndefined();
+    expect(container.textContent).toContain("no con un prompt propio");
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0]).toMatchObject({ workflow: "prompt", prompt: "/fix {ticket}", saving_mode: false });
+  });
+
+  it("Nada is sent as workflow none and hides the phased controls; it is also saved to the backlog", async () => {
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { container, getByText } = mountWith(projects);
+    fireEvent.change(startSelect(container), { target: { value: "none" } });
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0]).toMatchObject({ workflow: "none" });
+  });
+
+  it("shows the daemon's template errors inline", async () => {
+    vi.spyOn(api, "run").mockRejectedValueOnce(new ApiError("invalid", 422, false, undefined, undefined, [{ field: "workflow.start.template", code: "x", message: "placeholder desconocido" }]));
+    const { container } = mountWith(projects);
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/x {nope}" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(container.querySelector('[data-field="workflow.start.template"]')).not.toBeNull());
+  });
+
+  it("a backlog task keeps its stored message", () => {
+    const { container } = render(
+      <NewTaskDialog projects={projects} existing={{ ...started, workflow: "prompt", start_message: "/mine" }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(startSelect(container).value).toBe("prompt");
+    expect((container.querySelector('input[aria-label="Comando"]') as HTMLInputElement).value).toBe("/mine");
   });
 });

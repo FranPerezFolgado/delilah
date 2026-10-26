@@ -453,6 +453,7 @@ export function App() {
                   task={task}
                   spec={specs[owner]}
                   project={project}
+                  projects={projects}
                   tasks={tasks}
                   sessions={sessions.filter((s) => s.task === owner)}
                   asks={inbox.filter((i) => i.task === owner && (i.ask || i.permission))}

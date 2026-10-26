@@ -111,7 +111,7 @@ describe("BacklogTaskView autopilot", () => {
     const prompt = mount({ ...task, workflow: "prompt" });
     expect(prompt.container.textContent).toContain("no con un prompt propio");
     prompt.unmount();
-    const other = mount({ ...task, workflow: "custom" });
+    const other = render(<BacklogTaskView task={task} projects={[{ ...web, settings: DEFAULT_PROJECT_SETTINGS }]} onChanged={() => {}} />);
     expect(other.container.textContent).toContain("flujo por fases");
   });
 
@@ -162,5 +162,57 @@ describe("BacklogTaskView autopilot", () => {
     );
     expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
     expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
+  });
+});
+
+describe("BacklogTaskView start", () => {
+  beforeEach(() => vi.spyOn(api, "projectSkills").mockResolvedValue([]));
+  const startSelect = (c: HTMLElement) => c.querySelector('select[aria-label="Al empezar"]') as HTMLSelectElement;
+
+  it("shows the stored message and the project's own start for a plain task", () => {
+    const a = mount({ ...task, workflow: "prompt", start_message: "/mine" });
+    expect(startSelect(a.container).value).toBe("prompt");
+    expect((a.container.querySelector('input[aria-label="Comando"]') as HTMLInputElement).value).toBe("/mine");
+    a.unmount();
+    const b = mount({ ...task, workflow: "project", start_message: null });
+    expect(startSelect(b.container).value).toBe("project");
+    expect(b.container.querySelector(".start-resolved")!.textContent).toBe("/p");
+  });
+
+  it("saves a changed start with PATCH workflow and start_message", async () => {
+    const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
+    const { container } = mount({ ...task, workflow: "project" });
+    expect(btn(container, "Guardar").disabled).toBe(true);
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/fix {ticket}" } });
+    fireEvent.click(btn(container, "Guardar"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1]).toMatchObject({ workflow: "prompt", start_message: "/fix {ticket}" });
+  });
+
+  it("Nada saves workflow none and hides autopilot", async () => {
+    const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
+    const { container } = mount({ ...task, workflow: "project" });
+    fireEvent.change(startSelect(container), { target: { value: "none" } });
+    expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
+    fireEvent.click(btn(container, "Guardar"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1]).toMatchObject({ workflow: "none", start_message: null });
+  });
+
+  it("starts with the chosen start", async () => {
+    const run = vi.spyOn(api, "run").mockResolvedValue({ ...task, status: { type: "running" } });
+    const { container } = mount({ ...task, workflow: "prompt", start_message: "/mine" });
+    fireEvent.click(btn(container, "Iniciar"));
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0]).toMatchObject({ workflow: "prompt", prompt: "/mine" });
+  });
+
+  it("shows template errors inline", async () => {
+    vi.spyOn(api, "updateTask").mockRejectedValue(new ApiError("invalid", 422, false, undefined, undefined, [{ field: "workflow.start.template", code: "x", message: "placeholder desconocido" }]));
+    const { container } = mount({ ...task, workflow: "prompt", start_message: "/mine" });
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/x {nope}" } });
+    fireEvent.click(btn(container, "Guardar"));
+    await waitFor(() => expect(container.querySelector('[data-field="workflow.start.template"]')).not.toBeNull());
   });
 });
