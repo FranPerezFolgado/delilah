@@ -119,8 +119,15 @@ fn answer_next_card(env: &Env, task: &str, seen: &mut Vec<String>, decision: &st
     let item = env.wait_for(
         &format!("a new permission card of {task}"),
         T,
+        // Only a card: between two asks the session's attention can list a permission
+        // item with no `permission` to answer.
         || match inbox_item(env, task, "permission") {
-            Some(i) if !seen.iter().any(|s| i["permission"]["id"] == s.as_str()) => Ok(i),
+            Some(i)
+                if i["permission"]["id"].is_string()
+                    && !seen.iter().any(|s| i["permission"]["id"] == s.as_str()) =>
+            {
+                Ok(i)
+            }
             _ => Err(()),
         },
     );
