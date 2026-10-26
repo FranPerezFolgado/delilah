@@ -44,7 +44,7 @@ Tests: none (not requested; nothing executable ships).
 - [X] T010 [US3] Q4: add to Home Screen, record full-screen launch and iOS version in `specs/008-mobile-access-analysis/experiment/README.md`
 - [X] T011 [US5] Q5 + Q6: conversation and terminal at phone width; whether opening the terminal on the phone resizes the Mac's view; record in `specs/008-mobile-access-analysis/experiment/README.md`
 - [X] T012 Tear down: `tailscale serve reset`, stop the preview (Ctrl-C on its process, never by name)
-- [ ] T013 Update `specs/008-mobile-access-analysis/research.md`: turn each `[verify in Qn]` into "verified (Qn)" or a correction; if the phase was skipped, turn them into "from docs, unverified". If a result contradicts R1–R9, revise them and say so at the top of research.md
+- [X] T013 Update `specs/008-mobile-access-analysis/research.md`: turn each `[verify in Qn]` into "verified (Qn)" or a correction; if the phase was skipped, turn them into "from docs, unverified". If a result contradicts R1–R9, revise them and say so at the top of research.md
 
 **Checkpoint**: no `[verify in` marker remains in research.md.
 
