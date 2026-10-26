@@ -78,7 +78,11 @@ impl Live {
         }
         // Waiting on the user or paused: nothing is running any more.
         if matches!(state, LiveState::Waiting | LiveState::Paused) {
-            let cleared = self.activity.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            let cleared = self
+                .activity
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
             if cleared {
                 self.events.emit(Topic::Activity);
             }
@@ -87,7 +91,11 @@ impl Live {
 
     /// Applies one activity event, announcing it when the view changed; says whether it did.
     pub fn update_activity(&self, event: ActivityEvent) -> bool {
-        let changed = self.activity.lock().unwrap_or_else(|e| e.into_inner()).apply(event);
+        let changed = self
+            .activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .apply(event);
         if changed {
             self.events.emit(Topic::Activity);
         }

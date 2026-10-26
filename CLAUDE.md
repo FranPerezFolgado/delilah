@@ -1,8 +1,7 @@
 # Delilah
 
-Native macOS orchestrator for coding agents, written in Rust. Design doc:
-https://claude.ai/code/artifact/f0306b42-531c-43d7-a2b3-79f94f160204
-UI mock-ups: https://claude.ai/artifact/6kgvh73UPJWaboZVJiddre
+Native macOS orchestrator for coding agents, written in Rust. Design:
+[docs/vision.md](docs/vision.md). UI screenshots: `docs/redesign/`.
 
 ## Current scope
 
@@ -22,38 +21,38 @@ Read these before changing anything; keep them true when you change behaviour:
 - [docs/development.md](docs/development.md): running, testing, conventions,
   releasing, gotchas.
 - [docs/vision.md](docs/vision.md): the original plan, for what is not built yet.
-- [README.md](README.md): every feature as the user sees it.
+- [docs/usage.md](docs/usage.md): every feature as the user sees it (the README is a short newcomer page).
 
-When a feature lands, update `docs/status.md` (and the README for user-facing
+When a feature lands, update `docs/status.md` (and docs/usage.md for user-facing
 behaviour); when a decision is taken, add it to `docs/decisions.md`.
 
-## Versioning: every Spec Kit task bumps the version
+## Versioning: only when the user asks
 
-Every feature or fix done with Spec Kit (`/feature`, `/orchestrate`,
-`/speckit-implement`) ends with a version bump on its branch, before the PR.
-Decide the level yourself from what the change does (semver):
+Don't bump the version on feature or fix branches, not even at the end of a Spec Kit
+task (`/feature`, `/orchestrate`, `/speckit-implement`): several features ship in one
+release, and the user decides when to bump and release. When asked, pick the level
+with semver:
 
 - **major**: breaks something already in use — HTTP API or CLI changes that old
   clients can't handle, data/state that needs manual migration, removed features.
 - **minor**: a new user-facing feature or capability, backwards compatible.
 - **patch**: fixes, docs, internal refactors with no new behaviour.
 
-Bump from the version on `main` (re-check it if `main` moved before merging),
-in the four places listed in [docs/development.md](docs/development.md#releasing)
-plus the lockfiles (`scripts/bump-version.sh <level> --commit` does both), as its own commit
-`chore: bump version to X.Y.Z`, and say in the PR which level you picked and why. Tagging,
-building and publishing are `make release` on `main` and the tag workflow, as in the release steps.
+How to bump and release is in [docs/development.md](docs/development.md#releasing).
 
 ## Ground rules
 
-- Developed on a personal Mac, tested on the work Mac. Never reference or copy
-  anything from the work repos; use `scripts/make-fixture-parent.sh` and Jira
-  JSON fixtures instead.
+- Never copy code or data from private repos; use `scripts/make-fixture-parent.sh` and
+  the Jira JSON fixtures.
 - Agent hooks go in a settings file outside the repo, passed with `claude --settings`;
   never in the worktree or the global `~/.claude`. Spawn agents with a clean env.
-- Git and gh here run as the personal account (FranPerezFolgado). The machine
-  also has work credentials: confirm the account before any remote operation.
+- If several GitHub accounts are configured, confirm the one `gh` uses before any
+  remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.
+- PRs are always squash-merged (`gh pr merge --squash`; the repo allows nothing else). The
+  PR title becomes the commit on `main` and the changelog line, so write it as a
+  Conventional Commit (`feat: …`, `fix: …`), and keep the body as the commit message
+  (decision 83).
 
 ## Parallelize by default
 
@@ -99,7 +98,7 @@ scripts/preview.sh            # this worktree's daemon + UI, in the first free s
 scripts/preview.sh --fresh    # from an empty state
 ```
 
-It prints the UI URL (http://localhost:150N) and the API (http://127.0.0.1:750N),
+It prints the UI URL (`http://localhost:150N`) and the API (`http://127.0.0.1:750N`),
 with its own state in `fixtures/preview-home-N` and the fixture repos to register
 as projects. Open the UI in a browser (or the browser pane) to try the feature;
 use `DELILAH_URL=<API> target/debug/delilah …` or curl for the API. Run it in the

@@ -9,6 +9,7 @@ use delilah_core::TaskKey;
 use delilah_git::{GitOptions, Workspace};
 
 use crate::api::ApiError;
+use crate::preview::{GRACE, end_group};
 use crate::state::AppState;
 
 /// Notice kind: archiving a merged task was refused, nothing was removed.
@@ -48,8 +49,14 @@ pub(crate) struct Outcome {
 pub(crate) async fn stop_sessions(app: &AppState, key: &TaskKey) {
     crate::permissions::release_task(app, key.as_str()).await;
     for live in app.sessions.of_task(key.as_str()) {
+        // A terminal agent leads its own process group: what it started (a build, a
+        // dev server) goes with it, not to keep writing in the workspace.
+        let group = live.runtime.as_pty().and_then(|pty| pty.process_id());
         let _ = live.runtime.kill();
         live.runtime.wait().await;
+        if let Some(pid) = group {
+            end_group(pid, GRACE).await;
+        }
     }
 }
 
@@ -68,6 +75,9 @@ pub(crate) async fn release_workspace(
     let Some((root, ws)) = app.store.workspace(key).await? else {
         return Ok(());
     };
+    // Nothing of it may still be writing in the folder while git deletes it, or the
+    // removal stops halfway ("Directory not empty").
+    app.previews.stop_and_wait(key.as_str()).await;
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };

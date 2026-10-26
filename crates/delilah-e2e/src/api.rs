@@ -118,6 +118,20 @@ impl Api {
         self.get(&format!("/api/v1/tasks/{key}"))
     }
 
+    /// The task's history: its recorded events, oldest first.
+    pub fn task_events(&self, key: &str) -> Value {
+        self.get(&format!("/api/v1/tasks/{key}/events"))
+    }
+
+    /// Sets a preference (`PUT /preferences/<key>`), e.g. `save-notes` to `false`.
+    pub fn set_preference(&self, key: &str, value: Value) -> Value {
+        self.ok(
+            Method::PUT,
+            &format!("/api/v1/preferences/{key}"),
+            Some(value),
+        )
+    }
+
     pub fn set_phase(&self, key: &str, phase: &str) -> Value {
         self.post(
             &format!("/api/v1/tasks/{key}/phase"),

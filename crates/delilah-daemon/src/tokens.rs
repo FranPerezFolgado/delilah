@@ -49,7 +49,11 @@ mod tests {
 
     fn delta(total: u64, consumed: usize, id: &str) -> UsageDelta {
         UsageDelta {
-            usage: TokenUsage { total, input: total, ..Default::default() },
+            usage: TokenUsage {
+                total,
+                input: total,
+                ..Default::default()
+            },
             consumed,
             last_id: Some(id.into()),
         }
@@ -59,7 +63,10 @@ mod tests {
     fn apply_adds_and_advances() {
         let mut m = TokenMeter::default();
         assert!(m.apply(0, delta(10, 100, "a")));
-        assert_eq!((m.offset, m.usage.total, m.last_id.as_deref()), (100, 10, Some("a")));
+        assert_eq!(
+            (m.offset, m.usage.total, m.last_id.as_deref()),
+            (100, 10, Some("a"))
+        );
         assert!(!m.apply(100, delta(0, 20, "a")));
         assert_eq!(m.offset, 120);
     }

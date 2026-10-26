@@ -5,7 +5,7 @@ import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
 import { onOpenTask } from "./platform";
-import { setLanguage, t, type LangSetting } from "./i18n";
+import { parseSetting, setLanguage, t, type LangSetting } from "./i18n";
 import { CHANGES, OFFICE, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
 import { ideaToOpen } from "./components/ideas";
 import { BoardView } from "./components/BoardView";
@@ -170,8 +170,8 @@ export function App() {
   };
   useEffect(() => {
     api
-      .preference<LangSetting>("language")
-      .then((l) => l && applyLanguage(l))
+      .preference<unknown>("language")
+      .then((l) => l != null && applyLanguage(parseSetting(l)))
       .catch(() => {});
   }, []);
 
@@ -403,7 +403,7 @@ export function App() {
             </div>
           )}
           <div className={`shell-content${offline ? " is-offline" : ""}`} aria-disabled={offline || undefined} {...(offline ? { inert: true } : {})}>
-          <GlobalNotices tasks={tasks} usage={usage} current={view === "tasks" ? selected : null} onOpenTask={openTask} />
+          <GlobalNotices tasks={tasks} usage={usage} current={view === "tasks" ? selected : null} onOpenTask={openTask} onOpenInbox={() => setView("inbox")} />
           <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
           {view === "inbox" && <InboxView items={inbox} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
           {view === "playground" && (

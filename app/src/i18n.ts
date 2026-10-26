@@ -1,24 +1,34 @@
 // The app's language. Texts are written in Spanish in the components, wrapped in
 // t("…"); the English ones live in i18n/en.ts, keyed by the Spanish text. A text with
-// no translation shows in Spanish rather than breaking.
+// no translation shows in Spanish rather than breaking. The language is the
+// preference when it is "es" or "en"; anything else follows the system, and English
+// is the fallback for any system that is not Spanish.
 import { EN } from "./i18n/en";
 
 export type Lang = "es" | "en";
 /** What the user picked in Ajustes: "auto" follows the Mac's language. */
 export type LangSetting = "auto" | Lang;
 
-let current: Lang = detect("auto");
-
-export function detect(setting: LangSetting): Lang {
-  if (setting !== "auto") return setting;
-  const system = typeof navigator !== "undefined" ? navigator.language : "es";
-  return system.toLowerCase().startsWith("es") ? "es" : "en";
+/** The stored `language` preference as a setting: "es"/"en" as is, anything else "auto". */
+export function parseSetting(v: unknown): LangSetting {
+  return v === "es" || v === "en" ? v : "auto";
 }
 
-export function setLanguage(setting: LangSetting) {
+let current: Lang = "en";
+
+/** The rule is in specs/008-public-repo-onboarding/contracts/language.md. */
+export function detect(setting: unknown): Lang {
+  if (setting === "es" || setting === "en") return setting;
+  const system = typeof navigator !== "undefined" ? navigator.language : undefined;
+  return typeof system === "string" && system.toLowerCase().startsWith("es") ? "es" : "en";
+}
+
+export function setLanguage(setting: unknown) {
   current = detect(setting);
   if (typeof document !== "undefined") document.documentElement.lang = current;
 }
+
+setLanguage("auto");
 
 export const lang = () => current;
 

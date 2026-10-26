@@ -848,8 +848,11 @@ pub fn usage_delta(bytes: &[u8], last_id: Option<&str>) -> UsageDelta {
             last = Some(id.to_string());
         }
         let n = |k: &str| msg["usage"][k].as_u64().unwrap_or(0);
-        let (input, output, cache_write) =
-            (n("input_tokens"), n("output_tokens"), n("cache_creation_input_tokens"));
+        let (input, output, cache_write) = (
+            n("input_tokens"),
+            n("output_tokens"),
+            n("cache_creation_input_tokens"),
+        );
         usage.add(&TokenUsage {
             total: input.saturating_add(cache_write).saturating_add(output),
             input,
@@ -858,7 +861,11 @@ pub fn usage_delta(bytes: &[u8], last_id: Option<&str>) -> UsageDelta {
             cache_read: n("cache_read_input_tokens"),
         });
     }
-    UsageDelta { usage, consumed, last_id: last }
+    UsageDelta {
+        usage,
+        consumed,
+        last_id: last,
+    }
 }
 
 #[cfg(test)]
@@ -881,7 +888,13 @@ mod tests {
         assert_eq!(d.last_id.as_deref(), Some("m2"));
         assert_eq!(
             d.usage,
-            TokenUsage { total: 30, input: 6, output: 10, cache_write: 14, cache_read: 200 }
+            TokenUsage {
+                total: 30,
+                input: 6,
+                output: 10,
+                cache_write: 14,
+                cache_read: 200
+            }
         );
     }
 
@@ -893,8 +906,14 @@ mod tests {
         let d = usage_delta(text.as_bytes(), None);
         assert_eq!(d.usage.total, u64::MAX);
         assert_eq!(d.usage.input, u64::MAX);
-        let mut t = TokenUsage { total: u64::MAX, ..Default::default() };
-        t.add(&TokenUsage { total: 5, ..Default::default() });
+        let mut t = TokenUsage {
+            total: u64::MAX,
+            ..Default::default()
+        };
+        t.add(&TokenUsage {
+            total: 5,
+            ..Default::default()
+        });
         assert_eq!(t.total, u64::MAX);
     }
 
@@ -911,10 +930,20 @@ mod tests {
     fn usage_delta_leaves_partial_line_and_skips_noise() {
         let u = serde_json::json!({"output_tokens":4});
         let full = asst("m1", u.clone());
-        let text = format!("not json\n{{\"type\":\"user\"}}\n{full}{}", &asst("m2", u)[..20]);
+        let text = format!(
+            "not json\n{{\"type\":\"user\"}}\n{full}{}",
+            &asst("m2", u)[..20]
+        );
         let d = usage_delta(text.as_bytes(), None);
         assert_eq!(d.consumed, text.len() - 20);
-        assert_eq!(d.usage, TokenUsage { total: 4, output: 4, ..Default::default() });
+        assert_eq!(
+            d.usage,
+            TokenUsage {
+                total: 4,
+                output: 4,
+                ..Default::default()
+            }
+        );
         assert_eq!(usage_delta(b"", None).consumed, 0);
         assert_eq!(usage_delta(b"{\"type\":\"assi", None).consumed, 0);
     }

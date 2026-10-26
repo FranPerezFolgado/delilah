@@ -104,7 +104,10 @@ async fn check(app: &AppState, live: &Live) {
         .and_then(|p| std::fs::metadata(p).ok())
         .map(|m| m.len());
     let (before, offset, last_id) = {
-        let mut map = app.transcript_progress.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = app
+            .transcript_progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         match map.get_mut(&live.id) {
             Some(p) => {
                 // Another file, or one that shrank: count it again from the start.
@@ -117,7 +120,11 @@ async fn check(app: &AppState, live: &Live) {
                 if let Some(size) = size {
                     p.seen = size;
                 }
-                (Some(before), p.meter.offset(), p.meter.last_id().map(String::from))
+                (
+                    Some(before),
+                    p.meter.offset(),
+                    p.meter.last_id().map(String::from),
+                )
             }
             None => {
                 // First sight: the lines already there are not news for the
@@ -167,7 +174,10 @@ async fn check(app: &AppState, live: &Live) {
         return;
     };
     let changed = {
-        let mut map = app.transcript_progress.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = app
+            .transcript_progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         map.get_mut(&live.id)
             .is_some_and(|p| p.meter.apply(offset, delta))
     };
@@ -348,7 +358,10 @@ mod tests {
     }
 
     fn total(app: &AppState, id: &str) -> Option<u64> {
-        let map = app.transcript_progress.lock().unwrap_or_else(|e| e.into_inner());
+        let map = app
+            .transcript_progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         map.get(id).map(|p| p.tokens().map_or(0, |t| t.total))
     }
 
@@ -461,7 +474,11 @@ mod tests {
     }
 
     fn reads(app: &AppState, id: &str) -> u32 {
-        app.transcript_progress.lock().unwrap().get(id).map_or(0, |p| p.reads)
+        app.transcript_progress
+            .lock()
+            .unwrap()
+            .get(id)
+            .map_or(0, |p| p.reads)
     }
 
     #[tokio::test]
@@ -482,7 +499,11 @@ mod tests {
     #[tokio::test]
     async fn a_shrunk_or_replaced_transcript_is_counted_again() {
         let app = app().await;
-        let (live, path) = session(&app, SessionKind::Claude, &(usage_line("m1", 7) + &usage_line("m2", 5)));
+        let (live, path) = session(
+            &app,
+            SessionKind::Claude,
+            &(usage_line("m1", 7) + &usage_line("m2", 5)),
+        );
         tick(&app).await;
         assert_eq!(total(&app, &live.id), Some(12));
         // Shrinks (rewritten shorter).
@@ -494,7 +515,11 @@ mod tests {
             .config
             .claude_projects
             .join(format!("delilah-tw-other-{}.jsonl", live.id));
-        std::fs::write(&other, usage_line("a", 1) + &usage_line("b", 1) + &usage_line("c", 1)).unwrap();
+        std::fs::write(
+            &other,
+            usage_line("a", 1) + &usage_line("b", 1) + &usage_line("c", 1),
+        )
+        .unwrap();
         live.set_transcript(other);
         tick(&app).await;
         assert_eq!(total(&app, &live.id), Some(3));
@@ -506,6 +531,9 @@ mod tests {
         let (live, _) = session(&app, SessionKind::Claude, "{\"type\":\"user\"}\n");
         tick(&app).await;
         let map = app.transcript_progress.lock().unwrap();
-        assert_eq!(map.get(&live.id).unwrap().tokens().map(|t| t.total), Some(0));
+        assert_eq!(
+            map.get(&live.id).unwrap().tokens().map(|t| t.total),
+            Some(0)
+        );
     }
 }

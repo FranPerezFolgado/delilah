@@ -16,13 +16,23 @@ fn capped(event: ActivityEvent) -> ActivityEvent {
         role: shorten(&a.role),
     };
     match event {
-        ActivityEvent::ToolStarted { agent: a, mut action } => {
+        ActivityEvent::ToolStarted {
+            agent: a,
+            mut action,
+        } => {
             // The id pairs with the capped `ToolEnded` id, so it is cut the same way.
             action.id = shorten(&action.id);
             action.tool = shorten(&action.tool);
-            ActivityEvent::ToolStarted { agent: a.map(agent), action }
+            ActivityEvent::ToolStarted {
+                agent: a.map(agent),
+                action,
+            }
         }
-        ActivityEvent::ToolEnded { agent: a, id, failed } => ActivityEvent::ToolEnded {
+        ActivityEvent::ToolEnded {
+            agent: a,
+            id,
+            failed,
+        } => ActivityEvent::ToolEnded {
             agent: a.map(agent),
             id: shorten(&id),
             failed,
@@ -339,7 +349,10 @@ mod tests {
         let mut log = ActivityLog::new(t(0));
         let none = live(&[]);
         let event = ActivityEvent::ToolStarted {
-            agent: Some(AgentRef { id: "a1".into(), role: "r".into() }),
+            agent: Some(AgentRef {
+                id: "a1".into(),
+                role: "r".into(),
+            }),
             action: Action {
                 id: "toolu_1".into(),
                 kind: ActionKind::Edit,
@@ -371,7 +384,10 @@ mod tests {
         let long = "x".repeat(100);
         let mut log = ActivityLog::new(t(0));
         let none = live(&[]);
-        let agent = || AgentRef { id: long.clone(), role: long.clone() };
+        let agent = || AgentRef {
+            id: long.clone(),
+            role: long.clone(),
+        };
         log.record(
             "s",
             "T-1",
@@ -389,23 +405,48 @@ mod tests {
             },
             &none,
         );
-        log.record("s", "T-1", t(2), ActivityEvent::ToolEnded { agent: Some(agent()), id: long.clone(), failed: false }, &none);
-        log.record("s", "T-1", t(3), ActivityEvent::HelperStarted { agent: agent() }, &none);
-        log.record("s", "T-1", t(4), ActivityEvent::HelperEnded { id: long.clone() }, &none);
+        log.record(
+            "s",
+            "T-1",
+            t(2),
+            ActivityEvent::ToolEnded {
+                agent: Some(agent()),
+                id: long.clone(),
+                failed: false,
+            },
+            &none,
+        );
+        log.record(
+            "s",
+            "T-1",
+            t(3),
+            ActivityEvent::HelperStarted { agent: agent() },
+            &none,
+        );
+        log.record(
+            "s",
+            "T-1",
+            t(4),
+            ActivityEvent::HelperEnded { id: long.clone() },
+            &none,
+        );
         let v = serde_json::to_value(log.for_owner("T-1", None, &none)).unwrap();
         let mut strings = Vec::new();
         for e in v[0]["entries"].as_array().unwrap() {
             for key in ["id", "agent", "action"] {
                 match &e[key] {
                     serde_json::Value::String(s) => strings.push(s.clone()),
-                    serde_json::Value::Object(o) => strings.extend(
-                        o.values().filter_map(|x| x.as_str()).map(String::from),
-                    ),
+                    serde_json::Value::Object(o) => {
+                        strings.extend(o.values().filter_map(|x| x.as_str()).map(String::from))
+                    }
                     _ => {}
                 }
             }
         }
         assert!(strings.len() >= 9);
-        assert!(strings.iter().all(|s| s.chars().count() <= 40), "{strings:?}");
+        assert!(
+            strings.iter().all(|s| s.chars().count() <= 40),
+            "{strings:?}"
+        );
     }
 }

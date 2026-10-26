@@ -15,7 +15,12 @@ import { expect, test } from "./fixtures";
 import type { E2eEnv } from "./setup";
 
 const MODE = process.env.DELILAH_SCREENS ?? "";
-const OUT = path.resolve(import.meta.dirname, "..", "..", "docs", "redesign", MODE);
+// DELILAH_SCREENS_OUT overrides the output dir (e.g. a temp dir); DELILAH_SCREENS_LANG sets the UI language
+// (default "es"); DELILAH_SCREENS_ONLY is a comma-separated list of screen names to capture (default: all).
+const OUT_DIR = process.env.DELILAH_SCREENS_OUT ?? "";
+const OUT = OUT_DIR ? path.resolve(OUT_DIR) : path.resolve(import.meta.dirname, "..", "..", "docs", "redesign", MODE);
+const LANG = process.env.DELILAH_SCREENS_LANG || "es";
+const ONLY = (process.env.DELILAH_SCREENS_ONLY ?? "").split(",").map((n) => n.trim()).filter(Boolean);
 
 const THEMES = [
   { scheme: "dark", suffix: "oscuro" },
@@ -36,7 +41,10 @@ const K = {
   jira: "PROJ-1246",
 } as const;
 
-const LIVE_TITLE = "Chat: tarjetas de permiso en vivo";
+/** Seed text: Spanish by default, English when DELILAH_SCREENS_LANG=en. */
+const tr = (es: string, en: string) => (LANG === "en" ? en : es);
+
+const LIVE_TITLE = tr("Chat: tarjetas de permiso en vivo", "Chat: live permission cards");
 const BRANCH = {
   done: "feature/libre-4-reintentos-webhook",
   live: "feature/libre-5-tarjetas-permiso",
@@ -46,7 +54,10 @@ const BRANCH = {
 };
 
 test.describe.configure({ mode: "serial" });
-test.skip(MODE !== "antes" && MODE !== "despues", "set DELILAH_SCREENS=antes|despues to take the screenshots");
+test.skip(
+  MODE !== "antes" && MODE !== "despues" && !OUT_DIR,
+  "set DELILAH_SCREENS=antes|despues (or DELILAH_SCREENS_OUT) to take the screenshots",
+);
 test.use({ locale: "es-ES", timezoneId: "Europe/Madrid" });
 
 // ---------- daemon helpers (the fixtures' Api has no PUT) ----------
@@ -166,13 +177,13 @@ async function open(browser: Browser, env: E2eEnv, theme: Theme, width = 1440, h
   });
   const page = await ctx.newPage();
   await page.goto("/");
-  await expect(nav(page).getByRole("button", { name: /^Bandeja/ })).toBeVisible();
+  await expect(nav(page).getByRole("button", { name: /^(Bandeja|Inbox)/ })).toBeVisible();
   // The language preference is read after the first render.
-  await expect(nav(page).getByRole("button", { name: /^Ajustes/ })).toBeVisible();
+  await expect(nav(page).getByRole("button", { name: /^(Ajustes|Settings)/ })).toBeVisible();
   return { ctx, page };
 }
 
-const nav = (page: Page) => page.getByRole("navigation", { name: "Navegación" });
+const nav = (page: Page) => page.getByRole("navigation", { name: /^(Navegación|Navigation)$/ });
 
 /** Waits for the screen to have nothing loading, fonts in and a frame painted. */
 async function settle(page: Page) {
@@ -183,6 +194,7 @@ async function settle(page: Page) {
 }
 
 async function shot(page: Page, name: string, theme: Theme) {
+  if (ONLY.length && !ONLY.includes(name)) return;
   await settle(page);
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, `${name}-${theme.suffix}.png`), animations: "disabled", caret: "hide" });
@@ -194,7 +206,7 @@ const row = (page: Page, key: string) => nav(page).getByRole("button", { name: n
 /** The board, by its shortcut (⌘1): the sidebar's «Tareas» shows the selected task's screen. */
 async function board(page: Page) {
   await page.keyboard.press("ControlOrMeta+1");
-  await expect(page.getByRole("heading", { name: "Tareas" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^(Tareas|Tasks)$/ })).toBeVisible();
 }
 
 async function openTask(page: Page, key: string) {
@@ -224,7 +236,7 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
   if (tasks.length || projects.length) {
     throw new Error("the daemon is not empty: run this spec alone (npx playwright test screens)");
   }
-  await call(env, "PUT", "/api/v1/preferences/language", "es");
+  await call(env, "PUT", "/api/v1/preferences/language", LANG);
   await call(env, "POST", "/api/v1/projects", { path: env.fixtures.repo, kind: "repo", name: "signal" });
   await call(env, "POST", "/api/v1/projects", { path: env.fixtures.parent, kind: "parent", name: "delilah" });
   // The «antes» capture ran when a project defaulted to isolated worktrees; the default is the checkout now.
@@ -234,43 +246,43 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
 
   // PRs first: the daemon links them by branch as soon as the tasks exist.
   writePrs(env.gh_dir, [
-    { n: 12, branch: BRANCH.done, title: "Reintentos con backoff en el webhook de Stripe", state: "MERGED", ci: "SUCCESS" },
+    { n: 12, branch: BRANCH.done, title: tr("Reintentos con backoff en el webhook de Stripe", "Retries with backoff in the Stripe webhook"), state: "MERGED", ci: "SUCCESS" },
     {
       n: 14, branch: BRANCH.live, title: LIVE_TITLE, state: "OPEN", ci: "FAILURE",
-      review: "El test de la tarjeta de permiso falla en CI, ¿lo miras?", comment: "¿Y si el permiso caduca mientras espera?",
+      review: tr("El test de la tarjeta de permiso falla en CI, ¿lo miras?", "The permission card test fails in CI, can you take a look?"), comment: tr("¿Y si el permiso caduca mientras espera?", "What if the permission expires while it waits?"),
     },
   ]);
 
   // A terminal agent working for minutes (sleep_ms is capped at 5 s per step).
   scenario("screens-running", {
     steps: [
-      { print: "Leyendo el plan de la spec…\r\nImplementando la paginación por cursor en GET /invoices\r\n" },
+      { print: tr("Leyendo el plan de la spec…\r\nImplementando la paginación por cursor en GET /invoices\r\n", "Reading the spec plan…\r\nImplementing cursor pagination in GET /invoices\r\n") },
       ...Array.from({ length: 180 }, () => ({ sleep_ms: 5000 })),
     ],
   });
   // A turn that fails on the usage limit: paused until the reset (now + 30 min, unknown reset).
   scenario("screens-paused", {
-    steps: [{ print: "Midiendo la latencia del gateway…\r\n" }, { fail: "API Error: 429 rate_limit_error: usage limit reached" }],
+    steps: [{ print: tr("Midiendo la latencia del gateway…\r\n", "Measuring the gateway latency…\r\n") }, { fail: "API Error: 429 rate_limit_error: usage limit reached" }],
   });
   // Chat mode: one tool already allowed, then a permission card left waiting.
   scenario("screens-live", {
     turns: [
       [
-        { say: { text: "Vale. Voy a ejecutar los comandos uno a uno y esperar tu respuesta a cada permiso." } },
+        { say: { text: tr("Vale. Voy a ejecutar los comandos uno a uno y esperar tu respuesta a cada permiso.", "Okay. I will run the commands one by one and wait for your answer to each permission.") } },
         { tool: { name: "Bash", input: { command: "git status --short" }, output: " M README.md", ask: false } },
-        { say: { text: "Hay un cambio en README.md. Ahora listo el directorio." } },
+        { say: { text: tr("Hay un cambio en README.md. Ahora listo el directorio.", "There is a change in README.md. Now I list the directory.") } },
         { tool: { name: "Bash", input: { command: "ls -la" }, output: "total 8\nREADME.md\nsrc" } },
-        { say: { text: "Listado hecho." } },
+        { say: { text: tr("Listado hecho.", "Listing done.") } },
       ],
     ],
   });
 
   const backlog = [
-    { title: "Chat: probar «Permitir siempre» con prefijos", project: "signal", chat_mode: true,
-      notes: "Pide ejecutar ls -la, cat README.md y luego cat ~/.ssh/config: el último debe volver a preguntar." },
-    { title: "Terminal: tarea clásica en PTY", project: "signal", notes: "Sin modo chat, para comparar la vista." },
-    { title: "Parent: tocar svc-orders sin rama", project: "delilah", chat_mode: true,
-      notes: "Tarea libre sin rama: un git -C svc-orders commit debe crear la rama antes." },
+    { title: tr("Chat: probar «Permitir siempre» con prefijos", "Chat: try \"Always allow\" with prefixes"), project: "signal", chat_mode: true,
+      notes: tr("Pide ejecutar ls -la, cat README.md y luego cat ~/.ssh/config: el último debe volver a preguntar.", "Ask to run ls -la, cat README.md and then cat ~/.ssh/config: the last one must ask again.") },
+    { title: tr("Terminal: tarea clásica en PTY", "Terminal: classic task in a PTY"), project: "signal", notes: tr("Sin modo chat, para comparar la vista.", "No chat mode, to compare the view.") },
+    { title: tr("Parent: tocar svc-orders sin rama", "Parent: touch svc-orders without a branch"), project: "delilah", chat_mode: true,
+      notes: tr("Tarea libre sin rama: un git -C svc-orders commit debe crear la rama antes.", "Free task without a branch: a git -C svc-orders commit must create the branch first.") },
   ];
   for (const [i, b] of backlog.entries()) {
     const t = await call<TaskJson>(env, "POST", "/api/v1/tasks", { key: "", free: true, ...b });
@@ -283,15 +295,15 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
     return t;
   };
   // Done, with a merged PR: the default scenario stops and waits; then marked done.
-  const done = await run(K.done, { title: "Reintentos con backoff en el webhook de Stripe", branch: BRANCH.done });
+  const done = await run(K.done, { title: tr("Reintentos con backoff en el webhook de Stripe", "Retries with backoff in the Stripe webhook"), branch: BRANCH.done });
   expect(done.branch).toBe(BRANCH.done);
   const live = await run(K.live, { title: LIVE_TITLE, branch: BRANCH.live, chat_mode: true, prompt: "Hola. Para probar las tarjetas de permiso, ejecuta uno a uno y espera mi respuesta a cada permiso: git status, ls -la, cat README.md. [fake:screens-live]" });
   expect(live.branch).toBe(BRANCH.live);
-  await run(K.running, { title: "Paginación por cursor en GET /invoices", branch: BRANCH.running, prompt: "Implementa [fake:screens-running]" });
-  await run(K.paused, { title: "Métrica de latencia del gateway de pagos", branch: BRANCH.paused, prompt: "Mide [fake:screens-paused]" });
+  await run(K.running, { title: tr("Paginación por cursor en GET /invoices", "Cursor pagination in GET /invoices"), branch: BRANCH.running, prompt: "Implementa [fake:screens-running]" });
+  await run(K.paused, { title: tr("Métrica de latencia del gateway de pagos", "Payments gateway latency metric"), branch: BRANCH.paused, prompt: "Mide [fake:screens-paused]" });
   // A Jira task in the parent project, waiting for the user (default scenario).
   await call(env, "POST", "/api/v1/runs", {
-    key: K.jira, title: "Idempotency-Key en POST /payments", project: "delilah", submodules: ["svc-payments"],
+    key: K.jira, title: tr("Idempotency-Key en POST /payments", "Idempotency-Key on POST /payments"), project: "delilah", submodules: ["svc-payments"],
   });
 
   // Setup failed: a failing setup command only while this task starts.
@@ -301,7 +313,7 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
     ...signal.settings,
     setup: "echo '> npm ci'; echo 'npm ERR! code ENOENT: no se encuentra package-lock.json' >&2; exit 1",
   });
-  await run(K.setup, { title: "Actualizar common-lib a Java 21", branch: BRANCH.setup });
+  await run(K.setup, { title: tr("Actualizar common-lib a Java 21", "Upgrade common-lib to Java 21"), branch: BRANCH.setup });
   await waitStatus(env, K.setup, "setup-failed");
   await call(env, "PUT", "/api/v1/projects/signal/settings", signal.settings);
 
@@ -343,6 +355,7 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
 // ---------- Jira's connect form, before it is connected ----------
 
 test("Jira-conectar", async ({ browser, env }) => {
+  test.skip(ONLY.length > 0 && !ONLY.includes("Jira-conectar"), "not in DELILAH_SCREENS_ONLY");
   for (const theme of THEMES) {
     const { ctx, page } = await open(browser, env, theme);
     await nav(page).getByRole("button", { name: /^Jira/ }).click();
@@ -364,6 +377,11 @@ for (const theme of THEMES) {
     await board(page);
     await expect(page.getByText(LIVE_TITLE).last()).toBeVisible();
     await shot(page, "Tablero", theme);
+    // The rest of the flow drives Spanish UI text; stop here when only the board was asked for.
+    if (ONLY.length && ONLY.every((n) => n === "Tablero")) {
+      await ctx.close();
+      return;
+    }
 
     // Bandeja
     await nav(page).getByRole("button", { name: /^Bandeja/ }).click();

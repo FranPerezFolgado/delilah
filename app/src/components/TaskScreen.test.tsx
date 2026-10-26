@@ -6,6 +6,7 @@ import { OFFICE, sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
 import { ToastHost, clearToasts } from "./ui";
+import { toastsText } from "../test/toasts";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
@@ -499,7 +500,7 @@ describe("TaskScreen base-stale banner", () => {
     fireEvent.click(getByText("Actualizar rama"));
     await waitFor(() => expect(updateBranch).toHaveBeenCalledWith("PROJ-1"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
-    expect(await screen.findByText("Rama actualizada: 3 commits de main integrados")).toBeTruthy();
+    await waitFor(() => expect(toastsText()).toContain("Rama actualizada: 3 commits de main integrados"));
   });
 
   it("shows the daemon's refusal as an error toast", async () => {
@@ -508,7 +509,7 @@ describe("TaskScreen base-stale banner", () => {
     const { getByText, findByText } = screenWith([stale]);
     await findByText("main avanzó 1 commit");
     fireEvent.click(getByText("Actualizar rama"));
-    expect(await screen.findByText("la rama tiene cambios sin guardar")).toBeTruthy();
+    await waitFor(() => expect(toastsText()).toContain("la rama tiene cambios sin guardar"));
   });
 
   it("offers no update when the base has not moved", async () => {

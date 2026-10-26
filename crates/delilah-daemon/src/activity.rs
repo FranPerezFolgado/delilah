@@ -34,18 +34,28 @@ impl Activity {
             e => e,
         };
         match e {
-            ActivityEvent::ToolStarted { agent: None, action } => self.action = Some(action),
-            ActivityEvent::ToolStarted { agent: Some(a), action } => {
+            ActivityEvent::ToolStarted {
+                agent: None,
+                action,
+            } => self.action = Some(action),
+            ActivityEvent::ToolStarted {
+                agent: Some(a),
+                action,
+            } => {
                 if let Some(h) = self.upsert(&a.id, &a.role) {
                     h.action = Some(action);
                 }
             }
-            ActivityEvent::ToolEnded { agent: None, id, .. } => {
+            ActivityEvent::ToolEnded {
+                agent: None, id, ..
+            } => {
                 if self.action.as_ref().is_some_and(|a| a.id == id) {
                     self.action = None;
                 }
             }
-            ActivityEvent::ToolEnded { agent: Some(a), id, .. } => {
+            ActivityEvent::ToolEnded {
+                agent: Some(a), id, ..
+            } => {
                 // Only an existing helper: a late end after SubagentStop must not revive it.
                 let key = shorten(&a.id);
                 if let Some(h) = self.helpers.iter_mut().find(|h| h.id == key)
@@ -127,13 +137,23 @@ mod tests {
         }
     }
     fn agent(id: &str, role: &str) -> AgentRef {
-        AgentRef { id: id.into(), role: role.into() }
+        AgentRef {
+            id: id.into(),
+            role: role.into(),
+        }
     }
     fn start(agent: Option<AgentRef>, id: &str) -> ActivityEvent {
-        ActivityEvent::ToolStarted { agent, action: action(id) }
+        ActivityEvent::ToolStarted {
+            agent,
+            action: action(id),
+        }
     }
     fn end(agent: Option<AgentRef>, id: &str) -> ActivityEvent {
-        ActivityEvent::ToolEnded { agent, id: id.into(), failed: false }
+        ActivityEvent::ToolEnded {
+            agent,
+            id: id.into(),
+            failed: false,
+        }
     }
 
     #[test]
@@ -151,7 +171,10 @@ mod tests {
     fn identical_start_is_no_change_and_second_replaces() {
         let mut a = Activity::default();
         let act = action("t1");
-        let ev = ActivityEvent::ToolStarted { agent: None, action: act.clone() };
+        let ev = ActivityEvent::ToolStarted {
+            agent: None,
+            action: act.clone(),
+        };
         assert!(a.apply(ev.clone()));
         assert!(!a.apply(ev));
         assert!(a.apply(start(None, "t2")));
@@ -186,22 +209,34 @@ mod tests {
     fn helpers_are_capped_and_fields_shortened() {
         let mut a = Activity::default();
         for i in 0..64 {
-            assert!(a.apply(ActivityEvent::HelperStarted { agent: agent(&format!("h{i}"), "r") }));
+            assert!(a.apply(ActivityEvent::HelperStarted {
+                agent: agent(&format!("h{i}"), "r")
+            }));
         }
-        assert!(!a.apply(ActivityEvent::HelperStarted { agent: agent("extra", "r") }));
+        assert!(!a.apply(ActivityEvent::HelperStarted {
+            agent: agent("extra", "r")
+        }));
         assert!(!a.apply(start(Some(agent("extra", "r")), "t")));
         assert_eq!(a.helpers.len(), 64);
 
         let mut b = Activity::default();
         let long = "é".repeat(100);
-        b.apply(ActivityEvent::HelperStarted { agent: agent(&long, &long) });
+        b.apply(ActivityEvent::HelperStarted {
+            agent: agent(&long, &long),
+        });
         assert_eq!(b.helpers[0].id.chars().count(), 40);
         assert_eq!(b.helpers[0].role.chars().count(), 40);
         let mut act = action("t1");
         act.tool = long.clone();
-        b.apply(ActivityEvent::ToolStarted { agent: Some(agent(&long, "")), action: act });
+        b.apply(ActivityEvent::ToolStarted {
+            agent: Some(agent(&long, "")),
+            action: act,
+        });
         assert_eq!(b.helpers.len(), 1);
-        assert_eq!(b.helpers[0].action.as_ref().unwrap().tool.chars().count(), 40);
+        assert_eq!(
+            b.helpers[0].action.as_ref().unwrap().tool.chars().count(),
+            40
+        );
         assert!(b.apply(end(Some(agent(&long, "")), "t1")));
     }
 
@@ -215,8 +250,12 @@ mod tests {
     #[test]
     fn helper_started_twice_is_one_and_ended_removes() {
         let mut a = Activity::default();
-        assert!(a.apply(ActivityEvent::HelperStarted { agent: agent("h1", "Plan") }));
-        assert!(!a.apply(ActivityEvent::HelperStarted { agent: agent("h1", "Plan") }));
+        assert!(a.apply(ActivityEvent::HelperStarted {
+            agent: agent("h1", "Plan")
+        }));
+        assert!(!a.apply(ActivityEvent::HelperStarted {
+            agent: agent("h1", "Plan")
+        }));
         assert_eq!(a.helpers.len(), 1);
         assert!(a.apply(ActivityEvent::HelperEnded { id: "h1".into() }));
         assert!(!a.apply(ActivityEvent::HelperEnded { id: "h1".into() }));
@@ -227,7 +266,9 @@ mod tests {
     fn helpers_keep_start_order() {
         let mut a = Activity::default();
         for id in ["h1", "h2", "h3"] {
-            a.apply(ActivityEvent::HelperStarted { agent: agent(id, "r") });
+            a.apply(ActivityEvent::HelperStarted {
+                agent: agent(id, "r"),
+            });
         }
         a.apply(start(Some(agent("h1", "r")), "t"));
         let ids: Vec<_> = a.helpers.iter().map(|h| h.id.as_str()).collect();
@@ -247,7 +288,9 @@ mod tests {
     fn serializes_as_contract_shape() {
         let mut a = Activity::default();
         a.apply(start(None, "t1"));
-        a.apply(ActivityEvent::HelperStarted { agent: agent("h1", "Plan") });
+        a.apply(ActivityEvent::HelperStarted {
+            agent: agent("h1", "Plan"),
+        });
         let v = serde_json::to_value(&a).unwrap();
         assert_eq!(v["action"]["kind"], "edit");
         assert!(v["action"]["since"].is_string());

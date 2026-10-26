@@ -1,4 +1,4 @@
-/* UI v2 tokens (docs/ui-redesign.md §1): dark is the default, light follows the OS. */
+/* UI v2 tokens (docs/archive/ui-redesign.md §1): dark is the default, light follows the OS. */
 :root {
   --bg: #202125; --side: #1c1d20; --panel: #26272c; --card: #2c2d33; --dialog: #2a2b30; --hov: #33353b; --sel: #3a3c43;
   --bd: #33353b; --bd2: #41434a; --tx: #d4d5d9; --tx-strong: #e8e9ec; --tx2: #a6a8ae; --tx3: #979aa1;

@@ -419,6 +419,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         app.store
             .create_task(&Task::new(key.clone(), "Card retries", "feature"))
@@ -521,7 +522,10 @@ mod tests {
 
         let (_, a) = call(&app, "GET", "/api/v1/activity", None).await;
         let t = &a["tokens"][live.id.as_str()];
-        assert_eq!((t["total"].as_u64(), t["cache_read"].as_u64()), (Some(12), Some(100)));
+        assert_eq!(
+            (t["total"].as_u64(), t["cache_read"].as_u64()),
+            (Some(12), Some(100))
+        );
         assert_eq!(a["tokens"].as_object().unwrap().len(), 1);
     }
 
@@ -760,7 +764,7 @@ mod project_tests {
     #[tokio::test]
     async fn a_project_session_runs_in_the_project_checkout() {
         let home = std::env::temp_dir().join(format!("delilah-proj-{}", uuid::Uuid::new_v4()));
-        let repo = home.join("plataforma");
+        let repo = home.join("platform");
         std::fs::create_dir_all(repo.join("src")).unwrap();
         std::fs::write(repo.join("src/main.rs"), "fn main() {}\n").unwrap();
         let config = Config {
@@ -774,9 +778,10 @@ mod project_tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         app.store
             .create_project(&Project {
-                name: "plataforma".into(),
+                name: "platform".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
@@ -786,13 +791,13 @@ mod project_tests {
             .await
             .unwrap();
 
-        let req = Request::post("/api/v1/projects/plataforma/sessions")
+        let req = Request::post("/api/v1/projects/platform/sessions")
             .header("content-type", "application/json")
             .body(Body::from(json!({ "kind": "shell" }).to_string()))
             .unwrap();
         let (status, session) = call(&app, req).await;
         assert_eq!(status, StatusCode::CREATED, "{session}");
-        assert_eq!(session["task"], "@plataforma");
+        assert_eq!(session["task"], "@platform");
         assert_eq!(session["read_only"], false, "a terminal is never read-only");
 
         let (_, listed) = call(
@@ -807,11 +812,11 @@ mod project_tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|s| s["task"] == "@plataforma")
+                .any(|s| s["task"] == "@platform")
         );
         let (status, tree) = call(
             &app,
-            Request::get("/api/v1/tasks/@plataforma/tree?path=")
+            Request::get("/api/v1/tasks/@platform/tree?path=")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -828,7 +833,7 @@ mod project_tests {
 
     async fn project_app() -> (AppState, std::path::PathBuf) {
         let home = std::env::temp_dir().join(format!("delilah-conv-{}", uuid::Uuid::new_v4()));
-        let repo = home.join("plataforma");
+        let repo = home.join("platform");
         std::fs::create_dir_all(&repo).unwrap();
         // Stands in for `claude`, which CI doesn't have: stays up until the test kills it.
         let fake = home.join("fake-claude.sh");
@@ -847,9 +852,10 @@ mod project_tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         app.store
             .create_project(&Project {
-                name: "plataforma".into(),
+                name: "platform".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
@@ -862,7 +868,7 @@ mod project_tests {
     }
 
     fn post(body: Value) -> Request<Body> {
-        Request::post("/api/v1/projects/plataforma/sessions")
+        Request::post("/api/v1/projects/platform/sessions")
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()

@@ -108,6 +108,7 @@ impl AppState {
             events,
             asks: Arc::default(),
             permissions: Arc::default(),
+            // English unless told otherwise (decision 81).
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             transcript_progress: Arc::default(),
@@ -121,7 +122,9 @@ impl AppState {
             pr_backoff: Arc::default(),
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),
-            activity_log: Arc::new(Mutex::new(crate::activity_log::ActivityLog::new(Utc::now()))),
+            activity_log: Arc::new(Mutex::new(
+                crate::activity_log::ActivityLog::new(Utc::now()),
+            )),
             activity_dirty: Arc::default(),
         }
     }
@@ -143,7 +146,7 @@ impl AppState {
         let lang =
             tokio::task::spawn_blocking(move || crate::lang::from_setting(setting.as_deref()))
                 .await
-                .unwrap_or(crate::lang::Lang::Es);
+                .unwrap_or(crate::lang::Lang::En);
         self.lang.set(lang);
     }
 
