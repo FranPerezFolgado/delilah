@@ -1,6 +1,7 @@
 # The same checks as "Stack & checks" in CLAUDE.md, on every PR and on main, as parallel jobs.
-# Only clippy runs on macOS, so the macOS-only code (the keychain, cfg(target_os = "macos")) is
-# still linted; fmt, tests and the web UI run on Linux, which is faster and has more cores.
+# The Rust jobs that build the workspace run on macOS: the daemon has macOS-only code
+# (cfg(target_os = "macos")) and its tests rely on macOS behaviour (/bin/zsh, cp flags,
+# process reaping), so ~10 of them fail on Linux. fmt and the web UI run on Linux.
 name: CI
 
 on:
@@ -40,14 +41,12 @@ jobs:
 
   test:
     name: Rust tests
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
-      # The daemon runs previews and agents through /bin/zsh, which Ubuntu does not ship.
-      - run: sudo apt-get install -y zsh
       # nextest runs every test binary at once (cargo test runs them one after another);
       # the crates have no doc tests, so `cargo test --doc` is not needed.
       - run: cargo nextest run --workspace --no-fail-fast
@@ -71,14 +70,11 @@ jobs:
 
   e2e-api:
     name: E2E API/CLI
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: e2e
-      - run: sudo apt-get install -y zsh
       - run: scripts/e2e.sh api
 
   e2e-ui:
@@ -88,15 +84,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: e2e
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # The runner image already has Chrome's system libraries, so no `--with-deps` (its apt
+      # step alone took 2-5 min); e2e.sh downloads Chromium unless this cache has it.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
       - run: npm --prefix app ci
-      - run: npx --prefix app playwright install --with-deps chromium
       - run: scripts/e2e.sh ui
       - uses: actions/upload-artifact@v4
         if: failure()
