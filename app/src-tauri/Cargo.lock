@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-app"
-version = "1.1.1"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
