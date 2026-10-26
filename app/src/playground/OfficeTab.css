@@ -1,1 +1,3 @@
 .office-tab { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.office-seg button { height: 22px; font-size: 12px; }
+.office-seg button[aria-selected="true"] { background: var(--sel); color: var(--tx-strong); }
