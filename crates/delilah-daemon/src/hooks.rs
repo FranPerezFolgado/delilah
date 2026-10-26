@@ -96,6 +96,8 @@ pub(crate) async fn apply_signal(
     }
     // No live session (e.g. a hook from before a restart): treat it as the primary.
     let primary = live.as_ref().is_none_or(|l| l.primary);
+    let terminal = live.as_ref().is_some_and(|l| l.runtime.as_pty().is_some());
+    let task_session = crate::store_sessions::project_of(&q.task).is_none();
     if signal == Signal::SessionStarted
         && let Some(live) = &live
     {
@@ -113,9 +115,29 @@ pub(crate) async fn apply_signal(
         // Only a new turn makes a held Stop stale. A tool hook (`Working`) does not: a
         // background sub-agent posts them to this same session after the turn's Stop.
         let agent_start = signal == Signal::PromptSubmitted && agent_prompt(&hook);
-        if signal == Signal::PromptSubmitted && (!agent_start || live.state() == LiveState::Waiting)
-        {
+        // A terminal has no stream to tell a turn's start: with its Stop held, the turn is
+        // over, so an agent prompt now begins the next one.
+        let agent_turn = agent_start
+            && (live.state() == LiveState::Waiting || (terminal && live.has_held_stop()));
+        if signal == Signal::PromptSubmitted && (!agent_start || agent_turn) {
             live.drop_held_stop();
+        }
+        // The last sub-agent a terminal's held Stop waits on ended: if Claude does not
+        // start a turn about it, the Stop applies after the fallback.
+        if terminal
+            && hook["hook_event_name"] == "SubagentStop"
+            && let Some(id) = hook["agent_id"].as_str()
+            && live.held_agent_ended(id)
+        {
+            crate::stream_events::arm_fallback(&app, live.clone(), &q.task);
+        }
+        // Claude Code's idle reminder, a minute after a turn ended, is no question while
+        // that end is held behind sub-agents still working.
+        if signal == Signal::NeedsUser
+            && hook["notification_type"] == "idle_prompt"
+            && live.has_held_stop()
+        {
+            return;
         }
         // A background sub-agent's tool hook (it carries `agent_id`) arriving once the
         // session waits again is not a turn: it must not flip the session back to working.
@@ -129,19 +151,30 @@ pub(crate) async fn apply_signal(
         // task ends during it: no new turn, so nothing of a prompt's effects applies (it
         // would clear a pending question the turn still waits on). Waiting, it is the
         // start of a turn Claude began itself and applies in full.
-        if agent_start && live.state() != LiveState::Waiting {
+        if agent_start && !agent_turn {
             return;
         }
         // Background work still runs: the turn's end is held, not applied (see
-        // `Live::hold_stop_if_background`, the one atomic check). Queued messages are typed
-        // now so they are not stranded until the replay.
+        // `Live::hold_stop_if_background`, the one atomic check; a terminal goes by the
+        // Stop's own `background_tasks`, `Live::hold_stop_if_reported`). Queued messages are
+        // typed now so they are not stranded until the replay.
         if signal == Signal::TurnEnded
             && limit_reset.is_none()
-            && live.runtime.as_stream().is_some()
-            && !next_turn_started(live)
-            && live.hold_stop_if_background(hook.clone())
+            && (if terminal {
+                live.hold_stop_if_reported(hook.clone())
+            } else {
+                live.runtime.as_stream().is_some()
+                    && !next_turn_started(live)
+                    && live.hold_stop_if_background(hook.clone())
+            })
         {
             crate::conversation::flush_queue(&app, live).await;
+            // A terminal's turn end still does its phase work (the handoff, the stall
+            // check) at once, as it always did: only the waiting is held. Its replay
+            // does not do it again.
+            if terminal && task_session {
+                crate::phases::on_hook(&app, &q.task, signal, &hook, primary, false).await;
+            }
             return;
         }
         live.set_state(match (signal, limit_reset) {
@@ -230,12 +263,13 @@ pub(crate) async fn apply_signal(
         _ => None,
     };
     // What the agent did may move the task's phase (a task's sessions only).
-    if crate::store_sessions::project_of(&q.task).is_none() {
+    let replayed_in_terminal = terminal && hook["delilah_replayed"] == true;
+    if task_session && !replayed_in_terminal {
         crate::phases::on_hook(&app, &q.task, signal, &hook, primary, limit_reset.is_some()).await;
     }
 
     // A project's session has no task to move: only the session and the inbox change.
-    let event = event.filter(|_| crate::store_sessions::project_of(&q.task).is_none());
+    let event = event.filter(|_| task_session);
     if let Some(event) = event {
         match app.transition(&TaskKey::new(&q.task), event).await {
             // Hooks repeat and overlap (a Notification after Stop, the first prompt
@@ -1243,6 +1277,164 @@ mod tests {
         .await;
         assert_eq!(live.state(), LiveState::Working);
         assert!(state.store.attention("s-1").await.unwrap().is_none());
+    }
+
+    /// A terminal session `id` of PROJ-1 (its process just sleeps), working.
+    async fn pty_session(state: &AppState, id: &str) -> crate::sessions::Live {
+        pty_session_as(state, id, true).await
+    }
+
+    async fn pty_session_as(state: &AppState, id: &str, primary: bool) -> crate::sessions::Live {
+        state
+            .store
+            .create_session(&session_record(id, primary))
+            .await
+            .unwrap();
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let live = state.sessions.insert(
+            id,
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            primary,
+            pty,
+        );
+        live.set_state(LiveState::Working);
+        live
+    }
+
+    /// A Stop as a terminal's Claude Code sends it, `agents` running in the background.
+    fn terminal_stop(agents: &[&str]) -> Value {
+        let tasks: Vec<Value> = agents
+            .iter()
+            .map(|id| {
+                json!({ "id": id, "type": "subagent", "status": "running",
+                              "agent_type": "implementer", "description": "d" })
+            })
+            .collect();
+        json!({ "hook_event_name": "Stop", "last_assistant_message": "listo",
+                "background_tasks": tasks })
+    }
+
+    #[tokio::test]
+    async fn a_terminal_stays_running_while_its_sub_agents_work() {
+        let state = running_task().await;
+        let live = pty_session(&state, "s-1").await;
+
+        post(&state, URL, terminal_stop(&["a1", "a2"])).await;
+        assert!(live.has_held_stop());
+        assert_eq!(live.state(), LiveState::Working);
+        assert_eq!(status(&state).await, TaskStatus::Running);
+        assert!(inbox(&state).await.is_empty());
+
+        // The sub-agents' tools and Claude Code's idle reminder change nothing.
+        for hook in [
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash", "agent_id": "a1" }),
+            json!({ "hook_event_name": "Notification", "notification_type": "idle_prompt",
+                    "message": "Claude is waiting for your input" }),
+        ] {
+            post(&state, URL, hook).await;
+            assert_eq!(live.state(), LiveState::Working);
+            assert_eq!(status(&state).await, TaskStatus::Running);
+        }
+        assert!(inbox(&state).await.is_empty());
+
+        // A sub-agent reporting back starts the next turn, whose Stop applies at once.
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "UserPromptSubmit",
+                                  "prompt": "<agent-message from=\"a1\">done</agent-message>" }),
+        )
+        .await;
+        assert!(!live.has_held_stop());
+        post(&state, URL, terminal_stop(&[])).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+    }
+
+    #[tokio::test]
+    async fn nothing_notifies_while_a_terminals_sub_agents_work() {
+        let state = running_task().await;
+        let _main = pty_session(&state, "s-1").await;
+        let _review = pty_session_as(&state, "s-2", false).await;
+        let review_url = "/hooks/claude?task=PROJ-1&session=s-2";
+        let idle = json!({ "hook_event_name": "Notification", "notification_type": "idle_prompt",
+                           "message": "Claude is waiting for your input" });
+        for url in [URL, review_url] {
+            post(&state, url, terminal_stop(&["a1"])).await;
+            post(&state, url, idle.clone()).await;
+        }
+        // No desktop notification from the daemon and no Inbox item for the app to
+        // notify ("te espera", "terminó su turno").
+        assert!(state.notifier.recorded().is_empty());
+        assert!(inbox(&state).await.is_empty());
+
+        // The turn that really ends says so, once.
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "UserPromptSubmit",
+                                  "prompt": "<agent-message from=\"a1\">done</agent-message>" }),
+        )
+        .await;
+        post(&state, URL, terminal_stop(&[])).await;
+        assert_eq!(state.notifier.recorded().len(), 1);
+        assert_eq!(inbox(&state).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_stop_behind_background_shells_only_applies() {
+        let state = running_task().await;
+        let live = pty_session(&state, "s-1").await;
+        let stop = json!({ "hook_event_name": "Stop", "background_tasks": [
+            { "id": "b1", "type": "shell", "status": "running", "description": "dev server" }
+        ] });
+        post(&state, URL, stop).await;
+        assert!(!live.has_held_stop());
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+    }
+
+    #[tokio::test]
+    async fn a_task_notification_after_a_held_terminal_stop_is_a_new_turn() {
+        let state = running_task().await;
+        let live = pty_session(&state, "s-1").await;
+        let notification = json!({ "hook_event_name": "UserPromptSubmit",
+                                   "prompt": "<task-notification>\n<task-id>a1</task-id>" });
+        // Mid-turn (nothing held) it is ignored, as before.
+        post(&state, URL, notification.clone()).await;
+        assert_eq!(live.state(), LiveState::Working);
+
+        post(&state, URL, terminal_stop(&["a1"])).await;
+        post(&state, URL, notification).await;
+        assert!(!live.has_held_stop());
+        post(&state, URL, terminal_stop(&[])).await;
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+    }
+
+    #[tokio::test]
+    async fn a_held_terminal_stop_applies_once_its_sub_agents_end_with_no_new_turn() {
+        let state = running_task().await;
+        let live = pty_session(&state, "s-1").await;
+        post(&state, URL, terminal_stop(&["a1", "a2"])).await;
+
+        let ended = |id: &str| json!({ "hook_event_name": "SubagentStop", "agent_id": id });
+        post(&state, URL, ended("a1")).await;
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        assert!(live.has_held_stop(), "a2 still runs: no timer");
+        assert_eq!(status(&state).await, TaskStatus::Running);
+
+        post(&state, URL, ended("a2")).await;
+        let mut waited = 0;
+        while live.state() != LiveState::Waiting && waited < 50 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            waited += 1;
+        }
+        assert!(!live.has_held_stop());
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+        assert_eq!(inbox(&state).await.len(), 1);
     }
 }
 

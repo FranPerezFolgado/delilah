@@ -808,5 +808,20 @@ native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); 
 identity headers alone (forgeable by any local process).
 See the [research](../specs/008-mobile-access-analysis/research.md).
 
-**97. Background notifications as readable items (2026-10-26).**
+**97. A terminal holds its turn end by the `Stop`'s `background_tasks` (2026-10-26).** In
+terminal mode the `Stop` hook of a turn that ends with background sub-agents running (an
+entry with `type: "subagent"`, `status: "running"`) is held like chat mode's (#88). The task
+stays `running` instead of `waiting-for-user` while `/orchestrate` sub-agents implement, so neither the daemon nor the app sends a "waiting" or "turn done" notification for it.
+With the `Stop` held, the next prompt (a sub-agent's `<agent-message>`, a
+`<task-notification>`, the user's) is a new turn and drops it. A late `idle_prompt` is
+ignored. After `SubagentStop` for every listed sub-agent, the 30 s fallback applies it, as
+does process exit. The saving-mode and autopilot work of the turn end still runs when the
+`Stop` arrives (spec 008: waiting on sub-agents is no stall and never blocks a handoff).
+*Why:* the hook logs showed hundreds of terminal turn ends with sub-agents still running, and
+each one put the task in "waiting" with nothing to answer. *Ruled out:* holding on background
+shells, since a dev server can run for hours while Claude really waits on you; reading the
+sub-agent transcripts to follow them, which is more I/O for what the `Stop` already says.
+`background_tasks` is observed, not documented by Claude Code.
+
+**98. Background notifications as readable items (2026-10-26).**
 Each `<task-notification>` in a user line (even inside other text, several per message) becomes a `background-done` marker with an optional `background` object (label, status, duration, tool count, tokens, report); hand-backs (`isMeta` lines with `origin.handback`) become items too, and the UI folds each into the matching notification by `task_id`, derived on every render from the raw entries because the conversation is paginated (server-side pairing would need all pages). Agent-message and notification prompts never become a session's last message. *Why a marker and not a new kind:* UIs from before this change render unknown kinds as cards; the cost is a marker variant with a payload its siblings don't use. Reports are cut at 16 KB and there is no detail endpoint (the next step if it is not enough). *Ruled out:* an XML library (the format is small and fixed); reading `queue-operation` lines (not the transcript's contract); server-side pairing.
