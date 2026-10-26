@@ -26,8 +26,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-15 | 5 | 5A | verified | 1 | ce53e13 | retry requires --repo (CLI error); project show prints ci-autofix |
 | WP-16 | 5 | 5A | verified | 1 | 801a88f | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
 | WP-17 | 6 | 6A | verified | 1 | f9732e5 | inbox button reuses "Descartar"; badge mark via Sidebar |
-| WP-17F | 5-6 | fix | implementing | 0 | | Phase 5-6 review fixes |
-| WP-18 | 7 | 7A | verified | 1 | | decision 87; architecture autofix section; status + usage |
+| WP-17F | 5-6 | fix | verified | 1 | | Phase 5-6 review fixes |
+| WP-18 | 7 | 7A | verified | 1 | b623194 | decision 87; architecture autofix section; status + usage |
 | WP-19 | 7 | 7B | pending | 0 | | |
 
 ## Open findings

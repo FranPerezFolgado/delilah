@@ -88,7 +88,8 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
   const [override, setOverride] = useState<boolean | null>(null);
   useEffect(() => setOverride(null), [task?.ci_autofix]);
   const autofix = task ? (override ?? !!task.ci_autofix) : null;
-  const finished = task?.status.type === "done";
+  // The daemon refuses autofix changes (409 `terminal`) on a done or a failed task.
+  const finished = task?.status.type === "done" || task?.status.type === "failed";
 
   // Whether a PR can be opened: null while unknown, else the reason it can't (or "" if it can).
   const [cannot, setCannot] = useState<string | null>(null);
@@ -153,12 +154,22 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
     }
   };
 
-  const setAutofixMode = (f: () => Promise<Task>) =>
-    run(async () => {
+  const setAutofixMode = async (f: () => Promise<Task>) => {
+    setBusy(true);
+    setError(null);
+    try {
       const updated = await f();
       setOverride(!!updated.ci_autofix);
       onTaskChanged?.();
-    });
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError && e.reason === "terminal" ? t("La tarea ya terminó: el autofix no se puede cambiar") : (e as Error).message);
+      // The PR may have changed under us: show where it stands now.
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const link = () => {
     const u = url.trim();
@@ -259,7 +270,7 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
             <PrCard
               key={pr.id}
               pr={pr}
-              disabled={busy}
+              disabled={busy || finished}
               grouped={grouped}
               taskAutofix={autofix}
               onRetryAutofix={() => setAutofixMode(() => api.setAutofix(owner, "retry", pr.repo))}
@@ -288,7 +299,8 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
 
 /** The one-line state of autofix on a PR; no record means "watching" if the task has it on. */
 function autofixText(a: PrAutofix | null | undefined, taskOn: boolean): string {
-  if (!a) return taskOn ? t("Autofix: vigilando") : t("Autofix: apagado");
+  if (!taskOn) return t("Autofix: apagado");
+  if (!a) return t("Autofix: vigilando");
   if (a.state === "watching") return t("Autofix: vigilando");
   if (a.state === "fixing") return t("Arreglando CI: intento {n} de {limit}", { n: a.attempts, limit: a.limit });
   const why = a.reason ? STOP_REASON[a.reason] : undefined;
@@ -365,7 +377,7 @@ function PrCard({
           {pr.autofix?.state === "fixing" && pr.autofix.sent_at && (
             <span>{t("enviado {when}", { when: relativeTime(pr.autofix.sent_at) })}</span>
           )}
-          {pr.autofix?.state === "stopped" && (
+          {taskAutofix && pr.autofix?.state === "stopped" && (
             <Button variant="secondary" size={28} icon="retry" disabled={disabled} onClick={onRetryAutofix}>
               {t("Reintentar autofix")}
             </Button>

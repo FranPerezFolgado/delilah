@@ -916,6 +916,29 @@ pub(crate) async fn set(app: &AppState, key: &TaskKey, on: bool) -> Result<(), A
     Ok(())
 }
 
+/// Tries of the compare-and-set that resets a PR on retry before giving up with a 409.
+const RETRY_TRIES: usize = 3;
+
+/// Sets the PR in `repo` back to watching, re-reading its row for each of `tries`
+/// attempts; false when another write won every one.
+async fn reset_row(
+    app: &AppState,
+    key: &TaskKey,
+    repo: &str,
+    tries: usize,
+) -> Result<bool, ApiError> {
+    for _ in 0..tries {
+        let rows = app.store.prs_of(key).await?;
+        let Some(row) = rows.iter().find(|r| r.repo == repo) else {
+            return Ok(false);
+        };
+        if claim(app, row.id, row.autofix.as_ref(), &PrAutofix::watching()).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Retry of the PR in `repo`: attempts and the forwarded sha are reset, its stopped
 /// notice resolved and the current failure evaluated at once. Turns autofix on.
 pub(crate) async fn retry(
@@ -938,11 +961,15 @@ pub(crate) async fn retry(
         return Err(field("required", "retry needs the `repo` of the PR"));
     };
     let rows = app.store.prs_of(key).await?;
-    let Some(row) = rows.iter().find(|r| r.repo == repo) else {
+    if !rows.iter().any(|r| r.repo == repo) {
         return Err(field("unknown", &format!("{repo} is not a PR of {key}")));
-    };
+    }
+    if !reset_row(app, key, repo, RETRY_TRIES).await? {
+        return Err(ApiError::conflict(
+            "autofix state keeps changing, try again",
+        ));
+    }
     app.store.set_ci_autofix(key, true).await?;
-    claim(app, row.id, row.autofix.as_ref(), &PrAutofix::watching()).await?;
     resolve_stopped(app, key, repo).await?;
     app.emit(Topic::Tasks);
     app.emit(Topic::Prs);
@@ -1278,6 +1305,26 @@ mod tests {
 
     use crate::gh::fake::{FakeGh, PR_LIST, REPO_VIEW, ci_snapshot};
     use crate::pr_testkit::task_with_workspace;
+
+    #[tokio::test]
+    async fn reset_row_gives_up_when_it_never_wins_the_cas() {
+        let (app, key, _dir) = task_with_workspace(gh_heads(&[("abc", "failure")]), None).await;
+        pr_loop::check_task(&app, &key, true).await;
+        let repo = app.store.prs_of(&key).await.unwrap().remove(0).repo;
+        assert!(!reset_row(&app, &key, &repo, 0).await.ok().unwrap());
+        assert!(
+            reset_row(&app, &key, &repo, RETRY_TRIES)
+                .await
+                .ok()
+                .unwrap()
+        );
+        assert!(
+            !reset_row(&app, &key, "nowhere", RETRY_TRIES)
+                .await
+                .ok()
+                .unwrap()
+        );
+    }
 
     fn gh_heads(heads: &[(&str, &str)]) -> Arc<FakeGh> {
         let mut gh = FakeGh::new()

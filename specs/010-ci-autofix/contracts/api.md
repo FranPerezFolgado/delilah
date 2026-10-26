@@ -18,7 +18,7 @@ Additions only; existing shapes keep their fields. Client types in `app/src/api.
 - `retry`: for the PR of `repo` (required with `retry`), reset attempts and the
   forwarded sha, resolve its `autofix-stopped` notice and evaluate. Turns autofix on.
 - 200 with the task (as `GET /tasks/{key}`). 404 unknown task; 409 `terminal` for a
-  done/archived task; 422 `repo` missing or not a PR of the task for `retry`.
+  done or failed task (archiving keeps the status); 409 if the retry's reset keeps losing a race; 422 `repo` missing or not a PR of the task for `retry`.
 
 ### Task *(changed)*: `GET /tasks`, `GET /tasks/{key}`
 

@@ -33,5 +33,6 @@ export const EN: Record<string, string> = {
   "alcanzó el límite de intentos": "reached the attempt limit",
   "el agente no subió ningún cambio": "the agent pushed no change",
   "no hay sesión del agente": "no agent session",
+  "La tarea ya terminó: el autofix no se puede cambiar": "The task has finished: autofix can no longer be changed",
   "Reintentar autofix": "Retry autofix",
 };

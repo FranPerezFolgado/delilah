@@ -245,6 +245,33 @@ describe("PrView", () => {
       expect(((await findByRole("button", { name: /Fix CI/ })) as HTMLButtonElement).disabled).toBe(true);
     });
 
+    it("is disabled, with no retry, on a failed task (the daemon answers 409 terminal)", async () => {
+      const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: stopped }] }));
+      const failed = { ...task, status: { type: "failed", reason: "x" } } as unknown as Task;
+      const { findByRole, findByText } = render(<PrView owner="PROJ-1" task={failed} />);
+      expect(((await findByRole("button", { name: /Fix CI/ })) as HTMLButtonElement).disabled).toBe(true);
+      expect(((await findByText("Retry autofix")).closest("button") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("a 409 terminal reads translated and reloads the PRs", async () => {
+      const taskPrs = vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+      vi.spyOn(api, "setAutofix").mockRejectedValue(new ApiError("task is finished", 409, false, "terminal"));
+      const { findByRole, findByText } = render(<PrView owner="PROJ-1" task={task} />);
+      fireEvent.click(await findByRole("button", { name: /Fix CI/ }));
+      await findByText(/finished/i);
+      expect(document.body.textContent).not.toContain("task is finished");
+      await waitFor(() => expect(taskPrs.mock.calls.length).toBeGreaterThan(1));
+    });
+
+    it("reads off for every PR, with no retry, when the task's autofix is off", async () => {
+      const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: stopped }] }));
+      const { findByText, queryByText } = render(<PrView owner="PROJ-1" task={{ ...task, ci_autofix: false }} />);
+      await findByText("Autofix: off");
+      expect(queryByText("Retry autofix")).toBeNull();
+    });
+
     it("a stopped PR says why and retries with its repo", async () => {
       const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
       vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: stopped }] }));
