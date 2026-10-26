@@ -55,6 +55,15 @@ describe("WorkingIndicator", () => {
     expect(container.textContent).toContain("sin novedades desde hace 35 s");
   });
 
+  it("drops no-news when a new signal arrives", () => {
+    vi.setSystemTime(T0 + 40000);
+    const { container, rerender } = render(<WorkingIndicator turn={turn()} />);
+    expect(container.textContent).toContain("sin novedades");
+    rerender(<WorkingIndicator turn={turn({ last_signal_at: "2026-01-01T00:00:39Z" })} />);
+    expect(container.textContent).not.toContain("sin novedades");
+    expect(container.textContent).toContain("40 s");
+  });
+
   it("speaks English through t()", async () => {
     setLanguage("en");
     vi.setSystemTime(T0 + 40000);

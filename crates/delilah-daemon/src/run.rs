@@ -3521,7 +3521,11 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(app.sessions.get("sess-1").is_none(), "gone once it exited");
-        assert_eq!(live.state(), crate::sessions::LiveState::Waiting, "the Stop applied");
+        assert_eq!(
+            live.state(),
+            crate::sessions::LiveState::Waiting,
+            "the Stop applied"
+        );
         assert!(!live.has_held_stop());
         assert_eq!(live.progress().background[0].state, "stopped");
         assert_eq!(

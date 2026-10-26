@@ -775,6 +775,7 @@ pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
             .map(|b| b.task_id.clone())
             .collect();
         live.update_progress(|p| {
+            let mut changed = false;
             for task_id in &running {
                 let ended = delilah_agents::stream::StreamEvent::Task(
                     delilah_agents::stream::TaskEvent::Ended {
@@ -783,9 +784,9 @@ pub(crate) async fn turn_interrupted(app: &AppState, live: &Live) {
                         summary: None,
                     },
                 );
-                crate::progress::apply(p, &ended, Utc::now());
+                changed |= crate::progress::apply(p, &ended, Utc::now());
             }
-            true
+            changed
         });
     }
     live.set_state(LiveState::Waiting);
@@ -1812,7 +1813,11 @@ mod tests {
         assert!(!live.progress().has_background() && !live.has_held_stop());
         let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
-        assert_eq!(live.state(), LiveState::Working, "the interrupt result sets it");
+        assert_eq!(
+            live.state(),
+            LiveState::Working,
+            "the interrupt result sets it"
+        );
     }
 
     #[tokio::test]

@@ -283,27 +283,7 @@ fn apply_task(p: &mut Progress, task: &TaskEvent, now: DateTime<Utc>) {
         }
         TaskEvent::Ended {
             task_id, status, ..
-        } => {
-            let turns = p.turns;
-            let state = status_str(*status);
-            p.task_ended = true;
-            if let Some(b) = p.row(task_id).filter(|b| b.state == "running") {
-                b.state = state;
-                b.ended_at = Some(now);
-            }
-            if let Some(id) = p.task_agents.get(task_id).cloned() {
-                let agent = p.subagent(&id, "", now);
-                if agent.state == "running" {
-                    agent.state = match status {
-                        TaskStatus::Failed => "failed",
-                        TaskStatus::Stopped => "stopped",
-                        _ => "completed",
-                    };
-                    agent.ended_at = Some(now);
-                    agent.ended_turn = Some(turns);
-                }
-            }
-        }
+        } => end_task(p, task_id, *status, now),
         TaskEvent::Running {
             task_ids,
             described,
@@ -334,13 +314,37 @@ fn apply_task(p: &mut Progress, task: &TaskEvent, now: DateTime<Utc>) {
                     });
                 }
             }
-            for b in p.background.iter_mut() {
-                if b.state == "running" && !task_ids.contains(&b.task_id) {
-                    b.state = "completed";
-                    b.ended_at = Some(now);
-                    p.task_ended = true;
-                }
+            let gone: Vec<String> = p
+                .background
+                .iter()
+                .filter(|b| b.state == "running" && !task_ids.contains(&b.task_id))
+                .map(|b| b.task_id.clone())
+                .collect();
+            for id in gone {
+                end_task(p, &id, TaskStatus::Completed, now);
             }
+        }
+    }
+}
+
+/// Ends a task's background row and the sub-agent it runs, if any.
+fn end_task(p: &mut Progress, task_id: &str, status: TaskStatus, now: DateTime<Utc>) {
+    let turns = p.turns;
+    p.task_ended = true;
+    if let Some(b) = p.row(task_id).filter(|b| b.state == "running") {
+        b.state = status_str(status);
+        b.ended_at = Some(now);
+    }
+    if let Some(id) = p.task_agents.get(task_id).cloned() {
+        let agent = p.subagent(&id, "", now);
+        if agent.state == "running" {
+            agent.state = match status {
+                TaskStatus::Failed => "failed",
+                TaskStatus::Stopped => "stopped",
+                _ => "completed",
+            };
+            agent.ended_at = Some(now);
+            agent.ended_turn = Some(turns);
         }
     }
 }
@@ -651,6 +655,32 @@ mod tests {
         p.turn = None;
         let mut idle = p.clone();
         assert!(!apply(&mut idle, &snap(&["b3"]), t(5)));
+    }
+
+    #[test]
+    fn a_snapshot_that_drops_a_background_agent_ends_its_subagent_too() {
+        let mut p = Progress::default();
+        apply(&mut p, &init(false), t(0));
+        apply(
+            &mut p,
+            &started("a1", Some("tu1"), TaskKind::Agent, true),
+            t(1),
+        );
+        assert_eq!(p.subagents[0].state, "running");
+        apply(
+            &mut p,
+            &StreamEvent::Task(TaskEvent::Running {
+                task_ids: vec![],
+                described: vec![],
+            }),
+            t(2),
+        );
+        assert_eq!(p.background[0].state, "completed");
+        let s = &p.subagents[0];
+        assert_eq!(
+            (s.state, s.ended_at, s.ended_turn),
+            ("completed", Some(t(2)), Some(1))
+        );
     }
 
     #[test]

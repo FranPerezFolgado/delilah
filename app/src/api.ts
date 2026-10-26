@@ -489,7 +489,7 @@ export interface TurnProgress {
 export interface BackgroundItem {
   task_id: string;
   tool_use_id: string | null;
-  kind: "command" | "agent" | string;
+  kind: "command" | "agent" | "other";
   description: string;
   state: "running" | "completed" | "failed" | "stopped" | "unknown";
   started_at: string | null;

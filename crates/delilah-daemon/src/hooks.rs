@@ -107,8 +107,7 @@ pub(crate) async fn apply_signal(
         // Only a new turn makes a held Stop stale. A tool hook (`Working`) does not: a
         // background sub-agent posts them to this same session after the turn's Stop.
         let agent_start = signal == Signal::PromptSubmitted && agent_prompt(&hook);
-        if signal == Signal::PromptSubmitted
-            && (!agent_start || live.state() == LiveState::Waiting)
+        if signal == Signal::PromptSubmitted && (!agent_start || live.state() == LiveState::Waiting)
         {
             live.drop_held_stop();
         }
@@ -863,9 +862,7 @@ mod tests {
         let live = stream_session(&state, "s-1", true).await;
         feed(&live, bg_started());
 
-        for hook in [
-            json!({ "hook_event_name": "UserPromptSubmit", "prompt": "hola" }),
-        ] {
+        for hook in [json!({ "hook_event_name": "UserPromptSubmit", "prompt": "hola" })] {
             post(&state, URL, stop_hook()).await;
             assert!(live.has_held_stop());
             post(&state, URL, hook).await;
@@ -885,7 +882,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_background_sub_agents_tool_hook_neither_drops_the_held_stop_nor_wakes_a_waiting_session() {
+    async fn a_background_sub_agents_tool_hook_neither_drops_the_held_stop_nor_wakes_a_waiting_session()
+     {
         let state = running_task().await;
         let live = stream_session(&state, "s-1", true).await;
         feed(&live, bg_started());
@@ -908,7 +906,14 @@ mod tests {
             }),
         );
         let held = live.take_held_stop().unwrap();
-        apply_signal(state.clone(), "PROJ-1", Some("s-1"), Signal::TurnEnded, &held).await;
+        apply_signal(
+            state.clone(),
+            "PROJ-1",
+            Some("s-1"),
+            Signal::TurnEnded,
+            &held,
+        )
+        .await;
         assert_eq!(live.state(), LiveState::Waiting);
 
         // A late sub-agent hook does not flip it back.
