@@ -7,8 +7,8 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | d931873 | stop_task accepted; Stop + UserPromptSubmit fire |
 | WP-02 | 2 | 2A | verified | 1 | be15eb0 | |
-| WP-03 | 2 | 2A | verified | 1 | SHA3 | |
-| WP-04 | 2 | 2B | pending | 0 | | |
+| WP-03 | 2 | 2A | verified | 1 | ef8a45f | |
+| WP-04 | 2 | 2B | verified | 1 | SHA4 | |
 | WP-05 2 2C |  |  | pending | 0 | | |
 | WP-06 | 3 | 3A | pending | 0 | | |
 | WP-07 | 3 | 3A | pending | 0 | | |
