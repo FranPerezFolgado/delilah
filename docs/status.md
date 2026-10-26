@@ -6,6 +6,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Built
 
+**Workspace removal that finishes** (decision [#85](decisions.md)): before a worktree goes, the task's agents' process groups and its preview's group are ended and awaited; a `git worktree remove` that fails with the folder still there falls back to deleting it and `git worktree prune`, and a half-removed worktree can be archived again.
+
 **Public-repo onboarding** (spec `008-public-repo-onboarding`; decisions [#79](decisions.md) to [#83](decisions.md)):
 - **Docs:** README rewritten for newcomers (under 200 lines: badges, English screenshots, Install, Quickstart); the full reference in [usage.md](usage.md); an index in [docs/README.md](README.md); docs translated to English; history moved to `docs/archive/` and `specs/` with their own READMEs. The English board screenshots come from `app/e2e/screens.spec.ts` (`DELILAH_SCREENS_LANG`, `DELILAH_SCREENS_ONLY`, `DELILAH_SCREENS_OUT`).
 - **Install:** `scripts/install.sh` and `scripts/test-install.sh` (both run in CI, with shellcheck). `release.yml` publishes `SHA256SUMS` and a build-provenance attestation; the `release.sh` dry run prints the `SHA256SUMS`.
@@ -132,6 +134,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the pre-announcement audit (a separate task);
   - the `delilah` CLI is not shipped with the app: it only comes from source;
   - security hardening of the installer and release workflow: pin third-party actions to SHAs, split the release job (build apart from publish, so the publish step has fewer permissions).
+- **Workspace removal, known limits:** what an agent started in a process group of its own (or any child of a stream-mode agent, which shares the daemon's group) is not ended before the removal; the retried deletion usually outlasts it. Folders left behind before this fix are not swept: archiving their task again removes them.
 - **Fresh bases, known limits:**
   - parent worktrees still need the network to init submodules;
   - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;

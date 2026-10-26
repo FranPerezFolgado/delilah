@@ -664,3 +664,13 @@ carry closures (each "Deshacer" undoes a different thing), so toasts with an act
 exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
 centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
 Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).
+
+**85. A worktree goes even when git cannot remove it.** Before the removal, everything of the
+task that could write in the folder is ended and awaited (agents' process groups, the preview's
+group); if `git worktree remove --force` still fails and the folder is there, it is deleted by
+hand and pruned, and a worktree git no longer knows passes the archive checks. *Why:* a build
+or dev server still writing in `target/` made git stop halfway ("Directory not empty"), leaving a
+folder of several GB that git had forgotten, so no retry could ever remove it. Deleting by hand
+only happens after the same checks as before (or `force`), so it loses nothing git would have
+kept. *Ruled out:* only retrying `git worktree remove` (it refuses a forgotten worktree), and a
+periodic sweep of `workspaces/` (it would have to guess which folders are still in use).

@@ -312,8 +312,9 @@ A project's `preview_command` (project field, `PATCH /projects/{name}`) is run b
   - The branches to go back to are stored in `workspaces.previous`.
 - **Archive** (`actions::archive`, built on `archive.rs`):
   - **Checkout mode:** goes back to the previous branches. It never refuses: uncommitted files stay, and a folder that cannot switch is logged and left on the task's branch.
-  - **Worktree mode:** refuses while there are uncommitted changes or commits on no remote, unless `?force=true`. It then runs `git worktree remove --force`.
-  - Sessions are stopped and awaited first, so nothing writes while the workspace goes.
+  - **Worktree mode:** refuses while there are uncommitted changes or commits on no remote, unless `?force=true`. It then runs `git worktree remove --force`; if that fails with the folder still there (git stopped halfway, or no longer knows it as a worktree), the folder is deleted by hand (`remove_dir_all`, retried a few times) and `git worktree prune` runs. Never the project's own folder.
+  - A half-removed worktree (its `.git` names a git dir that no longer exists) has nothing git can check: the checks pass and a retried archive finishes the removal.
+  - Sessions are stopped and awaited first, and so is the rest of what could still write in the folder: a terminal agent's process group and the preview's (`Previews::stop_and_wait`, also for a preview that the task's end stopped shortly before; SIGTERM, SIGKILL after 5 s).
 - **Archive on merge** (`pr_loop::merge::on_merged`), when every linked PR of the task is merged and none was closed unmerged:
   1. The task is marked done if it is not terminal, and its sessions are stopped and awaited.
   2. Every repo of the workspace is checked, not only those with a PR. A repo with a merged PR is fetched (a failed fetch blocks) and `delilah_git::check_merged` requires no uncommitted changes (the parent's too) and its local branch contained in the PR's head; the head is the reference, not the base, so squash and rebase merges pass. A repo without a PR (`check_repos`) must have nothing uncommitted and no unpushed commits, and keeps its branch.
