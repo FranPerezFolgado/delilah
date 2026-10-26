@@ -137,7 +137,7 @@ parallel (different files, no dependency on an unfinished task).
 
 **Independent test**: The Story 3 block of [quickstart.md](quickstart.md). After merge, the community profile is at 100%.
 
-- [ ] T025 [P] [US3] Create `LICENSE` (standard MIT text, "Copyright (c) 2026 Francisco Pérez Folgado") and add `"license": "MIT"` to `app/package.json` (after `"version"`). The workspace `Cargo.toml` and `app/src-tauri/Cargo.toml` already declare MIT; confirm that.
+- [X] T025 [P] [US3] Create `LICENSE` (standard MIT text, "Copyright (c) 2026 Francisco Pérez Folgado") and add `"license": "MIT"` to `app/package.json` (after `"version"`). The workspace `Cargo.toml` and `app/src-tauri/Cargo.toml` already declare MIT; confirm that.
 - [ ] T026 [P] [US3] Create `CONTRIBUTING.md`, short and linking to `docs/development.md` for detail. Cover:
   - prerequisites: macOS on Apple Silicon, Xcode CLT, Rust stable, Node 22+, Claude Code;
   - the fixtures (`scripts/make-fixture-parent.sh`);
@@ -161,14 +161,14 @@ parallel (different files, no dependency on an unfinished task).
   - **Known limits**: an unsigned app; agents run untrusted repo content with the user's rights.
 
   Describe only what the code does; re-read those lines before writing.
-- [ ] T028 [P] [US3] Create `CODE_OF_CONDUCT.md`: Contributor Covenant 2.1 text, with enforcement contact "the maintainer through GitHub (@FranPerezFolgado)" and no email.
-- [ ] T029 [P] [US3] Create `.github/ISSUE_TEMPLATE/bug_report.yml` (issue form):
+- [X] T028 [P] [US3] Create `CODE_OF_CONDUCT.md`: Contributor Covenant 2.1 text, with enforcement contact "the maintainer through GitHub (@FranPerezFolgado)" and no email.
+- [X] T029 [P] [US3] Create `.github/ISSUE_TEMPLATE/bug_report.yml` (issue form):
   - required fields: what happened, steps to reproduce, expected; macOS version; Mac model/chip; Delilah version (About or `delilah --version`); Claude Code version (`claude --version`);
   - optional: logs (`~/Library/Logs/Delilah/delilahd.log`), screenshots;
   - label `bug`.
-- [ ] T030 [P] [US3] Create `.github/ISSUE_TEMPLATE/feature_request.yml` (problem, proposal, alternatives; label `enhancement`) and `.github/ISSUE_TEMPLATE/config.yml` (`blank_issues_enabled: false`; a contact link "Report a vulnerability" → the repo's security advisories page).
-- [ ] T031 [P] [US3] Create `.github/pull_request_template.md` with sections What and why, How it was tested (checks run, preview), Version bump (level and reason, per CONTRIBUTING), Docs updated (status/README/decisions), and a checklist.
-- [ ] T032 [P] [US3] Create `.github/dependabot.yml` (version 2):
+- [X] T030 [P] [US3] Create `.github/ISSUE_TEMPLATE/feature_request.yml` (problem, proposal, alternatives; label `enhancement`) and `.github/ISSUE_TEMPLATE/config.yml` (`blank_issues_enabled: false`; a contact link "Report a vulnerability" → the repo's security advisories page).
+- [X] T031 [P] [US3] Create `.github/pull_request_template.md` with sections What and why, How it was tested (checks run, preview), Version bump (level and reason, per CONTRIBUTING), Docs updated (status/README/decisions), and a checklist.
+- [X] T032 [P] [US3] Create `.github/dependabot.yml` (version 2):
   - `cargo` at `/` and at `/app/src-tauri`, with a group `tauri` for `tauri*` crates and a group `all` for the rest;
   - `npm` at `/app`, with a group `tauri` for `@tauri-apps/*` and a group `all` for the rest;
   - `github-actions` at `/`, grouped;
