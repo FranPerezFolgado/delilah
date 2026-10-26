@@ -418,7 +418,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "delilah-agents"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "delilah-core",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-cli"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "clap",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "serde",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-daemon"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "axum",
  "chrono",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-e2e"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "axum",
  "delilah-agents",
@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-git"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "delilah-core",
  "serde",
@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "delilah-integrations"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "reqwest",
  "serde",

@@ -807,3 +807,18 @@ widens exposure); Cloudflare Tunnel (public, and a third party sees the traffic)
 native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); Tailscale
 identity headers alone (forgeable by any local process).
 See the [research](../specs/008-mobile-access-analysis/research.md).
+
+**97. A terminal holds its turn end by the `Stop`'s `background_tasks` (2026-10-26).** In
+terminal mode the `Stop` hook of a turn that ends with background sub-agents running (an
+entry with `type: "subagent"`, `status: "running"`) is held like chat mode's (#88). The task
+stays `running` instead of `waiting-for-user` while `/orchestrate` sub-agents implement, so neither the daemon nor the app sends a "waiting" or "turn done" notification for it.
+With the `Stop` held, the next prompt (a sub-agent's `<agent-message>`, a
+`<task-notification>`, the user's) is a new turn and drops it. A late `idle_prompt` is
+ignored. After `SubagentStop` for every listed sub-agent, the 30 s fallback applies it, as
+does process exit. The saving-mode and autopilot work of the turn end still runs when the
+`Stop` arrives (spec 008: waiting on sub-agents is no stall and never blocks a handoff).
+*Why:* the hook logs showed hundreds of terminal turn ends with sub-agents still running, and
+each one put the task in "waiting" with nothing to answer. *Ruled out:* holding on background
+shells, since a dev server can run for hours while Claude really waits on you; reading the
+sub-agent transcripts to follow them, which is more I/O for what the `Stop` already says.
+`background_tasks` is observed, not documented by Claude Code.
