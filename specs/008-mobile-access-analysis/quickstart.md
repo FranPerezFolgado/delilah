@@ -11,16 +11,24 @@ port 7420 or the installed app; this runs against a preview.
 
 ## Run
 
+`tailscale serve <dir>` does not work on the macOS app (sandbox), so the UI is served by a local
+HTTP server and a single `serve` proxies to it. Same origin for UI and API.
+
 ```bash
 TS=<mac>.<tailnet>.ts.net
-# 1. A preview daemon that accepts the tailnet UI origin (slot N → API 750N)
-DELILAH_UI_ORIGIN="https://$TS" scripts/preview.sh --fresh      # note slot N
-# 2. A static UI build that calls the API through the tunnel (port 8443)
-(cd app && VITE_DELILAH_URL="https://$TS:8443" npx vite build --outDir /tmp/delilah-mobile-ui)
-# 3. Expose both on the tailnet only (not funnel)
-tailscale serve --bg --https=443  /tmp/delilah-mobile-ui
-tailscale serve --bg --https=8443 http://127.0.0.1:750N
+# 1. Preview daemon run directly (env as in scripts/preview.sh, slot N → API 750N), with
+#    DELILAH_UI_ORIGIN="https://$TS" (preview.sh hardcodes it, so it can't be used as is)
+# 2. Throwaway Vite dev server on 127.0.0.1:150N from a git-ignored fixtures/mobile-vite.config.mjs:
+#    root ../app, allowedHosts [".ts.net"], hmr off, proxy "/api" → http://127.0.0.1:750N
+#    (changeOrigin, ws). Symlink fixtures/node_modules → app/node_modules.
+VITE_DELILAH_URL="https://$TS" npx vite --config fixtures/mobile-vite.config.mjs --host 127.0.0.1 --port 150N
+# 3. Expose it on the tailnet only (not funnel)
+tailscale serve --bg --https=443 http://127.0.0.1:150N
 ```
+
+Expected: without a Host fix, the daemon answers 403 "the Host must be a loopback address"
+(Q2). To see the UI work, a Host-rewriting proxy is needed (the Vite proxy's `changeOrigin`
+does it); never leave that exposed.
 
 Open `https://$TS` in Safari on the iPhone (Wi-Fi **and** mobile data).
 

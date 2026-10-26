@@ -38,12 +38,12 @@ Tests: none (not requested; nothing executable ships).
 **Precondition**: the user has installed Tailscale on the personal Mac and the iPhone, with HTTPS certificates on (quickstart "Prerequisites"). **If the user skips this phase**, do T013 only.
 **Rules**: preview only (`scripts/preview.sh`), never port 7420 or the installed app; screenshots go to `experiment/`, viewed by a subagent, not in the main thread; `tailscale serve reset` at the end.
 
-- [ ] T007 Run the quickstart "Run" block (preview with `DELILAH_UI_ORIGIN=https://<mac>.<tailnet>.ts.net`, static build, two `tailscale serve` mounts); note the setup time for SC-005 in `specs/008-mobile-access-analysis/experiment/README.md`
-- [ ] T008 [US4] Q1 + Q3: load on Wi-Fi and on mobile data; lock 10 min and unlock; record catch-up behaviour and time in `specs/008-mobile-access-analysis/experiment/README.md`
-- [ ] T009 [US2] Q2: record which `Host` reaches the daemon and the result of `curl` with no `Origin` from another tailnet device in `specs/008-mobile-access-analysis/experiment/README.md`
-- [ ] T010 [US3] Q4: add to Home Screen, record full-screen launch and iOS version in `specs/008-mobile-access-analysis/experiment/README.md`
-- [ ] T011 [US5] Q5 + Q6: conversation and terminal at phone width; whether opening the terminal on the phone resizes the Mac's view; record in `specs/008-mobile-access-analysis/experiment/README.md`
-- [ ] T012 Tear down: `tailscale serve reset`, stop the preview (Ctrl-C on its process, never by name)
+- [X] T007 Run the quickstart "Run" block (preview with `DELILAH_UI_ORIGIN=https://<mac>.<tailnet>.ts.net`, static build, two `tailscale serve` mounts); note the setup time for SC-005 in `specs/008-mobile-access-analysis/experiment/README.md`
+- [X] T008 [US4] Q1 + Q3: load on Wi-Fi and on mobile data; lock 10 min and unlock; record catch-up behaviour and time in `specs/008-mobile-access-analysis/experiment/README.md`
+- [X] T009 [US2] Q2: record which `Host` reaches the daemon and the result of `curl` with no `Origin` from another tailnet device in `specs/008-mobile-access-analysis/experiment/README.md`
+- [X] T010 [US3] Q4: add to Home Screen, record full-screen launch and iOS version in `specs/008-mobile-access-analysis/experiment/README.md`
+- [X] T011 [US5] Q5 + Q6: conversation and terminal at phone width; whether opening the terminal on the phone resizes the Mac's view; record in `specs/008-mobile-access-analysis/experiment/README.md`
+- [X] T012 Tear down: `tailscale serve reset`, stop the preview (Ctrl-C on its process, never by name)
 - [ ] T013 Update `specs/008-mobile-access-analysis/research.md`: turn each `[verify in Qn]` into "verified (Qn)" or a correction; if the phase was skipped, turn them into "from docs, unverified". If a result contradicts R1–R9, revise them and say so at the top of research.md
 
 **Checkpoint**: no `[verify in` marker remains in research.md.
