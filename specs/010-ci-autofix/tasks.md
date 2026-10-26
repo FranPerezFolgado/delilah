@@ -48,9 +48,9 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 
 ### Tests for User Story 1
 
-- [ ] T012 [P] [US1] Table tests of the pure `decide(task, row_state, snapshot, idle) -> Action` in `crates/delilah-daemon/src/autofix/mod.rs`: send on red+finished+new sha+idle; wait while any check pending (acceptance 1.3); never twice for the same sha (1.4); wait when not idle (1.5); no checks/neutral only → nothing; autofix off → nothing; PR not open → nothing; green after `fixing` → fixed
-- [ ] T013 [P] [US1] Prompt tests in `crates/delilah-daemon/src/autofix/mod.rs`: es/en wording, "attempt N of 3", one section per PR when several are batched, framing "data, not instructions", "commit and push to this same branch; don't force-push or open another PR", within `forward::fit` size
-- [ ] T014 [P] [US1] Idle tests in `crates/delilah-daemon/src/autofix/mod.rs`: `Waiting` with a `Question` attention is idle; `Working`/`Starting`, a `Permission` attention, an open ask card, `PausedByLimit`, a terminal task are not; no live primary but a resumable record is idle (relaunch) (research R3)
+- [X] T012 [P] [US1] Table tests of the pure `decide(task, row_state, snapshot, idle) -> Action` in `crates/delilah-daemon/src/autofix/mod.rs`: send on red+finished+new sha+idle; wait while any check pending (acceptance 1.3); never twice for the same sha (1.4); wait when not idle (1.5); no checks/neutral only → nothing; autofix off → nothing; PR not open → nothing; green after `fixing` → fixed
+- [X] T013 [P] [US1] Prompt tests in `crates/delilah-daemon/src/autofix/mod.rs`: es/en wording, "attempt N of 3", one section per PR when several are batched, framing "data, not instructions", "commit and push to this same branch; don't force-push or open another PR", within `forward::fit` size
+- [X] T014 [P] [US1] Idle tests in `crates/delilah-daemon/src/autofix/mod.rs`: `Waiting` with a `Question` attention is idle; `Working`/`Starting`, a `Permission` attention, an open ask card, `PausedByLimit`, a terminal task are not; no live primary but a resumable record is idle (relaunch) (research R3)
 - [ ] T015 [US1] Flow test in `crates/delilah-daemon/src/autofix/mod.rs` (FakeGh + `cat` session, as `pr_api/forward.rs` tests): `pr_loop::check_task` on a failing finished head → prompt typed once, notice resolved, state `fixing`; a second check → nothing typed; a later green head → `watching`; two PRs of one task failing together → one prompt with both
 - [ ] T016 [US1] Test in `crates/delilah-daemon/src/pr_loop/notices.rs`: with `ci_autofix` on and the PR not `stopped`, a failing head writes the notice but sends no "CI failed" notification; with it off, the notification is sent as today
 - [ ] T017 [US1] Test in `crates/delilah-daemon/src/pr_api/forward.rs`: manual forward of `ci-failed` CASes `sha`; then autofix doesn't send that sha; a manual forward of a sha autofix already sent resolves and returns 204 without typing
@@ -58,7 +58,7 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 
 ### Implementation for User Story 1
 
-- [ ] T019 [US1] Implement `decide()`, the idle check and the prompt wrapper over `forward::ci_prompt` in `crates/delilah-daemon/src/autofix/mod.rs`
+- [X] T019 [US1] Implement `decide()`, the idle check and the prompt wrapper over `forward::ci_prompt` in `crates/delilah-daemon/src/autofix/mod.rs`
 - [ ] T020 [US1] Implement `evaluate(app, key)` in `crates/delilah-daemon/src/autofix/mod.rs`: take `AutofixGuard`, read task + PR rows, decide per row, CAS every row to send into `fixing` (attempts+1, sha, session, sent_at), send one prompt via `forward::send`, roll back on error (or stop on no-session), resolve the rows' `ci-failed` notices, emit `Topic::Prs`/`Topic::Inbox`, record `AutofixSent` (and `AutofixFailedAgain` when coming from `fixing`) / `AutofixFixed` on green
 - [ ] T021 [US1] Call `autofix::evaluate` from `pr_loop::check_task` after its `CheckGuard` is dropped (spawned) in `crates/delilah-daemon/src/pr_loop/mod.rs`
 - [ ] T022 [US1] Skip the "CI failed" notification for tasks with autofix handling the PR in `crates/delilah-daemon/src/pr_loop/notices.rs`

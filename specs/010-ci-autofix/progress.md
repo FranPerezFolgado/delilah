@@ -7,13 +7,13 @@ Mode: format=markdown commits=yes autonomy=auto
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | a9a12b5 | resumed after pause |
 | WP-01F | 1 | fix | done | 1 | 42c7c06 | migration backfill = not archived; backfill test |
-| WP-02 | 2 | 2A | verified | 1 | c405e23 | Task.ci_autofix not persisted yet (WP-03); AutofixDefault not re-exported from core lib.rs |
-| WP-04 | 2 | 2A | verified | 1 | af18699 | claim_autofix takes &str; forward() paused check now after prompt build |
-| WP-03 | 2 | 2B | verified | 1 | c897f5c | +prs.rs test literal (allowed); CAS by value in BEGIN IMMEDIATE |
-| WP-05 | 2 | 2C | verified | 1 | 3f4e2b7 | +run.rs test literal (compile-only); PATCH uses set_ci_autofix, BacklogChange untouched |
-| WP-05F | 2 | fix | implementing | 0 | | Phase 2 review fixes |
-| WP-06 | 3 | 3A | pending | 0 | | |
-| WP-08 | 3 | 3A | pending | 0 | | |
+| WP-02 | 2 | 2A | done | 1 | c405e23 | Task.ci_autofix not persisted yet (WP-03); AutofixDefault not re-exported from core lib.rs |
+| WP-04 | 2 | 2A | done | 1 | af18699 | claim_autofix takes &str; forward() paused check now after prompt build |
+| WP-03 | 2 | 2B | done | 1 | c897f5c | +prs.rs test literal (allowed); CAS by value in BEGIN IMMEDIATE |
+| WP-05 | 2 | 2C | done | 1 | 3f4e2b7 | +run.rs test literal (compile-only); PATCH uses set_ci_autofix, BacklogChange untouched |
+| WP-05F | 2 | fix | done | 1 | a8d0b61 | Phase 2 review fixes |
+| WP-06 | 3 | 3A | verified | 1 | | prompt duplicated in autofix (forward::ci_prompt/fit private) → dedupe in WP-07; FR-006 vs R3: followed R3 |
+| WP-08 | 3 | 3A | implementing | 0 | | |
 | WP-07 | 3 | 3B | pending | 0 | | |
 | WP-09 | 3 | 3C | pending | 0 | | |
 | WP-10 | 4 | 4A | pending | 0 | | |
