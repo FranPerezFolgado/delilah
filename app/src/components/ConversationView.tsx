@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   liveSocket,
@@ -10,6 +10,7 @@ import {
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
+import { foldBackground } from "../backgroundItems";
 import { BackgroundDoneItem } from "./BackgroundDoneItem";
 import { BackgroundStrip } from "./BackgroundStrip";
 import { Markdown } from "./Markdown";
@@ -216,6 +217,8 @@ export function ConversationView({
     return () => offs.forEach((off) => off());
   }, [load]);
 
+  // Notification + hand-back pairs show as one item; the raw entries stay in state.
+  const shown = useMemo(() => foldBackground(conv?.entries ?? []), [conv?.entries]);
   const count = (conv?.entries.length ?? 0) + shownWriting.length;
 
   useEffect(() => {
@@ -278,7 +281,7 @@ export function ConversationView({
             </button>
           </div>
         )}
-        {conv?.entries.map((e) => {
+        {shown.map((e) => {
           if (e.kind === "user") {
             return (
               <div key={e.id} className="conv-msg conv-user selectable">
@@ -319,7 +322,7 @@ export function ConversationView({
           if (e.kind === "marker") {
             // Unknown markers show nothing.
             if (e.marker !== "compacted" && e.marker !== "stopped" && e.marker !== "background-done") return null;
-            if (e.marker === "background-done") return <BackgroundDoneItem key={e.id} entry={e} complete={conv.complete} />;
+            if (e.marker === "background-done") return <BackgroundDoneItem key={e.id} entry={e} complete={conv?.complete ?? false} />;
             return (
               <div key={e.id} className="conv-marker muted">
                 {e.marker === "compacted" && t("Conversación compactada")}

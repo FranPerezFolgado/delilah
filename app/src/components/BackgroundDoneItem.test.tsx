@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { BackgroundInfo, ConversationEntry } from "../api";
 import { setLanguage } from "../i18n";
 import { BackgroundDoneItem } from "./BackgroundDoneItem";
@@ -56,5 +56,53 @@ describe("BackgroundDoneItem", () => {
   it("never shows raw task tags", () => {
     expect(row(mk({ status: "completed", label: "x" })).textContent).not.toContain("<task-");
     expect(row(mk(undefined, "d")).textContent).not.toContain("<task-");
+  });
+  const agent = (o: Partial<BackgroundInfo>) => mk({ kind: "agent", status: "completed", ...o });
+  it("reads as finished when the status is missing or unknown", () => {
+    const a = row(mk({ kind: "agent", label: "X" }));
+    expect(a.textContent).toContain("Subagente terminado · X");
+    expect(a.classList.contains("warn")).toBe(false);
+    expect(row(mk({ kind: "task" })).textContent).toBe("•Tarea en segundo plano terminada");
+    const c = row(mk({ kind: "command", status: "weird" }));
+    expect(c.textContent).toContain("Comando terminado (weird)");
+    expect(c.classList.contains("warn")).toBe(false);
+  });
+  it("expands and collapses the report as markdown", () => {
+    const { container, getByRole } = render(<BackgroundDoneItem entry={agent({ report: "# Title\n\n- one\n- two" })} complete={true} />);
+    const btn = getByRole("button");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector("h1")).toBeNull();
+    fireEvent.click(btn);
+    expect(container.querySelector("h1")?.textContent).toBe("Title");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    const first = container.querySelector(".bg-done-report")!.firstElementChild!;
+    expect(first.tagName).toBe("BUTTON");
+    expect(first.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(first);
+    expect(container.querySelector("h1")).toBeNull();
+  });
+  it("notes a truncated report", () => {
+    const { container, getByRole } = render(<BackgroundDoneItem entry={agent({ report: "x", report_truncated: true })} complete={true} />);
+    fireEvent.click(getByRole("button"));
+    expect(container.textContent).toContain("(informe recortado)");
+  });
+  it("says loading or unavailable when the report is in a hand-back", () => {
+    const e = agent({ report_in_handback: true });
+    const a = render(<BackgroundDoneItem entry={e} complete={false} />);
+    fireEvent.click(a.getByRole("button"));
+    expect(a.container.textContent).toContain("Cargando informe…");
+    cleanup();
+    const b = render(<BackgroundDoneItem entry={e} complete={true} />);
+    fireEvent.click(b.getByRole("button"));
+    expect(b.container.textContent).toContain("Informe no disponible");
+  });
+  it("has no disclosure for a command", () => {
+    expect(render(<BackgroundDoneItem entry={mk({ kind: "command", status: "completed" })} complete={true} />).queryByRole("button")).toBeNull();
+  });
+  it("renders script text as text", () => {
+    const { container, getByRole } = render(<BackgroundDoneItem entry={agent({ report: "<script>alert(1)</script>" })} complete={true} />);
+    fireEvent.click(getByRole("button"));
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.textContent).toContain("<script>");
   });
 });

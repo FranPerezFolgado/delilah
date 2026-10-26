@@ -1,7 +1,9 @@
+import { useState } from "react";
 import type { ConversationEntry } from "../api";
 import { outcome } from "../backgroundItems";
 import { duration, formatTokens } from "../format";
 import { t, tn } from "../i18n";
+import { Markdown } from "./Markdown";
 import "./BackgroundDoneItem.css";
 
 type Props = { entry: Extract<ConversationEntry, { kind: "marker" }>; complete: boolean };
@@ -9,7 +11,8 @@ type Props = { entry: Extract<ConversationEntry, { kind: "marker" }>; complete: 
 const ICON = { ok: "✓", failed: "⚠", stopped: "■", other: "•" } as const;
 
 /** One row for a finished background task: outcome icon, phrase, label and metrics. */
-export function BackgroundDoneItem({ entry }: Props) {
+export function BackgroundDoneItem({ entry, complete }: Props) {
+  const [open, setOpen] = useState(false);
   const info = entry.background;
   if (!info) {
     const base = t("Tarea en segundo plano terminada");
@@ -19,11 +22,11 @@ export function BackgroundDoneItem({ entry }: Props) {
   const s = info.status ?? "";
   let phrase: string;
   if (info.kind === "agent") {
-    phrase = o === "ok" ? t("Subagente terminado") : o === "failed" ? t("Subagente falló") : o === "stopped" ? t("Subagente detenido") : s ? t("Subagente: {status}", { status: s }) : t("Subagente");
+    phrase = o === "ok" ? t("Subagente terminado") : o === "failed" ? t("Subagente falló") : o === "stopped" ? t("Subagente detenido") : s ? t("Subagente terminado ({status})", { status: s }) : t("Subagente terminado");
   } else if (info.kind === "command") {
-    phrase = o === "ok" ? t("Comando terminado") : o === "failed" ? t("Comando falló") : o === "stopped" ? t("Comando detenido") : s ? t("Comando: {status}", { status: s }) : t("Comando");
+    phrase = o === "ok" ? t("Comando terminado") : o === "failed" ? t("Comando falló") : o === "stopped" ? t("Comando detenido") : s ? t("Comando terminado ({status})", { status: s }) : t("Comando terminado");
   } else {
-    phrase = o === "ok" ? t("Tarea en segundo plano terminada") : o === "failed" ? t("Tarea en segundo plano falló") : o === "stopped" ? t("Tarea en segundo plano detenida") : s ? t("Tarea en segundo plano: {status}", { status: s }) : t("Tarea en segundo plano");
+    phrase = o === "ok" ? t("Tarea en segundo plano terminada") : o === "failed" ? t("Tarea en segundo plano falló") : o === "stopped" ? t("Tarea en segundo plano detenida") : s ? t("Tarea en segundo plano terminada ({status})", { status: s }) : t("Tarea en segundo plano terminada");
   }
   const parts = [phrase];
   if (info.label) parts.push(info.label);
@@ -32,10 +35,32 @@ export function BackgroundDoneItem({ entry }: Props) {
   if (info.tokens != null) parts.push(t("{tokens} tokens", { tokens: formatTokens(info.tokens) }));
   if (info.kind === "command" && info.exit_code != null) parts.push(t("código {code}", { code: info.exit_code }));
   const warn = o === "failed" || o === "stopped";
+  const expandable = info.kind !== "command" && (!!info.report || !!info.report_in_handback);
+  const toggle = (
+    <button type="button" className="bg-done-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+      {open ? "▾" : "▸"}
+    </button>
+  );
   return (
-    <div className={`conv-marker bg-done ${o}${warn ? " warn" : " muted"}`}>
-      <span className="bg-done-icon" aria-hidden="true">{ICON[o]}</span>
-      <span className="bg-done-text">{parts.join(" · ")}</span>
+    <div className={`conv-marker bg-done ${o}${warn ? " warn" : " muted"}${expandable ? " expandable" : ""}`}>
+      <div className="bg-done-head">
+        <span className="bg-done-icon" aria-hidden="true">{ICON[o]}</span>
+        <span className="bg-done-text">{parts.join(" · ")}</span>
+        {expandable && !open && toggle}
+      </div>
+      {expandable && open && (
+        <div className="bg-done-report">
+          {toggle}
+          {info.report ? (
+            <>
+              <div className="selectable"><Markdown text={info.report} remoteImages="click" /></div>
+              {info.report_truncated && <div className="bg-done-note">{t("(informe recortado)")}</div>}
+            </>
+          ) : (
+            <div className="bg-done-note">{complete ? t("Informe no disponible") : t("Cargando informe…")}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

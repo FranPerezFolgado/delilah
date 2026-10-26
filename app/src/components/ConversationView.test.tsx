@@ -339,6 +339,22 @@ describe("ConversationView", () => {
     await findByText("uno");
   });
 
+  it("folds a notification and its hand-back from a later page into one item", async () => {
+    const bgm = (id: string, at: string, background: object): ConversationEntry =>
+      ({ id, at, kind: "marker", marker: "background-done", background }) as ConversationEntry;
+    const note = bgm("t:n:0", "2026-01-01T00:00:01Z", { source: "notification", kind: "agent", status: "completed", task_id: "a1", report_in_handback: true });
+    const hand = bgm("t:h:0", "2026-01-01T00:00:02Z", { source: "handback", kind: "agent", status: "completed", task_id: "a1", label: "worker", report: "Informe final" });
+    vi.spyOn(api, "conversation")
+      .mockResolvedValueOnce(conv([note], { cursor: "c1", complete: false }))
+      .mockResolvedValue(conv([hand], { cursor: "c2" }));
+    const { container, findByRole } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    const btn = await findByRole("button", { name: "▸" });
+    await waitFor(() => expect(container.querySelectorAll(".bg-done")).toHaveLength(1));
+    fireEvent.click(btn);
+    expect(container.textContent).toContain("Informe final");
+    expect(container.querySelectorAll(".bg-done")).toHaveLength(1);
+  });
+
   it("shows the waiting notice while the transcript is pending", async () => {
     const { findByText } = setup(conv([], { transcript: "pending" }), session({ conversation: false }));
     expect(await findByText("Esperando la conversación de Claude…")).toBeTruthy();
