@@ -5,31 +5,31 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | c328ca8 | tools: git-cliff 2.14.2, gitleaks 8.30.1, shellcheck 0.11.0, lychee 0.24.2 (brew; `npx lychee` doesn't work → call `lychee` directly) |
-| WP-02 | 2 | 2A | verified | 1 | ff6cbd5 | + comment paths in 6 code files |
-| WP-03 | 3 | 3A | verified | 1 | 3baf382 |  |
-| WP-04 | 3 | 3A | verified | 1 | 8f3b63a | Codex/Pi reworded as other agents |
-| WP-05 | 3 | 3A | verified | 1 | fd20712 |  |
-| WP-06 | 3 | 3A | verified | 1 | 05691c8 | English seed via tr(); seed poll flaky once |
-| WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
-| WP-07 | 3 | 3B | verified | 1 | 38b6381 | 121 lines; includes T024 |
-| WP-08 | 3 | 3C | verified | 1 | 6f52dad | greps + lychee clean; CLI only from source |
-| WP-10 | 4 | 4A | verified | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
-| WP-12 | 4 | 4A | verified | 1 | 4edfd57 | decisions #79 #80 |
-| WP-11 | 4 | 4B | verified | 1 | 842a9a7 | not verifiable until next tag; actions pinned by tag like the rest |
-| WP-13 | 4 | 4B | verified | 1 | 38b6381 | done in the WP-07 run (same file) |
-| WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
-| WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
-| WP-16 | 5 | 5A | verified | 1 | 3b9554e | CHANGELOG v0.2.1..v1.0.0; release check requires the version's section |
-| WP-17 | 5 | 5A | verified | 1 | 302a7a1 | personal notes moved to ignored CLAUDE.local.md |
-| WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
-| WP-19 | 6 | 6A | verified | 1 | d7954db | T041 PASS in preview (headless Playwright, en-US/es-ES, fr→en); native menu = unit tests only; empty defaults output now → English |
-| WP-20 | 6 | 6B | verified | 1 | bbc08f3 | decision #81 |
-| WP-21 | 7 | 7A | verified | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
+| WP-01 | 1 | 1A | done | 1 | c328ca8 | tools: git-cliff 2.14.2, gitleaks 8.30.1, shellcheck 0.11.0, lychee 0.24.2 (brew; `npx lychee` doesn't work → call `lychee` directly) |
+| WP-02 | 2 | 2A | done | 1 | ff6cbd5 | + comment paths in 6 code files |
+| WP-03 | 3 | 3A | done | 1 | 3baf382 |  |
+| WP-04 | 3 | 3A | done | 1 | 8f3b63a | Codex/Pi reworded as other agents |
+| WP-05 | 3 | 3A | done | 1 | fd20712 |  |
+| WP-06 | 3 | 3A | done | 1 | 05691c8 | English seed via tr(); seed poll flaky once |
+| WP-09 | 3 | 3A | done | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
+| WP-07 | 3 | 3B | done | 1 | 38b6381 | 121 lines; includes T024 |
+| WP-08 | 3 | 3C | done | 1 | 6f52dad | greps + lychee clean; CLI only from source |
+| WP-10 | 4 | 4A | done | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
+| WP-12 | 4 | 4A | done | 1 | 4edfd57 | decisions #79 #80 |
+| WP-11 | 4 | 4B | done | 1 | 842a9a7 | not verifiable until next tag; actions pinned by tag like the rest |
+| WP-13 | 4 | 4B | done | 1 | 38b6381 | done in the WP-07 run (same file) |
+| WP-14 | 5 | 5A | done | 1 | e124e91 |  |
+| WP-15 | 5 | 5A | done | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
+| WP-16 | 5 | 5A | done | 1 | 3b9554e | CHANGELOG v0.2.1..v1.0.0; release check requires the version's section |
+| WP-17 | 5 | 5A | done | 1 | 302a7a1 | personal notes moved to ignored CLAUDE.local.md |
+| WP-18 | 5 | 5A | done | 1 | — | done by orchestrator via gh: {"enabled":true} |
+| WP-19 | 6 | 6A | done | 1 | d7954db | T041 PASS in preview (headless Playwright, en-US/es-ES, fr→en); native menu = unit tests only; empty defaults output now → English |
+| WP-20 | 6 | 6B | done | 1 | bbc08f3 | decision #81 |
+| WP-21 | 7 | 7A | done | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
 | WP-22 | 8 | 8A | verified | 1 | 41285a5 | decision #82 |
-| WP-19F | 6 | 6F | verified | 1 | a688a90 | lang.rs/state.rs → English fallback; bare AppleLanguages entries; parseSetting in App |
-| WP-04F | 3 | 3F | verified | 1 | eb3eb40 | fix: Spanish labels in docs (HIGH), app-only quickstart, CLAUDE.md pointers |
-| WP-23 | 8 | 8B | pending | 0 | | |
+| WP-19F | 6 | 6F | done | 1 | a688a90 | lang.rs/state.rs → English fallback; bare AppleLanguages entries; parseSetting in App |
+| WP-04F | 3 | 3F | done | 1 | eb3eb40 | fix: Spanish labels in docs (HIGH), app-only quickstart, CLAUDE.md pointers |
+| WP-23 | 8 | 8B | verified | 1 | 56ddac6 | all suites, shellcheck, test-install, release tests, greps, lychee pass; secret scan refreshed (657 commits, 0 leaks) |
 | WP-24 | 8 | 8C | pending | 0 | | |
 
 ## Open findings
@@ -58,15 +58,15 @@ Mode: format=markdown commits=yes autonomy=auto
 | 1 | spec | LOW | tasks/quickstart still say `npx --yes lychee`; lychee is called directly | specs/008-public-repo-onboarding/tasks.md, quickstart.md |
 | 6 | architecture | MEDIUM | shell re-implements the rule instead of reading the daemon's resolved language (e.g. GET /api/v1/language); otherwise record the duplication | app/src-tauri/src/daemon.rs:219-246 |
 | 6 | architecture | MEDIUM | setLanguage("auto") at import mutates the DOM; could move to main.tsx; double navigator guard | app/src/i18n.ts:26 |
-| 6 | architecture | MEDIUM | App stores the raw preference ("fr", 42) in state; Settings then has no matching option. Normalise with parseSetting() | app/src/App.tsx:161-170 |
+| 6 | architecture | MEDIUM | (fixed in a688a90) App stores the raw preference ("fr", 42) in state; Settings then has no matching option. Normalise with parseSetting() | app/src/App.tsx:161-170 |
 | 6 | architecture | LOW | contract table mirrored by hand across TS/Rust; a shared JSON fixture would remove drift | app/src/i18n.test.ts, daemon.rs tests |
-| 3 | spec | MEDIUM | Quickstart needs a hidden build from source for the CLI (Rust not in Requirements) → in WP-04F | README.md:83-95 |
-| 3 | spec | LOW | proposal protocol strings `Nueva tarea`/`Crear` quoted without English label → in WP-04F | docs/*.md |
-| 5 | spec | MEDIUM | CLAUDE.md still points to README as "every feature" → in WP-04F | CLAUDE.md:24,26 |
+| 3 | spec | MEDIUM | Quickstart needs a hidden build from source for the CLI (Rust not in Requirements) → fixed in eb3eb40 | README.md:83-95 |
+| 3 | spec | LOW | proposal protocol strings `Nueva tarea`/`Crear` quoted without English label → fixed in eb3eb40 | docs/*.md |
+| 5 | spec | MEDIUM | CLAUDE.md still points to README as "every feature" → fixed in eb3eb40 | CLAUDE.md:24,26 |
 | 7 | spec | MEDIUM | secret-scan report predates 23 later commits (re-run: 650 commits, no leaks) → refresh at the end | ~/.delilah/tasks/LIBRE-15/secret-scan.md |
 | 5 | spec | LOW | committed CHANGELOG.md isn't reproducible from cliff.toml (omits 0.2.0); next bump rewrites it | CHANGELOG.md |
 | 5 | spec | LOW | CHANGELOG entries keep Spanish labels from old commit subjects (history) | CHANGELOG.md:41,47,53 |
 | 5 | spec | LOW | no automated test for the git-cliff guard in bump-version.sh | scripts/bump-version.sh |
-| 3 | spec | HIGH | Spanish UI labels left in current docs (Abrir PR, Rama, Restaurar, …) → WP-04F | docs/decisions.md, status.md, architecture.md, usage.md |
+| 3 | spec | HIGH | Spanish UI labels left in current docs (Abrir PR, Rama, Restaurar, …) → fixed in eb3eb40 | docs/decisions.md, status.md, architecture.md, usage.md |
 | 6 | implementer WP-19F | LOW | AppState::new defaults to Es under cfg!(test) only (≈800 tests assert Spanish), so production (En) and test defaults differ | crates/delilah-daemon/src/state.rs |
 | 6 | architecture (re-review) | LOW | first_language duplicated between daemon lang.rs and shell daemon.rs (guarded by mirrored tests) | crates/delilah-daemon/src/lang.rs:52 |
