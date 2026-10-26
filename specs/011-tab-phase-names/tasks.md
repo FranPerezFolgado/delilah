@@ -21,14 +21,14 @@ No setup: no new dependency, module or config. `app/` is already set up.
 **Purpose**: The single naming rule that the tab bar and the Sessions list both use (FR-001
 to FR-005, research R2/R3).
 
-- [ ] T001 Write failing unit tests for `sessionName` in `app/src/chain.test.ts` (new `describe("sessionName")`, with `setLanguage("es")` in `beforeEach`, restored after). Build sessions with the same full `Session` literal shape as `TaskScreen.test.tsx`'s `sess()`. Cases:
+- [X] T001 Write failing unit tests for `sessionName` in `app/src/chain.test.ts` (new `describe("sessionName")`, with `setLanguage("es")` in `beforeEach`, restored after). Build sessions with the same full `Session` literal shape as `TaskScreen.test.tsx`'s `sess()`. Cases:
   - step `plan` / `implement` / `review` → «Spec y plan» / «Implementación» / «Revisión», whether `primary` is true or false and whether `live` is true or false;
   - after `setLanguage("en")`, the same → «Spec and plan» / «Implement» / «Review»;
   - primary `claude` with `step: null` → «Claude principal» (en «Main Claude»);
   - primary of kind `shell` with `step: null` → its own `label` (pins the plan's choice of the `kind === "claude"` rule);
   - non-primary with `step: null` → its own `label`;
   - the stored `label` is never used when `step` is set (use a label like `"Otra cosa"`).
-- [ ] T002 Implement and export `sessionName(s: Session): string` in `app/src/chain.ts`, next to `stepLabel`: `s.step ? stepLabel(s.step) : s.primary && s.kind === "claude" ? t("Claude principal") : s.label`. Use no cast (a `Step` already fits `ChainStepName`), and add a one-line doc comment. Make T001 pass.
+- [X] T002 Implement and export `sessionName(s: Session): string` in `app/src/chain.ts`, next to `stepLabel`: `s.step ? stepLabel(s.step) : s.primary && s.kind === "claude" ? t("Claude principal") : s.label`. Use no cast (a `Step` already fits `ChainStepName`), and add a one-line doc comment. Make T001 pass.
 
 **Checkpoint**: `npx vitest related --run src/chain.ts` green; `npx tsc --noEmit` clean.
 
