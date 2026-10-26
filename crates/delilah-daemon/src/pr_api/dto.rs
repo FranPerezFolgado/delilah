@@ -3,7 +3,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::pr_types::{Check, PrState, ReviewDecision, Rollup, Snapshot};
+use crate::pr_types::{
+    Check, MergeMethod, PrState, ReviewComment, ReviewDecision, Rollup, Snapshot,
+};
 use crate::prs;
 use crate::store_prs::PrRow;
 
@@ -18,6 +20,8 @@ pub struct SnapshotView {
     ci: Rollup,
     review_decision: Option<ReviewDecision>,
     comments: usize,
+    review_comments: Vec<ReviewComment>,
+    merge_methods: Vec<MergeMethod>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +95,8 @@ impl From<&Snapshot> for SnapshotView {
             ci: prs::ci_outcome(&s.checks),
             review_decision: s.review_decision,
             comments: s.comments.len(),
+            review_comments: s.review_comments.clone(),
+            merge_methods: s.merge_methods.clone(),
         }
     }
 }

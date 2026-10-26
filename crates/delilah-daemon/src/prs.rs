@@ -318,6 +318,8 @@ pub(crate) mod tests {
             name: name.into(),
             outcome,
             url: None,
+            started_at: None,
+            finished_at: None,
         }
     }
 
@@ -332,6 +334,8 @@ pub(crate) mod tests {
             review_decision: None,
             reviews: vec![],
             comments: vec![],
+            review_comments: vec![],
+            merge_methods: vec![],
         }
     }
 

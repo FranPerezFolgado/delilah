@@ -55,6 +55,28 @@ json.dump(prs, open(lp, "w"), indent=2)
 print(url)
 PY
     ;;
+  "pr merge")
+    n="${3:-}"
+    n="${n%/}"
+    n="${n##*/}"
+    python3 -I - "$dir" "$n" <<'PY'
+import json, os, sys
+d, n = sys.argv[1:3]
+p = os.path.join(d, "pr-%s.json" % n)
+doc = json.load(open(p))
+pr = doc["data"]["repository"]["pullRequest"]
+pr["state"] = "MERGED"
+pr["merged"] = True
+json.dump(doc, open(p, "w"), indent=2)
+lp = os.path.join(d, "pr-list.json")
+if os.path.exists(lp):
+    prs = json.load(open(lp))
+    for x in prs:
+        if str(x.get("number")) == n:
+            x["state"] = "MERGED"
+    json.dump(prs, open(lp, "w"), indent=2)
+PY
+    ;;
   "api graphql")
     n=""
     for ((i = 0; i < ${#args[@]} - 1; i++)); do

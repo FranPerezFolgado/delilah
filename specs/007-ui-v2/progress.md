@@ -15,7 +15,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
 | WP-07 | 2 | 2B | done | 1 | a3b376d | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
-| WP-09 | 2 | 2B | implementing | 1 |  | PR check times, review comments, merge |
+| WP-09 | 2 | 2B | done | 1 |  | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
@@ -57,7 +57,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
-| WP-51 | 8 | 8A | done | 1 |  | Bandeja and Jira at width |
+| WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
 | WP-52 | 8 | 8A | pending | 0 | | Task screen and board at width |
 | WP-53 | 8 | 8A | pending | 0 | | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |

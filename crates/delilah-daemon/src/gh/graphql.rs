@@ -1,22 +1,28 @@
 //! The GraphQL side of `gh`: the query for everything one check needs about a PR and
 //! the parsing of its answer into a [`Snapshot`].
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use super::GhError;
 use crate::pr_types::{
-    Check, Comment, CommentKind, Outcome, PrState, Review, ReviewDecision, ReviewState, Snapshot,
+    Check, Comment, CommentKind, MergeMethod, Outcome, PrState, Review, ReviewComment,
+    ReviewDecision, ReviewState, Snapshot,
 };
+
+/// The most review comments kept in a snapshot.
+const MAX_REVIEW_COMMENTS: usize = 50;
 
 /// Everything one check needs about a PR, in a single call (research R2).
 pub(super) const SNAPSHOT_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
+    mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
     pullRequest(number: $number) {
       state isDraft merged headRefOid baseRefName title url reviewDecision
       commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
         __typename
-        ... on CheckRun { name status conclusion detailsUrl }
-        ... on StatusContext { context state targetUrl }
+        ... on CheckRun { name status conclusion detailsUrl startedAt completedAt }
+        ... on StatusContext { context state targetUrl createdAt }
       } } } } } }
       reviews(last: 50) { nodes { databaseId state author { login } body submittedAt } }
       comments(last: 100) { nodes { databaseId author { login } body createdAt } }
@@ -49,6 +55,10 @@ fn login(author: Option<Author>) -> String {
     author.map_or_else(|| "ghost".into(), |a| a.login)
 }
 
+fn login_ref(author: Option<&Author>) -> String {
+    author.map_or_else(|| "ghost".into(), |a| a.login.clone())
+}
+
 #[derive(Deserialize)]
 struct Envelope {
     data: Option<Data>,
@@ -67,7 +77,14 @@ struct Data {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Repository {
+    #[serde(default)]
+    merge_commit_allowed: bool,
+    #[serde(default)]
+    squash_merge_allowed: bool,
+    #[serde(default)]
+    rebase_merge_allowed: bool,
     #[serde(rename = "pullRequest")]
     pull_request: Option<RawPr>,
 }
@@ -114,6 +131,9 @@ struct RawContext {
     context: Option<String>,
     state: Option<String>,
     target_url: Option<String>,
+    started_at: Option<DateTime<Utc>>,
+    completed_at: Option<DateTime<Utc>>,
+    created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -123,6 +143,7 @@ struct RawReview {
     state: ReviewState,
     author: Option<Author>,
     body: String,
+    submitted_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +156,7 @@ struct RawComment {
     #[serde(default)]
     line: Option<i64>,
     body: String,
+    created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -157,6 +179,12 @@ fn check_of(c: RawContext) -> Option<Check> {
             name,
             outcome,
             url: c.details_url,
+            started_at: c.started_at,
+            finished_at: if outcome == Outcome::Pending {
+                None
+            } else {
+                c.completed_at
+            },
         });
     }
     let name = c.context?;
@@ -169,17 +197,34 @@ fn check_of(c: RawContext) -> Option<Check> {
         name,
         outcome,
         url: c.target_url,
+        // A commit status has one time: when it was set.
+        started_at: c.created_at,
+        finished_at: if outcome == Outcome::Pending {
+            None
+        } else {
+            c.created_at
+        },
     })
 }
 
 /// Reads the GraphQL answer of [`SNAPSHOT_QUERY`].
 pub(crate) fn parse_snapshot(out: &str) -> Result<Snapshot, GhError> {
     let env: Envelope = serde_json::from_str(out).map_err(|e| GhError::Parse(e.to_string()))?;
-    let Some(pr) = env
-        .data
-        .and_then(|d| d.repository)
-        .and_then(|r| r.pull_request)
-    else {
+    let repo = env.data.and_then(|d| d.repository);
+    let merge_methods: Vec<MergeMethod> = repo
+        .as_ref()
+        .map(|r| {
+            [
+                (r.merge_commit_allowed, MergeMethod::Merge),
+                (r.squash_merge_allowed, MergeMethod::Squash),
+                (r.rebase_merge_allowed, MergeMethod::Rebase),
+            ]
+            .into_iter()
+            .filter_map(|(allowed, m)| allowed.then_some(m))
+            .collect()
+        })
+        .unwrap_or_default();
+    let Some(pr) = repo.and_then(|r| r.pull_request) else {
         // GitHub answers 200 with the problem in `errors`: keep its words so
         // `classify` can read them.
         let message = env.errors.first().map_or_else(
@@ -195,16 +240,26 @@ pub(crate) fn parse_snapshot(out: &str) -> Result<Snapshot, GhError> {
         .and_then(|c| c.commit.status_check_rollup)
         .map(|r| r.contexts.into_items().filter_map(check_of).collect())
         .unwrap_or_default();
-    let reviews = pr
-        .reviews
-        .into_items()
-        .map(|r| Review {
+    let mut review_comments = Vec::new();
+    let mut reviews = Vec::new();
+    for r in pr.reviews.into_items() {
+        // The body of a review is a comment without a file.
+        if let (false, Some(at)) = (r.body.trim().is_empty(), r.submitted_at) {
+            review_comments.push(ReviewComment {
+                author: login_ref(r.author.as_ref()),
+                path: None,
+                line: None,
+                body: r.body.clone(),
+                at,
+            });
+        }
+        reviews.push(Review {
             id: r.database_id,
             author: login(r.author),
             state: r.state,
             body: r.body,
-        })
-        .collect();
+        });
+    }
     let comment = |c: RawComment, kind| Comment {
         id: c.database_id,
         kind,
@@ -219,13 +274,21 @@ pub(crate) fn parse_snapshot(out: &str) -> Result<Snapshot, GhError> {
         .map(|c| comment(c, CommentKind::Issue))
         .collect();
     for thread in pr.review_threads.into_items() {
-        comments.extend(
-            thread
-                .comments
-                .into_items()
-                .map(|c| comment(c, CommentKind::Review)),
-        );
+        for c in thread.comments.into_items() {
+            if let Some(at) = c.created_at {
+                review_comments.push(ReviewComment {
+                    author: login_ref(c.author.as_ref()),
+                    path: c.path.clone(),
+                    line: c.line,
+                    body: c.body.clone(),
+                    at,
+                });
+            }
+            comments.push(comment(c, CommentKind::Review));
+        }
     }
+    review_comments.sort_by_key(|c| std::cmp::Reverse(c.at));
+    review_comments.truncate(MAX_REVIEW_COMMENTS);
     Ok(Snapshot {
         state: pr.state,
         draft: pr.is_draft,
@@ -236,6 +299,8 @@ pub(crate) fn parse_snapshot(out: &str) -> Result<Snapshot, GhError> {
         review_decision: pr.review_decision,
         reviews,
         comments,
+        review_comments,
+        merge_methods,
     })
 }
 
@@ -244,26 +309,28 @@ pub(crate) mod tests {
     use super::*;
     use crate::gh::{AccessProblem, classify};
 
-    pub(crate) const GRAPHQL: &str = r#"{"data":{"repository":{"pullRequest":{
+    pub(crate) const GRAPHQL: &str = r#"{"data":{"repository":{
+      "mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":false,
+      "pullRequest":{
       "state":"OPEN","isDraft":true,"merged":false,"headRefOid":"abc123","baseRefName":"main",
       "title":"Add things","url":"https://github.com/me/repo/pull/42","reviewDecision":"CHANGES_REQUESTED",
       "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
-        {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://ci/1"},
+        {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://ci/1","startedAt":"2026-10-20T09:00:00Z","completedAt":"2026-10-20T09:02:30Z"},
         {"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://ci/2"},
         {"__typename":"CheckRun","name":"cancelled","status":"COMPLETED","conclusion":"CANCELLED","detailsUrl":null},
         {"__typename":"CheckRun","name":"skipped","status":"COMPLETED","conclusion":"SKIPPED","detailsUrl":null},
         {"__typename":"CheckRun","name":"neutral","status":"COMPLETED","conclusion":"NEUTRAL","detailsUrl":null},
         {"__typename":"CheckRun","name":"slow","status":"COMPLETED","conclusion":"TIMED_OUT","detailsUrl":null},
-        {"__typename":"CheckRun","name":"queued","status":"QUEUED","conclusion":null,"detailsUrl":null},
+        {"__typename":"CheckRun","name":"queued","status":"QUEUED","conclusion":null,"detailsUrl":null,"startedAt":"2026-10-20T09:05:00Z","completedAt":null},
         {"__typename":"StatusContext","context":"legacy/ci","state":"ERROR","targetUrl":"https://legacy/1"},
-        {"__typename":"StatusContext","context":"legacy/lint","state":"SUCCESS","targetUrl":null}
+        {"__typename":"StatusContext","context":"legacy/lint","state":"SUCCESS","targetUrl":null,"createdAt":"2026-10-20T09:01:00Z"}
       ]}}}}]},
       "reviews":{"nodes":[
         {"databaseId":11,"state":"CHANGES_REQUESTED","author":{"login":"alice"},"body":"Please fix","submittedAt":"2026-10-20T10:00:00Z"},
         {"databaseId":12,"state":"DISMISSED","author":null,"body":"","submittedAt":"2026-10-20T11:00:00Z"}]},
       "comments":{"nodes":[{"databaseId":21,"author":{"login":"bob"},"body":"Looks odd","createdAt":"2026-10-20T10:30:00Z"}]},
       "reviewThreads":{"nodes":[{"comments":{"nodes":[
-        {"databaseId":31,"author":{"login":"alice"},"path":"src/lib.rs","line":7,"body":"Rename","createdAt":"2026-10-20T10:00:00Z"}]}}]}
+        {"databaseId":31,"author":{"login":"alice"},"path":"src/lib.rs","line":7,"body":"Rename","createdAt":"2026-10-20T10:30:00Z"}]}}]}
     }}}}"#;
 
     #[test]
@@ -301,6 +368,76 @@ pub(crate) mod tests {
         assert_eq!(ids, [(21, CommentKind::Issue), (31, CommentKind::Review)]);
         assert_eq!(s.comments[1].path.as_deref(), Some("src/lib.rs"));
         assert_eq!(s.comments[1].line, Some(7));
+    }
+
+    #[test]
+    fn checks_carry_their_times() {
+        let s = parse_snapshot(GRAPHQL).unwrap();
+        let at = |t: &str| Some(t.parse::<DateTime<Utc>>().unwrap());
+        assert_eq!(s.checks[0].started_at, at("2026-10-20T09:00:00Z"));
+        assert_eq!(s.checks[0].finished_at, at("2026-10-20T09:02:30Z"));
+        // Running: started, not finished.
+        assert_eq!(s.checks[6].started_at, at("2026-10-20T09:05:00Z"));
+        assert_eq!(s.checks[6].finished_at, None);
+        // A commit status has one time.
+        assert_eq!(s.checks[8].started_at, at("2026-10-20T09:01:00Z"));
+        assert_eq!(s.checks[8].finished_at, at("2026-10-20T09:01:00Z"));
+        assert_eq!(s.checks[7].started_at, None);
+    }
+
+    #[test]
+    fn review_comments_are_threads_and_review_bodies_newest_first() {
+        let s = parse_snapshot(GRAPHQL).unwrap();
+        let got: Vec<_> = s
+            .review_comments
+            .iter()
+            .map(|c| {
+                (
+                    c.author.as_str(),
+                    c.path.as_deref(),
+                    c.line,
+                    c.body.as_str(),
+                )
+            })
+            .collect();
+        // The dismissed review has no body: not listed.
+        assert_eq!(
+            got,
+            [
+                ("alice", Some("src/lib.rs"), Some(7), "Rename"),
+                ("alice", None, None, "Please fix"),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_the_newest_fifty_review_comments_are_kept() {
+        let nodes: Vec<String> = (0..60)
+            .map(|i| {
+                format!(
+                    r#"{{"databaseId":{i},"author":{{"login":"a"}},"path":"f","line":1,"body":"c{i}","createdAt":"2026-10-20T10:{:02}:00Z"}}"#,
+                    i
+                )
+            })
+            .collect();
+        let json = format!(
+            r#"{{"data":{{"repository":{{"pullRequest":{{"state":"OPEN","isDraft":false,"headRefOid":"a","baseRefName":"main","title":"t","reviewDecision":null,
+            "commits":{{"nodes":[]}},"reviews":{{"nodes":[]}},"comments":{{"nodes":[]}},
+            "reviewThreads":{{"nodes":[{{"comments":{{"nodes":[{}]}}}}]}}}}}}}}}}"#,
+            nodes.join(",")
+        );
+        let s = parse_snapshot(&json).unwrap();
+        assert_eq!(s.review_comments.len(), 50);
+        assert_eq!(s.review_comments[0].body, "c59");
+        assert_eq!(s.review_comments[49].body, "c10");
+        // The repo flags are absent: methods unknown.
+        assert!(s.merge_methods.is_empty());
+    }
+
+    #[test]
+    fn merge_methods_follow_the_repository_flags() {
+        let s = parse_snapshot(GRAPHQL).unwrap();
+        assert_eq!(s.merge_methods, [MergeMethod::Merge, MergeMethod::Squash]);
     }
 
     #[test]

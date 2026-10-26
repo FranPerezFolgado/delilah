@@ -19,7 +19,7 @@ use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::pr_types::{ListedPr, Snapshot};
+use crate::pr_types::{ListedPr, MergeMethod, Snapshot};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 /// The most of `gh`'s stderr kept in an error: it ends up in the database.
@@ -355,6 +355,25 @@ impl GhClient {
         Ok(login)
     }
 
+    /// The login remembered for `host`, without asking `gh`.
+    pub fn cached_user(&self, host: &str) -> Option<String> {
+        self.users
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(host)
+            .cloned()
+    }
+
+    /// Asks `gh` who is signed in on `host` right now (the remembered login may be
+    /// stale after `gh auth switch`) and remembers the answer.
+    pub async fn user_fresh(&self, host: &str) -> Result<String, GhError> {
+        self.users
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(host);
+        self.user(host).await
+    }
+
     /// The PRs whose head is `branch`, in any state.
     pub async fn pr_list(&self, dir: &Path, branch: &str) -> Result<Vec<ListedPr>, GhError> {
         let args = [
@@ -407,6 +426,13 @@ impl GhClient {
             .pr_snapshot(&pr.host, &pr.owner_name, pr.number)
             .await?;
         Ok((pr, snapshot))
+    }
+
+    /// Merges the PR at `url` with `method` (`gh pr merge`). Runs outside any repo folder:
+    /// the URL names the PR.
+    pub async fn pr_merge(&self, url: &str, method: MergeMethod) -> Result<(), GhError> {
+        let args = strings(&["pr", "merge", url, method.flag()]);
+        self.inner.run(None, args, None).await.map(drop)
     }
 
     /// Creates the PR and returns its URL. The body goes through stdin.

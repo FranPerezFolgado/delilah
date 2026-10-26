@@ -33,6 +33,11 @@ pub struct Check {
     pub outcome: Outcome,
     #[serde(default)]
     pub url: Option<String>,
+    /// When the check started and ended; `None` when GitHub does not say (or not yet).
+    #[serde(default)]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub finished_at: Option<DateTime<Utc>>,
 }
 
 /// The CI of a head as a whole.
@@ -96,6 +101,36 @@ pub struct Comment {
     pub body: String,
 }
 
+/// A merge method a repository can allow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl MergeMethod {
+    /// The flag of `gh pr merge`.
+    pub fn flag(self) -> &'static str {
+        match self {
+            Self::Merge => "--merge",
+            Self::Squash => "--squash",
+            Self::Rebase => "--rebase",
+        }
+    }
+}
+
+/// A review comment for the PR tab: on a file line, or the body of a review (no path).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewComment {
+    pub author: String,
+    pub path: Option<String>,
+    pub line: Option<i64>,
+    pub body: String,
+    pub at: DateTime<Utc>,
+}
+
 /// What GitHub said about a PR at the last check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -109,6 +144,13 @@ pub struct Snapshot {
     pub review_decision: Option<ReviewDecision>,
     pub reviews: Vec<Review>,
     pub comments: Vec<Comment>,
+    /// The newest 50 review comments, newest first. Snapshots stored before they were
+    /// read lack the field.
+    #[serde(default)]
+    pub review_comments: Vec<ReviewComment>,
+    /// What the repository allows (`merge`, `squash`, `rebase`); empty when unknown.
+    #[serde(default)]
+    pub merge_methods: Vec<MergeMethod>,
 }
 
 /// The highest ids already seen, so nothing is notified twice (see research R4).
@@ -140,4 +182,30 @@ pub struct PrSummary {
     pub ci: Rollup,
     pub review_decision: Option<ReviewDecision>,
     pub count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_old_stored_snapshot_still_parses() {
+        let old = r#"{"state":"open","draft":false,"title":"t","head":"abc","base":"main",
+          "checks":[{"name":"ci","outcome":"pending","url":null}],
+          "review_decision":null,"reviews":[],"comments":[]}"#;
+        let s: Snapshot = serde_json::from_str(old).unwrap();
+        assert!(s.merge_methods.is_empty());
+        assert!(s.review_comments.is_empty());
+        assert_eq!(
+            (s.checks[0].started_at, s.checks[0].finished_at),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn merge_methods_serialize_lowercase() {
+        let v =
+            serde_json::to_value([MergeMethod::Merge, MergeMethod::Squash, MergeMethod::Rebase]);
+        assert_eq!(v.unwrap(), serde_json::json!(["merge", "squash", "rebase"]));
+    }
 }
