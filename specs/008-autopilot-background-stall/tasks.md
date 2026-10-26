@@ -18,7 +18,7 @@ the old code for the right reason) before its implementation.
 
 **Purpose**: neutral payload fixtures shared by the daemon and agent tests.
 
-- [ ] T001 [P] Create neutral `Stop` payload fixtures in `crates/delilah-daemon/tests/fixtures/hooks/`. Write `stop-background-running.json` (one `running` subagent entry, id `a1`, agent_type `implementer`, description `WP-01`), `stop-background-done.json` (two entries, `completed` and `failed`), `stop-background-empty.json` (`background_tasks: []`) and `stop-no-background-field.json` (no field). Use the shape in `contracts/stop-hook.md`; `session_id`/`cwd` are placeholders the tests overwrite. No prompts, messages, paths or ids from real tasks (FR-009).
+- [X] T001 [P] Create neutral `Stop` payload fixtures in `crates/delilah-daemon/tests/fixtures/hooks/`. Write `stop-background-running.json` (one `running` subagent entry, id `a1`, agent_type `implementer`, description `WP-01`), `stop-background-done.json` (two entries, `completed` and `failed`), `stop-background-empty.json` (`background_tasks: []`) and `stop-no-background-field.json` (no field). Use the shape in `contracts/stop-hook.md`; `session_id`/`cwd` are placeholders the tests overwrite. No prompts, messages, paths or ids from real tasks (FR-009).
 
 ---
 
@@ -49,7 +49,7 @@ parts share no files and run in parallel.
 
   Run them and see them fail.
 - [ ] T007 Implement in `crates/delilah-e2e/src/fake/hooks.rs` `payload::stop_with(session, cwd, message, background: Option<&[Value]>)` (`payload::stop` delegates with `None`), and play `Step::Stop`/`Step::Write` in `crates/delilah-e2e/src/fake/run.rs`. Make T006 green and keep `cargo test -p delilah-e2e --lib` green.
-- [ ] T008 [P] Update `specs/005-e2e-tests/contracts/fake-claude.md` with the delta in `specs/008-autopilot-background-stall/contracts/fake-claude.md`: the lookup order, the `stop` object form, and the `write` step; add `background_tasks` to the `Stop` row of the payload table.
+- [X] T008 [P] Update `specs/005-e2e-tests/contracts/fake-claude.md` with the delta in `specs/008-autopilot-background-stall/contracts/fake-claude.md`: the lookup order, the `stop` object form, and the `write` step; add `background_tasks` to the `Stop` row of the payload table.
 
 **Checkpoint**: `cargo test -p delilah-agents` and `cargo test -p delilah-e2e --lib` green.
 
