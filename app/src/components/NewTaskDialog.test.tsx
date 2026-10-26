@@ -147,6 +147,13 @@ describe("NewTaskDialog autopilot", () => {
     expect(pressed(saving)).toBe(true);
   });
 
+  it("is offered for a project whose workflow is \"project\"", () => {
+    const { container } = render(
+      <NewTaskDialog projects={[{ ...projects[0], workflow: "project" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(btn(container, "Autopiloto")).toBeDefined();
+  });
+
   it("is sent with the run together with saving mode", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);

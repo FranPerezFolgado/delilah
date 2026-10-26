@@ -3,6 +3,7 @@ import { api, isCheckoutDirty, type Project, type Task } from "../api";
 import { t } from "../i18n";
 import { relativeTime } from "../time";
 import { AutopilotControls } from "./AutopilotControls";
+import { isSpecWorkflow } from "./NewTaskDialog";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 import { Button, ConfirmDialog, StatusBadge, Toggle, useToast } from "./ui";
 import "./BacklogTaskView.css";
@@ -54,7 +55,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     savingMode !== task.saving_mode ||
     autopilot !== !!task.autopilot;
   // Only the spec workflow has autopilot.
-  const autopilotAllowed = task.workflow === "feature";
+  const autopilotAllowed = isSpecWorkflow(task.workflow);
   const locked = busy || !!started;
   const open = (key: string) => (onOpen ?? onChanged)(key);
 

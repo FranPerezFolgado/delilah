@@ -7,6 +7,9 @@ import { WherePicker, whereOf, type Where } from "./WherePicker";
 import { Button, Dialog, Segmented, Toggle } from "./ui";
 import "./NewTaskDialog.css";
 
+// The spec workflow: "project", or its legacy name "feature".
+export const isSpecWorkflow = (w: string | undefined | null) => w === "project" || w === "feature";
+
 /** A ticket to start from, e.g. picked in the Jira view. */
 export interface TaskDraft {
   key: string;
@@ -85,7 +88,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
 
   // Only the spec workflow has autopilot; a custom prompt runs outside it.
   const workflow = prompt.trim() ? "prompt" : (existing?.workflow ?? project?.workflow);
-  const autopilotAllowed = workflow === "feature";
+  const autopilotAllowed = isSpecWorkflow(workflow);
   const autopilotOn = autopilot && autopilotAllowed;
   // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
   const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};

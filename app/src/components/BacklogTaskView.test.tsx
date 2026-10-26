@@ -107,6 +107,11 @@ describe("BacklogTaskView", () => {
 });
 
 describe("BacklogTaskView autopilot", () => {
+  it("is offered for a task whose workflow is \"project\"", () => {
+    const { container } = mount({ ...task, workflow: "project" });
+    expect(toggle(container, "Autopiloto")).toBeDefined();
+  });
+
   it("turning it on asks first, then ticks and disables Ahorro, and saves both", async () => {
     const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
     const { container } = mount(task);
