@@ -11,7 +11,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-02 | 2 | 2A | done | 1 | 7874870 | Client read types and calls (api.ts) |
 | WP-03 | 2 | 2A | done | 1 | 87b9863 | Core events and created_at |
 | WP-04 | 2 | 2A | done | 1 | 8c35baa | Route skeleton |
-| WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
+| WP-05 | 2 | 2B | done | 1 |  | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
 | WP-07 | 2 | 2B | done | 1 | a3b376d | created_at exposed and reopen |
 | WP-08 | 2 | 2B | done | 1 | a224417 | Inbox store, ids, removal and new avisos |
@@ -40,7 +40,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-31 | 5 | 5B | done | 1 | c313d31 | Task header |
 | WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
 | WP-33 | 5 | 5B | done | 1 | 3d93e8a | Chat tab |
-| WP-34 | 5 | 5C | done | 1 |  | Task screen integration |
+| WP-34 | 5 | 5C | done | 1 | 191d0de | Task screen integration |
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
 | WP-37 | 6 | 6A | done | 1 | a54c617 | Bandeja |
@@ -58,7 +58,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
 | WP-51 | 8 | 8A | done | 1 | a809674 | Bandeja and Jira at width |
-| WP-52 | 8 | 8A | pending | 0 | | Task screen and board at width |
+| WP-52 | 8 | 8A | implementing | 1 |  | Task screen and board at width |
 | WP-53 | 8 | 8A | pending | 0 | | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |
 | WP-55 | 9 | 9A | pending | 0 | | Remove replaced code and i18n cleanup |
@@ -88,3 +88,5 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 9 | orchestrator | MEDIUM | i18n coverage test fails under vitest because the transformed `en.ts` glob list is cached while files are added in parallel; re-run with a clean cache after integration (WP-55/58) and confirm it really finds literals. | app/src/i18n |
 | 8 | WP-50 | LOW | The 6-task cap can hide the selected task; always show the current task even past the cap. | app/src/components/Sidebar.tsx |
 | 7 | WP-47 | MEDIUM | Dirty-checkout refusal is detected by matching error text; give it a daemon error code (`checkout-dirty`) and use it in BacklogTaskView + NewTaskDialog. | crates/delilah-daemon/src/run.rs, app |
+| 5 | WP-34 | HIGH | Base-stale bar can only show the notice text: «main avanzó N commits · Actualizar rama» needs the commit count and an update-branch endpoint (daemon + api.ts + TaskScreen). Same API-gap fix package as PrSummary.number / finished date. | crates/delilah-daemon, app/src/api.ts, TaskScreen.tsx |
+| 9 | orchestrator | HIGH | styles.test: ~40 font-size/radius values outside the scale across new component CSS (AskCard, AutopilotControls, BacklogTaskView, BoardView, ChangesView, ConversationView, …) and an old token/raw colour in BoardView.css. One fix package after WP-52/WP-44/WP-26. | app/src/components/*.css |

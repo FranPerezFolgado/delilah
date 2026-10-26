@@ -283,11 +283,17 @@ pub async fn get(
     let has_transcript = state == "present";
     // Asks live in memory: a card whose ask is gone cannot be answered any more.
     for entry in stored.as_array_mut().into_iter().flatten() {
+        let permission = entry["ask_kind"] == "permission";
+        let live_ask = |ask: &str| {
+            if permission {
+                app.permissions.get(ask).is_some()
+            } else {
+                app.asks.get(ask).is_some()
+            }
+        };
         if entry["kind"] == "card"
             && entry["outcome"] == "pending"
-            && !entry["ask"]
-                .as_str()
-                .is_some_and(|ask| app.asks.get(ask).is_some())
+            && !entry["ask"].as_str().is_some_and(live_ask)
         {
             entry["outcome"] = json!("withdrawn");
         }
@@ -400,12 +406,18 @@ pub async fn get(
         }
     }
     entries.extend(stored);
-    // Permission asks live in memory too: a card while one waits, none once answered.
+    // Answered, expired and withdrawn permission cards are stored and stay (above); an ask
+    // that waits without a stored card (inserted outside `on_request`) shows as pending.
+    let stored_asks: HashSet<String> = entries
+        .iter()
+        .filter(|e| e["ask_kind"] == "permission")
+        .filter_map(|e| e["ask"].as_str().map(str::to_string))
+        .collect();
     entries.extend(
         app.permissions
             .list()
             .into_iter()
-            .filter(|a| a.session == id)
+            .filter(|a| a.session == id && !stored_asks.contains(&a.id))
             .map(|a| permission_card(&a)),
     );
     if let Ok(ws) = crate::owners::workspace(&app, &record.task).await {
@@ -425,7 +437,7 @@ pub async fn get(
     })))
 }
 
-/// The card a waiting permission shows as. Built on every read, never stored.
+/// The card of a waiting permission that has no stored one.
 fn permission_card(ask: &crate::permissions::PermissionAsk) -> Value {
     json!({
         "id": format!("perm:{}", ask.id),
@@ -438,6 +450,7 @@ fn permission_card(ask: &crate::permissions::PermissionAsk) -> Value {
         "suggestion": ask.suggestion,
         "rule": ask.rule,
         "outcome": "pending",
+        "decision": null,
     })
 }
 
@@ -927,6 +940,68 @@ mod tests {
                 .iter()
                 .all(|e| e["ask_kind"] != "permission")
         );
+    }
+
+    /// A stored permission card of `conv`, ended by `end`.
+    async fn ended_permission_card(f: &Fixture, outcome: &str, decision: Option<&str>) {
+        let id = f.permission_ask().await;
+        let ask = f.app.permissions.take(&id).unwrap();
+        crate::permissions::record_card(&f.app, &ask).await;
+        crate::permissions::update_card(&f.app, &ask, outcome, decision).await;
+    }
+
+    #[tokio::test]
+    async fn an_answered_permission_card_stays_with_its_decision() {
+        let f = Fixture::new().await;
+        ended_permission_card(&f, "answered", Some("allow_once")).await;
+        let entries = f.entries().await;
+        let card = entries
+            .iter()
+            .find(|e| e["ask_kind"] == "permission")
+            .expect("the card stays");
+        assert_eq!(card["kind"], "card");
+        assert_eq!(card["outcome"], "answered");
+        assert_eq!(card["decision"], "allow_once");
+        assert_eq!(card["tool"], "Bash");
+        assert_eq!(card["summary"], "npm test");
+        assert_eq!(card["rule"], "Bash(npm test)");
+    }
+
+    #[tokio::test]
+    async fn an_expired_card_stays_as_terminal() {
+        let f = Fixture::new().await;
+        ended_permission_card(&f, "terminal", None).await;
+        let entries = f.entries().await;
+        let cards: Vec<_> = entries
+            .iter()
+            .filter(|e| e["ask_kind"] == "permission")
+            .collect();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["outcome"], "terminal");
+        assert_eq!(cards[0]["decision"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn a_stored_pending_permission_card_whose_ask_is_gone_reads_as_withdrawn() {
+        let f = Fixture::new().await;
+        let id = f.permission_ask().await;
+        let ask = f.app.permissions.get(&id).unwrap();
+        crate::permissions::record_card(&f.app, &ask).await;
+        // Live: one pending card, not doubled by the in-memory one.
+        let live: Vec<_> = f.entries().await;
+        assert_eq!(
+            live.iter()
+                .filter(|e| e["ask_kind"] == "permission")
+                .count(),
+            1
+        );
+        f.app.permissions.take(&id).unwrap();
+        let entries = f.entries().await;
+        let card = entries
+            .iter()
+            .find(|e| e["ask_kind"] == "permission")
+            .unwrap();
+        assert_eq!(card["outcome"], "withdrawn");
     }
 
     const HOOK: &str = "/hooks/claude?task=@web&session=conv";

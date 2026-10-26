@@ -16,15 +16,16 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use delilah_agents::stream::Decision;
-use delilah_core::TaskKey;
+use delilah_core::{Event, TaskKey, TaskStatus};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::api::ApiError;
 use crate::events::Topic;
 use crate::inbox::{Attention, AttentionKind};
 use crate::sessions::LiveState;
 use crate::state::AppState;
+use crate::store_sessions::EntryKind;
 
 /// What the agent is told when you deny without a reason.
 pub const DEFAULT_DENIAL: &str = "El usuario lo ha denegado";
@@ -117,19 +118,29 @@ impl Permissions {
 }
 
 /// Lets go of every permission of one session (stopped, killed, closed, switched to the
-/// terminal): the agent, if it still listens, is told "sesión detenida". Returns how many.
+/// terminal): the agent, if it still listens, is told "sesión detenida". Each ask expires
+/// as `withdrawn`. Returns how many.
 pub async fn release_session(app: &AppState, session: &str) -> usize {
     let asks = app.permissions.take_where(|a| a.session == session);
-    deny_all(app, asks).await
+    deny_all(app, asks, OUTCOME_WITHDRAWN).await
+}
+
+/// The same for asks that ended because they were settled in the terminal.
+pub async fn release_session_terminal(app: &AppState, session: &str) -> usize {
+    let asks = app.permissions.take_where(|a| a.session == session);
+    deny_all(app, asks, OUTCOME_TERMINAL).await
 }
 
 /// The same for every session of a task (it is being deleted).
 pub async fn release_task(app: &AppState, task: &str) -> usize {
     let asks = app.permissions.take_where(|a| a.task == task);
-    deny_all(app, asks).await
+    deny_all(app, asks, OUTCOME_WITHDRAWN).await
 }
 
-async fn deny_all(app: &AppState, asks: Vec<PermissionAsk>) -> usize {
+const OUTCOME_WITHDRAWN: &str = "withdrawn";
+const OUTCOME_TERMINAL: &str = "terminal";
+
+async fn deny_all(app: &AppState, asks: Vec<PermissionAsk>, outcome: &str) -> usize {
     for ask in &asks {
         // Best effort: the process may be gone already.
         let _ = reply(
@@ -142,12 +153,121 @@ async fn deny_all(app: &AppState, asks: Vec<PermissionAsk>) -> usize {
         )
         .await;
         clear_attention(app, &ask.session).await;
+        update_card(app, ask, outcome, None).await;
+        // History only: the status follows the "last ask" rule below.
+        let expired = Event::PermissionExpired {
+            tool: ask.tool.clone(),
+            summary: ask.summary.clone(),
+            outcome: outcome.into(),
+        };
+        if let Err(e) = app.transition(&TaskKey::new(&ask.task), expired).await {
+            tracing::debug!(task = %ask.task, "permission expiry not recorded: {e}");
+        }
+    }
+    let mut tasks: Vec<&str> = asks.iter().map(|a| a.task.as_str()).collect();
+    tasks.sort_unstable();
+    tasks.dedup();
+    for task in tasks {
+        resume_if_last(app, task).await;
     }
     if !asks.is_empty() {
         app.emit(Topic::Inbox);
         app.emit(Topic::Conversations);
     }
     asks.len()
+}
+
+/// Whether the task still has an ask (permission or question) waiting for you.
+fn has_pending_ask(app: &AppState, task: &str) -> bool {
+    app.permissions.list().iter().any(|a| a.task == task)
+        || app.asks.list().iter().any(|a| a.task == task)
+}
+
+/// An ask ended: only when it was the task's last one does a task that waited for it go
+/// back to working.
+async fn resume_if_last(app: &AppState, task: &str) {
+    if has_pending_ask(app, task) {
+        return;
+    }
+    let key = TaskKey::new(task);
+    if !matches!(
+        app.store.get_task(&key).await,
+        Ok(Some(t)) if t.status == TaskStatus::WaitingForUser
+    ) {
+        return;
+    }
+    if let Err(e) = app.transition(&key, Event::UserAnswered).await {
+        tracing::warn!(%task, "cannot resume the task: {e}");
+    }
+}
+
+/// The permission's card enters the session's history as pending; it stays there after
+/// it ends, with its outcome and decision.
+pub(crate) async fn record_card(app: &AppState, ask: &PermissionAsk) {
+    let body = json!({
+        "ask": ask.id,
+        "ask_kind": "permission",
+        "tool": ask.tool,
+        "summary": ask.summary,
+        "suggestion": ask.suggestion,
+        "rule": ask.rule,
+        "outcome": "pending",
+        "decision": null,
+    });
+    if let Err(e) = app
+        .store
+        .add_entry(&ask.session, EntryKind::Card, &body)
+        .await
+    {
+        tracing::warn!(session = %ask.session, "cannot record the permission card: {e}");
+    }
+}
+
+/// The card of `ask` ends with `outcome` (`answered`, `terminal`, `withdrawn`) and, when
+/// answered, the user's `decision`.
+pub(crate) async fn update_card(
+    app: &AppState,
+    ask: &PermissionAsk,
+    outcome: &str,
+    decision: Option<&str>,
+) {
+    let Ok(Some(entry)) = app.store.card_entry(&ask.session, &ask.id).await else {
+        return;
+    };
+    let mut body = entry.body;
+    body["outcome"] = json!(outcome);
+    body["decision"] = json!(decision);
+    if let Err(e) = app.store.update_entry(entry.id, &body).await {
+        tracing::warn!(session = %ask.session, "cannot update the permission card: {e}");
+    }
+}
+
+/// At daemon start: a task left `waiting-for-user` by a permission whose ask died with
+/// the previous process gets the expiry recorded, and stays waiting (resumable like any
+/// task whose agent died). A wait from a finished turn has no such ask: untouched.
+pub async fn reconcile_lost(app: &AppState) -> Result<(), crate::store::StoreError> {
+    for task in app.store.list_tasks().await? {
+        if task.status != TaskStatus::WaitingForUser || has_pending_ask(app, task.key.as_str()) {
+            continue;
+        }
+        let mut open = None;
+        for record in app.store.events(&task.key).await? {
+            match record.event {
+                Event::PermissionAsked { tool, summary } => open = Some((tool, summary)),
+                Event::PermissionExpired { .. } | Event::UserAnswered => open = None,
+                _ => {}
+            }
+        }
+        if let Some((tool, summary)) = open {
+            let expired = Event::PermissionExpired {
+                tool,
+                summary,
+                outcome: OUTCOME_WITHDRAWN.into(),
+            };
+            app.transition(&task.key, expired).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Writes the answer to the agent through the session's stream.
@@ -240,6 +360,7 @@ pub async fn on_request(
     let text = attention_text(&ask);
     let request_id = ask.request_id.clone();
     let tool = ask.tool.clone();
+    let stored = ask.clone();
     if !app.permissions.insert(ask) {
         tracing::warn!(%session, "too many permissions waiting; denying");
         let denial = Decision::Deny {
@@ -248,8 +369,14 @@ pub async fn on_request(
         let _ = reply(app, session, &request_id, denial).await;
         return;
     }
-    if let Some(live) = app.sessions.get(session) {
+    let live = app.sessions.get(session);
+    if let Some(live) = &live {
         live.set_state(LiveState::Waiting);
+    }
+    record_card(app, &stored).await;
+    // The primary session's ask is the task waiting for you (a question does the same).
+    if live.is_none_or(|l| l.primary) {
+        wait_for(app, task, &tool, &stored.summary).await;
     }
     let attention = Attention {
         kind: AttentionKind::Permission,
@@ -260,6 +387,26 @@ pub async fn on_request(
     crate::autopilot::on_permission(app, &TaskKey::new(task), session, &tool).await;
     app.emit(Topic::Inbox);
     app.emit(Topic::Conversations);
+}
+
+/// The ask is in the history (`permission-asked`) and a running task waits for you.
+async fn wait_for(app: &AppState, task: &str, tool: &str, summary: &str) {
+    let key = TaskKey::new(task);
+    let Ok(Some(t)) = app.store.get_task(&key).await else {
+        return;
+    };
+    let asked = Event::PermissionAsked {
+        tool: tool.into(),
+        summary: summary.into(),
+    };
+    if let Err(e) = app.transition(&key, asked).await {
+        tracing::warn!(%task, "permission ask not recorded: {e}");
+    }
+    if t.status == TaskStatus::Running
+        && let Err(e) = app.transition(&key, Event::AgentAsked).await
+    {
+        tracing::warn!(%task, "cannot mark the task as waiting: {e}");
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,6 +475,20 @@ pub async fn answer(
             tracing::warn!(task = %ask.task, "cannot remember the rule `{rule}`: {e}");
         }
         app.emit(Topic::Tasks);
+    }
+    update_card(
+        &app,
+        &ask,
+        if result.is_ok() {
+            "answered"
+        } else {
+            "withdrawn"
+        },
+        result.is_ok().then_some(body.decision.as_str()),
+    )
+    .await;
+    if result.is_ok() {
+        resume_if_last(&app, &ask.task).await;
     }
     // Other asks of the session still wait: attention moves to the next one, the state stays.
     let next = app
@@ -567,6 +728,10 @@ mod tests {
     impl Fixture {
         /// Task PROJ-1 with the primary chat-mode session "s-1" on the fake stream agent.
         async fn new() -> Self {
+            Self::with_status(TaskStatus::Queued).await
+        }
+
+        async fn with_status(status: TaskStatus) -> Self {
             let app = AppState::new(
                 crate::store::Store::in_memory().await.unwrap(),
                 crate::config::Config {
@@ -584,6 +749,7 @@ mod tests {
             );
             let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
             task.chat_mode = true;
+            task.status = status;
             app.store.create_task(&task).await.unwrap();
             let script = concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -670,6 +836,49 @@ mod tests {
                 .await
                 .unwrap()
                 .status()
+        }
+
+        /// The session's record: its cards are kept in the history.
+        async fn with_record(self) -> Self {
+            let record = crate::store_sessions::SessionRecord {
+                id: "s-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Claude".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: None,
+            };
+            self.app.store.create_session(&record).await.unwrap();
+            self
+        }
+
+        async fn status(&self) -> TaskStatus {
+            let task = self.app.store.get_task(&TaskKey::new("PROJ-1")).await;
+            task.unwrap().unwrap().status
+        }
+
+        async fn event_names(&self) -> Vec<&'static str> {
+            let events = self.app.store.events(&TaskKey::new("PROJ-1")).await;
+            events.unwrap().iter().map(|e| e.event.name()).collect()
+        }
+
+        /// A second ask of the same session, inserted without the agent.
+        fn extra_ask(&self, id: &str) -> PermissionAsk {
+            PermissionAsk {
+                id: id.into(),
+                request_id: format!("r-{id}"),
+                task: "PROJ-1".into(),
+                session: "s-1".into(),
+                tool: "Bash".into(),
+                input: json!({ "command": "ls" }),
+                suggestion: None,
+                rule: None,
+                summary: "ls".into(),
+                at: Utc::now(),
+            }
         }
 
         fn topics(&mut self) -> Vec<Topic> {
@@ -881,6 +1090,147 @@ mod tests {
         assert!(f.app.permissions.list().is_empty());
         assert_eq!(f.turn_text().await, "denied");
         assert_eq!(release_session(&f.app, "s-1").await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_pending_permission_puts_a_running_task_waiting() {
+        let mut f = Fixture::with_status(TaskStatus::Running).await;
+        f.ask().await.unwrap();
+        assert_eq!(f.status().await, TaskStatus::WaitingForUser);
+        let names = f.event_names().await;
+        assert!(names.contains(&"permission-asked") && names.contains(&"agent-asked"));
+        let topics = f.topics();
+        assert!(topics.contains(&Topic::Tasks) && topics.contains(&Topic::Inbox));
+    }
+
+    #[tokio::test]
+    async fn only_the_last_pending_ask_puts_it_back_to_running() {
+        let mut f = Fixture::with_status(TaskStatus::Running).await;
+        let first = f.ask().await.unwrap();
+        assert!(f.app.permissions.insert(f.extra_ask("second")));
+        let uri = |id: &str| format!("/api/v1/sessions/s-1/permissions/{id}");
+        let allow = json!({ "decision": "allow_once" });
+        assert_eq!(
+            f.post(&uri(&first.id), allow.clone()).await,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(f.status().await, TaskStatus::WaitingForUser);
+        // A question of the task is an ask too.
+        f.app.permissions.take("second");
+        let app = f.app.clone();
+        let question = json!({ "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": { "questions": [{
+            "question": "¿Cómo?", "header": "H", "multiSelect": false,
+            "options": [{ "label": "A", "description": "a" }, { "label": "B", "description": "b" }]
+        }]}});
+        tokio::spawn(async move {
+            let req =
+                crate::asks::tests::post("/hooks/claude/ask?task=PROJ-1&session=s-1", question);
+            crate::asks::tests::call(&app, req).await;
+        });
+        for _ in 0..100 {
+            if !f.app.asks.list().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!f.app.asks.list().is_empty());
+        assert!(f.app.permissions.insert(f.extra_ask("third")));
+        let _ = f.post(&uri("third"), allow.clone()).await;
+        assert_eq!(f.status().await, TaskStatus::WaitingForUser);
+        f.app.asks.release_task("PROJ-1");
+        assert!(f.app.permissions.insert(f.extra_ask("fourth")));
+        let _ = f.post(&uri("fourth"), allow).await;
+        assert_eq!(f.status().await, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn a_withdrawn_or_expired_last_ask_resumes_it() {
+        let mut f = Fixture::with_status(TaskStatus::Running).await;
+        f.ask().await.unwrap();
+        assert_eq!(f.status().await, TaskStatus::WaitingForUser);
+        release_session(&f.app, "s-1").await;
+        assert_eq!(f.status().await, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn after_a_restart_a_task_waiting_on_a_lost_permission_is_reconciled() {
+        let f = Fixture::with_status(TaskStatus::Running).await;
+        let key = TaskKey::new("PROJ-1");
+        let asked = Event::PermissionAsked {
+            tool: "Bash".into(),
+            summary: "ls".into(),
+        };
+        f.app.transition(&key, asked).await.unwrap();
+        f.app.transition(&key, Event::AgentAsked).await.unwrap();
+        reconcile_lost(&f.app).await.unwrap();
+        assert_eq!(f.status().await, TaskStatus::WaitingForUser);
+        let events = f.app.store.events(&key).await.unwrap();
+        assert!(matches!(
+            &events.last().unwrap().event,
+            Event::PermissionExpired { outcome, .. } if outcome == "withdrawn"
+        ));
+        // Reconciled once: a second start adds nothing.
+        reconcile_lost(&f.app).await.unwrap();
+        assert_eq!(f.app.store.events(&key).await.unwrap().len(), events.len());
+    }
+
+    #[tokio::test]
+    async fn a_wait_from_a_finished_turn_is_untouched_by_the_reconcile() {
+        let f = Fixture::with_status(TaskStatus::Running).await;
+        let key = TaskKey::new("PROJ-1");
+        f.app.transition(&key, Event::AgentAsked).await.unwrap();
+        let before = f.app.store.events(&key).await.unwrap().len();
+        reconcile_lost(&f.app).await.unwrap();
+        assert_eq!(f.app.store.events(&key).await.unwrap().len(), before);
+    }
+
+    #[tokio::test]
+    async fn an_ask_ending_in_the_terminal_records_permission_expired() {
+        let mut f = Fixture::with_status(TaskStatus::Running)
+            .await
+            .with_record()
+            .await;
+        f.ask().await.unwrap();
+        assert_eq!(release_session_terminal(&f.app, "s-1").await, 1);
+        let events = f.app.store.events(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert!(events.iter().any(|e| matches!(
+            &e.event,
+            Event::PermissionExpired { tool, outcome, .. } if tool == "Bash" && outcome == "terminal"
+        )));
+        let card = f.app.store.entries("s-1").await.unwrap().remove(0);
+        assert_eq!(card.body["outcome"], "terminal");
+    }
+
+    #[tokio::test]
+    async fn a_session_ending_with_an_open_ask_records_permission_expired_withdrawn() {
+        let mut f = Fixture::with_status(TaskStatus::Running)
+            .await
+            .with_record()
+            .await;
+        f.ask().await.unwrap();
+        release_session(&f.app, "s-1").await;
+        let events = f.app.store.events(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert!(events.iter().any(|e| matches!(
+            &e.event,
+            Event::PermissionExpired { outcome, .. } if outcome == "withdrawn"
+        )));
+        let card = f.app.store.entries("s-1").await.unwrap().remove(0);
+        assert_eq!(card.body["outcome"], "withdrawn");
+    }
+
+    #[tokio::test]
+    async fn an_answered_card_is_kept_with_its_decision() {
+        let mut f = Fixture::with_status(TaskStatus::Running)
+            .await
+            .with_record()
+            .await;
+        let ask = f.ask().await.unwrap();
+        let uri = format!("/api/v1/sessions/s-1/permissions/{}", ask.id);
+        f.post(&uri, json!({ "decision": "deny" })).await;
+        let card = f.app.store.entries("s-1").await.unwrap().remove(0);
+        assert_eq!(card.body["outcome"], "answered");
+        assert_eq!(card.body["decision"], "deny");
+        assert_eq!(card.body["tool"], "Bash");
     }
 
     #[test]
