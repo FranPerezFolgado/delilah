@@ -103,10 +103,13 @@ fn short_reason(stderr: &str) -> String {
 /// How a Claude session is launched, by what it is: a conversation never asks
 /// (`DontAsk`) and gets the Delilah plugin and the idea prompt; a read-only one plans;
 /// the plugin (which can create tasks) goes only to project sessions, never to a
-/// task's agents.
+/// task's agents. Task and project sessions follow the `agent-permissions` preference
+/// (`Auto` or Claude's default); the idea and read-only ones ignore it. Pure: the
+/// preference arrives as an argument.
 fn launch_flags(
     session: &SessionRecord,
     config: &crate::config::Config,
+    agent_permissions: crate::state::AgentPermissions,
 ) -> (
     claude::Permission,
     Option<std::path::PathBuf>,
@@ -117,7 +120,10 @@ fn launch_flags(
     } else if session.read_only {
         claude::Permission::Plan
     } else {
-        claude::Permission::Default
+        match agent_permissions {
+            crate::state::AgentPermissions::Auto => claude::Permission::Auto,
+            crate::state::AgentPermissions::Default => claude::Permission::Default,
+        }
     };
     let plugin_dir = project_of(&session.task)
         .is_some()
@@ -1413,7 +1419,8 @@ pub(crate) async fn spawn_session(
         |e: std::io::Error| ApiError::internal(format!("cannot start the session: {e}"));
     let (runtime, events) = match session.kind {
         SessionKind::Claude => {
-            let (permission, plugin_dir, append_system_prompt) = launch_flags(session, &app.config);
+            let (permission, plugin_dir, append_system_prompt) =
+                launch_flags(session, &app.config, app.agent_permissions());
             // The rules "always allow" added to the task, read now so a new session has them.
             let allowed_tools = match project_of(&session.task) {
                 Some(_) => Vec::new(),
@@ -1712,6 +1719,7 @@ fn effective_submodules(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::AgentPermissions::Auto;
 
     #[test]
     fn every_selected_submodule_is_on_the_task_branch() {
@@ -1793,32 +1801,55 @@ mod tests {
         };
         let mut conv = session("@web", "Idea");
         conv.conversation = true;
-        let (p, dir, prompt) = launch_flags(&conv, &config);
+        let (p, dir, prompt) = launch_flags(&conv, &config, Auto);
         assert_eq!(p, claude::Permission::DontAsk);
         assert_eq!(dir, Some(config.plugin_dir()));
         assert_eq!(prompt, Some(IDEA_PROMPT));
 
         let mut ro = session("@web", "Claude 1");
         ro.read_only = true;
-        let (p, dir, prompt) = launch_flags(&ro, &config);
+        let (p, dir, prompt) = launch_flags(&ro, &config, Auto);
         assert_eq!(p, claude::Permission::Plan);
         assert!(dir.is_some());
         assert_eq!(prompt, None);
 
-        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config);
-        assert_eq!(p, claude::Permission::Default);
+        let (p, dir, prompt) = launch_flags(&session("PROJ-1", "Claude 1"), &config, Auto);
+        assert_eq!(p, claude::Permission::Auto);
         assert_eq!((dir, prompt), (None, None));
 
         // An extra session of a task is no different: it never gets the plugin.
         let mut extra = session("PROJ-1", "Claude 2");
         extra.primary = false;
-        let (p, dir, prompt) = launch_flags(&extra, &config);
-        assert_eq!(p, claude::Permission::Default);
+        let (p, dir, prompt) = launch_flags(&extra, &config, Auto);
+        assert_eq!(p, claude::Permission::Auto);
         assert_eq!((dir, prompt), (None, None));
         extra.read_only = true;
-        let (p, dir, prompt) = launch_flags(&extra, &config);
+        let (p, dir, prompt) = launch_flags(&extra, &config, Auto);
         assert_eq!(p, claude::Permission::Plan);
         assert_eq!((dir, prompt), (None, None));
+    }
+
+    #[test]
+    fn the_agent_permissions_preference_only_changes_task_and_project_sessions() {
+        use crate::state::AgentPermissions::Default as Asks;
+        let config = crate::config::Config::test_defaults();
+        for key in ["PROJ-1", "@web"] {
+            let (p, ..) = launch_flags(&session(key, "Claude 1"), &config, Auto);
+            assert_eq!(p, claude::Permission::Auto, "{key}");
+            let (p, ..) = launch_flags(&session(key, "Claude 1"), &config, Asks);
+            assert_eq!(p, claude::Permission::Default, "{key}");
+        }
+        let mut conv = session("@web", "Idea");
+        conv.conversation = true;
+        let mut ro = session("@web", "Claude 1");
+        ro.read_only = true;
+        for mode in [Auto, Asks] {
+            assert_eq!(
+                launch_flags(&conv, &config, mode).0,
+                claude::Permission::DontAsk
+            );
+            assert_eq!(launch_flags(&ro, &config, mode).0, claude::Permission::Plan);
+        }
     }
 
     async fn app() -> AppState {

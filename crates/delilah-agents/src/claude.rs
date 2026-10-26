@@ -52,6 +52,10 @@ pub(crate) const KEPT_ENV: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Permission {
     Default,
+    /// Auto mode (`--permission-mode auto`): Claude's own classifier decides which
+    /// actions go ahead without asking and which still ask. That judgement is Claude's,
+    /// and choosing this mode is the user's choice (the `agent-permissions` preference).
+    Auto,
     /// Plan mode: Claude reads and explains, it does not edit.
     Plan,
     /// Anything not allowed is denied instead of asked, and editing tools are denied:
@@ -151,6 +155,9 @@ fn shared_args(launch: &Launch, with_remote_control: bool) -> Vec<OsString> {
     args.extend(["--settings".into(), launch.settings.into()]);
     match launch.permission {
         Permission::Default => {}
+        Permission::Auto => {
+            args.extend(["--permission-mode".into(), "auto".into()]);
+        }
         Permission::Plan => {
             args.extend(["--permission-mode".into(), "plan".into()]);
         }
@@ -1030,6 +1037,30 @@ mod tests {
         assert!(!plan.contains(&"--strict-mcp-config".to_string()));
         assert!(!plan.contains(&"--setting-sources".to_string()));
         assert!(!argv(&launch()).contains(&"--setting-sources".to_string()));
+    }
+
+    #[test]
+    fn auto_mode_reaches_both_runtimes_and_widens_nothing_else() {
+        let l = Launch {
+            permission: Permission::Auto,
+            ..launch()
+        };
+        let pty = argv(&l);
+        assert!(has_pair(&pty, "--permission-mode", "auto"), "{pty:?}");
+        let chat: Vec<String> = stream_command(&l)
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(has_pair(&chat, "--permission-mode", "auto"), "{chat:?}");
+        for args in [&pty, &chat] {
+            assert!(!args.contains(&"--setting-sources".to_string()), "{args:?}");
+            assert!(
+                !args.contains(&"--strict-mcp-config".to_string()),
+                "{args:?}"
+            );
+        }
+        assert!(!argv(&launch()).contains(&"--permission-mode".to_string()));
     }
 
     #[test]

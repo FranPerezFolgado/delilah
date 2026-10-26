@@ -47,10 +47,23 @@ pub struct Tool {
     pub output: String,
     #[serde(default = "yes")]
     pub ask: bool,
+    /// What Claude's auto mode does with this tool: `allow` runs it without asking,
+    /// `ask` still sends `can_use_tool`. Semantics mirror
+    /// `docs/spikes/2026-10-26-chat-permission-mode.md`.
+    #[serde(default)]
+    pub auto: AutoMode,
     /// `permission_suggestions` of the request; left out: Claude's usual one, an
     /// `addRules` with the exact command (Bash) or the bare tool.
     #[serde(default)]
     pub suggestions: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoMode {
+    #[default]
+    Allow,
+    Ask,
 }
 
 fn yes() -> bool {
@@ -271,6 +284,20 @@ mod tests {
         );
         assert!(matches!(&s.turns[0][1], StreamStep::Tool(t) if t.ask && t.suggestions.is_none()));
         assert_eq!(s.turns[1], vec![StreamStep::Exit(0)]);
+    }
+
+    #[test]
+    fn a_tool_auto_defaults_to_allow_and_parses_ask() {
+        let s = Scenario::parse(
+            r#"{"turns":[[{"tool":{"name":"A","input":{}}},{"tool":{"name":"B","input":{},"auto":"ask"}}]]}"#,
+        )
+        .unwrap();
+        assert!(matches!(&s.turns[0][0], StreamStep::Tool(t) if t.auto == AutoMode::Allow));
+        assert!(matches!(&s.turns[0][1], StreamStep::Tool(t) if t.auto == AutoMode::Ask));
+        assert!(
+            Scenario::parse(r#"{"turns":[[{"tool":{"name":"A","input":{},"auto":"x"}}]]}"#)
+                .is_err()
+        );
     }
 
     #[test]

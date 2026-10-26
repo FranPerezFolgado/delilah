@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::FromRef;
@@ -24,6 +24,15 @@ pub struct UsageReport {
     pub at: DateTime<Utc>,
     pub task: String,
     pub rate_limits: Value,
+}
+
+/// How task and project agents are launched with respect to permissions (the
+/// `agent-permissions` preference): `Auto` is Claude's auto mode, `Default` is Claude's
+/// own default (it asks for everything not already allowed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentPermissions {
+    Auto,
+    Default,
 }
 
 #[derive(Clone)]
@@ -58,6 +67,9 @@ pub struct AppState {
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
+    /// The `agent-permissions` preference, as an `AgentPermissions` (0 = Auto, 1 =
+    /// Default); `Auto` until `main` reads it.
+    agent_permissions: Arc<AtomicU8>,
     /// The user's `gh`, behind a trait so tests answer with canned output.
     pub gh: Arc<GhClient>,
     /// Per repo (`host/owner/name`): when to try `gh` again after it failed.
@@ -109,6 +121,7 @@ impl AppState {
             branching: Arc::default(),
             finishing: Arc::default(),
             remote_control: Arc::default(),
+            agent_permissions: Arc::default(),
             gh: Arc::new(GhClient::new(Arc::new(CliGh {
                 program: gh_program,
             }))),
@@ -153,6 +166,29 @@ impl AppState {
             .flatten();
         let on = value.as_ref().and_then(Value::as_bool).unwrap_or(false);
         self.remote_control.store(on, Ordering::Relaxed);
+    }
+
+    pub fn agent_permissions(&self) -> AgentPermissions {
+        match self.agent_permissions.load(Ordering::Relaxed) {
+            1 => AgentPermissions::Default,
+            _ => AgentPermissions::Auto,
+        }
+    }
+
+    /// Reads the `agent-permissions` preference again (at start, and when it changes):
+    /// `"default"` gives `Default`; anything else, including unset, gives `Auto`.
+    pub async fn load_agent_permissions(&self) {
+        let value: Option<Value> = self
+            .store
+            .setting("pref:agent-permissions")
+            .await
+            .ok()
+            .flatten();
+        let mode = match value.as_ref().and_then(Value::as_str) {
+            Some("default") => 1,
+            _ => 0,
+        };
+        self.agent_permissions.store(mode, Ordering::Relaxed);
     }
 
     pub fn emit(&self, topic: Topic) {

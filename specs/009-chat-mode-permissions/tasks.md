@@ -84,20 +84,20 @@ the current code. Record the failing run in `progress.md` before implementing.
 
 ### Tests (write first and see them FAIL)
 
-- [ ] T003 [P] In the `#[cfg(test)]` module of `crates/delilah-agents/src/claude.rs`,
+- [X] T003 [P] In the `#[cfg(test)]` module of `crates/delilah-agents/src/claude.rs`,
   add failing tests, next to `permission_modes_map_to_flags`:
   - `Permission::Auto` puts `--permission-mode auto` in both `command(&launch)` (PTY)
     and `stream_command(&launch)` (chat);
   - `Auto` adds neither `--setting-sources` nor `--strict-mcp-config`;
   - `Default` still adds no `--permission-mode`.
-- [ ] T004 [P] In the tests module of `crates/delilah-e2e/src/fake/stream.rs`, add
+- [X] T004 [P] In the tests module of `crates/delilah-e2e/src/fake/stream.rs`, add
   failing tests. With a scenario tool whose `auto` is `"allow"` (the default):
   - a fake launched with `--permission-mode auto` runs it and sends no `can_use_tool`;
   - a fake launched with no mode sends `can_use_tool` as today.
 
   A tool with `auto: "ask"` sends `can_use_tool` in both cases. Add a parse test for
   `auto` in `crates/delilah-e2e/src/fake/scenario.rs`.
-- [ ] T005 [P] In the tests module of `crates/delilah-daemon/src/preferences.rs`, add
+- [X] T005 [P] In the tests module of `crates/delilah-daemon/src/preferences.rs`, add
   failing tests modelled on `the_remote_control_preference_takes_effect_at_once`:
   - `PUT /api/v1/preferences/agent-permissions` with `"default"` makes
     `app.agent_permissions()` return `AgentPermissions::Default` at once, and `"auto"`
@@ -106,28 +106,28 @@ the current code. Record the failing run in `progress.md` before implementing.
   - a PUT of `"bypassPermissions"`, `1`, `null` or `{}` answers 400 and leaves the stored
     value unchanged;
   - other preference keys still accept any JSON.
-- [ ] T006 [P] In the tests module of `crates/delilah-daemon/src/run.rs`, near line 1790,
+- [X] T006 [P] In the tests module of `crates/delilah-daemon/src/run.rs`, near line 1790,
   add failing tests for `launch_flags(session, config, AgentPermissions)`:
   - with `Auto`, a task session and a project session get `Permission::Auto`;
   - with `Default`, they get `Permission::Default`;
   - an idea conversation gets `DontAsk` and a read-only session gets `Plan` under both
     values.
-- [ ] T007 Run `cargo test -p delilah-agents claude::`, `cargo test -p delilah-daemon
+- [X] T007 Run `cargo test -p delilah-agents claude::`, `cargo test -p delilah-daemon
   preferences launch_flags` and `cargo test -p delilah-e2e --lib fake::`. Confirm the
   new tests fail (compile errors count as failing), and record the output summary under
   "Red" in `specs/009-chat-mode-permissions/progress.md`.
 
 ### Implementation
 
-- [ ] T008 [P] In `crates/delilah-agents/src/claude.rs`, add `Permission::Auto`, with a
+- [X] T008 [P] In `crates/delilah-agents/src/claude.rs`, add `Permission::Auto`, with a
   doc comment covering what auto mode decides and that it is the user's choice. Map it
   in `shared_args` to `--permission-mode auto`, so both runtimes get it. T003 passes.
-- [ ] T009 [P] Add `Tool.auto`, a serde enum `allow | ask` with default `allow`, in
+- [X] T009 [P] Add `Tool.auto`, a serde enum `allow | ask` with default `allow`, in
   `crates/delilah-e2e/src/fake/scenario.rs`. Honour it in
   `crates/delilah-e2e/src/fake/stream.rs`: skip the `can_use_tool` when `args.rs`
   parsed `permission_mode == Some("auto")` and the tool's `auto` is `allow`. Add a doc
   comment saying these semantics mirror the spike record from T002. T004 passes.
-- [ ] T010 In `crates/delilah-daemon/src/state.rs`:
+- [X] T010 In `crates/delilah-daemon/src/state.rs`:
   - add `pub enum AgentPermissions { Auto, Default }`;
   - store it in an `Arc<AtomicU8>` field, defaulting to `Auto`;
   - add `agent_permissions()` and `load_agent_permissions()`. The loader reads
@@ -136,7 +136,7 @@ the current code. Record the failing run in `progress.md` before implementing.
 
   Call `app.load_agent_permissions().await` in `crates/delilah-daemon/src/main.rs`,
   next to `load_remote_control()` at line 66.
-- [ ] T011 In `crates/delilah-daemon/src/preferences.rs`:
+- [X] T011 In `crates/delilah-daemon/src/preferences.rs`:
   - turn the `if key == …` reload chain in `put` into a `match key`, with arms for
     `language`, `remote-control` and `agent-permissions`;
   - for `agent-permissions`, validate before saving: only the JSON strings `"auto"` or
@@ -145,14 +145,14 @@ the current code. Record the failing run in `progress.md` before implementing.
   Document the 400 on the preference route in `crates/delilah-daemon/src/api.rs`, and
   on `setPreference` in `app/src/api.ts` (add
   `export type AgentPermissions = "auto" | "default"`). T005 passes.
-- [ ] T012 In `crates/delilah-daemon/src/run.rs`:
+- [X] T012 In `crates/delilah-daemon/src/run.rs`:
   - give `launch_flags` an `AgentPermissions` parameter and map task and project
     sessions to `Auto` or `Default`. Keep it pure, and update its doc comment;
   - pass `app.agent_permissions()` from `spawn_session` (line 1416);
   - update the existing `launch_flags` tests (lines 1796–1819) to the new signature.
 
   T006 passes.
-- [ ] T013 Run `cargo test -p delilah-agents`, `cargo test -p delilah-daemon` and
+- [X] T013 Run `cargo test -p delilah-agents`, `cargo test -p delilah-daemon` and
   `cargo test -p delilah-e2e --lib`, plus `cargo clippy --workspace --all-targets -- -D
   warnings` and `cargo fmt --all --check`. All green. Record "Green" in `progress.md`.
 
