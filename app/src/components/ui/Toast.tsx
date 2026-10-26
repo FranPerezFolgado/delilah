@@ -231,7 +231,7 @@ export function ToastHost() {
       {announcer}
       {!empty && (
     <div
-      className={`toast-host${expanded ? " toast-expanded" : ""}`}
+      className={`toast-host${expanded ? " toast-expanded" : more > 0 ? " toast-stacked" : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);
@@ -258,7 +258,7 @@ export function ToastHost() {
           {expanded ? t("Ocultar avisos") : t("+{n}", { n: more })}
         </button>
       )}
-      {more > 0 && expanded && (
+      {more > 0 && (
         <button type="button" className="toast-clear" onClick={closeAll}>
           {t("Cerrar todo")}
         </button>

@@ -11,3 +11,6 @@
 .toast-more, .toast-clear { align-self: flex-start; padding: 3px 10px; border-radius: 7px; background: var(--dialog);
   border: 1px solid var(--bd2); box-shadow: var(--shadow); color: var(--tx); font-size: 12px; cursor: pointer; }
 .toast-more:hover, .toast-clear:hover { border-color: var(--tx2, var(--tx)); }
+/* Older toasts read as cards drawn behind the newest one. */
+.toast-host.toast-stacked .toast { margin-bottom: 6px;
+  box-shadow: 0 4px 0 -2px var(--dialog), 0 5px 0 -2px var(--bd2), 0 8px 0 -4px var(--dialog), 0 9px 0 -4px var(--bd2), var(--shadow); }

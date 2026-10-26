@@ -309,6 +309,20 @@ describe("Toast", () => {
       expect(document.querySelector(".toast-host")).toBeNull();
     });
 
+    it("Cerrar todo is available collapsed whenever there is more than one toast", () => {
+      mount();
+      const a = vi.fn(), b = vi.fn(), c = vi.fn();
+      act(() => {
+        toast({ text: "uno", kind: "error", onDismiss: a });
+        toast({ text: "dos", kind: "error", onDismiss: b });
+        toast({ text: "tres", kind: "error", onDismiss: c });
+      });
+      expect(host().classList.contains("toast-expanded")).toBe(false);
+      fireEvent.click(gt(/Cerrar todo|Close all/));
+      [a, b, c].forEach((f) => expect(f).toHaveBeenCalledTimes(1));
+      expect(document.querySelector(".toast-host")).toBeNull();
+    });
+
     it("announces through one status region; the stack has no live role", () => {
       mount();
       act(() => void toast({ text: "hola", kind: "error" }));
