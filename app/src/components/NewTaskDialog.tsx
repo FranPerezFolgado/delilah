@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
 import { t } from "../i18n";
+import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
+import { Button } from "./ui/Button";
+import { Dialog } from "./ui/Dialog";
+import { Segmented } from "./ui/Segmented";
+import { Toggle } from "./ui/Toggle";
+import "./NewTaskDialog.css";
 
 /** A ticket to start from, e.g. picked in the Jira view. */
 export interface TaskDraft {
@@ -59,13 +65,14 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
   const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
-  // Experimental: the agent runs headless, with no terminal.
-  const [chatMode, setChatMode] = useState(!!existing?.chat_mode);
+  // Experimental headless mode: only a backlog task can carry it now (no control sets it).
+  const chatMode = !!existing?.chat_mode;
   const [prompt, setPrompt] = useState("");
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ key?: string; title?: string; submodules?: string }>({});
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
   const always = project?.kind === "parent" ? project.settings.submodules.always : [];
@@ -122,12 +129,6 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       })
       .catch((e) => setError(e.message));
   }, [project?.name, project?.kind]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   // Proposal for the branch, debounced 1 s; an answer to an older request is dropped.
   const pickedKey = picked.join("\n");
@@ -209,9 +210,19 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
 
   const toggle = (path: string) => !always.includes(path) && setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
-  const submit = async (e: React.FormEvent | null, chat = chatMode) => {
+  const validate = () => {
+    const errs: typeof fieldErrors = {};
+    if (origin === "jira" && !key.trim()) errs.key = t("Falta el ticket");
+    if (origin !== "claude" && !title.trim()) errs.title = origin === "jira" ? t("Falta el título") : t("Cuéntanos qué quieres hacer");
+    if (origin !== "claude" && project?.kind === "parent" && picked.length === 0) errs.submodules = t("Elige al menos un submódulo");
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const submit = async (e: React.FormEvent | null, chat = chatMode, inCheckout = where === "checkout") => {
     e?.preventDefault();
-    if (!project) return;
+    if (!project || busy) return;
+    if (!validate()) return;
     setBusy(true);
     setError(null);
     if (origin === "claude") {
@@ -231,7 +242,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         project: project.name,
         submodules: picked,
         free: origin === "libre",
-        in_checkout: where === "checkout",
+        in_checkout: inCheckout,
         saving_mode: savingMode || autopilotOn,
         ...autopilotField,
         view,
@@ -273,14 +284,50 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       setBusy(false);
     }
   };
+  // The daemon refuses to start in a checkout with uncommitted changes: say it in human words.
+  const dirtyCheckout = where === "checkout" && !!error && /uncommitted|must be clean|not clean/i.test(error);
+  const startInWorktree = () => {
+    whereTouched.current = true;
+    setWhere("worktree");
+    submit(null, chatMode, false);
+  };
+  const openTerminal = async () => {
+    if (!project) return;
+    try {
+      onConversation(project.name, await api.openProjectSession(project.name, { kind: "shell" }));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   const canSave = !!project && !!title.trim() && (origin === "libre" || !!key.trim());
 
+  const formId = "new-task-form";
+  const title0 = fromSession ? t("Convertir en tarea") : existing ? t("Empezar {key}", { key: existing.key }) : t("Nueva tarea");
+  const startLabel = busy ? t("Preparando workspace…") : origin === "claude" ? t("Abrir conversación") : fromSession ? t("Convertir") : t("Iniciar");
+  const footer = (
+    <>
+      <span className="ntd-hint">{t("⌘↵ Iniciar")}</span>
+      <Button variant="ghost" onClick={onClose}>{t("Cancelar")}</Button>
+      {origin !== "claude" && !fromSession && !existing && (
+        <Button variant="secondary" disabled={busy || !canSave} onClick={saveToBacklog}
+          title={t("Se queda en el backlog del proyecto, sin workspace ni agente, hasta que la empieces")}>
+          {t("Guardar en backlog")}
+        </Button>
+      )}
+      <Button variant="primary" type="submit" form={formId} disabled={busy || !project}>{startLabel}</Button>
+    </>
+  );
+  const setSaving = (on: boolean) => {
+    savingTouched.current = true;
+    setSavingMode(on);
+  };
+
   return (
-    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="dialog" role="dialog" aria-label={t("Nueva tarea")} onSubmit={submit}>
-        <h2>{fromSession ? t("Convertir en tarea") : existing ? t("Empezar {key}", { key: existing.key }) : t("Nueva tarea")}</h2>
+    <Dialog title={title0} onClose={onClose} size={{ w: 600, h: 700 }} footer={footer}>
+      <form id={formId} className="ntd" aria-label={t("Nueva tarea")} noValidate onSubmit={submit}
+        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(null); } }}>
         {fromSession && (
-          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+          <p className="muted ntd-note">
             {t("«{label}» pasa a ser el Claude de una tarea libre: sigue con su conversación, ya puede editar y trabaja en una rama de tu checkout (donde está la conversación).", { label: fromSession.label })}
           </p>
         )}
@@ -289,34 +336,32 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         ) : (
           <>
             {!draft && !fromSession && !existing && (
-              <div className="segs" role="radiogroup" aria-label={t("Origen")} style={{ alignSelf: "flex-start" }}>
-                <button type="button" role="radio" aria-checked={origin === "jira"} className={`seg ${origin === "jira" ? "on" : ""}`} onClick={() => setOrigin("jira")}>
-                  {t("Ticket de Jira")}
-                </button>
-                <button type="button" role="radio" aria-checked={origin === "libre"} className={`seg ${origin === "libre" ? "on" : ""}`} onClick={() => setOrigin("libre")}>
-                  {t("Tarea libre")}
-                </button>
-                <button type="button" role="radio" aria-checked={origin === "claude"} className={`seg ${origin === "claude" ? "on" : ""}`} onClick={() => setOrigin("claude")}>
-                  {t("Con Claude")}
-                </button>
-              </div>
+              <Segmented mode="radio" label={t("Origen")} value={origin} onChange={(v) => setOrigin(v as typeof origin)}
+                options={[
+                  { value: "jira", label: t("Ticket de Jira") },
+                  { value: "libre", label: t("Tarea libre") },
+                  { value: "claude", label: t("Con Claude") },
+                ]} />
             )}
             {origin === "claude" ? null : origin === "jira" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10 }}>
+              <div className="ntd-ticket">
                 <label className="field">
                   <span>{t("Ticket")}</span>
-                  <input className="input mono" placeholder="PROJ-1234" value={key} onChange={(e) => setKey(e.target.value)} required autoFocus={!existing} readOnly={!!existing} />
+                  <input className="input mono" placeholder="PROJ-1234" value={key} onChange={(e) => setKey(e.target.value)} required aria-invalid={!!fieldErrors.key} autoFocus={!existing} readOnly={!!existing} />
+                  {fieldErrors.key && <span className="ntd-err" role="alert">{fieldErrors.key}</span>}
                 </label>
                 <label className="field">
                   <span>{t("Título")}</span>
-                  <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+                  <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required aria-invalid={!!fieldErrors.title} />
+                  {fieldErrors.title && <span className="ntd-err" role="alert">{fieldErrors.title}</span>}
                 </label>
               </div>
             ) : (
               <label className="field">
                 <span>{t("Qué quieres hacer")}</span>
-                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Probar caché de tarifas en svc-billing")} required autoFocus />
-                <span className="muted" style={{ fontSize: 11.5, fontWeight: 400 }}>
+                <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Probar caché de tarifas en svc-billing")} required aria-invalid={!!fieldErrors.title} autoFocus />
+                {fieldErrors.title && <span className="ntd-err" role="alert">{fieldErrors.title}</span>}
+                <span className="muted ntd-help">
                   {t("Delilah le pone una clave LIBRE-n. Arranca con /feature y esta descripción.")}
                 </span>
               </label>
@@ -346,63 +391,32 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
             )}
             {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
             {origin !== "claude" && (
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("Cada paso (plan, implementación, revisión) va en una sesión nueva, con las notas del anterior")}>
-                <input
-                  type="checkbox"
-                  checked={savingMode || autopilotOn}
-                  disabled={autopilotOn}
-                  onChange={(e) => {
-                    savingTouched.current = true;
-                    setSavingMode(e.target.checked);
-                  }}
-                />
-                <span>{t("Modo ahorro")}</span>
-              </label>
-            )}
-            {origin !== "claude" && (
-              <label className="field">
-                <span>{t("Vista")}</span>
-                <select className="input" value={view} onChange={(e) => setView(e.target.value as TaskView)}>
-                  <option value="chat">Chat</option>
-                  <option value="terminal">Terminal</option>
-                </select>
-              </label>
-            )}
-            {origin !== "claude" && (
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <input type="checkbox" checked={chatMode} onChange={(e) => setChatMode(e.target.checked)} />
-                <span>{t("Modo chat (experimental)")}</span>
-              </label>
-            )}
-            {origin !== "claude" && chatMode && (
-              <div className="muted" style={{ fontSize: 12 }}>
-                {t("Experimental: sin terminal; los permisos se piden con tarjetas en la conversación.")}
+              <div className="ntd-auto">
+                {autopilotAllowed ? (
+                  <AutopilotControls
+                    autopilot={autopilotOn ? { state: "running", since: "" } : null}
+                    savingMode={savingMode}
+                    onAutopilot={(a) => {
+                      if (a === "on") savingTouched.current = true;
+                      if (a === "on") setSavingMode(true);
+                      setAutopilot(a === "on");
+                    }}
+                    onSavingMode={setSaving}
+                  />
+                ) : (
+                  <Toggle label={t("Ahorro")} pressed={savingMode} onChange={setSaving} />
+                )}
+                <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>
               </div>
-            )}
-            {origin !== "claude" && autopilotAllowed && (
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }} title={t("El modo ahorro queda activo mientras el autopiloto esté activado")}>
-                <input
-                  type="checkbox"
-                  checked={autopilot}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      savingTouched.current = true;
-                      setSavingMode(true);
-                    }
-                    setAutopilot(e.target.checked);
-                  }}
-                />
-                <span>{t("Autopiloto")}</span>
-              </label>
             )}
             {origin !== "claude" && project?.kind === "parent" && (
               <div className="field">
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="ntd-sub-hd">
                   {t("Submódulos que toca la tarea")}
-                  <button type="button" className="btn" style={{ marginLeft: "auto", height: 24 }} onClick={suggest}
+                  <Button variant="secondary" size={28} className="ntd-suggest" onClick={suggest}
                     disabled={suggesting || (origin === "jira" && !key.trim()) || !title.trim()}>
                     {suggesting ? t("Claude está mirando el código…") : t("Sugerir con Claude")}
-                  </button>
+                  </Button>
                 </span>
                 <div className="choices">
                   {submodules.map((s) => (
@@ -413,11 +427,12 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                     </label>
                   ))}
                 </div>
+                {fieldErrors.submodules && <span className="ntd-err" role="alert">{fieldErrors.submodules}</span>}
                 {suggested.length > 0 && (
-                  <ul className="md-list" style={{ margin: "4px 0 0", fontSize: 12, color: "var(--tx2)" }}>
+                  <ul className="md-list ntd-suggested">
                     {suggested.map((s) => (
                       <li key={s.path}>
-                        <span className="mono" style={{ color: "var(--tx)" }}>{s.path}</span>: {s.reason}
+                        <span className="mono">{s.path}</span>: {s.reason}
                       </li>
                     ))}
                   </ul>
@@ -425,59 +440,56 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               </div>
             )}
             {origin !== "claude" && (
-              <label className="field">
-                <span>
-                  {t("Rama")}
-                  {branchHint && (
-                    <span className="muted" style={{ fontSize: 11.5, fontWeight: 400, marginLeft: 8 }}>
-                      {branchHint === "loading" ? t("Proponiendo…") : branchHint === "claude" ? t("propuesta por Claude") : branchHint === "title" ? t("a partir del título") : t("a partir de la clave")}
+              <details className="ntd-adv">
+                <summary>{t("Opciones avanzadas")}</summary>
+                <div className="field">
+                  <span>{t("Vista")}</span>
+                  <Segmented mode="radio" label={t("Vista")} value={view} onChange={(v) => setView(v as TaskView)}
+                    options={[{ value: "chat", label: "Chat", tag: "beta" }, { value: "terminal", label: "Terminal" }]} />
+                </div>
+                <label className="field">
+                  <span>
+                    {t("Rama")}
+                    {branchHint && (
+                      <span className="muted ntd-help">
+                        {branchHint === "loading" ? t("Proponiendo…") : branchHint === "claude" ? t("propuesta por Claude") : branchHint === "title" ? t("a partir del título") : t("a partir de la clave")}
+                      </span>
+                    )}
+                  </span>
+                  <span className="ntd-branch">
+                    {prefixed && <span className="mono muted">feature/</span>}
+                    <input className="input mono" aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={analysisNames ? t("la creará el análisis") : t("automática si la dejas vacía")} />
+                  </span>
+                </label>
+                {!fromSession && (
+                  <label className="field">
+                    <span>
+                      {t("Primer mensaje (opcional; si lo dejas vacío usa")}{" "}
+                      <span className="mono">/feature {origin === "libre" ? t("<lo que quieres hacer>") : key || "TICKET"}</span>)
                     </span>
-                  )}
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {prefixed && <span className="mono muted">feature/</span>}
-                  <input className="input mono" style={{ flex: 1 }} aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={analysisNames ? t("la creará el análisis") : t("automática si la dejas vacía")} />
-                </span>
-              </label>
-            )}
-            {origin !== "claude" && !fromSession && (
-            <label className="field">
-              <span>
-                {t("Primer mensaje (opcional; si lo dejas vacío usa")}{" "}
-                <span className="mono">/feature {origin === "libre" ? t("<lo que quieres hacer>") : key || "TICKET"}</span>)
-              </span>
-              <textarea className="input" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            </label>
+                    <textarea className="input" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+                  </label>
+                )}
+              </details>
             )}
           </>
         )}
-        {error && <div className="error selectable">{error}</div>}
-        {error && chatMode && error.includes("chat mode could not start") && (
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            onClick={() => {
-              setChatMode(false);
-              submit(null, false);
-            }}
-          >
-            {t("Iniciar en terminal")}
-          </button>
+        {error && !dirtyCheckout && <div className="error selectable">{error}</div>}
+        {dirtyCheckout && (
+          <div className="ntd-dirty" role="alert">
+            <div>{t("Tu checkout tiene cambios sin guardar. Guárdalos o descártalos, o inicia la tarea en un worktree aislado.")}</div>
+            <div className="ntd-dirty-actions">
+              <Button variant="secondary" size={28} disabled={busy} onClick={startInWorktree}>{t("Iniciar en un worktree")}</Button>
+              <Button variant="ghost" size={28} icon="console" disabled={busy} onClick={openTerminal}>{t("Abrir una terminal")}</Button>
+            </div>
+          </div>
         )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={onClose}>{t("Cancelar")}</button>
-          {origin !== "claude" && !fromSession && !existing && (
-            <button type="button" className="btn" disabled={busy || !canSave} onClick={saveToBacklog}
-              title={t("Se queda en el backlog del proyecto, sin workspace ni agente, hasta que la empieces")}>
-              {t("Guardar en backlog")}
-            </button>
-          )}
-          <button className="btn btn-p" disabled={busy || !project || (origin !== "claude" && project.kind === "parent" && picked.length === 0)}>
-            {busy ? t("Preparando workspace…") : origin === "claude" ? t("Abrir conversación") : fromSession ? t("Convertir") : existing ? t("Empezar") : t("Lanzar")}
-          </button>
-        </div>
+        {error && chatMode && error.includes("chat mode could not start") && (
+          <Button variant="secondary" disabled={busy} onClick={() => submit(null, false)}>
+            {t("Iniciar en terminal")}
+          </Button>
+        )}
       </form>
-    </div>
+    </Dialog>
   );
 }

@@ -15,7 +15,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
 | WP-07 | 2 | 2B | done | 1 | a3b376d | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
-| WP-09 | 2 | 2B | done | 1 |  | PR check times, review comments, merge |
+| WP-09 | 2 | 2B | done | 1 | 47ffad7 | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
@@ -52,7 +52,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-43 | 7 | 7A | done | 1 | da2920b | ProposalCard, delete task, Quick Open |
 | WP-44 | 7 | 7A | implementing | 1 |  | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
-| WP-46 | 7 | 7B | implementing | 1 |  | Nueva tarea dialog |
+| WP-46 | 7 | 7B | done | 1 |  | Nueva tarea dialog |
 | WP-47 | 7 | 7B | done | 1 | f80fe4c | Backlog task and project settings |
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |

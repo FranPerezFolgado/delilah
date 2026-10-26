@@ -8,6 +8,10 @@ import { NewTaskDialog } from "./NewTaskDialog";
 vi.mock("./WherePicker", async (orig) => ({ ...(await orig<typeof import("./WherePicker")>()), WherePicker: () => null }));
 
 const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS };
+/** A kit Toggle or Segmented option, found by its visible label. */
+const btn = (root: HTMLElement, label: string) =>
+  Array.from(root.querySelectorAll("button")).find((b) => b.textContent?.startsWith(label)) as HTMLButtonElement;
+const pressed = (b: HTMLButtonElement) => b.getAttribute("aria-pressed") === "true";
 const session = { id: "s9", task: "@web", kind: "claude", conversation: true } as Session;
 
 function setup() {
@@ -88,10 +92,10 @@ describe("NewTaskDialog saving mode", () => {
   it("is preloaded from the saving-mode preference and sent with the run", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(true);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
-    const { getByLabelText, container } = render(
+    const { container } = render(
       <NewTaskDialog projects={projects} draft={{ key: "PROJ-1", title: "Algo", components: [] }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
-    await waitFor(() => expect((getByLabelText("Modo ahorro") as HTMLInputElement).checked).toBe(true));
+    await waitFor(() => expect(pressed(btn(container, "Ahorro"))).toBe(true));
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(run).toHaveBeenCalled());
     expect(run.mock.calls[0][0].saving_mode).toBe(true);
@@ -100,11 +104,11 @@ describe("NewTaskDialog saving mode", () => {
   it("defaults to off and can be switched on, also for the backlog", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
-    const { getByLabelText, getByText } = render(
+    const { container, getByText } = render(
       <NewTaskDialog projects={projects} draft={{ key: "PROJ-1", title: "Algo", components: [] }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
-    const box = getByLabelText("Modo ahorro") as HTMLInputElement;
-    expect(box.checked).toBe(false);
+    const box = btn(container, "Ahorro");
+    expect(pressed(box)).toBe(false);
     fireEvent.click(box);
     fireEvent.click(getByText("Guardar en backlog"));
     await waitFor(() => expect(create).toHaveBeenCalled());
@@ -113,11 +117,11 @@ describe("NewTaskDialog saving mode", () => {
 
   it("starts a backlog task with the mode it was saved with", async () => {
     const pref = vi.spyOn(api, "preference").mockResolvedValue(false);
-    const { getByLabelText } = render(
+    const { container } = render(
       <NewTaskDialog projects={projects} existing={{ ...started, saving_mode: true }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
     await Promise.resolve();
-    expect((getByLabelText("Modo ahorro") as HTMLInputElement).checked).toBe(true);
+    expect(pressed(btn(container, "Ahorro"))).toBe(true);
     expect(pref).not.toHaveBeenCalled();
   });
 });
@@ -127,24 +131,28 @@ describe("NewTaskDialog autopilot", () => {
   const mount = () =>
     render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
 
-  it("ticking it ticks and disables saving mode; unticking re-enables it, still ticked", async () => {
+  it("turning it on asks first, then forces Ahorro on and locked; turning it off unlocks it, still on", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
-    const { getByLabelText } = mount();
-    const auto = getByLabelText("Autopiloto") as HTMLInputElement;
-    const saving = getByLabelText("Modo ahorro") as HTMLInputElement;
+    const { container, getByText } = mount();
+    const auto = btn(container, "Autopiloto");
+    const saving = btn(container, "Ahorro");
     fireEvent.click(auto);
-    expect(saving.checked).toBe(true);
+    expect(pressed(auto)).toBe(false);
+    fireEvent.click(getByText("Activar"));
+    expect(pressed(auto)).toBe(true);
+    expect(pressed(saving)).toBe(true);
     expect(saving.disabled).toBe(true);
     fireEvent.click(auto);
     expect(saving.disabled).toBe(false);
-    expect(saving.checked).toBe(true);
+    expect(pressed(saving)).toBe(true);
   });
 
   it("is sent with the run together with saving mode", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
-    const { getByLabelText, container } = mount();
-    fireEvent.click(getByLabelText("Autopiloto"));
+    const { container, getByText } = mount();
+    fireEvent.click(btn(container, "Autopiloto"));
+    fireEvent.click(getByText("Activar"));
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(run).toHaveBeenCalled());
     expect(run.mock.calls[0][0].autopilot).toBe(true);
@@ -154,8 +162,9 @@ describe("NewTaskDialog autopilot", () => {
   it("is sent when saving to the backlog", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
-    const { getByLabelText, getByText } = mount();
-    fireEvent.click(getByLabelText("Autopiloto"));
+    const { container, getByText } = mount();
+    fireEvent.click(btn(container, "Autopiloto"));
+    fireEvent.click(getByText("Activar"));
     fireEvent.click(getByText("Guardar en backlog"));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0]).toMatchObject({ autopilot: true, saving_mode: true });
@@ -165,10 +174,10 @@ describe("NewTaskDialog autopilot", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
     const existing = { ...started, autopilot: { state: "running" as const, since: "2026-10-21T10:00:00Z" } };
-    const { getByLabelText, container } = render(
+    const { container } = render(
       <NewTaskDialog projects={projects} existing={existing} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
-    fireEvent.click(getByLabelText("Autopiloto"));
+    fireEvent.click(btn(container, "Autopiloto"));
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(run).toHaveBeenCalled());
     expect(run.mock.calls[0][0].autopilot).toBe(false);
@@ -176,10 +185,11 @@ describe("NewTaskDialog autopilot", () => {
 
   it("is hidden outside the spec workflow", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
-    const { queryByLabelText } = render(
+    const { container } = render(
       <NewTaskDialog projects={[{ ...web, workflow: "custom" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
-    expect(queryByLabelText("Autopiloto")).toBeNull();
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    expect(btn(container, "Ahorro")).toBeDefined();
   });
 });
 
@@ -191,9 +201,10 @@ describe("NewTaskDialog view", () => {
   it("defaults to Chat and is sent with the run", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
-    const { getByLabelText, container } = mount();
-    expect((getByLabelText("Vista") as HTMLSelectElement).value).toBe("chat");
-    fireEvent.change(getByLabelText("Vista"), { target: { value: "terminal" } });
+    const { container } = mount();
+    expect(btn(container, "Chat").getAttribute("aria-checked")).toBe("true");
+    expect(btn(container, "Chat").textContent).toContain("beta");
+    fireEvent.click(btn(container, "Terminal"));
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(run).toHaveBeenCalled());
     expect(run.mock.calls[0][0]).toMatchObject({ view: "terminal" });
@@ -210,8 +221,8 @@ describe("NewTaskDialog view", () => {
 
   it("starts from the view of a backlog task", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
-    const { getByLabelText } = mount({ draft: undefined, existing: { ...started, view: "terminal" } });
-    expect((getByLabelText("Vista") as HTMLSelectElement).value).toBe("terminal");
+    const { container } = mount({ draft: undefined, existing: { ...started, view: "terminal" } });
+    expect(btn(container, "Terminal").getAttribute("aria-checked")).toBe("true");
   });
 });
 
@@ -412,29 +423,23 @@ describe("NewTaskDialog branch field", () => {
 
 describe("NewTaskDialog chat mode", () => {
   const draft = { key: "PROJ-1", title: "Algo", components: [] };
-  const mount = () =>
-    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
+  const mount = (extra: Partial<React.ComponentProps<typeof NewTaskDialog>> = {}) =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} {...extra} />);
 
-  it("is off by default and sends no chat_mode", async () => {
+  it("has no checkbox any more and sends no chat_mode by default", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
-    const { getByLabelText, container } = mount();
-    expect((getByLabelText("Modo chat (experimental)") as HTMLInputElement).checked).toBe(false);
+    const { container } = mount();
+    expect(container.querySelector('input[type="checkbox"]')).toBeNull();
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(run).toHaveBeenCalled());
     expect(run.mock.calls[0][0].chat_mode).toBeUndefined();
   });
 
-  it("shows a warning and sends chat_mode with the run and the backlog save", async () => {
+  it("a backlog task saved with chat mode keeps sending it", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
-    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
-    const { getByLabelText, getByText, container } = mount();
-    fireEvent.click(getByLabelText("Modo chat (experimental)"));
-    expect(getByText(/los permisos se piden con tarjetas/)).toBeTruthy();
-    fireEvent.click(getByText("Guardar en backlog"));
-    await waitFor(() => expect(create).toHaveBeenCalled());
-    expect(create.mock.calls[0][0].chat_mode).toBe(true);
+    const { container } = mount({ draft: undefined, existing: { ...started, chat_mode: true } });
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(run).toHaveBeenCalled());
     expect(run.mock.calls[0][0].chat_mode).toBe(true);
@@ -446,12 +451,104 @@ describe("NewTaskDialog chat mode", () => {
       .spyOn(api, "run")
       .mockRejectedValueOnce(new Error("chat mode could not start: no claude"))
       .mockResolvedValueOnce(started);
-    const { getByLabelText, getByText, container } = mount();
-    fireEvent.click(getByLabelText("Modo chat (experimental)"));
+    const { getByText, container } = mount({ draft: undefined, existing: { ...started, chat_mode: true } });
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => getByText("Iniciar en terminal"));
     fireEvent.click(getByText("Iniciar en terminal"));
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
     expect(run.mock.calls[1][0].chat_mode).toBeFalsy();
+  });
+});
+
+describe("NewTaskDialog layout and errors", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const mount = (extra: Partial<React.ComponentProps<typeof NewTaskDialog>> = {}) =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} {...extra} />);
+
+  it("is a 600x700 dialog with the actions in a footer outside the scrolling body, «Iniciar» primary", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { container, getByText } = mount();
+    const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.style.width).toBe("600px");
+    expect(dialog.style.height).toBe("700px");
+    const footer = dialog.querySelector(".dialog-ft")!;
+    const names = Array.from(footer.querySelectorAll("button")).map((b) => b.textContent);
+    expect(names).toEqual(["Cancelar", "Guardar en backlog", "Iniciar"]);
+    expect(footer.textContent).toContain("⌘↵ Iniciar");
+    expect(dialog.querySelector(".dialog-bd")!.contains(footer)).toBe(false);
+    expect(getByText("Iniciar").className).toContain("b-p");
+    expect(container.textContent).not.toContain("Lanzar");
+  });
+
+  it("puts Vista, Rama and Primer mensaje under Opciones avanzadas", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { container } = mount();
+    const adv = container.querySelector("details")!;
+    expect(adv.querySelector("summary")!.textContent).toBe("Opciones avanzadas");
+    expect(adv.querySelector('input[aria-label="Rama"]')).not.toBeNull();
+    expect(adv.querySelector("textarea")).not.toBeNull();
+    expect(adv.querySelector('[role="radiogroup"]')).not.toBeNull();
+  });
+
+  it("explains Ahorro in the new words", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { getByText } = mount();
+    expect(getByText("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")).toBeTruthy();
+  });
+
+  it("shows inline field errors, and does not run, when the ticket and title are missing", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run");
+    const { container, getByText } = mount({ draft: undefined });
+    fireEvent.click(getByText("Iniciar"));
+    expect(run).not.toHaveBeenCalled();
+    const alerts = Array.from(container.querySelectorAll(".ntd-err")).map((e) => e.textContent);
+    expect(alerts).toEqual(["Falta el ticket", "Falta el título"]);
+  });
+
+  it("Cmd+Enter starts the task", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = mount();
+    fireEvent.keyDown(container.querySelector("form")!, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(run).toHaveBeenCalled());
+  });
+
+  it("a dirty checkout refusal reads as one human error and offers «Iniciar en un worktree», which retries outside the checkout", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi
+      .spyOn(api, "run")
+      .mockRejectedValueOnce(new Error("/p/web has uncommitted changes; the checkout must be clean"))
+      .mockResolvedValueOnce(started);
+    const { container, getByText, queryByText } = mount();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => getByText(/Tu checkout tiene cambios sin guardar/));
+    expect(queryByText(/uncommitted/)).toBeNull();
+    expect(run.mock.calls[0][0].in_checkout).toBe(true);
+    fireEvent.click(getByText("Iniciar en un worktree"));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    expect(run.mock.calls[1][0].in_checkout).toBe(false);
+  });
+
+  it("«Abrir una terminal» opens a shell session in the project", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    vi.spyOn(api, "run").mockRejectedValueOnce(new Error("checkout has uncommitted changes"));
+    const open = vi.spyOn(api, "openProjectSession").mockResolvedValue(session);
+    const onConversation = vi.fn();
+    const { container, getByText } = mount({ onConversation });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => getByText("Abrir una terminal"));
+    fireEvent.click(getByText("Abrir una terminal"));
+    await waitFor(() => expect(onConversation).toHaveBeenCalledWith("web", session));
+    expect(open).toHaveBeenCalledWith("web", { kind: "shell" });
+  });
+
+  it("any other error is shown as the daemon says it", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    vi.spyOn(api, "run").mockRejectedValueOnce(new Error("boom"));
+    const { container, getByText, queryByText } = mount();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => getByText("boom"));
+    expect(queryByText("Iniciar en un worktree")).toBeNull();
   });
 });

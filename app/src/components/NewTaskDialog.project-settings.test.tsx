@@ -85,8 +85,11 @@ describe("NewTaskDialog", () => {
   describe("default workspace mode", () => {
     const withMode = (name: string, workspace: "checkout" | "worktree" | null) =>
       ({ name, kind: "repo", settings: { ...DEFAULT_PROJECT_SETTINGS, workspace } }) as unknown as Project;
-    const radio = (c: HTMLElement, v: string) =>
-      Array.from(c.querySelectorAll('input[name="where"]'))[v === "checkout" ? 0 : 1] as HTMLInputElement;
+    // The kit's OptionCards: radio buttons in the «Dónde trabaja el agente» group.
+    const radio = (c: HTMLElement, v: string) => {
+      const b = Array.from(c.querySelectorAll('button[data-name="where"]'))[v === "checkout" ? 0 : 1] as HTMLButtonElement;
+      return Object.assign(b, { get checked() { return b.getAttribute("aria-checked") === "true"; } }) as unknown as HTMLInputElement;
+    };
     const open = (projects: Project[], extra: Record<string, unknown> = {}) =>
       render(<NewTaskDialog projects={projects} onClose={vi.fn()} onStarted={vi.fn()} onSaved={vi.fn()} onConversation={vi.fn()} {...extra} />);
 
@@ -99,6 +102,11 @@ describe("NewTaskDialog", () => {
     it("preselects checkout when the project defaults to it", () => {
       const { container } = open([withMode("a", "checkout")]);
       expect(radio(container, "checkout").checked).toBe(true);
+    });
+
+    it("labels the checkout as the default when the project has no setting", () => {
+      const { container } = open([withMode("a", null)]);
+      expect(container.querySelector('button[data-name="where"]')!.textContent).toContain("· default");
     });
 
     it("preselects checkout (as before) when the project has no default", () => {
