@@ -72,3 +72,7 @@ required-features = ["e2e"]
 [[test]]
 name = "chat_permissions"
 required-features = ["e2e"]
+
+[[test]]
+name = "autofix"
+required-features = ["e2e"]
