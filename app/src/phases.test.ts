@@ -87,12 +87,12 @@ describe("headerPhaseOf", () => {
 
 describe("whereOf", () => {
   const mode = (workspace: "checkout" | "worktree") => ({ settings: { workspace } }) as never;
-  it("a saved choice wins; without one, the project's setting; without that, a worktree, as the daemon does", () => {
+  it("a saved choice wins; without one, the project's setting; without that, the checkout, as the daemon does", () => {
     expect(whereOf(true)).toBe("checkout");
     expect(whereOf(false)).toBe("worktree");
-    expect(whereOf(null)).toBe("worktree");
-    expect(whereOf(undefined)).toBe("worktree");
-    expect(whereOf(null, { settings: { workspace: null } } as never)).toBe("worktree");
+    expect(whereOf(null)).toBe("checkout");
+    expect(whereOf(undefined)).toBe("checkout");
+    expect(whereOf(null, { settings: { workspace: null } } as never)).toBe("checkout");
     expect(whereOf(null, mode("worktree"))).toBe("worktree");
     expect(whereOf(null, mode("checkout"))).toBe("checkout");
     expect(whereOf(true, mode("worktree"))).toBe("checkout");

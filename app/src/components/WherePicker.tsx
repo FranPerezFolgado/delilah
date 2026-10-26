@@ -7,10 +7,9 @@ export type Where = "checkout" | "worktree";
 
 /**
  * A task's saved choice; without one, the project's setting; without that, `fallback`.
- * The daemon runs a worktree then, so that is the default (what a backlog task will do);
- * the new-task form passes "checkout" to preselect it, as it always did.
+ * Unset means the checkout, as the daemon does.
  */
-export const whereOf = (inCheckout?: boolean | null, project?: Project, fallback: Where = "worktree"): Where =>
+export const whereOf = (inCheckout?: boolean | null, project?: Project, fallback: Where = "checkout"): Where =>
   inCheckout === true ? "checkout" : inCheckout === false ? "worktree" : (project?.settings.workspace ?? fallback);
 
 /** Where the agent works: a branch in the project's own checkout (the default), or a worktree. */

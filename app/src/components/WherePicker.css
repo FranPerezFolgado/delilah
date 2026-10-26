@@ -1,3 +1,2 @@
 .where-picker .where { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.where-picker .opt { min-width: 0; overflow-wrap: anywhere; font-size: 12.5px; }
-.where-picker .opt .muted { font-size: 11.5px; line-height: 1.4; }
+.where-picker .opt { min-width: 0; overflow-wrap: anywhere; }
