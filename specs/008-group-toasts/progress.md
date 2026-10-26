@@ -16,7 +16,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 6 | 6A | done | 1 | e2183f8 | |
 | WP-08 | 7 | 7A | done | 1 | 0a36240 | |
 | WP-09 | 7 | 7A | done | 1 | a00af6f | decision 79 |
-| WP-10 | 7 | 7B | implementing | 0 | | |
+| WP-10 | 7 | 7B | done | 1 | 430394a | preview: scenarios 1,2,3,5a pass; 4 (needs real agent) and 5b (no proposal) not reachable — unit-tested; bump minor 1.0.0→1.1.0 |
 
 ## Open findings
 

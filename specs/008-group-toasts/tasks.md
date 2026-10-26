@@ -102,7 +102,7 @@ with failing Vitest tests (jsdom, fake timers).
 - [X] T024 [P] Update `docs/status.md` (Kit/Toast entry and built features) and `docs/architecture.md` (UI kit note: toast store with keyed/merged toasts, GlobalNotices owns the waiting group)
 - [X] T025 [P] Add a decision to `docs/decisions.md`: one grouped «te espera» toast owned by GlobalNotices instead of one per task; merge rule (exact text+kind, no action); collapsed stack; alternatives ruled out (lower MAX, notification centre, moving waiting to gn-bar)
 - [X] T026 Try it in a preview per `specs/008-group-toasts/quickstart.md` (`scripts/preview.sh --fresh`, never the installed daemon on 7420); check scenarios 1–5 (ui-verifier)
-- [ ] T027 Bump the version (minor: new user-facing behaviour, backwards compatible) with `scripts/bump-version.sh minor --commit` as its own commit `chore: bump version to X.Y.Z`, from the version on `main`
+- [X] T027 Bump the version (minor: new user-facing behaviour, backwards compatible) with `scripts/bump-version.sh minor --commit` as its own commit `chore: bump version to X.Y.Z`, from the version on `main`
 
 ---
 
