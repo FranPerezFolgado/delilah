@@ -115,8 +115,15 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
             }
             Step::SleepMs(ms) => std::thread::sleep(Duration::from_millis(*ms)),
             Step::Ask(ask) => return self.ask(ask),
-            Step::Stop(message) => {
-                self.hook("Stop", &payload::stop(&session, &cwd, message));
+            Step::Stop(stop) => {
+                let p = payload::stop_with(&session, &cwd, stop.message(), stop.background());
+                self.hook("Stop", &p);
+            }
+            Step::Write { path, content } => {
+                if let Err(e) = write_file(&cwd, path, content) {
+                    eprintln!("fake-claude: {e}");
+                    return Flow::Exit(self.end("error", 2));
+                }
             }
             Step::WaitInput(_) => match self.read_line() {
                 None => return Flow::Exit(self.end("hangup", 0)),
@@ -183,6 +190,28 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         self.hook("PostToolUse", &post);
         Flow::Next
     }
+}
+
+/// Plays a `write` step: `path` is relative to `cwd`, with no `..`; parents are created
+/// and an existing file is overwritten.
+fn write_file(cwd: &str, path: &str, content: &str) -> Result<(), String> {
+    use std::path::Component;
+    let rel = Path::new(path);
+    if path.is_empty()
+        || rel.is_absolute()
+        || rel
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(format!(
+            "write: invalid path `{path}` (must be relative, no `..`)"
+        ));
+    }
+    let full = Path::new(cwd).join(rel);
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("write {path}: {e}"))?;
+    }
+    std::fs::write(&full, content).map_err(|e| format!("write {path}: {e}"))
 }
 
 /// The Env's temp home, derived from the fake dir (`<root>/fake`, `<root>/home`).
@@ -787,5 +816,71 @@ mod tests {
         assert_eq!(o.code, 0);
         assert_eq!(o.text, "");
         assert_eq!(events(&o), ["SessionStart", "SessionEnd"]);
+    }
+
+    #[test]
+    fn stop_object_logs_background_tasks() {
+        let steps = r#"[{"stop":{"message":"m","background":[{"id":"b1","status":"running"}]}},
+            {"stop":{"message":"n","background":[]}},{"stop":"plain"}]"#;
+        let o = play("new", steps, "", None);
+        let stops = logged(o.dir.path(), "Stop");
+        assert_eq!(stops[0]["last_assistant_message"], "m");
+        assert_eq!(
+            stops[0]["background_tasks"],
+            json!([{"id":"b1","status":"running"}])
+        );
+        assert_eq!(stops[1]["background_tasks"], json!([]));
+        assert!(stops[2].get("background_tasks").is_none());
+    }
+
+    fn play_in(cwd: &Path, steps: &str) -> Out {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = settings(dir.path());
+        let scenario = Scenario::parse(&format!(r#"{{"steps":{steps}}}"#)).unwrap();
+        let mut rec = record("new");
+        rec.cwd = cwd.display().to_string();
+        let mut out = Vec::new();
+        let code = run(
+            &mut rec,
+            &scenario,
+            &hooks,
+            None,
+            &mut Cursor::new(Vec::new()),
+            &mut out,
+        );
+        Out {
+            code,
+            text: String::new(),
+            record: rec,
+            dir,
+        }
+    }
+
+    #[test]
+    fn write_creates_the_file_with_parents_and_overwrites() {
+        let cwd = tempfile::tempdir().unwrap();
+        let o = play_in(
+            cwd.path(),
+            r#"[{"write":{"path":"specs/k-1-x/tasks.md","content":"old"}},
+            {"write":{"path":"specs/k-1-x/tasks.md","content":"- [ ] T1"}}]"#,
+        );
+        assert_eq!(o.code, 0);
+        assert_eq!(
+            std::fs::read_to_string(cwd.path().join("specs/k-1-x/tasks.md")).unwrap(),
+            "- [ ] T1"
+        );
+        assert!(logged(o.dir.path(), "Stop").is_empty());
+    }
+
+    #[test]
+    fn write_with_a_bad_path_exits_2() {
+        for bad in ["/etc/x", "../x", "a/../../x", ""] {
+            let cwd = tempfile::tempdir().unwrap();
+            let steps =
+                format!(r#"[{{"write":{{"path":"{bad}","content":"x"}}}},{{"print":"never"}}]"#);
+            let o = play_in(cwd.path(), &steps);
+            assert_eq!(o.code, 2, "{bad}");
+            assert_eq!(o.record.exited, Some(2), "{bad}");
+        }
     }
 }

@@ -11,7 +11,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose \
 ```
 
 Answers research.md R7 (a-h). Verdict: **adjust**, see decision 67 in
-[decisions.md](../decisions.md).
+[decisions.md](../../decisions.md).
 
 ## R7 answers
 

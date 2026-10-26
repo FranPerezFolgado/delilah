@@ -1395,7 +1395,7 @@ async fn start_failure(app: &AppState, runtime: &Runtime, said: Option<&str>) ->
 /// Whether `text` is the CLI refusing the `--permission-mode` it was launched with (an
 /// unknown or unavailable mode). Keyed on the rejection's shape, not on the mode named:
 /// `error: option '--permission-mode <mode>' argument '<x>' is invalid. Allowed choices
-/// are ...` (docs/spikes/2026-10-26-chat-permission-mode.md).
+/// are ...` (docs/archive/spikes/2026-10-26-chat-permission-mode.md).
 fn rejects_permission_mode(text: &str) -> bool {
     let text = text.to_lowercase();
     text.contains("--permission-mode")
@@ -2038,6 +2038,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         // A folder that isn't there: any workspace for it fails, and no agent starts.
         app.store
             .create_project(&delilah_core::Project {
@@ -2440,6 +2441,7 @@ mod tests {
         let mut config = app.config.as_ref().clone();
         config.claude_bin = bin;
         app = AppState::new(app.store.clone(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         app.store
             .create_project(&delilah_core::Project {
                 name: "repo".into(),
@@ -2978,6 +2980,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         app.store
             .create_project(&delilah_core::Project {
                 name: "web".into(),
@@ -3074,6 +3077,7 @@ mod tests {
         let mut config = app.config.as_ref().clone();
         config.agent_program = Some(bin);
         let app = AppState::new(app.store.clone(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
         task.project = Some("web".into());
         task.chat_mode = chat_mode;
@@ -3339,6 +3343,7 @@ mod tests {
         let mut config = app.config.as_ref().clone();
         config.claude_projects = projects.clone();
         let app = AppState::new(app.store.clone(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let record = SessionRecord {
             id: format!("resume-{}", uuid::Uuid::new_v4()),
             ..session("PROJ-1", "Main")
@@ -3410,6 +3415,7 @@ mod tests {
         let mut config = app.config.as_ref().clone();
         config.agent_program = Some(bin);
         let app = AppState::new(app.store.clone(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let mut task = Task::new(TaskKey::new("LIBRE-1"), "Reintentos", "feature");
         task.project = Some("repo".into());
         task.in_checkout = Some(false);
@@ -3726,6 +3732,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         app.store
             .create_project(&delilah_core::Project {
                 name: "web".into(),
@@ -3940,6 +3947,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         app.store
             .create_project(&delilah_core::Project {
                 name: "web".into(),
@@ -4074,6 +4082,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let mut project = delilah_core::Project {
             name: "parent".into(),
             path: dir.join("env/parent"),

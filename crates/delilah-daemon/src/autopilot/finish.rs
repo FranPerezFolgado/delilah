@@ -765,6 +765,7 @@ mod tests {
         let gh = gh("[]");
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config)
             .with_gh(gh.clone());
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         let mut t = Task::new(key.clone(), "t", "feature");
         t.saving_mode = true;

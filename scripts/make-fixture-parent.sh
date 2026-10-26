@@ -59,7 +59,7 @@ EOF
   chmod +x "$dir/src/service.sh" "$dir/tests/test.sh"
   commit_all "$dir" "Initial $name"
 
-  git clone -q --bare "$dir" "$TARGET/remotes/$name.git"
+  git clone -q --bare --no-hardlinks "$dir" "$TARGET/remotes/$name.git"
 }
 
 for m in "${MODULES[@]}"; do seed_module "$m"; done
@@ -77,7 +77,9 @@ for m in "${MODULES[@]}"; do
   git_local -C "$seed_parent" submodule add -q "$TARGET/remotes/$m.git" "$m"
 done
 commit_all "$seed_parent" "Add modules as submodules"
-git clone -q --bare "$seed_parent" "$TARGET/remotes/parent.git"
+# --no-hardlinks: git's background maintenance may still be writing a pack in the seed, and a
+# hardlinked clone then fails with "hardlink different from source" (seen on CI's Linux git).
+git clone -q --bare --no-hardlinks "$seed_parent" "$TARGET/remotes/parent.git"
 
 # Working checkout, as a developer would have it.
 git_local clone -q --recurse-submodules "$TARGET/remotes/parent.git" "$TARGET/parent"

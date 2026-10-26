@@ -84,3 +84,6 @@ Four reviewers (security, code quality, tests, architecture). Applied:
 - LOW (fixed): `AgentPermissions` in `api.ts` had split the `Step` doc comment.
 - MEDIUM (docs): README, architecture and status no longer promise the hint for "an account without auto"; only the "invalid mode" text is verified.
 Not applied (LOW / design): moving the rejection helpers out of `run.rs`; a typed enum instead of the `AtomicU8`; a per-key preference validator; unit test for `exit_with_stderr` parsing (covered by three e2e tests); splitting a two-case vitest. Full suite green after the fixes (daemon 820, vitest 858, Tauri 4, clippy, fmt); `a_message_sent_while_a_card_is_pending_is_queued` flaked once more in the first run and passed on 5 reruns and in the final run.
+
+### Merge with main (2026-10-26)
+Main had taken decision #80 (and up to #86), moved spikes to `docs/archive/spikes/`, moved user docs from the README to `docs/usage.md` and switched the docs to English UI terms. The agent-permissions decision is now **#87**; the spike is `docs/archive/spikes/2026-10-26-chat-permission-mode.md`; the user-facing paragraph moved to `docs/usage.md`.

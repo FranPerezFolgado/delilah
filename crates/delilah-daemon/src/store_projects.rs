@@ -209,25 +209,25 @@ mod tests {
     #[tokio::test]
     async fn keeps_projects_and_rejects_duplicate_names_or_folders() {
         let store = Store::in_memory().await.unwrap();
-        let work = project("plataforma", "/w/plataforma", ProjectKind::Parent);
+        let work = project("platform", "/w/platform", ProjectKind::Parent);
         store.create_project(&work).await.unwrap();
         store
             .create_project(&project("signal", "/p/signal", ProjectKind::Repo))
             .await
             .unwrap();
 
-        let same_name = project("plataforma", "/elsewhere", ProjectKind::Repo);
+        let same_name = project("platform", "/elsewhere", ProjectKind::Repo);
         assert!(matches!(
             store.create_project(&same_name).await,
             Err(StoreError::ProjectExists(_))
         ));
-        let same_folder = project("other", "/w/plataforma", ProjectKind::Repo);
+        let same_folder = project("other", "/w/platform", ProjectKind::Repo);
         assert!(matches!(
             store.create_project(&same_folder).await,
             Err(StoreError::ProjectExists(_))
         ));
 
-        assert_eq!(store.project("plataforma").await.unwrap(), work);
+        assert_eq!(store.project("platform").await.unwrap(), work);
         assert_eq!(store.list_projects().await.unwrap().len(), 2);
         assert!(matches!(
             store.project("nope").await,
@@ -273,15 +273,15 @@ mod tests {
         use delilah_core::{Task, TaskKey};
         let store = Store::in_memory().await.unwrap();
         store
-            .create_project(&project("plataforma", "/w/p", ProjectKind::Repo))
+            .create_project(&project("platform", "/w/p", ProjectKind::Repo))
             .await
             .unwrap();
         let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
-        task.project = Some("plataforma".into());
+        task.project = Some("platform".into());
         store.create_task(&task).await.unwrap();
 
         let renamed = project("payments", "/w/p", ProjectKind::Repo);
-        store.update_project("plataforma", &renamed).await.unwrap();
+        store.update_project("platform", &renamed).await.unwrap();
         let moved = store
             .get_task(&TaskKey::new("PROJ-1"))
             .await

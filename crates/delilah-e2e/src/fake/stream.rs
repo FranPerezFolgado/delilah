@@ -1,6 +1,6 @@
 //! Chat mode of the fake Claude Code: `claude -p --input-format stream-json
 //! --output-format stream-json …` as the daemon runs it (`claude::stream_command`), with
-//! the wire shapes of docs/spikes/2026-10-24-claude-stream.md. Each user line on stdin
+//! the wire shapes of docs/archive/spikes/2026-10-24-claude-stream.md. Each user line on stdin
 //! plays the next turn of the scenario's `turns` (picked at the first line: a
 //! `[fake:<name>]` marker in it, else `<task>.json`, else `default.json`); the hooks fire
 //! as in the terminal (SessionStart, UserPromptSubmit, Stop, SessionEnd) and the
@@ -276,7 +276,7 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         self.emit(&json!({"type": "assistant", "message": message}));
         self.emit(&json!({"type": "stream_event", "event": {"type": "message_stop"}}));
 
-        // Mirrors the spike (`docs/spikes/2026-10-26-chat-permission-mode.md`): under
+        // Mirrors the spike (`docs/archive/spikes/2026-10-26-chat-permission-mode.md`): under
         // `--permission-mode auto` a tool marked `auto: allow` runs without asking.
         let auto_allows = tool.auto == AutoMode::Allow
             && self

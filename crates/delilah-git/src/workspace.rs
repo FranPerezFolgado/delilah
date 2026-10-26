@@ -328,8 +328,9 @@ pub fn archive_workspace(
 /// Fails, touching nothing, if removing the workspace would lose work: uncommitted
 /// changes, or commits of the task's branch on no remote.
 pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
-    // Removed by hand: nothing left in it to lose, and the branch stays in the repo.
-    if !ws.path.exists() {
+    // Removed by hand, or half removed: nothing git can still lose in it, and the branch
+    // stays in the repo.
+    if !is_live_worktree(&ws.path) {
         return Ok(());
     }
     for (location, dir) in ws.branch_dirs() {
@@ -344,7 +345,7 @@ pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError
 /// [`check_workspace`] for only the repos of `ws` whose label (see [`Workspace::repos`])
 /// is in `labels`: for the repos an archive after a merge has no merged PR to vouch for.
 pub fn check_repos(ws: &Workspace, labels: &[String], opts: &GitOptions) -> Result<(), GitError> {
-    if !ws.path.exists() {
+    if !is_live_worktree(&ws.path) {
         return Ok(());
     }
     for (label, dir) in ws.repos() {
@@ -404,13 +405,63 @@ fn check_dir(
 pub fn remove_workspace(root: &Path, ws: &Workspace, opts: &GitOptions) -> Result<(), GitError> {
     // `--force` is required by git for worktrees with submodules; the checks above
     // are what keep it safe.
-    git(
+    let removed = git(
         root,
         &["worktree", "remove", "--force", &path_str(&ws.path)],
         opts,
-    )?;
+    );
+    // Git stops at the first file it cannot delete (something still writing in the
+    // folder: "Directory not empty"), and refuses a folder it no longer knows as a
+    // worktree: what is left goes by hand, so a retry of the archive can finish it.
+    if let Err(e) = removed
+        && ws.path.exists()
+    {
+        if same_dir(&ws.path, root) {
+            return Err(e);
+        }
+        remove_dir_retrying(&ws.path).map_err(|_| e)?;
+    }
     git(root, &["worktree", "prune"], opts)?;
     Ok(())
+}
+
+/// Whether git still knows the folder as a worktree: its `.git` names a git dir that
+/// exists. A failed `git worktree remove` can leave the folder without one.
+fn is_live_worktree(path: &Path) -> bool {
+    let dot_git = path.join(".git");
+    if dot_git.is_dir() {
+        return true;
+    }
+    let Ok(text) = std::fs::read_to_string(&dot_git) else {
+        return false;
+    };
+    text.lines()
+        .find_map(|l| l.strip_prefix("gitdir:"))
+        .map(|dir| path.join(dir.trim()))
+        .is_some_and(|dir| dir.exists())
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// `remove_dir_all`, again a few times: a process that is ending may still be writing
+/// in the folder (a build's `target/`).
+fn remove_dir_retrying(path: &Path) -> std::io::Result<()> {
+    let mut last = Ok(());
+    for attempt in 0..5 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+        last = std::fs::remove_dir_all(path);
+        if last.is_ok() || !path.exists() {
+            return Ok(());
+        }
+    }
+    last
 }
 
 fn path_str(path: &Path) -> String {
