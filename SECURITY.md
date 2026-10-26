@@ -47,6 +47,8 @@ is what it does and does not defend against, checked against the code.
 
 ## Known limits
 
-- The app is not signed or notarized by Apple, so macOS will warn on first launch.
+- The app is not signed or notarized by Apple, so macOS blocks a copy downloaded with a
+  browser until you allow it (see the README). The install script and a build from source
+  are not affected: neither sets the quarantine flag.
 - Agents execute the content of the repositories you point them at (scripts, build
   files, instructions) with your user's rights. Only register repositories you trust.

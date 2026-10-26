@@ -19,7 +19,7 @@ parallel (different files, no dependency on an unfinished task).
 
 ## Phase 1: Setup
 
-- [X] T001 Check the tools needed later and note any missing one in `specs/008-public-repo-onboarding/progress.md`: `git cliff --version`, `gitleaks version`, `shellcheck --version`, `npx --yes lychee --version`. Install them with `brew install git-cliff gitleaks shellcheck`; lychee runs through npx.
+- [X] T001 Check the tools needed later and note any missing one in `specs/008-public-repo-onboarding/progress.md`: `git cliff --version`, `gitleaks version`, `shellcheck --version`, `lychee --version`. Install them with `brew install git-cliff gitleaks shellcheck lychee` (`npx lychee` doesn't work).
 - [X] T002 [P] Add `CLAUDE.local.md` to `.gitignore` (root), next to the existing `.claude/settings.local.json` entry.
 
 ---
@@ -63,7 +63,7 @@ parallel (different files, no dependency on an unfinished task).
 - [X] T014 [US1] Run the Story 1 checks from [quickstart.md](quickstart.md):
   - the forbidden-terms grep over everything except `specs/`, `.specify/`, `docs/archive/` and `docs/redesign/` screenshots;
   - the Spanish-labels grep;
-  - `npx --yes lychee --offline` over `README.md` and `docs/**/*.md`, excluding only `docs/archive` (not `docs/redesign`).
+  - `lychee --offline` over `README.md` and `docs/**/*.md`, excluding only `docs/archive` (not `docs/redesign`).
 
   Fix every hit and broken link, including anchors into `docs/usage.md`.
 - [X] T015 [US1] Repo metadata (remote):

@@ -173,6 +173,16 @@ s=0
 grep -q 0.0.1 "$DEST/Delilah.app/Contents/Info.plist" || s=1
 check "(m) app running -> exit 6, old app untouched (rc=$RC)" "$s"
 
+# (n) a base URL that is neither https, file:// nor localhost http: exit 1, nothing fetched
+DEST="$WORK/n"; mkdir -p "$DEST"
+RC=0
+env DELILAH_BASE_URL="http://example.invalid" DELILAH_INSTALL_DIR="$DEST" DELILAH_ARCH=arm64 \
+  bash "$INSTALL" --yes >/dev/null 2>&1 || RC=$?
+s=0
+[ "$RC" -eq 1 ] || s=1
+[ ! -e "$DEST/Delilah.app" ] || s=1
+check "(n) plain http base URL -> exit 1 (rc=$RC)" "$s"
+
 # (i)/(j) over HTTP: a 404 for SHA256SUMS is "no checksums" (exit 3); any other error is a
 # download failure (exit 9), even with DELILAH_SKIP_CHECKSUM=1.
 if command -v python3 >/dev/null 2>&1; then

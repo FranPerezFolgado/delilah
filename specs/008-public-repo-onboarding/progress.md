@@ -36,26 +36,26 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
-| 3 | implementer WP-04 | LOW | architecture.md quotes the deny reason and "session stopped" in English, but the daemon may emit them in Spanish | docs/architecture.md |
+| 3 | implementer WP-04 | LOW | architecture.md quotes the deny reason and "session stopped" in English, but the daemon may emit them in Spanish → fixed after the branch review | docs/architecture.md |
 | 4 | security | MEDIUM | release.yml grants contents/id-token/attestations write to the single job that also runs tauri-action with the signing key; actions pinned by mutable tag. Fix: pin by SHA, split build vs checksum/attest/publish jobs | .github/workflows/release.yml:13-16 |
-| 4 | security | LOW | DELILAH_BASE_URL override drops https/TLS flags (http accepted, no warning); add --proto '=https,file' and a warning | scripts/install.sh:11,75 |
+| 4 | security | LOW | DELILAH_BASE_URL override drops https/TLS flags (http accepted, no warning); add --proto '=https,file' and a warning → fixed after the branch review | scripts/install.sh:11,75 |
 | 4 | security | LOW | no --proto-redir '=https', so redirects could downgrade → fixed in the branch review | scripts/install.sh:73 |
 | 4 | security | LOW | SHA256SUMS comes from the same origin; docs should say attestation is the provenance check (optionally verify with gh if present) → fixed in the branch review | scripts/install.sh:86-101 |
 | 4 | security | LOW | Delilah.app check uses -d (follows symlinks); add `! -L` (matters only with DELILAH_SKIP_CHECKSUM=1) → fixed in the branch review | scripts/install.sh:105-110 |
 | 4 | security | LOW | predictable staging names .new-$$/.old-$$ in install dir; use mktemp -d → fixed in the branch review | scripts/install.sh:136,144 |
-| 4 | security | LOW | "macOS will warn on first launch" isn't true for the script install (no quarantine) | SECURITY.md:47 |
+| 4 | security | LOW | "macOS will warn on first launch" isn't true for the script install (no quarantine) → fixed after the branch review | SECURITY.md:47 |
 | 4 | security | LOW | on re-run, gh release download fetches a stale SHA256SUMS into dist and hashes/attests it; rm it after download → fixed in the branch review | .github/workflows/release.yml:113-122 |
 | 4 | security | LOW | ci.yml has no permissions block; add contents: read → fixed in the branch review | .github/workflows/ci.yml:3-12 |
 | 3 | implementer WP-08 | MEDIUM | the app/DMG/install.sh ship only delilahd; the `delilah` CLI used in the Quickstart must be built from source (documented, not fixed) | README.md, app/src-tauri/tauri.conf.json |
 | 4 | spec | MEDIUM | on a re-run the stale SHA256SUMS in the draft is downloaded, listed and attested (contract: covers every *other* asset, not attested) → fixed in the branch review | .github/workflows/release.yml:113-116 |
 | 4 | spec | MEDIUM | README one-line install exits 3 until a release with SHA256SUMS exists (v1.0.0 has none): tag 1.1.0 soon after merge | README.md:40 |
 | 4 | spec | LOW | any SHA256SUMS fetch failure → exit 3; contract says 404 → 3, download failures → 9 → fixed in the branch review | scripts/install.sh:84 |
-| 4 | spec | LOW | mktemp failure exits 1 (usage code) | scripts/install.sh:54 |
-| 4 | spec | LOW | README advertises DELILAH_INSTALL_DIR; contract says env vars aren't advertised | README.md:36 |
-| 4 | spec | LOW | README build-from-source shows no clone / copy to /Applications (linked to usage.md) | README.md:72-76 |
+| 4 | spec | LOW | mktemp failure exits 1 (usage code) → fixed after the branch review | scripts/install.sh:54 |
+| 4 | spec | LOW | README advertises DELILAH_INSTALL_DIR; contract says env vars aren't advertised → fixed after the branch review | README.md:36 |
+| 4 | spec | LOW | README build-from-source shows no clone / copy to /Applications (linked to usage.md) → fixed after the branch review | README.md:72-76 |
 | 4 | spec | LOW | test-install.sh has no cases for exit 6/7/9; the no-quarantine assertion can't fail → fixed in the branch review | scripts/test-install.sh:69 |
-| 2 | spec | LOW | history line sits above the title | docs/redesign/README.md:1 |
-| 1 | spec | LOW | tasks/quickstart still say `npx --yes lychee`; lychee is called directly | specs/008-public-repo-onboarding/tasks.md, quickstart.md |
+| 2 | spec | LOW | history line sits above the title → fixed after the branch review | docs/redesign/README.md:1 |
+| 1 | spec | LOW | tasks/quickstart still say `npx --yes lychee`; lychee is called directly → fixed after the branch review | specs/008-public-repo-onboarding/tasks.md, quickstart.md |
 | 6 | architecture | MEDIUM | shell re-implements the rule instead of reading the daemon's resolved language (e.g. GET /api/v1/language); otherwise record the duplication | app/src-tauri/src/daemon.rs:219-246 |
 | 6 | architecture | MEDIUM | setLanguage("auto") at import mutates the DOM; could move to main.tsx; double navigator guard (guard → fixed in the branch review) | app/src/i18n.ts:26 |
 | 6 | architecture | MEDIUM | (fixed in a688a90) App stores the raw preference ("fr", 42) in state; Settings then has no matching option. Normalise with parseSetting() | app/src/App.tsx:161-170 |

@@ -15,11 +15,12 @@ bash scripts/install.sh [--yes]
 
 Always installs the latest release (`https://github.com/FranPerezFolgado/delilah/releases/latest/download/`).
 
-Environment (for `scripts/test-install.sh`; not advertised in the README):
+Environment (`DELILAH_INSTALL_DIR` is the one the README and the exit-8 message suggest; the
+others are for `scripts/test-install.sh`):
 
 | Variable | Default | Use |
 |---|---|---|
-| `DELILAH_BASE_URL` | the latest-release URL | Full base URL of the assets (tests use `file://…`). |
+| `DELILAH_BASE_URL` | the latest-release URL | Full base URL of the assets (tests use `file://…`). Only `https://`, `file://` or `http` on localhost (else exit 1), with a warning; redirects stay https. |
 | `DELILAH_INSTALL_DIR` | `/Applications` | Install target (tests use a temp dir). |
 | `DELILAH_ARCH` | `$(uname -m)` | Tests only: simulate another architecture. |
 | `DELILAH_SKIP_CHECKSUM` | unset | `1` is the deliberate override for a release with no `SHA256SUMS` (only releases before 1.1.0). It prints a loud warning that the download is unverified. It never skips a checksum *mismatch*. |
@@ -39,7 +40,7 @@ Environment (for `scripts/test-install.sh`; not advertised in the README):
 11. Prints the installed version (from `Contents/Info.plist` `CFBundleShortVersionString`) and "Open it with: open -a Delilah". It does not launch the app.
 
 Exit codes: 0 ok; 1 usage; 2 platform or missing tool; 3 no checksums; 4 checksum mismatch;
-5 bad archive; 6 app running; 7 install failed (old app restored); 8 not writable;
+5 bad archive; 6 app running; 7 install failed (nothing changed, or the old app restored; also a failing `mktemp`); 8 not writable;
 9 download failed.
 
 ## Non-goals

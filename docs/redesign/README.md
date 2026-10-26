@@ -1,6 +1,6 @@
-This folder records the v2 redesign; its screenshots show the UI in Spanish.
-
 # Redesign screenshots
+
+This folder records the v2 redesign; its screenshots show the UI in Spanish.
 
 Screenshots of every screen of the web UI, to compare before and after the redesign.
 

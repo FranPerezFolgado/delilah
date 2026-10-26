@@ -55,8 +55,8 @@ for tool in curl shasum tar ditto; do
   command -v "$tool" >/dev/null 2>&1 || die 2 "missing required tool: $tool"
 done
 
-TMP="$(mktemp -d)"
-[ -n "$TMP" ] && [ -d "$TMP" ] || die 1 "could not create a temporary directory"
+TMP="$(mktemp -d)" || die 7 "could not create a temporary directory"
+[ -n "$TMP" ] && [ -d "$TMP" ] || die 7 "could not create a temporary directory"
 OLD=""
 NEW=""
 FINAL=""
@@ -75,17 +75,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Plain https unless the base URL is overridden (tests use file://).
+# https only; an overridden base URL may also be file:// (tests) or http on localhost.
 fetch() { # fetch <name> [extra curl args...]
   local name="$1"
   shift
   if [ -z "${DELILAH_BASE_URL:-}" ]; then
     set -- --proto '=https' --proto-redir '=https' --tlsv1.2 "$@"
+  else
+    case "$BASE_URL" in
+      https://* | file://* | http://127.0.0.1[:/]* | http://localhost[:/]*) ;;
+      *) die 1 "DELILAH_BASE_URL must be https://, file:// or http on localhost" ;;
+    esac
+    set -- --proto '=https,file,http' --proto-redir '=https' "$@"
   fi
   curl -fL --retry 2 -sS "$@" -o "$TMP/$name" "$BASE_URL/$name"
 }
 
 # 3. Download
+if [ -n "${DELILAH_BASE_URL:-}" ]; then
+  echo "WARNING: downloading from DELILAH_BASE_URL=$BASE_URL, not the GitHub release." >&2
+fi
 echo "Downloading $ASSET ..."
 fetch "$ASSET" || die 9 "could not download $BASE_URL/$ASSET"
 

@@ -9,7 +9,7 @@ wc -l README.md                                   # < 200
 git grep -nE 'claude\.ai/(code/)?artifact|plataforma|MVP-0 in progress|deploy key|Codex|\bPi\b' \
   -- . ':!specs' ':!docs/archive' ':!docs/redesign' ':!.specify'   # no matches
 git grep -nE 'Te espera|Bandeja|Ajustes|Actualizaciones' -- README.md docs/*.md CONTRIBUTING.md SECURITY.md  # no matches
-npx --yes lychee --offline --no-progress README.md 'docs/**/*.md' \
+lychee --offline --no-progress README.md 'docs/**/*.md' \
   --exclude-path docs/archive --exclude-path docs/redesign  # 0 errors
 gh repo view FranPerezFolgado/delilah --json description,repositoryTopics
 ```

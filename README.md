@@ -74,7 +74,9 @@ workflow; `SHA256SUMS` itself is attested too.
 You need the Xcode Command Line Tools, Rust and Node 22 or later:
 
 ```bash
-cd app && npm install && npm run dist
+git clone https://github.com/FranPerezFolgado/delilah.git && cd delilah/app
+npm install && npm run dist
+cp -R src-tauri/target/release/bundle/macos/Delilah.app /Applications/
 ```
 
 Details in [Building from source](docs/usage.md#building-from-source).
