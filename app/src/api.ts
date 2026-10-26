@@ -46,6 +46,20 @@ export interface PreviewView {
   started_at: string;
 }
 
+/** The Claude model of an agent session; "default" is the account's (no `--model`). */
+export type AgentModel = "opus" | "sonnet" | "opusplan" | "haiku" | "default";
+export const AGENT_MODELS: AgentModel[] = ["opus", "sonnet", "opusplan", "haiku", "default"];
+/** The `agent-models` preference: a model per phase. */
+export type AgentModels = Record<"specify" | "plan" | "implement" | "review", AgentModel>;
+/** What the preference holds until it is saved. */
+export const DEFAULT_AGENT_MODELS: AgentModels = { specify: "opus", plan: "opus", implement: "sonnet", review: "sonnet" };
+
+export interface ModelSuggestion {
+  model: AgentModel;
+  reason: string;
+  source: "heuristic" | "claude";
+}
+
 export interface Task {
   key: string;
   /** When the task was created (RFC 3339). */
@@ -66,10 +80,14 @@ export interface Task {
   in_checkout?: boolean | null;
   /** The branch of the task's workspace; absent without a workspace (read-only). */
   branch?: string | null;
+  /** The task's own model; null or absent: follow Settings. */
+  model?: AgentModel | null;
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
   /** Autopilot: null when off. */
   autopilot?: Autopilot | null;
+  /** CI autofix: a red PR check is forwarded to the agent to fix. Absent from an older daemon. */
+  ci_autofix?: boolean;
   /** How the task's agent is shown: the chat view or its terminal. */
   view?: TaskView;
   /** Experimental: the agent runs headless (stream-json) with no terminal. */
@@ -103,6 +121,9 @@ export interface SharedEntry {
   mode: SharedMode | null;
 }
 
+/** A project's CI autofix default: never, for autopilot tasks only, or for every task. */
+export type CiAutofixMode = "off" | "autopilot" | "always";
+
 export interface ProjectSettings {
   /** null: not chosen, so the checkout. */
   workspace: WorkspaceMode | null;
@@ -113,6 +134,8 @@ export interface ProjectSettings {
   submodules: { always: string[]; never: string[] };
   /** How a task starts; null or absent: the built-in prompt (single, builtin). */
   workflow?: ProjectWorkflow | null;
+  /** Absent (older daemon) reads as "autopilot". */
+  ci_autofix?: CiAutofixMode;
 }
 
 /** What a single-session task sends first. */
@@ -148,6 +171,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   shared: [],
   setup: null,
   submodules: { always: [], never: [] },
+  ci_autofix: "autopilot",
 };
 
 export interface Project {
@@ -188,8 +212,12 @@ export interface NewBacklogTask {
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Absent or null: follow Settings. */
+  model?: AgentModel | null;
   /** Implies saving mode. */
   autopilot?: boolean;
+  /** Absent: the project's default. */
+  ci_autofix?: boolean;
   view?: TaskView;
   /** Experimental chat mode: no terminal. */
   chat_mode?: boolean;
@@ -206,8 +234,12 @@ export interface BacklogChange {
   project?: string;
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Absent: unchanged; null: back to following Settings. */
+  model?: AgentModel | null;
   /** Implies saving mode. */
   autopilot?: boolean;
+  /** Absent: the project's default. */
+  ci_autofix?: boolean;
   view?: TaskView;
   /** `project`, `prompt` (with `start_message`) or `none`. */
   workflow?: string;
@@ -228,8 +260,12 @@ export interface RunRequest {
   in_checkout?: boolean;
   /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
   saving_mode?: boolean;
+  /** Absent: a backlog task keeps its own; null: follow Settings; a value sets it. */
+  model?: AgentModel | null;
   /** Implies saving mode. */
   autopilot?: boolean;
+  /** Absent: the project's default. */
+  ci_autofix?: boolean;
   view?: TaskView;
   /** Experimental chat mode: no terminal. */
   chat_mode?: boolean;
@@ -414,7 +450,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot" | "base-stale" | "turn-done" | "pr-opened";
+  | "pr-failed" | "pr-review" | "pr-autofix" | "pr-blocked" | "branch" | "autopilot" | "base-stale" | "turn-done" | "pr-opened";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -452,12 +488,28 @@ export interface ToolEntry {
   message_id?: string;
 }
 
+/** Parsed background-task notification or hand-back, carried by a "background-done" marker. */
+export type BackgroundInfo = {
+  source: "notification" | "handback";
+  task_id?: string;
+  kind: "agent" | "command" | "task";
+  label?: string;
+  status?: string;
+  exit_code?: number;
+  duration_ms?: number;
+  tool_uses?: number;
+  tokens?: number;
+  report?: string;
+  report_truncated?: boolean;
+  report_in_handback?: boolean;
+};
+
 /** One entry of a conversation. */
 export type ConversationEntry =
   | { id: string; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" | "terminal" }
   | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
   | ToolEntry
-  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" | "background-done"; detail?: string }
+  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" | "background-done"; detail?: string; background?: BackgroundInfo }
   | QuestionCardEntry
   | PermissionCardEntry;
 
@@ -585,6 +637,10 @@ export interface InboxItem {
   permission?: PermissionAsk;
   /** The pr_notices row behind a base-stale item: dismiss it with `dismissNotice`. */
   notice?: number;
+  /** The repo, reason and attempts of a pr-autofix item (autofix stopped on a PR). */
+  repo?: string;
+  reason?: "limit" | "no-push" | "no-session";
+  attempts?: number;
 }
 
 /** Where a session's questions with options sit, next to its terminal. */
@@ -597,7 +653,7 @@ export function parseAskPosition(v: unknown): AskPosition {
 }
 
 /** The kinds that block an agent until you act: they count in the badge. */
-export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-blocked"];
+export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-autofix", "pr-blocked"];
 
 /** The stale-base warnings of one task, for its screen's banner. */
 export const baseStaleNotices = (inbox: InboxItem[], task: string): InboxItem[] =>
@@ -634,6 +690,15 @@ export interface PrSnapshot {
   /** What the repository allows; [] when unknown. */
   merge_methods: MergeMethod[];
 }
+/** Where CI autofix stands on one PR. */
+export interface PrAutofix {
+  state: "watching" | "fixing" | "stopped";
+  attempts: number;
+  limit: number;
+  sha: string | null;
+  sent_at: string | null;
+  reason: null | "limit" | "no-push" | "no-session";
+}
 export interface PullRequest {
   id: number;
   repo: string;
@@ -642,6 +707,8 @@ export interface PullRequest {
   number: number;
   url: string;
   linked_by: "detected" | "opened" | "pasted";
+  /** What CI autofix did on this PR; null/absent when it never acted. */
+  autofix?: PrAutofix | null;
   checked_at: string | null;
   error: string | null;
   snapshot: PrSnapshot | null;
@@ -810,6 +877,8 @@ export const api = {
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
   /** Moves the task between chat mode and terminal; its sessions resume in the new runtime. */
   setRuntime: (key: string, mode: "chat" | "terminal") => post<null>(`/api/v1/tasks/${key}/runtime`, { mode }),
+  setAutofix: (key: string, action: "on" | "off" | "retry", repo?: string) =>
+    post<Task>(`/api/v1/tasks/${key}/autofix`, repo === undefined ? { action } : { action, repo }),
   setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),
@@ -826,6 +895,9 @@ export const api = {
   // but "auto" | "default"; the stored value is kept.
   setPreference: (key: string, value: unknown) =>
     request<unknown>(`/api/v1/preferences/${key}`, { method: "PUT", body: JSON.stringify(value) }),
+  /** The model to suggest for a task; 409 when the `model-suggestion` preference is off. */
+  suggestModel: (req: { title: string; notes?: string; workflow?: string; key?: string; free?: boolean }) =>
+    post<ModelSuggestion>("/api/v1/model-suggestion", req),
   openSession: (task: string, s: { kind: SessionKind; label?: string; prompt?: string }) =>
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),

@@ -12,4 +12,6 @@ export const EN: Record<string, string> = {
   "Necesita un permiso": "Needs a permission",
   "Te pregunta": "Asks you",
   "Te espera": "Waiting for you",
+  "El autofix de CI se detuvo": "CI autofix stopped",
+  "Reintentar autofix": "Retry autofix",
 };

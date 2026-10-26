@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError, isCheckoutDirty, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
+import { AGENT_MODELS, api, ApiError, isCheckoutDirty, type AgentModel, type BranchProposal, type ModelSuggestion, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
+import { modelLabel } from "../agentModels";
 import { isPhased } from "../workflowPresets";
 import { t } from "../i18n";
+import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
 import { Button, Dialog, Segmented } from "./ui";
@@ -61,8 +63,15 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // Each step in a fresh session: a backlog task keeps its choice, a new one starts from the preference.
   const [savingMode, setSavingMode] = useState(existing?.saving_mode ?? false);
   const savingTouched = useRef(!!existing);
+  // The task's own model; null follows Settings.
+  const [model, setModel] = useState<AgentModel | null>(existing?.model ?? null);
+  // The "Sugerir" button exists only while the model-suggestion preference is on.
+  const [suggestionOn, setSuggestionOn] = useState(false);
+  const [modelHint, setModelHint] = useState<ModelSuggestion | "loading" | null>(null);
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
+  // CI autofix: null until the user touches it, then it follows the project default and autopilot.
+  const [autofix, setAutofix] = useState<boolean | null>(existing?.ci_autofix ?? null);
   const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
   // Experimental headless mode: only a backlog task can carry it now (no control sets it).
   const chatMode = !!existing?.chat_mode;
@@ -95,6 +104,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const autopilotOn = autopilot && autopilotAllowed;
   // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
   const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
+  // Always sent resolved: what the toggle shows is what the task gets.
+  const autofixOn = autofix ?? autofixDefault(project?.settings.ci_autofix, autopilotOn);
   // The branch name: proposed while the developer hasn't touched it. With the project's
   // own template it is that template's branch; `feature/` stays a fixed prefix only when
   // the name has none of its own (no template, or one that starts with `feature/`).
@@ -117,6 +128,13 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     api
       .preference<boolean>("saving-mode")
       .then((on) => !savingTouched.current && setSavingMode(on === true))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api
+      .preference<boolean>("model-suggestion")
+      .then((on) => setSuggestionOn(on === true))
       .catch(() => {});
   }, []);
 
@@ -213,6 +231,24 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     }
   };
 
+  // Asks for a model on demand; the user applies it, it is never set silently.
+  const suggestModel = async () => {
+    setModelHint("loading");
+    try {
+      setModelHint(
+        await api.suggestModel({
+          title: title.trim(),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+          ...(workflow ? { workflow } : {}),
+          ...(origin === "jira" && key.trim() ? { key: key.trim() } : {}),
+          free: origin === "libre",
+        }),
+      );
+    } catch {
+      setModelHint(null);
+    }
+  };
+
   const toggle = (path: string) => !always.includes(path) && setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
   const validate = () => {
@@ -251,7 +287,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         free: origin === "libre",
         in_checkout: inCheckout,
         saving_mode: autopilotAllowed && (savingMode || autopilotOn),
+        model,
         ...autopilotField,
+        ci_autofix: autofixOn,
         view,
         ...(chat || existing ? { chat_mode: chat } : {}),
         // A backlog task's notes as they read now ("" clears them).
@@ -283,7 +321,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         free: origin === "libre",
         in_checkout: where === "checkout",
         saving_mode: autopilotAllowed && (savingMode || autopilotOn),
+        model,
         ...autopilotField,
+        ci_autofix: autofixOn,
         view,
         ...(chatMode ? { chat_mode: true } : {}),
         ...startFields(start),
@@ -408,6 +448,32 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 value={start} errors={startErrors} onChange={setStart} />
             )}
             {origin !== "claude" && (
+              <div className="field">
+                <span className="ntd-sub-hd">
+                  {t("Modelo")}
+                  {suggestionOn && (
+                    <Button variant="secondary" size={28} className="ntd-suggest" onClick={suggestModel}
+                      disabled={!title.trim() || modelHint === "loading"}>
+                      {modelHint === "loading" ? t("Pensando…") : t("Sugerir")}
+                    </Button>
+                  )}
+                </span>
+                <select className="input" aria-label={t("Modelo")} value={model ?? ""}
+                  onChange={(e) => setModel((e.target.value || null) as AgentModel | null)}>
+                  <option value="">{t("Según ajustes")}</option>
+                  {AGENT_MODELS.map((m) => <option key={m} value={m}>{modelLabel(m)}</option>)}
+                </select>
+                {modelHint && modelHint !== "loading" && (
+                  <span className="muted ntd-help">
+                    {t("Sugerencia: {model} · {reason}", { model: modelLabel(modelHint.model), reason: modelHint.reason })}{" "}
+                    {model !== modelHint.model && (
+                      <Button variant="ghost" size={28} onClick={() => setModel(modelHint.model)}>{t("Aplicar")}</Button>
+                    )}
+                  </span>
+                )}
+              </div>
+            )}
+            {origin !== "claude" && (
               <div className="ntd-auto">
                 {autopilotAllowed ? (
                   <AutopilotControls
@@ -423,6 +489,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 ) : (
                   <span className="muted ntd-help">{workflow === "none" ? t("Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no sin mensaje de inicio.") : workflow === "prompt" ? t("Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no con un prompt propio.") : t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
                 )}
+                <AutofixControl on={autofixOn} onChange={setAutofix} />
                 {autopilotAllowed && <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>}
               </div>
             )}

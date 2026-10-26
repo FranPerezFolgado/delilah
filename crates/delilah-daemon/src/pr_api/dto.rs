@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::autofix::{self, PrAutofix, State, StopReason};
 use crate::pr_types::{
     Check, MergeMethod, PrState, ReviewComment, ReviewDecision, Rollup, Snapshot,
 };
@@ -36,6 +37,19 @@ pub struct PrView {
     checked_at: Option<DateTime<Utc>>,
     error: Option<String>,
     snapshot: Option<SnapshotView>,
+    /// `null` until CI autofix first acts on the PR.
+    autofix: Option<PrAutofixView>,
+}
+
+/// What clients see of a PR's autofix state: the internal `session` stays out.
+#[derive(Serialize)]
+pub struct PrAutofixView {
+    state: State,
+    attempts: u32,
+    limit: u32,
+    sha: Option<String>,
+    sent_at: Option<String>,
+    reason: Option<StopReason>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +115,19 @@ impl From<&Snapshot> for SnapshotView {
     }
 }
 
+impl From<&PrAutofix> for PrAutofixView {
+    fn from(a: &PrAutofix) -> Self {
+        Self {
+            state: a.state,
+            attempts: a.attempts,
+            limit: autofix::LIMIT,
+            sha: a.sha.clone(),
+            sent_at: a.sent_at.clone(),
+            reason: a.reason,
+        }
+    }
+}
+
 impl From<&PrRow> for PrView {
     fn from(row: &PrRow) -> Self {
         Self {
@@ -114,6 +141,50 @@ impl From<&PrRow> for PrView {
             checked_at: row.checked_at,
             error: row.error.clone(),
             snapshot: row.snapshot.as_ref().map(SnapshotView::from),
+            autofix: row.autofix.as_ref().map(PrAutofixView::from),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pr_api::support::{call, fake, setup};
+    use crate::pr_loop;
+    use delilah_core::TaskKey;
+
+    #[tokio::test]
+    async fn each_pr_carries_autofix_without_the_session_and_null_when_it_never_acted() {
+        let (router, app, _dir) = setup(fake()).await;
+        let key = TaskKey::new("PROJ-1");
+        pr_loop::check_task(&app, &key, true).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs", None).await;
+        assert_eq!(s, axum::http::StatusCode::OK);
+        assert!(v["prs"][0]["autofix"].is_null());
+        assert!(v["prs"][0].as_object().unwrap().contains_key("autofix"));
+
+        let pr = app.store.prs_of(&key).await.unwrap().remove(0);
+        let a = PrAutofix {
+            state: State::Stopped,
+            attempts: 3,
+            sha: Some("abc".into()),
+            session: Some("s-1".into()),
+            sent_at: Some("2026-01-01T00:00:00Z".into()),
+            reason: Some(StopReason::Limit),
+        };
+        assert!(
+            app.store
+                .update_pr_autofix(pr.id, None, Some(&a))
+                .await
+                .unwrap()
+        );
+        let (_, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs", None).await;
+        assert_eq!(
+            v["prs"][0]["autofix"],
+            serde_json::json!({
+                "state": "stopped", "attempts": 3, "limit": 3, "sha": "abc",
+                "sent_at": "2026-01-01T00:00:00Z", "reason": "limit",
+            })
+        );
     }
 }

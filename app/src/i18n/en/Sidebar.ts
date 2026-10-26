@@ -1,4 +1,5 @@
 export const EN: Record<string, string> = {
+  "Autofix de CI activado": "CI autofix on",
   "Plegar {name}": "Collapse {name}",
   "Desplegar {name}": "Expand {name}",
   "Desplegar barra lateral": "Expand sidebar",

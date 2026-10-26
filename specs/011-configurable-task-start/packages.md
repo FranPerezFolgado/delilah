@@ -25,7 +25,7 @@ Source: specs/011-configurable-task-start/tasks.md · 51 pending tasks · 16 pac
 ## WP-03 Preset texts, migration 0022, start_message storage
 - Phase: 2 Foundational
 - Tasks: T009, T010, T011, T012
-- Files: crates/delilah-daemon/src/lang.rs, crates/delilah-daemon/src/store.rs, crates/delilah-daemon/migrations/0022_workflow_commands.sql
+- Files: crates/delilah-daemon/src/lang.rs, crates/delilah-daemon/src/store.rs, crates/delilah-daemon/migrations/0024_workflow_commands.sql
 - Depends on: WP-02
 - Parallel group: 2B
 - Acceptance: FR-002, FR-003, FR-015 — existing projects get the `/feature` preset in their language, old tasks map to project/prompt, migration idempotent, start_message round-trips

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Autopilot, Handoff, Session, Step, Task } from "./api";
-import { chainOf } from "./chain";
+import { chainOf, sessionName } from "./chain";
+import { setLanguage } from "./i18n";
 
 const task = (saving: boolean, handoff: Handoff | null = null): Task => ({
   created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
@@ -106,5 +107,38 @@ describe("chainOf", () => {
       const c = chainOf(ap({ state: "paused", reason: "parado" }), none)!;
       expect(c.filter((x) => x.state === "waiting")).toEqual([expect.objectContaining({ step: "pr", error: "parado" })]);
     });
+  });
+});
+
+describe("sessionName", () => {
+  beforeEach(() => setLanguage("es"));
+  afterEach(() => setLanguage("es"));
+  const named = (o: Partial<Session>): Session => ({ ...sess("Otra cosa", null, false), ...o });
+
+  it("names a session after its step, whatever primary and live are", () => {
+    for (const primary of [true, false]) {
+      for (const live of [true, false]) {
+        expect(sessionName(named({ step: "plan", primary, live }))).toBe("Spec y plan");
+        expect(sessionName(named({ step: "implement", primary, live }))).toBe("Implementación");
+        expect(sessionName(named({ step: "review", primary, live }))).toBe("Revisión");
+      }
+    }
+  });
+
+  it("follows the UI language", () => {
+    setLanguage("en");
+    expect(sessionName(named({ step: "plan" }))).toBe("Spec and plan");
+    expect(sessionName(named({ step: "implement" }))).toBe("Implement");
+    expect(sessionName(named({ step: "review" }))).toBe("Review");
+    expect(sessionName(named({ primary: true }))).toBe("Main Claude");
+  });
+
+  it("calls the primary claude without a step Claude principal", () => {
+    expect(sessionName(named({ primary: true }))).toBe("Claude principal");
+  });
+
+  it("keeps the label of a primary shell and of non-primary sessions without a step", () => {
+    expect(sessionName(named({ primary: true, kind: "shell" }))).toBe("Otra cosa");
+    expect(sessionName(named({ primary: false }))).toBe("Otra cosa");
   });
 });

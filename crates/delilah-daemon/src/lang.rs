@@ -48,7 +48,7 @@ pub fn review_text(lang: Lang) -> &'static str {
 
 /// The "Spec Kit (`/feature`)" preset: what projects had before commands were
 /// configurable. The review text is [`review_text`], and the
-/// JSON in migration 0022 must stay equal to this (a test checks it).
+/// JSON in migration 0024 must stay equal to this (a test checks it).
 pub fn feature_preset(lang: Lang) -> ProjectWorkflow {
     ProjectWorkflow::Phased {
         plan: "/feature {task}".to_string(),

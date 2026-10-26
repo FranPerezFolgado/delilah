@@ -24,7 +24,7 @@
 
 ## R3. Migrating existing projects and tasks
 
-- **Decision**: migration `0022_workflow_commands.sql`:
+- **Decision**: migration `0024_workflow_commands.sql`:
   - `UPDATE projects SET settings = json_set(settings, '$.workflow', json('<feature preset>'))
     WHERE json_extract(settings, '$.workflow') IS NULL;`
   - `ALTER TABLE tasks ADD COLUMN start_message TEXT;`

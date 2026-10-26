@@ -42,6 +42,8 @@ pub struct ConvoState {
 struct ProgressState {
     progress: Progress,
     held_stop: Option<serde_json::Value>,
+    /// The sub-agents a terminal session's held Stop waits on (its `background_tasks`).
+    held_agents: HashSet<String>,
     /// Cancels the timer that replays the held Stop if no follow-up turn comes.
     fallback: Option<Arc<AtomicBool>>,
 }
@@ -64,6 +66,9 @@ pub struct Live {
     pub convo: Arc<Mutex<ConvoState>>,
     /// Where Claude saves this session's transcript, as its latest hook said.
     transcript: Arc<Mutex<Option<PathBuf>>>,
+    /// When the turn in progress began (a prompt was submitted, or the session went
+    /// back to work), as the hooks said; taken when the turn ends.
+    turn_started: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,
     /// Progress of the turn, background work and sub-agents, plus the held Stop.
     progress: Arc<Mutex<ProgressState>>,
     /// Snapshots of `progress`, sent whenever it changes.
@@ -115,6 +120,16 @@ impl Live {
             self.events.emit(Topic::Activity);
         }
         changed
+    }
+
+    /// A turn began now.
+    pub fn mark_turn_started(&self, at: chrono::DateTime<chrono::Utc>) {
+        *self.turn_started.lock().unwrap() = Some(at);
+    }
+
+    /// When the turn that is ending began, if a hook said; forgets it.
+    pub fn take_turn_started(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.turn_started.lock().unwrap().take()
     }
 
     pub fn is_idea(&self) -> bool {
@@ -188,6 +203,42 @@ impl Live {
         } else {
             false
         }
+    }
+
+    /// Holds a terminal session's Stop if its payload reports a sub-agent still running:
+    /// a terminal has no stream to follow its background work, so the Stop's own
+    /// `background_tasks` says what it waits on. Background shells do not hold it (a dev
+    /// server may run for hours while Claude waits on you). A newer Stop replaces the
+    /// older one and cancels its timer; a replayed one always applies. Returns whether it
+    /// was held.
+    pub fn hold_stop_if_reported(&self, hook: serde_json::Value) -> bool {
+        if hook["delilah_replayed"] == true {
+            return false;
+        }
+        let agents: HashSet<String> = hook["background_tasks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| t["status"] == "running" && t["type"] == "subagent")
+            .filter_map(|t| t["id"].as_str().map(str::to_string))
+            .collect();
+        if agents.is_empty() {
+            return false;
+        }
+        let mut state = self.progress.lock().unwrap();
+        if let Some(token) = state.fallback.take() {
+            token.store(true, Ordering::SeqCst);
+        }
+        state.held_agents = agents;
+        state.held_stop = Some(hook);
+        true
+    }
+
+    /// A sub-agent ended (its `SubagentStop`). Returns whether it was the last one a held
+    /// terminal Stop waited on.
+    pub fn held_agent_ended(&self, id: &str) -> bool {
+        let mut state = self.progress.lock().unwrap();
+        state.held_stop.is_some() && state.held_agents.remove(id) && state.held_agents.is_empty()
     }
 
     /// Drops the held Stop and cancels the fallback timer, under one lock so a timer that
@@ -289,6 +340,7 @@ impl Sessions {
             conversation: Arc::default(),
             convo: Arc::default(),
             transcript: Arc::default(),
+            turn_started: Arc::default(),
             progress: Arc::default(),
             progress_tx: Arc::new(watch::channel(Progress::default()).0),
             typing: Arc::default(),
@@ -452,5 +504,39 @@ mod tests {
         assert!(other.hold_stop_if_background(json!(1)));
         assert!(live.has_held_stop());
         assert_eq!(other.progress(), live.progress());
+    }
+
+    #[tokio::test]
+    async fn a_terminal_stop_is_held_while_its_sub_agents_run() {
+        let live = live();
+        let stop = |tasks: serde_json::Value| json!({ "hook_event_name": "Stop", "background_tasks": tasks });
+        let agent = |id: &str| json!({ "id": id, "type": "subagent", "status": "running" });
+        // Nothing reported, only a shell, or only finished entries: not held.
+        assert!(!live.hold_stop_if_reported(json!({ "hook_event_name": "Stop" })));
+        assert!(!live.hold_stop_if_reported(stop(json!([
+            { "id": "b1", "type": "shell", "status": "running" },
+            { "id": "a0", "type": "subagent", "status": "completed" },
+        ]))));
+        assert!(!live.has_held_stop());
+        assert!(!live.held_agent_ended("a0"), "nothing held");
+
+        assert!(live.hold_stop_if_reported(stop(json!([agent("a1"), agent("a2")]))));
+        assert!(!live.held_agent_ended("zz"), "not one it waits on");
+        assert!(!live.held_agent_ended("a1"));
+        assert!(live.held_agent_ended("a2"), "the last one");
+        assert!(!live.held_agent_ended("a2"), "said once");
+
+        // A newer Stop replaces what it waits on and cancels the older timer.
+        let token = live.arm_fallback();
+        assert!(live.hold_stop_if_reported(stop(json!([agent("a3")]))));
+        assert!(token.load(Ordering::SeqCst));
+        assert!(live.held_agent_ended("a3"));
+
+        // A replay is never held again.
+        let mut replayed = stop(json!([agent("a4")]));
+        replayed["delilah_replayed"] = json!(true);
+        live.drop_held_stop();
+        assert!(!live.hold_stop_if_reported(replayed));
+        assert!(!live.has_held_stop());
     }
 }

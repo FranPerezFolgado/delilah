@@ -180,6 +180,19 @@ before switching session" (on by default). Needs the spec files: without a
 workflow (see "Project settings"): turning it on elsewhere is refused. The handoffs send the
 project's own implement and review commands.
 
+**Agent model.** Delilah picks the Claude model of each task session when it starts.
+In Settings, "Agent model" sets one per phase (Specify, Plan, Implement, Review):
+Opus, Sonnet, Opus plan (Opus while planning, Sonnet otherwise), Haiku, or Claude's
+default (no `--model`). Out of the box: Opus to specify and plan, Sonnet to
+implement and review. A task can override it with "Model" in the new-task dialog
+("Per Settings" follows the phases). A session keeps the model it started on, even
+when resumed, so its prompt cache is not lost; a change applies to the next session
+(with saving mode, each phase is one). With "Suggest a model when creating a task"
+on (off by default), the dialog shows "Suggest": Delilah sizes the task from its
+type, labels, description and workflow, asks Haiku to confirm, and shows the
+suggestion with a reason; "Apply" sets it. Project sessions and idea conversations
+always run on Claude's default.
+
 **Autopilot.** A task can run on its own up to the PR: "Autopilot" (next to "Saving
 mode", which it turns on; a toggle on a running task, `--autopilot` /
 `--no-autopilot` in `delilah run` and `new`, `delilah autopilot <KEY> on|off|resume`).
@@ -191,7 +204,7 @@ answered for you. Anything else (a permission prompt in the task's session, a qu
 recommendation, a blocked review, a failure) pauses it: the header shows "Autopilot
 paused" with the reason, and the Inbox offers "Resume autopilot" or "Carry on by
 hand". Autopilot waits while the agent's background subagents run, and only nudges or
-pauses when the agent has really stopped. On the idea card, the autopilot option creates the task and starts it.
+pauses when the agent has really stopped. In the terminal too, a task whose agent ended its turn while its sub-agents still work stays "Working", not "Waiting", until they report back, and no "is waiting for you" or "finished its turn" notification is sent meanwhile. On the idea card, the autopilot option creates the task and starts it.
 Delilah pushes and opens the PR without asking again, so turn it on only where that is
 what you want. It never merges.
 
@@ -227,6 +240,16 @@ background" strip with "Stop". The task stays "Working" until that work ends; if
 resumes on its own afterwards the chat says "Claude continues: background task finished".
 While background work runs you can type to Claude, but the Chat / Terminal switch answers
 "Background work is running: wait for it to finish or press Stop".
+
+When a background task finishes, the chat shows one row for it: "Subagent finished" ("Subagente terminado") with
+its label, duration, number of tools and tokens, or "Command finished" ("Comando
+terminado") with the label and exit code; failed or stopped ones are flagged. Click the row to read the report as Markdown
+(remote images load only when you click them). When Claude hands the result back to the
+conversation, that report appears inside the same row. Reports are cut at 16 KB, and a
+hand-back whose notification Claude Code dropped shows no metrics. Messages from other
+Claude sessions ("Another Claude session sent a message…") are not shown as your
+messages; a prompt that contains `<task-notification>` anywhere counts as one from an
+agent, not from you.
 
 When a chat-mode agent needs a permission it shows a permission card (also in the
 Inbox) with the tool and what it will do: "Allow once", "Deny" (with an
@@ -311,7 +334,37 @@ binary swaps `gh` (previews use a fake one).
   anyone but you. Each opens the PR, or "Ask the agent to fix it" sends it to
   the task's agent as comments to consider (never on its own), or "Discard" it.
   They count on the Dock badge. A new failing commit raises a new item; the same one
-  never twice.
+  never twice. With CI autofix on, a failure it handles raises no notification of its own.
+- **CI autofix.** Turn on "Fix CI" in the PR tab (also `--autofix` / `--no-autofix` in
+  `delilah new` and `run`, and `delilah autofix <KEY> on|off`) and a red CI is sent to the
+  agent without you pressing anything. A new task gets it from its project: in the project
+  settings, "Fix CI automatically" is "Never", "Only on autopilot tasks" (the
+  default) or "On every task" (`delilah project set <name> ci-autofix off|autopilot|always`).
+  A task with it on shows a mark on its PR badge, and each PR card says "Autofix:
+  watching", "Fixing CI: attempt N of 3" or "Autofix: stopped" with the reason.
+  - *When it sends:* once all the head commit's checks have finished and at least one
+    failed, and the agent is waiting for you (it has finished its turn; not while it works,
+    waits on a permission prompt or an open question, or the task is paused by a limit).
+    Otherwise it waits for that. The agent is told which checks failed (names and links
+    from the PR, marked as CI data, not as your instructions), to read the logs with
+    `gh run view --log-failed`, fix it, and commit and push to the same branch; not to
+    force-push or open another PR. The history shows "CI autofix: attempt N of 3".
+  - *Limits:* 3 attempts per PR, and a commit is sent once. A green head ends the attempt
+    ("CI fixed") and gives the PR its 3 attempts back. Reviews and comments are never sent
+    by themselves.
+  - *When it stops:* after 3 attempts that did not fix it, when the agent ends its turn
+    without pushing, or when there is no agent session to send to. You get one notification
+    and an Inbox item "CI autofix stopped" with the reason; "Retry autofix" (also in the PR
+    card, or `delilah autofix <KEY> retry --repo <path>`) gives the PR its attempts back and
+    tries again at once. A green head clears it. Turning the toggle off, a merged or closed
+    PR, archiving or deleting the task cancel it: nothing more is sent, and a turn already
+    running is not interrupted.
+  - *Pressing "Ask the agent to fix it"* on a CI item still works; it does not send a commit
+    autofix already sent.
+  - *Security:* check names and links come from GitHub and can be influenced by others
+    (pull requests from forks, external status apps). The defence is that the agent is told
+    they are data, and its own permission prompts. Don't run autofix with permissive or
+    bypass permission modes on PRs you don't trust.
 - **"Open PR"** (in the PR tab, once the branch has commits, and while some repo of the task has no open PR) shows a title and
   description to edit (the Jira link and the commit subjects), "Draft", and for a
   parent a "Submodule" picker, on the first free submodule with commits. It pushes the branch and opens the PR against the
@@ -531,7 +584,10 @@ included) and opens it in a tab.
   and shells. "+ Claude" and "+ Terminal" in the task, or ⌘⇧T and ⌘T, start one
   as a new tab. ⌘W closes the active tab: a terminal closes at once, a working
   Claude asks first, and the primary one never closes (it ends with the task). A
-  stopped session offers "Reopen". ⌃Tab and ⌃⇧Tab move between tabs.
+  stopped session offers "Reopen". ⌃Tab and ⌃⇧Tab move between tabs. In saving
+  mode each phase's session is named after its phase ("Spec y plan",
+  "Implementación", "Revisión"), also once it is no longer the current one; outside
+  saving mode the primary reads "Claude principal".
 - **Changes** lists what the branch changed in each repo of the workspace (each
   submodule of a parent), with line counts and the diff of each file. It compares
   against where the branch started (its merge-base with `origin/HEAD`, or `main`), so

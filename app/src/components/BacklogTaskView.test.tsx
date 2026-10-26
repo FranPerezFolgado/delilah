@@ -152,7 +152,7 @@ describe("BacklogTaskView autopilot", () => {
 
   it("is hidden, with a reason, for a task outside the project workflow", () => {
     const { container } = mount({ ...task, workflow: "prompt" });
-    expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
+    expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Arreglar CI"]);
     expect(container.textContent).toContain("no con un prompt propio");
   });
 
@@ -160,7 +160,7 @@ describe("BacklogTaskView autopilot", () => {
     const { container } = render(
       <BacklogTaskView task={task} projects={[{ ...web, settings: DEFAULT_PROJECT_SETTINGS }]} onChanged={() => {}} />,
     );
-    expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
+    expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Arreglar CI"]);
     expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
   });
 });
@@ -204,7 +204,7 @@ describe("BacklogTaskView start", () => {
     const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
     const { container } = mount({ ...task, workflow: "project" });
     fireEvent.change(startSelect(container), { target: { value: "none" } });
-    expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
+    expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Arreglar CI"]);
     fireEvent.click(btn(container, "Guardar"));
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0][1]).toMatchObject({ workflow: "none", start_message: "" });
@@ -224,5 +224,29 @@ describe("BacklogTaskView start", () => {
     fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/x {nope}" } });
     fireEvent.click(btn(container, "Guardar"));
     await waitFor(() => expect(container.querySelector('[data-field="workflow.start.template"]')).not.toBeNull());
+  });
+
+  it("autofix shows the stored value, can be changed and saved, and is sent on start", async () => {
+    const update = vi.spyOn(api, "updateTask").mockResolvedValue(task);
+    const run = vi.spyOn(api, "run").mockResolvedValue({ ...task, status: { type: "running" } });
+    const { container } = mount({ ...task, ci_autofix: true });
+    const af = toggle(container, "Arreglar CI");
+    expect(af.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(af);
+    expect(af.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn(container, "Guardar"));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1]).toMatchObject({ ci_autofix: false });
+    fireEvent.click(btn(container, "Iniciar"));
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].ci_autofix).toBe(false);
+  });
+
+  it("without a stored value it follows the project default and autopilot", () => {
+    const { container } = mount(task);
+    expect(toggle(container, "Arreglar CI").getAttribute("aria-pressed")).toBe("false");
+    cleanup();
+    const withAuto = mount({ ...task, autopilot: { state: "running", since: "" } });
+    expect(toggle(withAuto.container, "Arreglar CI").getAttribute("aria-pressed")).toBe("true");
   });
 });

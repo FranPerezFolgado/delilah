@@ -339,6 +339,22 @@ describe("ConversationView", () => {
     await findByText("uno");
   });
 
+  it("folds a notification and its hand-back from a later page into one item", async () => {
+    const bgm = (id: string, at: string, background: object): ConversationEntry =>
+      ({ id, at, kind: "marker", marker: "background-done", background }) as ConversationEntry;
+    const note = bgm("t:n:0", "2026-01-01T00:00:01Z", { source: "notification", kind: "agent", status: "completed", task_id: "a1", report_in_handback: true });
+    const hand = bgm("t:h:0", "2026-01-01T00:00:02Z", { source: "handback", kind: "agent", status: "completed", task_id: "a1", label: "worker", report: "Informe final" });
+    vi.spyOn(api, "conversation")
+      .mockResolvedValueOnce(conv([note], { cursor: "c1", complete: false }))
+      .mockResolvedValue(conv([hand], { cursor: "c2" }));
+    const { container, findByRole } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    const btn = await findByRole("button", { name: "▸" });
+    await waitFor(() => expect(container.querySelectorAll(".bg-done")).toHaveLength(1));
+    fireEvent.click(btn);
+    expect(container.textContent).toContain("Informe final");
+    expect(container.querySelectorAll(".bg-done")).toHaveLength(1);
+  });
+
   it("shows the waiting notice while the transcript is pending", async () => {
     const { findByText } = setup(conv([], { transcript: "pending" }), session({ conversation: false }));
     expect(await findByText("Esperando la conversación de Claude…")).toBeTruthy();
@@ -574,6 +590,19 @@ describe("ConversationView chat mode", () => {
     await findByText(/Tarea en segundo plano terminada/);
     const m = container.querySelector(".conv-marker")!;
     expect(m.textContent).toContain('Background command "sleep 5" completed');
+  });
+
+  it("renders a background-done marker with background info as a BackgroundDoneItem row", async () => {
+    const e = {
+      id: "m1", at: "2025-01-01T00:00:00Z", kind: "marker", marker: "background-done",
+      background: { source: "notification", kind: "agent", status: "completed", label: "WP-07 update", tool_uses: 2 },
+    } as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([e]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText(/Subagente terminado/);
+    expect(container.querySelector(".bg-done")!.textContent).toContain("WP-07 update · 2 herramientas");
   });
 
   it("keeps the old activity line without progress", async () => {

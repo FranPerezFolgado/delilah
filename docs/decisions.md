@@ -309,7 +309,8 @@ after a restart.
 **29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
 A failed CI or a review only reaches the Inbox; "Ask the agent to fix it" sends it, as comments to consider, not as instructions from the user.
 Auto-forwarding was ruled out: it would spend the subscription and let a
-reviewer's text steer the agent unseen.
+reviewer's text steer the agent unseen. *Amended by 99: CI failures (only those)
+can be forwarded on their own, opt in; reviews and comments stay manual.*
 
 **30. Notify for comments from anyone but the signed-in account (2026-10-20).**
 Other people and bots count; only the user's own comments are skipped. Filtering
@@ -816,7 +817,60 @@ native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); 
 identity headers alone (forgeable by any local process).
 See the [research](../specs/008-mobile-access-analysis/research.md).
 
-**97. The commands Delilah sends are a per-project setting (2026-10-26).** A project's
+**97. A terminal holds its turn end by the `Stop`'s `background_tasks` (2026-10-26).** In
+terminal mode the `Stop` hook of a turn that ends with background sub-agents running (an
+entry with `type: "subagent"`, `status: "running"`) is held like chat mode's (#88). The task
+stays `running` instead of `waiting-for-user` while `/orchestrate` sub-agents implement, so neither the daemon nor the app sends a "waiting" or "turn done" notification for it.
+With the `Stop` held, the next prompt (a sub-agent's `<agent-message>`, a
+`<task-notification>`, the user's) is a new turn and drops it. A late `idle_prompt` is
+ignored. After `SubagentStop` for every listed sub-agent, the 30 s fallback applies it, as
+does process exit. The saving-mode and autopilot work of the turn end still runs when the
+`Stop` arrives (spec 008: waiting on sub-agents is no stall and never blocks a handoff).
+*Why:* the hook logs showed hundreds of terminal turn ends with sub-agents still running, and
+each one put the task in "waiting" with nothing to answer. *Ruled out:* holding on background
+shells, since a dev server can run for hours while Claude really waits on you; reading the
+sub-agent transcripts to follow them, which is more I/O for what the `Stop` already says.
+`background_tasks` is observed, not documented by Claude Code.
+
+**98. Background notifications as readable items (2026-10-26).**
+Each `<task-notification>` in a user line (even inside other text, several per message) becomes a `background-done` marker with an optional `background` object (label, status, duration, tool count, tokens, report); hand-backs (`isMeta` lines with `origin.handback`) become items too, and the UI folds each into the matching notification by `task_id`, derived on every render from the raw entries because the conversation is paginated (server-side pairing would need all pages). Agent-message and notification prompts never become a session's last message. *Why a marker and not a new kind:* UIs from before this change render unknown kinds as cards; the cost is a marker variant with a payload its siblings don't use. Reports are cut at 16 KB and there is no detail endpoint (the next step if it is not enough). *Ruled out:* an XML library (the format is small and fixed); reading `queue-operation` lines (not the transcript's contract); server-side pairing.
+
+**99. CI autofix forwards CI failures on its own, opt-in and bounded (2026-10-26).** Amends
+29 for CI only. A task with `ci_autofix` on (per task; the project default `off` /
+`autopilot` / `always`, `autopilot` if unset, decides what a new task gets) sends the agent
+the failed checks of its PR when the head's checks have all finished with a failure and the
+agent is idle, then waits for the next head. At most 3 attempts per PR (`autofix::LIMIT`);
+a head is sent once (its sha is kept); a push that does not come (the turn ends with the
+same head) or a missing session stops it into an Inbox item with "Retry autofix". Reviews
+and comments still reach the agent only when the user asks. *Why:* a red CI is the most
+mechanical feedback there is, and waiting for the user to press "Ask the agent to fix it"
+stalls autopilot at its last step. The risk 29 named (a stranger's text steering the agent)
+is smaller here: the prompt carries check names and links only, framed as CI data, with
+instructions first and the size capped from the end; the agent's own permission prompts are
+the real defence. The limit bounds the spend. *State before send:* the per-PR state (attempt,
+sha, session, time) is written by compare-and-set before the text is typed, and given back
+if the send fails, so a crash or a race can lose an attempt's count but never send a head
+twice; a manual forward takes the same per-task slot. *Ruled out:* forwarding reviews too
+(they come from people and bots, and are judgment calls); an unbounded loop; a time-based
+retry (the head is the trigger, not the clock); a lock in memory only (a restart would forget
+what was sent).
+
+**100. The agent model is chosen per phase and per task, once per session (2026-10-26).**
+Task agents used to run with no `--model`, so on the account's default (Opus). Now the
+`agent-models` preference maps each phase to a Claude Code alias (opus, sonnet, opusplan,
+haiku) or `default` (no flag), defaulting to Opus for specify/plan and Sonnet for
+implement/review; a task's own `model` wins over its phase. The model is resolved when a
+task session starts and stored on the session, and a resume reuses it. *Why:* most of the
+spend is implementation and review turns that do not need Opus, while specs and plans do;
+switching models inside a running session would throw away its prompt cache and cost more
+than it saves, so a change waits for the next session (saving mode already gives one per
+phase). The optional suggestion (off by default) is a heuristic plus a Haiku one-shot, and
+the user applies it; it never sets the model by itself. *Ruled out:* third-party model
+routers (jev-router, Claude Code Router), which put another process between Delilah and
+Claude and see the traffic; switching the model mid-session with `/model`; picking a model
+for project sessions and idea conversations (they stay on the default).
+
+**101. The commands Delilah sends are a per-project setting (2026-10-26).** A project's
 `ProjectSettings.workflow` is either `single` (one start: the built-in prompt, a message
 with placeholders, or nothing) or `phased` (a plan, an implement and a review command).
 Templates use `{ticket}`, `{title}` and `{task}` (`{spec_dir}` only in the implement
@@ -828,7 +882,7 @@ built-in prompt, so a newcomer without the author's skills gets a working first 
 mode, autopilot and the phase hand-offs exist only for phased workflows, and the hand-offs
 send the project's commands. Presets fill the fields in one click: the built-in prompt,
 nothing, "Spec Kit (`/feature`)" (`/feature {task}`, `/orchestrate {spec_dir}` and today's
-review message) and "Spec Kit (oficial)". *Migration 0022:* every project that had no
+review message) and "Spec Kit (oficial)". *Migration 0024:* every project that had no
 workflow gets the `/feature` preset (the review text in Spanish unless the language
 preference is `en`), so nothing changes for projects that already ran `/feature`; tasks
 stored as `feature` become `project`. A task can override the start (`project` | `prompt` with

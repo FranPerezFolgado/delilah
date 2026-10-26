@@ -84,7 +84,7 @@ pub enum SkillSource { User, Project, Plugin }
 
 Not stored. Sorted by source (project, user, plugin), then name.
 
-## Migration `0022_workflow_commands.sql`
+## Migration `0024_workflow_commands.sql`
 
 ```sql
 UPDATE projects SET settings = json_set(settings, '$.workflow', json('{"kind":"phased",...}'))

@@ -26,6 +26,7 @@ const NOTICE_TITLE: Partial<Record<InboxItem["kind"], string>> = {
   "pr-failed": "CI falló en la PR",
   "pr-review": "Comentarios en la PR",
   "pr-blocked": "No se pudo archivar",
+  "pr-autofix": "El autofix de CI se detuvo",
   "base-stale": "Rama posiblemente atrasada",
   branch: "Rama sin crear",
   autopilot: "Autopiloto en pausa",
@@ -494,6 +495,18 @@ function Item({ item, nav, projects, onOpenTask, onOpenChanges, onChanged }: { i
             <button className="btn btn-ghost" disabled={busy} onClick={() => setConfirming(false)}>
               {t("Cancelar")}
             </button>
+          </>
+        )}
+        {item.kind === "pr-autofix" && (
+          <>
+            <button className="btn btn-p" disabled={busy || paused} onClick={() => act(() => api.setAutofix(item.task, "retry", item.repo))}>
+              {t("Reintentar autofix")}
+            </button>
+            {item.notice != null && (
+              <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissNotice(item.notice!))}>
+                {t("Descartar")}
+              </button>
+            )}
           </>
         )}
         {item.kind === "base-stale" && item.notice != null && (

@@ -130,6 +130,8 @@ pub struct Launch<'a> {
     pub remote_control: Option<&'a str>,
     /// Program to run instead of `claude` (tests use a stand-in); `None` in production.
     pub program: Option<&'a Path>,
+    /// `--model`: a Claude Code alias (`opus`, `sonnet`…); `None` leaves the account's default.
+    pub model: Option<&'a str>,
 }
 
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
@@ -139,8 +141,8 @@ pub fn has_conversation_in(projects_root: &Path, workspace: &Path, session_id: &
         .is_some_and(|path| path.is_file())
 }
 
-/// The arguments both runtimes share: the session, folders, settings, permission mode,
-/// plugin and system prompt. `remote_control` is left out in chat mode (it has no terminal).
+/// The arguments both runtimes share: the session, folders, settings, model, permission
+/// mode, plugin and system prompt. `remote_control` is left out in chat mode (it has no terminal).
 fn shared_args(launch: &Launch, with_remote_control: bool) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     if launch.resume {
@@ -158,6 +160,9 @@ fn shared_args(launch: &Launch, with_remote_control: bool) -> Vec<OsString> {
         args.extend(["--remote-control".into(), name.into()]);
     }
     args.extend(["--settings".into(), launch.settings.into()]);
+    if let Some(model) = launch.model {
+        args.extend(["--model".into(), model.into()]);
+    }
     match launch.permission {
         Permission::Default => {}
         Permission::Auto => {
@@ -1011,6 +1016,7 @@ mod tests {
             append_system_prompt: None,
             remote_control: None,
             program: None,
+            model: None,
         };
         let args = |l: &Launch| {
             command(l)
@@ -1052,6 +1058,7 @@ mod tests {
         let remote = Launch {
             remote_control: Some("PROJ-1 · Principal"),
             program: None,
+            model: None,
             ..base
         };
         assert_eq!(
@@ -1130,6 +1137,7 @@ mod tests {
             append_system_prompt: None,
             remote_control: None,
             program: None,
+            model: None,
         }
     }
 
@@ -1176,10 +1184,39 @@ mod tests {
         let resumed = stream_command(&Launch {
             resume: true,
             program: Some(Path::new("/x/fake")),
+            model: None,
             ..launch()
         });
         assert_eq!(resumed.as_std().get_program(), "/x/fake");
         assert!(resumed.as_std().get_args().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn a_model_is_passed_to_both_runtimes_and_none_passes_nothing() {
+        let opus = Launch {
+            model: Some("opus"),
+            prompt: Some("/feature PROJ-1"),
+            ..launch()
+        };
+        let pty = argv(&opus);
+        assert!(has_pair(&pty, "--model", "opus"), "{pty:?}");
+        // Before the prompt, which comes after `--`.
+        let dashes = pty.iter().position(|a| a == "--").unwrap();
+        assert!(pty.iter().position(|a| a == "--model").unwrap() < dashes);
+        let stream: Vec<String> = stream_command(&opus)
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(has_pair(&stream, "--model", "opus"), "{stream:?}");
+        // Resuming keeps whatever model it is given (the caller passes the session's own).
+        let resumed = argv(&Launch {
+            resume: true,
+            model: Some("sonnet"),
+            ..launch()
+        });
+        assert!(has_pair(&resumed, "--model", "sonnet"), "{resumed:?}");
+        assert!(!argv(&launch()).contains(&"--model".to_string()));
     }
 
     #[test]
@@ -1522,6 +1559,7 @@ mod tests {
             append_system_prompt: None,
             remote_control: None,
             program,
+            model: None,
         };
         let first = |l: &Launch| command(l).get_argv()[0].to_string_lossy().into_owned();
         assert_eq!(first(&launch(None)), "claude");
@@ -1543,6 +1581,7 @@ mod tests {
             append_system_prompt: None,
             remote_control: None,
             program: None,
+            model: None,
         });
         let argv: Vec<String> = cmd
             .get_argv()
@@ -1579,6 +1618,7 @@ mod tests {
             append_system_prompt: None,
             remote_control: None,
             program: None,
+            model: None,
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());

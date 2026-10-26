@@ -286,13 +286,29 @@ pub(crate) async fn on_turn_ended_with<L: Launcher>(app: &AppState, key: &TaskKe
 }
 
 /// What the hook said about the turn that ended.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub(crate) struct TurnEnd {
+    /// The session whose turn ended, as the hook named it.
+    pub session: Option<String>,
+    /// When that turn began, if a hook said so.
+    pub started: Option<chrono::DateTime<chrono::Utc>>,
+    /// When the hook for the end arrived, taken before anything was awaited.
+    pub ended: Option<chrono::DateTime<chrono::Utc>>,
     /// Background work (subagents, shells) was still running when the turn ended.
     pub background: bool,
 }
 
 pub(crate) async fn on_turn_end(app: &AppState, key: &TaskKey, end: TurnEnd) {
+    // CI autofix judges its own attempt apart: it waits for a check, so it never holds
+    // up the handoff and the hint.
+    // A turn that ran with background work still going has not finished.
+    if let (Some(session), false) = (end.session.clone(), end.background) {
+        let (app, key) = (app.clone(), key.clone());
+        let (started, ended) = (end.started, end.ended.unwrap_or_else(chrono::Utc::now));
+        tokio::spawn(async move {
+            crate::autofix::on_turn_ended(&app, &key, &session, started, ended).await;
+        });
+    }
     on_turn_end_with(app, key, end, &crate::run::launch_session).await;
 }
 

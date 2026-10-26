@@ -9,6 +9,8 @@ const platform = vi.hoisted(() => ({ isDesktop: false, revealInFinder: vi.fn().m
 vi.mock("../platform", () => platform);
 vi.mock("../api", () => ({
   ASK_POSITIONS: ["top", "right", "bottom"],
+  AGENT_MODELS: ["opus", "sonnet", "opusplan", "haiku", "default"],
+  DEFAULT_AGENT_MODELS: { specify: "opus", plan: "opus", implement: "sonnet", review: "sonnet" },
   api: {
     preference: vi.fn().mockResolvedValue(null),
     setPreference: vi.fn().mockResolvedValue(undefined),
@@ -73,11 +75,11 @@ describe("SettingsView updates section", () => {
 });
 
 describe("SettingsView structure", () => {
-  it("has the section index with the six sections", () => {
+  it("has the section index with the seven sections", () => {
     setup();
     const nav = screen.getByRole("navigation");
     expect([...nav.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
-      "General", "Preguntas", "Modo ahorro", "Actualizaciones", "Atajos de teclado", "Diagnóstico",
+      "General", "Preguntas", "Modo ahorro", "Modelo del agente", "Actualizaciones", "Atajos de teclado", "Diagnóstico",
     ]);
   });
 
@@ -196,5 +198,64 @@ describe("SettingsView diagnostics", () => {
     setup();
     fireEvent.click(await screen.findByText("Mostrar en Finder"));
     expect(platform.revealInFinder).toHaveBeenCalledWith("/Users/x/.delilah");
+  });
+});
+
+describe("SettingsView agent model", () => {
+  const prefs = (values: Record<string, unknown>) =>
+    vi.mocked(api.preference).mockImplementation((async (k: string) => values[k] ?? null) as never);
+  const sel = (name: string) => screen.getByLabelText(name) as HTMLSelectElement;
+  afterEach(() => {
+    vi.mocked(api.preference).mockReset().mockResolvedValue(null);
+    vi.mocked(api.setPreference).mockReset().mockResolvedValue(undefined);
+  });
+
+  it("shows the built-in defaults when nothing was saved", async () => {
+    prefs({});
+    setup();
+    await waitFor(() => expect(sel("Especificar").disabled).toBe(false));
+    expect([sel("Especificar").value, sel("Planificar").value, sel("Implementar").value, sel("Revisar").value])
+      .toEqual(["opus", "opus", "sonnet", "sonnet"]);
+  });
+
+  it("shows the saved values", async () => {
+    prefs({ "agent-models": { specify: "haiku", plan: "opusplan", implement: "default", review: "opus" } });
+    setup();
+    await waitFor(() => expect(sel("Especificar").value).toBe("haiku"));
+    expect(sel("Planificar").value).toBe("opusplan");
+    expect(sel("Implementar").value).toBe("default");
+    expect(sel("Revisar").value).toBe("opus");
+  });
+
+  it("saves the whole object on change", async () => {
+    prefs({});
+    setup();
+    await waitFor(() => expect(sel("Revisar").disabled).toBe(false));
+    fireEvent.change(sel("Revisar"), { target: { value: "haiku" } });
+    await waitFor(() =>
+      expect(api.setPreference).toHaveBeenCalledWith("agent-models", { specify: "opus", plan: "opus", implement: "sonnet", review: "haiku" }),
+    );
+    await waitFor(() => expect(sel("Revisar").value).toBe("haiku"));
+  });
+
+  it("reverts and shows the error when the daemon refuses", async () => {
+    prefs({});
+    vi.mocked(api.setPreference).mockRejectedValueOnce(new Error("bad model"));
+    setup();
+    await waitFor(() => expect(sel("Revisar").disabled).toBe(false));
+    fireEvent.change(sel("Revisar"), { target: { value: "haiku" } });
+    await waitFor(() => expect(screen.getByText("bad model")).toBeTruthy());
+    expect(sel("Revisar").value).toBe("sonnet");
+  });
+
+  it("toggles the model suggestion, off by default", async () => {
+    prefs({});
+    setup();
+    const toggle = () => screen.getByText("Sugerir modelo al crear una tarea").closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(toggle().disabled).toBe(false));
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle());
+    await waitFor(() => expect(api.setPreference).toHaveBeenCalledWith("model-suggestion", true));
+    await waitFor(() => expect(toggle().getAttribute("aria-pressed")).toBe("true"));
   });
 });

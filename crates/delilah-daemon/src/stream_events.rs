@@ -48,7 +48,10 @@ const FALLBACK: std::time::Duration = std::time::Duration::from_millis(300);
 /// the background set is empty (or its rows were marked stopped). The take is the single
 /// claim: whoever gets the payload replays it, nobody twice.
 pub async fn replay_held_stop(app: &AppState, task: &str, session: &str, held: Option<Value>) {
-    if let Some(held) = held {
+    if let Some(mut held) = held {
+        // Its `background_tasks` still lists what ran when it was held: marked, so a
+        // terminal does not hold it again (`Live::hold_stop_if_reported`).
+        held["delilah_replayed"] = Value::Bool(true);
         crate::hooks::apply_signal(
             app.clone(),
             task,
@@ -208,7 +211,7 @@ pub fn spawn_pump(
 
 /// The last background item ended with a Stop held: if no turn begins within `FALLBACK`,
 /// the Stop applies as a normal end of turn (waiting, Bandeja, autopilot).
-fn arm_fallback(app: &AppState, live: crate::sessions::Live, task: &str) {
+pub(crate) fn arm_fallback(app: &AppState, live: crate::sessions::Live, task: &str) {
     let token = live.arm_fallback();
     let app = app.clone();
     let task = task.to_string();

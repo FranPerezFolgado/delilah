@@ -24,7 +24,7 @@ const CI: Record<PrSnapshot["ci"], string> = {
 };
 
 /** The state of a task's PR(s) in a glance: its state icon and a dot for the CI. */
-export function PrBadge({ pr }: { pr: PrSummary }) {
+export function PrBadge({ pr, autofix }: { pr: PrSummary; autofix?: boolean }) {
   const state = STATES[pr.draft && pr.state === "open" ? "draft" : pr.state];
   const review = pr.review_decision ? ` · ${t(REVIEWS[pr.review_decision])}` : "";
   const count = pr.count > 1 ? ` (${pr.count})` : "";
@@ -35,6 +35,11 @@ export function PrBadge({ pr }: { pr: PrSummary }) {
     >
       <Icon name={state.icon} />
       {pr.ci !== "none" && <span className={`pr-dot pr-ci-${pr.ci}`} data-ci={pr.ci} />}
+      {autofix && (
+        <span className="pr-autofix-mark" title={t("Autofix de CI activado")}>
+          <Icon name="retry" />
+        </span>
+      )}
       {pr.count > 1 && <span className="pr-count">{pr.count}</span>}
     </span>
   );

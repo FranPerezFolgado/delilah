@@ -227,6 +227,8 @@ async fn create_from_proposal(
         autopilot: autopilot.then_some(true),
         workflow: None,
         view: None,
+        ci_autofix: None,
+        model: None,
     };
     let mut autopilot = autopilot;
     // Another conversation may take the key between allocating it and storing the
@@ -695,6 +697,10 @@ mod tests {
         assert_eq!(task.status, delilah_core::TaskStatus::Queued);
         assert!(task.autopilot.is_some());
         assert!(task.saving_mode);
+        assert!(
+            task.ci_autofix,
+            "the project default (autopilot) turns it on"
+        );
     }
 
     #[tokio::test]

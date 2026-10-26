@@ -38,7 +38,7 @@ hooks outside the repo (unchanged); old requests sending `workflow: "feature"` k
 | Gate | Status |
 |---|---|
 | Settings kept by Delilah, not in the repo (decision 50) | ✅ workflow lives in `projects.settings` |
-| Never edit a shipped migration | ✅ new `0022_workflow_commands.sql` |
+| Never edit a shipped migration | ✅ new `0024_workflow_commands.sql` |
 | API ↔ `app/src/api.ts` contract kept in sync | ✅ contracts/api.md; additive plus an accepted alias |
 | Hooks outside the worktree, clean env | ✅ untouched |
 | Docs updated with behaviour (status, usage, decisions) | ✅ phase 6 |
@@ -63,7 +63,7 @@ Core does not know `Lang`: `feature_preset(Lang)` and `builtin_start(Lang)` live
 
 ### Daemon (`crates/delilah-daemon`)
 
-- `migrations/0022_workflow_commands.sql` (R3, data-model §Migration).
+- `migrations/0024_workflow_commands.sql` (R3, data-model §Migration).
 - `store.rs` / `store_projects.rs`: read/write `start_message`; settings already round-trip as
   JSON.
 - `run.rs` `start_run_with`: replace the `match (&req.prompt, workflow)` block with
@@ -135,7 +135,7 @@ specs/011-configurable-task-start/
 
 ```text
 crates/delilah-core/src/{workflow.rs (new), project.rs, task.rs, lib.rs}
-crates/delilah-daemon/migrations/0022_workflow_commands.sql (new)
+crates/delilah-daemon/migrations/0024_workflow_commands.sql (new)
 crates/delilah-daemon/src/{run.rs, handoff.rs, autopilot/mod.rs, api.rs, projects.rs,
                            skills.rs (new), store.rs, store_projects.rs, lang.rs, actions.rs,
                            conversation.rs, session_api.rs, asks.rs, pr_loop/mod.rs, proposals.rs}

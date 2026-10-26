@@ -16,4 +16,10 @@ export const EN: Record<string, string> = {
     "Saving mode and autopilot are only available with the project workflow, not with a custom prompt.",
   "Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no sin mensaje de inicio.":
     "Saving mode and autopilot are only available with the project workflow, not without a start message.",
+  Modelo: "Model",
+  Sugerir: "Suggest",
+  "Pensando…": "Thinking…",
+  "Según ajustes": "Per Settings",
+  "Sugerencia: {model} · {reason}": "Suggestion: {model} · {reason}",
+  Aplicar: "Apply",
 };

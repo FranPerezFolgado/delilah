@@ -14,4 +14,10 @@ export const EN: Record<string, string> = {
   "Nunca se clonan ni se incluyen en un workspace.": "Never cloned or included in a workspace.",
   "Flujo de trabajo": "Workflow",
   "Qué envía Delilah al empezar una tarea de este proyecto.": "What Delilah sends when a task of this project starts.",
+  "Arreglar el CI automáticamente": "Fix CI automatically",
+  "Nunca": "Never",
+  "Solo en tareas con autopiloto": "Only on autopilot tasks",
+  "En todas las tareas": "On every task",
+  "Si falla el CI de una PR, el agente recibe el fallo y lo arregla. Cada tarea puede cambiarlo.":
+    "If a PR's CI fails, the agent gets the failure and fixes it. Each task can change it.",
 };
