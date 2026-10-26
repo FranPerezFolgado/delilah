@@ -56,7 +56,7 @@ metrics; no `<task-notification>` text is visible.
 
 1. **Given** a transcript with a completed background-agent notification with usage,
    **When** the conversation is shown, **Then** one item reads like "Subagente terminado ·
-   WP-07 update status.md · 1 min 30 s · 2 herramientas · 12,3 k tokens", and no user
+   WP-07 update status.md · 1 min 30 s · 2 herramientas · 12.3K tokens", and no user
    bubble with that text exists.
 2. **Given** a notification for a background command ("Background command "Sleep 25
    seconds" completed (exit code 0)"), **When** shown, **Then** the item names the command
@@ -144,8 +144,10 @@ the task's previews.
   never shown.
 - Report text containing HTML-like or XML-like text (`<name>`, `&lt;`): shown as text,
   with entities decoded, never interpreted as markup.
-- Hand-back from an agent that has no notification in the session (e.g. a foreground
-  agent): not shown as a separate item; it stays hidden, as other hidden messages do today.
+- Hand-back from an agent that has no notification in the session: real transcripts show
+  that the agent CLI often removes the queued notification once the hand-back is delivered,
+  so the hand-back is the only record that the sub-agent finished. It becomes the item
+  (completed, labelled with the agent's name, report included); no metrics are known.
 - Very long reports (tens of KB): the conversation stays responsive; the collapsed item
   costs no more than a line.
 - Older clients (a UI from before this change talking to a newer daemon) keep showing the
@@ -172,7 +174,10 @@ the task's previews.
   only on click, no raw HTML), collapsed by default.
 - **FR-007**: When the report was delivered as a separate hand-back from the same task,
   the item MUST show the hand-back's report (with the harness preamble and indentation
-  removed); the hand-back MUST NOT appear as its own item or bubble.
+  removed); the hand-back MUST NOT appear as a second item or as a bubble. A hand-back
+  with no notification of its own in the conversation (the agent CLI often drops the
+  notification once the hand-back is delivered) MUST be shown as the finished-sub-agent
+  item itself, labelled with the agent's name.
 - **FR-008**: When a referenced hand-back is missing, the item MUST say the report is not
   available instead of showing the placeholder text.
 - **FR-009**: Several notifications in one message MUST produce one item each, in order;
