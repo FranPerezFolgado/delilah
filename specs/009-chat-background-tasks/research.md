@@ -163,3 +163,58 @@ flag) to confirm, and save the stdout and `hooks.jsonl` as fixtures under
 4. whether `stop_task` is accepted (R8).
 
 Results go into this file and `docs/spikes/2026-10-24-claude-stream.md` (a new section).
+
+### R9 Results (T001/T002, Claude Code 2.1.292, 2026-10-26)
+
+Two runs of `claude_stream_spike background` and `background-stop` (the flags of
+`StreamSession`: `-p --input-format stream-json --output-format stream-json --verbose
+--include-partial-messages --permission-prompt-tool stdio`, `--settings` with every hook
+posting to a local listener, fixture workspace from `make-fixture-parent.sh`, stdin open
+150 s). Fixtures: `crates/delilah-agents/tests/fixtures/stream-background.jsonl` (216
+lines, 3 `result`s), `stream-background-stop.jsonl` (203 lines, 2 `result`s),
+`stream-background-hooks.jsonl` (26 hook bodies of the first run). Home and scratch paths
+are rewritten to `/fixture/...`.
+
+1. **R3 shapes hold with the real flags.** `task_started` (`task_type` `local_bash` /
+   `local_agent`, `is_backgrounded`, `tool_use_id`, `run_id`, `subagent_type`,
+   `spawn_depth`), `task_progress` (`description`, `last_tool_name`, `usage`),
+   `task_updated` (`patch.status`, `patch.end_time`), `task_notification` (`status`,
+   `summary`, `output_file`, `usage` for agents only) and `background_tasks_changed` (full
+   set; `[]` at the end) all arrive as in R3. Each has an extra `run_id`. A foreground
+   sub-agent also gets `task_started` (`is_backgrounded: false`) and `task_notification`
+   before the turn ends; it never appears in `background_tasks_changed`.
+   **Sub-agent lines are tagged with `parent_tool_use_id`** = the `tool_use_id` of the
+   `Agent` call, on `assistant`, `user` (tool results) and `stream_event` lines; main-thread
+   lines have `null`. Sub-agent tool permissions arrive as `control_request`
+   `can_use_tool` on the same stdio channel.
+2. **`Stop` fires for the turn that ends with background work pending: yes.** Run 1 had 3
+   `result`s and 3 `Stop`s. New and useful: the `Stop` payload has `background_tasks`
+   (`[{id, type: "shell", command, description, status: "running"}]`; `[]` on the last),
+   `last_assistant_message`, `prompt_id`, `stop_hook_active`, `session_crons`, `effort`.
+   The deferral of R6 can read it directly.
+3. **`UserPromptSubmit` fires for a self-started turn: yes.** Its `prompt` is the
+   `<task-notification>` XML (`task-id`, `tool-use-id`, `output-file`, `status`,
+   `summary`). It arrives right after the `Stop` of the previous turn and about 100 ms
+   before the `system/init` of the new turn. Idempotent effects, as R4 planned. Also:
+   a notification that arrives **during** a running turn (run 2: the stopped `sleep`)
+   fires `UserPromptSubmit` too but starts no new turn and has no `init`, so a
+   `UserPromptSubmit` is not by itself a turn start; keep deciding from `init`.
+4. **`stop_task` is accepted.** Sent
+   `{"type":"control_request","request_id":"s1","request":{"subtype":"stop_task","task_id":"b3796hsz2"}}`
+   for the background `sleep` 1 ms after its start; answer
+   `{"type":"control_response","response":{"subtype":"success","request_id":"s1","response":{}}}`.
+   In the same millisecond: `task_updated` `patch.status: "killed"`, `task_notification`
+   with `status: "stopped"` (no `usage`; `summary` is just the description) and
+   `background_tasks_changed` with `tasks: []`. Claude kept going: the other background
+   agent ran on and the turn's later text said the sleep "was stopped". So R8's first
+   branch applies (T047/T048 stay): "Detener" can send `stop_task` per running item. Task
+   `status` values seen: `completed`, `stopped`; `killed` in `patch.status`: map both to
+   `detenido`.
+
+Other findings. A stop-task notification does not start a turn by itself when the turn is
+still running; with the stopped task gone, run 2 had only one self-started turn (the
+background agent's), and its `Stop` carried `background_tasks: []`. Self-started turns
+begin 0.1-0.3 s after the previous `result`. With `--permission-prompt-tool stdio` and no
+allow rules, the `find`/`ls` of a sub-agent asked via `can_use_tool` (the spike allows);
+Read did not. The user's PreToolUse hooks (rtk) may rewrite Bash input, visible in
+`updatedInput` echoes.
