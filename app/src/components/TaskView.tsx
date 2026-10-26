@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { humanError } from "./SessionViewSwitch";
-import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type InboxItem, type Session, type SessionKind, type Task } from "../api";
+import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type InboxItem, type Project, type Session, type SessionKind, type Task } from "../api";
 import { SetupBanner } from "./SetupBanner";
 import { isSetupRunning, kindLabel } from "./sessionLabels";
 import { on } from "../live";
 import { Button, ConfirmDialog, dismissToast, Icon, Menu, pushToast, Skeleton, StatusBadge } from "./ui";
 import { SpecPanel } from "./SpecPanel";
-import { AskCard, useProjectSettings } from "./AskCard";
+import { AskCard } from "./AskCard";
 import { historyEntry } from "../history";
 import { relativeTime } from "../time";
 import { sessionDot } from "../vocab";
@@ -27,6 +27,8 @@ interface Props {
   onViewChanges: () => void;
   /** Goes to a task a proposal created. */
   onOpenTask?: (key: string) => void;
+  /** Settings of the task's project (autopilot in a proposal needs a phased workflow). */
+  projectSettings?: Project["settings"];
 }
 
 /** Asks the app to confirm deleting a task (see DeleteTaskDialog in App). */
@@ -37,7 +39,7 @@ export const askToDelete = (task: Task) =>
   window.dispatchEvent(new CustomEvent<Task>("delilah:delete-task", { detail: task }));
 
 /** The task tab of a task's screen: meta line, actions, pending asks, sessions, spec and history. */
-export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSession, onChanged, onViewChanges, onOpenTask }: Props) {
+export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSession, onChanged, onViewChanges, onOpenTask, projectSettings }: Props) {
   const [events, setEvents] = useState<EventRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -136,7 +138,6 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
   const pending = asks.filter((a) => a.ask || a.permission);
   const at = Math.min(askAt, Math.max(0, pending.length - 1));
   const current = pending[at];
-  const projectSettings = useProjectSettings(task.project, !!current?.ask?.proposal);
   const menu = [
     { label: t("Abrir cambios"), onSelect: onViewChanges, disabled: !hasWorkspace },
     { label: t("Archivar workspace"), onSelect: () => archive(false), disabled: !canArchive(s) || busy },

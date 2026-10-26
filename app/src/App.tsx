@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, baseStaleNotices, BLOCKING, parseAskPosition, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
+import { api, ApiError, baseStaleNotices, BLOCKING, parseAskPosition, projectOfKey, type AskPosition, type InboxItem, type Project, type PrSummary, type Session, type SessionKind, type SpecSummary, type Task, type UsageReport } from "./api";
 import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
@@ -326,7 +326,7 @@ export function App() {
 
   const task = tasks.find((t) => t.key === selected);
   // `@<name>` selects a project's own screen (sessions on its checkout).
-  const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
+  const project = projects.find((p) => p.name === projectOfKey(selected));
   const asks: Record<string, string> = {};
   for (const i of inbox) if (i.kind === "waiting" && !(i.task in asks)) asks[i.task] = i.text ?? i.title;
   // When each done task finished, for the board's «Hecha» cards.
@@ -405,7 +405,7 @@ export function App() {
           <div className={`shell-content${offline ? " is-offline" : ""}`} aria-disabled={offline || undefined} {...(offline ? { inert: true } : {})}>
           <GlobalNotices tasks={tasks} usage={usage} current={view === "tasks" ? selected : null} onOpenTask={openTask} onOpenInbox={() => setView("inbox")} />
           <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
-          {view === "inbox" && <InboxView items={inbox} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
+          {view === "inbox" && <InboxView items={inbox} projects={projects} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
           {view === "playground" && (
             <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
               <PlaygroundView onOpenFloor={(owner) => openTask(owner, OFFICE)} online={!offline} />

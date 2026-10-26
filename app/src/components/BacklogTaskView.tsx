@@ -140,7 +140,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
             onSavingMode={setSavingMode}
           />
         ) : (
-          <p className="muted small">{t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</p>
+          <p className="muted small">{task.workflow === "prompt" ? t("Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no con un prompt propio.") : t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</p>
         )}
         <label className="field">
           <span>{t("Notas (el agente las recibe al empezar)")}</span>

@@ -731,6 +731,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
           {shown === OVERVIEW && task && (
             <TaskView
               task={task}
+              projectSettings={project?.settings}
               sessions={sessions}
               asks={asks}
               onOpenSession={showSession}

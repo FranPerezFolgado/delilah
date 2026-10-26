@@ -178,6 +178,17 @@ describe("NewTaskDialog autopilot", () => {
     expect(create.mock.calls[0][0]).toMatchObject({ autopilot: true, saving_mode: true });
   });
 
+  it("says it needs the project's workflow when the task uses a custom prompt", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const existing = { ...started, workflow: "prompt" };
+    const { container } = render(
+      <NewTaskDialog projects={projects} existing={existing} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    expect(container.textContent).toContain("no con un prompt propio");
+    expect(container.textContent).not.toContain("flujo por fases");
+  });
+
   it("unticking it on a backlog task that has it sends autopilot: false", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);

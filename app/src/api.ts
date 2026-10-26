@@ -1001,3 +1001,6 @@ export interface HistoryResponse {
   started_at: string;
   sessions: { session: string; live: boolean; dropped: boolean; entries: HistoryEntry[] }[];
 }
+
+/** The project an idea conversation's task key (`@name`) belongs to; null for any other key. */
+export const projectOfKey = (key?: string | null): string | null => (key?.startsWith("@") ? key.slice(1) : null);

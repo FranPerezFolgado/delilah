@@ -213,18 +213,15 @@ describe("InboxView proposal autopilot", () => {
     ask: { id: "a9", questions: [{ question: "¿Creo la tarea?", options: [] }], proposal: { title: "Idea", brief: "brief" } },
   };
   const project = (settings: typeof DEFAULT_PROJECT_SETTINGS) => ({ name: "web", path: "/w", kind: "repo" as const, workflow: "project", settings });
-  const mount = () => render(<InboxView items={[proposal]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);
+  const mount = (projects: ReturnType<typeof project>[]) => render(<InboxView items={[proposal]} projects={projects} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);
 
   it("offers Create with autopilot when the idea's project is phased", async () => {
-    vi.spyOn(api, "projects").mockResolvedValue([project({ ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased", plan: "/p", implement: "/i", review: "/r" } })]);
-    mount();
+    mount([project({ ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased", plan: "/p", implement: "/i", review: "/r" } })]);
     expect(await screen.findByText("Create with autopilot")).toBeTruthy();
   });
 
   it("does not when the project is not phased", async () => {
-    const spy = vi.spyOn(api, "projects").mockResolvedValue([project(DEFAULT_PROJECT_SETTINGS)]);
-    mount();
-    await waitFor(() => expect(spy).toHaveBeenCalled());
+    mount([project(DEFAULT_PROJECT_SETTINGS)]);
     expect(screen.queryByText("Create with autopilot")).toBeNull();
   });
 });

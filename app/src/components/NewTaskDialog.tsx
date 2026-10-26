@@ -406,7 +406,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                     onSavingMode={setSaving}
                   />
                 ) : (
-                  <span className="muted ntd-help">{t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
+                  <span className="muted ntd-help">{workflow === "prompt" ? t("Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no con un prompt propio.") : t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
                 )}
                 {autopilotAllowed && <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>}
               </div>

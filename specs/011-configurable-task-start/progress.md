@@ -16,8 +16,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 4 | 4A | done | 1 | 225e616 | +legacy projects.workflow fallback fix (run.rs) |
 | WP-08 | 4 | 4A | done | 1 | ecb0950 | SkillPicker {project,value,onChange}; start_message optional in TS |
 | WP-09 | 4 | 4B | done | 1 | f1b269f | +SkillPicker onSkills callback |
-| WP-10 | 5 | 5A | verified | 1 | | +lang::review_text single source; autopilot/testkit.rs allowed by user (proj gets feature preset) |
+| WP-10 | 5 | 5A | verified | 1 | 92f6914 | +lang::review_text single source; autopilot/testkit.rs allowed by user (proj gets feature preset) |
 | WP-11 | 5 | 5A | verified | 1 | cfa17f0 | +AskCard callers (InboxView, TaskView, TaskScreen) allowed by user; useSkills hook |
+| WP-10F | 5 | fix | implementing | 0 | | Vars helper + one phased guard (arch HIGH x2) |
+| WP-11F | 5 | fix | verified | 1 | | settings from App.tsx, ProposalCard reason |
 | WP-12 | 6 | 6A | pending | 0 | | |
 | WP-13 | 6 | 6A | pending | 0 | | |
 | WP-14 | 6 | 6A | pending | 0 | | |
@@ -71,3 +73,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | 4 | spec-compliance | LOW | skills.rs skips symlinked skills (dotfile-managed ~/.claude/skills/* won't list); undocumented — record in decisions (WP-15) | crates/delilah-daemon/src/skills.rs:114 |
 | 4 | spec-compliance | LOW | WorkflowEditor help mentions only {ticket}; US2 says {ticket} and {title} ({task} valid too) | app/src/components/WorkflowEditor.tsx |
 | 4 | spec-compliance | LOW | after a "nothing" start the live session stays Starting while the task is WaitingForUser; transcript reports "pending" | crates/delilah-daemon/src/run.rs:1010 |
+| 5 | architecture | HIGH | Vars built twice (run.rs:349, handoff.rs:723) with the free-key {task} rule repeated → one task_vars helper | crates/delilah-daemon/src/handoff.rs:723 |
+| 5 | architecture | HIGH | phased guard inline in try_start and again as silent None in step_prompt → one phased_commands helper | crates/delilah-daemon/src/handoff.rs:700 |
+| 5 | architecture | MEDIUM | useProjectSettings fetches api.projects() per card, never refreshes on live projects events; App.tsx already holds projects → pass settings down | app/src/components/AskCard.tsx:10 |
+| 5 | architecture | MEDIUM | data hook in a presentational card file; @name decoding duplicated (InboxView:292, App.tsx:329); errors swallowed | app/src/components/AskCard.tsx:10 |
+| 5 | architecture | LOW | store.project Err(_) reported as "not phased", hiding DB errors; not_phased message duplicated | crates/delilah-daemon/src/handoff.rs:705 |
+| 5 | spec-compliance | MEDIUM | ProposalCard hides "Crear con autopiloto" with no reason when not phased (and while settings load) → WP-11F | app/src/components/ProposalCard.tsx:120 |
+| 5 | spec-compliance | LOW | build_task stores saving_mode from the global pref for non-phased backlog tasks (clamped at start, but stale) → WP-12 | crates/delilah-daemon/src/api.rs:495 |
+| 5 | spec-compliance | LOW | hidden-autopilot reason says "set a phased workflow" also when the cause is a custom prompt → WP-11F | app/src/components/NewTaskDialog.tsx:409 |

@@ -117,10 +117,12 @@ export function ProposalCard({ ask, projectSettings, onDone, onOpenTask }: Propo
             <Button variant="primary" disabled={busy} onClick={() => send("Crear")}>
               {t("Crear")}
             </Button>
-            {isPhased("project", projectSettings) && (
+            {isPhased("project", projectSettings) ? (
               <Button variant="secondary" disabled={busy} onClick={() => setAsking(true)}>
                 {t("Crear con autopiloto")}
               </Button>
+            ) : (
+              projectSettings && <span className="muted small">{t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
             )}
             <Button variant="secondary" disabled={busy} onClick={() => send("Cambiar algo")}>
               {t("Cambiar algo")}

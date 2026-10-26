@@ -45,6 +45,14 @@ describe("ProposalCard", () => {
     expect(yes.getByText("Crear con autopiloto")).toBeTruthy();
   });
 
+  it("says why autopilot is missing when the project is not phased, and stays quiet when settings are unknown", () => {
+    const unknown = render(<ProposalCard ask={proposal} />);
+    expect(unknown.container.textContent).not.toContain("solo están disponibles con un flujo por fases");
+    unknown.unmount();
+    const single = render(<ProposalCard ask={proposal} projectSettings={{ workflow: { kind: "single", start: { type: "builtin" } } }} />);
+    expect(single.container.textContent).toContain("solo están disponibles con un flujo por fases");
+  });
+
   it("Crear answers and shows the created task as a link", async () => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-7" });
     const onOpenTask = vi.fn();

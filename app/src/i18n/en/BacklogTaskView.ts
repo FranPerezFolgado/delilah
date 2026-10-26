@@ -9,4 +9,6 @@ export const EN: Record<string, string> = {
   "Abrir": "Open",
   "Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).":
     "Saving mode and autopilot are only available with a phased workflow (set it in the project settings).",
+  "Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no con un prompt propio.":
+    "Saving mode and autopilot are only available with the project workflow, not with a custom prompt.",
 };

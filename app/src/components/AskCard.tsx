@@ -1,24 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, type AskQuestion, type Project, type PermissionAsk, type PermissionDecision } from "../api";
+import { api, type AskQuestion, type PermissionAsk, type PermissionDecision } from "../api";
 import { t } from "../i18n";
 import { Markdown } from "./Markdown";
 import { ProposalCard, type ProposalProps } from "./ProposalCard";
 import { Button, IconButton } from "./ui";
 import "./AskCard.css";
-
-/** The settings of a project (an idea conversation's task key is `@name`), fetched only when `enabled`. */
-export function useProjectSettings(project: string | null | undefined, enabled: boolean): Project["settings"] | undefined {
-  const [settings, setSettings] = useState<Project["settings"]>();
-  useEffect(() => {
-    if (!enabled || !project) return;
-    let live = true;
-    api.projects().then((ps) => live && setSettings(ps.find((p) => p.name === project)?.settings), () => {});
-    return () => {
-      live = false;
-    };
-  }, [project, enabled]);
-  return settings;
-}
 
 export type AskVariant = "inbox" | "inline" | "chat";
 

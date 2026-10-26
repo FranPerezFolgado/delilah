@@ -107,6 +107,14 @@ describe("BacklogTaskView", () => {
 });
 
 describe("BacklogTaskView autopilot", () => {
+  it("says why it is hidden: custom prompt vs project not phased", () => {
+    const prompt = mount({ ...task, workflow: "prompt" });
+    expect(prompt.container.textContent).toContain("no con un prompt propio");
+    prompt.unmount();
+    const other = mount({ ...task, workflow: "custom" });
+    expect(other.container.textContent).toContain("flujo por fases");
+  });
+
   it("is offered for a task whose workflow is \"project\"", () => {
     const { container } = mount({ ...task, workflow: "project" });
     expect(toggle(container, "Autopiloto")).toBeDefined();
@@ -145,7 +153,7 @@ describe("BacklogTaskView autopilot", () => {
   it("is hidden, with a reason, for a task outside the project workflow", () => {
     const { container } = mount({ ...task, workflow: "prompt" });
     expect(container.querySelectorAll("button.toggle")).toHaveLength(0);
-    expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
+    expect(container.textContent).toContain("no con un prompt propio");
   });
 
   it("is hidden when the project's workflow is not phased", () => {
