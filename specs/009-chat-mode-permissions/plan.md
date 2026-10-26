@@ -106,7 +106,7 @@ crates/delilah-e2e/
 ├── src/fake/scenario.rs   # Tool.auto: allow | ask (mirrors the spike's table)
 ├── src/fake/stream.rs     # honour it when launched with --permission-mode auto
 ├── src/fake/args.rs       # (parses --permission-mode already)
-└── tests/fake_claude.rs   # chat_mode_permissions_* e2e tests (routine: 0 cards; ask: card + autopilot pause; default: 4 cards)
+└── tests/chat_permissions.rs   # new e2e file (routine: 0 cards; ask: card + autopilot pause; default: 4 cards)
 
 app/src/
 ├── components/SettingsView.tsx   # "Permisos de los agentes": Auto / Por defecto de Claude
@@ -142,8 +142,8 @@ docs/
    - Unit tests for `launch_flags` under both preference values.
    - Unit tests for the preference PUT validation and reload.
    - The fake `Tool.auto` with its own unit tests.
-   - The e2e scenarios (routine → 0 cards; `auto: "ask"` → card, and the autopilot pause
-     if the harness can run a spec-workflow task on autopilot; with `default` → 4 cards).
+   - The e2e scenarios (routine → 0 cards; `auto: "ask"` → card, and the autopilot pause on a
+     `feature`-workflow task; with `default` → 4 cards).
    - Run them and record that they fail.
 3. **Fix.** Also add a test that changing the preference does not restart running
    sessions, and that the next relaunch (runtime switch) gets the new mode.
