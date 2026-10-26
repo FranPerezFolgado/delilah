@@ -36,7 +36,7 @@ export function AutopilotControls({ autopilot, savingMode, onAutopilot, onSaving
         pressed={savingMode || active}
         disabled={busy || active}
         iconOnly={iconOnly}
-        title={active ? t("Ahorro queda activado mientras el autopiloto está encendido") : t("Ahorro: una sesión nueva por fase, para releer menos contexto")}
+        title={active ? t("Ahorro queda activado mientras el autopiloto está encendido") : t("Una sesión de Claude nueva por fase, para gastar menos contexto")}
         onChange={onSavingMode}
       />
       {paused && (

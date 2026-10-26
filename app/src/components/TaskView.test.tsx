@@ -179,6 +179,36 @@ describe("More menu", () => {
   });
 });
 
+describe("review notice", () => {
+  const reviewing: Task = { ...running, phase: "review" };
+  const pending = {
+    kind: "question", task: "PROJ-1", title: "t", session: null, text: null, since: null,
+    ask: { id: "a", questions: [{ question: "Q?", header: "h", multiSelect: false, options: [{ label: "Yes", description: "" }] }] },
+  } as InboxItem;
+  const btn = (c: HTMLElement) => byText(c, "button", "Review with Claude")!;
+
+  it("is the primary of the view when no ask is shown", () => {
+    const { container } = show(reviewing, { sessions: [session()] });
+    expect(btn(container).className).toContain("b-p");
+  });
+
+  it("becomes secondary while an inline ask is shown", () => {
+    const { container } = show(reviewing, { sessions: [session()], asks: [pending] });
+    expect(btn(container).className).toContain("b-s");
+  });
+});
+
+describe("errors", () => {
+  it("shows a human error, never the daemon's raw English message", async () => {
+    resume.mockRejectedValue(new ApiError("sqlite: database is locked", 500));
+    const { container } = show({ ...running, status: { type: "failed", reason: "x" } }, { sessions: [session({ live: false })] });
+    await act(async () => {
+      fireEvent.click(byText(container, "button", "Resume")!);
+    });
+    expect(container.querySelector(".tv-error")!.textContent).toBe("Could not complete the action");
+  });
+});
+
 describe("pending asks inline", () => {
   const ask = (id: string): InboxItem => ({
     kind: "question", task: "PROJ-1", title: "t", session: null, text: null, since: null,

@@ -23,7 +23,7 @@ describe("UpdateNotice", () => {
   it("offers an available version with notes and dispatches its buttons", () => {
     const { dispatch } = setup({ kind: "available", version: "1.2.0", notes: "**Nuevo** algo" });
     expect(screen.getByText("Delilah 1.2.0 disponible")).toBeTruthy();
-    fireEvent.click(screen.getByText("Ver novedades"));
+    fireEvent.click(screen.getByText("Abrir novedades"));
     expect(screen.getByText("Nuevo").tagName).toBe("STRONG");
     fireEvent.click(screen.getByText("Actualizar"));
     expect(dispatch).toHaveBeenCalledWith({ type: "requestUpdate" });

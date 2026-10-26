@@ -176,8 +176,18 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   // header); without one, the task's setting decides (a project's sessions open in chat).
   // Kept while the screen is open.
   const [views, setViews] = useState<Map<string, ViewMode>>(() => new Map());
+  // A task's Claude shows what its runtime is (the switch changes the runtime); a project's
+  // sessions have no runtime to choose, so they only change what is shown.
   const viewOf = (s: Session): ViewMode =>
-    s.kind === "shell" ? "terminal" : s.runtime === "stream" ? "chat" : (views.get(s.id) ?? (task?.view === "terminal" ? "terminal" : "chat"));
+    s.kind === "shell"
+      ? "terminal"
+      : project
+        ? s.runtime === "stream"
+          ? "chat"
+          : (views.get(s.id) ?? "chat")
+        : (s.live ? s.runtime : (s.effective_runtime ?? s.runtime)) === "stream"
+          ? "chat"
+          : "terminal";
   const showView = (id: string, v: ViewMode) => setViews((cur) => new Map(cur).set(id, v));
   // A project always has its checkout; a task only once its workspace exists.
   const hasWorkspace = !!project || sessions.length > 0;
@@ -387,9 +397,9 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
     OVERVIEW,
     ...sessions.map((s) => sessionTab(s.id)),
     ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
+    ...session.tabs.map((t) => t.path),
     ...(session.changesOpen ? [CHANGES] : []),
     ...(prTab ? [PRS] : []),
-    ...session.tabs.map((t) => t.path),
   ];
 
   const close = async (id: string, force = false) => {
@@ -599,16 +609,10 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   const rememberView = (v: ViewMode) => {
     if (task && task.view !== v) api.updateTask(owner, { view: v }).then(onChanged, () => {});
   };
-  // The view of a PTY session only changes what is shown; moving a chat-mode session to the
-  // terminal is a runtime change the switch itself confirms and makes.
+  // A project session's view only changes what is shown (the switch is not offered there).
   const chooseView = (s: Session, v: ViewMode) => {
     showView(s.id, v);
     rememberView(v);
-  };
-  // After the runtime changed: the sessions come back in the new one, show the matching view.
-  const runtimeChanged = (s: Session) => {
-    showView(s.id, s.runtime === "stream" ? "terminal" : "chat");
-    onChanged();
   };
 
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
@@ -630,19 +634,21 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
       dot: sessionDot(s),
       closable: !s.primary,
     })),
-    ...(starting && !sessionById(starting) ? [{ id: sessionTab(starting), kind: "session" as const, label: t("Arrancando…") }] : []),
+    ...(starting && !sessionById(starting) ? [{ id: sessionTab(starting), kind: "session" as const, label: t("Iniciando…") }] : []),
+    ...session.tabs.map((f): TaskTabItem => ({ id: f.path, kind: "file", label: name(f.path), title: f.path, dirty: f.dirty, closable: true })),
     ...(session.changesOpen ? [{ id: CHANGES, kind: "changes" as const, label: t("Cambios"), count: changed.size, closable: true }] : []),
     ...(prTab ? [{ id: PRS, kind: "pr" as const, label: "PR" }] : []),
-    ...session.tabs.map((f): TaskTabItem => ({ id: f.path, kind: "file", label: name(f.path), title: f.path, dirty: f.dirty, closable: true })),
   ];
 
   // Chat | Terminal for the session of the open tab: not on the Tarea tab nor plain terminals.
-  const sessionSwitch = shownClaude ? (
+  // Not for a project's sessions: the daemon refuses to change their runtime.
+  const turnRunning =
+    !!shownClaude && (shownClaude.state === "working" || asks.some((a) => a.session?.id === shownClaude.id && a.ask));
+  const sessionSwitch = shownClaude && !project ? (
     <SessionViewSwitch
       session={shownClaude}
-      view={viewOf(shownClaude)}
-      chooseView={(v) => chooseView(shownClaude, v)}
-      onChanged={() => runtimeChanged(shownClaude)}
+      busy={turnRunning}
+      onChanged={onChanged}
       onError={setError}
     />
   ) : undefined;
@@ -901,7 +907,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
               <button className="btn btn-ghost icon-btn mono" onClick={() => setFinding(true)} title={t("Abrir un archivo por su nombre")}>
                 {keyOf("quick-open")}
               </button>
-              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Refrescar")} aria-label={t("Actualizar el árbol")}>
+              <button className="btn btn-ghost icon-btn" onClick={() => setTreeRefresh((n) => n + 1)} title={t("Recargar")} aria-label={t("Actualizar el árbol")}>
                 <Icon name="refresh" />
               </button>
               <button className="btn btn-ghost icon-btn" onClick={toggleTree} title={t("Ocultar ({key})", { key: keyOf("toggle-tree") })} aria-label={t("Ocultar el árbol")}>

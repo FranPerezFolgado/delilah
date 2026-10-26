@@ -49,7 +49,7 @@ describe("PreviewControl", () => {
     const start = vi.spyOn(api, "startPreview").mockResolvedValue(view({ state: "starting" }));
     const { findByRole } = render(<PreviewControl taskKey="T-1" project="app" />);
     fireEvent.click(await findByRole("button", { name: "Preview" }));
-    await findByRole("button", { name: "Preview arrancando" });
+    await findByRole("button", { name: "Preview iniciándose" });
     expect(start).toHaveBeenCalledWith("T-1");
   });
 
@@ -83,7 +83,7 @@ describe("PreviewControl", () => {
     const start = vi.spyOn(api, "startPreview").mockResolvedValue(view({ state: "starting" }));
     const { findByText, findByRole } = render(<PreviewControl taskKey="T-1" project="app" />);
     fireEvent.click(await findByText("Reintentar"));
-    await findByRole("button", { name: "Preview arrancando" });
+    await findByRole("button", { name: "Preview iniciándose" });
     expect(start).toHaveBeenCalled();
   });
 

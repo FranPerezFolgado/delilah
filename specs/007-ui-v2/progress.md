@@ -62,7 +62,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-53 | 8 | 8A | done | 2 | 42e2199 | Global notices |
 | WP-54 | 8 | 8B | implementing | 1 |  | E2E widths |
 | WP-55 | 9 | 9A | pending | 0 | | Remove replaced code and i18n cleanup |
-| WP-56 | 9 | 9A | done | 1 |  | Preview seed |
+| WP-56 | 9 | 9A | done | 1 | d18fb28 | Preview seed |
 | WP-57 | 9 | 9A | pending | 0 | | Decisions, status, README, architecture docs |
 | WP-58 | 9 | 9B | pending | 0 | | Full checks |
 | WP-59 | 9 | 9C | pending | 0 | | Before/after record |
@@ -100,3 +100,5 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 9 | architecture-reviewer | HIGH→WP-55 | Dead PhaseBadge.tsx / AutopilotMark.tsx (+tests); LEGACY block in styles.css (~520 lines): delete unused classes, move survivors to component sheets. | app/src/components, app/src/styles.css |
 | 9 | architecture-reviewer | MEDIUM→WP-55 | Replace `ago()` (api.ts) with `relativeTime`; barrel-only kit imports; move Icon into ui/; HandoffActions/SpecPanel get their own CSS. | app/src |
 | 9 | architecture-reviewer | HIGH→follow-up | Split TaskScreen.tsx (924 lines) into a data hook + panes and App.tsx (570) into useRoute/useAppData/Shell; ~60 raw <button> outside the kit; neutral kind keys instead of Spanish literals. Behaviour-neutral refactor, deferred to its own PR. | app/src/components/TaskScreen.tsx, App.tsx |
+| 9 | preview check | HIGH | Board: done LIBRE-6 shows «#14 Checks fallan» (another task's PR) instead of its own merged #12 — PR summary mapped to the wrong task. | app/src/components/BoardView.tsx / App.tsx prs map |
+| 9 | preview check | LOW | Board hint says «1 columnas más»: use tn() singular/plural. | app/src/components/BoardView.tsx |

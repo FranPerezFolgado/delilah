@@ -89,6 +89,8 @@ describe("JiraView list", () => {
     fireEvent.click(screen.getByLabelText("Recargar"));
     await screen.findByText("Jira rechazó el token (401)");
     expect(screen.getByText("Otra cosa")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reconectar" }).className).toContain("b-p");
+    expect(screen.getByRole("button", { name: "Analizar con Claude" }).className).toContain("b-s");
     fireEvent.click(screen.getByRole("button", { name: "Reconectar" }));
     expect(screen.getByText("Conectar Jira")).toBeTruthy();
   });

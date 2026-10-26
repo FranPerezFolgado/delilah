@@ -75,13 +75,13 @@ export function PreviewControl({ taskKey, project, status, iconOnly }: Props) {
   return (
     <span className="preview-ctl">
       {!preview && (
-        <Button variant="secondary" size={28} icon="external" disabled={busy} title={t("Lanzar preview")} aria-label={label} onClick={start}>
+        <Button variant="secondary" size={28} icon="external" disabled={busy} title={t("Iniciar preview")} aria-label={label} onClick={start}>
           {shown}
         </Button>
       )}
       {preview?.state === "starting" && (
-        <Button variant="secondary" size={28} icon="external" disabled title={t("Preview arrancando")} aria-label={t("Preview arrancando")}>
-          {iconOnly ? undefined : t("Preview arrancando")}
+        <Button variant="secondary" size={28} icon="external" disabled title={t("Preview iniciándose")} aria-label={t("Preview iniciándose")}>
+          {iconOnly ? undefined : t("Preview iniciándose")}
         </Button>
       )}
       {preview?.state === "running" && (

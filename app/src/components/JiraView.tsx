@@ -374,7 +374,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
         {issue && (!overlays || showDrawer) && (
           <>
             {overlays && <div className="jv-scrim" onClick={() => setDrawerOpen(false)} />}
-            <Detail key={issue.key} issue={issue} parentListed={!!issue.parent && issues.some((i) => i.key === issue.parent!.key)}
+            <Detail key={issue.key} issue={issue} expired={expired} parentListed={!!issue.parent && issues.some((i) => i.key === issue.parent!.key)}
               drawer={overlays} onClose={() => setDrawerOpen(false)}
               onSelect={setSelected} onAnalyze={onAnalyze} onOpenTask={onOpenTask} />
           </>
@@ -384,8 +384,10 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
   );
 }
 
-function Detail({ issue, parentListed, drawer, onClose, onSelect, onAnalyze, onOpenTask }: {
+function Detail({ issue, expired, parentListed, drawer, onClose, onSelect, onAnalyze, onOpenTask }: {
   issue: JiraIssue;
+  /** The token expired: «Reconectar» is the view's primary action. */
+  expired: boolean;
   parentListed: boolean;
   drawer: boolean;
   onClose: () => void;
@@ -447,7 +449,7 @@ function Detail({ issue, parentListed, drawer, onClose, onSelect, onAnalyze, onO
         </button>
       ) : (
         <div className="jv-analyze">
-          <Button variant="primary" onClick={() => onAnalyze(issue)}>{t("Analizar con Claude")}</Button>
+          <Button variant={expired ? "secondary" : "primary"} onClick={() => onAnalyze(issue)}>{t("Analizar con Claude")}</Button>
           <span className="muted">{t("Claude lee el ticket y propone un plan antes de tocar código.")}</span>
         </div>
       )}

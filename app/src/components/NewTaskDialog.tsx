@@ -306,7 +306,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const canSave = !!project && !!title.trim() && (origin === "libre" || !!key.trim());
 
   const formId = "new-task-form";
-  const title0 = fromSession ? t("Convertir en tarea") : existing ? t("Empezar {key}", { key: existing.key }) : t("Nueva tarea");
+  const title0 = fromSession ? t("Convertir en tarea") : existing ? t("Iniciar {key}", { key: existing.key }) : t("Nueva tarea");
   const startLabel = busy ? t("Preparando workspace…") : origin === "claude" ? t("Abrir conversación") : fromSession ? t("Convertir") : t("Iniciar");
   const footer = (
     <>
@@ -366,7 +366,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Probar caché de tarifas en svc-billing")} required aria-invalid={!!fieldErrors.title} autoFocus />
                 {fieldErrors.title && <span className="ntd-err" role="alert">{fieldErrors.title}</span>}
                 <span className="muted ntd-help">
-                  {t("Delilah le pone una clave LIBRE-n. Arranca con /feature y esta descripción.")}
+                  {t("Delilah le pone una clave LIBRE-n. Se inicia con /feature y esta descripción.")}
                 </span>
               </label>
             )}

@@ -156,6 +156,14 @@ describe("TaskScreen tabs", () => {
     expect(labels()).toEqual(["Tarea", "Claude principal", "Review", "PR"]);
   });
 
+  it("orders the tabs Tarea, sessions, files, Cambios, PR", () => {
+    sessionFor("PROJ-1").changesOpen = true;
+    sessionFor("PROJ-1").tabs = [{ path: "src/a.rs", dirty: false } as never];
+    taskScreen([sess("a", { primary: true })]);
+    expect(labels().map((l) => l?.replace(/\d+$/, ""))).toEqual(["Tarea", "Claude principal", "a.rs", "Cambios", "PR"]);
+    sessionFor("PROJ-1").tabs = [];
+  });
+
   it("only non-primary sessions can be closed", () => {
     taskScreen([sess("a", { primary: true }), sess("b", { label: "Review" })]);
     expect(screen.queryByRole("button", { name: "Cerrar Claude principal" })).toBeNull();
@@ -241,22 +249,10 @@ describe("TaskScreen conversation sessions", () => {
     expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
   });
 
-  it("Terminal on a stream session asks to confirm instead of showing a terminal it has not", () => {
-    const { queryByTestId, getByRole, queryByText } = open({ ...conv, runtime: "stream" });
-    fireEvent.click(getByRole("button", { name: /^Terminal$/ }));
-    expect(queryByText("Pasar a terminal")).not.toBeNull();
-    expect(queryByTestId("terminal")).toBeNull();
-    expect(queryByTestId("conversation")).not.toBeNull();
-  });
-
-  it("toggles to the terminal and back with the Chat / Terminal switch", () => {
-    const { queryByTestId, getByRole } = open(conv);
-    fireEvent.click(getByRole("button", { name: /^Terminal$/ }));
-    expect(queryByTestId("terminal")).not.toBeNull();
-    expect(queryByTestId("conversation")).toBeNull();
-    fireEvent.click(getByRole("button", { name: /^Chat/ }));
-    expect(queryByTestId("conversation")).not.toBeNull();
-    expect(queryByTestId("terminal")).toBeNull();
+  it("offers no Chat / Terminal switch on a project conversation: the daemon refuses it", () => {
+    const { container, queryByRole } = open(conv);
+    expect(container.querySelector(".svs")).toBeNull();
+    expect(queryByRole("button", { name: /^Terminal$/ })).toBeNull();
   });
 
   it("opens a project session in chat even when it is not an idea conversation", () => {
@@ -279,25 +275,31 @@ describe("TaskScreen conversation sessions", () => {
     );
   };
 
-  it("starts a task session in chat or terminal from task.view, and the switch overrides it", () => {
-    const a = inTask(conv, "chat");
+  it("shows a task session in the view of its runtime", () => {
+    const a = inTask({ ...conv, runtime: "stream" }, "terminal");
     expect(a.queryByTestId("conversation")).not.toBeNull();
     cleanup();
-    const b = inTask(conv, "terminal");
+    const b = inTask({ ...conv, runtime: "pty" }, "chat");
     expect(b.queryByTestId("terminal")).not.toBeNull();
     expect(b.queryByTestId("conversation")).toBeNull();
     fireEvent.click(b.getByRole("button", { name: /^Chat/ }));
-    expect(b.queryByTestId("conversation")).not.toBeNull();
-    fireEvent.click(b.getByRole("button", { name: /^Terminal$/ }));
+    expect(b.getByText("Pasar a chat")).toBeTruthy();
     expect(b.queryByTestId("terminal")).not.toBeNull();
   });
 
-  it("remembers the view picked with the switch as the task's view, with no other view control", () => {
-    updateTask.mockClear();
-    const r = inTask(conv, "chat");
-    expect(r.queryByLabelText("Vista")).toBeNull();
+  it("Terminal on a stream task session asks to confirm instead of showing a terminal it has not", () => {
+    const r = inTask({ ...conv, runtime: "stream" });
     fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
-    expect(updateTask).toHaveBeenCalledWith("PROJ-1", { view: "terminal" });
+    expect(r.queryByText("Pasar a terminal")).not.toBeNull();
+    expect(r.queryByTestId("terminal")).toBeNull();
+    expect(r.queryByTestId("conversation")).not.toBeNull();
+  });
+
+  it("disables the switch with the reason while the session is mid-turn", () => {
+    const r = inTask({ ...conv, runtime: "pty", state: "working" });
+    const chat = r.getByRole("button", { name: /^Chat/ }) as HTMLButtonElement;
+    expect(chat.disabled).toBe(true);
+    expect(chat.title).toBe("Espera a que termine el turno");
   });
 
   const pendingAsk = {
@@ -611,13 +613,22 @@ describe("TaskScreen runtime switch", () => {
     expect(sessionRuntime.calls).not.toHaveBeenCalled();
   });
 
-  it("shows a refused switch in an alert", async () => {
-    sessionRuntime.result = () => Promise.reject(new ApiError("wait for the turn to end", 409));
+  it("Chat on a terminal session confirms and switches the runtime to chat", () => {
+    const r = render(screen1(task({ type: "running" }), { ...stream, runtime: "pty" }));
+    fireEvent.click(r.getByRole("button", { name: /^Chat/ }));
+    expect(sessionRuntime.calls).not.toHaveBeenCalled();
+    fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
+    expect(sessionRuntime.calls).toHaveBeenCalledWith("s1", "chat");
+  });
+
+  it("shows a refused switch in Spanish, never the daemon's English", async () => {
+    sessionRuntime.result = () => Promise.reject(new ApiError("wait for the turn to end or press Detener", 409));
     const r = render(screen1(chatTask, stream));
     fireEvent.click(r.getByRole("button", { name: /^Terminal$/ }));
     fireEvent.click(r.getByRole("button", { name: "Cambiar" }));
     const alert = await r.findByRole("alert");
-    expect(alert.textContent).toContain("wait for the turn to end");
+    expect(alert.textContent).toContain("Espera a que termine el turno");
+    expect(alert.textContent).not.toContain("wait for the turn");
   });
 });
 

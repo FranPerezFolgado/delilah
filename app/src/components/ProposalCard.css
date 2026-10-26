@@ -3,5 +3,5 @@
 .pc-brief { font-size: 13.5px; color: var(--tx2); }
 .pc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .pc-created { font-size: 13.5px; color: var(--ok-tx); }
-.pc-created a { color: var(--run-tx); }
+.pc-created a { color: var(--tx-strong); text-decoration: underline; }
 .pc-error { font-size: 13.5px; color: var(--err-tx); }

@@ -152,14 +152,14 @@ describe("ToolCard", () => {
     expect(r.getByText("<b>negrita</b>")).toBeTruthy();
   });
 
-  it("truncated: Ver todo fetches and shows the full text", async () => {
+  it("truncated: Mostrar todo fetches and shows the full text", async () => {
     const spy = vi.spyOn(api, "toolDetail").mockResolvedValue({ input: { command: "cat big" }, result: "COMPLETO", is_error: false, truncated: false });
     const r = setup(tool({ summary: "grande", input: { command: "cat big" }, result: "corto", truncated: true }));
     open(r, "grande");
-    fireEvent.click(r.getByText("Ver todo"));
+    fireEvent.click(r.getByText("Mostrar todo"));
     await waitFor(() => expect(r.getByText("COMPLETO")).toBeTruthy());
     expect(spy).toHaveBeenCalledWith("s1", "toolu_1");
-    expect(r.queryByText("Ver todo")).toBeNull();
+    expect(r.queryByText("Mostrar todo")).toBeNull();
   });
 
   it("a pending tool shows a running state", () => {

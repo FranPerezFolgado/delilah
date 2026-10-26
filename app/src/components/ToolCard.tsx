@@ -150,7 +150,7 @@ export function ToolCard({ entry, sessionId, onOpenFile }: Props) {
           {entry.is_error && <div className="error">{t("Falló")}</div>}
           {truncated && (
             <button className="btn btn-ghost" disabled={loading} onClick={showAll}>
-              {t("Ver todo")}
+              {t("Mostrar todo")}
             </button>
           )}
           {error && <div className="error">{error}</div>}

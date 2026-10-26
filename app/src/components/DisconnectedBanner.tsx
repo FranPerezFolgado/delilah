@@ -17,7 +17,7 @@ export function DisconnectedBanner({ lastOk, onRetry }: DisconnectedBannerProps)
       <div className="dcb-text">
         <strong>{t("Sin conexión con delilahd · reintentando…")}</strong>
         <span>
-          {t("Para arrancarlo, abre la app de Delilah o ejecuta")} <code>delilahd</code>.
+          {t("Para iniciarlo, abre la app de Delilah o ejecuta")} <code>delilahd</code>.
           {lastOk != null && <> {t("Datos de {when}", { when: relativeTime(new Date(lastOk)) })}</>}
         </span>
       </div>

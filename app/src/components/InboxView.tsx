@@ -412,7 +412,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
         {item.kind === "review" && (
           <>
             <button className="btn btn-p" onClick={() => onOpenChanges(item.task)}>
-              <Icon name="diff" /> {t("Ver cambios")}
+              <Icon name="diff" /> {t("Abrir cambios")}
             </button>
             <button className="btn" onClick={() => onOpenTask(item.task)}>{t("Abrir la tarea")}</button>
           </>
@@ -423,7 +423,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
               <Icon name="review" /> {t("Pasar a revisión")}
             </button>
             <button className="btn" onClick={() => onOpenChanges(item.task)}>
-              <Icon name="diff" /> {t("Ver cambios")}
+              <Icon name="diff" /> {t("Abrir cambios")}
             </button>
             <button className="btn btn-ghost" disabled={busy} onClick={() => act(() => api.dismissReviewHint(item.task))}>
               {t("Todavía no")}
@@ -500,7 +500,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
         )}
         {item.pr && (
           <button className="btn" onClick={() => openExternal(item.pr!.url).catch(() => {})}>
-            {item.kind === "pr-opened" ? t("Abrir PR") : t("Ver PR")}
+            {t("Abrir PR")}
           </button>
         )}
         {item.kind === "branch" && (

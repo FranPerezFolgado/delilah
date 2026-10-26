@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { humanError } from "./SessionViewSwitch";
 import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type InboxItem, type Session, type SessionKind, type Task } from "../api";
 import { SetupBanner } from "./SetupBanner";
 import { isSetupRunning, kindLabel } from "./sessionLabels";
@@ -79,7 +80,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
       await action();
       onChanged();
     } catch (e) {
-      setError((e as Error).message);
+      setError(humanError(e));
     } finally {
       setBusy(false);
     }
@@ -122,7 +123,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
     } catch (e) {
       // Work that would be lost: the app's own dialog asks about forcing it.
       if (e instanceof ApiError && e.unpushed) askToDelete(task);
-      else setError((e as Error).message);
+      else setError(humanError(e));
     }
   };
   // Asking for a review puts the task in review.
@@ -229,9 +230,9 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
           <Icon name="review" className="c-done" />
           <span className="tv-grow">{t("La tarea está en revisión: toca revisar los cambios de la rama.")}</span>
           <Button variant="secondary" size={28} icon="diff" onClick={onViewChanges}>
-            {t("Ver cambios")}
+            {t("Abrir cambios")}
           </Button>
-          <Button variant="primary" size={28} disabled={busy} onClick={review}>
+          <Button variant={current ? "secondary" : "primary"} size={28} disabled={busy} onClick={review}>
             {t("Revisar con Claude")}
           </Button>
         </div>
@@ -243,7 +244,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
             {t("No se ha archivado: {why}. Commitea y sube lo que quieras conservar, o archívalo igualmente.", { why: keeps })}
           </span>
           <Button variant="secondary" size={28} icon="diff" onClick={onViewChanges}>
-            {t("Ver cambios")}
+            {t("Abrir cambios")}
           </Button>
           <Button variant="danger" size={28} disabled={busy} onClick={() => archive(true)}>
             {t("Archivar igualmente (se pierde lo no subido)")}

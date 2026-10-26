@@ -140,7 +140,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
           />
         ) : (
           <div className="apc">
-            <Toggle label={t("Ahorro")} pressed={savingMode} disabled={locked} onChange={setSavingMode} title={t("Ahorro: una sesión nueva por fase, para releer menos contexto")} />
+            <Toggle label={t("Ahorro")} pressed={savingMode} disabled={locked} onChange={setSavingMode} title={t("Una sesión de Claude nueva por fase, para gastar menos contexto")} />
           </div>
         )}
         <label className="field">

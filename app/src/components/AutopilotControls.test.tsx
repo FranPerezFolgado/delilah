@@ -47,6 +47,11 @@ it("while on, Ahorro is forced on and disabled with the reason", () => {
   expect(b.title).toContain("autopiloto");
 });
 
+it("Ahorro explains itself in plain words", () => {
+  setup(null, false);
+  expect(screen.getByRole("button", { name: "Ahorro" }).title).toBe("Una sesión de Claude nueva por fase, para gastar menos contexto");
+});
+
 it("Ahorro toggles when autopilot is off", () => {
   const { onSavingMode } = setup(null, false);
   fireEvent.click(screen.getByRole("button", { name: "Ahorro" }));

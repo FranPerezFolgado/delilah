@@ -74,7 +74,7 @@ describe("InboxView PR items", () => {
   it("opens the PR externally", () => {
     const open = vi.spyOn(platform, "openExternal").mockResolvedValue();
     view();
-    fireEvent.click(screen.getByText("View PR"));
+    fireEvent.click(screen.getByText("Open PR"));
     expect(open).toHaveBeenCalledWith("https://github.com/o/r/pull/3");
   });
 });
@@ -262,7 +262,7 @@ describe("InboxView base-stale", () => {
     viewStale();
     expect(screen.getByText("Branch may be behind")).toBeTruthy();
     expect(document.querySelector(".ac-text")?.textContent).toBe("No se pudo actualizar r (sin red); se usó main");
-    expect(screen.queryByText("View PR")).toBeNull();
+    expect(screen.queryByText("Open PR")).toBeNull();
     expect(screen.queryByText("Ask the agent to fix it")).toBeNull();
   });
 

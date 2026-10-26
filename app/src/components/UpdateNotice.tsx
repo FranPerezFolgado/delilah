@@ -37,7 +37,7 @@ export function UpdateNotice({ state, dispatch, installed }: Props) {
             <div className="gn-row">
               <span>{t("Delilah {version} disponible", { version: state.version })}</span>
               {state.notes && (
-                <Button variant="ghost" size={28} onClick={() => setNotesOpen((o) => !o)}>{t("Ver novedades")}</Button>
+                <Button variant="ghost" size={28} onClick={() => setNotesOpen((o) => !o)}>{t("Abrir novedades")}</Button>
               )}
               <span className="grow" />
               <Button variant="primary" size={28} onClick={() => dispatch({ type: "requestUpdate" })}>{t("Actualizar")}</Button>

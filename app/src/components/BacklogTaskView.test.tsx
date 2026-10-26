@@ -132,6 +132,11 @@ describe("BacklogTaskView autopilot", () => {
     expect(toggle(container, "Ahorro").getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("words Ahorro as one fresh Claude session per phase", () => {
+    const { container } = mount(task);
+    expect(toggle(container, "Ahorro").title).toBe("Una sesión de Claude nueva por fase, para gastar menos contexto");
+  });
+
   it("is hidden for a task outside the spec workflow", () => {
     const { container } = mount({ ...task, workflow: "prompt" });
     expect(Array.from(container.querySelectorAll("button.toggle")).map((b) => b.textContent)).toEqual(["Ahorro"]);
