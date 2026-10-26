@@ -4,7 +4,7 @@
    ```bash
    cargo test -p delilah-agents claude::
    cargo test -p delilah-daemon launch_flags preferences
-   cargo test -p delilah-e2e --test chat_permissions
+   cargo test -p delilah-e2e --features e2e --test chat_permissions
    ```
 2. A preview (never the installed app):
    ```bash

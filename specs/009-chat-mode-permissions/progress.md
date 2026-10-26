@@ -87,3 +87,6 @@ Not applied (LOW / design): moving the rejection helpers out of `run.rs`; a type
 
 ### Merge with main (2026-10-26)
 Main had taken decision #80 (and up to #86), moved spikes to `docs/archive/spikes/`, moved user docs from the README to `docs/usage.md` and switched the docs to English UI terms. The agent-permissions decision is now **#87**; the spike is `docs/archive/spikes/2026-10-26-chat-permission-mode.md`; the user-facing paragraph moved to `docs/usage.md`.
+
+### CI after the merge (2026-10-26)
+`chat_permissions` was the only e2e suite without `required-features = ["e2e"]`, so the nextest shards ran it with no `delilahd` built; now gated like the rest. Main's `ui_v2` (2 tests) and `app/e2e/chat.spec.ts` (3 tests) expected permission cards from a fake tool that, under the Auto default, now runs without asking; they mark the tool `auto: "ask"`. `scripts/e2e.sh api` and `scripts/e2e.sh ui` pass locally.
