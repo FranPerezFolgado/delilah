@@ -1,0 +1,28 @@
+.ntd { display: flex; flex-direction: column; gap: 14px; }
+.ntd > .seg { align-self: flex-start; }
+.ntd-note { margin: 0; font-size: 13.5px; }
+.ntd-ticket { display: grid; grid-template-columns: 140px 1fr; gap: 10px; }
+.ntd-help { font-size: 12px; font-weight: 400; }
+.ntd-err { font-size: 12px; font-weight: 400; color: var(--err-tx); }
+.ntd .input[aria-invalid="true"] { border-color: var(--err); }
+.ntd-auto { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.ntd-sub-hd { display: flex; align-items: center; gap: 8px; }
+.ntd-suggest { margin-left: auto; }
+.ntd-suggested { margin: 4px 0 0; font-size: 12px; color: var(--tx2); }
+.ntd-suggested .mono { color: var(--tx); }
+.ntd-adv { display: flex; flex-direction: column; gap: 12px; }
+.ntd-adv > summary { cursor: pointer; font-size: 12px; font-weight: 500; color: var(--tx2); margin-bottom: 10px; }
+.ntd-adv[open] > summary { margin-bottom: 12px; }
+.ntd-adv > .field + .field { margin-top: 12px; }
+.ntd-adv .seg { align-self: flex-start; }
+.ntd-branch { display: flex; align-items: center; gap: 6px; }
+.ntd-branch .input { flex: 1; }
+.ntd-dirty { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--bd2); background: var(--panel); font-size: 13.5px; color: var(--err-tx); }
+.ntd-dirty-actions { display: flex; gap: 8px; }
+.dialog-ft .ntd-hint { margin-right: auto; font-size: 12px; color: var(--tx3); }
+
+/* Moved from the pre-v2 stylesheet. */
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--bd2); border-radius: 7px; cursor: pointer; font-size: 12px; background: var(--panel); }
+.choice.on { border-color: var(--tx3); background: var(--sel); }
+.choice input { margin: 0; accent-color: var(--tx-strong); }

@@ -1,5 +1,6 @@
 //! Claude Code adapter. Findings behind these choices: `docs/spikes/2026-10-19-claude-pty.md`.
 
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -10,6 +11,10 @@ use serde_json::{Value, json};
 /// Hook events Delilah listens to.
 /// How long AskUserQuestion may wait for an answer from Delilah: a day.
 pub const ASK_TIMEOUT_SECS: u64 = 86_400;
+/// The tools the branch guard looks at.
+pub const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
+/// The guard hook's own timeout: a little over its curl's `-m 15`.
+pub const GUARD_TIMEOUT_SECS: u64 = 20;
 
 const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
@@ -48,6 +53,60 @@ pub(crate) const KEPT_ENV: &[&str] = &[
     "NODE_EXTRA_CA_CERTS",
 ];
 
+/// How much the agent may do without asking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission {
+    Default,
+    /// Plan mode: Claude reads and explains, it does not edit.
+    Plan,
+    /// Anything not allowed is denied instead of asked, and editing tools are denied:
+    /// the idea conversation reads code without a terminal prompt in the way.
+    DontAsk,
+}
+
+/// Tools and commands allowed under [`Permission::DontAsk`]. Each read-only Bash rule
+/// also in its RTK-rewritten form: a user-level PreToolUse hook such as RTK rewrites
+/// `git status` to `rtk git status`, and allow rules match the rewritten command.
+/// No `rg` nor `git log/show/diff`: `rg --pre` runs programs and `--output` writes files.
+/// Reading is scoped: the workspace (the cwd) and, per extra dir, that folder; see
+/// [`dont_ask_allow`]. Claude applies `Read` rules to Grep and Glob too.
+const DONT_ASK_ALLOW: &[&str] = &[
+    "AskUserQuestion",
+    // Only the plugin's skill, as the call is recorded: `{"skill":"delilah:task-from-idea"}`.
+    "Skill(delilah:task-from-idea)",
+    "TodoWrite",
+    "Bash(git status:*)",
+    "Bash(ls:*)",
+    "Bash(rtk git status:*)",
+    "Bash(rtk ls:*)",
+];
+
+/// Editing tools, and the places secrets live (deny wins over the scoped allow).
+const DONT_ASK_DENY: &[&str] = &[
+    "Edit",
+    "MultiEdit",
+    "Write",
+    "NotebookEdit",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.config/gh/**)",
+    "Read(**/.env)",
+    "Read(**/.env.*)",
+];
+
+/// The allow list under [`Permission::DontAsk`]: reads limited to the workspace
+/// (`./**`, relative to the cwd) and each of `extra_dirs` (`//` marks an absolute path).
+fn dont_ask_allow(extra_dirs: &[&Path]) -> Vec<String> {
+    let mut allow = vec!["Read(./**)".to_string()];
+    for dir in extra_dirs {
+        let dir = dir.to_string_lossy();
+        allow.push(format!("Read(/{}/**)", dir.trim_end_matches('/')));
+    }
+    allow.extend(DONT_ASK_ALLOW.iter().map(|rule| rule.to_string()));
+    allow
+}
+
 pub struct Launch<'a> {
     pub workspace: &'a Path,
     pub session_id: &'a str,
@@ -57,80 +116,373 @@ pub struct Launch<'a> {
     pub resume: bool,
     /// Folders outside the workspace the agent may read, e.g. the task's ticket.
     pub extra_dirs: &'a [&'a Path],
-    /// Plan mode: Claude reads and explains, it does not edit.
-    pub read_only: bool,
+    pub permission: Permission,
+    /// A plugin folder to load for this session (`--plugin-dir`).
+    pub plugin_dir: Option<&'a Path>,
+    /// Extra instructions appended to Claude's system prompt, also when resuming.
+    pub append_system_prompt: Option<&'a str>,
     /// Remote Control: the session can also be followed and driven from claude.ai
     /// and the Claude app, under this name.
     pub remote_control: Option<&'a str>,
+    /// Program to run instead of `claude` (tests use a stand-in); `None` in production.
+    pub program: Option<&'a Path>,
 }
 
 /// Whether Claude saved a conversation for `session_id` started in `workspace`, i.e.
 /// whether `--resume` will find it: a session closed before its first message has none.
-pub fn has_conversation(workspace: &Path, session_id: &str) -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
-        return false;
-    };
-    let dir = workspace
-        .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf());
-    // Claude names a project's folder after its path, every other character a dash.
-    let folder: String = dir
-        .to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    Path::new(&home)
-        .join(".claude/projects")
-        .join(folder)
-        .join(format!("{session_id}.jsonl"))
-        .is_file()
+pub fn has_conversation_in(projects_root: &Path, workspace: &Path, session_id: &str) -> bool {
+    crate::transcript::transcript_path_under(projects_root, workspace, session_id)
+        .is_some_and(|path| path.is_file())
+}
+
+/// The arguments both runtimes share: the session, folders, settings, permission mode,
+/// plugin and system prompt. `remote_control` is left out in chat mode (it has no terminal).
+fn shared_args(launch: &Launch, with_remote_control: bool) -> Vec<OsString> {
+    let mut args: Vec<OsString> = Vec::new();
+    if launch.resume {
+        args.extend(["--resume".into(), launch.session_id.into()]);
+    } else {
+        args.extend(["--session-id".into(), launch.session_id.into()]);
+    }
+    // `--add-dir` takes several values: keep another option after it so it never
+    // swallows the prompt.
+    for dir in launch.extra_dirs {
+        args.extend(["--add-dir".into(), dir.into()]);
+    }
+    // The name is always given: `--remote-control` alone would take the prompt as one.
+    if let Some(name) = launch.remote_control.filter(|_| with_remote_control) {
+        args.extend(["--remote-control".into(), name.into()]);
+    }
+    args.extend(["--settings".into(), launch.settings.into()]);
+    match launch.permission {
+        Permission::Default => {}
+        Permission::Plan => {
+            args.extend(["--permission-mode".into(), "plan".into()]);
+        }
+        Permission::DontAsk => {
+            args.extend(["--permission-mode".into(), "dontAsk".into()]);
+            // A cloned repo's own settings must not widen the allow list.
+            args.extend(["--setting-sources".into(), "user".into()]);
+            // Nor may the project's or user's MCP servers reach an idea conversation.
+            args.push("--strict-mcp-config".into());
+        }
+    }
+    if let Some(dir) = launch.plugin_dir {
+        args.extend(["--plugin-dir".into(), dir.into()]);
+    }
+    if let Some(text) = launch.append_system_prompt {
+        args.extend(["--append-system-prompt".into(), text.into()]);
+    }
+    args
+}
+
+fn program<'a>(launch: &Launch<'a>) -> &'a OsStr {
+    launch.program.map_or(OsStr::new("claude"), Path::as_os_str)
 }
 
 pub fn command(launch: &Launch) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new("claude");
+    let mut cmd = CommandBuilder::new(program(launch));
     cmd.env_clear();
     for (key, value) in crate::env::agent_env() {
         cmd.env(key, value);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-
-    if launch.resume {
-        cmd.args(["--resume", launch.session_id]);
-    } else {
-        cmd.args(["--session-id", launch.session_id]);
-    }
-    // `--add-dir` takes several values: keep another option after it so it never
-    // swallows the prompt.
-    for dir in launch.extra_dirs {
-        cmd.arg("--add-dir");
-        cmd.arg(dir);
-    }
-    // The name is always given: `--remote-control` alone would take the prompt as one.
-    if let Some(name) = launch.remote_control {
-        cmd.args(["--remote-control", name]);
-    }
-    cmd.arg("--settings");
-    cmd.arg(launch.settings);
-    if launch.read_only {
-        cmd.args(["--permission-mode", "plan"]);
-    }
+    cmd.args(shared_args(launch, true));
     if let Some(prompt) = launch.prompt {
-        cmd.arg(prompt);
+        // After `--`, so a prompt starting with `-` is never read as an option.
+        cmd.args(["--", prompt]);
     }
     cmd.cwd(launch.workspace);
     cmd
 }
 
+/// The command for chat mode: the same environment and arguments, speaking stream-json
+/// on stdin and stdout. No positional prompt (the first prompt goes on stdin after the
+/// init line, also in `launch.prompt`) and no Remote Control. `--permission-prompt-tool
+/// stdio` makes `can_use_tool` requests arrive and adds AskUserQuestion to the tools.
+pub fn stream_command(launch: &Launch) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(program(launch));
+    cmd.env_clear();
+    cmd.envs(crate::env::agent_env());
+    cmd.args([
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--permission-prompt-tool",
+        "stdio",
+    ]);
+    cmd.args(shared_args(launch, false));
+    cmd.current_dir(launch.workspace);
+    cmd
+}
+
+/// Safe, bounded commands a remembered Bash PREFIX rule (`Bash(<prefix>:*)`) may cover.
+/// Each entry is a word sequence; a prefix is accepted when it starts with one of them
+/// (so `git diff --stat:*` is fine and `git:*` is not). Anything else is remembered only
+/// as the exact command. To extend: add an entry of words that, followed by ANY arguments,
+/// can neither run arbitrary code (no `-exec`, `--pre`, `-c alias=`, scripts, wrappers)
+/// nor write outside the workspace.
+pub const SAFE_BASH_PREFIXES: &[&[&str]] = &[
+    &["ls"],
+    &["cat"],
+    &["head"],
+    &["tail"],
+    &["wc"],
+    &["grep"],
+    &["pwd"],
+    &["echo"],
+    &["which"],
+    &["tree"],
+    &["diff"],
+    &["stat"],
+    &["file"],
+    &["git", "status"],
+    &["git", "diff"],
+    &["git", "log"],
+    &["git", "show"],
+    &["git", "add"],
+    &["npm", "test"],
+    &["pnpm", "test"],
+    &["yarn", "test"],
+    &["cargo", "test"],
+    &["cargo", "check"],
+    &["cargo", "build"],
+    &["cargo", "clippy"],
+    &["cargo", "fmt", "--check"],
+    &["go", "test"],
+    &["go", "vet"],
+    &["go", "build"],
+    &["pytest"],
+    &["make", "test"],
+];
+
+/// First words that hand over arbitrary execution: not even an exact command starting with
+/// one is remembered (`sh x.sh` runs whatever the file holds at that moment).
+const UNSAFE_BASH_HEADS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "fish",
+    "env",
+    "sudo",
+    "doas",
+    "xargs",
+    "eval",
+    "exec",
+    "nohup",
+    "time",
+    "command",
+    "builtin",
+    "nice",
+    "timeout",
+    "watch",
+    "node",
+    "nodejs",
+    "python",
+    "python2",
+    "python3",
+    "ruby",
+    "perl",
+    "php",
+    "lua",
+    "deno",
+    "bun",
+    "npx",
+    "bunx",
+    "pnpx",
+    "osascript",
+];
+
+/// Flags that make an allowlisted command run a program of the agent's choosing
+/// (`go test -exec sh`, `cargo test --config target.x.runner=…`, `npm test --script-shell`).
+const EXEC_FLAGS: &[&str] = &[
+    "-exec",
+    "--exec",
+    "-toolexec",
+    "--toolexec",
+    "-vettool",
+    "--vettool",
+    "--config",
+    "--script-shell",
+    "--ext-diff",
+    "--textconv",
+];
+
+/// Whether the arguments after a remembered Bash prefix stay bounded, checked by the daemon
+/// before it answers a request with a `Bash(<prefix>:*)` rule: whole words after the
+/// prefix, no chaining, substitution, redirection, quoting or globbing, no flag of
+/// [`EXEC_FLAGS`] (nor cargo's `-Z` or `+toolchain`), and every path relative and inside
+/// the workspace (no leading `/` or `~`, no `..`), so `cat ~/.ssh/id_rsa` or
+/// `git diff --output=../x` ask again.
+pub fn is_safe_prefix_tail(tail: &str) -> bool {
+    if !(tail.is_empty() || tail.starts_with(char::is_whitespace))
+        || tail.contains(SHELL_META)
+        || tail.contains(['\'', '"', '*', '?', '[', ']'])
+    {
+        return false;
+    }
+    tail.split_whitespace().all(|word| {
+        let (name, value) = match word.split_once('=') {
+            Some((name, value)) if word.starts_with('-') => (name, Some(value)),
+            _ => (word, None),
+        };
+        let escapes = |s: &str| {
+            s.starts_with(['/', '~']) || s.contains(":~") || s.split('/').any(|c| c == "..")
+        };
+        let flag = name.starts_with('-');
+        !(word.starts_with('+')
+            || EXEC_FLAGS.contains(&name)
+            || name.starts_with("-Z")
+            // A short flag with its value glued on (`-o/etc/x`) can't be told from a path.
+            || (flag && name.contains('/'))
+            || (!flag && escapes(name))
+            || value.is_some_and(escapes))
+    })
+}
+
+/// Characters that chain, substitute or redirect in a shell command (or break a rule).
+const SHELL_META: &[char] = &[
+    '(', ')', '\n', '\r', ';', '&', '|', '`', '$', '<', '>', '{', '}', '!', '\\',
+];
+
+/// Tools whose rule content is a path (inside the workspace only).
+pub const PATH_TOOLS: &[&str] = &[
+    "Read",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+];
+
+/// `NAME=value`, a shell environment assignment.
+fn is_env_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Whether `command` (a plain command line) is one Delilah may remember exactly: no
+/// wildcard, chaining, substitution or redirection, no leading `VAR=value`, and not
+/// starting with an interpreter or wrapper.
+pub fn is_safe_exact_command(command: &str) -> bool {
+    let command = command.trim();
+    if command.is_empty() || command.contains('*') || command.contains(SHELL_META) {
+        return false;
+    }
+    let head = command.split_whitespace().next().unwrap_or_default();
+    if is_env_assignment(head) {
+        return false;
+    }
+    let head = head.rsplit('/').next().unwrap_or(head);
+    !UNSAFE_BASH_HEADS.contains(&head)
+}
+
+/// Whether a Bash prefix (without `:*`) is a plain command line at least as specific as an
+/// entry of [`SAFE_BASH_PREFIXES`].
+pub fn is_safe_bash_prefix(prefix: &str) -> bool {
+    let prefix = prefix.trim();
+    if !is_safe_exact_command(prefix) {
+        return false;
+    }
+    let words: Vec<&str> = prefix.split_whitespace().collect();
+    SAFE_BASH_PREFIXES
+        .iter()
+        .any(|entry| words.len() >= entry.len() && words[..entry.len()] == **entry)
+}
+
+/// Whether a path rule content stays inside the workspace: relative, no `~`, no `//`
+/// (absolute), no `..`, and no wildcard but a trailing `/**` after a real directory.
+pub fn is_workspace_path(content: &str) -> bool {
+    let content = content.trim();
+    if content.is_empty() || content.starts_with(['/', '~', '!', '#']) {
+        return false;
+    }
+    let path = content.strip_suffix("/**").unwrap_or(content);
+    !path.is_empty()
+        && !path.contains(['*', '?', '[', ']', '\\', '{', '}', '\n', '\r', '(', ')'])
+        && !path.contains("//")
+        && path
+            .split('/')
+            .all(|c| !c.is_empty() && c != ".." && c != ".")
+}
+
+/// Whether a WebFetch content is `domain:<exact host>`.
+fn is_exact_domain(content: &str) -> bool {
+    content.trim().strip_prefix("domain:").is_some_and(|host| {
+        !host.is_empty()
+            && host.contains('.')
+            && !host.starts_with(['.', '-'])
+            && host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    })
+}
+
+/// Structural check of an allow rule before it is written into a session's settings (the
+/// daemon applies the same one before remembering): `Tool(content)` only, never a bare
+/// tool name, which would allow every use. Bash: `<prefix>:*` only for a prefix on the
+/// [`SAFE_BASH_PREFIXES`] allowlist, else one exact plain command. File tools: a path
+/// relative to the workspace (so inside it), wildcards only as a trailing `/**`.
+/// WebFetch: `domain:<exact host>`. Other tools (MCP): content that is not just wildcards.
+pub fn is_safe_allow_rule(rule: &str) -> bool {
+    let rule = rule.trim();
+    let Some((tool, rest)) = rule.split_once('(') else {
+        return false;
+    };
+    let Some(content) = rest.strip_suffix(')') else {
+        return false;
+    };
+    if tool.is_empty()
+        || !tool
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        || content.trim().is_empty()
+        || content.contains(['(', ')', '\n', '\r'])
+    {
+        return false;
+    }
+    if PATH_TOOLS.contains(&tool) {
+        return is_workspace_path(content);
+    }
+    if tool == "WebFetch" {
+        return is_exact_domain(content);
+    }
+    if tool != "Bash" {
+        let rest = content.trim();
+        return !rest
+            .chars()
+            .all(|c| matches!(c, '*' | '/' | '.' | ':') || c.is_whitespace());
+    }
+    match content.strip_suffix(":*") {
+        Some(prefix) => is_safe_bash_prefix(prefix),
+        None => is_safe_exact_command(content),
+    }
+}
+
 /// Settings for one session: every hook posts its JSON to the daemon, and the status
 /// line runs `status_script` (see [`status_script`]). Lives outside the repo and is
-/// passed with `--settings`.
+/// passed with `--settings`. `allowed_tools` are the task's extra allow rules.
+#[allow(clippy::too_many_arguments)]
 pub fn settings(
     daemon_url: &str,
     task: &str,
     session: &str,
     status_script: &Path,
     padding: Option<&Value>,
+    permission: Permission,
+    extra_dirs: &[&Path],
+    allowed_tools: &[String],
+    guard: bool,
 ) -> Value {
     let post = post_command(daemon_url, "/hooks/claude", task, session);
     let mut hooks: serde_json::Map<String, Value> = HOOK_EVENTS
@@ -147,23 +499,57 @@ pub fn settings(
         "curl -sS -m 86400 -X POST -H 'content-type: application/json' --data-binary @- \
          '{daemon_url}/hooks/claude/ask?task={task}&session={session}' 2>/dev/null || true"
     );
-    hooks.insert(
-        "PreToolUse".into(),
-        json!([
-            {
-                "matcher": "AskUserQuestion",
-                "hooks": [{ "type": "command", "command": ask, "timeout": ASK_TIMEOUT_SECS }]
-            },
-            // Every other tool start feeds the activity view; the answer is not awaited.
-            { "matcher": "*", "hooks": [{ "type": "command", "command": post }] }
-        ]),
-    );
+    let mut pre_tool_use = vec![json!({
+        "matcher": "AskUserQuestion",
+        "hooks": [{ "type": "command", "command": ask, "timeout": ASK_TIMEOUT_SECS }]
+    })];
+    // A task without a branch gets one before an edit or a commit lands (see the
+    // daemon's branching.rs); an empty answer lets the tool through.
+    if guard {
+        let command = format!(
+            "curl -sS -m 15 -X POST -H 'content-type: application/json' --data-binary @- \
+             '{daemon_url}/hooks/claude/guard?task={task}&session={session}' 2>/dev/null || true"
+        );
+        pre_tool_use.push(json!({
+            "matcher": GUARD_MATCHER,
+            "hooks": [{ "type": "command", "command": command, "timeout": GUARD_TIMEOUT_SECS }]
+        }));
+    }
+    // Every other tool start feeds the activity view; the answer is not awaited.
+    pre_tool_use.push(json!({ "matcher": "*", "hooks": [{ "type": "command", "command": post }] }));
+    hooks.insert("PreToolUse".into(), Value::Array(pre_tool_use));
     let mut status_line =
         json!({ "type": "command", "command": format!("sh '{}'", status_script.display()) });
     if let Some(padding) = padding {
         status_line["padding"] = padding.clone();
     }
-    json!({ "hooks": hooks, "statusLine": status_line })
+    let mut settings = json!({ "hooks": hooks, "statusLine": status_line });
+    if permission == Permission::DontAsk {
+        settings["permissions"] =
+            json!({ "allow": dont_ask_allow(extra_dirs), "deny": DONT_ASK_DENY });
+    } else if permission == Permission::Default {
+        // The rules the user chose with "always allow" in this task. Only a session
+        // that may edit gets them: a read-only one never gains a write through them.
+        // Bash prefix rules stay out: Claude would match any arguments after the prefix
+        // (`go test -exec sh`), so only the daemon applies them, with
+        // [`is_safe_prefix_tail`], when a chat-mode session asks.
+        let allow: Vec<&str> = allowed_tools
+            .iter()
+            .map(|r| r.trim())
+            .filter(|r| is_safe_allow_rule(r) && !is_bash_prefix_rule(r))
+            .collect();
+        if !allow.is_empty() {
+            settings["permissions"] = json!({ "allow": allow });
+        }
+    }
+    settings
+}
+
+/// `Bash(<prefix>:*)`.
+fn is_bash_prefix_rule(rule: &str) -> bool {
+    rule.strip_prefix("Bash(")
+        .and_then(|r| r.strip_suffix(')'))
+        .is_some_and(|c| c.trim_end().ends_with(":*"))
 }
 
 fn post_command(daemon_url: &str, path: &str, task: &str, session: &str) -> String {
@@ -206,11 +592,16 @@ pub fn status_script(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn write_settings(
     path: &Path,
     daemon_url: &str,
     task: &str,
     session: &str,
+    permission: Permission,
+    extra_dirs: &[&Path],
+    allowed_tools: &[String],
+    guard: bool,
 ) -> std::io::Result<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
@@ -231,9 +622,33 @@ pub fn write_settings(
         session,
         &script,
         user.as_ref().and_then(|u| u.get("padding")),
+        permission,
+        extra_dirs,
+        allowed_tools,
+        guard,
     );
     std::fs::write(path, serde_json::to_vec_pretty(&settings)?)?;
     Ok(path.to_path_buf())
+}
+
+/// Writes the Delilah plugin (the `task-from-idea` skill) under `dir`, with `version`
+/// in its manifest. Overwrites what is there, so it is safe to call on every start.
+pub fn write_plugin(dir: &Path, version: &str) -> std::io::Result<()> {
+    let mut manifest: Value =
+        serde_json::from_str(include_str!("../plugin/.claude-plugin/plugin.json"))?;
+    manifest["version"] = json!(version);
+    let manifest_dir = dir.join(".claude-plugin");
+    std::fs::create_dir_all(&manifest_dir)?;
+    std::fs::write(
+        manifest_dir.join("plugin.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    let skill_dir = dir.join("skills/task-from-idea");
+    std::fs::create_dir_all(&skill_dir)?;
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        include_str!("../plugin/skills/task-from-idea/SKILL.md"),
+    )
 }
 
 /// What a hook payload means for the task.
@@ -485,6 +900,10 @@ mod tests {
             "sess-1",
             Path::new("/tmp/statusline-sess-1.sh"),
             None,
+            Permission::Default,
+            &[],
+            &[],
+            false,
         );
         for event in HOOK_EVENTS {
             let command = s["hooks"][event][0]["hooks"][0]["command"]
@@ -505,6 +924,37 @@ mod tests {
                 .contains("/hooks/claude/ask?task=PROJ-1&session=sess-1")
         );
         assert_eq!(ask["hooks"][0]["timeout"], ASK_TIMEOUT_SECS);
+        // Without the guard, only the activity hook joins it on PreToolUse.
+        let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 2);
+        assert_eq!(pre[1]["matcher"], "*");
+    }
+
+    #[test]
+    fn the_guard_adds_a_second_pre_tool_use_hook() {
+        let s = settings(
+            "http://127.0.0.1:7420",
+            "LIBRE-1",
+            "sess-1",
+            Path::new("/tmp/statusline-sess-1.sh"),
+            None,
+            Permission::Default,
+            &[],
+            &[],
+            true,
+        );
+        let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 3);
+        assert_eq!(pre[0]["matcher"], "AskUserQuestion");
+        assert_eq!(pre[1]["matcher"], "Edit|Write|MultiEdit|NotebookEdit|Bash");
+        assert_eq!(pre[2]["matcher"], "*");
+        let command = pre[1]["hooks"][0]["command"].as_str().unwrap();
+        assert!(command.contains("curl -sS -m 15"), "{command}");
+        assert!(
+            command.contains("/hooks/claude/guard?task=LIBRE-1&session=sess-1"),
+            "{command}"
+        );
+        assert!(command.ends_with("|| true"), "{command}");
     }
 
     #[test]
@@ -533,8 +983,11 @@ mod tests {
             prompt: Some("/feature PROJ-1"),
             resume: false,
             extra_dirs: &[],
-            read_only: false,
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
             remote_control: None,
+            program: None,
         };
         let args = |l: &Launch| {
             command(l)
@@ -552,6 +1005,7 @@ mod tests {
                 "abc",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -568,11 +1022,13 @@ mod tests {
                 "abc",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "continúa"
             ]
         );
         let remote = Launch {
             remote_control: Some("PROJ-1 · Principal"),
+            program: None,
             ..base
         };
         assert_eq!(
@@ -585,6 +1041,7 @@ mod tests {
                 "PROJ-1 · Principal",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -603,11 +1060,12 @@ mod tests {
                 "PROJ-1 · Principal",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "continúa"
             ]
         );
         let remote_plan = Launch {
-            read_only: true,
+            permission: Permission::Plan,
             ..remote
         };
         assert_eq!(
@@ -622,9 +1080,405 @@ mod tests {
                 "/tmp/s.json",
                 "--permission-mode",
                 "plan",
+                "--",
                 "/feature PROJ-1"
             ]
         );
+    }
+
+    fn argv(l: &Launch) -> Vec<String> {
+        command(l)
+            .get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn launch() -> Launch<'static> {
+        Launch {
+            workspace: Path::new("/tmp/ws"),
+            session_id: "abc",
+            settings: Path::new("/tmp/s.json"),
+            prompt: None,
+            resume: false,
+            extra_dirs: &[],
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
+            remote_control: None,
+            program: None,
+        }
+    }
+
+    fn has_pair(args: &[String], flag: &str, value: &str) -> bool {
+        args.windows(2).any(|w| w[0] == flag && w[1] == value)
+    }
+
+    #[test]
+    fn stream_command_has_the_stream_flags_and_no_prompt_nor_remote_control() {
+        let l = Launch {
+            prompt: Some("hola"),
+            remote_control: Some("PROJ-1"),
+            permission: Permission::Plan,
+            ..launch()
+        };
+        let cmd = stream_command(&l);
+        let std = cmd.as_std();
+        assert_eq!(std.get_program(), "claude");
+        let args: Vec<String> = std
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-p",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-prompt-tool",
+                "stdio",
+                "--session-id",
+                "abc",
+                "--settings",
+                "/tmp/s.json",
+                "--permission-mode",
+                "plan"
+            ]
+        );
+        assert_eq!(std.get_current_dir(), Some(Path::new("/tmp/ws")));
+        let resumed = stream_command(&Launch {
+            resume: true,
+            program: Some(Path::new("/x/fake")),
+            ..launch()
+        });
+        assert_eq!(resumed.as_std().get_program(), "/x/fake");
+        assert!(resumed.as_std().get_args().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn permission_modes_map_to_flags() {
+        let plan = argv(&Launch {
+            permission: Permission::Plan,
+            ..launch()
+        });
+        assert!(has_pair(&plan, "--permission-mode", "plan"), "{plan:?}");
+        let dont_ask = argv(&Launch {
+            permission: Permission::DontAsk,
+            ..launch()
+        });
+        assert!(
+            has_pair(&dont_ask, "--permission-mode", "dontAsk"),
+            "{dont_ask:?}"
+        );
+        assert!(!argv(&launch()).contains(&"--permission-mode".to_string()));
+        // Only the read-only conversation drops the repo's own settings.
+        assert!(
+            has_pair(&dont_ask, "--setting-sources", "user"),
+            "{dont_ask:?}"
+        );
+        assert!(
+            dont_ask.contains(&"--strict-mcp-config".to_string()),
+            "{dont_ask:?}"
+        );
+        assert!(!plan.contains(&"--strict-mcp-config".to_string()));
+        assert!(!plan.contains(&"--setting-sources".to_string()));
+        assert!(!argv(&launch()).contains(&"--setting-sources".to_string()));
+    }
+
+    #[test]
+    fn a_prompt_goes_after_double_dash_so_it_is_never_an_option() {
+        for prompt in ["--dangerously-skip-permissions", "-p", "idea"] {
+            let args = argv(&Launch {
+                prompt: Some(prompt),
+                plugin_dir: Some(Path::new("/tmp/plugin")),
+                ..launch()
+            });
+            assert_eq!(args[args.len() - 2..], ["--", prompt], "{args:?}");
+        }
+    }
+
+    #[test]
+    fn plugin_dir_and_system_prompt_are_optional_flags() {
+        let plain = argv(&launch());
+        assert!(!plain.contains(&"--plugin-dir".to_string()));
+        assert!(!plain.contains(&"--append-system-prompt".to_string()));
+        let dir = Path::new("/tmp/plugin");
+        for resume in [false, true] {
+            let args = argv(&Launch {
+                plugin_dir: Some(dir),
+                append_system_prompt: Some("be brief"),
+                resume,
+                ..launch()
+            });
+            assert!(has_pair(&args, "--plugin-dir", "/tmp/plugin"), "{args:?}");
+            assert!(
+                has_pair(&args, "--append-system-prompt", "be brief"),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dont_ask_settings_allow_read_only_tools_and_deny_edits() {
+        let extra = Path::new("/home/u/.delilah/tasks/T-1");
+        let s = |p| {
+            settings(
+                "http://x",
+                "T-1",
+                "s",
+                Path::new("/tmp/s.sh"),
+                None,
+                p,
+                &[extra],
+                &[],
+                false,
+            )
+        };
+        let dont_ask = s(Permission::DontAsk);
+        assert_eq!(
+            dont_ask["permissions"]["allow"],
+            json!([
+                "Read(./**)",
+                "Read(//home/u/.delilah/tasks/T-1/**)",
+                "AskUserQuestion",
+                "Skill(delilah:task-from-idea)",
+                "TodoWrite",
+                "Bash(git status:*)",
+                "Bash(ls:*)",
+                "Bash(rtk git status:*)",
+                "Bash(rtk ls:*)"
+            ])
+        );
+        assert_eq!(
+            dont_ask["permissions"]["deny"],
+            json!([
+                "Edit",
+                "MultiEdit",
+                "Write",
+                "NotebookEdit",
+                "Read(~/.ssh/**)",
+                "Read(~/.aws/**)",
+                "Read(~/.gnupg/**)",
+                "Read(~/.config/gh/**)",
+                "Read(**/.env)",
+                "Read(**/.env.*)"
+            ])
+        );
+        assert!(s(Permission::Plan).get("permissions").is_none());
+        assert!(s(Permission::Default).get("permissions").is_none());
+    }
+
+    #[test]
+    fn a_prefix_tail_stays_bounded() {
+        for ok in [
+            "",
+            " ./...",
+            " -p delilah-daemon --lib",
+            " -- --nocapture",
+            " --stat HEAD~3",
+            " -la src",
+            " -rn foo crates/x.rs",
+            " --output=out/diff.txt",
+            " -v -run TestX ./pkg/...",
+        ] {
+            assert!(is_safe_prefix_tail(ok), "{ok:?}");
+        }
+        for bad in [
+            "x",
+            " -exec /bin/sh",
+            " -exec sh",
+            " -toolexec=sh",
+            " -vettool=x",
+            " --config target.x.runner=\"sh\"",
+            " --config=build.rustc-wrapper=x",
+            " -Zunstable-options",
+            " +nightly",
+            " --script-shell=python",
+            " --ext-diff",
+            " -\"exec\" sh",
+            " -'exec' sh",
+            " ~/.ssh/id_rsa",
+            " /etc/passwd",
+            " ../../secret",
+            " src/../../x",
+            " --output=../x",
+            " --output=/Users/x/.zshrc",
+            " --output=~/x",
+            " -o/etc/x",
+            " .*",
+            " a; sh",
+            " $(id)",
+            " a > f",
+        ] {
+            assert!(!is_safe_prefix_tail(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_tasks_allowed_tools_go_into_the_allow_list_of_an_editing_session_only() {
+        let rules = vec![
+            "Bash(npm test:*)".to_string(),
+            " Bash(git status) ".to_string(),
+            "Bash(git:*)".to_string(),
+            "Edit(~/**)".to_string(),
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Bash(sh:*)".to_string(),
+            "Bash(npm test; rm -rf /:*)".to_string(),
+            "  ".to_string(),
+        ];
+        let s = |p| {
+            settings(
+                "http://x",
+                "T-1",
+                "s",
+                Path::new("/tmp/s.sh"),
+                None,
+                p,
+                &[],
+                &rules,
+                false,
+            )
+        };
+        assert_eq!(
+            s(Permission::Default)["permissions"]["allow"],
+            json!(["Bash(git status)"])
+        );
+        assert!(s(Permission::Default)["permissions"].get("deny").is_none());
+        assert!(s(Permission::Plan).get("permissions").is_none());
+        let dont_ask = s(Permission::DontAsk);
+        assert!(
+            !dont_ask["permissions"]["allow"]
+                .to_string()
+                .contains("npm install")
+        );
+    }
+
+    #[test]
+    fn only_specific_safe_rules_pass_is_safe_allow_rule() {
+        for ok in [
+            "Bash(npm test:*)",
+            "Bash(cargo test:*)",
+            "Bash(cargo test -p foo:*)",
+            "Bash(git status:*)",
+            "Bash(git diff --stat:*)",
+            "Bash(ls:*)",
+            "Bash(ls -la:*)",
+            "Bash(git status)",
+            "Bash(npm install lodash)",
+            "Bash(rm -rf target)",
+            "WebFetch(domain:docs.rs)",
+            "Edit(src/a.rs)",
+            "Edit(src/**)",
+            "Read(README.md)",
+            "mcp__srv__tool(read x)",
+        ] {
+            assert!(is_safe_allow_rule(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "Bash",
+            "Edit",
+            "WebFetch",
+            "Bash()",
+            "Bash(:*)",
+            "Bash(*)",
+            "Bash(npm*:*)",
+            "Bash(ls *:*)",
+            "Bash(ls;:*)",
+            "Bash(a && b:*)",
+            "Bash(a | b:*)",
+            "Bash(echo `id`:*)",
+            "Bash(echo $(id):*)",
+            "Bash(a > f:*)",
+            "Bash(sh:*)",
+            "Bash(bash -c:*)",
+            "Bash(env:*)",
+            "Bash(sudo ls:*)",
+            "Bash(/usr/bin/env FOO=1:*)",
+            "Bash(node -e:*)",
+            "Bash(python -c:*)",
+            "Bash(xargs rm:*)",
+            "Bash(ls\nrm:*)",
+            // The review's bypasses: not on the allowlist.
+            "Bash(git:*)",
+            "Bash(npm run:*)",
+            "Bash(npm:*)",
+            "Bash(find:*)",
+            "Bash(git config:*)",
+            "Bash(rm:*)",
+            "Bash(curl:*)",
+            "Bash(git -c core.pager=sh:*)",
+            "Bash(cargo:*)",
+            "Bash(make:*)",
+            // Env assignments and interpreters, also as exact commands.
+            "Bash(FOO=1 sh:*)",
+            "Bash(FOO=1 ls:*)",
+            "Bash(FOO=1 ls)",
+            "Bash(sh x.sh)",
+            "Bash(node script.js)",
+            "WebFetch(*)",
+            "WebFetch(domain:*)",
+            "WebFetch(domain:*.com)",
+            "WebFetch(domain:com)",
+            "Edit(~/**)",
+            "Write(//**/*.sh)",
+            "Read(~/.ssh/**)",
+            "Edit(*.rs)",
+            "Edit(src/*.rs)",
+            "Edit(**/*.rs)",
+            "Edit(/etc/passwd)",
+            "Edit(//etc/passwd)",
+            "Edit(../x)",
+            "Edit(src/../../x)",
+            "Edit(**)",
+            "Read(**)",
+            "Read(//**)",
+            "Read(  )",
+        ] {
+            assert!(!is_safe_allow_rule(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn write_plugin_is_idempotent_and_sets_the_version() {
+        let dir = tempfile::tempdir().unwrap();
+        write_plugin(dir.path(), "1.2.3").unwrap();
+        write_plugin(dir.path(), "1.2.4").unwrap();
+        let manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join(".claude-plugin/plugin.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "delilah");
+        assert_eq!(manifest["version"], "1.2.4");
+        let skill =
+            std::fs::read_to_string(dir.path().join("skills/task-from-idea/SKILL.md")).unwrap();
+        assert!(skill.contains("name: task-from-idea"), "{skill}");
+    }
+
+    #[test]
+    fn the_program_override_replaces_claude_as_argv0() {
+        let fake = Path::new("/tmp/fake-claude");
+        let launch = |program| Launch {
+            workspace: Path::new("/tmp/ws"),
+            session_id: "abc",
+            settings: Path::new("/tmp/s.json"),
+            prompt: None,
+            resume: false,
+            extra_dirs: &[],
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
+            remote_control: None,
+            program,
+        };
+        let first = |l: &Launch| command(l).get_argv()[0].to_string_lossy().into_owned();
+        assert_eq!(first(&launch(None)), "claude");
+        assert_eq!(first(&launch(Some(fake))), "/tmp/fake-claude");
     }
 
     #[test]
@@ -637,8 +1491,11 @@ mod tests {
             prompt: Some("/feature PROJ-1"),
             resume: false,
             extra_dirs: &[ticket_dir],
-            read_only: false,
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
             remote_control: None,
+            program: None,
         });
         let argv: Vec<String> = cmd
             .get_argv()
@@ -655,6 +1512,7 @@ mod tests {
                 "/tmp/tasks/PROJ-1",
                 "--settings",
                 "/tmp/s.json",
+                "--",
                 "/feature PROJ-1"
             ]
         );
@@ -669,8 +1527,11 @@ mod tests {
             prompt: None,
             resume: false,
             extra_dirs: &[],
-            read_only: false,
+            permission: Permission::Default,
+            plugin_dir: None,
+            append_system_prompt: None,
             remote_control: None,
+            program: None,
         });
         assert!(cmd.get_env("CLAUDE_CODE_CHILD_SESSION").is_none());
         assert!(cmd.get_env("CLAUDECODE").is_none());
@@ -716,7 +1577,17 @@ mod tests {
 
     #[test]
     fn settings_register_the_activity_hooks() {
-        let s = settings("http://d", "T-1", "s1", Path::new("/tmp/s.sh"), None);
+        let s = settings(
+            "http://d",
+            "T-1",
+            "s1",
+            Path::new("/tmp/s.sh"),
+            None,
+            Permission::Default,
+            &[],
+            &[],
+            false,
+        );
         for event in ["PostToolUseFailure", "SubagentStart", "SubagentStop"] {
             let c = s["hooks"][event][0]["hooks"][0]["command"]
                 .as_str()

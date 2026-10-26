@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type ChangeKind, type TreeEntry } from "../api";
 import { t } from "../i18n";
+import "./FileTree.css";
 
 const MARK: Partial<Record<ChangeKind, string>> = {
   modified: "c-wait",
@@ -77,7 +78,7 @@ export function FileTree({ taskKey, changed, active, expanded, refresh, onOpen }
         return [
           <button key={path} className="trow" style={pad} onClick={() => toggle(path)} title={path}>
             <span className={`chev ${open ? "open" : ""}`}>›</span>
-            <span className="trunc" style={{ flex: 1 }}>{e.name}</span>
+            <span className="trunc tree-name">{e.name}</span>
             {changedDirs.has(path) && <span className="tdot" />}
           </button>,
           ...(open ? rows(path, depth + 1) : []),
@@ -93,7 +94,7 @@ export function FileTree({ taskKey, changed, active, expanded, refresh, onOpen }
           title={path}
         >
           <span className="chev" />
-          <span className="trunc" style={{ flex: 1 }}>{e.name}</span>
+          <span className="trunc tree-name">{e.name}</span>
           {kind && <span className="mono tkind">{kind === "untracked" ? "U" : kind[0].toUpperCase()}</span>}
         </button>,
       ];
@@ -101,8 +102,8 @@ export function FileTree({ taskKey, changed, active, expanded, refresh, onOpen }
 
   return (
     <div className="tree">
-      {children.has("") ? rows("", 0) : <div className="muted" style={{ padding: 10 }}>{t("Cargando…")}</div>}
-      {children.get("")?.length === 0 && <div className="muted" style={{ padding: 10 }}>{t("El workspace está vacío.")}</div>}
+      {children.has("") ? rows("", 0) : <div className="muted tree-note">{t("Cargando…")}</div>}
+      {children.get("")?.length === 0 && <div className="muted tree-note">{t("El workspace está vacío.")}</div>}
     </div>
   );
 }

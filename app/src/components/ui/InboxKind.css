@@ -1,0 +1,2 @@
+.kind { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--tx2); }
+.kind .i { width: 14px; height: 14px; }

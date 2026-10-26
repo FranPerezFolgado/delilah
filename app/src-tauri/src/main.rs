@@ -6,21 +6,29 @@
 mod daemon;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 const RESTART_DAEMON: &str = "daemon-restart";
 const STOP_DAEMON: &str = "daemon-stop";
 const SHOW_LOGS: &str = "show-logs";
+const CHECK_UPDATES: &str = "check-updates";
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Native folder picker, e.g. to add a project.
         .plugin(tauri_plugin_dialog::init())
         // Native notifications for what waits on you (see app/src/platform.ts).
         .plugin(tauri_plugin_notification::init())
         // Links in Markdown previews open in the default browser, not in the window.
         .plugin(tauri_plugin_opener::init())
+        // Relaunch after installing an update.
+        .plugin(tauri_plugin_process::init());
+    // Dev and unpackaged builds never check for or install updates.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
+        .invoke_handler(tauri::generate_handler![reveal_path])
         .menu(menu)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
@@ -31,6 +39,15 @@ fn main() {
                     let _ = window.set_focus();
                     let _ = window.eval("window.dispatchEvent(new Event('delilah:show-logs'))");
                 }
+                return;
+            }
+            if id == CHECK_UPDATES {
+                // The UI owns the update flow (app/src/useUpdates.ts): bring the window and tell it.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+                let _ = app.emit_to("main", CHECK_UPDATES, ());
                 return;
             }
             if id != RESTART_DAEMON && id != STOP_DAEMON {
@@ -95,6 +112,39 @@ fn main() {
         });
 }
 
+/// Resolves `path` for «Mostrar en Finder»: canonicalised first (so `..` and symlinks are
+/// resolved before anything is judged), it must exist and lie under the canonical `$HOME`.
+fn validate_reveal(path: &str, home: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let home = home.canonicalize().map_err(|e| format!("home: {e}"))?;
+    let real = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(|e| format!("{path}: {e}"))?;
+    if real.starts_with(&home) {
+        Ok(real)
+    } else {
+        Err(format!("{path}: outside the home folder"))
+    }
+}
+
+/// Reveals a path in Finder. Refuses anything that is not under the user's home.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    let real = validate_reveal(&path, std::path::Path::new(&home))?;
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(real)
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| {
+            if s.success() {
+                Ok(())
+            } else {
+                Err(format!("open exited with {s}"))
+            }
+        })
+}
+
 /// The usual macOS menus, minus "Close Window": in a terminal app Cmd+W closes the
 /// active tab, so the shortcut has to reach the UI (see `app/src/shortcuts.ts`).
 /// Edit stays, or copy and paste would not work in the webview.
@@ -109,8 +159,27 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         &[
             &PredefinedMenuItem::about(app, Some(l("Acerca de Delilah", "About Delilah")), None)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, RESTART_DAEMON, l("Reiniciar el daemon", "Restart the daemon"), true, None::<&str>)?,
-            &MenuItem::with_id(app, STOP_DAEMON, l("Detener el daemon", "Stop the daemon"), true, None::<&str>)?,
+            &MenuItem::with_id(
+                app,
+                CHECK_UPDATES,
+                l("Buscar actualizaciones…", "Check for updates…"),
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                RESTART_DAEMON,
+                l("Reiniciar el daemon", "Restart the daemon"),
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                STOP_DAEMON,
+                l("Detener el daemon", "Stop the daemon"),
+                true,
+                None::<&str>,
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, Some(l("Ocultar Delilah", "Hide Delilah")))?,
             &PredefinedMenuItem::hide_others(app, Some(l("Ocultar otros", "Hide Others")))?,
@@ -141,7 +210,10 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::minimize(app, Some(l("Minimizar", "Minimize")))?,
             &PredefinedMenuItem::maximize(app, Some(l("Zoom", "Zoom")))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::fullscreen(app, Some(l("Pantalla completa", "Enter Full Screen")))?,
+            &PredefinedMenuItem::fullscreen(
+                app,
+                Some(l("Pantalla completa", "Enter Full Screen")),
+            )?,
         ],
     )?;
     let help = Submenu::with_items(
@@ -157,4 +229,58 @@ fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         )?],
     )?;
     Menu::with_items(app, &[&app_menu, &edit, &window, &help])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_reveal;
+    use std::fs;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("delilah-reveal-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn plain_path_under_home_passes() {
+        let root = tmp("ok");
+        let home = root.join("home");
+        fs::create_dir_all(home.join("data")).unwrap();
+        let got = validate_reveal(home.join("data").to_str().unwrap(), &home).unwrap();
+        assert!(got.ends_with("data"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dotdot_out_of_home_is_refused() {
+        let root = tmp("dotdot");
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
+        let p = format!("{}/../other", home.display());
+        assert!(validate_reveal(&p, &home).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn symlink_pointing_outside_home_is_refused() {
+        let root = tmp("link");
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), home.join("link")).unwrap();
+        assert!(validate_reveal(home.join("link").to_str().unwrap(), &home).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_path_is_refused() {
+        let root = tmp("missing");
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        assert!(validate_reveal(home.join("nope").to_str().unwrap(), &home).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

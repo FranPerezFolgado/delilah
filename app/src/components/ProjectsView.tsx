@@ -1,230 +1,177 @@
 import { useState } from "react";
-import { api, type FolderInspection, type Project, type ProjectKind } from "../api";
-import { isDesktop, pickFolder } from "../platform";
-import { t } from "../i18n";
+import { createPortal } from "react-dom";
+import { api, type Project, type Task } from "../api";
+import { t, tn } from "../i18n";
+import { Button, ConfirmDialog, Dialog, Icon, IconButton, Menu } from "./ui";
+import { ProjectSettings } from "./ProjectSettings";
+import { AddProjectDialog } from "./AddProjectDialog";
+import "./ProjectsView.css";
 
-export function ProjectsView({ projects, onChanged }: { projects: Project[]; onChanged: () => void }) {
-  const [path, setPath] = useState("");
-  const [kind, setKind] = useState<ProjectKind>("repo");
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [found, setFound] = useState<FolderInspection | null>(null);
+interface Props {
+  projects: Project[];
+  /** All tasks: they give each project's active count and whether it holds a workspace. */
+  tasks?: Task[];
+  onChanged: () => void;
+  onOpenProject?: (name: string) => void;
+  /** The add dialog, opened from outside too (the sidebar «+»). Uncontrolled when omitted. */
+  adding?: boolean;
+  onAddingChange?: (open: boolean) => void;
+}
 
-  // Fill the rest of the form from what the folder is.
-  const inspect = async (folder: string) => {
-    setFound(null);
-    if (!folder.trim()) return;
-    // Show the chosen folder even if it turns out not to be usable.
-    setPath(folder.trim());
-    try {
-      const info = await api.inspectFolder(folder.trim());
-      setFound(info);
-      setPath(info.path);
-      setKind(info.kind);
-      setName((n) => n || info.name);
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
+const isActive = (tk: Task) => tk.status.type !== "done" && tk.status.type !== "queued";
+const holdsWorkspace = (tk: Task) => isActive(tk) && tk.branch != null;
 
-  const choose = async () => {
-    const folder = await pickFolder(t("Elige la carpeta del repositorio"));
-    if (folder) {
-      setName("");
-      await inspect(folder);
-    }
-  };
+function where(p: Project): string {
+  if (p.settings.workspace === "checkout") return t("Tu checkout");
+  if (p.settings.workspace === "worktree") return t("Aislado (worktree)");
+  return t("Por defecto");
+}
 
-  const add = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.addProject({ path: path.trim(), kind, name: name.trim() || undefined });
-      setPath("");
-      setName("");
-      setFound(null);
-      onChanged();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+export function ProjectsView({ projects, tasks = [], onChanged, onOpenProject, adding, onAddingChange }: Props) {
+  const [ownAdding, setOwnAdding] = useState(false);
+  const addOpen = adding ?? ownAdding;
+  const setAdd = (open: boolean) => (onAddingChange ? onAddingChange(open) : setOwnAdding(open));
 
   return (
     <>
       <div className="view-head" data-tauri-drag-region>
         <h1 data-tauri-drag-region>{t("Proyectos")}</h1>
-        <span className="muted" style={{ fontSize: 12 }}>{projects.length}</span>
+        <span className="muted small">{projects.length}</span>
+        <span className="pv-spacer" />
+        <Button variant="primary" icon="plus" onClick={() => setAdd(true)}>{t("Añadir proyecto")}</Button>
       </div>
       <div className="view-body">
-        <div className="card">
-          <table className="list">
-            <thead>
-              <tr><th>{t("Nombre")}</th><th>{t("Tipo")}</th><th>Workflow</th><th>{t("Carpeta")}</th><th /></tr>
-            </thead>
-            <tbody>
-              {projects.length === 0 && (
-                <tr><td colSpan={5} className="muted">{t("Todavía no hay proyectos. Añade uno abajo.")}</td></tr>
-              )}
-              {projects.map((p) => (
-                <ProjectRow key={p.name} project={p} onChanged={onChanged} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <form className="card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }} onSubmit={add}>
-          <div className="sec">{t("Añadir proyecto")}</div>
-          <label className="field">
-            <span>{t("Carpeta del repo")}</span>
-            <span style={{ display: "flex", gap: 8 }}>
-              <input className="input mono" style={{ flex: 1 }} placeholder={t("/Users/tu/dev/projects/mi-proyecto")} value={path}
-                onChange={(e) => setPath(e.target.value)} onBlur={(e) => inspect(e.target.value)} required />
-              {isDesktop && (
-                <button type="button" className="btn" style={{ height: 30 }} onClick={choose}>{t("Elegir carpeta…")}</button>
-              )}
-            </span>
-            {found && (
-              <span className="muted" style={{ fontSize: 12 }}>
-                {found.submodules > 0
-                  ? t("Repo con {n} submódulos: se añadirá como parent.", { n: found.submodules })
-                  : t("Repo sin submódulos: se añadirá como repo.")}
-              </span>
-            )}
-          </label>
-          <div className="field">
-            <span>{t("Tipo")}</span>
-            <div className="choices" role="radiogroup">
-              {(["repo", "parent"] as ProjectKind[]).map((k) => (
-                <label key={k} className={`choice ${kind === k ? "on" : ""}`}>
-                  <input type="radio" name="kind" checked={kind === k} onChange={() => setKind(k)} />
-                  {k === "repo" ? t("Repo (un repositorio)") : t("Parent (con submódulos)")}
-                </label>
-              ))}
-            </div>
+        {projects.length === 0 ? (
+          <div className="pv-empty">
+            <p>{t("Todavía no hay proyectos.")}</p>
+            <Button variant="primary" icon="plus" onClick={() => setAdd(true)}>{t("Añadir proyecto")}</Button>
           </div>
-          <label className="field">
-            <span>{t("Nombre (opcional, por defecto el de la carpeta)")}</span>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          {error && (
-            <div className="notice" style={{ borderColor: "var(--err)" }}>
-              <span className="c-err">●</span>
-              <span className="selectable">
-                {error}
-                {error.includes("not a git repo") && t(" — inicializa el repositorio (git init) y vuelve a elegirlo.")}
-              </span>
-            </div>
-          )}
-          <div><button className="btn btn-p" disabled={busy}>{t("Añadir")}</button></div>
-        </form>
+        ) : (
+          <div className="card">
+            <table className="list pv-table">
+              <thead>
+                <tr><th>{t("Nombre")}</th><th>{t("Dónde trabaja")}</th><th>{t("Carpeta")}</th><th /></tr>
+              </thead>
+              <tbody>
+                {projects.map((p) => (
+                  <ProjectRow
+                    key={p.name}
+                    project={p}
+                    tasks={tasks.filter((tk) => tk.project === p.name)}
+                    onChanged={onChanged}
+                    onOpen={onOpenProject}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+      {addOpen && (
+        <AddProjectDialog
+          onClose={() => setAdd(false)}
+          onAdded={() => {
+            setAdd(false);
+            onChanged();
+          }}
+        />
+      )}
     </>
   );
 }
 
-/** One project: shown, edited in place, or confirming its deletion. */
-function ProjectRow({ project, onChanged }: { project: Project; onChanged: () => void }) {
-  const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
-  const [name, setName] = useState(project.name);
-  const [path, setPath] = useState(project.path);
-  const [kind, setKind] = useState<ProjectKind>(project.kind);
-  const [workflow, setWorkflow] = useState(project.workflow);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const act = async (action: () => Promise<unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-      setMode("view");
-      onChanged();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const reset = () => {
-    setName(project.name);
-    setPath(project.path);
-    setKind(project.kind);
-    setWorkflow(project.workflow);
-    setError(null);
-    setMode("view");
-  };
-
-  if (mode === "edit") {
-    return (
-      <tr>
-        <td colSpan={5}>
-          <form
-            style={{ display: "grid", gridTemplateColumns: "160px 170px 120px minmax(0,1fr)", gap: 8, alignItems: "end" }}
-            onSubmit={(e) => {
-              e.preventDefault();
-              act(() => api.updateProject(project.name, { name, path, kind, workflow }));
-            }}
-          >
-            <label className="field"><span>{t("Nombre")}</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} required /></label>
-            <label className="field">
-              <span>{t("Tipo")}</span>
-              <select className="input" value={kind} onChange={(e) => setKind(e.target.value as ProjectKind)}>
-                <option value="repo">Repo</option>
-                <option value="parent">{t("Parent con submódulos")}</option>
-              </select>
-            </label>
-            <label className="field"><span>Workflow</span><input className="input mono" value={workflow} onChange={(e) => setWorkflow(e.target.value)} required /></label>
-            <label className="field">
-              <span>{t("Carpeta")}</span>
-              <span style={{ display: "flex", gap: 6 }}>
-                <input className="input mono" style={{ flex: 1, minWidth: 0 }} value={path} onChange={(e) => setPath(e.target.value)} required />
-                {isDesktop && (
-                  <button type="button" className="btn" style={{ height: 30 }}
-                    onClick={async () => { const f = await pickFolder(t("Elige la carpeta del repositorio")); if (f) setPath(f); }}>
-                    {t("Elegir…")}
-                  </button>
-                )}
-              </span>
-            </label>
-            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btn btn-p" disabled={busy}>{t("Guardar")}</button>
-              <button type="button" className="btn" onClick={reset}>{t("Cancelar")}</button>
-              {error && <span className="error selectable">{error}</span>}
-            </div>
-          </form>
-        </td>
-      </tr>
-    );
-  }
+function ProjectRow({ project, tasks, onChanged, onOpen }: { project: Project; tasks: Task[]; onChanged: () => void; onOpen?: (name: string) => void }) {
+  const [dialog, setDialog] = useState<"settings" | "rename" | "remove" | null>(null);
+  const active = tasks.filter(isActive).length;
+  const blocked = tasks.some(holdsWorkspace) ? t("Una tarea tiene su workspace en este proyecto: termínala o elimínala antes de quitarlo.") : undefined;
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
   return (
-    <tr>
-      <td style={{ fontWeight: 600 }}>{project.name}</td>
-      <td>{project.kind === "parent" ? t("Parent con submódulos") : "Repo"}</td>
-      <td className="mono">{project.workflow}</td>
-      <td className="mono muted trunc selectable" style={{ maxWidth: 380 }}>{project.path}</td>
-      <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-        {mode === "delete" ? (
-          <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-            <span className="muted" style={{ fontSize: 12 }}>{t("Sus sesiones se cierran; las tareas hechas se quedan sin proyecto.")}</span>
-            <button className="btn" style={{ color: "var(--err)" }} disabled={busy} onClick={() => act(() => api.deleteProject(project.name))}>
-              {t("Borrar")}
-            </button>
-            <button className="btn btn-ghost" onClick={reset}>{t("Cancelar")}</button>
+    <tr className="pv-row" onClick={() => onOpen?.(project.name)}>
+      <td>
+        <span className="pv-name">
+          <Icon name={project.kind === "parent" ? "folder" : "repo"} />
+          <span className="pv-names">
+            <button type="button" className="pv-open" onClick={(e) => { stop(e); onOpen?.(project.name); }}>{project.name}</button>
+            <span className="muted small">
+              {project.kind === "parent" ? "Multi-repo" : "Repo"} · {tn(active, "{n} tarea activa", "{n} tareas activas")}
+            </span>
           </span>
-        ) : (
-          <span style={{ display: "inline-flex", gap: 4 }}>
-            <button className="btn btn-ghost" onClick={() => setMode("edit")}>{t("Editar")}</button>
-            <button className="btn btn-ghost" onClick={() => setMode("delete")}>{t("Borrar")}</button>
-          </span>
+        </span>
+      </td>
+      <td>{where(project)}</td>
+      <td className="mono muted selectable pv-path">{project.path}</td>
+      <td className="pv-actions" onClick={stop}>
+        <Button variant="ghost" size={28} onClick={() => setDialog("settings")}>{t("Ajustes")}</Button>
+        <Menu
+          trigger={(p) => <IconButton {...p} icon="more" label={t("Más acciones de {name}", { name: project.name })} />}
+          items={[
+            { label: t("Renombrar"), onSelect: () => setDialog("rename") },
+            { label: t("Quitar…"), danger: true, onSelect: () => setDialog("remove") },
+          ]}
+        />
+        {dialog !== null && createPortal(
+          dialog === "settings" ? (
+            <ProjectSettings project={project} onClose={() => setDialog(null)} onSaved={() => { setDialog(null); onChanged(); }} />
+          ) : dialog === "rename" ? (
+            <RenameDialog project={project} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onChanged(); }} />
+          ) : (
+            <RemoveDialog project={project} blocked={blocked} onClose={() => setDialog(null)} onDone={() => { setDialog(null); onChanged(); }} />
+          ),
+          document.body,
         )}
-        {error && <div className="error selectable" style={{ whiteSpace: "normal" }}>{error}</div>}
       </td>
     </tr>
+  );
+}
+
+function RenameDialog({ project, onClose, onDone }: { project: Project; onClose: () => void; onDone: () => void }) {
+  const [name, setName] = useState(project.name);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.updateProject(project.name, { name: name.trim() });
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <Dialog
+      title={t("Renombrar {name}", { name: project.name })}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>{t("Cancelar")}</Button>
+          <Button variant="primary" type="submit" form="rename-project-form" disabled={!name.trim() || name.trim() === project.name}>{t("Guardar")}</Button>
+        </>
+      }
+    >
+      <form id="rename-project-form" onSubmit={save}>
+        <label className="field">
+          <span>{t("Nombre")}</span>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
+        </label>
+        {error && <p className="apd-error selectable" role="alert">{error}</p>}
+      </form>
+    </Dialog>
+  );
+}
+
+function RemoveDialog({ project, blocked, onClose, onDone }: { project: Project; blocked?: string; onClose: () => void; onDone: () => void }) {
+  // The daemon refuses with 409 while a task has a workspace; show its reason like the local check.
+  const [refused, setRefused] = useState<string | null>(null);
+  return (
+    <ConfirmDialog
+      title={t("Quitar {name}", { name: project.name })}
+      body={t("Sus sesiones se cierran; las tareas hechas se quedan sin proyecto. La carpeta no se toca.")}
+      action={t("Quitar")}
+      danger
+      blocked={blocked ?? refused ?? undefined}
+      onClose={onClose}
+      onConfirm={() => api.deleteProject(project.name).then(onDone).catch((e) => setRefused((e as Error).message))}
+    />
   );
 }

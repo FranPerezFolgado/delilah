@@ -38,7 +38,8 @@ export function deskState(session: Session, activity?: Activity): DeskState {
 /** The action as a short line: `Edit · api.rs`, or just the tool without a target. */
 export function caption(action: Action | null | undefined): string | null {
   if (!action) return null;
-  return action.target ? `${action.tool} · ${action.target}` : action.tool;
+  // Concatenated, not a template literal: the i18n coverage scan pairs backticks naively.
+  return action.target ? action.tool + " · " + action.target : action.tool;
 }
 
 const STATE_WORD: Record<DeskState, string> = {

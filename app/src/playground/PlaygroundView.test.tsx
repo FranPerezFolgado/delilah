@@ -21,7 +21,7 @@ const desk = (id: string, slot: number, state: Session["state"], over: Partial<D
     live: true,
     read_only: false,
     state,
-  },
+  } as Session,
   owner: id,
   key: id,
   title: `title of ${id}`,

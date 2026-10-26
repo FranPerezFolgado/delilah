@@ -1,10 +1,24 @@
 # Status
 
 What Delilah does today, what is pending, and the known problems. Update this
-page when a feature lands or a decision is taken. Last updated: 2026-10-20
-(version 0.3.0).
+page when a feature lands or a decision is taken. Last updated: 2026-10-26
+(UI v2, the redesign of `docs/ui-redesign.md`, on `feature/ui-v2`; before it, 0.12.0).
 
 ## Built
+
+**UI v2** (spec `007-ui-v2`, the redesign of [ui-redesign.md](ui-redesign.md); decisions [#68](decisions.md) to [#78](decisions.md)):
+- **Tokens and themes:** `styles.css` holds only the tokens (dark and light, following the OS) and the base; every component has its own CSS. The terminal and the editor read the same tokens (`theme.ts`) and change theme live. Guards in `tokens.test.ts` (contrast), `styles.test.ts` (type/radius scale, allowed colours) and `inline-style.test.ts` (inline-style ratchet).
+- **Kit** (`components/ui/`, one barrel): Button, IconButton, Toggle, Segmented, Menu, Dialog, ConfirmDialog, Toast, Skeleton, Row, OptionCard, StatusBadge, InboxKind, PrChip, PhaseBars, Icon.
+- **Shell:** the sidebar (collapses to a rail with ⌘\ or below 1300 px, a task filter, the 6 most urgent tasks per project with "Mostrar N más"), the statusbar (connection, "N trabajando · N te espera · N en pausa · N con error", usage, "Logs"), and the disconnected state (a banner over the content with the age of the data and "Reintentar ahora"; `connection.ts`). Logs, first run ("Primeros pasos") and the global notices (a task waits, usage almost out, limit reached, paused autopilot).
+- **Every screen redone:** Bandeja, board, task screen (header with phase and PR chip, task tab, Chat / Terminal tab, Cambios, PR, setup), Jira, projects and project view, settings (with the auto-update preference), "Nueva tarea", backlog task, project settings, quick open, delete task, idea proposals.
+- **Bandeja:** the three-axis vocabulary (`vocab.ts`), avisos you can remove one by one or all with "Limpiar avisos" and bring back with "Deshacer" (`inbox_dismissals`), the new avisos "Terminó su turno" (a secondary session finished its turn) and PR opened, and the empty state with the last activity.
+- **Chat | Terminal per session**, with `sessions.runtime` as the session's own override (`POST /sessions/{id}/runtime`, `delilah runtime --session`); inline answers to questions and permissions; a pending permission makes the task "Te espera".
+- **Tasks:** reopen a done task (`Done → WaitingForUser`, "Deshacer" after "Marcar como hecha", `delilah reopen`); PR merge from the PR tab ("Fusionar", with the repo's allowed method and the `gh` account guard); setup failure detail (command, exit code, duration, tail, full log); base update ("main avanzó N commits · Actualizar rama", a merge, never a rebase); Jira sub-tasks; the board's PR chip and "Hecha" dates (`PrSummary.number`, `Task.finished_at`).
+- **Checkout is now the default** when nothing says otherwise (`POST /runs`, `delilah run|new`; decisions 16 and 57).
+- **Widths and scale:** breakpoints at 1300 px (rail) and 1200 px (overlays), the task header compacts at 960 px of main area (`useWidth.ts`); the sidebar, Bandeja, Jira, task screen and board at width.
+- **Per-component English** in `i18n/en/` (a coverage test finds literals missing a translation); the old code, LEGACY CSS and orphan keys are gone.
+- **Preview seed** (`scripts/seed-preview.sh`) with every state of the redesign, and a fake `gh` that merges.
+- **Before / after record:** `docs/redesign/antes/` and `despues/` (the same 46 screens; see [redesign/README.md](redesign/README.md)).
 
 **Core (MVP-0):**
 - The Cargo workspace and the task state machine.
@@ -24,18 +38,48 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - The daemon is bundled and run by launchd.
 - Native window, configurable shortcuts and a folder picker.
 - A board by phase, and spec tracking per task.
+- The task header shows the phase (and done/total while implementing) before the status; hidden for backlog and finished tasks.
 - A task screen in Orca's style: tabs (task, sessions, Cambios, files), the project tree, ⌘P, and tabs remembered per task.
 - Cambios (diffs), a CodeMirror editor that reloads on disk changes, and a Markdown preview.
 - The Bandeja, with replies, AskUserQuestion answers (with a configurable panel position) and review suggestions.
 - Live updates over WebSocket, the Dock badge, and notifications.
+
+**Fresh task bases:**
+- A new task's branch starts from `origin`'s default branch as just fetched (by sha, no upstream), in both modes, per submodule for a parent. A failed fetch warns ("Rama posiblemente atrasada": Bandeja item plus banner on the task screen) and the task goes on. See decision 66.
 
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
+- "Nueva tarea con Claude": an idea conversation per project, shown as a chat view (no terminal) with Claude's replies, question cards, a text field, queued messages and "Detener". Claude ends with a `Nueva tarea` confirmation card; `Crear` makes a backlog task with the brief as notes and the history event "Creada desde la conversación «label»". Project sessions can create tasks the same way, task sessions cannot. The history survives restarts (`--resume`). The sidebar groups a project's idea conversations in one "Ideas" row (count, waiting highlight) that opens the waiting, last shown or newest idea. See [architecture.md](architecture.md) and decisions [#34](decisions.md), [#35](decisions.md), [#36](decisions.md), [#59](decisions.md).
 
-**Playground** (`app/src/playground/`):
+**Chat view and chat mode (experimental):**
+- Every Claude session of a task or project has a chat view next to the terminal (a Chat / Terminal switch per session, remembered as the task's view): your messages, Claude's text, tool cards (Bash, Edit/Write diffs, Read, Glob…, the full input and result on demand) and question cards, built from the session's transcript; a text field with queued messages and "Detener". `tasks.view` only sets what opens first.
+- Chat mode runs a task's Claude on `claude -p` with stream-json in and out instead of a PTY (`delilah new/run --chat`, "Modo chat (experimental)" in the dialogs, `tasks.chat_mode`). Claude's text appears live over `GET /sessions/{id}/live`; hooks still drive states, phases, Bandeja, usage limits (from `rate_limit_event`), saving mode, autopilot and the PR flow. No terminal in that mode (409 on the terminal routes, `delilah attach` says why).
+- "¿Permitir?" cards (conversation and Bandeja) answered by Delilah: "Permitir una vez", "Permitir siempre en esta tarea" (only when a bounded rule exists; remembered in `tasks.allowed_tools`, see [ADR-001](adr/ADR-001-chat-mode-allow-always-allowlist.md)) and "Denegar" with a reason. Bash prefix rules are applied only by the daemon, only to chat-mode requests, and only for bounded arguments.
+- Switch between chat mode and the terminal keeping the conversation (`delilah runtime <KEY> chat|terminal`, "Terminal" in the switch of a chat-mode session, "Probar modo chat (experimental)" in the chat view of a terminal task), refused while the agent works or waits. See decisions [#67](decisions.md) and [architecture.md](architecture.md#chat-mode).
+
+**PR loop:**
+- Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
+- A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
+- The Bandeja shows failed CI, changes requested and new comments (from anyone but the signed-in account), and "Pedir al agente que lo arregle" sends them to the agent, only when the user chooses.
+- "Abrir PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
+- A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
+
+**Branch names:**
+- A task's branch is named from its title: Claude (haiku) proposes a short name, with fallbacks to a slug of the title and then to the key. Jira tasks get `feature/<KEY>-<short-name>`; a free task gets that proposal only when it is started with a branch typed or a project template, else it starts without a branch and takes the spec folder's name (decision 65).
+- A taken name (local or remote, in any repo of the workspace) gets `-2`, `-3`…; a branch is never reused or renamed.
+- A "Rama" field in the start dialog shows the proposal and accepts a name; `delilah run --branch` is normalised the same way.
+- `Task.branch` (from the stored workspace) is shown on the task view.
+
+**Project settings** (spec `004-project-config`, personal to the install, in `projects.settings`):
+- A settings screen (Proyectos › Ajustes) and `delilah project show|set|unset`: default workspace mode, optional branch template, shared entries, setup command, always/never submodules.
+- A project's optional branch template (null by default, then the proposal above applies) decides the branch format; the "Rama" field of the new task form shows the template's branch at once and then the daemon's answer (decision 49); `delilah new|run` take `--checkout` / `--worktree`.
+- Shared entries are copied or linked into new worktrees.
+- A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
+
+**Playground** (`app/src/playground/`, spec `004-agent-playground`; decisions [#79](decisions.md) to [#81](decisions.md)):
 - A view of every live session as a pixel character at a desk, by project, with poses for starting, thinking, editing, reading, running, supervising, waiting and paused, and a caption of the current tool.
 - Helpers for sub-agents, the waiting counter, click to open the task's terminal, and "Abrir en ventana" (a separate Tauri window, or a named tab in a browser).
 - Stale banner while offline, still poses with reduced motion, animations paused when hidden.
@@ -47,22 +91,109 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-20
 - Previews (`scripts/preview.sh`) to try a branch next to the installed app.
 - Phases moved by the user, by spec files and by agent signals; archiving that never blocks in the checkout, and a forced archive for worktrees.
 
+**Saving mode** (a fresh Claude session per phase, opt-in per task):
+- Option on new tasks, backlog items and running tasks (also `--saving-mode` / `--no-saving-mode` in the CLI), with its default and "save notes first" in Settings.
+- The session chain on the task screen; the planning → implementation handoff is offered (task screen and Bandeja), the review starts on its own and is announced.
+- Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
+
+**Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
+- Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restaurar".
+- A guard hook makes the branch before the first edit outside `specs/` or a commit/push/PR; failures show in the Bandeja with "Reintentar".
+- The title is editable in the task screen on any non-archived task.
+
+**Autopilot** (a task runs plan → implement → review → draft PR on its own; opt-in per task, spec workflow only, implies saving mode):
+- Option on new tasks, backlog items and running tasks (`--autopilot` / `--no-autopilot`, `delilah autopilot <KEY> on|off|resume`), a mark in the task header, and the chain's preview and PR steps.
+- The implementation starts without asking; a stalled step gets one nudge; questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into a Bandeja item (*Reanudar autopiloto* / *Seguir a mano*).
+- The review writes an outcome file; if ready, the project's preview starts and a draft PR opens per repo (title and body from the review, a loopback preview URL appended). Interrupted finishes recover on the scheduler tick.
+- "Crear y lanzar en autopiloto" on the idea card.
+- See [architecture.md](architecture.md) and decisions [#38](decisions.md) to [#48](decisions.md).
+
+**Dev workflow** (for working on this repo, not a product feature): CI on every PR (`.github/workflows/`), fmt/clippy/tests gating each implementer (`.claude/verify.sh`), a hook guarding the installed app, `scripts/bump-version.sh`. Decisions [#49](decisions.md) and [#50](decisions.md).
+
+**Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
+
+**End-to-end tests:**
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Local only, no CI. See [development.md](development.md#end-to-end-tests).
+
+**Auto-update** (0.8.0):
+- Tauri updater against GitHub Releases: a notice with the open-session count, "Más tarde" / "Cuando terminen", menu item and Ajustes › Actualizaciones; release builds only.
+- The daemon copies the database to `backups/` before migrating after a version change.
+- `make release` / `make release-dry-run` and the tag workflow `.github/workflows/release.yml`.
+
 ## Pending and known problems
 
+- **Fresh bases, known limits:**
+  - parent worktrees still need the network to init submodules;
+  - the repo's config (`core.sshCommand`, credential helpers) is trusted during the fetch;
+  - git and ssh never prompt (no terminal, no askpass, `credential.interactive=never`), but a macOS keychain access dialog raised by a credential helper still can, bounded by the 30 s deadline;
+  - the fetch lock lives in the git crate (process-wide), not in the daemon's state;
+  - a branchless task in checkout mode is not rebased: its branch starts from where the folder is (decision 66).
+- **Branch guard is best-effort:** it matches substrings of Bash commands and does not resolve symlinks, so an unusual command can write before the branch exists.
+- **End-to-end tests, pending and known:**
+  - the UI quick-open test covers the file quick open (the UI has no task switcher);
+  - the UI layer shares one daemon per run (tests are serial and use their own repos and projects);
+  - the real-Claude smoke test (`--real-claude`) is opt-in, uses the subscription and is not run by default;
+  - measured: API layer 57 s (including the build), UI layer 30 s; 10 consecutive full `scripts/e2e.sh` runs all green (78–105 s each), no flaky tests; the installed Delilah stayed untouched (same PID, health OK) and an interrupted run (Ctrl-C) leaves no daemons behind.
+- **Auto-update, pending:**
+  - the maintainer's key and secrets (T005 of `specs/005-app-auto-update`): until the public key replaces `REPLACE_WITH_UPDATER_PUBKEY`, `check.mjs` refuses to release;
+  - the first tagged release, which verifies the workflow end to end (draft lookups, asset name, relaunch into the new version, daemon and plugin version);
+  - next step: `vX.Y.Z-rc.N` tags published as GitHub prereleases (no `--latest`, so `releases/latest` and installed apps ignore them) to rehearse the pipeline. Needs the workflow to accept `-rc` tags and publish with `--prerelease`, and `check.mjs`, `manifest.mjs` and `versions.mjs` to accept the suffix. No update channel in the app: one fixed endpoint;
+  - third-party actions are pinned to major tags, not SHAs.
+- **Idea conversations, still missing:**
+  - the idea conversation itself still runs in a PTY and shows no live text (chat mode covers task sessions only);
+  - deleting conversations (the history is kept for good);
+  - the usage-limit notice does not show in the conversation view;
+  - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
+  - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
+- **Chat mode, limits and known problems:**
+  - experimental: a stuck chat-mode agent has no terminal; switch back with `delilah runtime <KEY> terminal` (refused mid-turn: press "Detener" first);
+  - only task Claude sessions: project sessions, idea conversations and shells always use a PTY;
+  - the stream-json input protocol is thinly documented and may change between Claude versions; the transcript format is not a public contract (unknown lines are skipped);
+  - `Notification` and `StopFailure` hooks, and the `rate_limit_event` status when a limit is hit, were not observed in print mode; the status line does not run there; `--remote-control` is hidden;
+  - "Permitir siempre" is bounded on purpose (more prompts: `npm install x` is remembered only as that exact command); allowlisted prefixes take only workspace-relative paths (`is_safe_prefix_tail`), but `cargo`/`npm`/`go`/`make test|build` run the repo's own code; there is no view to review or revoke a task's remembered rules; rules stored before the allowlist that no longer pass are ignored;
+  - images show as a placeholder; thinking blocks and a sub-agent's inner steps are not shown;
+  - the API has no token: any local process without an `Origin` can type into a session or answer a permission.
+- **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).
+- **Saving mode, known problems:**
+  - the old live session keeps `primary = true` in memory until it exits (~3 s);
+  - `PATCH` of `saving_mode` is not atomic with the other backlog fields;
+  - an unparsable `handoff` JSON fails the whole task list;
+  - the English history says "Moved to Implement" (it reuses the phase-name keys);
+  - a CLI older than the daemon fails on `step-started` events: ship them together;
+  - rolling the daemon back after using saving mode needs the `step-started` rows tolerated.
 - **The real usage-limit payload** has never been observed. When it first happens on the work Mac, check `hooks.jsonl` against `delilah-agents::limits` (see the [spike](spikes/2026-10-19-claude-pty.md)).
 - **SpecKit dirties the checkout.** Each `/speckit-plan` writes its block into CLAUDE.md, and a dirty checkout blocks new checkout tasks. Proposed: ignore that block in the clean-checkout check.
 - **The archive refusal message** (`workspace: . has uncommitted changes…`) names neither the task nor the files. It should list them.
 - **Moved state:** the installed app's state was copied from `fixtures/dev-home` on 2026-10-20. Those tasks' worktrees still live in `fixtures/dev-home/workspaces/` (absolute paths in the DB): do not delete that folder. The fixture `PROJ-*` tasks need `DELILAH_ALLOW_FILE_PROTOCOL`, which the installed daemon lacks.
 - **Live sessions lost:** FEAT-4 and FEAT-5 lost their live sessions when the dev daemon was killed. Their conversations can be resumed from the task.
+- **Autopilot, known limits:**
+  - previews are lost on a daemon restart (memory only, not adopted again);
+  - a preview's child process that ignores SIGTERM once its leader has exited is left running ([#44](decisions.md));
+  - `handoff` and `autopilot` call each other (as do `autopilot::pause` and the inbox's types): when they grow, give `handoff` a small policy hook that autopilot implements;
+  - no time or token caps: a running autopilot is bounded only by one nudge per step and the usage limit;
+  - an autopilot stored before `review_session` existed does not auto-recover a finish;
+  - a destructive option the agent marks "(Recommended)" would be picked automatically ([#43](decisions.md));
+  - the end-to-end run with a real Claude (quickstart) is tried by hand in a preview.
 - **Optional next steps for previews:**
   - a "Delilah Preview" Tauri build (another identifier and port) for native-only features;
-  - a per-task "Preview" button that runs the project's preview command next to the terminal;
   - a browser MCP so the agent inside a task can see the preview UI.
+- **Project settings, open items:**
+  - the settings screen, the setup banner and the new task form were never checked in a browser during that feature's reviews (API and CLI were);
+  - low: no test for the "Ajustes guardados" confirmation; a PATCH that changes a project's kind does two non-atomic writes; the Spanish "unknown submodule" message omits the path; the CLI's 422 output is untested end to end; no migration test over pre-existing rows; `ß`/`Æ` become hyphens in branch slugs;
+- **PR loop follow-ups:**
+  - cross-linked PRs of a changeset (each PR names the others);
+  - saving lessons to QMD when a task merges;
+  - "Abrir PR" against a base other than the default branch.
+- **UI v2, open items** (from the reviews in `specs/007-ui-v2/progress.md`):
+  - **Structure:** `TaskScreen.tsx` (~900 lines) and `App.tsx` (~570) should be split (a data hook plus panes; `useRoute` / `useAppData` / a shell). Deferred on purpose to its own behaviour-neutral PR. Also ~60 raw `<button>` outside the kit and Spanish literals as kind keys where neutral keys would do.
+  - **Bandeja avisos:** the `turn-done` / `pr-opened` rows in `pr_notices` accumulate (never resolved) and their text-hash ids change with the language; `pr_notices` is still the table of those two avisos, and a rename to a neutral `notices` is pending ([#74](decisions.md)). Downgrade: an older binary refuses a database at version 21 (say it in the release notes).
+  - **Colour:** light `--tx3` on `--side` is 4.43:1 (listed in `KNOWN_LOW` in `tokens.test.ts`); darken to #686b72 and drop the entry. A colour-blind mode is not built.
+  - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). Run vitest with `--no-cache` after adding files under `i18n/en/` (the glob list is cached).
 - **Playground limits:**
   - only the last of several parallel tool calls is shown as the action;
   - agents launched before the update have no `PreToolUse` hook in their settings, so they show no actions until relaunched;
   - the native "playground" window and the pixel art have not been checked visually yet (no browser was available when it was built);
   - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
 - **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
-- **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, PR handling, gates and budgets.
+- **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
 - **Testing:** test the whole flow on the work Mac with a real ticket.

@@ -1,0 +1,16 @@
+export const EN: Record<string, string> = {
+  "El setup del proyecto falló": "The project setup failed",
+  "Iniciar sin setup": "Start without setup",
+  "Superó el tiempo límite": "Timed out",
+  "Cancelado": "Cancelled",
+  "Código de salida {code}": "Exit code {code}",
+  "Sin código de salida": "No exit code",
+  "{s} s": "{s} s",
+  "Comando copiado": "Command copied",
+  "No se pudo copiar el comando": "Could not copy the command",
+  "Comando de setup del proyecto": "Project setup command",
+  "El setup no escribió nada en su salida.": "The setup wrote nothing to its output.",
+  "Abrir el log completo": "Open the full log",
+  "Copiar comando": "Copy command",
+  "Abrir terminal aquí": "Open a terminal here",
+};

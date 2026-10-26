@@ -1,0 +1,26 @@
+/* The spec of a task: phase progress, files and the tasks.md checklist. */
+.sp-section { display: flex; flex-direction: column; gap: 8px; }
+.sp-title { display: flex; align-items: center; gap: 10px; }
+.sp-title h3 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--tx3); }
+.sp-title .b:last-child { margin-left: auto; }
+.sp-card { border: 1px solid var(--bd); border-radius: 10px; background: var(--card); overflow: hidden; }
+.sp-empty { padding: 10px 12px; color: var(--tx2); font-size: 13.5px; }
+.sp-grow { flex: 1; min-width: 0; }
+.sp-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-bar { width: 120px; height: 6px; border-radius: 7px; background: var(--bd); overflow: hidden; }
+.sp-bar > span { display: block; height: 100%; }
+.sp-bar-run { background: var(--tx-strong); }
+.sp-bar-ok { background: var(--ok); }
+.sp-count { color: var(--tx2); font-size: 12px; }
+.sp-files { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sp-dir { color: var(--tx2); font-size: 12px; margin-right: 4px; }
+.sp-chip { height: 22px; padding: 0 8px; border: 1px solid var(--bd2); border-radius: 7px; background: transparent; color: var(--tx2); font-size: 12px; cursor: pointer; }
+.sp-chip:hover { color: var(--tx); border-color: var(--tx3); }
+.sp-checklist details + details { border-top: 1px solid var(--bd); }
+.sp-checklist summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 13.5px; font-weight: 600; }
+.sp-check { display: flex; align-items: flex-start; gap: 8px; padding: 5px 12px 5px 20px; font-size: 13.5px; }
+.sp-check.is-done { color: var(--tx3); }
+.sp-check.is-current { background: var(--sel); }
+.sp-box { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--bd2); border-radius: 7px; }
+.sp-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 7px; background: var(--neutral-bg); color: var(--neutral-tx); font-size: 12px; }
+.sp-tag-run { background: var(--sel); color: var(--tx-strong); }

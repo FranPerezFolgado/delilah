@@ -24,7 +24,8 @@ describe("assignSlots", () => {
   });
 });
 
-const session = (id: string, task: string, over: Partial<Session> = {}): Session => ({
+const session = (id: string, task: string, over: Partial<Session> = {}): Session =>
+  ({
   id,
   task,
   kind: "claude",
@@ -35,8 +36,9 @@ const session = (id: string, task: string, over: Partial<Session> = {}): Session
   read_only: false,
   state: "working",
   ...over,
-});
-const task = (key: string, project: string | null, over: Partial<Task> = {}): Task => ({
+  }) as Session;
+const task = (key: string, project: string | null, over: Partial<Task> = {}): Task =>
+  ({
   key,
   title: `title ${key}`,
   project,
@@ -44,8 +46,8 @@ const task = (key: string, project: string | null, over: Partial<Task> = {}): Ta
   phase: null,
   status: { type: "running" },
   ...over,
-});
-const proj = (name: string): Project => ({ name, path: `/p/${name}`, kind: "repo", workflow: "feature" });
+  }) as Task;
+const proj = (name: string): Project => ({ name, path: `/p/${name}`, kind: "repo", workflow: "feature" }) as Project;
 
 describe("groupByProject", () => {
   const projects = [proj("web"), proj("api"), proj("empty")];

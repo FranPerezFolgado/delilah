@@ -1,0 +1,33 @@
+# Progress — 005-autopilot
+
+Branch: feature/LIBRE-9 · Base: 3bea8ed · Started: 2026-10-22
+Mode: format=markdown commits=yes
+
+| WP | Phase | Group | Status | Attempts | Commit | Notes |
+|----|-------|-------|--------|----------|--------|-------|
+| WP-01 | 2 | 2A | done | 1 | 5cb27dd | +13 Project literal fixes in daemon (approved) |
+| WP-02 | 2 | 2B | done | 1 | 2fc0472 | create/update_project also write preview_command |
+| WP-03 | 3 | 3A | done | 1 | 6a8b39d | |
+| WP-04 | 3 | 3A | done | 1 | 588bff3 | +phase-2 MEDIUM fix (update_project keeps preview_command); kill via /bin/kill (unsafe forbidden) |
+| WP-05 | 3 | 3B | done | 1 | e650aa4 | |
+| WP-05F | 3 | 3F | done | 1 | fc7e456 | phase-3 review fixes |
+| WP-06 | 4 | 4A | done | 2 | 13520d9 | RunRequest lives in run.rs; Spanish marker (Recomendado) |
+| WP-07 | 4 | 4B | done | 2 | d16dd66 | +pr_api/mod.rs re-export, proposal_for extracted; TODO(WP-09) seams |
+| WP-08 | 4 | 4C | done | 1 | a6fff3e | scheduler.rs test only (tick already recovers) |
+| WP-08F | 4 | 4F | done | 1 | 18f6063 | phase-4 review fixes (+1-line store.rs test literal); TODO for WP-20 decisions.md: preview URL kept for loopback, credentials/query/fragment stripped |
+| WP-09 | 5 | 5A | done | 1 | bdecd2b | +delilah-git Workspace::uncommitted; `on` = 400 TODO(WP-12) |
+| WP-10 | 5 | 5B | done | 1 | 798de49 | hook FAIL was the parallel package mid-edit; full suite green after |
+| WP-11 | 5 | 5B | done | 1 | e57e216 | +hooks.rs call site; hook FAIL from parallel run, green after |
+| WP-11F | 5 | 5F | done | 1 | 7264a0b | phase-5 review fixes; autopilot.rs split into autopilot/; TODO WP-20 decisions.md: agent-labelled (Recommended) is trusted |
+| WP-12 | 6 | 6A | done | 1 | 1dcc34f | +1-line literal fixes in proposals.rs, run.rs; rule: workflow == feature |
+| WP-13 | 6 | 6A | done | 1 | df9be0b | hook FAIL from parallel run, green after |
+| WP-14 | 6 | 6A | done | 1 | 54f6212 | +alerts.ts, InboxView KINDS, TaskView EVENT_LABELS; Task.autopilot optional in TS |
+| WP-15 | 6 | 6B | done | 1 | 8cb0eb2 | +SessionChain HandoffActions line, styles.css |
+| WP-16 | 6 | 6B | done | 1 | c89800c | SessionChain loads projects + taskPrs |
+| WP-16F | 6 | 6F | done | 1 | 0bd45e9 | phase-6 review fixes (+running-task toggle, workflow gate); UI not browser-checked (no browser tools) |
+| WP-17 | 7 | 7A | done | 1 | 5131bb3 | PreviewControl fetches projects itself |
+| WP-18 | 8 | 8A | done | 1 | 68423d8 | non-spec workflow → task + refusal |
+| WP-19 | 8 | 8B | done | 1 | 0967841 | |
+| WP-19F | 8 | 8F | done | 1 | 210912e | phases 7-8 review fixes; for_hook rejects closed sessions only (spec 004 FR-013 keeps terminals) |
+| WP-20 | 9 | 9A | done | 1 | 7593b9d | decisions #37–#47 |
+| WP-21 | 9 | 9B | done | 1 | 34530d4 | minor (new feature); Tauri shell test blocked by missing sidecar (env) |

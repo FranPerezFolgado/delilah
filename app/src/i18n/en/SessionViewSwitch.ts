@@ -1,0 +1,16 @@
+export const EN: Record<string, string> = {
+  Chat: "Chat",
+  Terminal: "Terminal",
+  "Vista de la sesión": "Session view",
+  "Pasar a chat": "Switch to chat",
+  "Pasar a terminal": "Switch to terminal",
+  "Cambiar": "Switch",
+  "La sesión se reanuda en modo chat, sin terminal.": "The session resumes in chat mode, without a terminal.",
+  "La sesión se reanuda en la terminal, sin modo chat.": "The session resumes in the terminal, without chat mode.",
+  "Espera a que termine el turno": "Wait for the turn to end",
+  "No se pudo cambiar: {error}": "Could not switch: {error}",
+  "Solo las sesiones de Claude de una tarea cambian de modo.": "Only a task's Claude sessions change mode.",
+  "La sesión ya está en ese modo.": "The session is already in that mode.",
+  "Ya no existe.": "It no longer exists.",
+  "No se pudo completar la acción": "Could not complete the action",
+};

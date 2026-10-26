@@ -2,6 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onOpenTask, openPlaygroundWindow, requestOpenTask } from "./platform";
 
+const invoke = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
 // A tiny in-memory BroadcastChannel: delivers to the other instances of the same name.
 const channels = new Map<string, Set<FakeChannel>>();
 class FakeChannel {
@@ -72,5 +75,27 @@ describe("platform (browser mode)", () => {
     tx.postMessage({ type: "open-task", task: "", session: "s" });
     tx.postMessage({ type: "open-task", task: "x".repeat(201), session: "s" });
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe("revealInFinder", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    vi.resetModules();
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  });
+
+  it("does nothing outside the desktop app", async () => {
+    const { isDesktop, revealInFinder } = await import("./platform");
+    expect(isDesktop).toBe(false);
+    await revealInFinder("/Users/x/.delilah");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("calls reveal_path in the desktop app", async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    const { revealInFinder } = await import("./platform");
+    await revealInFinder("/Users/x/.delilah");
+    expect(invoke).toHaveBeenCalledWith("reveal_path", { path: "/Users/x/.delilah" });
   });
 });

@@ -87,7 +87,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     if started == Some(true) {
         println!("trust dialog shown: accepting");
-        writer.write_all(b"\r")?;
+        // Claude 2.1.292 opens it on "No, exit": let it settle, move down, then Enter.
+        for _ in 0..3 {
+            std::thread::sleep(Duration::from_millis(600));
+            let yes = delilah_agents::claude::trust_dialog_selection(&screen.lock().unwrap());
+            if yes == Some(true) {
+                break;
+            }
+            writer.write_all(delilah_agents::claude::DOWN)?;
+        }
+        writer.write_all(delilah_agents::claude::ENTER)?;
         screen
             .lock()
             .unwrap()

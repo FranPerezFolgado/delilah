@@ -373,7 +373,7 @@ export const DESK: string[][] = [
   ],
 ];
 
-/** Every letter a sprite may use; each is a `--pg-<key>` colour in playground.css. */
+/** Every letter a sprite may use; each is a `--pg-<key>` colour in PlaygroundView.css. */
 export const PALETTE_KEYS = ["k", "s", "h", "c", "d", "b", "m", "l", "w", "z", "y"];
 
 /** What a helper's props say about its role. */

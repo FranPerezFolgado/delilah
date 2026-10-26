@@ -1,0 +1,3 @@
+/* A sprite's frames sit side by side in one group; this steps through them. */
+.pg-anim { animation: pg-frames 0.8s steps(var(--pg-fn)) infinite; }
+@keyframes pg-frames { to { transform: translateX(calc(-1 * var(--pg-fw) * var(--pg-fn))); } }

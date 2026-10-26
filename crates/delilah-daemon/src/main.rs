@@ -1,4 +1,6 @@
-use delilah_daemon::{api, config::Config, scheduler, specs, state::AppState, store::Store};
+use delilah_daemon::{
+    api, config::Config, pr_loop, scheduler, specs, state::AppState, store::Store, transcript_watch,
+};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -26,6 +28,9 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
+    for note in config.override_notes() {
+        tracing::warn!("test-only switch on: {note}");
+    }
     match tokio::task::spawn_blocking(delilah_agents::env::init_login_path).await? {
         Some(path) => tracing::info!(%path, "agents get the login shell's PATH"),
         None => tracing::warn!("could not read the login shell's PATH; agents get the daemon's"),
@@ -36,18 +41,51 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&config.home, std::fs::Permissions::from_mode(0o700))?;
     }
+    if let Err(e) =
+        delilah_agents::claude::write_plugin(&config.plugin_dir(), env!("CARGO_PKG_VERSION"))
+    {
+        tracing::warn!("could not write the Delilah plugin: {e}");
+    }
+    let version = env!("CARGO_PKG_VERSION");
+    delilah_daemon::upgrade::before_open(&config.home, &config.database_path(), version).await;
     let store = Store::open(&config.database_path()).await?;
+    if let Err(e) = delilah_daemon::upgrade::after_open(&config.home, version) {
+        tracing::warn!("could not record the version: {e}");
+    }
+    // The pending asks lived in the previous process: their cards cannot be answered.
+    match store.withdraw_pending_cards().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, "withdrew the cards left pending by the last run"),
+        Err(e) => tracing::warn!("could not withdraw the stale cards: {e}"),
+    }
 
     let listener = tokio::net::TcpListener::bind(config.addr).await?;
     tracing::info!(addr = %config.addr, home = %config.home.display(), "delilahd listening");
     let app = AppState::new(store, config);
     app.load_language().await;
     app.load_remote_control().await;
+    // An analysis written while the daemon was down is picked up now, not at the first tick.
+    scheduler::recover_branches(&app).await;
+    // Before anything else acts on tasks: the setups that died with the previous
+    // daemon stop as failed.
+    if let Err(e) = delilah_daemon::recover_interrupted_setups(&app).await {
+        tracing::warn!("cannot recover interrupted setups: {e}");
+    }
+    // The permissions that were waiting died with the previous daemon: record it.
+    if let Err(e) = delilah_daemon::permissions::reconcile_lost(&app).await {
+        tracing::warn!("cannot reconcile the lost permissions: {e}");
+    }
     scheduler::spawn(app.clone());
+    pr_loop::spawn(app.clone());
     specs::spawn(app.clone());
-    axum::serve(listener, api::router(app))
+    transcript_watch::spawn(app.clone());
+    let shutdown = app.clone();
+    let served = axum::serve(listener, api::router(app))
         .with_graceful_shutdown(shutdown_signal())
-        .await?;
+        .await;
+    // Also when serving failed: no preview is left running behind the daemon.
+    shutdown.shutdown_runtime().await;
+    served?;
     Ok(())
 }
 

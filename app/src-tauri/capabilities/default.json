@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window and the playground window. Data comes from the daemon's API, not Tauri commands. The shell adds what only a desktop app can: the title bar drawn by the UI (drags, zoom on double-click), the folder picker, notifications, the Dock badge and opening links in the browser, and creating, focusing and showing windows (the playground window, and bringing the main one to the front).",
+  "description": "The main window and the playground window. Data comes from the daemon's API, not Tauri commands. The shell adds what only a desktop app can: the title bar drawn by the UI (drags, zoom on double-click), the folder picker, notifications, the Dock badge, opening links in the browser, creating, focusing and showing windows (the playground window, and bringing the main one to the front), and checking for, installing and relaunching into updates.",
   "windows": [
     "main",
     "playground"
@@ -15,6 +15,8 @@
     "core:window:allow-show",
     "core:window:allow-unminimize",
     "dialog:allow-open",
+    "updater:default",
+    "process:allow-restart",
     "core:window:allow-set-badge-count",
     "notification:default",
     {

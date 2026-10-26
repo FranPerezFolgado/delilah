@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type ChangeKind, type FileChange, type RepoChanges } from "../api";
-import { Icon } from "./Icon";
+import { Button, Icon, Skeleton } from "./ui";
+import "./ChangesView.css";
+import { DiffRows, type DiffRowData } from "./DiffRows";
 import { t, tn } from "../i18n";
 
 const KIND: Record<ChangeKind, { letter: string; label: string; cls: string }> = {
   added: { letter: "A", label: "Añadido", cls: "c-done" },
-  untracked: { letter: "U", label: "Nuevo, sin añadir a git", cls: "c-done" },
+  untracked: { letter: "A", label: "Nuevo, sin añadir a git", cls: "c-done" },
   modified: { letter: "M", label: "Modificado", cls: "c-wait" },
   renamed: { letter: "R", label: "Renombrado", cls: "c-run" },
   deleted: { letter: "D", label: "Borrado", cls: "c-err" },
@@ -19,6 +21,22 @@ interface Props {
 }
 
 type Selected = { repo: string; path: string };
+type Entry = { repo: string; file: FileChange };
+interface Folder { dir: string; files: FileChange[] }
+
+/** The files of a repo by folder (root first, then alphabetical), keeping those that match `filter`. */
+function groupByFolder(files: FileChange[], filter: string): Folder[] {
+  const q = filter.trim().toLowerCase();
+  const by = new Map<string, FileChange[]>();
+  for (const f of files) {
+    if (q && !f.path.toLowerCase().includes(q)) continue;
+    const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "";
+    by.set(dir, [...(by.get(dir) ?? []), f]);
+  }
+  return [...by.entries()]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
+    .map(([dir, fs]) => ({ dir, files: fs.sort((x, y) => x.path.localeCompare(y.path)) }));
+}
 
 /** Everything the task's branch changed, per repo of the workspace, with each file's diff.
  *  Compared against where the branch started, uncommitted work included. */
@@ -27,6 +45,7 @@ export function ChangesView({ owner, onEdit }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -47,7 +66,16 @@ export function ChangesView({ owner, onEdit }: Props) {
     return () => window.removeEventListener("focus", load);
   }, [load]);
 
-  const flat = useMemo(() => (repos ?? []).flatMap((r) => r.files.map((f) => ({ repo: r.repo, file: f }))), [repos]);
+  // Per repo, the files that match the filter by folder; `flat` follows the order they are drawn in.
+  const shown = useMemo(
+    () => (repos ?? []).map((r) => ({ r, folders: groupByFolder(r.files, filter) })),
+    [repos, filter],
+  );
+  const flat: Entry[] = useMemo(
+    () => shown.flatMap(({ r, folders }) => folders.flatMap((d) => d.files.map((file) => ({ repo: r.repo, file })))),
+    [shown],
+  );
+  const total = (repos ?? []).reduce((n, r) => n + r.files.length, 0);
 
   // Keep the selection while it still exists; else the first file.
   useEffect(() => {
@@ -74,24 +102,37 @@ export function ChangesView({ owner, onEdit }: Props) {
     <>
       <div className="ctoolbar">
         {repos && (
-          <span className="muted" style={{ fontSize: 12 }}>
-            {flat.length} {flat.length === 1 ? "archivo" : "archivos"} · <span className="c-done">+{totals.add}</span>{" "}
+          <span className="muted changes-summary">
+            {tn(flat.length, "{n} archivo", "{n} archivos")} · <span className="c-done">+{totals.add}</span>{" "}
             <span className="c-err">−{totals.del}</span>
           </span>
         )}
-        <button className="btn btn-ghost" style={{ marginLeft: "auto" }} onClick={load} disabled={loading}>
-          <Icon name="refresh" /> {t("Actualizar")}
-        </button>
+        <input
+          className="input changes-filter"
+          type="search"
+          value={filter}
+          placeholder={t("Filtrar archivos…")}
+          aria-label={t("Filtrar archivos")}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <Button variant="ghost" size={28} icon="refresh" onClick={load} disabled={loading}>
+          {t("Recargar")}
+        </Button>
       </div>
-      {error && <div className="error selectable" style={{ padding: "12px 20px" }}>{error}</div>}
+      {error && <div className="error selectable changes-error">{error}</div>}
       {!repos && !error && (
-        <div className="empty">
-          <span>{t("Cargando…")}</span>
+        <div className="changes-loading" role="status" aria-label={t("Cargando…")}>
+          <Skeleton lines={6} />
         </div>
       )}
-      {repos && flat.length === 0 && (
+      {repos && total === 0 && (
         <div className="empty">
           <span>{t("La rama aún no ha cambiado nada.")}</span>
+        </div>
+      )}
+      {repos && total > 0 && flat.length === 0 && (
+        <div className="empty">
+          <span>{t("Ningún archivo coincide con el filtro.")}</span>
         </div>
       )}
       {flat.length > 0 && (
@@ -100,6 +141,7 @@ export function ChangesView({ owner, onEdit }: Props) {
             className="changes-files"
             tabIndex={0}
             onKeyDown={(e) => {
+              if (e.target instanceof HTMLInputElement) return;
               if (e.key === "ArrowDown" || e.key === "j") {
                 e.preventDefault();
                 move(1);
@@ -109,7 +151,7 @@ export function ChangesView({ owner, onEdit }: Props) {
               }
             }}
           >
-            {repos!.map((r) => (
+            {shown.map(({ r, folders }) => (
               <div key={r.repo}>
                 {!plainRepo && (
                   <div className="changes-repo">
@@ -124,13 +166,24 @@ export function ChangesView({ owner, onEdit }: Props) {
                     {r.base ? <> {t("desde")} <span className="mono">{r.base.slice(0, 8)}</span></> : t(" · sin base: solo lo no commiteado")}
                   </div>
                 )}
-                {r.files.map((f) => (
-                  <FileRow
-                    key={f.path}
-                    file={f}
-                    on={selected?.repo === r.repo && selected.path === f.path}
-                    onClick={() => setSelected({ repo: r.repo, path: f.path })}
-                  />
+                {folders.map((d) => (
+                  <div key={d.dir} className="changes-folder" role="group" aria-label={d.dir || t("Raíz")}>
+                    {(d.dir !== "" || folders.length > 1) && (
+                      <div className="changes-dir muted">
+                        <Icon name="folder" />
+                        <span className="trunc mono">{d.dir || "/"}</span>
+                        <span className="mono">{d.files.length}</span>
+                      </div>
+                    )}
+                    {d.files.map((f) => (
+                      <FileRow
+                        key={f.path}
+                        file={f}
+                        on={selected?.repo === r.repo && selected.path === f.path}
+                        onClick={() => setSelected({ repo: r.repo, path: f.path })}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
@@ -152,9 +205,9 @@ function FileRow({ file, on, onClick }: { file: FileChange; on: boolean; onClick
       <span className={`kind mono ${kind.cls}`} title={t(kind.label)}>
         {kind.letter}
       </span>
-      <span className="trunc" style={{ flex: 1 }}>
+      <span className="trunc frow-name">
         {file.path.slice(slash + 1)}
-        {slash > 0 && <span className="muted"> {file.path.slice(0, slash)}</span>}
+        {file.old_path && <span className="muted"> ← {file.old_path}</span>}
       </span>
       {file.additions === null ? (
         <span className="muted mono">bin</span>
@@ -168,7 +221,7 @@ function FileRow({ file, on, onClick }: { file: FileChange; on: boolean; onClick
   );
 }
 
-type Line = { type: "add" | "del" | "ctx" | "hunk" | "note"; text: string; old?: number; new?: number };
+type Line = DiffRowData;
 
 /** Unified diff to rows with old and new line numbers. Git's own headers are dropped. */
 function parse(diff: string): Line[] {
@@ -182,17 +235,17 @@ function parse(diff: string): Line[] {
       o = Number(hunk[1]);
       n = Number(hunk[2]);
       inHunk = true;
-      lines.push({ type: "hunk", text: raw });
+      lines.push({ kind: "hunk", text: raw, old: null, new: null });
     } else if (!inHunk) {
-      if (raw.startsWith("Binary files") || raw === "Binary file") lines.push({ type: "note", text: "Archivo binario" });
+      if (raw.startsWith("Binary files") || raw === "Binary file") lines.push({ kind: "note", text: "Archivo binario", old: null, new: null });
     } else if (raw.startsWith("+")) {
-      lines.push({ type: "add", text: raw.slice(1), new: n++ });
+      lines.push({ kind: "add", text: raw.slice(1), old: null, new: n++ });
     } else if (raw.startsWith("-")) {
-      lines.push({ type: "del", text: raw.slice(1), old: o++ });
+      lines.push({ kind: "del", text: raw.slice(1), old: o++, new: null });
     } else if (raw.startsWith("\\")) {
-      lines.push({ type: "note", text: raw.slice(2) });
+      lines.push({ kind: "note", text: raw.slice(2), old: null, new: null });
     } else if (raw.startsWith(" ")) {
-      lines.push({ type: "ctx", text: raw.slice(1), old: o++, new: n++ });
+      lines.push({ kind: "ctx", text: raw.slice(1), old: o++, new: n++ });
     } else if (raw.startsWith("diff --git")) {
       inHunk = false;
     }
@@ -240,40 +293,17 @@ function Diff({
           {file.old_path && <span className="muted">{file.old_path} → </span>}
           {where}
         </span>
-        <span className="muted" style={{ marginLeft: "auto", flex: "none" }}>{t(KIND[file.kind].label)}</span>
+        <span className="muted diff-kind">{t(KIND[file.kind].label)}</span>
         {file.kind !== "deleted" && (
-          <button className="btn btn-ghost" style={{ flex: "none" }} onClick={() => onEdit(where)}>
-            <Icon name="code" /> {t("Abrir")}
-          </button>
+          <Button variant="ghost" size={28} icon="code" onClick={() => onEdit(where)}>
+            {t("Abrir")}
+          </Button>
         )}
       </div>
-      {error && <div className="error" style={{ padding: 12 }}>{error}</div>}
-      {text !== null && lines.length === 0 && <div className="muted" style={{ padding: 12 }}>{t("Sin cambios de contenido.")}</div>}
+      {error && <div className="error changes-error">{error}</div>}
+      {text !== null && lines.length === 0 && <div className="muted changes-error">{t("Sin cambios de contenido.")}</div>}
       <div className="diff selectable">
-        {lines.map((l, i) =>
-          l.type === "hunk" ? (
-            <div key={i} className="dl hunk">
-              <span className="ln" />
-              <span className="ln" />
-              <span className="code">{l.text}</span>
-            </div>
-          ) : l.type === "note" ? (
-            <div key={i} className="dl note">
-              <span className="ln" />
-              <span className="ln" />
-              <span className="code">{l.text}</span>
-            </div>
-          ) : (
-            <div key={i} className={`dl ${l.type}`}>
-              <span className="ln">{l.old ?? ""}</span>
-              <span className="ln">{l.new ?? ""}</span>
-              <span className="code">
-                <span className="sign">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span>
-                {l.text}
-              </span>
-            </div>
-          ),
-        )}
+        <DiffRows rows={lines} />
       </div>
     </>
   );

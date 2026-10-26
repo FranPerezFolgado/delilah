@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { safeUrl } from "../markdown";
+import "./MarkdownImage.css";
 
 interface Props {
   src: string;

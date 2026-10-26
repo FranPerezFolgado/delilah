@@ -1,0 +1,15 @@
+.prj-head { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--tx2); }
+.prj-name { margin: 0; font-size: 15px; font-weight: 600; color: var(--tx-strong); }
+.prj-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prj-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.prj-sec { display: flex; flex-direction: column; gap: 6px; }
+.prj-sec > p { margin: 0; }
+.prj-cmd { display: flex; gap: 8px; }
+.prj-cmd .input { flex: 1; min-width: 0; }
+.prj-readme { padding: 12px 16px; max-height: 360px; overflow: auto; }
+.prj-tree { list-style: none; margin: 0; padding-left: 14px; }
+.prj-sec > .prj-tree { padding-left: 0; }
+.prj-node { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 2px 4px; font: inherit; font-size: 12px; color: var(--tx); cursor: pointer; }
+.prj-node:hover { background: var(--hov); border-radius: 7px; }
+.prj-file { color: var(--tx2); cursor: default; padding-left: 24px; }
+.prj-file:hover { background: transparent; }

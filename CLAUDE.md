@@ -27,6 +27,23 @@ Read these before changing anything; keep them true when you change behaviour:
 When a feature lands, update `docs/status.md` (and the README for user-facing
 behaviour); when a decision is taken, add it to `docs/decisions.md`.
 
+## Versioning: every Spec Kit task bumps the version
+
+Every feature or fix done with Spec Kit (`/feature`, `/orchestrate`,
+`/speckit-implement`) ends with a version bump on its branch, before the PR.
+Decide the level yourself from what the change does (semver):
+
+- **major**: breaks something already in use — HTTP API or CLI changes that old
+  clients can't handle, data/state that needs manual migration, removed features.
+- **minor**: a new user-facing feature or capability, backwards compatible.
+- **patch**: fixes, docs, internal refactors with no new behaviour.
+
+Bump from the version on `main` (re-check it if `main` moved before merging),
+in the four places listed in [docs/development.md](docs/development.md#releasing)
+plus the lockfiles (`scripts/bump-version.sh <level> --commit` does both), as its own commit
+`chore: bump version to X.Y.Z`, and say in the PR which level you picked and why. Tagging,
+building and publishing are `make release` on `main` and the tag workflow, as in the release steps.
+
 ## Ground rules
 
 - Developed on a personal Mac, tested on the work Mac. Never reference or copy
@@ -37,6 +54,23 @@ behaviour); when a decision is taken, add it to `docs/decisions.md`.
 - Git and gh here run as the personal account (FranPerezFolgado). The machine
   also has work credentials: confirm the account before any remote operation.
 - Submodules over `file://` need `git -c protocol.file.allow=always`.
+
+## Parallelize by default
+
+The setup is built for parallel work, so use it without being asked. Whenever a task
+has pieces that don't depend on each other, run them at the same time:
+
+- **Reading, research, reviews, checks:** subagents (`code-researcher`, the
+  reviewers, `ui-verifier`, `doc-searcher`), all launched in one message.
+- **Independent pieces of code** (separate files, neither needs the other's result):
+  one worktree each, since each worktree gets its own preview slot (1–9). With Spec
+  Kit, `/orchestrate` already runs packages that share no files in parallel.
+- **Tasks of their own** (a separate fix or feature that turns up along the way):
+  propose them as a separate session or Delilah task instead of chaining them here.
+
+Don't parallelize what a handful of tool calls settles, two writers on the same
+files, or steps that need each other's output. When a plan has independent steps
+and you run them one after another anyway, say why in one line.
 
 ## Stack & checks
 
@@ -70,5 +104,7 @@ with its own state in `fixtures/preview-home-N` and the fixture repos to registe
 as projects. Open the UI in a browser (or the browser pane) to try the feature;
 use `DELILAH_URL=<API> target/debug/delilah …` or curl for the API. Run it in the
 background and stop it with Ctrl-C (or by stopping that process), never by name.
+A `PreToolUse` hook (`.claude/hooks/guard-installed-daemon.sh`) blocks the commands that would
+touch the installed app; if it blocks you, use a preview or ask the user.
 Only what is native to macOS (notifications, menu, Dock badge, global ⌘P) needs
 the Tauri app; say so instead of trying it.

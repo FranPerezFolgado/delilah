@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
-use crate::command::{GitError, GitOptions, git};
+use crate::base::{FetchOutcome, RepoBase, prepare_base};
+use crate::command::{Deadline, GitError, GitOptions, NETWORK_LIMIT, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Submodule {
@@ -17,7 +19,8 @@ pub struct Submodule {
 pub struct WorkspaceSpec {
     /// Folder of the new workspace, e.g. `~/.delilah/workspaces/PROJ-1234`.
     pub path: PathBuf,
-    pub branch: String,
+    /// `None`: no branch yet (the workspace starts detached at `HEAD`).
+    pub branch: Option<String>,
     pub kind: ProjectKind,
     /// `parent` only: submodule paths, as listed by [`list_submodules`].
     pub submodules: Vec<String>,
@@ -41,6 +44,48 @@ impl Workspace {
         }
     }
 
+    /// The folder that holds the task's branch once the workspace is gone, for the repo
+    /// `label` (see [`Workspace::repos`]) of the project at `root`: its own checkout, or
+    /// the submodule there when it is set up. `None` when the folder is not a repo, or
+    /// when the label would lead out of `root`.
+    pub fn home_of(root: &Path, label: &str) -> Option<PathBuf> {
+        let root = root.canonicalize().ok()?;
+        if label == "." {
+            return Some(root);
+        }
+        let dir = root.join(label).canonicalize().ok()?;
+        // An uninitialised submodule folder would make git answer for the parent.
+        (dir.starts_with(&root) && dir != root && dir.join(".git").exists()).then_some(dir)
+    }
+
+    /// Whether a parent workspace is on the task's branch in the parent's own repo too (a
+    /// descriptive branch made after the start; older tasks never were, and a branch of
+    /// the same name that the parent happens to have is not theirs).
+    pub fn parent_has_branch(&self, opts: &GitOptions) -> bool {
+        self.kind == ProjectKind::Parent
+            && self.has_branch()
+            && current_branch(&self.path, opts).ok().flatten().as_deref()
+                == Some(self.branch.as_str())
+    }
+
+    /// Whether the task has a branch yet: an empty name means the first analysis has
+    /// not created it.
+    pub fn has_branch(&self) -> bool {
+        !self.branch.is_empty()
+    }
+
+    /// The repos (as in [`Workspace::repos`]) with uncommitted changes. Errors when a
+    /// folder cannot be read by git.
+    pub fn uncommitted(&self, opts: &GitOptions) -> Result<Vec<String>, GitError> {
+        let mut dirty = Vec::new();
+        for (label, dir) in self.repos() {
+            if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+                dirty.push(label);
+            }
+        }
+        Ok(dirty)
+    }
+
     /// Folders that hold the task's branch: each submodule, or the repo itself.
     fn branch_dirs(&self) -> Vec<(String, PathBuf)> {
         match self.kind {
@@ -52,6 +97,47 @@ impl Workspace {
             ProjectKind::Repo => vec![("the workspace".into(), self.path.clone())],
         }
     }
+}
+
+/// Names of the folders in `root/specs/` that hold a `spec.md`, sorted. Empty when
+/// there is no `specs/` folder.
+pub fn spec_dirs(root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root.join("specs")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().join("spec.md").is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    names
+}
+
+/// The branch checked out in `dir`, or `None` on a detached HEAD.
+pub fn current_branch(dir: &Path, opts: &GitOptions) -> Result<Option<String>, GitError> {
+    let name = git(dir, &["branch", "--show-current"], opts)?;
+    Ok((!name.is_empty()).then_some(name))
+}
+
+/// Starts the branch `name` at the current `HEAD` of `dir` and switches to it, keeping
+/// the uncommitted files. Fails if the branch already exists.
+pub fn apply_branch(dir: &Path, name: &str, opts: &GitOptions) -> Result<(), GitError> {
+    if git(dir, &["check-ref-format", "--branch", name], opts).is_err() {
+        return Err(GitError::InvalidBranch(name.to_string()));
+    }
+    git(dir, &["checkout", "-q", "-b", name], opts)?;
+    Ok(())
+}
+
+/// Switches `dir` to the existing branch `name`, keeping the uncommitted files. Fails if
+/// git cannot carry them over, or the name is not a valid branch name.
+pub fn switch_branch(dir: &Path, name: &str, opts: &GitOptions) -> Result<(), GitError> {
+    if git(dir, &["check-ref-format", "--branch", name], opts).is_err() {
+        return Err(GitError::InvalidBranch(name.to_string()));
+    }
+    git(dir, &["checkout", "-q", name], opts)?;
+    Ok(())
 }
 
 /// Top folder of the repo containing `path`.
@@ -97,32 +183,61 @@ pub fn list_submodules(parent: &Path) -> Result<Vec<Submodule>, GitError> {
 
 /// Creates the workspace of `root` (the parent or the repo) described by `spec`.
 ///
-/// - `parent`: a worktree detached at the parent's `HEAD`, with only `submodules`
-///   initialised, each on `branch`. Branches and PRs live in the submodules.
-/// - `repo`: a worktree of the repo on a new `branch`.
+/// - `parent`: a worktree detached at the parent's fresh `origin` default branch, with
+///   only `submodules` initialised, each on a new `branch` that starts at its own
+///   fresh `origin` default (detached there when `branch` is `None`). Branches and
+///   PRs live in the submodules.
+/// - `repo`: a worktree of the repo on a new `branch` that starts at `origin`'s default
+///   branch, fetched first (bounded by `deadline`); detached there when `branch` is
+///   `None`, so the branch made later starts fresh too. No local branch moves and the
+///   new branch has no upstream. A failed fetch falls back to the last known `origin`.
+///
+/// Also returns the base each repo started from (`.` is the parent for `parent`).
 pub fn create_workspace(
     root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
-) -> Result<Workspace, GitError> {
+    deadline: Deadline,
+) -> Result<(Workspace, Vec<RepoBase>), GitError> {
     if spec.path.exists() {
         return Err(GitError::WorkspaceExists(spec.path.clone()));
     }
-    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
-        return Err(GitError::InvalidBranch(spec.branch.clone()));
+    if let Some(branch) = &spec.branch
+        && git(root, &["check-ref-format", "--branch", branch], opts).is_err()
+    {
+        return Err(GitError::InvalidBranch(branch.clone()));
     }
     let ws_path = path_str(&spec.path);
 
+    let mut bases = Vec::new();
     match spec.kind {
         ProjectKind::Repo => {
             if !spec.submodules.is_empty() {
                 return Err(GitError::SubmodulesInRepo);
             }
-            git(
-                root,
-                &["worktree", "add", "-b", &spec.branch, &ws_path, "HEAD"],
-                opts,
-            )?;
+            let base = prepare_base(root, ".", opts, deadline);
+            let start = base.start().to_string();
+            match &spec.branch {
+                Some(branch) => git(
+                    root,
+                    &[
+                        "worktree",
+                        "add",
+                        "--no-track",
+                        "-b",
+                        branch,
+                        &ws_path,
+                        &start,
+                    ],
+                    opts,
+                )?,
+                None => git(
+                    root,
+                    &["worktree", "add", "--detach", &ws_path, &start],
+                    opts,
+                )?,
+            };
+            bases.push(base);
         }
         ProjectKind::Parent => {
             let known = list_submodules(root)?;
@@ -133,39 +248,65 @@ pub fn create_workspace(
             {
                 return Err(GitError::UnknownSubmodule(unknown.clone()));
             }
+            let base = prepare_base(root, ".", opts, deadline);
+            let start = base.start().to_string();
             git(
                 root,
-                &["worktree", "add", "--detach", &ws_path, "HEAD"],
+                &["worktree", "add", "--detach", &ws_path, &start],
                 opts,
             )?;
-            if let Err(e) = init_submodules(&spec.path, spec, opts) {
-                // Leave nothing half-built behind.
-                let _ = git(root, &["worktree", "remove", "--force", &ws_path], opts);
-                return Err(e);
+            bases.push(base);
+            match init_submodules(&spec.path, spec, opts, deadline) {
+                Ok(subs) => bases.extend(subs),
+                Err(e) => {
+                    // Leave nothing half-built behind.
+                    let _ = git(root, &["worktree", "remove", "--force", &ws_path], opts);
+                    return Err(e);
+                }
             }
         }
     }
 
-    Ok(Workspace {
+    let ws = Workspace {
         path: spec.path.clone(),
-        branch: spec.branch.clone(),
+        branch: spec.branch.clone().unwrap_or_default(),
         kind: spec.kind,
         submodules: spec.submodules.clone(),
-    })
+    };
+    Ok((ws, bases))
 }
 
-fn init_submodules(ws: &Path, spec: &WorkspaceSpec, opts: &GitOptions) -> Result<(), GitError> {
+fn init_submodules(
+    ws: &Path,
+    spec: &WorkspaceSpec,
+    opts: &GitOptions,
+    deadline: Deadline,
+) -> Result<Vec<RepoBase>, GitError> {
     if spec.submodules.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut args = vec!["submodule", "update", "--init", "--"];
     args.extend(spec.submodules.iter().map(String::as_str));
     git(ws, &args, opts)?;
 
+    let mut bases = Vec::new();
     for sub in &spec.submodules {
-        git(&ws.join(sub), &["checkout", "-b", &spec.branch], opts)?;
+        let dir = ws.join(sub);
+        let base = prepare_base(&dir, sub, opts, deadline);
+        let start = base.start().to_string();
+        // Without a branch the submodule is detached at its fresh base, where the
+        // branch made later starts.
+        match &spec.branch {
+            Some(branch) => git(
+                &dir,
+                &["checkout", "-q", "--no-track", "-b", branch, &start],
+                opts,
+            )?,
+            None => git(&dir, &["checkout", "-q", "--detach", &start], opts)?,
+        };
+        bases.push(base);
     }
-    Ok(())
+    Ok(bases)
 }
 
 /// Removes the workspace. Refuses while the task's branch has uncommitted changes or
@@ -191,30 +332,69 @@ pub fn check_workspace(ws: &Workspace, opts: &GitOptions) -> Result<(), GitError
     if !ws.path.exists() {
         return Ok(());
     }
-    let only_this_branch = format!("--exclude={}", ws.branch);
     for (location, dir) in ws.branch_dirs() {
-        if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
-            return Err(GitError::Dirty { location });
+        check_dir(&location, &dir, &ws.branch, false, opts)?;
+    }
+    if ws.parent_has_branch(opts) {
+        check_dir("the parent", &ws.path, &ws.branch, true, opts)?;
+    }
+    Ok(())
+}
+
+/// [`check_workspace`] for only the repos of `ws` whose label (see [`Workspace::repos`])
+/// is in `labels`: for the repos an archive after a merge has no merged PR to vouch for.
+pub fn check_repos(ws: &Workspace, labels: &[String], opts: &GitOptions) -> Result<(), GitError> {
+    if !ws.path.exists() {
+        return Ok(());
+    }
+    for (label, dir) in ws.repos() {
+        if labels.contains(&label) {
+            let location = if label == "." {
+                "the workspace".to_string()
+            } else {
+                label
+            };
+            check_dir(&location, &dir, &ws.branch, false, opts)?;
         }
-        // Commits of this branch that are neither pushed nor on another local branch
-        // (so a local, unpushed `main` it started from does not count).
-        let ahead = git(
-            &dir,
-            &[
-                "rev-list",
-                "--count",
-                "HEAD",
-                "--not",
-                "--remotes",
-                &only_this_branch,
-                "--branches",
-            ],
-            opts,
-        )?;
-        let count = ahead.parse().unwrap_or(0);
-        if count > 0 {
-            return Err(GitError::Unpushed { location, count });
-        }
+    }
+    Ok(())
+}
+
+/// `ignore_submodules`: for a parent's own repo, whose submodules are checked on their own.
+fn check_dir(
+    location: &str,
+    dir: &Path,
+    branch: &str,
+    ignore_submodules: bool,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    let location = location.to_string();
+    let mut status = vec!["status", "--porcelain"];
+    if ignore_submodules {
+        status.push("--ignore-submodules=all");
+    }
+    if !git(dir, &status, opts)?.is_empty() {
+        return Err(GitError::Dirty { location });
+    }
+    // Commits of this branch that are neither pushed nor on another local branch
+    // (so a local, unpushed `main` it started from does not count).
+    let only_this_branch = format!("--exclude={branch}");
+    let ahead = git(
+        dir,
+        &[
+            "rev-list",
+            "--count",
+            "HEAD",
+            "--not",
+            "--remotes",
+            &only_this_branch,
+            "--branches",
+        ],
+        opts,
+    )?;
+    let count = ahead.parse().unwrap_or(0);
+    if count > 0 {
+        return Err(GitError::Unpushed { location, count });
     }
     Ok(())
 }
@@ -316,19 +496,30 @@ fn checkout_dirs(root: &Path, spec: &WorkspaceSpec) -> Result<Vec<(String, PathB
     }
 }
 
+/// Per folder of a checkout-mode workspace, the branch (or commit) it was on.
+pub type Previous = Vec<(String, String)>;
+
 /// Puts the task's branch in the project's own checkout instead of a worktree:
 /// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
-/// while there are uncommitted changes. Returns the workspace and, per folder, the
-/// branch (or commit) it was on, to go back there when the task is archived.
+/// while there are uncommitted changes (before any fetch). A new branch starts at the
+/// fresh `origin` default branch (see [`prepare_base`]) with no upstream; one that
+/// already exists is switched to as it is, never moved. With no branch it switches
+/// and fetches nothing, and a parent's own checkout (`"."`) is recorded too, as a hook
+/// may switch it. Returns the workspace, per folder the branch (or commit) it was on,
+/// to go back there when the task is archived, and the base each folder's branch
+/// started from (none without a branch).
 pub fn use_checkout(
     root: &Path,
     spec: &WorkspaceSpec,
     opts: &GitOptions,
-) -> Result<(Workspace, Vec<(String, String)>), GitError> {
-    if git(root, &["check-ref-format", "--branch", &spec.branch], opts).is_err() {
-        return Err(GitError::InvalidBranch(spec.branch.clone()));
+    deadline: Deadline,
+) -> Result<(Workspace, Previous, Vec<RepoBase>), GitError> {
+    if let Some(branch) = &spec.branch
+        && git(root, &["check-ref-format", "--branch", branch], opts).is_err()
+    {
+        return Err(GitError::InvalidBranch(branch.clone()));
     }
-    let dirs = checkout_dirs(root, spec)?;
+    let mut dirs = checkout_dirs(root, spec)?;
     for (location, dir) in &dirs {
         if !git(dir, &["status", "--porcelain"], opts)?.is_empty() {
             return Err(GitError::Dirty {
@@ -336,49 +527,83 @@ pub fn use_checkout(
             });
         }
     }
-    let mut previous: Vec<(String, String)> = Vec::new();
+    if spec.branch.is_none() && spec.kind == ProjectKind::Parent {
+        dirs.push((".".into(), root.to_path_buf()));
+    }
+    let mut previous: Previous = Vec::new();
+    let mut bases: Vec<RepoBase> = Vec::new();
+    // The folders where this call created the branch, to delete it on a rollback.
+    let mut created: Vec<PathBuf> = Vec::new();
     for (location, dir) in &dirs {
         let was = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"], opts)
             .ok()
             .filter(|b| !b.is_empty())
             .map_or_else(|| git(dir, &["rev-parse", "HEAD"], opts), Ok)?;
+        let Some(branch) = &spec.branch else {
+            previous.push((location.clone(), was));
+            continue;
+        };
         let exists = git(
             dir,
             &[
                 "rev-parse",
                 "--verify",
                 "--quiet",
-                &format!("refs/heads/{}", spec.branch),
+                &format!("refs/heads/{branch}"),
             ],
             opts,
         )
         .is_ok();
         let switched = if exists {
-            git(dir, &["checkout", "-q", &spec.branch], opts)
+            git(dir, &["checkout", "-q", branch], opts)
+                .and_then(|_| git(dir, &["rev-parse", "HEAD"], opts))
+                .map(|sha| RepoBase {
+                    repo: location.clone(),
+                    refname: branch.clone(),
+                    sha: Some(sha),
+                    fetch: FetchOutcome::Existing,
+                })
         } else {
-            git(dir, &["checkout", "-q", "-b", &spec.branch], opts)
+            let base = prepare_base(dir, location, opts, deadline);
+            let start = base.start().to_string();
+            git(
+                dir,
+                &["checkout", "-q", "--no-track", "-b", branch, &start],
+                opts,
+            )
+            .map(|_| base)
         };
-        if let Err(e) = switched {
-            // Leave nothing half-switched behind.
-            for (loc, back) in &previous {
-                let d = if loc == "." {
-                    root.to_path_buf()
-                } else {
-                    root.join(loc)
-                };
-                let _ = git(&d, &["checkout", "-q", back], opts);
+        let base = match switched {
+            Ok(base) => base,
+            Err(e) => {
+                // Leave nothing half-switched behind, and no branch this call made.
+                for (loc, back) in &previous {
+                    let d = if loc == "." {
+                        root.to_path_buf()
+                    } else {
+                        root.join(loc)
+                    };
+                    let _ = git(&d, &["checkout", "-q", back], opts);
+                }
+                for d in &created {
+                    let _ = git(d, &["branch", "-D", branch], opts);
+                }
+                return Err(e);
             }
-            return Err(e);
+        };
+        if base.fetch != FetchOutcome::Existing {
+            created.push(dir.clone());
         }
+        bases.push(base);
         previous.push((location.clone(), was));
     }
     let ws = Workspace {
         path: root.to_path_buf(),
-        branch: spec.branch.clone(),
+        branch: spec.branch.clone().unwrap_or_default(),
         kind: spec.kind,
         submodules: spec.submodules.clone(),
     };
-    Ok((ws, previous))
+    Ok((ws, previous, bases))
 }
 
 /// Ends a task that worked in the project's checkout: goes back to the branches it
@@ -412,4 +637,225 @@ pub fn leave_checkout(
         }
     }
     stuck
+}
+
+fn check_branch(branch: &str) -> Result<(), GitError> {
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(GitError::InvalidBranch(branch.to_string()));
+    }
+    Ok(())
+}
+
+/// Subjects of the commits on `branch` that are not in `base`, oldest first. Prefers
+/// `origin/<base>` over the local `<base>` when it exists.
+pub fn commit_subjects(
+    dir: &Path,
+    base: &str,
+    branch: &str,
+    opts: &GitOptions,
+) -> Result<Vec<String>, GitError> {
+    check_branch(branch)?;
+    check_branch(base)?;
+    let remote_base = format!("origin/{base}");
+    let base_ref = if git(
+        dir,
+        &["rev-parse", "--verify", "--quiet", &remote_base],
+        opts,
+    )
+    .is_ok()
+    {
+        remote_base
+    } else {
+        base.to_string()
+    };
+    let range = format!("{base_ref}..{branch}");
+    let out = git(dir, &["log", "--reverse", "--format=%s", &range], opts)?;
+    Ok(out.lines().map(str::to_string).collect())
+}
+
+/// True when `branch` has no upstream or has commits its upstream lacks.
+pub fn needs_push(dir: &Path, branch: &str, opts: &GitOptions) -> Result<bool, GitError> {
+    check_branch(branch)?;
+    let upstream = format!("{branch}@{{upstream}}");
+    if git(dir, &["rev-parse", "--abbrev-ref", &upstream], opts).is_err() {
+        return Ok(true);
+    }
+    let range = format!("{upstream}..{branch}");
+    let count = git(dir, &["rev-list", "--count", &range], opts)?;
+    Ok(count.trim().parse::<u32>().unwrap_or(1) > 0)
+}
+
+/// `git push -u origin <branch>`.
+pub fn push_branch(dir: &Path, branch: &str, opts: &GitOptions) -> Result<(), GitError> {
+    check_branch(branch)?;
+    git(dir, &["push", "-u", "origin", branch], opts).map(|_| ())
+}
+
+/// True when `name` is a local branch, or a remote-tracking branch of any remote, in `dir`.
+pub fn branch_taken(dir: &Path, name: &str, opts: &GitOptions) -> Result<bool, GitError> {
+    let out = git(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        opts,
+    )?;
+    // Remote names may contain `/`, so strip each known remote instead of splitting.
+    let remotes = git(dir, &["remote"], opts)?;
+    let local = format!("refs/heads/{name}");
+    Ok(out.lines().any(|r| {
+        r == local
+            || remotes.lines().any(|remote| {
+                r.strip_prefix("refs/remotes/")
+                    .and_then(|rest| rest.strip_prefix(remote))
+                    .and_then(|rest| rest.strip_prefix('/'))
+                    == Some(name)
+            })
+    }))
+}
+
+/// `base` if no repo in `dirs` has that branch, else the first free `base-2`..`base-99`,
+/// else `base` with the unix time.
+pub fn free_branch(dirs: &[PathBuf], base: &str, opts: &GitOptions) -> Result<String, GitError> {
+    let taken = |name: &str| -> Result<bool, GitError> {
+        for dir in dirs {
+            if branch_taken(dir, name, opts)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    };
+    if !taken(base)? {
+        return Ok(base.to_string());
+    }
+    for n in 2..=99 {
+        let name = format!("{base}-{n}");
+        if !taken(&name)? {
+            return Ok(name);
+        }
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(format!("{base}-{secs}"))
+}
+
+/// Fetches `origin`, giving up at `deadline`. The error is git's stderr, or why it
+/// did not run.
+pub fn fetch(dir: &Path, opts: &GitOptions, deadline: Deadline) -> Result<(), String> {
+    // The same lock and limits as `prepare_base`, so they never fetch at once and a
+    // hung remote holds neither for long. Never reuses an earlier fetch: a merge check
+    // must see the remote as it is now.
+    crate::base::locked_fetch(dir, opts, deadline, std::time::Duration::ZERO)
+}
+
+/// Fails, touching nothing, if archiving after a merged PR would lose work: uncommitted
+/// changes, or local commits of the task's branch beyond the PR's head. `heads` maps
+/// each repo label (see [`Workspace::repos`]) to the head the merged PR had; repos
+/// without an entry are not checked. A squash merge leaves the PR head out of the
+/// base branch, so the check is against that head, not against the base.
+pub fn check_merged(
+    ws: &Workspace,
+    heads: &HashMap<String, String>,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    // Removed by hand: nothing left in it to lose.
+    if !ws.path.exists() {
+        return Ok(());
+    }
+    if ws.kind == ProjectKind::Parent
+        && !git(
+            &ws.path,
+            &["status", "--porcelain", "--ignore-submodules=all"],
+            opts,
+        )?
+        .is_empty()
+    {
+        return Err(GitError::Dirty {
+            location: "the parent".into(),
+        });
+    }
+    for (location, dir) in ws.repos() {
+        let Some(head) = heads.get(&location) else {
+            continue;
+        };
+        if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+            return Err(GitError::Dirty { location });
+        }
+        let args = ["merge-base", "--is-ancestor", ws.branch.as_str(), head];
+        let mut code = git_code(&dir, &args, opts)?;
+        if code > 1 {
+            // Probably a head this clone has not fetched yet.
+            fetch(&dir, opts, Deadline::after(NETWORK_LIMIT)).map_err(|stderr| {
+                GitError::Command {
+                    dir: dir.clone(),
+                    args: "fetch origin".into(),
+                    stderr,
+                }
+            })?;
+            code = git_code(&dir, &args, opts)?;
+        }
+        match code {
+            0 => {}
+            1 => return Err(GitError::NotMerged { location }),
+            _ => {
+                // Surface git's own message.
+                git(&dir, &args, opts)?;
+                return Err(GitError::NotMerged { location });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The commit the local `branch` points at, or `None` when there is no such branch.
+pub fn branch_tip(dir: &Path, branch: &str, opts: &GitOptions) -> Result<Option<String>, GitError> {
+    check_branch(branch)?;
+    let reference = format!("refs/heads/{branch}");
+    if git_code(dir, &["show-ref", "--verify", "--quiet", &reference], opts)? != 0 {
+        return Ok(None);
+    }
+    git(dir, &["rev-parse", &reference], opts).map(Some)
+}
+
+/// A full commit id: what is safe to hand to git as one.
+pub fn is_sha(s: &str) -> bool {
+    (40..=64).contains(&s.len()) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Deletes the local `branch`. Fine if it is already gone; refuses the checked-out one.
+/// With `expected` (a commit id) it deletes only if the branch still points there, so
+/// a commit made since is never lost.
+pub fn delete_branch(
+    dir: &Path,
+    branch: &str,
+    expected: Option<&str>,
+    opts: &GitOptions,
+) -> Result<(), GitError> {
+    check_branch(branch)?;
+    if expected.is_some_and(|sha| !is_sha(sha)) {
+        return Err(GitError::InvalidBranch(format!(
+            "{branch}@{}",
+            expected.unwrap_or_default()
+        )));
+    }
+    let reference = format!("refs/heads/{branch}");
+    if git_code(dir, &["show-ref", "--verify", "--quiet", &reference], opts)? != 0 {
+        return Ok(());
+    }
+    if git(dir, &["symbolic-ref", "--short", "HEAD"], opts).is_ok_and(|cur| cur == branch) {
+        return Err(GitError::Command {
+            dir: dir.to_path_buf(),
+            args: format!("branch -D {branch}"),
+            stderr: "it is the checked-out branch".into(),
+        });
+    }
+    match expected {
+        Some(sha) => git(dir, &["update-ref", "-d", &reference, sha], opts).map(|_| ()),
+        None => git(dir, &["branch", "-D", branch], opts).map(|_| ()),
+    }
 }

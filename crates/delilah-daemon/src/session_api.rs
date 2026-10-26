@@ -4,6 +4,7 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use delilah_agents::runtime::RuntimeKind;
 use delilah_core::TaskKey;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +14,9 @@ use crate::run::launch_session;
 use crate::sessions::LiveState;
 use crate::state::AppState;
 use crate::store::StoreError;
-use crate::store_sessions::{SessionKind, SessionRecord, project_of, project_owner};
+use crate::store_sessions::{EntryKind, SessionKind, SessionRecord, project_of, project_owner};
+
+use crate::conversation::MAX_MESSAGE_CHARS as MAX_PROMPT_CHARS;
 
 #[derive(Debug, Serialize)]
 pub struct SessionView {
@@ -23,6 +26,16 @@ pub struct SessionView {
     pub live: bool,
     /// Live sessions only.
     pub state: Option<LiveState>,
+    /// `"stream"` for a chat-mode agent, else `"pty"`: what is running, or what a
+    /// launch would use (the task's flag; project sessions are always terminals).
+    pub runtime: RuntimeKind,
+    /// What the next launch uses: the session's own runtime, else the task's `chat_mode`.
+    /// It differs from `runtime` only between a switch and the relaunch.
+    pub effective_runtime: RuntimeKind,
+    /// The stored per-session choice; `None` follows the task.
+    pub runtime_override: Option<RuntimeKind>,
+    pub last_activity_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,12 +47,15 @@ pub struct OpenSession {
     /// Claude in plan mode. Defaults to true in a project (its checkout is yours),
     /// false in a task.
     pub read_only: Option<bool>,
+    /// An idea conversation (Claude, in a project only): shown as a chat that ends
+    /// in a task. Its label is "Idea" and it is never read-only.
+    pub conversation: Option<bool>,
 }
 
 /// Every open session, of every task.
 pub async fn list_all(State(app): State<AppState>) -> Result<Json<Vec<SessionView>>, ApiError> {
     let records = app.store.open_sessions(None).await?;
-    Ok(Json(records.into_iter().map(|r| view(&app, r)).collect()))
+    Ok(Json(views(&app, records).await))
 }
 
 /// What each live Claude session's agents are doing, for those doing something.
@@ -53,7 +69,7 @@ pub async fn list_for_task(
     Path(key): Path<String>,
 ) -> Result<Json<Vec<SessionView>>, ApiError> {
     let records = app.store.open_sessions(Some(&key)).await?;
-    Ok(Json(records.into_iter().map(|r| view(&app, r)).collect()))
+    Ok(Json(views(&app, records).await))
 }
 
 /// Opens another session in the task's workspace.
@@ -86,20 +102,54 @@ async fn open_for(
     key: String,
     req: OpenSession,
 ) -> Result<(StatusCode, Json<SessionView>), ApiError> {
+    if req.kind == SessionKind::Setup {
+        return Err(ApiError::bad_request(
+            "a setup session is started by the task, not opened",
+        ));
+    }
+    let conversation = req.conversation.unwrap_or(false);
+    if conversation && req.kind != SessionKind::Claude {
+        return Err(ApiError::bad_request("a conversation is a Claude session"));
+    }
+    if conversation && project_of(&key).is_none() {
+        return Err(ApiError::bad_request(
+            "a conversation can only be opened in a project",
+        ));
+    }
+    // As in `conversation::send`: what reaches the terminal is what is recorded.
+    let prompt = req
+        .prompt
+        .as_deref()
+        .map(|p| crate::actions::sanitize_prompt(p.trim()))
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    if prompt
+        .as_deref()
+        .is_some_and(|p| p.chars().count() > MAX_PROMPT_CHARS)
+    {
+        return Err(ApiError::bad_request(format!(
+            "the prompt is longer than {MAX_PROMPT_CHARS} characters"
+        )));
+    }
     let ws = crate::owners::workspace(app, &key)
         .await
         .map_err(|_| ApiError::conflict(format!("{key} has no workspace (archived?)")))?;
-    let read_only =
-        req.kind == SessionKind::Claude && req.read_only.unwrap_or(project_of(&key).is_some());
+    let read_only = !conversation
+        && req.kind == SessionKind::Claude
+        && req.read_only.unwrap_or(project_of(&key).is_some());
 
     let existing = app.store.open_sessions(Some(&key)).await?;
+    // A conversation is always "Idea".
     let label = req
         .label
+        .filter(|_| !conversation)
         .filter(|l| !l.trim().is_empty())
+        .or_else(|| conversation.then(|| "Idea".to_string()))
         .unwrap_or_else(|| {
             let same = existing.iter().filter(|s| s.kind == req.kind).count() + 1;
             match req.kind {
                 SessionKind::Claude => format!("Claude {same}"),
+                SessionKind::Setup => "Setup".into(),
                 SessionKind::Shell => {
                     if same == 1 {
                         "Terminal".into()
@@ -117,12 +167,31 @@ async fn open_for(
         primary: false,
         closed: false,
         read_only,
+        conversation,
+        step: None,
     };
     app.store.create_session(&record).await?;
+    let prompt = prompt.as_deref();
+    if let (true, Some(text)) = (conversation, prompt) {
+        // The prompt goes to Claude on launch: the first line of the chat.
+        app.store
+            .add_entry(
+                &record.id,
+                EntryKind::User,
+                &serde_json::json!({ "text": text, "state": "sent", "from": "view" }),
+            )
+            .await?;
+    }
     app.emit(Topic::Sessions);
-    let prompt = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
-    launch_session(app, &record, &ws.path, prompt, false)?;
-    Ok((StatusCode::CREATED, Json(view(app, record))))
+    if let Err(e) = launch_session(app, &record, &ws.path, prompt, false).await {
+        // A chat-mode agent can fail to come up: no dead tab is left behind.
+        if let Err(err) = app.store.forget_session(&record.id).await {
+            tracing::warn!(session = %record.id, "cannot forget the failed session: {err}");
+        }
+        app.emit(Topic::Sessions);
+        return Err(e);
+    }
+    Ok((StatusCode::CREATED, Json(view(app, record).await)))
 }
 
 /// Lets a read-only Claude edit: it starts again in normal mode on the same
@@ -137,16 +206,22 @@ pub async fn allow_edits(
         .await?
         .filter(|r| !r.closed && r.kind == SessionKind::Claude)
         .ok_or_else(|| ApiError::not_found(format!("no open Claude session {id}")))?;
+    if record.conversation {
+        return Err(ApiError::conflict(
+            "a conversation is read-only through dontAsk: there is nothing to allow",
+        ));
+    }
     app.store.set_read_only(&id, false).await?;
     record.read_only = false;
     if let Some(live) = app.sessions.get(&id) {
-        let _ = live.pty.kill();
-        live.pty.wait().await;
+        crate::permissions::release_session(&app, &id).await;
+        let _ = live.runtime.kill();
+        live.runtime.wait().await;
     }
     let ws = crate::owners::workspace(&app, &record.task).await?;
-    launch_session(&app, &record, &ws.path, None, true)?;
+    launch_session(&app, &record, &ws.path, None, true).await?;
     app.emit(Topic::Sessions);
-    Ok(Json(view(&app, record)))
+    Ok(Json(view(&app, record).await))
 }
 
 /// Stops an extra session and removes it from the task. The primary one stays: it
@@ -166,7 +241,8 @@ pub async fn close(
         ));
     }
     if let Some(live) = app.sessions.get(&id) {
-        let _ = live.pty.kill();
+        crate::permissions::release_session(&app, &id).await;
+        let _ = live.runtime.kill();
     }
     app.store.close_session(&id).await?;
     app.emit(Topic::Sessions);
@@ -186,28 +262,82 @@ pub async fn reopen(
         .await?
         .filter(|r| !r.closed)
         .ok_or_else(|| ApiError::not_found(format!("session {id} does not exist or was closed")))?;
-    if app.sessions.get(&id).is_some_and(|l| !l.pty.has_exited()) {
+    if app
+        .sessions
+        .get(&id)
+        .is_some_and(|l| !l.runtime.has_exited())
+    {
         return Err(ApiError::conflict("the session is already running"));
     }
-    let ws = crate::owners::workspace(&app, &record.task)
+    relaunch(&app, &record, None).await?;
+    Ok(Json(view(&app, record).await))
+}
+
+/// Starts an ended session again in its workspace (Claude with `--resume`), with
+/// `prompt` as its first message if any.
+pub(crate) async fn relaunch(
+    app: &AppState,
+    record: &SessionRecord,
+    prompt: Option<&str>,
+) -> Result<(), ApiError> {
+    let ws = crate::owners::workspace(app, &record.task)
         .await
         .map_err(|_| ApiError::conflict(format!("{} has no workspace (archived?)", record.task)))?;
     launch_session(
-        &app,
-        &record,
+        app,
+        record,
         &ws.path,
-        None,
+        prompt,
         record.kind == SessionKind::Claude,
-    )?;
-    Ok(Json(view(&app, record)))
+    )
+    .await?;
+    Ok(())
 }
 
-fn view(app: &AppState, record: SessionRecord) -> SessionView {
-    let live = app.sessions.get(&record.id).filter(|l| !l.pty.has_exited());
+async fn views(app: &AppState, records: Vec<SessionRecord>) -> Vec<SessionView> {
+    let mut views = Vec::with_capacity(records.len());
+    for record in records {
+        views.push(view(app, record).await);
+    }
+    views
+}
+
+async fn view(app: &AppState, record: SessionRecord) -> SessionView {
+    let live = app
+        .sessions
+        .get(&record.id)
+        .filter(|l| !l.runtime.has_exited());
+    let extras = app
+        .store
+        .session_extras(&record.id)
+        .await
+        .unwrap_or_default();
     SessionView {
+        runtime: runtime_name(app, &record, live.as_ref()).await,
+        effective_runtime: crate::run::runtime_kind(app, &record)
+            .await
+            .unwrap_or(RuntimeKind::Pty),
+        runtime_override: extras.runtime_override,
+        last_activity_at: extras.last_activity_at,
+        last_message: extras.last_message,
         live: live.is_some(),
         state: live.map(|l| l.state()),
         record,
+    }
+}
+
+/// What the session runs now, or what a launch would use.
+pub(crate) async fn runtime_name(
+    app: &AppState,
+    record: &SessionRecord,
+    live: Option<&crate::sessions::Live>,
+) -> RuntimeKind {
+    match live.filter(|l| !l.runtime.has_exited()) {
+        Some(l) if l.runtime.as_stream().is_some() => RuntimeKind::Stream,
+        Some(_) => RuntimeKind::Pty,
+        None => crate::run::runtime_kind(app, record)
+            .await
+            .unwrap_or(RuntimeKind::Pty),
     }
 }
 
@@ -241,6 +371,9 @@ mod tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
@@ -267,6 +400,8 @@ mod tests {
                 primary,
                 closed: false,
                 read_only: false,
+                conversation: false,
+                step: None,
             };
             app.store.create_session(&record).await.unwrap();
             let mut cmd = CommandBuilder::new("bash");
@@ -322,6 +457,110 @@ mod tests {
             .unwrap()
             .unwrap()
             .status
+    }
+
+    #[tokio::test]
+    async fn a_session_reports_its_runtime() {
+        let (app, _) = task_with_two_sessions().await;
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        assert!(
+            list.as_array()
+                .unwrap()
+                .iter()
+                .all(|s| s["runtime"] == "pty")
+        );
+
+        // Not running: the task's flag decides.
+        for live in app.sessions.of_task("PROJ-1") {
+            let _ = live.runtime.kill();
+            live.runtime.wait().await;
+        }
+        app.store
+            .set_chat_mode(&TaskKey::new("PROJ-1"), true)
+            .await
+            .unwrap();
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        assert!(
+            list.as_array()
+                .unwrap()
+                .iter()
+                .all(|s| s["runtime"] == "stream")
+        );
+
+        // A project's session is a terminal whatever any task says.
+        let project = SessionRecord {
+            id: "p-1".into(),
+            task: "@web".into(),
+            kind: SessionKind::Claude,
+            label: "Claude 1".into(),
+            primary: false,
+            closed: false,
+            read_only: true,
+            conversation: false,
+            step: None,
+        };
+        assert_eq!(view(&app, project).await.runtime, RuntimeKind::Pty);
+    }
+
+    #[tokio::test]
+    async fn effective_runtime_is_the_override_else_the_tasks_mode() {
+        let (app, _) = task_with_two_sessions().await;
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        for s in list.as_array().unwrap() {
+            assert_eq!(s["effective_runtime"], "pty");
+            assert!(s["runtime_override"].is_null());
+            assert!(s["last_activity_at"].is_null() && s["last_message"].is_null());
+        }
+        app.store
+            .set_runtime_override("main", Some(RuntimeKind::Stream))
+            .await
+            .unwrap();
+        app.store.touch_session("main", Some("done")).await.unwrap();
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        let main = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == "main")
+            .unwrap();
+        // The live process still runs on the terminal until the relaunch.
+        assert_eq!(main["runtime"], "pty");
+        assert_eq!(main["effective_runtime"], "stream");
+        assert_eq!(main["runtime_override"], "stream");
+        assert_eq!(main["last_message"], "done");
+        assert!(main["last_activity_at"].is_string());
+    }
+
+    #[tokio::test]
+    async fn a_live_stream_session_reports_the_stream_runtime() {
+        let (app, _) = task_with_two_sessions().await;
+        // The task's flag is off: it is the running process that says what it runs on.
+        for live in app.sessions.of_task("PROJ-1") {
+            let _ = live.runtime.kill();
+            live.runtime.wait().await;
+        }
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../delilah-agents/tests/fixtures/fake-claude-stream.sh"
+        );
+        let (stream, _rx) =
+            delilah_agents::stream::StreamSession::spawn(tokio::process::Command::new(script))
+                .unwrap();
+        let stream = Arc::new(stream);
+        app.sessions
+            .insert("main", "PROJ-1", SessionKind::Claude, true, stream.clone());
+        let (_, list) = call(&app, "GET", "/api/v1/tasks/PROJ-1/sessions", None).await;
+        let runtime_of = |id: &str| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == id)
+                .map(|s| s["runtime"].clone())
+        };
+        assert_eq!(runtime_of("main"), Some(serde_json::json!("stream")));
+        // The other one is not running, and the task is not in chat mode.
+        assert_eq!(runtime_of("review"), Some(serde_json::json!("pty")));
+        stream.kill();
     }
 
     #[tokio::test]
@@ -401,6 +640,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_task_cannot_open_a_conversation() {
+        let (app, _) = task_with_two_sessions().await;
+        let (code, body) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks/PROJ-1/sessions",
+            Some(json!({ "kind": "claude", "conversation": true })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+    }
+
+    #[tokio::test]
     async fn a_task_without_workspace_cannot_open_sessions() {
         let (app, _) = task_with_two_sessions().await;
         app.store
@@ -451,6 +703,9 @@ mod project_tests {
             allow_file_protocol: false,
             notify: false,
             ui_origin: None,
+            claude_bin: "claude".into(),
+            agent_program: None,
+            ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         app.store
@@ -459,6 +714,8 @@ mod project_tests {
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
                 workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
             })
             .await
             .unwrap();
@@ -498,7 +755,176 @@ mod project_tests {
 
         let id = session["id"].as_str().unwrap();
         if let Some(live) = app.sessions.get(id) {
-            let _ = live.pty.kill();
+            let _ = live.runtime.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    async fn project_app() -> (AppState, std::path::PathBuf) {
+        let home = std::env::temp_dir().join(format!("delilah-conv-{}", uuid::Uuid::new_v4()));
+        let repo = home.join("plataforma");
+        std::fs::create_dir_all(&repo).unwrap();
+        // Stands in for `claude`, which CI doesn't have: stays up until the test kills it.
+        let fake = home.join("fake-claude.sh");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 30\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let config = Config {
+            home: home.clone(),
+            addr: "127.0.0.1:7420".parse().unwrap(),
+            allow_file_protocol: false,
+            notify: false,
+            ui_origin: None,
+            agent_program: Some(fake),
+            ..crate::config::Config::test_defaults()
+        };
+        let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.store
+            .create_project(&Project {
+                name: "plataforma".into(),
+                path: repo,
+                kind: ProjectKind::Repo,
+                workflow: "feature".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        (app, home)
+    }
+
+    fn post(body: Value) -> Request<Body> {
+        Request::post("/api/v1/projects/plataforma/sessions")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_conversation_opens_in_a_project_as_an_idea() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        assert_eq!(s["conversation"], true);
+        assert_eq!(s["label"], "Idea");
+        assert_eq!(s["read_only"], false);
+        if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
+            let _ = live.runtime.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn a_shell_conversation_is_refused() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(&app, post(json!({ "kind": "shell", "conversation": true }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{s}");
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn without_conversation_a_project_claude_is_as_before() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(&app, post(json!({ "kind": "claude" }))).await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        assert_eq!(s["conversation"], false);
+        assert_eq!(s["label"], "Claude 1");
+        assert_eq!(s["read_only"], true);
+        if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
+            let _ = live.runtime.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn a_conversation_label_is_always_idea() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "label": "x" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        assert_eq!(s["label"], "Idea");
+        if let Some(live) = app.sessions.get(s["id"].as_str().unwrap()) {
+            let _ = live.runtime.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn a_conversation_prompt_is_its_first_user_entry() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "prompt": "an idea" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        let id = s["id"].as_str().unwrap();
+        let entries = app.store.entries(id).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, EntryKind::User);
+        assert_eq!(
+            entries[0].body,
+            json!({ "text": "an idea", "state": "sent", "from": "view" })
+        );
+        if let Some(live) = app.sessions.get(id) {
+            let _ = live.runtime.kill();
+        }
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn the_first_prompt_is_sanitised_and_capped() {
+        let (app, home) = project_app().await;
+        let (status, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "prompt": "an\u{1b}[31m idea\u{3}" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{s}");
+        let id = s["id"].as_str().unwrap();
+        let entries = app.store.entries(id).await.unwrap();
+        assert_eq!(entries[0].body["text"], "an[31m idea");
+        if let Some(live) = app.sessions.get(id) {
+            let _ = live.runtime.kill();
+        }
+        let long = "x".repeat(MAX_PROMPT_CHARS + 1);
+        let (status, body) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true, "prompt": long })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn allow_edits_refuses_a_conversation() {
+        let (app, home) = project_app().await;
+        let (_, s) = call(
+            &app,
+            post(json!({ "kind": "claude", "conversation": true })),
+        )
+        .await;
+        let id = s["id"].as_str().unwrap().to_string();
+        let (status, body) = call(
+            &app,
+            Request::post(format!("/api/v1/sessions/{id}/allow-edits"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        if let Some(live) = app.sessions.get(&id) {
+            let _ = live.runtime.kill();
         }
         std::fs::remove_dir_all(home).ok();
     }

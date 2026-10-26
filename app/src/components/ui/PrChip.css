@@ -1,0 +1,7 @@
+.prchip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 7px;
+  border: 1px solid var(--bd2); font-size: 12px; color: var(--tx); white-space: nowrap; }
+.prchip .i { width: 14px; height: 14px; }
+.prchip .num { font-family: var(--mono, monospace); }
+.prchip.draft { color: var(--tx2); }
+.prchip.failing { color: var(--err-tx); }
+.prchip.merged { color: var(--ok-tx); }

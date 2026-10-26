@@ -1,4 +1,5 @@
 import { memo, type CSSProperties } from "react";
+import "./Sprite.css";
 
 interface Parsed {
   w: number;

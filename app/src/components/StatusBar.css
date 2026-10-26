@@ -1,0 +1,13 @@
+.statusbar { height: 28px; }
+.sb-conn { display: flex; align-items: center; gap: 6px; }
+.sb-ok { background: var(--ok); }
+.sb-down { background: var(--err); }
+.sb-counts { display: flex; gap: 4px; }
+.sb-btn { height: 20px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--tx2); font: inherit; }
+.sb-btn:hover { background: var(--hov); color: var(--tx); }
+.sb-err { color: var(--err-tx); }
+.sb-usage { margin-left: auto; display: flex; gap: 14px; }
+.sb-hot { color: var(--wait-tx); }
+
+/* Moved from the pre-v2 stylesheet. */
+.statusbar { height: 24px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 12px; background: var(--side); border-top: 1px solid var(--bd); font-size: 12px; color: var(--tx3); }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +9,9 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::events::{Events, Topic};
+use crate::gh::{CliGh, Gh, GhClient};
 use crate::notify::Notifier;
+use crate::prs::Backoff;
 use crate::secrets::Secrets;
 use crate::sessions::Sessions;
 use crate::specs::SpecSummary;
@@ -38,14 +40,39 @@ pub struct AppState {
     pub events: Events,
     /// AskUserQuestion questions waiting for an answer from Delilah.
     pub asks: Arc<crate::asks::Asks>,
+    /// Permissions a chat-mode agent waits on (see `permissions.rs`).
+    pub permissions: Arc<crate::permissions::Permissions>,
     /// The language Delilah speaks in (see `lang.rs`); Spanish until `main` reads
     /// the preference.
     pub lang: crate::lang::Current,
     /// Tasks the inbox suggests moving to review (see `phases.rs`).
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Last size seen of each live session's transcript (see `transcript_watch.rs`).
+    pub(crate) transcript_seen: Arc<Mutex<HashMap<String, u64>>>,
+    /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
+    pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
+    /// One lock per task for the branch and name triggers (see `branching.rs`).
+    pub(crate) branching: Arc<crate::branching::BranchLocks>,
+    /// The autopilot finishes running now, and their retries (see `autopilot/finish.rs`).
+    pub(crate) finishing: Arc<crate::autopilot::Finishing>,
     /// Whether Claude sessions start with Remote Control (the `remote-control`
     /// preference); off until `main` reads it.
     remote_control: Arc<AtomicBool>,
+    /// The user's `gh`, behind a trait so tests answer with canned output.
+    pub gh: Arc<GhClient>,
+    /// Per repo (`host/owner/name`): when to try `gh` again after it failed.
+    pub(crate) pr_backoff: Arc<Mutex<Backoff>>,
+    /// Tasks whose PRs are being checked now: one check per task at a time.
+    pub(crate) pr_checking: Arc<Mutex<HashSet<String>>>,
+    /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
+    pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
+    /// The previews the daemon runs, one per task at most (see `preview.rs`).
+    pub(crate) previews: Arc<crate::preview::Previews>,
+}
+
+/// Unit tests must never touch the real Keychain; `DELILAH_SECRETS=memory` also asks for it.
+fn use_memory_secrets(secrets_in_memory: bool, under_test: bool) -> bool {
+    under_test || secrets_in_memory
 }
 
 impl AppState {
@@ -55,15 +82,18 @@ impl AppState {
         } else {
             Notifier::Recorder(Arc::default())
         };
+        let secrets_in_memory = config.secrets_in_memory;
+        let gh_program = config.gh_program.clone();
         let events = Events::default();
         Self {
             store,
             config: Arc::new(config),
+            previews: Arc::new(crate::preview::Previews::new(events.clone())),
             sessions: Arc::new(Sessions::new(events.clone())),
             usage: Arc::default(),
             notifier,
             // Unit tests must never touch the real Keychain.
-            secrets: if cfg!(test) {
+            secrets: if use_memory_secrets(secrets_in_memory, cfg!(test)) {
                 Secrets::Memory(Arc::default())
             } else {
                 Secrets::Keychain
@@ -71,10 +101,27 @@ impl AppState {
             specs: Arc::default(),
             events,
             asks: Arc::default(),
+            permissions: Arc::default(),
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
+            transcript_seen: Arc::default(),
+            handoffs: Arc::default(),
+            branching: Arc::default(),
+            finishing: Arc::default(),
             remote_control: Arc::default(),
+            gh: Arc::new(GhClient::new(Arc::new(CliGh {
+                program: gh_program,
+            }))),
+            pr_backoff: Arc::default(),
+            pr_checking: Arc::default(),
+            pr_nudges: Arc::default(),
         }
+    }
+
+    /// The same state talking to another `gh` (tests inject a fake).
+    pub fn with_gh(mut self, gh: Arc<dyn Gh>) -> Self {
+        self.gh = Arc::new(GhClient::new(gh));
+        self
     }
 
     pub fn lang(&self) -> crate::lang::Lang {
@@ -124,5 +171,17 @@ impl AppState {
 impl FromRef<AppState> for Store {
     fn from_ref(state: &AppState) -> Self {
         state.store.clone()
+    }
+}
+
+#[cfg(test)]
+mod secrets_tests {
+    use super::use_memory_secrets;
+
+    #[test]
+    fn memory_secrets_under_test_or_when_asked() {
+        assert!(use_memory_secrets(true, false));
+        assert!(use_memory_secrets(false, true));
+        assert!(!use_memory_secrets(false, false));
     }
 }

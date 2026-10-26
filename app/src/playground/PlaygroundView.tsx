@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { openPlaygroundWindow } from "../platform";
-import "./playground.css";
+import { Button } from "../components/ui";
+import "./PlaygroundView.css";
 import { Desk } from "./Desk";
 import { deskState, type DeskModel } from "./layout";
 import { usePlayground } from "./usePlayground";
@@ -40,36 +41,39 @@ export function PlaygroundView({ onOpen, online, standalone }: Props) {
   const waiting = areas.reduce((n, a) => n + a.desks.filter((d) => deskState(d.session) === "waiting").length, 0);
   return (
     <div className={`pg-office${connected ? "" : " pg-office--stale"}${hidden ? " pg-office--paused" : ""}`}>
+      <div className="view-head" data-tauri-drag-region>
+        <h1 data-tauri-drag-region>{t("Playground")}</h1>
+        <span className={`pg-count${waiting > 0 ? " pg-count--on" : ""}`}>{t("{n} esperando", { n: waiting })}</span>
+        <span className="pg-spacer" />
+        {!standalone && (
+          <Button variant="secondary" size={28} icon="open" className="pg-window" onClick={() => void openPlaygroundWindow()}>
+            {t("Abrir en ventana")}
+          </Button>
+        )}
+      </div>
       {!connected && (
         <div className="pg-banner" role="status">
           {t("Reconectando…")}
         </div>
       )}
-      <header className="pg-head">
-        <h2>{t("Playground")}</h2>
-        <span className={`pg-count${waiting > 0 ? " pg-count--on" : ""}`}>{t("{n} esperando", { n: waiting })}</span>
-        {!standalone && (
-          <button type="button" className="pg-window" style={{ marginLeft: "auto" }} onClick={() => void openPlaygroundWindow()}>
-            {t("Abrir en ventana")}
-          </button>
+      <div className="view-body pg-body">
+        {areas.length === 0 ? (
+          <p className="pg-empty">{t("Ningún agente trabajando")}</p>
+        ) : (
+          <div className="pg-areas">
+            {areas.map((a) => (
+              <section key={a.project} className="pg-area">
+                <h3>{a.project}</h3>
+                <div className="pg-grid">
+                  {cells(a.desks).map((d, i) =>
+                    d ? <Desk key={d.session.id} desk={d} onOpen={onOpen} /> : <div key={`free-${i}`} className="pg-desk pg-desk--empty" aria-hidden="true" />,
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
         )}
-      </header>
-      {areas.length === 0 ? (
-        <p className="pg-empty">{t("Ningún agente trabajando")}</p>
-      ) : (
-        <div className="pg-areas">
-          {areas.map((a) => (
-            <section key={a.project} className="pg-area">
-              <h3>{a.project}</h3>
-              <div className="pg-grid">
-                {cells(a.desks).map((d, i) =>
-                  d ? <Desk key={d.session.id} desk={d} onOpen={onOpen} /> : <div key={`free-${i}`} className="pg-desk pg-desk--empty" aria-hidden="true" />,
-                )}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

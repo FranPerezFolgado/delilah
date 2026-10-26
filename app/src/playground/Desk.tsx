@@ -5,6 +5,7 @@ import type { Helper } from "../api";
 import { accessibleName, assignSlots, caption, deskState, helperName, helperPose, roleLook, visibleHelpers, type DeskModel } from "./layout";
 import { POSE_OF } from "./poses";
 import { Sprite } from "./Sprite";
+import "./Desk.css";
 import { DESK, POSES, ROLE_PROP_FRAMES, type Look } from "./sprites";
 
 /** Helper spots per session (helper id -> spot), module-level so they survive unmounting. */
@@ -126,7 +127,7 @@ export const Desk = memo(function Desk({ desk, onOpen }: { desk: DeskModel; onOp
         </div>
       )}
       <div className="pg-label">
-        <span className="key">{desk.key}</span>
+        <span className="key mono">{desk.key}</span>
         <span className="trunc pg-title" title={desk.title}>
           {desk.title}
         </span>
