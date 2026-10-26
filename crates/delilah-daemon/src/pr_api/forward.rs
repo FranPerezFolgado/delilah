@@ -146,16 +146,11 @@ fn review_prompt(lang: Lang, url: &str, detail: &Value) -> String {
     fit(lang, out)
 }
 
-/// Sends the notice's failures or comments to the task's primary session, on the
-/// user's say-so (never on its own), and resolves it.
-pub async fn forward(
-    State(app): State<AppState>,
-    Path(id): Path<i64>,
-) -> Result<StatusCode, ApiError> {
-    let notice = open_notice(&app, id).await?;
-    let key = TaskKey::new(&notice.task_key);
+/// Gives the task's agent a prompt: typed into its live primary session, or by
+/// relaunching the session's record. Refuses while the task is paused by the limit.
+pub(crate) async fn send(app: &AppState, key: &TaskKey, prompt: &str) -> Result<(), ApiError> {
     let lang = app.lang();
-    if let Some(task) = app.store.get_task(&key).await?
+    if let Some(task) = app.store.get_task(key).await?
         && let TaskStatus::PausedByLimit { resume_at } = task.status
     {
         let at = resume_at.with_timezone(&chrono::Local).format("%H:%M");
@@ -165,6 +160,34 @@ pub async fn forward(
         );
         return Err(ApiError::paused(message, resume_at));
     }
+    match app.sessions.primary(key.as_str()) {
+        Some(live) if !live.runtime.has_exited() => {
+            crate::actions::type_prompt(&live, prompt).await?
+        }
+        _ => {
+            let record = app
+                .store
+                .primary_session(key.as_str())
+                .await?
+                .filter(|r| !r.closed)
+                .ok_or_else(|| {
+                    ApiError::conflict(format!("{key} has no agent session to send it to"))
+                })?;
+            crate::session_api::relaunch(app, &record, Some(prompt)).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Sends the notice's failures or comments to the task's primary session, on the
+/// user's say-so (never on its own), and resolves it.
+pub async fn forward(
+    State(app): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let notice = open_notice(&app, id).await?;
+    let key = TaskKey::new(&notice.task_key);
+    let lang = app.lang();
     let url = app
         .store
         .prs_of(&key)
@@ -184,22 +207,7 @@ pub async fn forward(
         }
     };
 
-    match app.sessions.primary(key.as_str()) {
-        Some(live) if !live.runtime.has_exited() => {
-            crate::actions::type_prompt(&live, &prompt).await?
-        }
-        _ => {
-            let record = app
-                .store
-                .primary_session(key.as_str())
-                .await?
-                .filter(|r| !r.closed)
-                .ok_or_else(|| {
-                    ApiError::conflict(format!("{key} has no agent session to send it to"))
-                })?;
-            crate::session_api::relaunch(&app, &record, Some(&prompt)).await?;
-        }
-    }
+    send(&app, &key, &prompt).await?;
     app.store.resolve_notice(id).await?;
     app.emit(Topic::Inbox);
     Ok(StatusCode::NO_CONTENT)
@@ -308,6 +316,34 @@ mod tests {
         // Already resolved: gone.
         let (s, _) = call(&router, "POST", &uri, None).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn send_types_into_a_live_primary_session() {
+        let (_router, app, _dir) = setup(fake()).await;
+        let mut out = cat_session(&app);
+        assert!(
+            send(&app, &TaskKey::new("PROJ-1"), "autofix please")
+                .await
+                .is_ok()
+        );
+        read_until(&mut out, &["autofix please"]).await;
+    }
+
+    #[tokio::test]
+    async fn send_refuses_a_paused_task_and_a_task_without_sessions() {
+        let (_router, app, _dir) = setup(fake()).await;
+        let key = TaskKey::new("PROJ-1");
+        assert!(send(&app, &key, "x").await.is_err());
+        let resume_at = Utc::now() + chrono::Duration::hours(2);
+        app.transition(&key, delilah_core::Event::LimitReached { resume_at })
+            .await
+            .unwrap();
+        let _out = cat_session(&app);
+        let Err(err) = send(&app, &key, "x").await else {
+            panic!("a paused task must refuse");
+        };
+        assert_eq!(err.resume_at, Some(resume_at));
     }
 
     #[test]

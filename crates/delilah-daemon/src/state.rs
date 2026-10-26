@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::extract::FromRef;
 use chrono::{DateTime, Utc};
@@ -66,8 +66,26 @@ pub struct AppState {
     pub(crate) pr_checking: Arc<Mutex<HashSet<String>>>,
     /// Tasks with a delayed check already waiting, so a burst of pushes makes one.
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
+    /// Tasks whose CI autofix is being evaluated now: one at a time per task.
+    pub(crate) autofix_running: Arc<Mutex<HashSet<String>>>,
     /// The previews the daemon runs, one per task at most (see `preview.rs`).
     pub(crate) previews: Arc<crate::preview::Previews>,
+}
+
+/// Marks a task's autofix as being evaluated; dropping it lets the next one run.
+#[allow(dead_code)] // held by the autofix module
+pub(crate) struct AutofixGuard {
+    running: Arc<Mutex<HashSet<String>>>,
+    key: String,
+}
+
+impl Drop for AutofixGuard {
+    fn drop(&mut self) {
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.key);
+    }
 }
 
 /// Unit tests must never touch the real Keychain; `DELILAH_SECRETS=memory` also asks for it.
@@ -116,6 +134,7 @@ impl AppState {
             pr_backoff: Arc::default(),
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),
+            autofix_running: Arc::default(),
         }
     }
 
@@ -123,6 +142,20 @@ impl AppState {
     pub fn with_gh(mut self, gh: Arc<dyn Gh>) -> Self {
         self.gh = Arc::new(GhClient::new(gh));
         self
+    }
+
+    /// Takes the task's autofix evaluation; `None` when another one is running.
+    #[allow(dead_code)] // used by the autofix module
+    pub(crate) fn claim_autofix(&self, key: &str) -> Option<AutofixGuard> {
+        let fresh = self
+            .autofix_running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.to_string());
+        fresh.then(|| AutofixGuard {
+            running: self.autofix_running.clone(),
+            key: key.to_string(),
+        })
     }
 
     pub fn lang(&self) -> crate::lang::Lang {
@@ -184,5 +217,24 @@ mod secrets_tests {
         assert!(use_memory_secrets(true, false));
         assert!(use_memory_secrets(false, true));
         assert!(!use_memory_secrets(false, false));
+    }
+}
+
+#[cfg(test)]
+mod autofix_guard_tests {
+    use super::*;
+
+    async fn app() -> AppState {
+        AppState::new(Store::in_memory().await.unwrap(), Config::test_defaults())
+    }
+
+    #[tokio::test]
+    async fn the_guard_is_per_task_and_released_on_drop() {
+        let app = app().await;
+        let first = app.claim_autofix("PROJ-1").unwrap();
+        assert!(app.claim_autofix("PROJ-1").is_none());
+        assert!(app.claim_autofix("PROJ-2").is_some());
+        drop(first);
+        assert!(app.claim_autofix("PROJ-1").is_some());
     }
 }

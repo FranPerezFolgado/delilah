@@ -6,9 +6,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | verified | 1 | a9a12b5 | resumed after pause |
-| WP-02 | 2 | 2A | verified | 1 | | Task.ci_autofix not persisted yet (WP-03); AutofixDefault not re-exported from core lib.rs |
-| WP-04 | 2 | 2A | implementing | 0 | | |
-| WP-03 | 2 | 2B | pending | 0 | | |
+| WP-02 | 2 | 2A | verified | 1 | c405e23 | Task.ci_autofix not persisted yet (WP-03); AutofixDefault not re-exported from core lib.rs |
+| WP-04 | 2 | 2A | verified | 1 | | claim_autofix takes &str; forward() paused check now after prompt build |
+| WP-03 | 2 | 2B | blocked-on-WP-01F | 0 | | |
 | WP-05 | 2 | 2C | pending | 0 | | |
 | WP-06 | 3 | 3A | pending | 0 | | |
 | WP-08 | 3 | 3A | pending | 0 | | |
