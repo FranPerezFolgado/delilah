@@ -4,7 +4,7 @@ import { boardColumnOf, headerPhaseOf } from "./phases";
 import { whereOf } from "./components/WherePicker";
 
 const task = (status: TaskStatus, phase: string | null = null): Task => ({
-  key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
   title: "x",
   project: "web",
   workflow: "feature",

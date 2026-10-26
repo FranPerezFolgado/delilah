@@ -8,7 +8,7 @@ import { InboxView } from "./InboxView";
 import { ToastHost, clearToasts } from "./ui";
 
 const item: InboxItem = {
-  kind: "pr-failed",
+  id: "item-1", kind: "pr-failed",
   task: "PROJ-1",
   title: "Reintentos",
   session: null,
@@ -115,7 +115,7 @@ describe("InboxView pr-blocked", () => {
 });
 
 const handoffItem: InboxItem = {
-  kind: "handoff",
+  id: "item-1", kind: "handoff",
   task: "PROJ-1",
   title: "Reintentos",
   session: { id: "s-1", label: "Claude", primary: true, live: true },
@@ -124,7 +124,7 @@ const handoffItem: InboxItem = {
 };
 
 const taskWith = (handoff: Handoff | null): Task => ({
-  key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
   title: "Reintentos",
   project: "web",
   workflow: "feature",
@@ -247,7 +247,7 @@ describe("InboxView permission items", () => {
 
 describe("InboxView base-stale", () => {
   const stale: InboxItem = {
-    kind: "base-stale",
+    id: "item-1", kind: "base-stale",
     task: "PROJ-1",
     title: "Reintentos",
     session: null,

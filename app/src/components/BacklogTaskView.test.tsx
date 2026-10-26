@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { DEFAULT_PROJECT_SETTINGS, api, type Project, type Task } from "../api";
+import { ApiError, DEFAULT_PROJECT_SETTINGS, api, type Project, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { BacklogTaskView } from "./BacklogTaskView";
 import { ToastHost, clearToasts } from "./ui";
@@ -12,6 +12,7 @@ const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "fea
 const task: Task = {
   key: "LIBRE-9",
   created_at: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+  finished_at: null,
   title: "Algo",
   project: "web",
   workflow: "feature",
@@ -70,7 +71,7 @@ describe("BacklogTaskView", () => {
   it("a dirty checkout shows one human error with «Iniciar en un worktree»", async () => {
     const run = vi
       .spyOn(api, "run")
-      .mockRejectedValueOnce(new Error("el checkout tiene cambios sin confirmar"))
+      .mockRejectedValueOnce(new ApiError("anything the daemon words", 409, false, "checkout-dirty"))
       .mockResolvedValue({ ...task, status: { type: "running" } });
     const { container } = mount(task);
     fireEvent.click(btn(container, "Iniciar"));

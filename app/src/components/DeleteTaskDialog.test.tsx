@@ -6,7 +6,7 @@ import { api, ApiError, type Task } from "../api";
 import { DeleteTaskDialog } from "./DeleteTaskDialog";
 
 const running: Task = {
-  key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
   title: "Reintentos",
   project: "web",
   workflow: "feature",

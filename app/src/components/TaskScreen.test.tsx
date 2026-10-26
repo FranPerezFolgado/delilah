@@ -5,9 +5,12 @@ import { ApiError, DEFAULT_PROJECT_SETTINGS, type InboxItem, type Project, type 
 import { sessionFor, sessionTab } from "../editor/session";
 import { setLanguage } from "../i18n";
 import { TaskScreen } from "./TaskScreen";
+import { ToastHost, clearToasts } from "./ui";
 
 const setSavingMode = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const dismissNotice = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
+const baseStatus = vi.hoisted(() => vi.fn((): Promise<unknown> => new Promise(() => {})));
+const updateBranch = vi.hoisted(() => vi.fn((): Promise<unknown> => new Promise(() => {})));
 const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 // A spy that returns a rejected promise reports it as unhandled: record the calls apart.
@@ -22,7 +25,7 @@ vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setSessionRuntime" ? setSessionRuntime : name === "openSession" ? openSession : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setSessionRuntime" ? setSessionRuntime : name === "openSession" ? openSession : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : name === "baseStatus" ? baseStatus : name === "updateBranch" ? updateBranch : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -62,6 +65,8 @@ vi.mock("./AskCard", () => ({
 
 const task = (status: TaskStatus): Task => ({
   key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z",
+  finished_at: null,
   title: "A task",
   project: "web",
   workflow: "feature",
@@ -133,7 +138,7 @@ describe("TaskScreen header", () => {
 
 describe("TaskScreen tabs", () => {
   const sess = (id: string, over: Partial<Session> = {}): Session => ({
-    id, task: "PROJ-1", kind: "claude", label: id, primary: false, closed: false, live: true, read_only: false, conversation: false, state: "working", step: null, ...over,
+    effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id, task: "PROJ-1", kind: "claude", label: id, primary: false, closed: false, live: true, read_only: false, conversation: false, state: "working", step: null, ...over,
   });
   const taskScreen = (sessions: Session[], t = task({ type: "running" }), extra: Partial<React.ComponentProps<typeof TaskScreen>> = {}) =>
     render(<TaskScreen owner="PROJ-1" task={t} sessions={sessions} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} {...extra} />);
@@ -203,7 +208,7 @@ describe("TaskScreen tabs", () => {
 
 describe("TaskScreen conversation sessions", () => {
   const conv: Session = {
-    id: "s1",
+    effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id: "s1",
     task: "@web",
     kind: "claude",
     label: "Idea",
@@ -407,7 +412,7 @@ describe("TaskScreen autopilot control", () => {
 
 describe("TaskScreen follows the primary session", () => {
   const sess = (id: string, primary: boolean): Session => ({
-    id,
+    effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id,
     task: "PROJ-1",
     kind: "claude",
     label: id,
@@ -447,8 +452,10 @@ describe("TaskScreen follows the primary session", () => {
 });
 
 describe("TaskScreen base-stale banner", () => {
+  afterEach(() => clearToasts());
+
   const stale: InboxItem = {
-    kind: "base-stale",
+    id: "item-1", kind: "base-stale",
     task: "PROJ-1",
     title: "A task",
     session: null,
@@ -457,7 +464,12 @@ describe("TaskScreen base-stale banner", () => {
     notice: 9,
   };
   const screenWith = (notices: InboxItem[], onChanged = () => {}) =>
-    render(<TaskScreen owner="PROJ-1" task={task({ type: "running" })} sessions={[]} asks={[]} notices={notices} askPosition="right" onChanged={onChanged} />);
+    render(
+      <>
+        <TaskScreen owner="PROJ-1" task={task({ type: "running" })} sessions={[]} asks={[]} notices={notices} askPosition="right" onChanged={onChanged} />
+        <ToastHost />
+      </>,
+    );
 
   it("shows the notice text and dismisses it", async () => {
     dismissNotice.mockClear();
@@ -469,9 +481,44 @@ describe("TaskScreen base-stale banner", () => {
     expect(dismissNotice).toHaveBeenCalledWith(9);
   });
 
+  it("says how far the base moved and merges it in, with the result as a toast", async () => {
+    baseStatus.mockResolvedValueOnce({ base: "origin/main", behind_by: 3 });
+    updateBranch.mockResolvedValueOnce({ base: "origin/main", merged: 3 });
+    const onChanged = vi.fn();
+    const { getByText, findByText } = screenWith([stale], onChanged);
+    await findByText("main avanzó 3 commits");
+    fireEvent.click(getByText("Actualizar rama"));
+    await waitFor(() => expect(updateBranch).toHaveBeenCalledWith("PROJ-1"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(await screen.findByText("Rama actualizada: 3 commits de main integrados")).toBeTruthy();
+  });
+
+  it("shows the daemon's refusal as an error toast", async () => {
+    baseStatus.mockResolvedValueOnce({ base: "origin/main", behind_by: 1 });
+    updateBranch.mockRejectedValueOnce(new ApiError("la rama tiene cambios sin guardar", 409, false, "workspace-dirty"));
+    const { getByText, findByText } = screenWith([stale]);
+    await findByText("main avanzó 1 commit");
+    fireEvent.click(getByText("Actualizar rama"));
+    expect(await screen.findByText("la rama tiene cambios sin guardar")).toBeTruthy();
+  });
+
+  it("offers no update when the base has not moved", async () => {
+    baseStatus.mockResolvedValueOnce({ base: "origin/main", behind_by: 0 });
+    const { queryByText } = screenWith([stale]);
+    await waitFor(() => expect(baseStatus).toHaveBeenCalled());
+    expect(queryByText("Actualizar rama")).toBeNull();
+  });
+
   it("has no banner without notices", () => {
     const { container } = screenWith([]);
     expect(container.querySelector(".base-stale")).toBeNull();
+  });
+});
+
+describe("TaskScreen done date", () => {
+  it("the header of a done task shows the task's finished_at, with no events call", () => {
+    const h = head({ ...task({ type: "done" }), finished_at: "2020-01-01T00:00:00Z" });
+    expect(h.querySelector(".th-when")!.textContent).not.toBe("");
   });
 });
 
@@ -520,7 +567,7 @@ describe("TaskScreen editable title", () => {
 });
 
 describe("TaskScreen runtime switch", () => {
-  const stream: Session = { id: "s1", task: "PROJ-1", kind: "claude", label: "Main", primary: true, closed: false, live: true, read_only: false, step: null, state: "waiting", conversation: false, runtime: "stream" };
+  const stream: Session = { effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id: "s1", task: "PROJ-1", kind: "claude", label: "Main", primary: true, closed: false, live: true, read_only: false, step: null, state: "waiting", conversation: false, runtime: "stream" };
   const screen1 = (t: Task, s: Session) => (
     <TaskScreen owner="PROJ-1" task={t} sessions={[s]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />
   );

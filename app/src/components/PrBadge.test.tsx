@@ -6,7 +6,7 @@ import { PrBadge } from "./PrBadge";
 
 afterEach(cleanup);
 
-const base: PrSummary = { task: "PROJ-1", state: "open", draft: false, ci: "success", review_decision: "approved", count: 1 };
+const base: PrSummary = { task: "PROJ-1", number: 1, state: "open", draft: false, ci: "success", review_decision: "approved", count: 1 };
 
 describe("PrBadge", () => {
   it("renders each state with its class", () => {

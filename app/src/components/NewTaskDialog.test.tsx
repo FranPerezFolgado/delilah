@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { api, DEFAULT_PROJECT_SETTINGS, type BranchProposal, type Project, type Session, type Task } from "../api";
+import { api, ApiError, DEFAULT_PROJECT_SETTINGS, type BranchProposal, type Project, type Session, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { NewTaskDialog } from "./NewTaskDialog";
 
@@ -77,7 +77,7 @@ describe("NewTaskDialog origins", () => {
 
 const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS }];
 const started: Task = {
-  key: "LIBRE-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "LIBRE-1",
   title: "t",
   project: "web",
   workflow: "feature",
@@ -518,7 +518,7 @@ describe("NewTaskDialog layout and errors", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi
       .spyOn(api, "run")
-      .mockRejectedValueOnce(new Error("/p/web has uncommitted changes; the checkout must be clean"))
+      .mockRejectedValueOnce(new ApiError("workspace: the checkout holds work", 409, false, "checkout-dirty"))
       .mockResolvedValueOnce(started);
     const { container, getByText, queryByText } = mount();
     fireEvent.submit(container.querySelector("form")!);
@@ -528,6 +528,23 @@ describe("NewTaskDialog layout and errors", () => {
     fireEvent.click(getByText("Iniciar en un worktree"));
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
     expect(run.mock.calls[1][0].in_checkout).toBe(false);
+  });
+
+  it("a dirty checkout from an older daemon (no reason) is still recognised by its message", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    vi.spyOn(api, "run").mockRejectedValueOnce(new Error("/p/web has uncommitted changes; the checkout must be clean"));
+    const { container, getByText } = mount();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => getByText(/Tu checkout tiene cambios sin guardar/));
+  });
+
+  it("another 409 reason is not shown as a dirty checkout even if its message says so", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    vi.spyOn(api, "run").mockRejectedValueOnce(new ApiError("has uncommitted changes", 409, false, "other"));
+    const { container, queryByText, findByText } = mount();
+    fireEvent.submit(container.querySelector("form")!);
+    await findByText(/has uncommitted changes/);
+    expect(queryByText(/Tu checkout tiene cambios sin guardar/)).toBeNull();
   });
 
   it("«Abrir una terminal» opens a shell session in the project", async () => {

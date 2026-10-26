@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, type AskPosition, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
+import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
@@ -21,7 +21,7 @@ import { SessionViewSwitch } from "./SessionViewSwitch";
 import { TaskHeader } from "./TaskHeader";
 import { useBreakpoints } from "../useWidth";
 import { TaskTabs, type TaskTabItem } from "./TaskTabs";
-import { IconButton } from "./ui";
+import { IconButton, useToast } from "./ui";
 import { headerPhaseOf } from "../phases";
 import { isSetupRunning } from "./sessionLabels";
 import { sessionDot } from "../vocab";
@@ -63,6 +63,82 @@ interface Props {
 }
 
 const WATCH_MS = 3000;
+
+/** The base name without its remote: `origin/main` -> `main`. */
+const shortBase = (base: string | null) => (base ?? "main").replace(/^origin\//, "");
+
+/**
+ * The base-stale warnings above the tabs. When the base has moved on (the daemon fetches
+ * to say how far) the first one offers to merge it into the branch, and says how it went
+ * in a toast.
+ */
+function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: InboxItem[]; onChanged: () => void }) {
+  const toast = useToast();
+  const [status, setStatus] = useState<BaseStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const has = notices.length > 0;
+  useEffect(() => {
+    setStatus(null);
+    if (!has || owner.startsWith("@")) return;
+    let alive = true;
+    api
+      .baseStatus(owner)
+      .then((s) => alive && setStatus(s))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [owner, has]);
+
+  const update = () => {
+    setBusy(true);
+    api
+      .updateBranch(owner)
+      .then((r) => {
+        const base = shortBase(r.base);
+        toast({
+          text:
+            r.merged === 0
+              ? t("La rama ya estaba al día")
+              : r.merged === 1
+                ? t("Rama actualizada: 1 commit de {base} integrado", { base })
+                : t("Rama actualizada: {n} commits de {base} integrados", { n: r.merged, base }),
+        });
+        setStatus((s) => (s ? { ...s, behind_by: 0 } : s));
+        onChanged();
+      })
+      .catch((e) => toast({ text: (e as Error).message, kind: "error" }))
+      .finally(() => setBusy(false));
+  };
+
+  const behind = status?.behind_by ?? 0;
+  return (
+    <>
+      {notices.map((n, i) => (
+        <div key={n.notice} className="ts-bar base-stale">
+          <span className="ts-grow">{n.text}</span>
+          {i === 0 && behind > 0 && (
+            <>
+              <span>
+                {behind === 1
+                  ? t("{base} avanzó 1 commit", { base: shortBase(status!.base) })
+                  : t("{base} avanzó {n} commits", { base: shortBase(status!.base), n: behind })}
+              </span>
+              <button className="btn btn-ghost" disabled={busy} onClick={update}>
+                {t("Actualizar rama")}
+              </button>
+            </>
+          )}
+          {n.notice != null && (
+            <button className="btn btn-ghost" onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}>
+              {t("Descartar")}
+            </button>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
 
 /**
  * A task as Orca shows a worktree: tabs for the task itself, its sessions (Claude and
@@ -300,26 +376,6 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
       .catch((e) => setError((e as Error).message))
       .finally(() => setAutopilotBusy(false));
   };
-
-  // When the task was marked done, for the header of a finished task.
-  const [doneAt, setDoneAt] = useState<string | null>(null);
-  const isDone = task?.status.type === "done";
-  useEffect(() => {
-    setDoneAt(null);
-    if (!task || !isDone) return;
-    let alive = true;
-    api
-      .events(owner)
-      .then((ev) => {
-        const e = [...ev].reverse().find((x) => x.event.type === "mark-done" || x.event.type === "agent-finished");
-        if (alive && e) setDoneAt(e.at);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owner, isDone]);
 
   const openChanges = () => {
     session.changesOpen = true;
@@ -607,7 +663,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
           onAutopilot={setAutopilotMode}
           onSavingMode={setSaving}
           pr={pr}
-          doneAt={doneAt}
+          doneAt={task?.finished_at}
           onChanged={onChanged}
           onError={setError}
         />
@@ -632,16 +688,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
       >
         <div className="tmain">
           {task && <SessionChain task={task} sessions={sessions} onOpenSession={showSession} onChanged={onChanged} />}
-          {notices.map((n) => (
-            <div key={n.notice} className="ts-bar base-stale">
-              <span className="ts-grow">{n.text}</span>
-              {n.notice != null && (
-                <button className="btn btn-ghost" onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}>
-                  {t("Descartar")}
-                </button>
-              )}
-            </div>
-          ))}
+          <BaseStaleBars owner={owner} notices={notices} onChanged={onChanged} />
           <TaskTabs
             tabs={tabItems}
             active={shown}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type Project, type Task } from "../api";
+import { api, isCheckoutDirty, type Project, type Task } from "../api";
 import { t } from "../i18n";
 import { relativeTime } from "../time";
 import { AutopilotControls } from "./AutopilotControls";
@@ -17,9 +17,6 @@ interface Props {
   /** Opens the started task («Abrir» in the toast); falls back to `onChanged`. */
   onOpen?: (key: string) => void;
 }
-
-/** A refusal because the project's checkout has uncommitted changes. */
-const dirtyCheckout = (message: string) => /checkout/i.test(message) && /(cambios|changes|dirty|uncommitted)/i.test(message);
 
 /** A task saved to the backlog: what it is about, editable until it starts. */
 export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
@@ -69,7 +66,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
       await run();
     } catch (e) {
       const message = (e as Error).message;
-      if (dirtyCheckout(message)) setRefused(true);
+      if (isCheckoutDirty(e)) setRefused(true);
       else setError(message);
     } finally {
       setBusy(false);

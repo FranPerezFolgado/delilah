@@ -447,6 +447,10 @@ pub(crate) async fn start_run_with(
         Err(e) => {
             let reason = format!("workspace: {e}");
             abort_start(&app, &key, existing, false, &reason).await?;
+            // A checkout with work in it is the user's to resolve, not an invalid request.
+            if in_checkout && matches!(e, delilah_git::GitError::Dirty { .. }) {
+                return Err(ApiError::conflict_reason(reason, "checkout-dirty"));
+            }
             return Err(ApiError::unprocessable(reason));
         }
     };
@@ -2018,6 +2022,23 @@ mod tests {
             "{}",
             n.text
         );
+    }
+
+    #[tokio::test]
+    async fn a_dirty_checkout_is_refused_with_a_reason_the_client_can_read() {
+        let app = repo_project(None).await;
+        let repo = app.store.project("stale").await.unwrap().path;
+        std::fs::write(repo.join("a.txt"), "changed\n").unwrap();
+        let mut req = run("PROJ-9");
+        req.project = "stale".into();
+        req.title = "Dirty".into();
+        req.in_checkout = Some(true);
+        let Err(e) = start_run(State(app.clone()), Json(req)).await else {
+            panic!("a dirty checkout must be refused");
+        };
+        assert_eq!(e.status, StatusCode::CONFLICT);
+        assert_eq!(e.reason.as_deref(), Some("checkout-dirty"));
+        assert!(e.message.contains("uncommitted changes"), "{}", e.message);
     }
 
     #[test]

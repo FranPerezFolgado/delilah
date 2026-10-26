@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  DAEMON_URL, api, baseStaleNotices, onRequestResult,
+  ApiError, DAEMON_URL, api, baseStaleNotices, isCheckoutDirty, onRequestResult,
   type Health, type InboxItem, type InboxKind, type JiraIssue, type MergeMethod, type PermissionCardEntry,
   type PrCheck, type PrSnapshot, type ReviewComment, type Session, type SetupInfo, type Task,
 } from "./api";
@@ -78,6 +78,24 @@ describe("v2 calls", () => {
     expect(path()).toBe("/api/v1/tasks/K-1/setup");
     expect(last().init?.method).toBeUndefined();
     expect(api.setupLogUrl("K-1")).toBe(`${DAEMON_URL}/api/v1/tasks/K-1/setup/log`);
+  });
+  it("setupLogUrl encodes the key", () => {
+    expect(api.setupLogUrl("a/b c")).toBe(`${DAEMON_URL}/api/v1/tasks/a%2Fb%20c/setup/log`);
+  });
+  it("baseStatus reads and updateBranch posts", async () => {
+    reply(200, JSON.stringify({ base: "origin/main", behind_by: 2 }));
+    expect(await api.baseStatus("K-1")).toEqual({ base: "origin/main", behind_by: 2 });
+    expect(path()).toBe("/api/v1/tasks/K-1/base-status");
+    reply(200, JSON.stringify({ base: "origin/main", merged: 2 }));
+    expect((await api.updateBranch("K-1")).merged).toBe(2);
+    expect(path()).toBe("/api/v1/tasks/K-1/update-branch");
+    expect(last().init?.method).toBe("POST");
+  });
+  it("isCheckoutDirty trusts the reason, and reads the message only without one", () => {
+    expect(isCheckoutDirty(new ApiError("x", 409, false, "checkout-dirty"))).toBe(true);
+    expect(isCheckoutDirty(new ApiError("has uncommitted changes", 409, false, "other"))).toBe(false);
+    expect(isCheckoutDirty(new ApiError("/p has uncommitted changes"))).toBe(true);
+    expect(isCheckoutDirty(new Error("boom"))).toBe(false);
   });
   it("dismissInbox encodes the id", async () => {
     reply(204, "");

@@ -313,6 +313,9 @@ export function App() {
   const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
   const asks: Record<string, string> = {};
   for (const i of inbox) if (i.kind === "waiting" && !(i.task in asks)) asks[i.task] = i.text ?? i.title;
+  // When each done task finished, for the board's «Hecha» cards.
+  const finished: Record<string, string> = {};
+  for (const x of tasks) if (x.finished_at) finished[x.key] = x.finished_at;
   const owner = task?.key ?? (project ? `@${project.name}` : null);
 
   const crumbs: { text: string; mono?: boolean }[] = [{ text: "Delilah" }];
@@ -397,6 +400,7 @@ export function App() {
               onClearStatusFilter={() => setStatusFilter(null)}
               loading={!loaded}
               asks={asks}
+              finished={finished}
               onAddProject={() => setView("projects")}
               onConnectJira={() => setView("jira")}
               onOpen={(key) => {

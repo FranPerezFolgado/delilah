@@ -9,12 +9,9 @@ import { FirstRun } from "./FirstRun";
 import { Button, Count, PhaseBars, PrChip, Segmented, Skeleton, StatusBadge } from "./ui";
 import "./BoardView.css";
 
-/** A PR summary that may carry the PR's number (the chip needs it). */
-type BoardPr = PrSummary & { number?: number };
-
 interface Props {
   tasks: Task[];
-  prs?: BoardPr[];
+  prs?: PrSummary[];
   specs: Record<string, SpecSummary>;
   projects?: Project[];
   /** From the statusbar: only tasks whose status has this tone. */
@@ -167,7 +164,7 @@ function AutopilotIcon({ autopilot }: { autopilot?: Autopilot | null }) {
 
 function Card({
   task, spec, pr, ask, finishedAt, onOpen,
-}: { task: Task; spec?: SpecSummary; pr?: BoardPr; ask?: string; finishedAt?: string; onOpen: (key: string) => void }) {
+}: { task: Task; spec?: SpecSummary; pr?: PrSummary; ask?: string; finishedAt?: string; onOpen: (key: string) => void }) {
   const col = boardColumnOf(task, spec);
   const bars = col !== "backlog" && col !== "done";
   const open = () => onOpen(task.key);
@@ -189,7 +186,7 @@ function Card({
       <span className="kcard-title">{task.title}</span>
       {task.project && <span className="kcard-meta">{task.project}</span>}
       {bars && <PhaseBars mini labelInTooltip phase={headerPhaseOf(task, spec) ?? (bars && task.status.type !== "setup-failed" ? { column: col as SpecPhase, step: COLUMNS.findIndex((c) => c.id === col) + 1 } : null)} status={task.status} />}
-      {pr && pr.number != null && <PrChip pr={{ number: pr.number, state: pr.state === "merged" ? "merged" : pr.draft ? "draft" : pr.ci === "failure" ? "failing" : "open" }} />}
+      {pr && <PrChip pr={{ number: pr.number, state: pr.state === "merged" ? "merged" : pr.draft ? "draft" : pr.ci === "failure" ? "failing" : "open" }} />}
       {task.status.type === "waiting-for-user" && (
         <span className="kcard-ask">
           {ask && <span className="preview">{ask}</span>}

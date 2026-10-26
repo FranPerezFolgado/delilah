@@ -177,6 +177,8 @@ pub struct ListedPr {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrSummary {
     pub task: String,
+    /// The number of the PR the badge links to: the first one in the badge's `state`.
+    pub number: i64,
     pub state: PrState,
     pub draft: bool,
     pub ci: Rollup,

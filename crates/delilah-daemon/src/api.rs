@@ -119,6 +119,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/tasks/{key}/setup", get(crate::setup::info))
         .route("/api/v1/tasks/{key}/setup/log", get(crate::setup::log))
+        .route(
+            "/api/v1/tasks/{key}/base-status",
+            get(crate::base_update::status),
+        )
+        .route(
+            "/api/v1/tasks/{key}/update-branch",
+            post(crate::base_update::update),
+        )
         .route("/api/v1/inbox/{id}/dismiss", post(inbox::dismiss))
         .route("/api/v1/inbox/clear", post(inbox::clear))
         .route("/api/v1/inbox/restore", post(inbox::restore))
@@ -804,6 +812,8 @@ mod tests {
             ("POST", "/api/v1/tasks/T-1/prs/1/merge", None),
             ("GET", "/api/v1/tasks/T-1/setup", None),
             ("GET", "/api/v1/tasks/T-1/setup/log", None),
+            ("GET", "/api/v1/tasks/T-1/base-status", None),
+            ("POST", "/api/v1/tasks/T-1/update-branch", None),
             ("POST", "/api/v1/inbox/question%3AT-1%3Aa%3A1/dismiss", None),
             ("POST", "/api/v1/inbox/clear", None),
             ("POST", "/api/v1/inbox/restore", ids),

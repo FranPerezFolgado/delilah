@@ -20,7 +20,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
 | WP-12 | 2 | 2C | done | 1 | c1339b7 | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | done | 1 | 4d98457 | CLI |
-| WP-14 | 2 | 2D | done | 1 |  | API e2e flows |
+| WP-14 | 2 | 2D | done | 1 | 05ad935 | API e2e flows |
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
 | WP-16 | 3 | 3A | done | 1 | 8801386 | Vocabulary, relative time, icons |
 | WP-17 | 3 | 3B | done | 1 | 1870515 | Rename old tokens in TSX |

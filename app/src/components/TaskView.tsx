@@ -132,7 +132,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
       await onNewSession("claude", reviewPrompt(), t("Revisión"));
     });
 
-  const doneAt = s.type === "done" ? [...(events ?? [])].reverse().find((e) => e.event.type === "mark-done")?.at : undefined;
+  const doneAt = s.type === "done" ? task.finished_at : undefined;
   const pending = asks.filter((a) => a.ask || a.permission);
   const at = Math.min(askAt, Math.max(0, pending.length - 1));
   const current = pending[at];

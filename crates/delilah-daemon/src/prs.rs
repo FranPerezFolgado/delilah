@@ -297,8 +297,13 @@ pub(crate) fn summary(task: &str, rows: &[PrRow]) -> Option<PrSummary> {
     ]
     .into_iter()
     .find(|d| decisions.contains(d));
+    let number = rows
+        .iter()
+        .find(|r| state_of(&r.snapshot.as_ref()) == state)
+        .map_or(rows[0].number, |r| r.number);
     Some(PrSummary {
         task: task.to_string(),
+        number,
         state,
         draft,
         ci,
@@ -593,6 +598,11 @@ pub(crate) mod tests {
         assert_eq!(s.ci, Rollup::Failure);
         assert_eq!(s.review_decision, Some(ReviewDecision::ChangesRequested));
         assert_eq!(s.count, 2);
+        assert_eq!(s.number, 1, "the open one");
+        let mut merged_row = row(Some(snapshot(PrState::Merged, vec![])));
+        merged_row.number = 9;
+        let rows = [merged_row, row(None)];
+        assert_eq!(summary("PROJ-1", &rows).unwrap().number, 1);
     }
 
     #[test]
@@ -618,7 +628,7 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_value(&s).unwrap(),
-            serde_json::json!({"task":"PROJ-1","state":"open","draft":false,"ci":"success","review_decision":null,"count":1})
+            serde_json::json!({"task":"PROJ-1","number":1,"state":"open","draft":false,"ci":"success","review_decision":null,"count":1})
         );
     }
 

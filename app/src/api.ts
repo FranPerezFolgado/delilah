@@ -47,7 +47,9 @@ export interface PreviewView {
 export interface Task {
   key: string;
   /** When the task was created (RFC 3339). */
-  created_at?: string;
+  created_at: string;
+  /** When a done task got there (RFC 3339); null in any other state. */
+  finished_at: string | null;
   title: string;
   project: string | null;
   workflow: string;
@@ -305,11 +307,11 @@ export interface Session {
   /** The live process's runtime, else the one it would launch with. "stream": chat mode, no terminal. */
   runtime?: "pty" | "stream";
   /** What the next launch uses: `runtime_override`, else the task's chat mode. */
-  effective_runtime?: "pty" | "stream";
+  effective_runtime: "pty" | "stream";
   /** The stored per-session choice; null follows the task. */
-  runtime_override?: "pty" | "stream" | null;
-  last_activity_at?: string | null;
-  last_message?: string | null;
+  runtime_override: "pty" | "stream" | null;
+  last_activity_at: string | null;
+  last_message: string | null;
 }
 
 export type SpecPhase = "specify" | "plan" | "implement" | "review";
@@ -489,7 +491,7 @@ export interface ToolDetail {
 /** Something that waits on you, from any task. */
 export interface InboxItem {
   /** `<kind>:<task>:<source>:<since ms>`; percent-encode it in a URL (`dismissInbox` does). */
-  id?: string;
+  id: string;
   kind: InboxKind;
   task: string;
   title: string;
@@ -549,9 +551,9 @@ export interface PrSnapshot {
   review_decision: "approved" | "changes-requested" | "review-required" | null;
   comments: number;
   /** The newest 50. */
-  review_comments?: ReviewComment[];
+  review_comments: ReviewComment[];
   /** What the repository allows; [] when unknown. */
-  merge_methods?: MergeMethod[];
+  merge_methods: MergeMethod[];
 }
 export interface PullRequest {
   id: number;
@@ -571,6 +573,8 @@ export interface PrProposal { repo: string; title: string; body: string; base: s
 /** One task's PRs for badges: the worst of each field when it has several. */
 export interface PrSummary {
   task: string;
+  /** The PR the badge stands for. */
+  number: number;
   state: PrSnapshot["state"];
   draft: boolean;
   ci: PrSnapshot["ci"];
@@ -583,15 +587,36 @@ export interface SetupInfo {
   command: string;
   exit_code: number | null;
   started_at: string;
-  finished_at: string | null;
-  duration_ms: number | null;
+  finished_at: string;
+  duration_ms: number;
   cancelled: boolean;
   timed_out: boolean;
   tail: string;
   log_bytes: number;
 }
 
+/** How far a task's branch is from its base (`GET …/base-status`). */
+export interface BaseStatus {
+  /** The ref compared with (`origin/main`); null when none could be resolved. */
+  base: string | null;
+  /** Commits of the base the branch does not have. */
+  behind_by: number;
+}
+/** What `POST …/update-branch` did: the commits it merged in (0: up to date). */
+export interface BranchUpdate { base: string | null; merged: number }
+
 export interface Health { version: string; exe?: string | null; exe_mtime?: number | null; home: string }
+
+/** The `reason` of the 409 for a start in a checkout that has uncommitted changes. */
+export const CHECKOUT_DIRTY = "checkout-dirty";
+
+/** Whether a start was refused because the project's checkout has uncommitted changes. */
+export function isCheckoutDirty(e: unknown): boolean {
+  if (e instanceof ApiError && e.reason) return e.reason === CHECKOUT_DIRTY;
+  // An older daemon sends no reason: read the message.
+  const message = e instanceof Error ? e.message : "";
+  return /uncommitted|must be clean|not clean/i.test(message) || (/checkout/i.test(message) && /(cambios|changes|dirty)/i.test(message));
+}
 
 export class ApiError extends Error {
   constructor(
@@ -647,9 +672,12 @@ export const api = {
   /** Merges a task's PR; `method` omitted: the daemon picks. */
   mergePr: (key: string, id: number, method?: MergeMethod) =>
     post<PullRequest>(`/api/v1/tasks/${key}/prs/${id}/merge`, method ? { method } : {}),
+  baseStatus: (key: string) => request<BaseStatus>(`/api/v1/tasks/${key}/base-status`),
+  /** Merges the base into the task's branch; 409 with a `reason` (`workspace-dirty`, `update-conflict`…) when refused. */
+  updateBranch: (key: string) => post<BranchUpdate>(`/api/v1/tasks/${key}/update-branch`),
   setupInfo: (key: string) => request<SetupInfo>(`/api/v1/tasks/${key}/setup`),
   /** The whole setup log as text/plain, to open in a new tab or window. */
-  setupLogUrl: (key: string) => `${DAEMON_URL}/api/v1/tasks/${key}/setup/log`,
+  setupLogUrl: (key: string) => `${DAEMON_URL}/api/v1/tasks/${encodeURIComponent(key)}/setup/log`,
   dismissInbox: (id: string) => post<null>(`/api/v1/inbox/${encodeURIComponent(id)}/dismiss`),
   /** Dismisses every non-blocking item; returns their ids (for undo). */
   clearInbox: () => post<{ ids: string[] }>("/api/v1/inbox/clear"),

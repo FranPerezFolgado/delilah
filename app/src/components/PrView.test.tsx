@@ -14,7 +14,7 @@ const pr: PullRequest = {
   id: 7, repo: "api", host: "github.com", owner_name: "me/repo", number: 42, url: "https://github.com/me/repo/pull/42",
   linked_by: "detected", checked_at: new Date().toISOString(), error: null,
   snapshot: {
-    state: "open", draft: false, title: "Reintentos", head: "abc", base: "main",
+    review_comments: [], merge_methods: [], state: "open", draft: false, title: "Reintentos", head: "abc", base: "main",
     checks: [{ name: "test", outcome: "failure", url: "https://ci/1" }],
     ci: "failure", review_decision: "changes-requested", comments: 3,
   },

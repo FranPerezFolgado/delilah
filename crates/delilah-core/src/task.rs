@@ -436,6 +436,10 @@ pub struct Task {
     /// When the task was created.
     #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
+    /// When a task that is done got there (read from its events; never stored on the task);
+    /// `null` in any other state.
+    #[serde(default)]
+    pub finished_at: Option<DateTime<Utc>>,
 }
 
 impl Task {
@@ -460,6 +464,7 @@ impl Task {
             chat_mode: false,
             allowed_tools: Vec::new(),
             created_at: Utc::now(),
+            finished_at: None,
         }
     }
 
@@ -1181,6 +1186,7 @@ mod tests {
         assert!(task.created_at >= before && task.created_at <= Utc::now());
         let json = serde_json::to_value(&task).unwrap();
         assert!(json["created_at"].is_string());
+        assert!(json["finished_at"].is_null(), "present, null until done");
         let back: Task = serde_json::from_value(json).unwrap();
         assert_eq!(back, task);
 

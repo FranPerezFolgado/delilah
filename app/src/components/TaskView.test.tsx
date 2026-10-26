@@ -20,10 +20,10 @@ vi.mock("../api", async (orig) => {
 });
 vi.mock("./SpecPanel", () => ({ SpecPanel: () => null }));
 
-const task: Task = { key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, title_source: "initial", previous_title: null, branch_error: null, handoff: null };
+const task: Task = { created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1", title: "A task", project: "web", workflow: "feature", phase: null, status: { type: "queued" }, saving_mode: false, title_source: "initial", previous_title: null, branch_error: null, handoff: null };
 const running: Task = { ...task, status: { type: "running" }, branch: "feature/K-1-do-it" };
 const session = (over: Partial<Session> = {}): Session => ({
-  id: "s1", task: "PROJ-1", kind: "claude", label: "Claude", primary: true, closed: false, live: true, read_only: false,
+  effective_runtime: "pty", runtime_override: null, last_activity_at: null, last_message: null, id: "s1", task: "PROJ-1", kind: "claude", label: "Claude", primary: true, closed: false, live: true, read_only: false,
   state: "working", conversation: false, step: null, ...over,
 });
 

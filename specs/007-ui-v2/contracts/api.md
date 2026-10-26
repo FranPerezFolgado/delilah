@@ -27,6 +27,14 @@ TS: `health: () => request<Health>(…)`, `interface Health { version: string; e
 
 ### `GET /api/v1/tasks`, `GET /api/v1/tasks/{key}` — `Task`
 `+ "created_at": "2026-10-24T09:12:00Z"` (always present). TS `created_at: string`.
+`+ "finished_at": "2026-10-25T18:03:00Z" | null`: when a task that is `done` got there (the time of
+its latest `mark-done` / `agent-finished` event, read from `task_events`; no column); `null` in any
+other state, and after `reopen`. Always present. TS `finished_at: string | null`; App builds the
+board's «Hecha» dates and `TaskHeader.doneAt` from it (no `GET …/events` call for that).
+
+### `GET /api/v1/prs` — `PrSummary`
+`+ "number": 7`: the PR the badge stands for (the first one in the badge's `state`; open before
+merged before closed). Always present. TS `PrSummary.number: number` (the board's PR chip).
 
 ### `GET /api/v1/sessions`, `GET /api/v1/tasks/{key}/sessions` — `Session`
 ```json
@@ -69,7 +77,7 @@ TS: `PrCheck.started_at?: string | null; finished_at?: string | null`; `PrSnapsh
 - A session with a pending permission ask lists only the `permission` item (no extra
   `waiting` item for it).
 - Dismissal rows older than 30 days are purged (at start, at most hourly from `list`).
-TS: `InboxItem.id: string`; `InboxKind` += `"turn-done" | "pr-opened"`; `BLOCKING` unchanged.
+TS: `InboxItem.id: string` (required); `InboxKind` += `"turn-done" | "pr-opened"`; `BLOCKING` unchanged.
 
 ### `GET /api/v1/sessions/{id}/conversation` — permission cards
 Permission card entries (`ask_kind: "permission"`) are **kept** after they end:
@@ -133,6 +141,27 @@ TS calls (all in `api.ts`): `reopen(key)`, `mergePr(key, id, method?)`, `setupIn
 `setupLogUrl(key)` (a URL for «Abrir el log completo», opened in a new tab/window),
 `dismissInbox(id)` (encodes `id` with `encodeURIComponent`), `clearInbox()`, `restoreInbox(ids)`,
 `jiraSubtasks(key)`, `setSessionRuntime(id, mode)`.
+
+### Base staleness and updating the branch
+| Method + path | Handler | Body | Response | Errors | Topic |
+|---|---|---|---|---|---|
+| `GET /api/v1/tasks/{key}/base-status` | `base_update::status` | — | `{ "base": "origin/main" \| null, "behind_by": 3 }` | 404 no task; 409 `no-workspace`, `no-branch` | — |
+| `POST /api/v1/tasks/{key}/update-branch` | `base_update::update` | — | `{ "base": "origin/main" \| null, "merged": 3 }` (`merged: 0`: already up to date) | 404; 409 with `reason` `no-workspace`, `no-branch`, `not-on-branch`, `workspace-dirty` (tracked changes), `update-conflict` (the merge is aborted, the branch is left as it was; the message lists the files), `update-failed` | `Inbox` (when it settles the `base-stale` notice) |
+
+Both fetch `origin` first (best effort, 20 s) and use the base a new branch starts from
+(decision 66: `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`). `behind_by` counts
+`HEAD..base` summed over the task's repos (the main repo, or each chosen submodule). The update
+is a **merge** (`git merge --no-edit <base>`, never a rebase: the branch may be pushed). A
+successful update resolves the task's `base-stale` notice of repo `.`. TS: `api.baseStatus(key)`,
+`api.updateBranch(key)`, `BaseStatus`, `BranchUpdate`. The inbox item itself is unchanged: the
+task screen asks `base-status` while it shows a `base-stale` notice and renders «main avanzó N
+commits · Actualizar rama»; the result of the update is a toast.
+
+### `POST /api/v1/runs` — dirty checkout
+A start in the project's checkout that has uncommitted changes is refused with **409** (was 422)
+and `reason: "checkout-dirty"` (the message stays human-readable). TS: `ApiError.reason`,
+`isCheckoutDirty(e)` (the reason; the message regex only for an ApiError without a reason, i.e. an
+older daemon). `NewTaskDialog` and `BacklogTaskView` use it for «Iniciar en un worktree».
 
 ## Existing routes reused (no change)
 

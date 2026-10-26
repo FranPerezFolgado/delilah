@@ -9,7 +9,7 @@ import { canArchive } from "./TaskView";
 import { isSetupRunning } from "./sessionLabels";
 
 const task = (status: Task["status"]): Task => ({
-  key: "PROJ-1",
+  created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "PROJ-1",
   title: "T",
   project: "web",
   workflow: "feature",

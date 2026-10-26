@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
+import { api, isCheckoutDirty, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
 import { t } from "../i18n";
 import { AutopilotControls } from "./AutopilotControls";
@@ -72,6 +72,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The start was refused because the checkout has uncommitted changes (the daemon's reason).
+  const [dirtyRefusal, setDirtyRefusal] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{ key?: string; title?: string; submodules?: string }>({});
   const [busy, setBusy] = useState(false);
   const project = projects.find((p) => p.name === projectName);
@@ -225,6 +227,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     if (!validate()) return;
     setBusy(true);
     setError(null);
+    setDirtyRefusal(false);
     if (origin === "claude") {
       try {
         const s = await api.openProjectSession(project.name, { kind: "claude", conversation: true, prompt: idea.trim() || undefined });
@@ -256,6 +259,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       });
       onStarted(task);
     } catch (err) {
+      setDirtyRefusal(isCheckoutDirty(err));
       setError((err as Error).message);
       setBusy(false);
     }
@@ -285,7 +289,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     }
   };
   // The daemon refuses to start in a checkout with uncommitted changes: say it in human words.
-  const dirtyCheckout = where === "checkout" && !!error && /uncommitted|must be clean|not clean/i.test(error);
+  const dirtyCheckout = where === "checkout" && !!error && dirtyRefusal;
   const startInWorktree = () => {
     whereTouched.current = true;
     setWhere("worktree");
