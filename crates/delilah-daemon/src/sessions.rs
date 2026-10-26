@@ -85,12 +85,13 @@ impl Live {
         }
     }
 
-    /// Applies one activity event, announcing it when the view changed.
-    pub fn update_activity(&self, event: ActivityEvent) {
+    /// Applies one activity event, announcing it when the view changed; says whether it did.
+    pub fn update_activity(&self, event: ActivityEvent) -> bool {
         let changed = self.activity.lock().unwrap_or_else(|e| e.into_inner()).apply(event);
         if changed {
             self.events.emit(Topic::Activity);
         }
+        changed
     }
 
     pub fn is_idea(&self) -> bool {

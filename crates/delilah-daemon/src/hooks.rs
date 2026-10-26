@@ -9,6 +9,7 @@ use delilah_agents::limits;
 use delilah_core::{Event, TaskKey};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::atomic::Ordering;
 use tokio::io::AsyncWriteExt;
 
 use crate::events::Topic;
@@ -130,7 +131,17 @@ async fn apply_signal(
     if let Some(live) = &live
         && let Some(event) = claude::classify_activity(&hook)
     {
-        live.update_activity(event);
+        // Snapshot before locking the log: never call `sessions` under its lock.
+        let live_ids: std::collections::HashSet<String> =
+            app.sessions.all().into_iter().map(|l| l.id).collect();
+        app.activity_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(&live.id, &live.task, Utc::now(), event.clone(), &live_ids);
+        // A change is announced at once; an append that changes nothing waits for the tick.
+        if !live.update_activity(event) {
+            app.activity_dirty.store(true, Ordering::Relaxed);
+        }
     }
 
     // What the session now waits on you for, for the inbox.
@@ -536,6 +547,21 @@ mod tests {
         serde_json::from_slice(&body).unwrap()
     }
 
+    async fn history(state: &AppState, query: &str) -> (StatusCode, Value) {
+        let req = Request::get(format!("/api/v1/activity/history{query}"))
+            .body(Body::empty())
+            .unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        let code = res.status();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (code, serde_json::from_slice(&body).unwrap_or(Value::Null))
+    }
+
     const LIVE: &str = "/hooks/claude?task=PROJ-1&session=s-1";
 
     fn pre_edit() -> Value {
@@ -623,6 +649,62 @@ mod tests {
         let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
         post(&state, LIVE, other).await;
         assert!(!drain(&mut rx).contains(&Topic::Activity));
+    }
+
+    #[tokio::test]
+    async fn a_no_change_append_is_recorded_and_marks_the_log_dirty() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        state.activity_dirty.store(false, Ordering::Relaxed);
+        // The end of a call that is not the current one changes nothing, but is logged.
+        let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
+        post(&state, LIVE, other).await;
+        assert!(state.activity_dirty.load(Ordering::Relaxed));
+        let (code, h) = history(&state, "?owner=PROJ-1").await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(h["sessions"][0]["entries"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn history_returns_entries_after_a_seq_and_keeps_ended_sessions() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        let (_, h) = history(&state, "?owner=PROJ-1").await;
+        assert!(h["started_at"].is_string());
+        assert_eq!(h["sessions"][0]["session"], "s-1");
+        assert_eq!(h["sessions"][0]["live"], true);
+        assert_eq!(h["sessions"][0]["entries"][0]["type"], "tool_started");
+        let seq = h["sessions"][0]["entries"][0]["seq"].as_u64().unwrap();
+
+        let end = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "t1" });
+        post(&state, LIVE, end).await;
+        let (_, h) = history(&state, &format!("?owner=PROJ-1&after={seq}")).await;
+        let entries = h["sessions"][0]["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["type"], "tool_ended");
+
+        let last = entries[0]["seq"].as_u64().unwrap();
+        let live = state.sessions.get("s-1").unwrap();
+        state.sessions.remove_if_same("s-1", &live.runtime);
+        let (_, h) = history(&state, &format!("?owner=PROJ-1&after={last}")).await;
+        assert_eq!(h["sessions"][0]["live"], false);
+        assert!(h["sessions"][0]["entries"].as_array().unwrap().is_empty());
+
+        let (code, h) = history(&state, "?owner=NOPE-1").await;
+        assert_eq!((code, h["sessions"].as_array().map(Vec::len)), (StatusCode::OK, Some(0)));
+    }
+
+    #[tokio::test]
+    async fn history_rejects_a_missing_owner_and_a_bad_after() {
+        let state = running_task().await;
+        assert_eq!(history(&state, "").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(history(&state, "?owner=").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            history(&state, "?owner=PROJ-1&after=x").await.0,
+            StatusCode::BAD_REQUEST
+        );
     }
 
     fn session_record(id: &str, primary: bool) -> crate::store_sessions::SessionRecord {

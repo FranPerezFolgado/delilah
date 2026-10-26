@@ -2,7 +2,7 @@
 //! shells in a task's workspace, next to its primary session.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use delilah_agents::runtime::RuntimeKind;
 use delilah_core::TaskKey;
@@ -62,6 +62,38 @@ pub async fn list_all(State(app): State<AppState>) -> Result<Json<Vec<SessionVie
 pub async fn activity(State(app): State<AppState>) -> Json<serde_json::Value> {
     let sessions: std::collections::BTreeMap<_, _> = app.sessions.busy().into_iter().collect();
     Json(serde_json::json!({ "sessions": sessions }))
+}
+
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    owner: Option<String>,
+    /// A string so a non-number answers 400 with our error body.
+    after: Option<String>,
+}
+
+/// The recent activity events of an owner's sessions, live or ended (see `activity_log.rs`).
+pub async fn activity_history(
+    State(app): State<AppState>,
+    Query(q): Query<HistoryQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let owner = q
+        .owner
+        .filter(|o| !o.is_empty())
+        .ok_or_else(|| ApiError::bad_request("owner is required".to_string()))?;
+    let after = match q.after.as_deref() {
+        None | Some("") => None,
+        Some(a) => Some(
+            a.parse::<u64>()
+                .map_err(|_| ApiError::bad_request(format!("after must be a number: {a}")))?,
+        ),
+    };
+    let live_ids: std::collections::HashSet<String> =
+        app.sessions.all().into_iter().map(|l| l.id).collect();
+    let log = app.activity_log.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(Json(serde_json::json!({
+        "started_at": log.started_at,
+        "sessions": log.for_owner(&owner, after, &live_ids),
+    })))
 }
 
 pub async fn list_for_task(

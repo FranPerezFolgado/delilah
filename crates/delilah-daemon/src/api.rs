@@ -95,6 +95,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/sessions", get(session_api::list_all))
         .route("/api/v1/activity", get(session_api::activity))
         .route(
+            "/api/v1/activity/history",
+            get(session_api::activity_history),
+        )
+        .route(
             "/api/v1/preferences/{key}",
             get(preferences::get).put(preferences::put),
         )

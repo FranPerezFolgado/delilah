@@ -97,8 +97,6 @@ impl From<&Entry> for EntryView {
     }
 }
 
-// WP-04 wires these into AppState and the history endpoint.
-#[allow(dead_code)]
 impl ActivityLog {
     pub fn new(now: DateTime<Utc>) -> Self {
         Self {
@@ -151,7 +149,8 @@ impl ActivityLog {
     }
 
     /// Logs of `owner` with entries `seq > after`, ordered by their oldest kept entry.
-    /// With `after` set, sessions with nothing newer are left out.
+    /// Every log of the owner is returned (possibly with no entries), so a client
+    /// polling with `after` still sees `live` flip when a session ends.
     pub fn for_owner(
         &self,
         owner: &str,
@@ -165,22 +164,19 @@ impl ActivityLog {
             .collect();
         logs.sort_by_key(|l| l.entries.front().map_or(u64::MAX, |e| e.seq));
         logs.into_iter()
-            .filter_map(|l| {
+            .map(|l| {
                 let entries: Vec<EntryView> = l
                     .entries
                     .iter()
                     .filter(|e| after.is_none_or(|a| e.seq > a))
                     .map(EntryView::from)
                     .collect();
-                if after.is_some() && entries.is_empty() {
-                    return None;
-                }
-                Some(SessionLogView {
+                SessionLogView {
                     session: l.session.clone(),
                     live: live_ids.contains(&l.session),
                     dropped: l.dropped,
                     entries,
-                })
+                }
             })
             .collect()
     }
@@ -271,7 +267,9 @@ mod tests {
         assert!(v[0].live);
         assert_eq!(v[0].entries.len(), 1);
         assert_eq!(v[0].entries[0].seq, 2);
-        assert!(log.for_owner("T-1", Some(2), &l).is_empty());
+        let v = log.for_owner("T-1", Some(2), &l);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].entries.is_empty());
     }
 
     #[test]

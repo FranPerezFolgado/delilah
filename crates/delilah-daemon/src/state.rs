@@ -68,6 +68,11 @@ pub struct AppState {
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
     /// The previews the daemon runs, one per task at most (see `preview.rs`).
     pub(crate) previews: Arc<crate::preview::Previews>,
+    /// Recent activity events per Claude session (see `activity_log.rs`).
+    pub activity_log: Arc<Mutex<crate::activity_log::ActivityLog>>,
+    /// Set when the log grew without the `Activity` view changing; the watcher's tick
+    /// announces it.
+    pub activity_dirty: Arc<AtomicBool>,
 }
 
 /// Unit tests must never touch the real Keychain; `DELILAH_SECRETS=memory` also asks for it.
@@ -115,6 +120,8 @@ impl AppState {
             pr_backoff: Arc::default(),
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),
+            activity_log: Arc::new(Mutex::new(crate::activity_log::ActivityLog::new(Utc::now()))),
+            activity_dirty: Arc::default(),
         }
     }
 
