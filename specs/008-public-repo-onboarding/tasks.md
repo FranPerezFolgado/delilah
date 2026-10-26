@@ -185,7 +185,7 @@ parallel (different files, no dependency on an unfinished task).
   2. In `CLAUDE.md` keep the generic versions: "never copy code or data from private repos; use `scripts/make-fixture-parent.sh` and the Jira JSON fixtures"; "if several GitHub accounts are configured, confirm the one gh uses before any remote operation".
   3. Replace the two claude.ai links at the top with `docs/vision.md` (design) and `docs/redesign/` (UI screenshots).
   4. Update any links into moved docs.
-- [ ] T037 [US3] Enable private vulnerability reporting (remote). Run `gh auth status` first and continue only as `FranPerezFolgado`. Then `gh api -X PUT repos/FranPerezFolgado/delilah/private-vulnerability-reporting`, and check with `gh api repos/FranPerezFolgado/delilah/private-vulnerability-reporting`.
+- [X] T037 [US3] Enable private vulnerability reporting (remote). Run `gh auth status` first and continue only as `FranPerezFolgado`. Then `gh api -X PUT repos/FranPerezFolgado/delilah/private-vulnerability-reporting`, and check with `gh api repos/FranPerezFolgado/delilah/private-vulnerability-reporting`.
 
 **Checkpoint**: Story 3 passes; `cargo test --workspace` is green.
 

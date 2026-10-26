@@ -14,16 +14,16 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
 | WP-07 | 3 | 3B | pending | 0 | | |
 | WP-08 | 3 | 3C | pending | 0 | | |
-| WP-10 | 4 | 4A | pending | 0 | | |
+| WP-10 | 4 | 4A | implementing | 0 | | |
 | WP-12 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-13 | 4 | 4B | pending | 0 | | |
-| WP-14 | 5 | 5A | pending | 0 | | |
-| WP-15 | 5 | 5A | pending | 0 | | |
+| WP-14 | 5 | 5A | implementing | 0 | | |
+| WP-15 | 5 | 5A | implementing | 0 | | |
 | WP-16 | 5 | 5A | pending | 0 | | |
 | WP-17 | 5 | 5A | pending | 0 | | |
-| WP-18 | 5 | 5A | pending | 0 | | |
-| WP-19 | 6 | 6A | pending | 0 | | |
+| WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
+| WP-19 | 6 | 6A | implementing | 0 | | |
 | WP-20 | 6 | 6B | pending | 0 | | |
 | WP-21 | 7 | 7A | pending | 0 | | |
 | WP-22 | 8 | 8A | pending | 0 | | |
@@ -34,3 +34,4 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 3 | implementer WP-04 | LOW | architecture.md quotes the deny reason and "session stopped" in English, but the daemon may emit them in Spanish | docs/architecture.md |
