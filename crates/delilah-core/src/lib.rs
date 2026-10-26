@@ -6,7 +6,7 @@ mod spec;
 mod task;
 
 pub use project::{
-    FieldError, Project, ProjectKind, ProjectSettings, ShareMode, SharedEntry, SubmoduleRules,
+    AutofixDefault, FieldError, Project, ProjectKind, ProjectSettings, ShareMode, SharedEntry, SubmoduleRules,
     WorkspaceMode, branch_name, slug, validate,
 };
 pub use spec::{SpecGroup, SpecItem, SpecPhase, parse_tasks};

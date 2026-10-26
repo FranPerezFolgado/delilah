@@ -9,8 +9,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01F | 1 | fix | done | 1 | 42c7c06 | migration backfill = not archived; backfill test |
 | WP-02 | 2 | 2A | verified | 1 | c405e23 | Task.ci_autofix not persisted yet (WP-03); AutofixDefault not re-exported from core lib.rs |
 | WP-04 | 2 | 2A | verified | 1 | af18699 | claim_autofix takes &str; forward() paused check now after prompt build |
-| WP-03 | 2 | 2B | verified | 1 | | +prs.rs test literal (allowed); CAS by value in BEGIN IMMEDIATE |
-| WP-05 | 2 | 2C | implementing | 0 | | |
+| WP-03 | 2 | 2B | verified | 1 | c897f5c | +prs.rs test literal (allowed); CAS by value in BEGIN IMMEDIATE |
+| WP-05 | 2 | 2C | verified | 1 | | +run.rs test literal (compile-only); PATCH uses set_ci_autofix, BacklogChange untouched |
 | WP-06 | 3 | 3A | pending | 0 | | |
 | WP-08 | 3 | 3A | pending | 0 | | |
 | WP-07 | 3 | 3B | pending | 0 | | |

@@ -2806,6 +2806,7 @@ mod tests {
                 workflow: None,
                 free: true,
                 view: None,
+                ci_autofix: None,
             },
         )
         .await

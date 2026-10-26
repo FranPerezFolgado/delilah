@@ -332,6 +332,24 @@ pub struct NewTask {
     /// `chat` or `terminal`; absent, chat.
     #[serde(default)]
     pub view: Option<String>,
+    /// CI autofix on or off; absent, the project's default decides.
+    #[serde(default)]
+    pub ci_autofix: Option<bool>,
+}
+
+/// Whether a new task has CI autofix on: the explicit value wins, else the project
+/// default (`always` on, `autopilot` on iff the task is autopilot, `off` off).
+pub(crate) fn resolve_ci_autofix(
+    explicit: Option<bool>,
+    default: delilah_core::AutofixDefault,
+    autopilot: bool,
+) -> bool {
+    use delilah_core::AutofixDefault::{Always, Autopilot, Off};
+    explicit.unwrap_or(match default {
+        Always => true,
+        Autopilot => autopilot,
+        Off => false,
+    })
 }
 
 /// Parses a `view` from a request; anything but `chat` or `terminal` is a 400.
@@ -468,6 +486,14 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     if crate::branching::is_free(&task.key) {
         task.title_source = delilah_core::TitleSource::Initial;
     }
+    task.ci_autofix = resolve_ci_autofix(
+        new.ci_autofix,
+        project
+            .as_ref()
+            .map(|p| p.settings.ci_autofix)
+            .unwrap_or_default(),
+        new.autopilot == Some(true),
+    );
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
@@ -506,6 +532,7 @@ async fn update_task(
         saving_mode,
         autopilot,
         view,
+        ci_autofix,
     } = body;
     check_autopilot(autopilot, saving_mode)?;
     let view = view.as_deref().map(parse_view).transpose()?;
@@ -522,7 +549,7 @@ async fn update_task(
         && change.project.is_none()
         && change.workflow.is_none()
         && change.in_checkout.is_none();
-    let mut task = if view.is_some() && change.is_empty() {
+    let mut task = if (view.is_some() || ci_autofix.is_some()) && change.is_empty() {
         app.store
             .get_task(&key)
             .await?
@@ -533,6 +560,10 @@ async fn update_task(
             _ => app.store.update_backlog_task(&key, &change).await?,
         }
     };
+    if let Some(on) = ci_autofix.filter(|on| *on != task.ci_autofix) {
+        app.store.set_ci_autofix(&key, on).await?;
+        task.ci_autofix = on;
+    }
     if let Some(view) = view.filter(|v| *v != task.view) {
         task = app.store.set_view(&key, view).await?;
     }
@@ -569,6 +600,9 @@ struct UpdateTask {
     autopilot: Option<bool>,
     #[serde(default)]
     view: Option<String>,
+    /// Absent leaves it as it is: the project default applies only at creation.
+    #[serde(default)]
+    ci_autofix: Option<bool>,
 }
 
 async fn get_task(
@@ -1453,6 +1487,102 @@ mod tests {
             .unwrap();
         let (_, task) = call(&app, "POST", "/api/v1/tasks", Some(new(json!({})))).await;
         assert_eq!(task["saving_mode"], true, "the preference is the default");
+    }
+
+    #[test]
+    fn resolve_ci_autofix_follows_the_explicit_value_then_the_default() {
+        use delilah_core::AutofixDefault::{Always, Autopilot, Off};
+        // (explicit, default, autopilot, expected)
+        let table = [
+            (None, Always, false, true),
+            (None, Always, true, true),
+            (None, Autopilot, true, true),
+            (None, Autopilot, false, false),
+            (None, Off, true, false),
+            (None, Off, false, false),
+            (Some(true), Off, false, true),
+            (Some(false), Always, true, false),
+            (Some(false), Autopilot, true, false),
+        ];
+        for (explicit, default, autopilot, want) in table {
+            assert_eq!(
+                resolve_ci_autofix(explicit, default, autopilot),
+                want,
+                "{explicit:?} {default:?} autopilot={autopilot}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_new_task_takes_ci_autofix_from_the_project_default_or_the_request() {
+        use delilah_core::AutofixDefault;
+        let (app, state) = app_with_project().await;
+        for (name, default) in [
+            ("always", AutofixDefault::Always),
+            ("off", AutofixDefault::Off),
+        ] {
+            state
+                .store
+                .create_project(&delilah_core::Project {
+                    name: name.into(),
+                    path: format!("/w/{name}").into(),
+                    kind: delilah_core::ProjectKind::Repo,
+                    workflow: "custom".into(),
+                    settings: delilah_core::ProjectSettings {
+                        ci_autofix: default,
+                        ..Default::default()
+                    },
+                    preview_command: None,
+                })
+                .await
+                .unwrap();
+        }
+        let create = |project: &'static str, extra: Value| {
+            let app = app.clone();
+            async move {
+                let mut body =
+                    json!({"free": true, "title": "T", "project": project, "workflow": "feature"});
+                body.as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                let (status, task) = call(&app, "POST", "/api/v1/tasks", Some(body)).await;
+                assert_eq!(status, StatusCode::CREATED);
+                task["ci_autofix"].as_bool().unwrap()
+            }
+        };
+        // "web" has the default (autopilot): on iff autopilot.
+        assert!(!create("web", json!({})).await);
+        assert!(create("web", json!({"autopilot": true})).await);
+        assert!(!create("web", json!({"autopilot": true, "ci_autofix": false})).await);
+        assert!(create("web", json!({"ci_autofix": true})).await);
+        assert!(create("always", json!({})).await);
+        assert!(!create("always", json!({"ci_autofix": false})).await);
+        assert!(!create("off", json!({"autopilot": true})).await);
+        assert!(create("off", json!({"ci_autofix": true})).await);
+    }
+
+    #[tokio::test]
+    async fn patch_sets_ci_autofix_and_absent_leaves_it() {
+        let (app, _state) = app_with_project().await;
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "project": "web", "workflow": "feature"})),
+        )
+        .await;
+        assert_eq!(task["ci_autofix"], false);
+        let uri = format!("/api/v1/tasks/{}", task["key"].as_str().unwrap());
+        let (status, task) = call(&app, "PATCH", &uri, Some(json!({"ci_autofix": true}))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(task["ci_autofix"], true);
+        // Turning autopilot on later, or editing something else, doesn't re-resolve it.
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"notes": "n"}))).await;
+        assert_eq!(task["ci_autofix"], true);
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"ci_autofix": false}))).await;
+        assert_eq!(task["ci_autofix"], false);
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
+        assert_eq!(task["ci_autofix"], false);
     }
 
     #[tokio::test]
