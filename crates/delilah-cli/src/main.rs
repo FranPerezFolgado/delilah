@@ -9,8 +9,8 @@ use std::time::Duration;
 use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use delilah_core::{
-    AutopilotState, Event, Project, ProjectSettings, ShareMode, SharedEntry, Task, TaskStatus,
-    WorkspaceMode,
+    AutopilotState, Event, Project, ProjectSettings, ProjectWorkflow, ShareMode, SharedEntry,
+    Start, Task, TaskStatus, WorkspaceMode,
 };
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
@@ -183,8 +183,11 @@ enum Command {
         #[arg(long)]
         worktree: bool,
         /// Defaults to the project's workflow.
-        #[arg(long)]
+        #[arg(long, value_parser = WORKFLOWS)]
         workflow: Option<String>,
+        /// Start without a first message (same as --workflow none).
+        #[arg(long, conflicts_with = "workflow")]
+        no_prompt: bool,
         /// Run the agent in chat mode (experimental): no terminal, the conversation is the only view.
         #[arg(long)]
         chat: bool,
@@ -211,15 +214,19 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         submodules: Vec<String>,
         /// Defaults to the project's workflow.
-        #[arg(long)]
+        #[arg(long, value_parser = WORKFLOWS)]
         workflow: Option<String>,
+        /// Start without a first message (same as --workflow none).
+        #[arg(long, conflicts_with_all = ["workflow", "prompt"])]
+        no_prompt: bool,
         /// Defaults to the project's branch template if it has one; else a free task starts
         /// without a branch (the first analysis names it), and a Jira task gets a name
         /// Claude proposes from the title (feature/KEY-…). A typed one is normalised and
         /// made unique.
         #[arg(long)]
         branch: Option<String>,
-        /// First prompt; defaults to `/feature <KEY>`.
+        /// Overrides the project's start for this task with this first message (default: the
+        /// project's workflow).
         #[arg(long)]
         prompt: Option<String>,
         /// Work in the project's checkout (default: the backlog task's choice, else the
@@ -311,8 +318,9 @@ enum ProjectCommand {
         /// Defaults to the folder name.
         #[arg(long)]
         name: Option<String>,
-        #[arg(long, default_value = "project")]
-        workflow: String,
+        /// Deprecated and ignored: the workflow is set in the project's settings.
+        #[arg(long)]
+        workflow: Option<String>,
     },
     /// Lists the registered projects.
     Ls,
@@ -394,6 +402,7 @@ enum SettingName {
     Setup,
     Shared,
     Submodules,
+    Workflow,
 }
 
 /// One change to a project's settings.
@@ -476,6 +485,7 @@ fn apply_change(mut s: ProjectSettings, change: Change) -> Result<ProjectSetting
             SettingName::Setup => s.setup = defaults.setup,
             SettingName::Shared => s.shared = defaults.shared,
             SettingName::Submodules => s.submodules = defaults.submodules,
+            SettingName::Workflow => s.workflow = defaults.workflow,
         },
     }
     Ok(s)
@@ -542,8 +552,49 @@ fn settings_lines(s: &ProjectSettings) -> Vec<String> {
     lines.push(format!("submodules:{}", mark(default_subs)));
     lines.push(format!("  always: {}", list(&s.submodules.always)));
     lines.push(format!("  never:  {}", list(&s.submodules.never)));
+    lines.extend(workflow_lines(&s.workflow));
     lines
 }
+
+/// The workflow: kind and commands; `(default)` when the project has none of its own.
+fn workflow_lines(w: &Option<ProjectWorkflow>) -> Vec<String> {
+    let mark = if w.is_none() { " (default)" } else { "" };
+    match w {
+        None
+        | Some(ProjectWorkflow::Single {
+            start: Start::Builtin,
+        }) => {
+            vec![format!("workflow:   single, built-in prompt{mark}")]
+        }
+        Some(ProjectWorkflow::Single {
+            start: Start::Message { template },
+        }) => vec![format!("workflow:   single, message \"{template}\"")],
+        Some(ProjectWorkflow::Single {
+            start: Start::Nothing,
+        }) => vec!["workflow:   single, nothing (no first message)".to_string()],
+        Some(ProjectWorkflow::Phased {
+            plan,
+            implement,
+            review,
+        }) => vec![
+            "workflow:   phased".to_string(),
+            format!("  plan:      {plan}"),
+            format!("  implement: {implement}"),
+            format!("  review:    {review}"),
+        ],
+    }
+}
+
+/// `--no-prompt` is `--workflow none`.
+fn start_workflow(workflow: Option<String>, no_prompt: bool) -> Option<String> {
+    if no_prompt {
+        Some("none".into())
+    } else {
+        workflow
+    }
+}
+
+const WORKFLOWS: [&str; 4] = ["project", "prompt", "none", "feature"];
 
 #[derive(Deserialize)]
 struct Health {
@@ -668,6 +719,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             checkout,
             worktree,
             workflow,
+            no_prompt,
             chat,
             saving,
             autopilot,
@@ -687,7 +739,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                                 notes,
                                 free,
                                 choice(checkout, worktree),
-                                workflow,
+                                start_workflow(workflow, no_prompt),
                             ),
                             chat,
                         ),
@@ -734,6 +786,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             project,
             submodules,
             workflow,
+            no_prompt,
             branch,
             prompt,
             checkout,
@@ -745,7 +798,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
         } => {
             let mut body = json!({
                 "key": key, "title": title.unwrap_or_default(), "project": project.unwrap_or_default(),
-                "workflow": workflow,
+                "workflow": start_workflow(workflow, no_prompt),
                 "submodules": submodules, "branch": branch, "prompt": prompt,
             });
             with_choice(&mut body, choice(checkout, worktree));
@@ -858,9 +911,15 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             // The daemon runs in another folder: send it an absolute path.
             let path =
                 std::fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            if workflow.is_some() {
+                eprintln!(
+                    "warning: `project add --workflow` is deprecated and ignored; \
+                     set the workflow in the project's settings"
+                );
+            }
             let project: Project = api.post(
                 "/api/v1/projects",
-                &json!({ "path": path, "kind": kind, "name": name, "workflow": workflow }),
+                &json!({ "path": path, "kind": kind, "name": name }),
             )?;
             println!(
                 "Added {} ({}) at {}",
@@ -1427,6 +1486,138 @@ mod tests {
         assert!(settings_lines(&s)[1].contains("(default: proposed by Delilah)"));
         s.branch = Some("fix/{ticket}".into());
         assert!(settings_lines(&s)[1].contains("fix/{ticket}"));
+    }
+
+    fn parse_cmd(args: &[&str]) -> Result<Command, clap::Error> {
+        let mut argv = vec!["delilah"];
+        argv.extend_from_slice(args);
+        Cli::try_parse_from(argv).map(|c| c.command)
+    }
+
+    #[test]
+    fn no_prompt_means_workflow_none() {
+        match parse_cmd(&["run", "K-1", "--no-prompt"]).unwrap() {
+            Command::Run {
+                workflow,
+                no_prompt,
+                prompt,
+                ..
+            } => {
+                assert_eq!(start_workflow(workflow, no_prompt).as_deref(), Some("none"));
+                assert!(prompt.is_none());
+            }
+            _ => panic!("not run"),
+        }
+        match parse_cmd(&[
+            "new",
+            "K-1",
+            "--title",
+            "t",
+            "--project",
+            "p",
+            "--no-prompt",
+        ])
+        .unwrap()
+        {
+            Command::New {
+                workflow,
+                no_prompt,
+                ..
+            } => assert_eq!(start_workflow(workflow, no_prompt).as_deref(), Some("none")),
+            _ => panic!("not new"),
+        }
+        assert_eq!(start_workflow(None, false), None);
+    }
+
+    #[test]
+    fn no_prompt_conflicts_with_prompt_and_workflow() {
+        assert!(parse_cmd(&["run", "K-1", "--no-prompt", "--prompt", "x"]).is_err());
+        assert!(parse_cmd(&["run", "K-1", "--no-prompt", "--workflow", "project"]).is_err());
+        assert!(
+            parse_cmd(&[
+                "new",
+                "K-1",
+                "--title",
+                "t",
+                "--project",
+                "p",
+                "--no-prompt",
+                "--workflow",
+                "none"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn workflow_values_are_checked() {
+        for v in ["project", "prompt", "none", "feature"] {
+            assert!(parse_cmd(&["run", "K-1", "--workflow", v]).is_ok(), "{v}");
+        }
+        assert!(parse_cmd(&["run", "K-1", "--workflow", "bogus"]).is_err());
+        assert!(parse_cmd(&["run", "K-1", "--prompt", "hi"]).is_ok());
+    }
+
+    #[test]
+    fn unsets_the_workflow() {
+        assert!(matches!(
+            parse_cmd(&["project", "unset", "p", "workflow"]).unwrap(),
+            Command::Project(ProjectCommand::Unset {
+                setting: SettingName::Workflow,
+                ..
+            })
+        ));
+        let mut s = ProjectSettings::default();
+        s.workflow = Some(ProjectWorkflow::Single {
+            start: Start::Nothing,
+        });
+        let s = apply_change(s, Change::Unset(SettingName::Workflow)).unwrap();
+        assert_eq!(s.workflow, None);
+    }
+
+    #[test]
+    fn project_add_workflow_is_optional() {
+        match parse_cmd(&["project", "add", "/x", "--kind", "repo"]).unwrap() {
+            Command::Project(ProjectCommand::Add { workflow, .. }) => assert!(workflow.is_none()),
+            _ => panic!(),
+        }
+        assert!(
+            parse_cmd(&[
+                "project",
+                "add",
+                "/x",
+                "--kind",
+                "repo",
+                "--workflow",
+                "project"
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn show_prints_the_workflow() {
+        let mut s = ProjectSettings::default();
+        let text = |s: &ProjectSettings| settings_lines(s).join("\n");
+        assert!(text(&s).contains("workflow:   single, built-in prompt (default)"));
+        s.workflow = Some(ProjectWorkflow::Single {
+            start: Start::Message {
+                template: "/go {ticket}".into(),
+            },
+        });
+        assert!(text(&s).contains("message \"/go {ticket}\""));
+        s.workflow = Some(ProjectWorkflow::Single {
+            start: Start::Nothing,
+        });
+        assert!(text(&s).contains("nothing"));
+        s.workflow = Some(ProjectWorkflow::Phased {
+            plan: "/p".into(),
+            implement: "/i".into(),
+            review: "/r".into(),
+        });
+        let t = text(&s);
+        assert!(t.contains("phased") && t.contains("plan:      /p") && t.contains("review:    /r"));
+        assert!(!workflow_lines(&s.workflow).join("\n").contains("(default)"));
     }
 
     #[test]
