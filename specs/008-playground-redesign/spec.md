@@ -61,7 +61,7 @@ colour with the tool; when a helper ends it walks to the lounge and its desk emp
    its own current action.
 4. **Given** a helper is at a desk, **When** it finishes, **Then** it walks to the lounge
    (or, with reduce motion on, appears there directly) and its desk frees up; it leaves the
-   floor after a short while.
+   floor after about 5 seconds.
 5. **Given** the agent waits for the user, **When** the floor is shown, **Then** a `?`
    floats over it and the desk is highlighted; **Given** it is paused by the usage limit,
    **Then** it shows `zzz`.
@@ -143,7 +143,8 @@ its details.
    **Then** they show the tool, the target (cut as captions are), the start time and the
    duration or "running".
 6. **Given** the user switches back to Oficina and again to Flujo, **When** the view
-   shows, **Then** it keeps the chosen view per place until changed.
+   shows, **Then** the last chosen view is kept (one choice for every place on that
+   device) until changed.
 
 ---
 
@@ -155,7 +156,7 @@ its details.
 - A project-level agent session (not tied to a task): it gets a floor in the building
   named after the project, and the same office/flow view in its project screen tab.
 - More helpers than free desks on a floor: the floor grows with more desk pods; the
-  building's miniature shows the first ones and a "+N".
+  building's miniature shows the first 6 characters of the floor and a "+N".
 - More floors than fit on screen: the building scrolls; the waiting counter still counts
   all of them.
 - A helper never reports that it finished (crash mid-way): it leaves its desk when its
@@ -200,11 +201,13 @@ its details.
 - **FR-004**: Characters MUST have distinct poses for at least: arriving, sitting idle,
   typing, waiting with a raised hand, sleeping, and walking.
 - **FR-005**: When a helper finishes, its character MUST walk from its desk to the floor's
-  lounge, stay there briefly, and leave; its desk MUST become free.
+  lounge, stay there about 5 seconds, and leave; its desk MUST become free as soon as
+  it stands up.
 - **FR-006**: The lead characters of agents of the same project MUST wear the same outfit
   colours, chosen deterministically from the project; helpers keep a look per role.
 - **FR-025**: The system MUST know how many tokens each live agent session has used so far
-  (input, output and cache, as the agent reports them), updated as the session works.
+  (input, output and cache, as the agent reports them), reflected on screen within 10
+  seconds of the agent recording it.
 - **FR-026**: Each lead desk MUST show a paper stack that grows with its session's tokens:
   none below 250K, then a small, medium and large stack from 250K, 2M and 16M; the exact
   count MUST be in the desk's hover text and accessible name (for example "1.2M tokens").
@@ -230,7 +233,8 @@ its details.
 **Flow view**
 
 - **FR-012**: Wherever the office floor is shown, a toggle MUST switch between Oficina and
-  Flujo; the choice MUST be remembered per user on that device.
+  Flujo; the last choice MUST apply to every place where the toggle appears and be
+  remembered on that device.
 - **FR-013**: The system MUST keep, for each agent session, an in-memory history of its
   recent activity events (tool call started, tool call ended, helper started, helper
   ended, turn over), at most 200 per session, each with its time; it MUST NOT be stored
@@ -245,6 +249,9 @@ its details.
   selecting one MUST highlight the other.
 - **FR-017**: Running tool calls MUST be visibly distinct from finished ones, and tool
   call nodes MUST use the same colours per kind as the monitors in the office.
+- **FR-027**: The kind of action MUST never be shown by colour alone: the caption (office)
+  and label (Flujo) also name it, and the per-kind colours MUST stay distinguishable in
+  both themes.
 - **FR-018**: When older events have been dropped by the limit, or there are none since
   the daemon started, Flujo MUST say so.
 
@@ -319,7 +326,8 @@ its details.
   waiting on a question (between turns); paused by the usage limit also shows `zzz`.
 - Decision #80 is revised: activity stays in memory and on its own topic, but now keeps a
   short per-session history besides the current state.
-- An ended session's history may stay in memory (bounded) so Flujo can still show it for
+- An ended session's history may stay in memory (at most the 50 most recently ended
+  sessions) so Flujo can still show it for
   its task until the daemon restarts; the office shows only live sessions.
 - Walking follows simple paths on the floor (desk ↔ lounge); full pathfinding around
   furniture is not required.
