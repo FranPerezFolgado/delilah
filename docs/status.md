@@ -108,7 +108,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 **Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
 
 **End-to-end tests:**
-- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Also in CI, on every PR. See [development.md](development.md#end-to-end-tests).
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). The API/CLI layer also runs in CI on every PR; the UI layer is local only (flaky permission flows in `chat.spec.ts`). See [development.md](development.md#end-to-end-tests).
 
 **Auto-update** (0.8.0):
 - Tauri updater against GitHub Releases: a notice with the open-session count, "Más tarde" / "Cuando terminen", menu item and Ajustes › Actualizaciones; release builds only.
