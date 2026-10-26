@@ -68,21 +68,23 @@ workspace"). The state machine was meant to leave room for them.
 per task in tokens or time with a warning at 80 %, and optionally resuming with
 another agent or account when a task is urgent.
 
-**Mobile, through Tailscale.** The daemon is already API-first, so a phone is just
-one more client:
-- **Exposure:** `tailscale serve` for HTTPS, never the public internet.
-- **Pairing:** with a token, which today's loopback-only security model does not have yet.
-- **Client:** a PWA served by the daemon, with web push.
-- **Scope:** see, answer and approve. Destructive actions stay on the desktop.
+**Mobile, through Tailscale (decided, [decision 96](decisions.md)).** The daemon is already
+API-first, so a phone is just one more client. Analysed and tried on an iPhone on 2026-10-26
+([research](../specs/008-mobile-access-analysis/research.md)):
+- **Exposure:** `tailscale serve` on the personal Mac: HTTPS inside the tailnet only, never
+  Funnel or the public internet. On the work Mac only if IT allows Tailscale.
+- **Security first:** per-device tokens, paired by QR from the desktop and revocable there.
+  The tailnet `Host` is accepted only while tokens are enforced; a loopback `Host` stays local.
+- **Client:** the same UI, served by the daemon (same origin) and added to the iPhone's home
+  screen as a web app, with web push.
+- **Scope:** see, answer and launch work (with a confirm step). Destructive and config actions
+  stay on the desktop, refused server-side; the terminal is read-only on the phone.
+- **Roadmap:** device auth → mobile switch → phone layout → installable app and push → launch
+  screens.
 
-Proposed but not decided:
-- an Inbox-first mobile scope;
-- QR pairing.
-
-The user still has to say:
-- which Mac it would run on, and whether IT allows Tailscale;
-- iPhone or Android;
-- answer-only, or also launching work.
+Still open:
+- the phone layout (to be designed on its own);
+- whether IT allows Tailscale on the work Mac.
 
 ## Open questions from the sketch
 

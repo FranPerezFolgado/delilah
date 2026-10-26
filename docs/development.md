@@ -276,6 +276,8 @@ makes a copy, named after the version in the marker. To go back:
 - **Hot reload:** after changing the shell, restart `tauri dev`. A stale dev app once made ⌘P look broken.
 - **No updater in dev builds:** it runs only in release builds (`cfg(not(debug_assertions))` in the shell, `!import.meta.env.DEV` in the UI), so `tauri dev` and previews never check for or offer updates.
 - **Jira:** the site field wants the site root, not a board URL; `site_root()` normalises it, and HTML answers are reported as errors.
+- **Vitest stale cache:** after adding a file under `app/src/i18n/en/`, run `rm -rf app/node_modules/.vitest-cache`; `--no-cache` does not bypass it and `i18n/coverage.test.ts` would fail on texts that do have an entry.
+- **Pixtuoid art:** `app/src/playground/art/pixtuoid.ts` is generated; regenerate it with `scripts/port-pixtuoid.py` against the pinned commit in `CREDITS.md`, never by hand.
 - **SpecKit:** it rewrites its block in CLAUDE.md on each plan, which dirties the checkout.
 
 ## Tools in this repo

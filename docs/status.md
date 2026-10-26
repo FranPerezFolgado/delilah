@@ -60,6 +60,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 **Work modes:**
 - Tasks in the user's checkout (the default) or in a worktree.
+- A terminal task stays "Working" while the sub-agents its turn left running work, instead of "Waiting" ([#97](decisions.md)).
 - Free tasks (`LIBRE-n`), and a backlog with notes.
 - Deleting tasks.
 - Project sessions (read-only Claude in the checkout), which can be turned into a task.
@@ -69,6 +70,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Every Claude session of a task or project has a chat view next to the terminal (a Chat / Terminal switch per session, remembered as the task's view): your messages, Claude's text, tool cards (Bash, Edit/Write diffs, Read, Glob…, the full input and result on demand) and question cards, built from the session's transcript; a text field with queued messages and "Stop". `tasks.view` only sets what opens first.
 - Chat mode runs a task's Claude on `claude -p` with stream-json in and out instead of a PTY (`delilah new/run --chat`, "Chat mode (experimental)" in the dialogs, `tasks.chat_mode`). Claude's text appears live over `GET /sessions/{id}/live`; hooks still drive states, phases, Inbox, usage limits (from `rate_limit_event`), saving mode, autopilot and the PR flow. No terminal in that mode (409 on the terminal routes, `delilah attach` says why).
 - "Allow?" cards (conversation and Inbox) answered by Delilah: "Allow once", "Always allow in this task" (only when a bounded rule exists; remembered in `tasks.allowed_tools`, see [ADR-001](adr/ADR-001-chat-mode-allow-always-allowlist.md)) and "Deny" with a reason. Bash prefix rules are applied only by the daemon, only to chat-mode requests, and only for bounded arguments.
+- Working indicator ("Working" with a clock and the current step), sub-agent cards with their latest one-line steps, an "In the background" strip (with "Stop", which also asks Claude to stop each background task) and self-started turns ("Claude continues") in chat mode. The turn end is held while background work runs, so the task stays "Working"; messages and the Chat/Terminal switch follow ([#88](decisions.md), [architecture.md](architecture.md#chat-mode)).
+- Background notifications are readable items in the chat ("Subagent finished · label · duration · N tools · tokens" / "Command finished · label · code N"; failed or stopped flagged) with an expandable report in Markdown, hand-backs included (folded into their notification by `task_id`). Limits: when Claude Code drops a notification in favour of a hand-back, no metrics are shown; reports are cut at 16 KB ([#98](decisions.md)).
 - Switch between chat mode and the terminal keeping the conversation (`delilah runtime <KEY> chat|terminal`, "Terminal" in the switch of a chat-mode session, "Probar modo chat (experimental)" in the chat view of a terminal task), refused while the agent works or waits. See decisions [#67](decisions.md) and [architecture.md](architecture.md#chat-mode).
 
 **PR loop:**
@@ -76,7 +79,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
 - The Inbox shows failed CI, changes requested and new comments (from anyone but the signed-in account), and "Ask the agent to fix it" sends them to the agent, only when the user chooses.
 - "Open PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
-- **CI autofix** ([#87](decisions.md), spec `010-ci-autofix`): opt in per task (a "Fix CI" toggle in the PR tab, `--autofix` / `--no-autofix` on `delilah new|run`, `delilah autofix <KEY> on|off|retry`) with a project default (`delilah project set <name> ci-autofix off|autopilot|always`, a select in the project settings). When a task's PR has all its checks finished with a failure and the agent is idle, Delilah types the failed checks into the agent's session, up to 3 attempts per PR and once per commit. It stops, with an Inbox item ("Retry autofix"), when the limit is reached, the agent ends its turn without pushing, or there is no session. Merge, close, archive, delete and toggling off cancel it. Reviews and comments are still forwarded only by the user. See [architecture.md](architecture.md#ci-autofix-autofix).
+- **CI autofix** ([#99](decisions.md), spec `010-ci-autofix`): opt in per task (a "Fix CI" toggle in the PR tab, `--autofix` / `--no-autofix` on `delilah new|run`, `delilah autofix <KEY> on|off|retry`) with a project default (`delilah project set <name> ci-autofix off|autopilot|always`, a select in the project settings). When a task's PR has all its checks finished with a failure and the agent is idle, Delilah types the failed checks into the agent's session, up to 3 attempts per PR and once per commit. It stops, with an Inbox item ("Retry autofix"), when the limit is reached, the agent ends its turn without pushing, or there is no session. Merge, close, archive, delete and toggling off cancel it. Reviews and comments are still forwarded only by the user. See [architecture.md](architecture.md#ci-autofix-autofix).
 - A task whose PRs are all merged is done and archived on its own, unless that would lose work (every repo is checked, also those without a PR, which keep their branch); one notification per merge; a half-finished archive is finished by a manual archive.
 
 **Branch names:**
@@ -91,6 +94,14 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Shared entries are copied or linked into new worktrees.
 - A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
 
+**Playground** (`app/src/playground/`, specs `004-agent-playground` and `008-playground-redesign`; decisions [#89](decisions.md) to [#95](decisions.md)):
+- A building with one floor per task or project (newest on top, a miniature of each). A floor is an office of pixel characters at desks (pixtuoid's art, MIT, 1x), with poses for starting, thinking, editing, reading, running, supervising, waiting and paused, and a caption of the current tool. Desk slots stay fixed.
+- The task screen has an "Oficina" tab right after Overview (a dot when an agent of the owner waits) with the floor and "Flujo", a toggle remembered in `localStorage` (`delilah.office.view`). Flujo draws the agents, helpers and every tool call as a graph (pan, zoom, fit) with a timeline of buttons; a failed call is marked.
+- Helpers for sub-agents walk to the lounge when they finish; a stack of paper on each desk grows with the session's tokens (fresh spend from the transcript, #93).
+- Activity history in memory (200 events x 64 sessions) behind `GET /api/v1/activity/history`; `GET /api/v1/activity` also carries `tokens`.
+- The waiting counter, click to open the task's terminal, and "Abrir en ventana" (a separate Tauri window where a floor opens in place, or a named tab in a browser).
+- Stale banner while offline, still poses with reduced motion, animations paused when hidden.
+
 **Other:**
 - Spanish and English, including what Delilah tells Claude.
 - Help › Ver logs.
@@ -102,6 +113,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Option on new tasks, backlog items and running tasks (also `--saving-mode` / `--no-saving-mode` in the CLI), with its default and "save notes first" in Settings.
 - The session chain on the task screen; the planning → implementation handoff is offered (task screen and Inbox), the review starts on its own and is announced.
 - Recovery of an interrupted handoff on the scheduler tick; retry after a failure.
+- Session tabs and the task's Sessions list name phase sessions after their step ("Spec y plan", "Implementación", "Revisión"), live or stopped; the primary outside saving mode reads "Claude principal" (LIBRE-24).
 
 **Task name and branch from the first analysis** ([spec](../specs/005-task-name-from-spec/spec.md)):
 - Free tasks with no typed branch and no project template start without a branch (decision 65; the rest are named at start, #37/#49); the branch is named like the spec folder Spec Kit makes (or by Delilah), and the title becomes the spec's title once, with "Restore".
@@ -160,13 +172,20 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the usage-limit notice does not show in the conversation view;
   - the "Created from the conversation" label is not shown in the backlog view, only once the task starts;
   - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
+- **Agent permissions** (spec `009-chat-mode-permissions`, decision [#87](decisions.md)): the `agent-permissions` preference (Settings › Agent permissions: Auto by default, or "Claude's default") sets the mode of task and project sessions in both runtimes, so chat mode (`claude -p`, which ignores the user's interactive default) no longer asks for every action. A CLI that rejects the mode at start (only its "invalid mode" text is verified; the one for an account without auto has not been seen) shows a hint to try "Claude's default": in the failure reason of a task (terminal), in the start error (chat), and as an Inbox error item on a project session (which does not fail).
+- **Agent permissions, limits:** auto mode's own classifier decides; the spike found no harmless action that auto escalates, so whether an escalation arrives as `can_use_tool` or `permission_denied` is unverified; only `can_use_tool` becomes a card (and pauses autopilot), `system/permission_denied` is currently ignored (no card, no pause); the default widens the terminal for users whose Claude default is not auto; running sessions keep their mode until relaunched.
 - **Chat mode, limits and known problems:**
+  - chat mode now gets the `agent-permissions` setting (Auto by default) and no longer asks for routine work (see the two Agent permissions bullets above);
   - experimental: a stuck chat-mode agent has no terminal; switch back with `delilah runtime <KEY> terminal` (refused mid-turn: press "Stop" first);
   - only task Claude sessions: project sessions, idea conversations and shells always use a PTY;
   - the stream-json input protocol is thinly documented and may change between Claude versions; the transcript format is not a public contract (unknown lines are skipped);
   - `Notification` and `StopFailure` hooks, and the `rate_limit_event` status when a limit is hit, were not observed in print mode; the status line does not run there; `--remote-control` is hidden;
   - "Always allow" is bounded on purpose (more prompts: `npm install x` is remembered only as that exact command); allowlisted prefixes take only workspace-relative paths (`is_safe_prefix_tail`), but `cargo`/`npm`/`go`/`make test|build` run the repo's own code; there is no view to review or revoke a task's remembered rules; rules stored before the allowlist that no longer pass are ignored;
-  - images show as a placeholder; thinking blocks and a sub-agent's inner steps are not shown;
+  - images show as a placeholder; thinking blocks are not shown, and a sub-agent shows one-line steps (the last 50), not its nested conversation; finished background rows drop on the next turn or after 60 s;
+  - a turn end held for background work is released 30 s after the set empties if no follow-up turn starts; progress is live-only (lost on a daemon restart);
+  - in terminal mode the turn end is held only behind sub-agents the `Stop` lists as running (not background shells); a sub-agent that never sends `SubagentStop` keeps it held until the next prompt, Stop or exit ([#97](decisions.md));
+  - held-Stop heuristics not yet confirmed against Claude Code (review of 010): a late Stop is told from the current turn's by a 1 s window after the turn's init, not by `prompt_id`; a user line that never gets its own init leaves the next self-started turn marked as the user's; a row that never gets an end event keeps the Stop held, with no upper bound, until the next turn, Stop or exit; a Stop hook that arrives after Stop with background still running is held instead of applied; the conversation GET and the `/live` progress snapshot are not versioned, so a slow GET can show a stale snapshot until the next change;
+  - the stream shapes used for background work (`system/task_*`, `background_tasks_changed`, `parent_tool_use_id`, `stop_task`) are undocumented by Anthropic, captured from Claude Code 2.1.x ([spike](archive/spikes/2026-10-24-claude-stream.md)); an older daemon fails to decode the history of a task with an `agent-resumed` event (downgrade only);
   - the API has no token: any local process without an `Origin` can type into a session or answer a permission.
 - **Saving mode, pending:** one session per orchestrate phase (cutting inside implementation).
 - **Saving mode, known problems:**
@@ -205,7 +224,15 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - **Structure:** `TaskScreen.tsx` (~900 lines) and `App.tsx` (~570) should be split (a data hook plus panes; `useRoute` / `useAppData` / a shell). Deferred on purpose to its own behaviour-neutral PR. Also ~60 raw `<button>` outside the kit and Spanish literals as kind keys where neutral keys would do.
   - **Inbox notices:** the `turn-done` / `pr-opened` rows in `pr_notices` accumulate (never resolved) and their text-hash ids change with the language; `pr_notices` is still the table of those two notices, and a rename to a neutral `notices` is pending ([#74](decisions.md)). Downgrade: an older binary refuses a database at version 21 (say it in the release notes).
   - **Colour:** light `--tx3` on `--side` is 4.43:1 (listed in `KNOWN_LOW` in `tokens.test.ts`); darken to #686b72 and drop the entry. A colour-blind mode is not built.
-  - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). Run vitest with `--no-cache` after adding files under `i18n/en/` (the glob list is cached).
-- **Mobile access:** design only, waiting for the user's answers (see [vision.md](vision.md)).
+  - **Tests:** `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in some full daemon runs, and `conversation::a_message_sent_while_a_card_is_pending_is_queued` and `preview::a_running_one_outlives_the_url_timeout` are flaky under load (they pass alone). After adding a file under `i18n/en/`, run `rm -rf app/node_modules/.vitest-cache` (the glob list is cached; `--no-cache` does not bypass it).
+- **Playground limits:**
+  - the office shows only the last of several parallel tool calls as the action (Flujo shows each);
+  - tokens count the session's own transcript only: sub-agent (helper) spend is missing, so a stack can look low during heavy delegation;
+  - the art is the 1x pixtuoid set, so there are no hairstyles (hair colour varies);
+  - agents launched before the update have no `PreToolUse` hook in their settings, so they show no actions until relaunched;
+  - history `seq` and `started_at` restart with the daemon (clients refetch on reconnect); a malformed `history` query gets a plain-text 400;
+  - the native "playground" window (Tauri) has not been checked; the office floor, building and Flujo were checked in a browser preview with live agents;
+  - `tasks/<KEY>/hooks.jsonl` has no rotation (pre-existing).
+- **Mobile access:** analysed (decision 96, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth.
 - **Everything else in [vision.md](vision.md):** more agents, portable context, declarative workflows, `delilah.toml`, gates and budgets.
 - **Testing:** test the whole flow on a real project with a real ticket.

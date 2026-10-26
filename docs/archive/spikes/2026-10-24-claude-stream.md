@@ -102,3 +102,26 @@ hooks), `system/thinking_tokens`, `result` (`subtype`, `is_error`, `terminal_rea
 - **`DONT_ASK_ALLOW`** in `crates/delilah-agents/src/claude.rs` lists AskUserQuestion;
   in `-p` it exists only with the stdio flag.
 - Run 1's `resume` and `ask` scenarios were a broken example and were re-run (spike2).
+
+## Background tasks (2026-10-26)
+
+Answers research.md R9 of specs/010-chat-background-tasks. Claude Code 2.1.292, the
+`background` and `background-stop` scenarios of the example (same flags and settings as
+above, `--permission-prompt-tool stdio`, stdin open 150 s, workspace from
+`scripts/make-fixture-parent.sh`). Prompt: background Bash `sleep 25`, background
+sub-agent that globs and reads files, foreground sub-agent that reads one file, end the
+turn, say ALL-DONE when the background work ends. Fixtures (paths rewritten to
+`/fixture/...`): `crates/delilah-agents/tests/fixtures/stream-background.jsonl` (216 lines),
+`stream-background-stop.jsonl` (203), `stream-background-hooks.jsonl` (26). The example
+also writes `stdout-<label>.jsonl` (raw stdout lines) next to `stream.jsonl`.
+
+| Question | Result |
+|---|---|
+| R3 shapes with the real flags | **Hold.** `system` subtypes `task_started`, `task_progress`, `task_updated`, `task_notification`, `background_tasks_changed` (full set, `[]` at the end), each with an extra `run_id`. Foreground sub-agents get `task_started`/`task_notification` too (`is_backgrounded: false`) but are not in `background_tasks_changed`. Sub-agent `assistant`/`user`/`stream_event` lines carry `parent_tool_use_id` = the `Agent` call's `tool_use_id`; main-thread lines have `null`. |
+| `Stop` for a turn ending with background work | **Yes.** 3 results, 3 `Stop`s. The payload has `background_tasks` (`[{id, type:"shell", command, description, status:"running"}]`, `[]` on the last), `last_assistant_message`, `prompt_id`. |
+| `UserPromptSubmit` for a self-started turn | **Yes**, `prompt` is the `<task-notification>` XML, ~100 ms before the new `system/init`. It also fires for a notification that lands mid-turn, which starts no turn: decide self-started turns from `init`, not from this hook. |
+| `stop_task` | **Accepted.** `{"type":"control_request","request_id":"s1","request":{"subtype":"stop_task","task_id":"<id>"}}` answers `{"type":"control_response","response":{"subtype":"success","request_id":"s1","response":{}}}`; in the same ms `task_updated` (`patch.status: "killed"`), `task_notification` (`status: "stopped"`, no `usage`) and `background_tasks_changed` (`tasks: []`). Claude carries on and reports the task as stopped. |
+
+Gotcha: without `--permission-prompt-tool stdio` the sub-agents' Bash calls are refused
+(`system/permission_denied`) and nothing background happens usefully; with it, sub-agent
+tool use arrives as `control_request` `can_use_tool` on the same channel.

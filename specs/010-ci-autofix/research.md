@@ -95,7 +95,7 @@
 
 ## R9. Decision log
 
-- **Decision 87** (new): "CI autofix forwards CI failures on its own, opt-in and
+- **Decision 99** (new): "CI autofix forwards CI failures on its own, opt-in and
   bounded" — amends #29 for CI failures only; reviews stay manual; rationale and limits.
 
 ## R10. Plan review fixes (architecture-reviewer, 2026-10-26)

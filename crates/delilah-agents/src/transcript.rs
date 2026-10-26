@@ -12,6 +12,9 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff};
 
+mod background;
+pub use background::{BackgroundInfo, BackgroundKind, BackgroundSource, is_agent_message};
+
 /// Tool results and long input strings are cut to this many bytes in entries.
 pub const MAX_TEXT: usize = 4096;
 /// Longest one-line summary, in characters.
@@ -45,6 +48,9 @@ pub enum UserFrom {
 pub enum MarkerKind {
     Compacted,
     Stopped,
+    /// A turn Claude started by itself because a background task finished.
+    #[serde(rename = "background-done")]
+    BackgroundDone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -108,6 +114,12 @@ pub enum Entry {
         id: String,
         at: String,
         marker: MarkerKind,
+        /// Why, when known (the first line of a task notification's summary).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        /// What a background-task notification said, when this marker is one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        background: Option<BackgroundInfo>,
     },
 }
 
@@ -348,6 +360,7 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
     let kind = line.get("type").and_then(Value::as_str).unwrap_or("");
     match kind {
         "user" | "assistant" => {}
+        "attachment" if is_notification_attachment(line) => return attachment_items(line, skipped),
         // Known lines that are not part of the conversation.
         "summary" | "system" | "file-history-snapshot" | "queue-operation" => return vec![],
         _ => {
@@ -356,7 +369,13 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
         }
     }
     let flag = |name: &str| line.get(name).and_then(Value::as_bool).unwrap_or(false);
-    if flag("isSidechain") || flag("isMeta") {
+    // A hand-back is a hidden (`isMeta`) line; it is the one meta line that is shown.
+    let handback = if !flag("isSidechain") && flag("isMeta") {
+        background::read_handback(&line["origin"])
+    } else {
+        None
+    };
+    if flag("isSidechain") || (flag("isMeta") && handback.is_none()) {
         return vec![];
     }
     let Some(uuid) = line.get("uuid").and_then(Value::as_str) else {
@@ -375,11 +394,37 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
         *skipped += 1;
         return vec![];
     };
+    if let Some(info) = handback {
+        return vec![Item::Entry(Entry::Marker {
+            id: format!("t:{uuid}:0"),
+            at,
+            marker: MarkerKind::BackgroundDone,
+            detail: info.label.clone(),
+            background: Some(info),
+        })];
+    }
     if flag("isCompactSummary") {
         return vec![Item::Entry(Entry::Marker {
             id: format!("t:{uuid}:0"),
             at,
             marker: MarkerKind::Compacted,
+            detail: None,
+            background: None,
+        })];
+    }
+    // A notification that no text block carries (the CLI marks it in `origin`) still
+    // gives its marker.
+    if line.get("type").and_then(Value::as_str) == Some("user")
+        && line.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification")
+        && let Some(message) = line.get("message")
+        && !user_text(message).contains("<task-notification>")
+    {
+        return vec![Item::Entry(Entry::Marker {
+            id: format!("t:{uuid}:0"),
+            at,
+            marker: MarkerKind::BackgroundDone,
+            detail: None,
+            background: Some(background::read_notification("")),
         })];
     }
     match line.get("message") {
@@ -391,10 +436,96 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
     }
 }
 
+/// An attachment line Claude Code writes for a notification that arrived mid-turn.
+fn is_notification_attachment(line: &Value) -> bool {
+    let a = &line["attachment"];
+    a.get("type").and_then(Value::as_str) == Some("queued_command")
+        && (a.get("commandMode").and_then(Value::as_str) == Some("task-notification")
+            || a.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification"))
+}
+
+/// One marker per notification block of a mid-turn notification attachment.
+fn attachment_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
+    if line.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return vec![];
+    }
+    let uuid = line.get("uuid").and_then(Value::as_str);
+    let at = line
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+        .map(|t| {
+            t.with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Millis, true)
+        });
+    let (Some(uuid), Some(at)) = (uuid, at) else {
+        *skipped += 1;
+        return vec![];
+    };
+    let prompt = line
+        .pointer("/attachment/prompt")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mut items = Vec::new();
+    for segment in background::split_notifications(prompt) {
+        if let background::Segment::Notification(block) = segment {
+            let id = if items.is_empty() {
+                format!("t:{uuid}:0")
+            } else {
+                format!("t:{uuid}:0:{}", items.len())
+            };
+            items.push(Item::Entry(Entry::Marker {
+                id,
+                at: at.clone(),
+                marker: MarkerKind::BackgroundDone,
+                detail: notification_summary(block),
+                background: Some(background::read_notification(block)),
+            }));
+        }
+    }
+    items
+}
+
+/// The text of a user message, its text blocks joined.
+fn user_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(t)) => t.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// First line of the `<summary>` of a task notification, at most 200 characters.
+fn notification_summary(text: &str) -> Option<String> {
+    let start = text.find("<summary>")? + "<summary>".len();
+    let rest = &text[start..];
+    let body = &rest[..rest.find("</summary>").unwrap_or(rest.len())];
+    let first = body.trim().lines().next()?.trim();
+    (!first.is_empty()).then(|| first.chars().take(200).collect())
+}
+
+/// What a tool call shows as a step: "Leyendo <file>", "Buscando <pattern>", the first
+/// 40 characters of a Bash command, else the tool name.
+pub fn tool_step_summary(tool: &str, input: &Value) -> Option<String> {
+    let field = |name: &str| input[name].as_str().filter(|s| !s.is_empty());
+    Some(match tool {
+        "Read" => format!("Leyendo {}", field("file_path")?),
+        "Grep" | "Glob" => format!("Buscando {}", field("pattern")?),
+        "Bash" => field("command")?.chars().take(40).collect(),
+        other => other.to_string(),
+    })
+}
+
 /// Text that Claude Code or its hooks put in user messages without the user typing it.
 fn is_injected(text: &str) -> bool {
     let t = text.trim_start();
     t.is_empty()
+        || background::is_agent_message(t)
         || t.starts_with("<system-reminder>")
         || t.starts_with("<user-prompt-submit-hook>")
         || t.starts_with("<command-")
@@ -421,14 +552,44 @@ fn message_items(message: &Value, uuid: &str, at: &str, skipped: &mut usize) -> 
             Some("text") => {
                 let text = block.get("text").and_then(Value::as_str).unwrap_or("");
                 if user {
-                    if !is_injected(text) {
-                        items.push(Item::Entry(Entry::User {
-                            id,
-                            at,
-                            text: text.to_string(),
-                            state: UserState::Delivered,
-                            from: UserFrom::Terminal,
-                        }));
+                    let mut k = 0;
+                    let segments = background::split_notifications(text);
+                    // Only a block that held a notification is trimmed; plain text stays verbatim.
+                    let split = segments
+                        .iter()
+                        .any(|s| matches!(s, background::Segment::Notification(_)));
+                    for segment in segments {
+                        let id = if k == 0 {
+                            id.clone()
+                        } else {
+                            format!("{id}:{k}")
+                        };
+                        let at = at.clone();
+                        match segment {
+                            background::Segment::Text(t) => {
+                                let t = if split { t.trim() } else { t };
+                                if !is_injected(t) {
+                                    items.push(Item::Entry(Entry::User {
+                                        id,
+                                        at,
+                                        text: t.to_string(),
+                                        state: UserState::Delivered,
+                                        from: UserFrom::Terminal,
+                                    }));
+                                    k += 1;
+                                }
+                            }
+                            background::Segment::Notification(block) => {
+                                items.push(Item::Entry(Entry::Marker {
+                                    id,
+                                    at,
+                                    marker: MarkerKind::BackgroundDone,
+                                    detail: notification_summary(block),
+                                    background: Some(background::read_notification(block)),
+                                }));
+                                k += 1;
+                            }
+                        }
                     }
                 } else if !text.trim().is_empty() {
                     items.push(Item::Entry(Entry::Claude {
@@ -793,9 +954,160 @@ fn diff_rows(old: &str, new: &str, rows: &mut Vec<DiffRow>) -> bool {
     false
 }
 
+/// Tokens a session used, as the agent reports them. `total` is new input, output and
+/// cache writes; re-read cached context (`cache_read`) is not counted in it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct TokenUsage {
+    pub total: u64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+}
+
+impl TokenUsage {
+    pub fn add(&mut self, other: &TokenUsage) {
+        self.total = self.total.saturating_add(other.total);
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+    }
+}
+
+/// What `usage_delta` read: the usage of the new lines, how many bytes it consumed and
+/// the last message id counted (to pass to the next call).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageDelta {
+    pub usage: TokenUsage,
+    pub consumed: usize,
+    pub last_id: Option<String>,
+}
+
+/// Sums the usage of the assistant lines in `bytes`. Only complete lines are read (the
+/// bytes after the last `\n` are not consumed). Lines of one `message.id` (one per
+/// content block) count once; `last_id` carries that across calls. Bad JSON is skipped.
+pub fn usage_delta(bytes: &[u8], last_id: Option<&str>) -> UsageDelta {
+    let consumed = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let mut usage = TokenUsage::default();
+    let mut last = last_id.map(String::from);
+    for line in bytes[..consumed].split(|&b| b == b'\n') {
+        let Ok(v) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if v["type"].as_str() != Some("assistant") {
+            continue;
+        }
+        let msg = &v["message"];
+        if !msg["usage"].is_object() {
+            continue;
+        }
+        if let Some(id) = msg["id"].as_str() {
+            if last.as_deref() == Some(id) {
+                continue;
+            }
+            last = Some(id.to_string());
+        }
+        let n = |k: &str| msg["usage"][k].as_u64().unwrap_or(0);
+        let (input, output, cache_write) = (
+            n("input_tokens"),
+            n("output_tokens"),
+            n("cache_creation_input_tokens"),
+        );
+        usage.add(&TokenUsage {
+            total: input.saturating_add(cache_write).saturating_add(output),
+            input,
+            output,
+            cache_write,
+            cache_read: n("cache_read_input_tokens"),
+        });
+    }
+    UsageDelta {
+        usage,
+        consumed,
+        last_id: last,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn asst(id: &str, u: Value) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"assistant","message":{"id":id,"usage":u}})
+        )
+    }
+
+    #[test]
+    fn usage_delta_counts_one_message_once_and_excludes_cache_read() {
+        let u = serde_json::json!({"input_tokens":3,"output_tokens":5,"cache_creation_input_tokens":7,"cache_read_input_tokens":100});
+        let text = asst("m1", u.clone()) + &asst("m1", u.clone()) + &asst("m2", u);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.consumed, text.len());
+        assert_eq!(d.last_id.as_deref(), Some("m2"));
+        assert_eq!(
+            d.usage,
+            TokenUsage {
+                total: 30,
+                input: 6,
+                output: 10,
+                cache_write: 14,
+                cache_read: 200
+            }
+        );
+    }
+
+    #[test]
+    fn usage_sums_saturate() {
+        let big = u64::MAX - 1;
+        let u = serde_json::json!({"input_tokens":big,"output_tokens":big,"cache_creation_input_tokens":big});
+        let text = asst("m1", u.clone()) + &asst("m2", u);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.usage.total, u64::MAX);
+        assert_eq!(d.usage.input, u64::MAX);
+        let mut t = TokenUsage {
+            total: u64::MAX,
+            ..Default::default()
+        };
+        t.add(&TokenUsage {
+            total: 5,
+            ..Default::default()
+        });
+        assert_eq!(t.total, u64::MAX);
+    }
+
+    #[test]
+    fn usage_delta_carries_last_id_across_calls() {
+        let u = serde_json::json!({"input_tokens":1,"output_tokens":1});
+        let text = asst("m1", u);
+        let d = usage_delta(text.as_bytes(), Some("m1"));
+        assert_eq!(d.usage, TokenUsage::default());
+        assert_eq!(d.consumed, text.len());
+    }
+
+    #[test]
+    fn usage_delta_leaves_partial_line_and_skips_noise() {
+        let u = serde_json::json!({"output_tokens":4});
+        let full = asst("m1", u.clone());
+        let text = format!(
+            "not json\n{{\"type\":\"user\"}}\n{full}{}",
+            &asst("m2", u)[..20]
+        );
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.consumed, text.len() - 20);
+        assert_eq!(
+            d.usage,
+            TokenUsage {
+                total: 4,
+                output: 4,
+                ..Default::default()
+            }
+        );
+        assert_eq!(usage_delta(b"", None).consumed, 0);
+        assert_eq!(usage_delta(b"{\"type\":\"assi", None).consumed, 0);
+    }
 
     fn fixture(name: &str) -> Vec<u8> {
         std::fs::read(format!(
@@ -946,6 +1258,280 @@ mod tests {
             }
         ));
         assert_eq!(p.skipped, 0);
+    }
+
+    fn user_line(extra: &str, content: &str) -> Vec<u8> {
+        format!(
+            r#"{{"type":"user","uuid":"n1","timestamp":"2025-01-01T10:00:00.000Z"{extra},"message":{{"role":"user","content":{content}}}}}"#
+        )
+        .into_bytes()
+        .into_iter()
+        .chain(*b"\n")
+        .collect()
+    }
+
+    const NOTE: &str = r#""<task-notification>\n<task-id>b1</task-id>\n<summary>Background command \"sleep 5\" completed\nsecond line</summary>\n</task-notification>""#;
+
+    #[test]
+    fn task_notification_is_a_background_done_marker() {
+        for extra in [r#","origin":{"kind":"task-notification"}"#, ""] {
+            let p = parse(&user_line(extra, NOTE), 0);
+            assert_eq!(p.entries.len(), 1);
+            let Entry::Marker { marker, detail, .. } = &p.entries[0] else {
+                panic!("not a marker: {:?}", p.entries[0]);
+            };
+            assert_eq!(*marker, MarkerKind::BackgroundDone);
+            assert_eq!(
+                detail.as_deref(),
+                Some("Background command \"sleep 5\" completed")
+            );
+        }
+        let json = serde_json::to_value(&parse(&user_line("", NOTE), 0).entries[0]).unwrap();
+        assert_eq!(json["marker"], "background-done");
+    }
+
+    #[test]
+    fn task_notification_fills_background() {
+        for extra in [r#","origin":{"kind":"task-notification"}"#, ""] {
+            let p = parse(&user_line(extra, NOTE), 0);
+            let Entry::Marker { background, .. } = &p.entries[0] else {
+                panic!("not a marker");
+            };
+            let b = background.as_ref().expect("background");
+            assert_eq!(b.task_id.as_deref(), Some("b1"));
+            assert_eq!(b.kind, BackgroundKind::Command);
+            assert_eq!(b.label.as_deref(), Some("sleep 5"));
+        }
+    }
+
+    fn attachment_line(kind: &str) -> Vec<u8> {
+        let v = serde_json::json!({"type":"attachment","uuid":"u9","timestamp":"2026-01-01T00:00:00Z",
+            "attachment":{"type":kind,"commandMode":"task-notification","origin":{"kind":"task-notification"},
+            "prompt":"<task-notification>\n<task-id>b3gj1qeu9</task-id>\n<status>failed</status>\n<summary>Background command \"Run false command\" failed with exit code 1</summary>\n</task-notification>"}});
+        format!("{v}\n").into_bytes()
+    }
+
+    #[test]
+    fn queued_command_attachment_is_a_marker() {
+        let p = parse(&attachment_line("queued_command"), 0);
+        assert_eq!(p.entries.len(), 1);
+        let Entry::Marker {
+            id,
+            marker,
+            background,
+            ..
+        } = &p.entries[0]
+        else {
+            panic!("not a marker");
+        };
+        assert_eq!(id, "t:u9:0");
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        let b = background.as_ref().expect("background");
+        assert_eq!(b.kind, BackgroundKind::Command);
+        assert_eq!(b.exit_code, Some(1));
+        assert_eq!(b.status.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn other_attachment_types_stay_skipped() {
+        let p = parse(&attachment_line("hook_success"), 0);
+        assert!(p.entries.is_empty());
+        assert_eq!(p.skipped, 1);
+    }
+
+    const HANDBACK: &str = r#","isMeta":true,"origin":{"kind":"peer","from":"a97d","name":"code-researcher","handback":true,"body":"[Subagent hand-back] x. The report follows:\n  ## Map\n  line two\n"}"#;
+
+    #[test]
+    fn handback_line_is_a_background_done_marker() {
+        let p = parse(
+            &user_line(HANDBACK, r#""Another Claude session sent a message""#),
+            0,
+        );
+        assert_eq!(p.entries.len(), 1);
+        let Entry::Marker {
+            id,
+            marker,
+            detail,
+            background,
+            ..
+        } = &p.entries[0]
+        else {
+            panic!("not a marker");
+        };
+        assert_eq!(id, "t:n1:0");
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        assert_eq!(detail.as_deref(), Some("code-researcher"));
+        let b = background.as_ref().expect("background");
+        assert_eq!(b.source, BackgroundSource::Handback);
+        assert_eq!(b.report.as_deref(), Some("## Map\nline two"));
+    }
+
+    #[test]
+    fn notification_and_handback_get_different_ids() {
+        let mut bytes = user_line("", NOTE);
+        let other = String::from_utf8(user_line(HANDBACK, r#""m""#))
+            .unwrap()
+            .replace("\"n1\"", "\"n2\"");
+        bytes.extend(other.into_bytes());
+        let p = parse(&bytes, 0);
+        let ids: Vec<_> = p
+            .entries
+            .iter()
+            .map(|e| match e {
+                Entry::Marker { id, .. } => id.clone(),
+                _ => panic!("not a marker"),
+            })
+            .collect();
+        assert_eq!(ids, ["t:n1:0", "t:n2:0"]);
+    }
+
+    #[test]
+    fn other_meta_and_sidechain_lines_still_give_nothing() {
+        let skill = r#","isMeta":true"#;
+        assert!(
+            parse(
+                &user_line(skill, r#""Base directory for this skill: /x""#),
+                0
+            )
+            .entries
+            .is_empty()
+        );
+        let side = format!(r#","isSidechain":true{HANDBACK}"#);
+        assert!(parse(&user_line(&side, r#""m""#), 0).entries.is_empty());
+    }
+
+    #[test]
+    fn plain_user_text_keeps_its_whitespace() {
+        let p = parse(&user_line("", r#""  hola\n""#), 0);
+        let texts: Vec<_> = p
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::User { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["  hola\n"]);
+    }
+
+    #[test]
+    fn origin_notification_without_block_still_gives_a_marker() {
+        let p = parse(
+            &user_line(r#","origin":{"kind":"task-notification"}"#, r#""nothing""#),
+            0,
+        );
+        assert_eq!(p.entries.len(), 1);
+        let Entry::Marker {
+            detail, background, ..
+        } = &p.entries[0]
+        else {
+            panic!("not a marker");
+        };
+        assert_eq!(*detail, None);
+        let b = background.as_ref().expect("background");
+        assert_eq!(b.source, BackgroundSource::Notification);
+        assert_eq!(b.kind, BackgroundKind::Task);
+    }
+
+    #[test]
+    fn task_notification_without_summary_has_no_detail() {
+        let p = parse(
+            &user_line(
+                "",
+                r#""<task-notification><task-id>x</task-id></task-notification>""#,
+            ),
+            0,
+        );
+        let Entry::Marker { marker, detail, .. } = &p.entries[0] else {
+            panic!("not a marker");
+        };
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        assert_eq!(*detail, None);
+        let json = serde_json::to_value(&p.entries[0]).unwrap();
+        assert!(json.get("detail").is_none());
+    }
+
+    fn entries_of(content: &str) -> Vec<Entry> {
+        parse(&user_line("", content), 0).entries
+    }
+
+    fn marker_id(e: &Entry) -> &str {
+        match e {
+            Entry::Marker { id, .. } => id,
+            Entry::User { id, .. } => id,
+            _ => panic!("unexpected entry"),
+        }
+    }
+
+    #[test]
+    fn two_notifications_in_one_string_give_two_markers() {
+        let content = r#""<task-notification><task-id>a</task-id></task-notification>\n<task-notification><task-id>b</task-id></task-notification>""#;
+        let e = entries_of(content);
+        assert_eq!(e.len(), 2);
+        assert_eq!(marker_id(&e[0]), "t:n1:0");
+        assert_eq!(marker_id(&e[1]), "t:n1:0:1");
+    }
+
+    #[test]
+    fn notification_in_a_second_block_and_around_text() {
+        let e = entries_of(
+            r#"[{"type":"text","text":"hola"},{"type":"text","text":"<task-notification><task-id>a</task-id></task-notification>"}]"#,
+        );
+        assert_eq!(e.len(), 2);
+        assert!(matches!(&e[0], Entry::User { text, .. } if text == "hola"));
+        assert_eq!(marker_id(&e[0]), "t:n1:0");
+        assert!(matches!(&e[1], Entry::Marker { .. }));
+        assert_eq!(marker_id(&e[1]), "t:n1:1");
+
+        let e = entries_of(
+            r#""hola\n<task-notification><task-id>a</task-id></task-notification>\nadiós""#,
+        );
+        assert_eq!(e.len(), 3);
+        assert!(matches!(&e[0], Entry::User { text, .. } if text == "hola"));
+        assert!(matches!(&e[1], Entry::Marker { .. }));
+        assert!(matches!(&e[2], Entry::User { text, .. } if text == "adiós"));
+        let ids: Vec<_> = e.iter().map(marker_id).collect();
+        assert_eq!(ids, ["t:n1:0", "t:n1:0:1", "t:n1:0:2"]);
+    }
+
+    #[test]
+    fn agent_messages_never_become_user_entries() {
+        for content in [
+            r#""Another Claude session sent a message:\n<agent-message from=\"x\">hi</agent-message>""#,
+            r#""a <task-notification>unterminated""#,
+        ] {
+            for entry in entries_of(content) {
+                if let Entry::User { text, .. } = entry {
+                    assert!(
+                        !text.contains("<task-notification") && !text.contains("<agent-message")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn step_summaries() {
+        use serde_json::json;
+        assert_eq!(
+            tool_step_summary("Read", &json!({"file_path": "a.rs"})).as_deref(),
+            Some("Leyendo a.rs")
+        );
+        assert_eq!(
+            tool_step_summary("Grep", &json!({"pattern": "foo"})).as_deref(),
+            Some("Buscando foo")
+        );
+        let long = "x".repeat(60);
+        assert_eq!(
+            tool_step_summary("Bash", &json!({"command": long}))
+                .unwrap()
+                .len(),
+            40
+        );
+        assert_eq!(
+            tool_step_summary("Edit", &json!({})).as_deref(),
+            Some("Edit")
+        );
     }
 
     #[test]

@@ -77,7 +77,7 @@ one place, and a client that missed messages just refetches.
 - File access is confined to the workspace, symlinks included.
 - The Jira token lives in the Keychain.
 
-Mobile access (via Tailscale) will need pairing tokens first.
+Mobile access (via Tailscale) needs device tokens first (96).
 
 ## Agents
 
@@ -305,7 +305,7 @@ after a restart.
 **29. Delilah never forwards PR feedback to the agent by itself (2026-10-20).**
 A failed CI or a review only reaches the Inbox; "Ask the agent to fix it" sends it, as comments to consider, not as instructions from the user.
 Auto-forwarding was ruled out: it would spend the subscription and let a
-reviewer's text steer the agent unseen. *Amended by 87: CI failures (only those)
+reviewer's text steer the agent unseen. *Amended by 99: CI failures (only those)
 can be forwarded on their own, opt in; reviews and comments stay manual.*
 
 **30. Notify for comments from anyone but the signed-in account (2026-10-20).**
@@ -695,7 +695,139 @@ only happens after the same checks as before (or `force`), so it loses nothing g
 kept. *Ruled out:* only retrying `git worktree remove` (it refuses a forgotten worktree), and a
 periodic sweep of `workspaces/` (it would have to guess which folders are still in use).
 
-**87. CI autofix forwards CI failures on its own, opt-in and bounded (2026-10-26).** Amends
+**87. Agent permission mode is a Delilah setting applied to both runtimes, Auto by default
+(2026-10-26).** `claude -p` (chat mode's print mode) ignores the user's interactive default
+permission mode and runs in `default`, so it asked for every action: a probe gave 5 asks
+without a flag and 0 with `--permission-mode auto`; the spike
+([chat permission mode](archive/spikes/2026-10-26-chat-permission-mode.md)) 11 of 11 asked against 0 of
+11. The terminal reports `permission_mode: "auto"`. The preference `agent-permissions`
+(`auto` default, also when unset; `default` passes no flag) sets the mode of task and project
+sessions in PTY and chat alike; idea conversations (`dontAsk`) and read-only sessions (`plan`)
+are unchanged. It applies to new or relaunched sessions only. A start the CLI rejects fails
+with a hint to "Claude's default" (only the CLI's "invalid mode" text has been seen; not the
+one for an account without auto). *Why a setting:* always
+auto in chat would hide the choice and leave the two runtimes different; reading
+`~/.claude.json` would depend on a private file whose format Claude may change. *Cost:* the
+default widens the terminal for users whose Claude default is not auto. Auto mode's own
+classifier decides what it escalates; Delilah turns `can_use_tool` into a card; `system/permission_denied` is currently ignored. [#43](decisions.md) is
+unchanged: Delilah's autopilot still never answers a permission prompt.
+
+**88. Background work holds the turn end in memory; progress is live-only.** In chat mode
+the `Stop` hook of a session with background tasks running is held by the daemon (released
+30 s after the set empties with no follow-up turn, or on process exit; dropped by a real new
+turn or "Stop") instead of adding a task state; the task stays `running`. Progress (activity,
+sub-agent steps, background rows) is a `watch` value per live session, relayed on `/live`
+at most every 250 ms and included in `GET …/conversation`; never persisted. A turn Claude
+starts by itself is detected from the stream (`init` without a user line since the previous
+`init`), not from hooks, which also fire for `<task-notification>` prompts mid-turn; it is
+recorded as the history event `agent-resumed`. *Why:* a new state needs a migration and
+touches every consumer (board, Inbox, autopilot); hiding it in the UI alone leaves them
+wrong; persisting progress adds writes for data that is meaningless after a restart (the
+process is gone). History is the typed `Event` enum, so an older daemon cannot decode a
+history containing `agent-resumed` (accepted: downgrade or mixed versions only). *Ruled out:*
+a "background" task state; progress as messages on the stream-event broadcast (no throttle,
+lag resets would drop live text); polling the conversation route.
+
+## Playground
+
+Decided while building the agent playground (spec `004-agent-playground`, 2026-10-26).
+
+**89. The playground is DOM + SVG pixel maps.** Each character, desk and helper is
+a small pixel map in code (`sprites.ts`) drawn as SVG, animated with CSS. It stays
+in the React tree: it is accessible (real buttons with names), follows reduced
+motion and costs nothing while hidden. Ruled out: a canvas (no accessibility, a
+render loop for a handful of desks), game engines (a heavy dependency for a view
+that shows a few sprites) and third-party sprite sheets (licences, and a look we
+could not change). The "no third-party sprite sheets" part was replaced by #92.
+
+**90. Activity is in memory, on its own topic.** What a session is doing right now
+lasts seconds and is rebuilt by the next hook, so it is not stored in SQLite and
+not mixed into `sessions`. It has its own `activity` topic and
+`GET /api/v1/activity`, so the frequent tool events refetch only that. Revised
+(spec `008-playground-redesign`): the recent history is kept too, still only in
+memory: `ActivityLog` holds the last 200 events of each of at most 64 sessions
+(the oldest non-live one goes first, live ones never), outside `Live` so that ended
+sessions stay viewable without touching the session-end paths. Appends mark a
+dirty flag and the transcript watcher's 1 s tick emits `activity` once, so a burst
+of hooks is one refetch (`GET /api/v1/activity/history?owner=&after=`).
+
+**91. "Supervising" is derived from a foreground `Agent` call.** While Claude is
+inside a foreground `Agent` call it is waiting on a sub-agent and has no tool
+event of its own, so the desk shows the phone pose and "Supervisando". An `Agent`
+call run in the background does not block Claude, so that desk keeps its thinking
+pose. Ruled out: a dedicated hook (none exists) and guessing from silence
+(thinking looks the same).
+
+**92. The office art is pixtuoid's (MIT), ported by a script.** The 1x sprites,
+palette and ramps of [pixtuoid](https://github.com/ivanwang123/pixtuoid) (pinned commit, © Ivan Wang) are
+converted by `scripts/port-pixtuoid.py` into the checked-in
+`app/src/playground/art/pixtuoid.ts`; the licence and commit are in
+`app/src/playground/CREDITS.md`. This supersedes #89's "no third-party sprite
+sheets"; rendering stays DOM + SVG (#89). Colours of shirt, pants, hair and skin are
+re-derived per character (OKLab steps in `art/ramp.ts`), the outfit is seeded by the
+project name. Hairstyles exist only in the 4x art, which was left out (16 times the
+pixels), so there are none. Ruled out: copying the 4x art, drawing our own set again.
+
+**93. Tokens come from the transcript: fresh spend, once per message.** The
+transcript watcher reads the appended bytes of each session's trusted transcript
+(at most 1 MiB per tick, complete lines only) and sums `input + cache creation +
+output` tokens. Claude Code writes one line per content block repeating the same
+usage, so a line whose `message.id` equals the last one counted is skipped.
+Cache reads are kept apart and not in the total (they would put every session at
+the top tier). Sub-agent files (`<session>/subagents/*.jsonl`) are not read, so
+helpers' spend is missing. When a transcript shrinks or is replaced the meter
+restarts from 0. The totals sit in `AppState` independent of the live sessions and
+come in `GET /api/v1/activity` as `tokens`. Ruled out: hook payloads (no usage),
+a chars/4 estimate, counting cache reads.
+
+**94. Flow is drawn without a graph library.** Nodes (agents, helpers, tool calls
+paired by tool use id) and edges come from the history entries (`flowModel.ts`);
+`flowLayout.ts` is a deterministic tree plus a column of tool rows per agent, drawn as
+SVG with pan/zoom, and a timeline of buttons beside it. A node never moves once
+placed. Ruled out: d3-force (jitter, dependency), React Flow (heavy), canvas
+(accessibility).
+
+**95. A building of floors, one floor per owner.** The playground is a building:
+one floor per task or project (owner), newest on top, each with its own desks that keep
+fixed slots. In the app, a floor opens the task's "Oficina" tab (office and Flow
+with a toggle remembered in `localStorage` as `delilah.office.view`); in the separate
+window it opens in place with a back button, because that window has no task screen.
+
+**96. Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26).**
+The phone reaches the daemon with `tailscale serve` (tailnet only, never Funnel) and uses the
+UI as a web app added to the home screen. The daemon serves the built UI itself, same-origin,
+because the macOS Tailscale app refuses to serve folders (found in the experiment). *Rule:* a
+loopback `Host` is local (no token, as today); the tailnet `Host` is remote and always needs a
+device token, with or without `Origin`; the daemon accepts the tailnet `Host` only while token
+enforcement is on (one switch, enforced in code), because the experiment showed that accepting
+it without tokens gave the whole API to any tailnet caller (curl with no `Origin` got 200).
+Destructive and config actions are refused to device tokens, server-side. On the work Mac only
+if IT allows Tailscale. *Why:* free, no developer account, valid HTTPS (needed for push and
+for installing on iOS), never public. *Ruled out:* same-Wi-Fi LAN (no valid HTTPS, home only,
+widens exposure); Cloudflare Tunnel (public, and a third party sees the traffic); a sideloaded
+native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); Tailscale
+identity headers alone (forgeable by any local process).
+See the [research](../specs/008-mobile-access-analysis/research.md).
+
+**97. A terminal holds its turn end by the `Stop`'s `background_tasks` (2026-10-26).** In
+terminal mode the `Stop` hook of a turn that ends with background sub-agents running (an
+entry with `type: "subagent"`, `status: "running"`) is held like chat mode's (#88). The task
+stays `running` instead of `waiting-for-user` while `/orchestrate` sub-agents implement, so neither the daemon nor the app sends a "waiting" or "turn done" notification for it.
+With the `Stop` held, the next prompt (a sub-agent's `<agent-message>`, a
+`<task-notification>`, the user's) is a new turn and drops it. A late `idle_prompt` is
+ignored. After `SubagentStop` for every listed sub-agent, the 30 s fallback applies it, as
+does process exit. The saving-mode and autopilot work of the turn end still runs when the
+`Stop` arrives (spec 008: waiting on sub-agents is no stall and never blocks a handoff).
+*Why:* the hook logs showed hundreds of terminal turn ends with sub-agents still running, and
+each one put the task in "waiting" with nothing to answer. *Ruled out:* holding on background
+shells, since a dev server can run for hours while Claude really waits on you; reading the
+sub-agent transcripts to follow them, which is more I/O for what the `Stop` already says.
+`background_tasks` is observed, not documented by Claude Code.
+
+**98. Background notifications as readable items (2026-10-26).**
+Each `<task-notification>` in a user line (even inside other text, several per message) becomes a `background-done` marker with an optional `background` object (label, status, duration, tool count, tokens, report); hand-backs (`isMeta` lines with `origin.handback`) become items too, and the UI folds each into the matching notification by `task_id`, derived on every render from the raw entries because the conversation is paginated (server-side pairing would need all pages). Agent-message and notification prompts never become a session's last message. *Why a marker and not a new kind:* UIs from before this change render unknown kinds as cards; the cost is a marker variant with a payload its siblings don't use. Reports are cut at 16 KB and there is no detail endpoint (the next step if it is not enough). *Ruled out:* an XML library (the format is small and fixed); reading `queue-operation` lines (not the transcript's contract); server-side pairing.
+
+**99. CI autofix forwards CI failures on its own, opt-in and bounded (2026-10-26).** Amends
 29 for CI only. A task with `ci_autofix` on (per task; the project default `off` /
 `autopilot` / `always`, `autopilot` if unset, decides what a new task gets) sends the agent
 the failed checks of its PR when the head's checks have all finished with a failure and the

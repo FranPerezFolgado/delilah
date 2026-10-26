@@ -766,7 +766,7 @@ mod tests {
                 store.prs_of(&TaskKey::new("PROJ-1")).await.unwrap().len(),
                 1
             );
-            assert!(store.open_prs().await.unwrap().len() >= 1);
+            assert!(!store.open_prs().await.unwrap().is_empty());
             let next = fixing("ddd", 1);
             assert!(
                 store

@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use super::hooks::{Hooks, payload};
 use super::record::{HookResult, Record};
 use super::run::write_transcript;
-use super::scenario::{self, Say, Scenario, StreamStep, Tool};
+use super::scenario::{self, AutoMode, Say, Scenario, StreamStep, Tool};
 
 /// What came in on stdin.
 #[derive(Debug, Clone, PartialEq)]
@@ -276,7 +276,15 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         self.emit(&json!({"type": "assistant", "message": message}));
         self.emit(&json!({"type": "stream_event", "event": {"type": "message_stop"}}));
 
-        let (allowed, text) = if tool.ask {
+        // Mirrors the spike (`docs/archive/spikes/2026-10-26-chat-permission-mode.md`): under
+        // `--permission-mode auto` a tool marked `auto: allow` runs without asking.
+        let auto_allows = tool.auto == AutoMode::Allow
+            && self
+                .record
+                .args
+                .windows(2)
+                .any(|w| w[0] == "--permission-mode" && w[1] == "auto");
+        let (allowed, text) = if tool.ask && !auto_allows {
             let request_id = unique("perm-");
             let suggestions = tool.suggestions.clone().unwrap_or_else(|| {
                 let mut rule = json!({"toolName": tool.name});
@@ -327,6 +335,11 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     fn turn(&mut self, text: &str) -> Flow {
         let (session, cwd) = (self.record.session_id.clone(), self.record.cwd.clone());
         let steps = self.steps_for(text);
+        // A CLI that rejects its flags dies before it says anything on stdout.
+        if let Some(StreamStep::ExitWithStderr(e)) = steps.first() {
+            eprintln!("{}", e.message);
+            return Flow::Exit(self.end("exit", e.code));
+        }
         self.emit(&json!({"type": "system", "subtype": "init", "session_id": session, "cwd": cwd}));
         self.append("user", &json!({"role": "user", "content": text}));
         self.record.inputs.push(text.to_string());
@@ -345,6 +358,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 },
                 StreamStep::SleepMs(ms) => std::thread::sleep(Duration::from_millis(*ms)),
                 StreamStep::Exit(code) => return Flow::Exit(self.end("exit", *code)),
+                StreamStep::ExitWithStderr(e) => {
+                    eprintln!("{}", e.message);
+                    return Flow::Exit(self.end("exit", e.code));
+                }
             }
             self.record.steps_done += 1;
             self.save();
@@ -525,6 +542,40 @@ mod tests {
             |v| v["type"] == "assistant" && v["message"]["content"][0]["text"] == "Hola mundo"
         ));
         assert_eq!(out.last().unwrap()["type"], "result");
+    }
+
+    /// Runs one turn with a single `Bash` tool and returns the `can_use_tool` count.
+    fn asks_for(tool_extra: &str, mode: Option<&str>) -> usize {
+        let d = scenario_dir(&format!(
+            r#"{{"turns":[[{{"tool":{{"name":"Bash","input":{{"command":"ls"}},"output":"ok"{tool_extra}}}}}]]}}"#
+        ));
+        let mut rec = record();
+        if let Some(m) = mode {
+            rec.args = vec!["--permission-mode".into(), m.into()];
+        }
+        let user =
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"[fake:chat]\"}}\n";
+        let mut out = Vec::new();
+        run(
+            &mut rec,
+            &Hooks::default(),
+            Some(d.path()),
+            &mut Cursor::new(user),
+            &mut out,
+        );
+        lines(&out)
+            .iter()
+            .filter(|v| v["type"] == "control_request")
+            .count()
+    }
+
+    #[test]
+    fn auto_mode_skips_can_use_tool_for_an_allowed_tool_only() {
+        assert_eq!(asks_for("", Some("auto")), 0);
+        assert_eq!(asks_for("", None), 1);
+        assert_eq!(asks_for("", Some("plan")), 1);
+        assert_eq!(asks_for(r#","auto":"ask""#, Some("auto")), 1);
+        assert_eq!(asks_for(r#","auto":"ask""#, None), 1);
     }
 
     #[test]

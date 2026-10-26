@@ -3,7 +3,9 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use portable_pty::CommandBuilder;
+use serde::Serialize;
 use serde_json::{Value, json};
 
 /// Hook events Delilah listens to.
@@ -18,6 +20,9 @@ const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
     "PostToolUse",
+    "PostToolUseFailure",
+    "SubagentStart",
+    "SubagentStop",
     "Notification",
     "Stop",
     "StopFailure",
@@ -52,6 +57,10 @@ pub(crate) const KEPT_ENV: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Permission {
     Default,
+    /// Auto mode (`--permission-mode auto`): Claude's own classifier decides which
+    /// actions go ahead without asking and which still ask. That judgement is Claude's,
+    /// and choosing this mode is the user's choice (the `agent-permissions` preference).
+    Auto,
     /// Plan mode: Claude reads and explains, it does not edit.
     Plan,
     /// Anything not allowed is denied instead of asked, and editing tools are denied:
@@ -151,6 +160,9 @@ fn shared_args(launch: &Launch, with_remote_control: bool) -> Vec<OsString> {
     args.extend(["--settings".into(), launch.settings.into()]);
     match launch.permission {
         Permission::Default => {}
+        Permission::Auto => {
+            args.extend(["--permission-mode".into(), "auto".into()]);
+        }
         Permission::Plan => {
             args.extend(["--permission-mode".into(), "plan".into()]);
         }
@@ -510,6 +522,8 @@ pub fn settings(
             "hooks": [{ "type": "command", "command": command, "timeout": GUARD_TIMEOUT_SECS }]
         }));
     }
+    // Every other tool start feeds the activity view; the answer is not awaited.
+    pre_tool_use.push(json!({ "matcher": "*", "hooks": [{ "type": "command", "command": post }] }));
     hooks.insert("PreToolUse".into(), Value::Array(pre_tool_use));
     let mut status_line =
         json!({ "type": "command", "command": format!("sh '{}'", status_script.display()) });
@@ -675,6 +689,156 @@ pub fn classify(hook: &Value) -> Signal {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ActionKind {
+    Edit,
+    Read,
+    Run,
+    Delegate,
+    Other,
+}
+
+/// A tool call in flight, as shown in the activity view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Action {
+    /// The `tool_use_id`.
+    pub id: String,
+    pub kind: ActionKind,
+    pub tool: String,
+    /// What the tool acts on, at most 40 chars. Never file contents.
+    pub target: Option<String>,
+    pub background: bool,
+    pub since: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentRef {
+    pub id: String,
+    /// The `agent_type`, empty when missing.
+    pub role: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum ActivityEvent {
+    ToolStarted {
+        agent: Option<AgentRef>,
+        action: Action,
+    },
+    ToolEnded {
+        agent: Option<AgentRef>,
+        id: String,
+        /// The tool call failed (`PostToolUseFailure`).
+        failed: bool,
+    },
+    HelperStarted {
+        agent: AgentRef,
+    },
+    HelperEnded {
+        id: String,
+    },
+    TurnOver,
+}
+
+const TARGET_MAX: usize = 40;
+
+pub fn shorten(s: &str) -> String {
+    if s.chars().count() <= TARGET_MAX {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(TARGET_MAX - 1).collect();
+    out.push('…');
+    out
+}
+
+/// The action a tool call performs. Only a short, safe target is kept.
+pub fn action_of(tool: &str, input: &Value, id: &str) -> Action {
+    let text = |key: &str| input[key].as_str().filter(|s| !s.is_empty());
+    let file = |key: &str| {
+        text(key).and_then(|p| {
+            Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+    };
+    let (kind, target) = match tool {
+        "Edit" | "MultiEdit" | "Write" => (ActionKind::Edit, file("file_path")),
+        "NotebookEdit" => (ActionKind::Edit, file("notebook_path")),
+        "Read" => (ActionKind::Read, file("file_path")),
+        "NotebookRead" => (ActionKind::Read, file("notebook_path")),
+        "Grep" | "Glob" => (ActionKind::Read, text("pattern").map(String::from)),
+        "LS" => (ActionKind::Read, None),
+        "WebFetch" => {
+            let host = text("url").and_then(|u| {
+                let rest = u.split_once("://").map_or(u, |(_, r)| r);
+                let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+                // Never keep credentials from a `user:pass@host` URL.
+                let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+                (!host.is_empty()).then(|| host.to_string())
+            });
+            (ActionKind::Read, host)
+        }
+        "WebSearch" => (ActionKind::Read, text("query").map(String::from)),
+        "Bash" | "BashOutput" | "KillShell" => {
+            let line = text("command")
+                .and_then(|c| c.trim().lines().next())
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty());
+            (ActionKind::Run, line)
+        }
+        "Agent" | "Task" => (
+            ActionKind::Delegate,
+            text("description")
+                .or_else(|| text("subagent_type"))
+                .map(String::from),
+        ),
+        _ => (ActionKind::Other, None),
+    };
+    Action {
+        id: id.to_string(),
+        kind,
+        tool: tool.to_string(),
+        target: target.map(|t| shorten(&t)),
+        background: kind == ActionKind::Delegate
+            && input["run_in_background"].as_bool().unwrap_or(false),
+        since: Utc::now(),
+    }
+}
+
+/// What a hook payload means for the activity view, if anything.
+pub fn classify_activity(hook: &Value) -> Option<ActivityEvent> {
+    let agent_id = hook["agent_id"].as_str().filter(|s| !s.is_empty());
+    let agent = agent_id.map(|id| AgentRef {
+        id: id.to_string(),
+        role: hook["agent_type"].as_str().unwrap_or("").to_string(),
+    });
+    let tool_use_id = hook["tool_use_id"].as_str().unwrap_or("").to_string();
+    // A waiting session must not show a stale AskUserQuestion action.
+    if hook["tool_name"].as_str() == Some("AskUserQuestion") {
+        return None;
+    }
+    match hook["hook_event_name"].as_str()? {
+        "PreToolUse" => Some(ActivityEvent::ToolStarted {
+            agent,
+            action: action_of(
+                hook["tool_name"].as_str().unwrap_or(""),
+                &hook["tool_input"],
+                &tool_use_id,
+            ),
+        }),
+        ev @ ("PostToolUse" | "PostToolUseFailure") => Some(ActivityEvent::ToolEnded {
+            agent,
+            id: tool_use_id,
+            failed: ev == "PostToolUseFailure",
+        }),
+        "SubagentStart" => agent.map(|agent| ActivityEvent::HelperStarted { agent }),
+        "SubagentStop" => agent.map(|a| ActivityEvent::HelperEnded { id: a.id }),
+        "Stop" | "StopFailure" | "SessionEnd" if agent.is_none() => Some(ActivityEvent::TurnOver),
+        _ => None,
+    }
+}
+
 /// Whether Claude Code's `Stop` hook reports a background task still running.
 /// The payload carries `background_tasks`, a list of entries with a `status`;
 /// only `status == "running"` counts. Any other shape (field missing, not an
@@ -783,8 +947,10 @@ mod tests {
                 .contains("/hooks/claude/ask?task=PROJ-1&session=sess-1")
         );
         assert_eq!(ask["hooks"][0]["timeout"], ASK_TIMEOUT_SECS);
-        // Without the guard, nothing else is hooked on PreToolUse.
-        assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        // Without the guard, only the activity hook joins it on PreToolUse.
+        let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 2);
+        assert_eq!(pre[1]["matcher"], "*");
     }
 
     #[test]
@@ -801,9 +967,10 @@ mod tests {
             true,
         );
         let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(pre.len(), 2);
+        assert_eq!(pre.len(), 3);
         assert_eq!(pre[0]["matcher"], "AskUserQuestion");
         assert_eq!(pre[1]["matcher"], "Edit|Write|MultiEdit|NotebookEdit|Bash");
+        assert_eq!(pre[2]["matcher"], "*");
         let command = pre[1]["hooks"][0]["command"].as_str().unwrap();
         assert!(command.contains("curl -sS -m 15"), "{command}");
         assert!(
@@ -1043,6 +1210,30 @@ mod tests {
         assert!(!plan.contains(&"--strict-mcp-config".to_string()));
         assert!(!plan.contains(&"--setting-sources".to_string()));
         assert!(!argv(&launch()).contains(&"--setting-sources".to_string()));
+    }
+
+    #[test]
+    fn auto_mode_reaches_both_runtimes_and_widens_nothing_else() {
+        let l = Launch {
+            permission: Permission::Auto,
+            ..launch()
+        };
+        let pty = argv(&l);
+        assert!(has_pair(&pty, "--permission-mode", "auto"), "{pty:?}");
+        let chat: Vec<String> = stream_command(&l)
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(has_pair(&chat, "--permission-mode", "auto"), "{chat:?}");
+        for args in [&pty, &chat] {
+            assert!(!args.contains(&"--setting-sources".to_string()), "{args:?}");
+            assert!(
+                !args.contains(&"--strict-mcp-config".to_string()),
+                "{args:?}"
+            );
+        }
+        assert!(!argv(&launch()).contains(&"--permission-mode".to_string()));
     }
 
     #[test]
@@ -1452,5 +1643,291 @@ mod tests {
             trust_dialog_selection(b"Do you trust the files in this folder?"),
             None
         );
+    }
+
+    #[test]
+    fn settings_register_the_activity_hooks() {
+        let s = settings(
+            "http://d",
+            "T-1",
+            "s1",
+            Path::new("/tmp/s.sh"),
+            None,
+            Permission::Default,
+            &[],
+            &[],
+            false,
+        );
+        for event in ["PostToolUseFailure", "SubagentStart", "SubagentStop"] {
+            let c = s["hooks"][event][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap();
+            assert!(
+                c.contains("http://d/hooks/claude?task=T-1&session=s1"),
+                "{c}"
+            );
+        }
+        let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 2);
+        let ask = pre
+            .iter()
+            .find(|e| e["matcher"] == "AskUserQuestion")
+            .unwrap();
+        assert!(
+            ask["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("/hooks/claude/ask?")
+        );
+        assert_eq!(ask["hooks"][0]["timeout"], ASK_TIMEOUT_SECS);
+        let all = pre.iter().find(|e| e["matcher"] == "*").unwrap();
+        let c = all["hooks"][0]["command"].as_str().unwrap();
+        assert!(
+            c.contains("http://d/hooks/claude?task=T-1&session=s1"),
+            "{c}"
+        );
+        assert!(all["hooks"][0].get("timeout").is_none());
+        assert!(!c.contains("86400"));
+    }
+
+    #[test]
+    fn action_of_gives_kind_and_a_short_target() {
+        let long = "x".repeat(100);
+        let multibyte = "é".repeat(100);
+        let cases: Vec<(&str, Value, ActionKind, Option<String>, bool)> = vec![
+            (
+                "Edit",
+                json!({"file_path": "/a/b/c.rs"}),
+                ActionKind::Edit,
+                Some("c.rs".into()),
+                false,
+            ),
+            (
+                "MultiEdit",
+                json!({"file_path": "/a/b/d.rs"}),
+                ActionKind::Edit,
+                Some("d.rs".into()),
+                false,
+            ),
+            (
+                "Write",
+                json!({"file_path": "/a/e.rs", "content": "SECRET"}),
+                ActionKind::Edit,
+                Some("e.rs".into()),
+                false,
+            ),
+            (
+                "NotebookEdit",
+                json!({"notebook_path": "/a/n.ipynb"}),
+                ActionKind::Edit,
+                Some("n.ipynb".into()),
+                false,
+            ),
+            (
+                "Read",
+                json!({"file_path": "/a/r.rs"}),
+                ActionKind::Read,
+                Some("r.rs".into()),
+                false,
+            ),
+            (
+                "NotebookRead",
+                json!({"notebook_path": "/a/n.ipynb"}),
+                ActionKind::Read,
+                Some("n.ipynb".into()),
+                false,
+            ),
+            (
+                "Grep",
+                json!({"pattern": "foo.*"}),
+                ActionKind::Read,
+                Some("foo.*".into()),
+                false,
+            ),
+            (
+                "Glob",
+                json!({"pattern": "**/*.rs"}),
+                ActionKind::Read,
+                Some("**/*.rs".into()),
+                false,
+            ),
+            ("LS", json!({"path": "/a"}), ActionKind::Read, None, false),
+            (
+                "WebFetch",
+                json!({"url": "https://example.com/x?y=1"}),
+                ActionKind::Read,
+                Some("example.com".into()),
+                false,
+            ),
+            (
+                "WebSearch",
+                json!({"query": "rust serde"}),
+                ActionKind::Read,
+                Some("rust serde".into()),
+                false,
+            ),
+            (
+                "Bash",
+                json!({"command": "  cargo test\nsecond line"}),
+                ActionKind::Run,
+                Some("cargo test".into()),
+                false,
+            ),
+            (
+                "BashOutput",
+                json!({"command": "ls"}),
+                ActionKind::Run,
+                Some("ls".into()),
+                false,
+            ),
+            ("KillShell", json!({}), ActionKind::Run, None, false),
+            (
+                "Agent",
+                json!({"description": "find it", "run_in_background": true}),
+                ActionKind::Delegate,
+                Some("find it".into()),
+                true,
+            ),
+            (
+                "Task",
+                json!({"description": "do", "subagent_type": "x"}),
+                ActionKind::Delegate,
+                Some("do".into()),
+                false,
+            ),
+            (
+                "mcp__jira__search",
+                json!({"query": "q"}),
+                ActionKind::Other,
+                None,
+                false,
+            ),
+            (
+                "TodoWrite",
+                json!({"todos": []}),
+                ActionKind::Other,
+                None,
+                false,
+            ),
+            (
+                "Bash",
+                json!({"command": long}),
+                ActionKind::Run,
+                Some(format!("{}…", "x".repeat(39))),
+                false,
+            ),
+            (
+                "Bash",
+                json!({"command": multibyte}),
+                ActionKind::Run,
+                Some(format!("{}…", "é".repeat(39))),
+                false,
+            ),
+        ];
+        for (tool, input, kind, target, background) in cases {
+            let a = action_of(tool, &input, "tu1");
+            assert_eq!(a.kind, kind, "{tool}");
+            assert_eq!(a.target, target, "{tool}");
+            assert_eq!(a.background, background, "{tool}");
+            assert_eq!(a.tool, tool);
+            assert_eq!(a.id, "tu1");
+            assert!(!serde_json::to_string(&a).unwrap().contains("SECRET"));
+        }
+        let a = action_of("Bash", &json!({"command": "x".repeat(100)}), "");
+        assert_eq!(a.target.unwrap().chars().count(), 40);
+    }
+
+    #[test]
+    fn ask_user_question_is_not_an_activity() {
+        for ev in ["PreToolUse", "PostToolUse", "PostToolUseFailure"] {
+            let h = json!({"hook_event_name": ev, "tool_name": "AskUserQuestion",
+                "tool_input": {}, "tool_use_id": "t1"});
+            assert!(classify_activity(&h).is_none(), "{ev}");
+        }
+    }
+
+    #[test]
+    fn webfetch_target_drops_userinfo_and_keeps_port() {
+        let a = action_of(
+            "WebFetch",
+            &json!({"url": "https://u:p@example.com:8080/x"}),
+            "t",
+        );
+        assert_eq!(a.target.as_deref(), Some("example.com:8080"));
+    }
+
+    #[test]
+    fn classify_activity_maps_hooks_to_events() {
+        let pre = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash",
+            "tool_input": {"command": "ls"}, "tool_use_id": "t1"});
+        match classify_activity(&pre) {
+            Some(ActivityEvent::ToolStarted {
+                agent: None,
+                action,
+            }) => {
+                assert_eq!(action.id, "t1");
+                assert_eq!(action.kind, ActionKind::Run);
+            }
+            other => panic!("{other:?}"),
+        }
+        let sub = json!({"hook_event_name": "PreToolUse", "tool_name": "Read",
+            "tool_input": {"file_path": "/a/b"}, "tool_use_id": "t2",
+            "agent_id": "a1", "agent_type": "Explore"});
+        match classify_activity(&sub) {
+            Some(ActivityEvent::ToolStarted { agent: Some(r), .. }) => {
+                assert_eq!(
+                    r,
+                    AgentRef {
+                        id: "a1".into(),
+                        role: "Explore".into()
+                    }
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        for (ev, failed) in [("PostToolUse", false), ("PostToolUseFailure", true)] {
+            let h = json!({"hook_event_name": ev, "tool_use_id": "t1"});
+            assert_eq!(
+                classify_activity(&h),
+                Some(ActivityEvent::ToolEnded {
+                    agent: None,
+                    id: "t1".into(),
+                    failed
+                })
+            );
+        }
+        let start =
+            json!({"hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"});
+        assert_eq!(
+            classify_activity(&start),
+            Some(ActivityEvent::HelperStarted {
+                agent: AgentRef {
+                    id: "a1".into(),
+                    role: "Explore".into()
+                }
+            })
+        );
+        let stop = json!({"hook_event_name": "SubagentStop", "agent_id": "a1"});
+        assert_eq!(
+            classify_activity(&stop),
+            Some(ActivityEvent::HelperEnded { id: "a1".into() })
+        );
+        for ev in ["Stop", "StopFailure", "SessionEnd"] {
+            let h = json!({"hook_event_name": ev});
+            assert_eq!(classify_activity(&h), Some(ActivityEvent::TurnOver));
+            let h = json!({"hook_event_name": ev, "agent_id": "a1"});
+            assert_eq!(classify_activity(&h), None);
+        }
+        assert_eq!(
+            classify_activity(&json!({"hook_event_name": "Notification"})),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_ignores_the_activity_only_events() {
+        for ev in ["PreToolUse", "SubagentStart", "SubagentStop"] {
+            assert_eq!(classify(&json!({"hook_event_name": ev})), Signal::Other);
+        }
     }
 }

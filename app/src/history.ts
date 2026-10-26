@@ -77,6 +77,8 @@ export function historyLine(ev: Ev): string {
       return inRepo(why ? t("Autofix de CI parado: {reason}", { reason: t(why) }) : t("Autofix de CI parado"), ev);
     }
     case "autofix-cancelled": return inRepo(t("Autofix de CI cancelado"), ev);
+    case "agent-resumed":
+      return str(ev.reason) === "background-done" ? t("Claude continúa: tarea en segundo plano terminada") : t("Claude continúa");
     default: return t("Pasó algo en la tarea");
   }
 }

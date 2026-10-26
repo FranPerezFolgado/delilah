@@ -7,7 +7,7 @@ import { sessionDot, statusOf } from "../vocab";
 import { t, tn } from "../i18n";
 import "./Sidebar.css";
 
-export type View = "inbox" | "board" | "tasks" | "jira" | "projects" | "settings";
+export type View = "inbox" | "board" | "tasks" | "jira" | "projects" | "playground" | "settings";
 
 interface Props {
   view: View;
@@ -172,6 +172,7 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
     { view: "board", icon: "tasks", label: t("Tareas"), action: "view-tasks", count: tasks.length },
     { view: "jira", icon: "ticket", label: "Jira", action: "view-jira" },
     { view: "projects", icon: "folder", label: t("Proyectos"), action: "view-projects" },
+    { view: "playground", icon: "console", label: t("Playground"), action: "view-playground" },
   ];
   const isOn = (v: View) => view === v;
   const collapseLabel = rail ? t("Desplegar barra lateral") : t("Plegar barra lateral");

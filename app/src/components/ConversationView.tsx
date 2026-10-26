@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   liveSocket,
   type Conversation,
   type ConversationEntry,
+  type Progress,
   type Session,
 } from "../api";
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
+import { foldBackground } from "../backgroundItems";
+import { BackgroundDoneItem } from "./BackgroundDoneItem";
+import { BackgroundStrip } from "./BackgroundStrip";
 import { Markdown } from "./Markdown";
+import { WorkingIndicator } from "./WorkingIndicator";
 import { ToolCard } from "./ToolCard";
 import { Button, Skeleton } from "./ui";
 import "./ConversationView.css";
@@ -73,6 +78,9 @@ export function ConversationView({
   onOpenFile,
 }: Props) {
   const [conv, setConv] = useState<Conversation | null>(null);
+  // What the agent is doing now: the last of the conversation load and the live socket.
+  // Absent for PTY sessions and older daemons.
+  const [progress, setProgress] = useState<Progress | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -92,6 +100,7 @@ export function ConversationView({
       (c) => {
         if (mine !== seq.current) return;
         cursor.current = c.cursor;
+        setProgress(c.progress ?? null);
         setConv((prev) => ({
           ...c,
           entries: merge(prev?.entries ?? [], c.entries, !!from),
@@ -109,6 +118,7 @@ export function ConversationView({
   useEffect(() => {
     cursor.current = null;
     setConv(null);
+    setProgress(null);
     setError(null);
     stick.current = true;
   }, [id]);
@@ -137,10 +147,14 @@ export function ConversationView({
       ws = sock;
       sock.onmessage = (ev) => {
         delay = 1000;
-        let m: { message?: string; text?: string; done?: boolean; reset?: boolean };
+        let m: { message?: string; text?: string; done?: boolean; reset?: boolean; progress?: Progress };
         try {
           m = JSON.parse(String(ev.data));
         } catch {
+          return;
+        }
+        if (m.progress) {
+          setProgress(m.progress);
           return;
         }
         // The daemon dropped deltas (a slow socket): the bubbles have gaps, the
@@ -203,6 +217,8 @@ export function ConversationView({
     return () => offs.forEach((off) => off());
   }, [load]);
 
+  // Notification + hand-back pairs show as one item; the raw entries stay in state.
+  const shown = useMemo(() => foldBackground(conv?.entries ?? []), [conv?.entries]);
   const count = (conv?.entries.length ?? 0) + shownWriting.length;
 
   useEffect(() => {
@@ -228,6 +244,8 @@ export function ConversationView({
   const guard = (p: Promise<unknown>) =>
     p.then(load, (e) => setError((e as Error).message));
   const working = session.state === "working";
+  // Background work keeps Detener available (and the session takes messages) with no turn running.
+  const backgroundRunning = !!progress?.background.some((b) => b.state === "running");
   // Any open Claude session takes messages; a closed one is reopened first and a shell has no chat.
   const canCompose = !session.closed && session.kind !== "shell";
 
@@ -263,7 +281,7 @@ export function ConversationView({
             </button>
           </div>
         )}
-        {conv?.entries.map((e) => {
+        {shown.map((e) => {
           if (e.kind === "user") {
             return (
               <div key={e.id} className="conv-msg conv-user selectable">
@@ -298,14 +316,17 @@ export function ConversationView({
                 entry={e}
                 sessionId={id}
                 onOpenFile={onOpenFile ?? noop}
+                subagent={progress?.subagents.find((s) => s.tool_use_id === e.tool_use_id) ?? null}
               />
             );
           if (e.kind === "marker") {
+            // Unknown markers show nothing.
+            if (e.marker !== "compacted" && e.marker !== "stopped" && e.marker !== "background-done") return null;
+            if (e.marker === "background-done") return <BackgroundDoneItem key={e.id} entry={e} complete={conv?.complete ?? false} />;
             return (
               <div key={e.id} className="conv-marker muted">
-                {e.marker === "compacted"
-                  ? t("Conversación compactada")
-                  : t("Detenida: detuviste a Claude.")}
+                {e.marker === "compacted" && t("Conversación compactada")}
+                {e.marker === "stopped" && t("Detenida: detuviste a Claude.")}
               </div>
             );
           }
@@ -385,9 +406,12 @@ export function ConversationView({
           </div>
         ))}
       </div>
-      {working && conv?.activity && (
-        <div className="conv-activity muted">{conv.activity}</div>
+      {progress?.turn ? (
+        <WorkingIndicator turn={progress.turn} />
+      ) : (
+        !progress && working && conv?.activity && <div className="conv-activity muted">{conv.activity}</div>
       )}
+      {progress && progress.background.length > 0 && <BackgroundStrip items={progress.background} />}
       {conv?.needs_terminal && (
         <div className="conv-notice">
           {t("Claude espera en la terminal")}
@@ -423,7 +447,7 @@ export function ConversationView({
           <Button variant="primary" disabled={!text.trim()} title={text.trim() ? undefined : t("Escribe un mensaje")} onClick={send}>
             {t("Enviar")} <span className="conv-key">⌘↵</span>
           </Button>
-          {working && (
+          {(working || backgroundRunning) && (
             <Button variant="secondary" onClick={() => guard(api.stopSession(id))}>
               {t("Detener")}
             </Button>

@@ -39,12 +39,18 @@ pub async fn put(
     if value.to_string().len() > 64 * 1024 {
         return Err(ApiError::bad_request("preference too large"));
     }
-    app.store.set_setting(&setting_key(&key)?, &value).await?;
-    if key == "language" {
-        app.load_language().await;
+    // Checked before saving, so a bad value never reaches the store.
+    if key == "agent-permissions" && !matches!(value.as_str(), Some("auto" | "default")) {
+        return Err(ApiError::bad_request(
+            "`agent-permissions` must be \"auto\" or \"default\"",
+        ));
     }
-    if key == "remote-control" {
-        app.load_remote_control().await;
+    app.store.set_setting(&setting_key(&key)?, &value).await?;
+    match key.as_str() {
+        "language" => app.load_language().await,
+        "remote-control" => app.load_remote_control().await,
+        "agent-permissions" => app.load_agent_permissions().await,
+        _ => {}
     }
     Ok(Json(value))
 }
@@ -140,6 +146,43 @@ mod tests {
         // Only a real `true` turns it on.
         call(&app, "PUT", uri, Some(json!("yes"))).await;
         assert!(!app.remote_control());
+    }
+
+    #[tokio::test]
+    async fn the_agent_permissions_preference_takes_effect_at_once() {
+        use crate::state::AgentPermissions;
+        let app = app().await;
+        assert_eq!(app.agent_permissions(), AgentPermissions::Auto);
+        let uri = "/api/v1/preferences/agent-permissions";
+        let (code, _) = call(&app, "PUT", uri, Some(json!("default"))).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(app.agent_permissions(), AgentPermissions::Default);
+        call(&app, "PUT", uri, Some(json!("auto"))).await;
+        assert_eq!(app.agent_permissions(), AgentPermissions::Auto);
+    }
+
+    #[tokio::test]
+    async fn a_bad_agent_permissions_value_is_a_400_and_changes_nothing() {
+        use crate::state::AgentPermissions;
+        let app = app().await;
+        let uri = "/api/v1/preferences/agent-permissions";
+        call(&app, "PUT", uri, Some(json!("default"))).await;
+        for bad in [json!("bypassPermissions"), json!(1), json!(null), json!({})] {
+            let (code, _) = call(&app, "PUT", uri, Some(bad.clone())).await;
+            assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+            let (_, saved) = call(&app, "GET", uri, None).await;
+            assert_eq!(saved, json!("default"), "{bad}");
+            assert_eq!(app.agent_permissions(), AgentPermissions::Default);
+        }
+    }
+
+    #[tokio::test]
+    async fn other_preferences_still_accept_any_json() {
+        let app = app().await;
+        for v in [json!(1), json!(null), json!({"a": [1]}), json!("x")] {
+            let (code, _) = call(&app, "PUT", "/api/v1/preferences/whatever", Some(v)).await;
+            assert_eq!(code, StatusCode::OK);
+        }
     }
 
     #[tokio::test]

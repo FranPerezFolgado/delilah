@@ -40,5 +40,7 @@ export const EN: Record<string, string> = {
   "alcanzó el límite de intentos": "reached the attempt limit",
   "el agente no subió ningún cambio": "the agent pushed no change",
   "no hay sesión del agente": "no agent session",
+  "Claude continúa: tarea en segundo plano terminada": "Claude continues: background task finished",
+  "Claude continúa": "Claude continues",
   "Pasó algo en la tarea": "Something happened in the task",
 };

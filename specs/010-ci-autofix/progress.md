@@ -27,7 +27,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-16 | 5 | 5A | done | 1 | 801a88f | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
 | WP-17 | 6 | 6A | done | 1 | f9732e5 | inbox button reuses "Descartar"; badge mark via Sidebar |
 | WP-17F | 5-6 | fix | done | 1 | 035c440 | Phase 5-6 review fixes |
-| WP-18 | 7 | 7A | done | 1 | b623194 | decision 87; architecture autofix section; status + usage |
+| WP-18 | 7 | 7A | done | 1 | b623194 | decision 99; architecture autofix section; status + usage |
 | WP-19 | 7 | 7B | done | 1 | | fmt ok; clippy 1 pre-existing warning; workspace + all e2e pass; tauri tests not run (sidecar binary missing in worktree); T049 quickstart walk + browser check not done |
 
 ## Open findings

@@ -1,6 +1,8 @@
 export const EN: Record<string, string> = {
   Tarea: "Task",
   Proyecto: "Project",
+  Oficina: "Office",
+  "Un agente te espera": "An agent is waiting for you",
   Cambios: "Changes",
   PR: "PR",
   "+ Sesión": "+ Session",

@@ -346,3 +346,17 @@ describe("Sidebar at scale", () => {
     expect(container.querySelector(".sb-initial")!.getAttribute("data-n")).toBe("8");
   });
 });
+
+describe("Sidebar playground", () => {
+  it("opens the playground from its nav button", () => {
+    const { getByText, onView } = setup([]);
+    fireEvent.click(getByText("Playground"));
+    expect(onView).toHaveBeenCalledWith("playground");
+  });
+
+  it("has a rail button for the playground", () => {
+    const { getByRole, onView } = setup([], [], { rail: true });
+    fireEvent.click(getByRole("button", { name: "Playground" }));
+    expect(onView).toHaveBeenCalledWith("playground");
+  });
+});

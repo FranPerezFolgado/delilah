@@ -176,6 +176,8 @@ pub(crate) async fn on_hook(
             }
         }
         // Back to work: the question no longer stands.
+        // (Not when Claude started the turn itself: nobody answered anything.)
+        Signal::PromptSubmitted if crate::hooks::agent_prompt(hook) => {}
         Signal::PromptSubmitted => drop_hint(app, task),
         Signal::TurnEnded if primary && !limited => {
             let app = app.clone();
@@ -239,6 +241,41 @@ mod tests {
         // The user can.
         assert!(record(&app, &key, SpecPhase::Plan).await.is_ok());
         assert_eq!(phase(&app, &key).await.as_deref(), Some("plan"));
+    }
+
+    #[tokio::test]
+    async fn a_prompt_hook_drops_the_review_hint_unless_the_agent_made_it_up() {
+        use delilah_agents::claude::Signal;
+        let (app, key) = running().await;
+        let hook = |origin: Option<&str>| match origin {
+            Some(o) => {
+                serde_json::json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": o })
+            }
+            None => serde_json::json!({ "hook_event_name": "UserPromptSubmit", "prompt": "go" }),
+        };
+        hint(&app, key.as_str());
+        on_hook(
+            &app,
+            key.as_str(),
+            Signal::PromptSubmitted,
+            &hook(Some("agent")),
+            true,
+            false,
+            Default::default(),
+        )
+        .await;
+        assert!(app.review_hints.lock().unwrap().contains(key.as_str()));
+        on_hook(
+            &app,
+            key.as_str(),
+            Signal::PromptSubmitted,
+            &hook(None),
+            true,
+            false,
+            Default::default(),
+        )
+        .await;
+        assert!(!app.review_hints.lock().unwrap().contains(key.as_str()));
     }
 
     #[test]

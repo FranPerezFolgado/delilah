@@ -339,6 +339,22 @@ describe("ConversationView", () => {
     await findByText("uno");
   });
 
+  it("folds a notification and its hand-back from a later page into one item", async () => {
+    const bgm = (id: string, at: string, background: object): ConversationEntry =>
+      ({ id, at, kind: "marker", marker: "background-done", background }) as ConversationEntry;
+    const note = bgm("t:n:0", "2026-01-01T00:00:01Z", { source: "notification", kind: "agent", status: "completed", task_id: "a1", report_in_handback: true });
+    const hand = bgm("t:h:0", "2026-01-01T00:00:02Z", { source: "handback", kind: "agent", status: "completed", task_id: "a1", label: "worker", report: "Informe final" });
+    vi.spyOn(api, "conversation")
+      .mockResolvedValueOnce(conv([note], { cursor: "c1", complete: false }))
+      .mockResolvedValue(conv([hand], { cursor: "c2" }));
+    const { container, findByRole } = render(<ConversationView session={session()} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />);
+    const btn = await findByRole("button", { name: "▸" });
+    await waitFor(() => expect(container.querySelectorAll(".bg-done")).toHaveLength(1));
+    fireEvent.click(btn);
+    expect(container.textContent).toContain("Informe final");
+    expect(container.querySelectorAll(".bg-done")).toHaveLength(1);
+  });
+
   it("shows the waiting notice while the transcript is pending", async () => {
     const { findByText } = setup(conv([], { transcript: "pending" }), session({ conversation: false }));
     expect(await findByText("Esperando la conversación de Claude…")).toBeTruthy();
@@ -460,6 +476,143 @@ describe("ConversationView chat mode", () => {
     vi.stubGlobal("WebSocket", FakeSocket);
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  const turnP = (started_at = "2026-01-01T00:00:00Z", step: string | null = null) => ({
+    turn: { started_at, by: "user" as const, reason: null, step, last_signal_at: started_at },
+    background: [],
+    subagents: [],
+  });
+
+  it("shows the working indicator from the loaded progress and replaces it from the socket", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([], { progress: turnP(new Date(Date.now() - 125000).toISOString()), activity: "old line" }));
+    const { findByTestId, queryByText, container } = render(
+      <ConversationView session={session({ runtime: "stream", state: "working" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    const ind = await findByTestId("working-indicator");
+    expect(ind.textContent).toMatch(/2 min 0\d s/);
+    expect(queryByText("old line")).toBeNull();
+    FakeSocket.last.push({ progress: turnP(new Date().toISOString(), "Bash: ls") });
+    expect(container.querySelector("[data-testid=working-indicator]")!.textContent).toContain("Bash: ls");
+    FakeSocket.last.push({ progress: { turn: null, background: [], subagents: [] } });
+    expect(container.querySelector("[data-testid=working-indicator]")).toBeNull();
+  });
+
+  const bgItem = (state: "running" | "completed" = "running") => ({
+    task_id: "b1", tool_use_id: null, kind: "command", description: "npm run dev", state, started_at: new Date().toISOString(), ended_at: null,
+  });
+  const bgP = (state: "running" | "completed" = "running") => ({ turn: null, background: [bgItem(state)], subagents: [] });
+  const renderBg = (progress: object | null, state: "working" | "waiting" = "working") => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([], { progress: progress as never }));
+    return render(
+      <ConversationView session={session({ runtime: "stream", state })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+  };
+
+  it("shows the background strip from the loaded progress and the socket", async () => {
+    const { findByText, queryByText } = renderBg(bgP());
+    await findByText("En segundo plano");
+    await findByText("npm run dev");
+    FakeSocket.last.push({ progress: bgP("completed") });
+    expect(queryByText("terminado")).not.toBeNull();
+    FakeSocket.last.push({ progress: { turn: null, background: [], subagents: [] } });
+    expect(queryByText("En segundo plano")).toBeNull();
+  });
+
+  it("keeps Detener while background runs with no turn, even when waiting", async () => {
+    const stop = vi.spyOn(api, "stopSession").mockResolvedValue(null);
+    const { findByText, queryByText } = renderBg(bgP(), "waiting");
+    fireEvent.click(await findByText("Detener"));
+    expect(stop).toHaveBeenCalledWith("s1");
+    FakeSocket.last.push({ progress: bgP("completed") });
+    expect(queryByText("Detener")).toBeNull();
+  });
+
+  it("sends from the composer while only background work runs, without queueing", async () => {
+    const send = vi.spyOn(api, "sendMessage").mockResolvedValue(null as never);
+    const { findByLabelText, findByText, queryByText } = renderBg(bgP());
+    await findByText("npm run dev");
+    const field = (await findByLabelText("Mensaje")) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "hola" } });
+    fireEvent.keyDown(field, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(send).toHaveBeenCalledWith("s1", "hola"));
+    expect(queryByText("en cola")).toBeNull();
+    expect(queryByText("npm run dev")).not.toBeNull();
+  });
+
+  it("gives each Agent card its own sub-agent progress, loaded and from the socket", async () => {
+    const sa = (id: string, steps: string[]) => ({
+      tool_use_id: id,
+      description: "d",
+      state: "running" as const,
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      steps: steps.length,
+      recent: steps.map((summary) => ({ tool: "Read", summary, at: "" })),
+    });
+    const agent = (id: string, at: string) => tool("t:" + id, at, { tool: "Agent", tool_use_id: id, summary: "Agente " + id });
+    vi.spyOn(api, "conversation").mockResolvedValue(
+      conv([agent("a1", "2025-01-01T00:00:01Z"), agent("a2", "2025-01-01T00:00:02Z")], {
+        progress: { turn: null, background: [], subagents: [sa("a1", ["uno-a"]), sa("a2", ["uno-b", "dos-b"])] },
+      }),
+    );
+    const { container, findAllByRole } = render(
+      <ConversationView session={session({ runtime: "stream", state: "working" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findAllByRole("group");
+    const heads = () => [...container.querySelectorAll(".tool-head")].map((h) => h.textContent!);
+    expect(heads()[0]).toContain("1 paso");
+    expect(heads()[0]).toContain("uno-a");
+    expect(heads()[1]).toContain("2 pasos");
+    expect(heads()[1]).toContain("dos-b");
+    expect(heads()[0]).not.toContain("-b");
+    FakeSocket.last.push({ progress: { turn: null, background: [], subagents: [sa("a1", ["uno-a", "nuevo-a"]), sa("a2", ["uno-b", "dos-b"])] } });
+    expect(heads()[0]).toContain("2 pasos");
+    expect(heads()[0]).toContain("nuevo-a");
+    expect(heads()[1]).not.toContain("nuevo-a");
+  });
+
+  it("renders nothing for unknown markers", async () => {
+    const mk = (id: string, marker: string) => ({ id, at: "2025-01-01T00:00:00Z", kind: "marker", marker }) as unknown as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([mk("m1", "stopped"), mk("m3", "weird")]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("Detenida: detuviste a Claude.");
+    expect(container.querySelectorAll(".conv-marker").length).toBe(1);
+  });
+
+  it("renders a background-done marker as a divider with its detail", async () => {
+    const e = { id: "m1", at: "2025-01-01T00:00:00Z", kind: "marker", marker: "background-done", detail: 'Background command "sleep 5" completed' } as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([e]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText(/Tarea en segundo plano terminada/);
+    const m = container.querySelector(".conv-marker")!;
+    expect(m.textContent).toContain('Background command "sleep 5" completed');
+  });
+
+  it("renders a background-done marker with background info as a BackgroundDoneItem row", async () => {
+    const e = {
+      id: "m1", at: "2025-01-01T00:00:00Z", kind: "marker", marker: "background-done",
+      background: { source: "notification", kind: "agent", status: "completed", label: "WP-07 update", tool_uses: 2 },
+    } as ConversationEntry;
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([e]));
+    const { findByText, container } = render(
+      <ConversationView session={session({ runtime: "stream" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText(/Subagente terminado/);
+    expect(container.querySelector(".bg-done")!.textContent).toContain("WP-07 update · 2 herramientas");
+  });
+
+  it("keeps the old activity line without progress", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(conv([], { activity: "old line" }));
+    const { findByText, queryByTestId } = render(
+      <ConversationView session={session({ runtime: "stream", state: "working" })} onOpenTerminal={() => {}} onOpenTask={() => {}} onReopen={() => {}} />,
+    );
+    await findByText("old line");
+    expect(queryByTestId("working-indicator")).toBeNull();
+  });
 
   it("grows a writing bubble from deltas and replaces it with the transcript entry", async () => {
     const spy = vi.spyOn(api, "conversation").mockResolvedValue(conv([]));

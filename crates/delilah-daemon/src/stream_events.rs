@@ -4,11 +4,15 @@
 //! too; the pump only handles what the hooks do not carry (the end of an interrupted
 //! turn, rate limits). Permission requests go to `permissions.rs`.
 
+use chrono::Utc;
 use delilah_agents::runtime::Runtime;
 use delilah_agents::stream::{LimitWindow, StreamEvent};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+use delilah_core::{Event, TaskKey};
+
+use crate::progress::{self, Progress};
 use crate::sessions::LiveState;
 use crate::state::AppState;
 
@@ -27,6 +31,61 @@ pub enum Started {
 /// How long, once the process is gone, the pump waits for what it said last to arrive.
 const DRAIN: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// How often, while finished background rows wait to expire, the progress is ticked.
+#[cfg(not(test))]
+const TICK: std::time::Duration = std::time::Duration::from_secs(5);
+#[cfg(test)]
+const TICK: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// How long, once the last background item ended with a Stop held, Claude has to start a
+/// follow-up turn before the Stop applies as a normal end of turn.
+#[cfg(not(test))]
+const FALLBACK: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const FALLBACK: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Replays the Stop held behind background work as a normal end of turn. Call only once
+/// the background set is empty (or its rows were marked stopped). The take is the single
+/// claim: whoever gets the payload replays it, nobody twice.
+pub async fn replay_held_stop(app: &AppState, task: &str, session: &str, held: Option<Value>) {
+    if let Some(mut held) = held {
+        // Its `background_tasks` still lists what ran when it was held: marked, so a
+        // terminal does not hold it again (`Live::hold_stop_if_reported`).
+        held["delilah_replayed"] = Value::Bool(true);
+        crate::hooks::apply_signal(
+            app.clone(),
+            task,
+            Some(session),
+            delilah_agents::claude::Signal::TurnEnded,
+            &held,
+        )
+        .await;
+    }
+}
+
+/// A stream process is gone: its running rows become stopped and the Stop held behind them
+/// applies first, as after a normal turn end, before the exit is handled.
+pub async fn on_process_exit(app: &AppState, live: &crate::sessions::Live) {
+    live.update_progress(|p| progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now()));
+    let held = live.take_held_stop();
+    // A newer process on the same id owns the session now: its state is not touched.
+    // Not in the registry at all (already removed) the held Stop still applies.
+    if app
+        .sessions
+        .get(&live.id)
+        .is_some_and(|current| !current.runtime.same(&live.runtime))
+    {
+        return;
+    }
+    replay_held_stop(app, &live.task, &live.id, held).await;
+}
+
+/// Whether a finished row or sub-agent still waits to expire from the progress.
+fn final_rows_wait(p: &Progress) -> bool {
+    p.background.iter().any(|b| b.state != "running")
+        || p.subagents.iter().any(|s| s.state != "running")
+}
+
 /// Starts the session's pump over its lossless events (see `StreamSession::take_events`:
 /// every event but the text, none dropped). The receiver resolves at the first sign of
 /// the agent working, or when the process exits before one.
@@ -42,13 +101,26 @@ pub fn spawn_pump(
     let session = session.to_string();
     let task = task.to_string();
     // The process, to end the pump when it exits even if the `Exited` event never comes.
-    let runtime = app.sessions.get(&session).map(|live| live.runtime);
+    let live = app.sessions.get(&session);
+    let runtime = live.as_ref().map(|live| live.runtime.clone());
     tokio::spawn(async move {
         // Once the process is gone, what it said last is still read; then the pump is done.
         let mut gone = false;
         // Whether the agent has shown any sign of work yet.
         let mut worked = false;
+        // Ticks the progress so finished rows expire; it only runs while some wait.
+        let mut ticker = tokio::time::interval(TICK);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut ticking = false;
+        let mut exit_applied = false;
         loop {
+            let waiting = live
+                .as_ref()
+                .is_some_and(|live| final_rows_wait(&live.progress()));
+            if waiting && !ticking {
+                ticker.reset();
+            }
+            ticking = waiting;
             let event = if gone {
                 tokio::time::timeout(DRAIN, events.recv())
                     .await
@@ -61,9 +133,30 @@ pub fn spawn_pump(
                         gone = true;
                         continue;
                     }
+                    _ = ticker.tick(), if waiting => {
+                        if let Some(live) = &live {
+                            live.update_progress(|p| progress::tick(p, Utc::now()));
+                        }
+                        continue;
+                    }
                 }
             };
             let Some(event) = event else { break };
+            if let Some(live) = &live {
+                let before = live.progress().has_background();
+                live.update_progress(|p| progress::apply(p, &event, Utc::now()));
+                if matches!(event, StreamEvent::Init { .. }) {
+                    // A turn began: the held Stop (and its timer) belong to the last one.
+                    live.cancel_held_stop();
+                } else if before
+                    && !live.progress().has_background()
+                    && !matches!(event, StreamEvent::Exited { .. })
+                    && live.has_held_stop()
+                {
+                    arm_fallback(&app, live.clone(), &task);
+                }
+            }
+            exit_applied |= matches!(event, StreamEvent::Exited { .. });
             let outcome = match &event {
                 StreamEvent::Exited { .. } => Some(Started::Exited),
                 StreamEvent::RateLimit { .. } => None,
@@ -98,6 +191,15 @@ pub fn spawn_pump(
                 break;
             }
         }
+        // The process is gone even if no `Exited` said so: its running work is over.
+        if !exit_applied
+            && owns(&app, &session, runtime.as_ref())
+            && let Some(live) = &live
+        {
+            live.update_progress(|p| {
+                progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now())
+            });
+        }
         // However it ended, nobody is left to answer what the agent asked (unless the
         // session already runs a new process, whose asks are not this pump's).
         if owns(&app, &session, runtime.as_ref()) {
@@ -105,6 +207,19 @@ pub fn spawn_pump(
         }
     });
     started_rx
+}
+
+/// The last background item ended with a Stop held: if no turn begins within `FALLBACK`,
+/// the Stop applies as a normal end of turn (waiting, Bandeja, autopilot).
+pub(crate) fn arm_fallback(app: &AppState, live: crate::sessions::Live, task: &str) {
+    let token = live.arm_fallback();
+    let app = app.clone();
+    let task = task.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(FALLBACK).await;
+        let held = live.take_held_stop_unless_cancelled(&token);
+        replay_held_stop(&app, &task, &live.id, held).await;
+    });
 }
 
 /// Resolves when the process is gone; never for a pump without a process to watch.
@@ -156,6 +271,9 @@ async fn handle(
             is_error,
             result,
         } => turn_result(app, task, session, &subtype, is_error, result.as_deref()).await,
+        StreamEvent::Init {
+            self_started: true, ..
+        } => self_started_turn(app, task, session).await,
         // Answered later, from the API: the pump must not wait for the user.
         StreamEvent::PermissionRequest {
             request_id,
@@ -171,6 +289,45 @@ async fn handle(
             crate::permissions::release_session(app, session).await;
         }
         _ => {}
+    }
+}
+
+/// Claude began a turn without a user message (a background task ended, say). Only a
+/// primary session that waits for the user is moved: it goes to working, the task back to
+/// running and the previous turn's question is resolved, as a typed message does, through
+/// the prompt hook the CLI also posts for such a turn (which then changes nothing more).
+async fn self_started_turn(app: &AppState, task: &str, session: &str) {
+    let Some(live) = app.sessions.get(session) else {
+        return;
+    };
+    if !live.primary {
+        return;
+    }
+    // Waiting: the real prompt hook has not come yet. If it came first, the session is
+    // already working and has nothing left to move.
+    if live.state() == LiveState::Waiting {
+        let hook = json!({ "hook_event_name": "UserPromptSubmit", "delilah_origin": "agent" });
+        crate::hooks::apply_signal(
+            app.clone(),
+            task,
+            Some(session),
+            delilah_agents::claude::Signal::PromptSubmitted,
+            &hook,
+        )
+        .await;
+    }
+    // One `Init` per turn: the history entry is written here and only here.
+    // A code, not the text: the UI words it.
+    let reason = live
+        .progress()
+        .turn
+        .and_then(|t| t.reason)
+        .map(|_| "background-done".to_string());
+    if let Err(e) = app
+        .transition(&TaskKey::new(task), Event::AgentResumed { reason })
+        .await
+    {
+        tracing::warn!(task, "cannot record the self-started turn: {e}");
     }
 }
 
@@ -366,6 +523,73 @@ mod tests {
         }
     }
 
+    fn bg_started(id: &str) -> StreamEvent {
+        StreamEvent::Task(delilah_agents::stream::TaskEvent::Started {
+            task_id: id.into(),
+            tool_use_id: None,
+            kind: delilah_agents::stream::TaskKind::Command,
+            description: "sleep".into(),
+            background: true,
+        })
+    }
+
+    fn bg_ended(id: &str) -> StreamEvent {
+        StreamEvent::Task(delilah_agents::stream::TaskEvent::Ended {
+            task_id: id.into(),
+            status: delilah_agents::stream::TaskStatus::Completed,
+            summary: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn every_event_feeds_the_progress() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        assert!(live.progress().has_background());
+        tx.send(bg_ended("b1")).unwrap();
+        until(|| !live.progress().has_background()).await;
+        assert!(!live.progress().has_background());
+        assert_eq!(live.progress().background[0].state, "completed");
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_tick_drops_final_rows_once_they_are_old() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["300"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        tx.send(bg_ended("b1")).unwrap();
+        until(|| live.progress().background.len() == 1).await;
+        assert_eq!(live.progress().background.len(), 1);
+        // The tick judges ages by the wall clock: make the row old.
+        live.update_progress(|p| {
+            p.background[0].ended_at = Some(chrono::Utc::now() - chrono::Duration::seconds(120));
+            true
+        });
+        until(|| live.progress().background.is_empty()).await;
+        assert!(live.progress().background.is_empty());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn the_pump_marks_running_rows_stopped_when_the_process_exits() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        tx.send(StreamEvent::Exited { code: Some(0) }).unwrap();
+        until(|| !live.progress().has_background()).await;
+        assert!(!live.progress().has_background());
+    }
+
     #[tokio::test]
     async fn an_interrupted_turn_ends_with_its_result_and_the_session_waits() {
         let app = test_app().await;
@@ -450,6 +674,7 @@ mod tests {
         let started = spawn_pump(&app, "s-1", "PROJ-1", rx);
         tx.send(StreamEvent::Init {
             session_id: "s-1".into(),
+            self_started: false,
         })
         .unwrap();
         assert_eq!(started.await.unwrap(), Started::Up);
@@ -588,6 +813,7 @@ mod tests {
         let started = spawn_pump(&app, "s-1", "PROJ-1", rx);
         tx.send(StreamEvent::Init {
             session_id: "s-1".into(),
+            self_started: false,
         })
         .unwrap();
         assert_eq!(started.await.unwrap(), Started::Up);
@@ -686,5 +912,305 @@ mod tests {
             Some("processed 429 files, then crashed")
         ));
         assert!(!mentions_limit("error_during_execution", None));
+    }
+
+    fn init(self_started: bool) -> StreamEvent {
+        StreamEvent::Init {
+            session_id: "c-1".into(),
+            self_started,
+        }
+    }
+
+    /// PROJ-1 waiting for the user after a turn that asked a question, session "s-1" waiting.
+    async fn waiting_task(app: &AppState, live: &crate::sessions::Live) -> TaskKey {
+        let key = running_task(app).await;
+        app.store
+            .create_session(&crate::store_sessions::SessionRecord {
+                id: "s-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "s-1".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: None,
+            })
+            .await
+            .unwrap();
+        app.transition(&key, Event::AgentAsked).await.unwrap();
+        let question = crate::inbox::Attention {
+            kind: crate::inbox::AttentionKind::Question,
+            text: "¿sigo?".into(),
+            since: Utc::now(),
+        };
+        app.store
+            .set_attention("s-1", Some(&question))
+            .await
+            .unwrap();
+        live.set_state(LiveState::Waiting);
+        key
+    }
+
+    async fn status(app: &AppState, key: &TaskKey) -> TaskStatus {
+        app.store.get_task(key).await.unwrap().unwrap().status
+    }
+
+    #[tokio::test]
+    async fn a_self_started_turn_puts_a_waiting_session_and_task_to_work() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = waiting_task(&app, &live).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(init(true)).unwrap();
+        until(|| live.state() == LiveState::Working).await;
+        assert_eq!(live.state(), LiveState::Working);
+        for _ in 0..100 {
+            if status(&app, &key).await == TaskStatus::Running {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(status(&app, &key).await, TaskStatus::Running);
+        assert!(app.store.attention("s-1").await.unwrap().is_none());
+        for _ in 0..100 {
+            if !resumed(&app, &key).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(resumed(&app, &key).await, vec![None]);
+        let _ = live.runtime.kill();
+    }
+
+    /// The `reason` of every `agent-resumed` in the task's history.
+    async fn resumed(app: &AppState, key: &TaskKey) -> Vec<Option<String>> {
+        let events = app.store.events(key).await.unwrap();
+        events
+            .into_iter()
+            .filter_map(|e| match e.event {
+                Event::AgentResumed { reason } => Some(reason),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_self_started_turn_after_a_task_end_records_why() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = waiting_task(&app, &live).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(bg_started("b1")).unwrap();
+        tx.send(bg_ended("b1")).unwrap();
+        tx.send(init(true)).unwrap();
+        for _ in 0..100 {
+            if !resumed(&app, &key).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            resumed(&app, &key).await,
+            vec![Some("background-done".to_string())]
+        );
+        let _ = live.runtime.kill();
+    }
+
+    fn stop_hook() -> Value {
+        json!({ "hook_event_name": "Stop", "last_assistant_message": "listo" })
+    }
+
+    /// A working session with one background item running and a Stop held behind it.
+    async fn held_behind_background(
+        tx: &mpsc::UnboundedSender<StreamEvent>,
+        live: &crate::sessions::Live,
+    ) {
+        live.set_state(LiveState::Working);
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        assert!(live.hold_stop_if_background(stop_hook()));
+    }
+
+    #[tokio::test]
+    async fn a_held_stop_is_replayed_when_no_turn_follows_the_last_background_item() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        tx.send(bg_ended("b1")).unwrap();
+        until(|| live.state() == LiveState::Waiting).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        for _ in 0..100 {
+            if status(&app, &key).await == TaskStatus::WaitingForUser {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_process_exit_replays_the_held_stop_even_if_the_session_left_the_registry() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        assert!(live.has_held_stop());
+        app.sessions.remove_if_same("s-1", &live.runtime);
+        assert!(app.sessions.get("s-1").is_none());
+        on_process_exit(&app, &live).await;
+        assert!(!live.has_held_stop());
+        assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_new_turn_before_the_fallback_drops_the_held_stop_and_its_timer() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        tx.send(bg_ended("b1")).unwrap();
+        tx.send(init(false)).unwrap();
+        until(|| !live.has_held_stop()).await;
+        assert!(!live.has_held_stop());
+        tokio::time::sleep(FALLBACK * 3).await;
+        assert_eq!(live.state(), LiveState::Working, "the timer did not fire");
+        assert_eq!(status(&app, &key).await, TaskStatus::Running);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_self_started_turn_with_a_held_stop_drops_it_and_stays_working() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        tx.send(bg_ended("b1")).unwrap();
+        tx.send(init(true)).unwrap();
+        for _ in 0..100 {
+            if !resumed(&app, &key).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            resumed(&app, &key).await,
+            vec![Some("background-done".to_string())]
+        );
+        assert!(!live.has_held_stop());
+        tokio::time::sleep(FALLBACK * 3).await;
+        assert_eq!(live.state(), LiveState::Working);
+        assert_eq!(status(&app, &key).await, TaskStatus::Running);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_non_primary_session_self_starting_moves_nothing() {
+        let app = test_app().await;
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let live = app.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            SessionKind::Claude,
+            false,
+            std::sync::Arc::new(session),
+        );
+        let key = running_task(&app).await;
+        app.transition(&key, Event::AgentAsked).await.unwrap();
+        live.set_state(LiveState::Waiting);
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(init(true)).unwrap();
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
+        assert!(resumed(&app, &key).await.is_empty());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_turn_the_user_started_changes_nothing_here() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = waiting_task(&app, &live).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        tx.send(init(false)).unwrap();
+        // Another event after it: once it is handled, the init has been too.
+        tx.send(bg_started("b1")).unwrap();
+        until(|| live.progress().has_background()).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
+        assert!(app.store.attention("s-1").await.unwrap().is_some());
+        assert!(resumed(&app, &key).await.is_empty());
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn the_real_prompt_hook_before_or_after_the_init_leaves_the_same_end_state() {
+        for hook_first in [true, false] {
+            let app = test_app().await;
+            let live = insert_stream(&app, "sleep", &["5"]);
+            let key = waiting_task(&app, &live).await;
+            let hook = json!({ "hook_event_name": "UserPromptSubmit",
+                "prompt": "<task-notification>\n<task-id>b1</task-id>" });
+            let (tx, rx) = mpsc::unbounded_channel();
+            spawn_pump(&app, "s-1", "PROJ-1", rx);
+            if hook_first {
+                crate::hooks::apply_signal(
+                    app.clone(),
+                    "PROJ-1",
+                    Some("s-1"),
+                    delilah_agents::claude::Signal::PromptSubmitted,
+                    &hook,
+                )
+                .await;
+            }
+            tx.send(init(true)).unwrap();
+            tx.send(bg_started("b1")).unwrap();
+            until(|| live.progress().has_background()).await;
+            if !hook_first {
+                crate::hooks::apply_signal(
+                    app.clone(),
+                    "PROJ-1",
+                    Some("s-1"),
+                    delilah_agents::claude::Signal::PromptSubmitted,
+                    &hook,
+                )
+                .await;
+            }
+            assert_eq!(live.state(), LiveState::Working);
+            assert_eq!(status(&app, &key).await, TaskStatus::Running);
+            assert!(app.store.attention("s-1").await.unwrap().is_none());
+            for _ in 0..100 {
+                if !resumed(&app, &key).await.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(
+                resumed(&app, &key).await.len(),
+                1,
+                "hook_first={hook_first}"
+            );
+            let _ = live.runtime.kill();
+        }
     }
 }

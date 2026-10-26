@@ -25,7 +25,7 @@ and "Retry autofix". The manual forward of a `ci-failed` notice also records the
 forwarded. The app gets the toggle (task screen PR tab, new task dialog, backlog), the
 project setting, a state line in `PrView`, a mark on `PrBadge` and the inbox item. The
 CLI gets `delilah autofix <KEY> on|off|retry`, `--autofix/--no-autofix` and
-`delilah project set <name> ci-autofix …`. Decision #29 is amended (decision 87).
+`delilah project set <name> ci-autofix …`. Decision #29 is amended (decision 99).
 See [research.md](research.md).
 
 ## Technical Context
@@ -57,7 +57,7 @@ ground rules in `CLAUDE.md` and `docs/decisions.md`:
 |---|---|
 | Never edit a shipped migration; new `NNNN_*.sql` | PASS: `0022_ci_autofix.sql` |
 | API ↔ `app/src/api.ts` contract kept in step | PASS: [contracts/api.md](contracts/api.md) lists both sides |
-| Decisions recorded | PASS: decision 87 amends #29 (CI only, opt-in, bounded) |
+| Decisions recorded | PASS: decision 99 amends #29 (CI only, opt-in, bounded) |
 | Agent hooks outside the repo, clean env | PASS: no new hooks; reuses the existing Stop hook path |
 | Try changes in a preview, never the installed daemon | PASS: quickstart uses `scripts/preview.sh` |
 | Docs updated with behaviour | PASS: status, usage, architecture, decisions tasks |

@@ -15,6 +15,7 @@ export type ActionId =
   | "view-tasks"
   | "view-jira"
   | "view-projects"
+  | "view-playground"
   | "toggle-sidebar";
 
 export interface ActionDef {
@@ -38,6 +39,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "view-tasks", label: "Abrir el tablero", group: "General", default: "Mod+1" },
   { id: "view-jira", label: "Abrir Jira", group: "General", default: "Mod+2" },
   { id: "view-projects", label: "Abrir Proyectos", group: "General", default: "Mod+3" },
+  { id: "view-playground", label: "Abrir el Playground", group: "General", default: "Mod+4" },
   { id: "toggle-sidebar", label: "Plegar barra lateral", group: "Ventana", default: "Mod+\\" },
 ];
 

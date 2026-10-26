@@ -180,7 +180,7 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 - Files: docs/decisions.md, docs/architecture.md, docs/status.md, docs/usage.md
 - Depends on: WP-14
 - Parallel group: 7A
-- Acceptance: FR-001..FR-017 — decision 87 (and "Amended by 87" on #29), `autofix/` architecture section, status and usage updated including the upgrade note
+- Acceptance: FR-001..FR-017 — decision 99 (and "Amended by 99" on #29), `autofix/` architecture section, status and usage updated including the upgrade note
 - Checks: —
 - Reviewers: —
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError, DAEMON_URL, api, baseStaleNotices, isCheckoutDirty, onRequestResult,
-  type Health, type InboxItem, type InboxKind, type JiraIssue, type MergeMethod, type PermissionCardEntry,
+  type Health, type HistoryEntry, type InboxItem, type InboxKind, type JiraIssue, type MergeMethod, type PermissionCardEntry,
   type PrCheck, type PrSnapshot, type ReviewComment, type Session, type SetupInfo, type Task,
 } from "./api";
 
@@ -140,5 +140,37 @@ describe("v2 calls", () => {
     off();
     await expect(api.tasks()).rejects.toThrow();
     expect(seen).toHaveLength(3);
+  });
+});
+
+describe("activity calls", () => {
+  const urls: string[] = [];
+  const reply = (body: unknown) =>
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify(body), { status: 200 });
+    }));
+  beforeEach(() => { urls.length = 0; });
+  afterEach(() => vi.unstubAllGlobals());
+  const path = () => urls[urls.length - 1].replace(DAEMON_URL, "");
+
+  it("activityHistory encodes the owner and adds after only when given", async () => {
+    reply({ started_at: "t", sessions: [] });
+    await api.activityHistory("@web");
+    expect(path()).toBe("/api/v1/activity/history?owner=%40web");
+    await api.activityHistory("s1", 7);
+    expect(path()).toBe("/api/v1/activity/history?owner=s1&after=7");
+    await api.activityHistory("s1", 0);
+    expect(path()).toBe("/api/v1/activity/history?owner=s1&after=0");
+  });
+
+  it("activity defaults tokens to {} for an older daemon", async () => {
+    reply({ sessions: {} });
+    expect(await api.activity()).toEqual({ sessions: {}, tokens: {} });
+  });
+
+  it("history entries narrow by type", () => {
+    const e: HistoryEntry = { seq: 1, at: "t", type: "tool_ended", agent: null, id: "a", failed: false };
+    expect(e.type === "tool_ended" && e.failed).toBe(false);
   });
 });

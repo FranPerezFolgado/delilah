@@ -2,10 +2,11 @@ import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, t
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
 import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
+import { sessionName } from "../chain";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
 import { createState, languageFor, languageSlot } from "../editor/codemirror";
-import { CHANGES, OVERVIEW, PRS, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
+import { CHANGES, OFFICE, OVERVIEW, PRS, persist, sessionFor, sessionOf, sessionTab, setTreeOpen, treeOpen, treeWidth, type Tab } from "../editor/session";
 import { t } from "../i18n";
 import { on } from "../live";
 import { isMarkdown } from "../markdown";
@@ -20,6 +21,7 @@ import { SessionChain } from "./SessionChain";
 import { SessionViewSwitch } from "./SessionViewSwitch";
 import { TaskHeader } from "./TaskHeader";
 import { useBreakpoints } from "../useWidth";
+import { OfficeTab } from "../playground/OfficeTab";
 import { TaskTabs, type TaskTabItem } from "./TaskTabs";
 import { headerPhaseOf } from "../phases";
 import { isSetupRunning } from "./sessionLabels";
@@ -32,6 +34,8 @@ import { TerminalPane } from "./TerminalPane";
 import "./TaskScreen.css";
 
 interface Props {
+  /** The app's connection state, for the Oficina tab (the app already holds the change feed). */
+  online?: boolean;
   /** The task's key, or `@<project>` for a project's own checkout. */
   owner: string;
   /** The task, when the owner is one. */
@@ -145,7 +149,7 @@ function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: 
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
+export function TaskScreen({ online, owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -218,6 +222,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   const activeSession = sessionOf(session.active);
   const exists =
     session.active === OVERVIEW ||
+    session.active === OFFICE ||
     (session.active === CHANGES && session.changesOpen) ||
     (session.active === PRS && prTab) ||
     !!tab(session.active) ||
@@ -396,6 +401,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   // Tabs in strip order: the task, its sessions, the changes, the files.
   const order = () => [
     OVERVIEW,
+    OFFICE,
     ...sessions.map((s) => sessionTab(s.id)),
     ...(starting && !sessionById(starting) ? [sessionTab(starting)] : []),
     ...session.tabs.map((t) => t.path),
@@ -404,7 +410,7 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
   ];
 
   const close = async (id: string, force = false) => {
-    if (id === OVERVIEW) return;
+    if (id === OVERVIEW || id === OFFICE) return;
     const strip = order();
     const at = strip.indexOf(id);
     const sid = sessionOf(id);
@@ -627,10 +633,11 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
 
   const tabItems: TaskTabItem[] = [
     { id: OVERVIEW, kind: project ? "project" : "task", label: project ? t("Proyecto") : t("Tarea") },
+    { id: OFFICE, kind: "office", label: t("Oficina"), attention: sessions.some((s) => sessionDot(s) === "wait") },
     ...sessions.map((s): TaskTabItem => ({
       id: sessionTab(s.id),
       kind: "session",
-      label: s.primary ? t("Claude principal") : s.label,
+      label: sessionName(s),
       title: s.label,
       dot: sessionDot(s),
       closable: !s.primary,
@@ -734,13 +741,14 @@ export function TaskScreen({ owner, task, spec, project, tasks, sessions, asks, 
               onOpenTask={onOpenTask}
             />
           )}
+          {shown === OFFICE && <OfficeTab owner={owner} online={online} onOpenSession={showSession} />}
           {shown === PRS && <PrView owner={owner} task={task} onTaskChanged={onChanged} onOpenTerminal={openTerminal} />}
           {shown === CHANGES && <ChangesView owner={owner} onEdit={openFile} />}
 
           {closingSession && (
             <div className="ebar warn">
               <span className="ts-grow">
-                {t("Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.", { label: closingSession.label })}
+                {t("Cerrar «{label}» detiene ese Claude. Su conversación no se podrá reabrir desde aquí.", { label: sessionName(closingSession) })}
               </span>
               <button className="btn btn-p" onClick={() => close(sessionTab(closingSession.id), true)}>{t("Cerrar")}</button>
               <button className="btn btn-ghost" onClick={() => setClosingSession(null)}>{t("Cancelar")}</button>
