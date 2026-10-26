@@ -30,8 +30,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-21 | 3 | 3B | done | 1 | 7368434 | Live terminal and editor themes |
 | WP-22 | 3 | 3C | done | 1 | 530e3af | Kit barrel |
 | WP-23 | 4 | 4A | done | 1 | 48806d0 | Connection, breakpoints, sidebar shortcut |
-| WP-24 | 4 | 4B | done | 1 |  | Logs view, statusbar, disconnected banner |
-| WP-25 | 4 | 4B | implementing | 1 |  | Sidebar rewrite |
+| WP-24 | 4 | 4B | done | 1 | 1537fa3 | Logs view, statusbar, disconnected banner |
+| WP-25 | 4 | 4B | done | 1 |  | Sidebar rewrite |
 | WP-26 | 4 | 4C | pending | 0 | | App shell |
 | WP-27 | 4 | 4D | pending | 0 | | E2E selectors for the shell |
 | WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
