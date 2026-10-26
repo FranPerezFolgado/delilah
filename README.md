@@ -238,8 +238,9 @@ so it survives a restart (`GET /api/v1/inbox`, `POST /api/v1/sessions/{id}/reply
 with "Responder" for one, "{n} tareas te esperan" with "Ver" (opens the Inbox) for several. A
 task leaves the group when it stops waiting or you open its screen; closing the toast empties it.
 Identical repeated toasts merge into one with "×N" (up to "×99+"). With more than one toast they
-collapse into the newest plus a "+N" button; hover, focus or click expands the stack, with
-"Cerrar todo". Timers pause while it is expanded. Info toasts last 6 s; errors and the waiting
+collapse into stacked cards (the newest in full plus a "+N" button); hover, focus or click
+expands the stack and the button becomes "Ocultar avisos". "Cerrar todo" shows whenever there
+is more than one toast, collapsed or expanded. Timers pause while it is expanded. Info toasts last 6 s; errors and the waiting
 toast stay until closed.
 
 **Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
