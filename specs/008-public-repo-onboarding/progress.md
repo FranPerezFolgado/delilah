@@ -5,7 +5,7 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | {c} | tools: git-cliff 2.14.2, gitleaks 8.30.1, shellcheck 0.11.0, lychee 0.24.2 (brew; `npx lychee` doesn't work → call `lychee` directly) |
+| WP-01 | 1 | 1A | verified | 1 | c328ca8 | tools: git-cliff 2.14.2, gitleaks 8.30.1, shellcheck 0.11.0, lychee 0.24.2 (brew; `npx lychee` doesn't work → call `lychee` directly) |
 | WP-02 | 2 | 2A | verified | 1 | ff6cbd5 | + comment paths in 6 code files |
 | WP-03 | 3 | 3A | pending | 0 | | |
 | WP-04 | 3 | 3A | pending | 0 | | |
