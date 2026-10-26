@@ -90,10 +90,10 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Shared entries are copied or linked into new worktrees.
 - A setup command runs in the new worktree as a read-only Setup session; a failure leaves the task in `setup-failed` with retry, skip and cancel (UI banner and `delilah setup`).
 
-**Playground** (`app/src/playground/`, specs `004-agent-playground` and `008-playground-redesign`; decisions [#87](decisions.md) to [#93](decisions.md)):
+**Playground** (`app/src/playground/`, specs `004-agent-playground` and `008-playground-redesign`; decisions [#88](decisions.md) to [#94](decisions.md)):
 - A building with one floor per task or project (newest on top, a miniature of each). A floor is an office of pixel characters at desks (pixtuoid's art, MIT, 1x), with poses for starting, thinking, editing, reading, running, supervising, waiting and paused, and a caption of the current tool. Desk slots stay fixed.
 - The task screen has an "Oficina" tab right after Overview (a dot when an agent of the owner waits) with the floor and "Flujo", a toggle remembered in `localStorage` (`delilah.office.view`). Flujo draws the agents, helpers and every tool call as a graph (pan, zoom, fit) with a timeline of buttons; a failed call is marked.
-- Helpers for sub-agents walk to the lounge when they finish; a stack of paper on each desk grows with the session's tokens (fresh spend from the transcript, #91).
+- Helpers for sub-agents walk to the lounge when they finish; a stack of paper on each desk grows with the session's tokens (fresh spend from the transcript, #92).
 - Activity history in memory (200 events x 64 sessions) behind `GET /api/v1/activity/history`; `GET /api/v1/activity` also carries `tokens`.
 - The waiting counter, click to open the task's terminal, and "Abrir en ventana" (a separate Tauri window where a floor opens in place, or a named tab in a browser).
 - Stale banner while offline, still poses with reduced motion, animations paused when hidden.
@@ -167,7 +167,10 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the usage-limit notice does not show in the conversation view;
   - the "Created from the conversation" label is not shown in the backlog view, only once the task starts;
   - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
+- **Agent permissions** (spec `009-chat-mode-permissions`, decision [#87](decisions.md)): the `agent-permissions` preference (Settings › Agent permissions: Auto by default, or "Claude's default") sets the mode of task and project sessions in both runtimes, so chat mode (`claude -p`, which ignores the user's interactive default) no longer asks for every action. A CLI that rejects the mode at start (only its "invalid mode" text is verified; the one for an account without auto has not been seen) shows a hint to try "Claude's default": in the failure reason of a task (terminal), in the start error (chat), and as an Inbox error item on a project session (which does not fail).
+- **Agent permissions, limits:** auto mode's own classifier decides; the spike found no harmless action that auto escalates, so whether an escalation arrives as `can_use_tool` or `permission_denied` is unverified; only `can_use_tool` becomes a card (and pauses autopilot), `system/permission_denied` is currently ignored (no card, no pause); the default widens the terminal for users whose Claude default is not auto; running sessions keep their mode until relaunched.
 - **Chat mode, limits and known problems:**
+  - chat mode now gets the `agent-permissions` setting (Auto by default) and no longer asks for routine work (see the two Agent permissions bullets above);
   - experimental: a stuck chat-mode agent has no terminal; switch back with `delilah runtime <KEY> terminal` (refused mid-turn: press "Stop" first);
   - only task Claude sessions: project sessions, idea conversations and shells always use a PTY;
   - the stream-json input protocol is thinly documented and may change between Claude versions; the transcript format is not a public contract (unknown lines are skipped);

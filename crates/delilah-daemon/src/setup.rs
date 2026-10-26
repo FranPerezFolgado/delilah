@@ -507,7 +507,7 @@ fn output_tail(log: &Path) -> String {
 }
 
 /// Drops colour codes and other escape sequences.
-fn strip_escapes(s: &str) -> String {
+pub(crate) fn strip_escapes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {

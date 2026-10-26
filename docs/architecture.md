@@ -183,12 +183,24 @@ and only changes while the task is under way (see `phases.rs`):
   - `--remote-control <name>` when that preference is on;
   - the mode and plugin by kind (`run.rs`, `launch_flags`), below.
 
-  | Session | Mode | Plugin dir | Other |
+  | Session | Mode (preference `auto` / `default`) | Plugin dir | Other |
   |---|---|---|---|
-  | Idea conversation | `dontAsk` ([#34](decisions.md)) | yes | idea system prompt, `--setting-sources user`, `--strict-mcp-config` |
-  | Read-only project session | `plan` | yes | |
-  | Other project session | default | yes | |
-  | Task session (primary or extra) | default | no | |
+  | Idea conversation | `dontAsk` ([#34](decisions.md)), both | yes | idea system prompt, `--setting-sources user`, `--strict-mcp-config` |
+  | Read-only project session | `plan`, both | yes | |
+  | Other project session | `--permission-mode auto` / no flag | yes | |
+  | Task session (primary or extra) | `--permission-mode auto` / no flag | no | |
+
+  The mode of task and project sessions comes from the `agent-permissions` preference
+  (`"auto"`, the default and the value when unset, or `"default"`; [#87](decisions.md)).
+  `PUT /api/v1/preferences/agent-permissions` refuses anything else with 400 and keeps the
+  stored value. `AppState` holds it in memory (reloaded at start and after each PUT);
+  `launch_flags` reads it, so it applies to sessions spawned or relaunched afterwards, not to
+  running ones. The flag is the same in PTY and chat. If the CLI rejects the mode at start
+  (its text names `--permission-mode` and says invalid/unavailable; only the "invalid" text
+  has been seen, see the spike), the hint to Settings › Agent permissions ("Claude's default") is added to the task failure reason (terminal), the start error (chat), or, for a project session (which does not fail), an Inbox error item on the session (`fail_if_mode_rejected`). For a terminal this only
+  counts for an exit within 10 s of the spawn with the rejection among the first lines of
+  the screen, so a kill (Stop, a runtime switch) of an agent whose own output quotes the
+  error is not mistaken for it.
 - **Clean environment.** Claude runs with a clean environment plus the login
   shell's PATH (see `env.rs`). A Claude spawned with another Claude session's
   variables does not save its transcript.
@@ -215,6 +227,7 @@ and only changes while the task is under way (see `phases.rs`):
 An experimental runtime for a task's Claude sessions ([#67](decisions.md), [spike](archive/spikes/2026-10-24-claude-stream.md), spec `specs/006-chat-view`). Instead of a PTY the daemon owns a long-lived `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio` process (`delilah_agents::stream::StreamSession`), with partial messages on. `Runtime` (`runtime.rs`) is an enum over `Pty(PtySession)` and `Stream(StreamSession)`; the PTY-only operations (resize, attach, scrollback) answer "not available" through `as_pty()`.
 
 - **Which runtime.** `run::runtime_kind` decides per session: `Stream` only for a Claude session of a task (not a shell or setup, not an idea conversation, not a project session) whose `tasks.chat_mode` is set; everything else is `Pty`. `chat_mode` is chosen at creation (`chat_mode` in `POST /api/v1/tasks` and `POST /api/v1/runs`; CLI `--chat`; the "Chat mode (experimental)" checkbox) and changed with the switch below. Session JSON carries `runtime` (`pty` / `stream`).
+- **Permission mode.** `claude -p` ignores the user's interactive default mode and runs in `default`, asking for every action, so `launch_flags` passes the `agent-permissions` mode (`--permission-mode auto` by default) to the stream process exactly as to the PTY one ([#87](decisions.md)). What auto mode still escalates arrives as `can_use_tool` and goes through the cards below (and pauses autopilot); `system/permission_denied` is currently ignored (no card, no pause).
 - **What stays the same.** Hooks fire in print mode, so states, phases, Inbox, saving mode, autopilot, the PR flow and `--resume` work from the same signals. Entries still come from the transcript (the stream's `uuid`s equal the transcript's); the stream gives only live text. Not the same: the status line never runs in print mode, so usage windows come from the stream's `rate_limit_event` (`stream_events.rs`); "Stop" sends an interrupt and the turn ends on the `result` (no `Stop` hook fires); Remote Control is hidden; `GET /sessions/{id}/terminal` and `GET /tasks/{key}/terminal` answer 409 naming chat mode (and `delilah attach` says so).
 - **Live text** (`live.rs`, `GET /api/v1/sessions/{id}/live`, WebSocket). Sends `{"message": <msg id>, "text": <delta>}` per piece and `{"message": <msg id>, "done": true}` when the message is complete; nothing is replayed, and partial text is never stored. A session not in chat mode is closed at once with code **4409**. If the client lags and deltas were dropped (broadcast overflow) the server sends `{"reset": true}`: the client drops its partial text and reloads the conversation. The socket ends when the process exits.
 - **Switching** (`runtime_api.rs`, `POST /api/v1/tasks/{key}/runtime`, `delilah runtime <KEY> chat|terminal`). Takes each live session's typing lock, sets `tasks.chat_mode` (not `view`), and relaunches the task's own Claude sessions (not shells or idea conversations) with `--resume` in the other runtime, so the conversation goes on; a failed relaunch puts the flag and the sessions back as they were. Refused (409) while a session works, has a question or permission waiting, or is starting with a message not yet delivered ("wait for the turn to end or press Detener"); a no-op (204) if nothing changes. A chat agent relaunched without a prompt says nothing until it gets a message, so the switch counts as done if the process stays up for 3 s; a later death is seen by the exit watcher and leaves the task in chat mode with no live session (resume it, or switch back). A chat-mode session is resumed in chat mode after a daemon restart or a usage-limit pause.
@@ -396,6 +409,6 @@ restarts the existing daemon with the new binary (as in any install), which rewr
   - The daemon picks its own texts with `lang().pick(es, en)`.
 - **Playground** (`playground/`):
   - `useOffice.ts` joins sessions, tasks, projects, the `activity` topic and the tokens into floors by owner (`floorsByOwner`), with desk slots kept stable in module-level maps; `useActivityHistory.ts` fetches `activity/history` per owner and refetches with `after=<last seq>` (a full refetch on reconnect); `layout.ts` and `floorLayout.ts` do the slotting, the pods of desks and the helper paths;
-  - `PlaygroundView.tsx` renders `Building.tsx` (floors, newest on top, each a `FloorMini`); `Floor.tsx` is one office (desks, helpers walking to the lounge, token stack "paper" by tier, bubbles for waiting and paused); `OfficeTab.tsx` is the task screen's "Oficina" tab (fixed tab right after Overview, with a dot when an agent waits) with the Oficina/Flujo toggle; `FlowView.tsx` + `flowModel.ts` + `flowLayout.ts` + `Timeline.tsx` are Flow (see decision #92);
+  - `PlaygroundView.tsx` renders `Building.tsx` (floors, newest on top, each a `FloorMini`); `Floor.tsx` is one office (desks, helpers walking to the lounge, token stack "paper" by tier, bubbles for waiting and paused); `OfficeTab.tsx` is the task screen's "Oficina" tab (fixed tab right after Overview, with a dot when an agent waits) with the Oficina/Flujo toggle; `FlowView.tsx` + `flowModel.ts` + `flowLayout.ts` + `Timeline.tsx` are Flow (see decision #93);
   - `PixelSprite.tsx` draws a sprite frame as SVG paths, cycling frames with CSS `steps()` (paused when hidden, still with reduced motion); the art is `art/pixtuoid.ts` (generated by `scripts/port-pixtuoid.py`), `art/ramp.ts` (recolouring), `art/outfit.ts` (outfits seeded by project name) and `art/kinds.ts` (tool kind to glow colour, shared with Flow); each component has its own stylesheet and its English in `i18n/en/`;
   - the separate window is a Tauri `WebviewWindow` labelled `playground` (`#playground`, `PlaygroundWindow.tsx`), opened from `platform.ts`. Closing it really closes it (only the main window hides on close); there a floor opens in place, and a click on a lead character tells the main window to open the task. In a browser it is a named tab talking over a `BroadcastChannel`.

@@ -98,6 +98,8 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/activity/history",
             get(session_api::activity_history),
         )
+        // PUT answers 400 for a bad name, a value over 64 KiB, or (for `agent-permissions`)
+        // anything but the JSON strings "auto" or "default"; the stored value is kept.
         .route(
             "/api/v1/preferences/{key}",
             get(preferences::get).put(preferences::put),
