@@ -185,7 +185,8 @@ stalls gets one nudge; questions that have an option marked "(Recommended)" are
 answered for you. Anything else (a permission prompt in the task's session, a question without a
 recommendation, a blocked review, a failure) pauses it: the header shows "Autopilot
 paused" with the reason, and the Inbox offers "Resume autopilot" or "Carry on by
-hand". On the idea card, the autopilot option creates the task and starts it.
+hand". Autopilot waits while the agent's background subagents run, and only nudges or
+pauses when the agent has really stopped. On the idea card, the autopilot option creates the task and starts it.
 Delilah pushes and opens the PR without asking again, so turn it on only where that is
 what you want. It never merges.
 

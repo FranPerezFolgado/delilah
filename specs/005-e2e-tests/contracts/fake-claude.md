@@ -44,7 +44,7 @@ Payloads (fields the daemon reads, as in `hooks.rs` tests):
 | `UserPromptSubmit` | `{…, prompt}` |
 | `PreToolUse` | `{…, tool_name: "AskUserQuestion", tool_input: {questions: [{question, header, multiSelect: false, options: [{label, description}]}]}}` |
 | `PostToolUse` | `{…, tool_name, tool_input, tool_response}` |
-| `Stop` | `{…, last_assistant_message}` |
+| `Stop` | `{…, last_assistant_message, background_tasks?}` (only from the `stop` object form with `background`) |
 | `StopFailure` | `{…, error}` |
 | `Notification` | `{…, notification_type: "idle_prompt", message}` |
 | `SessionEnd` | `{…, reason}` |
@@ -79,6 +79,44 @@ At start it creates an empty `<HOME>/.claude/projects/<cwd with non-alphanumeric
 dashes>/<session id>.jsonl`, which is what the daemon checks before passing `--resume`.
 It does so only if `HOME` is absolute and equals the Env's temp home (`<fake-dir>/../home`)
 and the session id has no `/` or `..`; otherwise nothing is written.
+
+## Scenario lookup
+
+Order: `[fake:<name>]` in the prompt → `<task>.<command>.json` → `<task>.json` →
+`default.json`.
+
+`<command>` is the prompt's leading slash command without the slash, up to the first
+space (`/feature LIBRE-1 …` → `feature`, `/orchestrate specs/x` → `orchestrate`). It must
+pass `valid_name` once joined (`<task>.<command>`); a prompt without a leading `/word`
+skips this lookup. So a task's plan and implement sessions can play different scripts.
+
+## The `stop` step
+
+- `{"stop": "text"}`: sends `Stop` with `last_assistant_message = text`, no
+  `background_tasks`.
+- Object form, for a turn that ends with background work still running:
+
+```json
+{"stop": {"message": "Waiting on the reviewer.",
+          "background": [{"id": "a1", "type": "subagent", "agent_type": "architecture-reviewer",
+                          "description": "Review plan", "status": "running"}]}}
+```
+
+  Sends `Stop` with `last_assistant_message = message` and `background_tasks =
+  background` (each entry as given; `[]` allowed). `background` left out: no
+  `background_tasks` field.
+
+## The `write` step
+
+```json
+{"write": {"path": "specs/libre-1-x/tasks.md", "content": "- [ ] T001 …\n"}}
+```
+
+- `path` is relative to the fake's cwd (the task's workspace). Absolute paths, `..`
+  components or an empty path: the fake prints the error and exits 2 (a broken scenario,
+  like an unknown step).
+- Parents are created; the file is overwritten.
+- Sends no hook (the daemon reads the spec from disk at the next turn end).
 
 ## The `fail` step
 
