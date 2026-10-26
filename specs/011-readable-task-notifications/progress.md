@@ -15,9 +15,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-08 | 4 | 4A | done | 1 | | |
 | WP-09 | 5 | 5A | done | 1 | | |
 | WP-10 | 5 | 5B | done | 1 | | |
-| WP-11 | 6 | 6A | verified | 1 | | |
-| WP-12 | 6 | 6B | implementing | 0 | | T035 green (1 flaky pre-existing daemon test passed on re-run) |
+| WP-11 | 6 | 6A | done | 1 | | |
+| WP-12 | 6 | 6B | done | 1 | | T035 green (1 flaky pre-existing daemon test passed on re-run) |
 | WP-09F | 5 | 5F | done | 1 | | phase-5 review fixes (linear split, trim only split blocks) |
+| WP-12F | 6 | 6F | done | 1 | | preview fixes: mid-turn attachment notifications, `with exit code N` |
 
 ## Open findings
 
@@ -41,3 +42,5 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | spec | LOW | Mixed prompt "hola\n<task-notification>…" drops "hola" as last message (as T029 asks) | crates/delilah-daemon/src/hooks.rs |
 | 5 | spec | LOW | Non-hand-back "Another Claude session…" messages now vanish from chat (as T031 asks), undocumented | docs/usage.md |
 | 5 | spec | LOW | `origin.kind` fallback marker has `detail: None` and no new test | crates/delilah-agents/src/transcript.rs |
+| 6 | preview | LOW | If Claude Code ever writes the same notification both as a `queued_command` attachment and as a user line, it would show twice (not seen: absorbed mid-turn notifications are not repeated) | crates/delilah-agents/src/transcript.rs |
+| 6 | preview | LOW | UI rendering not checked in a browser (no browser tools); covered by vitest only | app/src/components/BackgroundDoneItem.tsx |

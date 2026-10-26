@@ -93,6 +93,15 @@ fn read_summary(summary: &str) -> (BackgroundKind, Option<String>, Option<i64>) 
             let digits = &first[i + "(exit code ".len()..];
             digits[..digits.find(')')?].trim().parse().ok()
         });
+        let exit_code = exit_code.or_else(|| {
+            let i = first.rfind("with exit code ")?;
+            let rest = &first[i + "with exit code ".len()..];
+            let end = rest
+                .char_indices()
+                .find(|&(n, c)| !(c.is_ascii_digit() || (n == 0 && c == '-')))
+                .map_or(rest.len(), |(n, _)| n);
+            rest[..end].parse().ok()
+        });
         return (BackgroundKind::Command, Some(label), exit_code);
     }
     let label: String = first.chars().take(200).collect();
@@ -310,6 +319,21 @@ mod tests {
         for hidden in ["toolu_1", "x.output", "secret note"] {
             assert!(!dbg.contains(hidden));
         }
+    }
+
+    #[test]
+    fn reads_with_exit_code_form() {
+        let code = |tail: &str| {
+            read_notification(&format!(
+                "<task-notification><summary>Background command \"x\" failed with exit code {tail}</summary></task-notification>"
+            ))
+            .exit_code
+        };
+        assert_eq!(code("1"), Some(1));
+        assert_eq!(code("127."), Some(127));
+        assert_eq!(code("2 (oops)"), Some(2));
+        assert_eq!(code("abc"), None);
+        assert_eq!(code(""), None);
     }
 
     #[test]

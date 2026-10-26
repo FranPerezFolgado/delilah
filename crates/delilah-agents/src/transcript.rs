@@ -360,6 +360,7 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
     let kind = line.get("type").and_then(Value::as_str).unwrap_or("");
     match kind {
         "user" | "assistant" => {}
+        "attachment" if is_notification_attachment(line) => return attachment_items(line, skipped),
         // Known lines that are not part of the conversation.
         "summary" | "system" | "file-history-snapshot" | "queue-operation" => return vec![],
         _ => {
@@ -433,6 +434,56 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             vec![]
         }
     }
+}
+
+/// An attachment line Claude Code writes for a notification that arrived mid-turn.
+fn is_notification_attachment(line: &Value) -> bool {
+    let a = &line["attachment"];
+    a.get("type").and_then(Value::as_str) == Some("queued_command")
+        && (a.get("commandMode").and_then(Value::as_str) == Some("task-notification")
+            || a.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification"))
+}
+
+/// One marker per notification block of a mid-turn notification attachment.
+fn attachment_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
+    if line.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return vec![];
+    }
+    let uuid = line.get("uuid").and_then(Value::as_str);
+    let at = line
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+        .map(|t| {
+            t.with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Millis, true)
+        });
+    let (Some(uuid), Some(at)) = (uuid, at) else {
+        *skipped += 1;
+        return vec![];
+    };
+    let prompt = line
+        .pointer("/attachment/prompt")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let mut items = Vec::new();
+    for segment in background::split_notifications(prompt) {
+        if let background::Segment::Notification(block) = segment {
+            let id = if items.is_empty() {
+                format!("t:{uuid}:0")
+            } else {
+                format!("t:{uuid}:0:{}", items.len())
+            };
+            items.push(Item::Entry(Entry::Marker {
+                id,
+                at: at.clone(),
+                marker: MarkerKind::BackgroundDone,
+                detail: notification_summary(block),
+                background: Some(background::read_notification(block)),
+            }));
+        }
+    }
+    items
 }
 
 /// The text of a user message, its text blocks joined.
@@ -1251,6 +1302,41 @@ mod tests {
             assert_eq!(b.kind, BackgroundKind::Command);
             assert_eq!(b.label.as_deref(), Some("sleep 5"));
         }
+    }
+
+    fn attachment_line(kind: &str) -> Vec<u8> {
+        let v = serde_json::json!({"type":"attachment","uuid":"u9","timestamp":"2026-01-01T00:00:00Z",
+            "attachment":{"type":kind,"commandMode":"task-notification","origin":{"kind":"task-notification"},
+            "prompt":"<task-notification>\n<task-id>b3gj1qeu9</task-id>\n<status>failed</status>\n<summary>Background command \"Run false command\" failed with exit code 1</summary>\n</task-notification>"}});
+        format!("{v}\n").into_bytes()
+    }
+
+    #[test]
+    fn queued_command_attachment_is_a_marker() {
+        let p = parse(&attachment_line("queued_command"), 0);
+        assert_eq!(p.entries.len(), 1);
+        let Entry::Marker {
+            id,
+            marker,
+            background,
+            ..
+        } = &p.entries[0]
+        else {
+            panic!("not a marker");
+        };
+        assert_eq!(id, "t:u9:0");
+        assert_eq!(*marker, MarkerKind::BackgroundDone);
+        let b = background.as_ref().expect("background");
+        assert_eq!(b.kind, BackgroundKind::Command);
+        assert_eq!(b.exit_code, Some(1));
+        assert_eq!(b.status.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn other_attachment_types_stay_skipped() {
+        let p = parse(&attachment_line("hook_success"), 0);
+        assert!(p.entries.is_empty());
+        assert_eq!(p.skipped, 1);
     }
 
     const HANDBACK: &str = r#","isMeta":true,"origin":{"kind":"peer","from":"a97d","name":"code-researcher","handback":true,"body":"[Subagent hand-back] x. The report follows:\n  ## Map\n  line two\n"}"#;

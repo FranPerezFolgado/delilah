@@ -45,3 +45,20 @@ cd app && npx tsc --noEmit && npx vitest related --run \
 
 Point the UI from `main` at the preview API (`VITE_DELILAH_URL=<API>`): it shows the old
 one-line markers, no errors in the console.
+
+## Results
+
+Run on 2026-10-26 against `scripts/preview.sh --fresh --no-ui` (slot 1, fixture repo
+`signal`, task SIG-1 in chat mode, real Claude Code session), through the HTTP API: no
+browser was available to the verifying agent, so the UI rendering is covered by the vitest
+suites (`BackgroundDoneItem`, `backgroundItems`, `ConversationView`) only.
+
+| Scenario | Result | Notes |
+|---|---|---|
+| US1 1–3 | Pass | Command marker `kind: command, exit_code: 0`; sub-agent notification with `duration_ms`, `tool_uses`, `tokens`, `report_in_handback` plus a hand-back marker with the same `task_id` (folded by the UI). No user entry contains notification or agent-message markup. |
+| US1 4 | Fail → fixed (WP-12F) | Two bugs: a notification absorbed mid-turn is written as an `attachment` (`queued_command`, `commandMode: task-notification`) and gave no marker; failed commands' summary `failed with exit code N` gave no `exit_code`. Both parsed now, with tests. |
+| US1 5 | Not reproducible | Claude Code wrote no notification for a task stopped with TaskStop. Covered by unit tests. |
+| US2 1 | Not checked in a browser | Expand/collapse covered by `BackgroundDoneItem.test.tsx`. |
+| US2 2 | Partly | Hand-back marker produced and paired by `task_id` in real data; the fold is unit-tested. |
+| US3 2 | Pass | `last_message` on the sessions, `/api/v1/sessions` and the inbox stayed Claude's answer after every notification. |
+| Compatibility with `main` UI | Not checked | Change is additive (optional `background` field). |
