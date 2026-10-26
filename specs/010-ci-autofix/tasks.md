@@ -19,8 +19,8 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 
 ## Phase 1: Setup
 
-- [ ] T001 Add migration `crates/delilah-daemon/migrations/0022_ci_autofix.sql` exactly as in data-model.md (`tasks.ci_autofix`, `pull_requests.autofix`, backfill for live autopilot tasks and seed of their PRs' `sha`); first check how `tasks.status` is encoded and how archived tasks are marked in `crates/delilah-daemon/migrations/0001*.sql` and `store.rs`, and match the `WHERE`
-- [ ] T002 Create the module skeleton `crates/delilah-daemon/src/autofix/mod.rs` and `autofix/api.rs`, registered in `crates/delilah-daemon/src/lib.rs` (empty pub fns `evaluate`, `on_turn_ended`, `cancel`; mirror how `autopilot/` is declared)
+- [X] T001 Add migration `crates/delilah-daemon/migrations/0022_ci_autofix.sql` exactly as in data-model.md (`tasks.ci_autofix`, `pull_requests.autofix`, backfill for live autopilot tasks and seed of their PRs' `sha`); first check how `tasks.status` is encoded and how archived tasks are marked in `crates/delilah-daemon/migrations/0001*.sql` and `store.rs`, and match the `WHERE`
+- [X] T002 Create the module skeleton `crates/delilah-daemon/src/autofix/mod.rs` and `autofix/api.rs`, registered in `crates/delilah-daemon/src/lib.rs` (empty pub fns `evaluate`, `on_turn_ended`, `cancel`; mirror how `autopilot/` is declared)
 
 ---
 

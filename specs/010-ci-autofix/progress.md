@@ -5,7 +5,7 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | implementing | 0 | | paused mid-run 2026-10-26; partial files left uncommitted |
+| WP-01 | 1 | 1A | verified | 1 | | resumed after pause |
 | WP-02 | 2 | 2A | pending | 0 | | |
 | WP-04 | 2 | 2A | pending | 0 | | |
 | WP-03 | 2 | 2B | pending | 0 | | |
