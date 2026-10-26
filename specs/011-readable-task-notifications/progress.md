@@ -44,3 +44,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | spec | LOW | `origin.kind` fallback marker has `detail: None` and no new test | crates/delilah-agents/src/transcript.rs |
 | 6 | preview | LOW | If Claude Code ever writes the same notification both as a `queued_command` attachment and as a user line, it would show twice (not seen: absorbed mid-turn notifications are not repeated) | crates/delilah-agents/src/transcript.rs |
 | 6 | preview | LOW | UI rendering not checked in a browser (no browser tools); covered by vitest only | app/src/components/BackgroundDoneItem.tsx |
+| final | quality | MEDIUM | An unclosed `<task-notification>` typed mid-sentence swallows the rest of the user's text (spec: truncated blocks keep what can be read; left as is, same trade-off as the hooks check) | crates/delilah-agents/src/transcript/background.rs |
+| final | quality | LOW | `formatTokens` showed "1000K" just under one million — FIXED | app/src/format.ts |
+| final | quality | LOW | Phrase choice was three nested ternaries — FIXED (table by kind and outcome) | app/src/components/BackgroundDoneItem.tsx |
+| final | architecture | LOW | `formatTokens` re-export shim in playground `kinds.ts` — FIXED (importers use `format.ts`) | app/src/playground/art/kinds.ts |
+| final | architecture | LOW | Docs quoted UI strings only in Spanish; hidden "Another Claude session" messages undocumented — FIXED | docs/usage.md, docs/status.md |

@@ -19,5 +19,9 @@ describe("formatTokens", () => {
     expect(formatTokens(1000)).toBe("1K");
     expect(formatTokens(12_300)).toBe("12.3K");
     expect(formatTokens(1_200_000)).toBe("1.2M");
+    expect(formatTokens(999_949)).toBe("999.9K");
+    expect(formatTokens(999_999)).toBe("1M");
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(1_000_000)).toBe("1M");
   });
 });

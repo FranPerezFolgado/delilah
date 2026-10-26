@@ -15,5 +15,3 @@ export function tokenTier(total: number): 0 | 1 | 2 | 3 {
   if (total >= 250_000) return 1;
   return 0;
 }
-
-export { formatTokens } from "../../format";

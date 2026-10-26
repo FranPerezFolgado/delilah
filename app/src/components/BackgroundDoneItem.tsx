@@ -10,6 +10,18 @@ type Props = { entry: Extract<ConversationEntry, { kind: "marker" }>; complete: 
 
 const ICON = { ok: "✓", failed: "⚠", stopped: "■", other: "•" } as const;
 
+/** i18n keys per kind and outcome; `raw` carries an unknown status word. */
+const PHRASES = {
+  agent: { ok: "Subagente terminado", failed: "Subagente falló", stopped: "Subagente detenido", raw: "Subagente terminado ({status})" },
+  command: { ok: "Comando terminado", failed: "Comando falló", stopped: "Comando detenido", raw: "Comando terminado ({status})" },
+  task: {
+    ok: "Tarea en segundo plano terminada",
+    failed: "Tarea en segundo plano falló",
+    stopped: "Tarea en segundo plano detenida",
+    raw: "Tarea en segundo plano terminada ({status})",
+  },
+} as const;
+
 /** One row for a finished background task: outcome icon, phrase, label and metrics. */
 export function BackgroundDoneItem({ entry, complete }: Props) {
   const [open, setOpen] = useState(false);
@@ -20,14 +32,8 @@ export function BackgroundDoneItem({ entry, complete }: Props) {
   }
   const o = outcome(info);
   const s = info.status ?? "";
-  let phrase: string;
-  if (info.kind === "agent") {
-    phrase = o === "ok" ? t("Subagente terminado") : o === "failed" ? t("Subagente falló") : o === "stopped" ? t("Subagente detenido") : s ? t("Subagente terminado ({status})", { status: s }) : t("Subagente terminado");
-  } else if (info.kind === "command") {
-    phrase = o === "ok" ? t("Comando terminado") : o === "failed" ? t("Comando falló") : o === "stopped" ? t("Comando detenido") : s ? t("Comando terminado ({status})", { status: s }) : t("Comando terminado");
-  } else {
-    phrase = o === "ok" ? t("Tarea en segundo plano terminada") : o === "failed" ? t("Tarea en segundo plano falló") : o === "stopped" ? t("Tarea en segundo plano detenida") : s ? t("Tarea en segundo plano terminada ({status})", { status: s }) : t("Tarea en segundo plano terminada");
-  }
+  const p = PHRASES[info.kind];
+  const phrase = o === "other" ? (s ? t(p.raw, { status: s }) : t(p.ok)) : t(p[o]);
   const parts = [phrase];
   if (info.label) parts.push(info.label);
   if (info.duration_ms != null) parts.push(duration(info.duration_ms / 1000));

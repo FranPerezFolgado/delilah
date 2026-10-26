@@ -31,6 +31,10 @@ const hand = (id: string, task: string, o: Partial<BackgroundInfo> = {}) =>
 const user = (id: string): ConversationEntry => ({ id, at: "2025-01-01T00:00:00Z", kind: "user", text: id, state: "sent", from: "view" });
 
 describe("foldBackground", () => {
+  it("returns an empty list for no entries", () => {
+    expect(foldBackground([])).toEqual([]);
+  });
+
   it("merges a notification with a later hand-back", () => {
     const out = foldBackground([note("n", "a"), user("u"), hand("h", "a", { report_truncated: true })]);
     expect(out.map((e) => e.id)).toEqual(["n", "u"]);

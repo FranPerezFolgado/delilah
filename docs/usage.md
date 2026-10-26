@@ -223,12 +223,15 @@ resumes on its own afterwards the chat says "Claude continues: background task f
 While background work runs you can type to Claude, but the Chat / Terminal switch answers
 "Background work is running: wait for it to finish or press Stop".
 
-When a background task finishes, the chat shows one row for it: "Subagente terminado" with its
-label, duration, number of tools and tokens, or "Comando terminado" with the label and exit
-code; failed or stopped ones are flagged. Click the row to read the report as Markdown
+When a background task finishes, the chat shows one row for it: "Subagent finished" ("Subagente terminado") with
+its label, duration, number of tools and tokens, or "Command finished" ("Comando
+terminado") with the label and exit code; failed or stopped ones are flagged. Click the row to read the report as Markdown
 (remote images load only when you click them). When Claude hands the result back to the
 conversation, that report appears inside the same row. Reports are cut at 16 KB, and a
-hand-back whose notification Claude Code dropped shows no metrics.
+hand-back whose notification Claude Code dropped shows no metrics. Messages from other
+Claude sessions ("Another Claude session sent a message…") are not shown as your
+messages; a prompt that contains `<task-notification>` anywhere counts as one from an
+agent, not from you.
 
 When a chat-mode agent needs a permission it shows a permission card (also in the
 Inbox) with the tool and what it will do: "Allow once", "Deny" (with an

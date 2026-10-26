@@ -1,7 +1,7 @@
 import type { Action, Activity, Helper, Session } from "../api";
 import { t, tn } from "../i18n";
 import { type Column } from "../phases";
-import { formatTokens } from "./art/kinds";
+import { formatTokens } from "../format";
 
 /** What a desk's character is doing, from the session's state. */
 type DeskState = "starting" | "thinking" | "waiting" | "paused" | "edit" | "read" | "run" | "delegate" | "other" | "supervising";

@@ -4,7 +4,6 @@ import { duration } from "../format";
 import { t } from "../i18n";
 import "./BackgroundStrip.css";
 
-
 function stateLabel(state: string): string {
   switch (state) {
     case "running":

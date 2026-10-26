@@ -7,8 +7,9 @@ export function duration(secs: number): string {
 
 const trim = (n: number) => n.toFixed(1).replace(/\.0$/, "");
 
+/** Tokens as "950", "12.3K" or "1.2M" (a value that rounds to 1000K shows as 1M). */
 export function formatTokens(n: number): string {
   if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${trim(n / 1000)}K`;
+  if (n < 999_950) return `${trim(n / 1000)}K`;
   return `${trim(n / 1_000_000)}M`;
 }
