@@ -406,6 +406,18 @@ impl StreamSession {
         .await
     }
 
+    /// Asks the agent to stop one background task (`stop_task` control request); it answers
+    /// with a `task_updated` "killed" and a `task_notification` "stopped".
+    pub async fn stop_task(&self, task_id: &str) -> io::Result<()> {
+        let n = self.request_seq.fetch_add(1, Ordering::Relaxed);
+        self.write(&json!({
+            "type": "control_request",
+            "request_id": format!("delilah-stop-task-{n}"),
+            "request": {"subtype": "stop_task", "task_id": task_id},
+        }))
+        .await
+    }
+
     /// Answers a [`StreamEvent::PermissionRequest`].
     pub async fn reply_permission(&self, request_id: &str, decision: Decision) -> io::Result<()> {
         let response = match decision {
@@ -902,6 +914,39 @@ mod tests {
             }
         );
         s.kill();
+    }
+
+    #[tokio::test]
+    async fn stop_task_writes_the_control_request() {
+        let dir = std::env::temp_dir().join(format!("delilah-stop-task-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("stdin.log");
+        let mut cmd = Command::new("bash");
+        cmd.arg("-c").arg("cat >> \"$1\"").arg("_").arg(&log);
+        let (s, _rx) = StreamSession::spawn(cmd).unwrap();
+        s.stop_task("task-1").await.unwrap();
+        let mut lines = vec![];
+        for _ in 0..100 {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            lines = text.lines().map(str::to_string).collect();
+            if !lines.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        s.kill();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(lines.len(), 1);
+        let v: Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(v["type"], "control_request");
+        assert!(
+            v["request_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("delilah-stop-task-")
+        );
+        assert_eq!(v["request"]["subtype"], "stop_task");
+        assert_eq!(v["request"]["task_id"], "task-1");
     }
 
     #[tokio::test]

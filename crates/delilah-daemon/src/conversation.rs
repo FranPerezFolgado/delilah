@@ -721,6 +721,19 @@ pub async fn stop(
         .stop()
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    if let Some(stream) = live.runtime.as_stream() {
+        // Background work outlives the turn: ask the agent to stop each running item too.
+        for b in live
+            .progress()
+            .background
+            .iter()
+            .filter(|b| b.state == "running")
+        {
+            if let Err(e) = stream.stop_task(&b.task_id).await {
+                tracing::warn!(session = %id, task = %b.task_id, "cannot stop the task: {e}");
+            }
+        }
+    }
     crate::permissions::release_session(&app, &id).await;
     if live.runtime.as_stream().is_none() {
         turn_interrupted(&app, &live).await;
@@ -1709,6 +1722,67 @@ mod tests {
         .expect("Detener is immediate");
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert_eq!(f.live.state(), LiveState::Waiting);
+    }
+
+    #[tokio::test]
+    async fn stop_asks_the_agent_to_stop_each_running_background_task() {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        let f = Fixture::new().await;
+        let _ = f.live.runtime.kill();
+        let dir = std::env::temp_dir().join(format!("delilah-stop-bg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("stdin.log");
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.arg("-c").arg("cat >> \"$1\"").arg("_").arg(&log);
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let session = std::sync::Arc::new(session);
+        let live =
+            f.app
+                .sessions
+                .insert("conv", "@web", SessionKind::Claude, false, session.clone());
+        for id in ["bg-1", "bg-2", "bg-done"] {
+            live.update_progress(|p| {
+                crate::progress::apply(
+                    p,
+                    &StreamEvent::Task(TaskEvent::Started {
+                        task_id: id.into(),
+                        tool_use_id: None,
+                        kind: TaskKind::Command,
+                        description: id.into(),
+                        background: true,
+                    }),
+                    Utc::now(),
+                )
+            });
+        }
+        live.update_progress(|p| {
+            p.background
+                .iter_mut()
+                .find(|b| b.task_id == "bg-done")
+                .unwrap()
+                .state = "completed";
+            true
+        });
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let mut stopped = vec![];
+        for _ in 0..100 {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            stopped = text
+                .lines()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .filter(|v| v["request"]["subtype"] == "stop_task")
+                .map(|v| v["request"]["task_id"].as_str().unwrap().to_string())
+                .collect();
+            if stopped.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        session.kill();
+        let _ = std::fs::remove_dir_all(&dir);
+        stopped.sort();
+        assert_eq!(stopped, ["bg-1", "bg-2"]);
     }
 
     #[tokio::test]
