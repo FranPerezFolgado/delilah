@@ -276,7 +276,7 @@ macOS-only dependencies; that costs more runner minutes than Linux.
 - **Isolation:** each run has a temp `HOME` (the daemon reads `~/.claude/settings.json` and the login shell's rc files), its own `DELILAH_HOME`, fixtures and a free port, never 7420 nor 7501-7509. A tripwire `claude`/`gh` first on PATH fails the test if the real one is reached; the one-shot Claude calls (`DELILAH_CLAUDE_BIN`) get a fake that always fails, so branch names are the daemon's deterministic fallback. The only exception is the opt-in real-Claude smoke test.
 - **A separate crate, `delilah-e2e`, with an `e2e` feature**, so `cargo test --workspace` stays as fast as before and the flows are not mixed with the `#[ignore]`d smoke test.
 - **UI: one daemon and one Vite per run, tests serial.** `VITE_DELILAH_URL` is fixed when Vite starts; each test makes its own repos and projects instead.
-- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI.
+- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI. *(Superseded by 85: both layers now run in CI.)*
 - **Ruled out:** a shell fake (hard to handle JSON and to keep in step with `claude.rs`); a fake that posts to `/hooks/claude` itself (skips the settings file); a `claude` shim on PATH (the agent's PATH comes from the login shell); replaying real sessions (they depend on the real Claude and its cost); reusing `preview.sh` (user's `HOME`, fixed slots, interactive); tests in `crates/delilah-daemon/tests/` (bloats its dev-dependencies); CI on macOS runners (cost, and the checks run locally anyway); a runtime daemon switch in the UI (`?daemon=`, code that exists only for tests); Cypress (Playwright has traces and runs from Node).
 
 ## Pull requests
@@ -664,3 +664,18 @@ carry closures (each "Deshacer" undoes a different thing), so toasts with an act
 exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
 centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
 Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).
+
+**85. CI as parallel jobs; Rust tests on macOS, sharded (2026-10-26).** `ci.yml` runs fmt,
+clippy, the tests, the web UI and both e2e layers as separate jobs at the same time. Tests use
+`cargo nextest`, split in three macOS shards (`--partition count:N/3`) that share one cache.
+fmt, the web UI and the UI e2e run on Linux; clippy, the tests and the API e2e on macOS.
+Running the UI e2e there showed a real race (`chat.spec.ts`, ~1 run in 4), fixed in
+`permissions::answer`.
+*Why:* the old single job ran fmt → clippy → tests one after another, and the tests alone
+(~1 200, CPU-bound on git subprocesses) saturate one 3-core macOS runner. The repo is public,
+so macOS minutes cost nothing (which also lifts 58's reason for keeping e2e out of CI).
+*Ruled out:* tests on Linux (48 s instead of ~3 min, but ~10 tests fail there on macOS-only
+behaviour, `/bin/zsh`, `cp` flags and process reaping, and the app only ships for macOS);
+one unsharded nextest job on macOS (slower than `cargo test`: a process per test costs more
+on macOS); `playwright install --with-deps` (its apt step took 2-5 min; the runner already
+has Chrome's libraries); Playwright retries (they hid that race instead of finding it).
