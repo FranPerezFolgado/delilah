@@ -199,12 +199,12 @@ parallel (different files, no dependency on an unfinished task).
 
 ### Tests first
 
-- [ ] T038 [P] [US4] Write `app/src/i18n.test.ts` (vitest). Use the contract's table as a `describe.each`: pref ∈ {missing, `null`, `"auto"`, `"fr"`, `42`, `"es"`, `"en"`} × system ∈ {`es-ES`, `es-419`, `ES`, `en-US`, `fr-FR`, `ja-JP`, `""`, no navigator}, asserting `detect()`. Also assert that `setLanguage("fr")` makes `lang()` `"en"` on an English system, and that `document.documentElement.lang` matches after import and after `setLanguage`. Mock `navigator.language` with `vi.stubGlobal`. Add a header comment saying the table is mirrored in `app/src-tauri/src/daemon.rs` tests and `contracts/language.md`. It must fail now.
-- [ ] T039 [P] [US4] Add `#[cfg(test)] mod tests` to `app/src-tauri/src/daemon.rs` for `english_for(pref: Option<&str>, apple_languages: &str) -> bool`. Use the same table as T038, with the system given as `defaults read -g AppleLanguages` output, e.g. `"(\n    \"es-ES\",\n    \"en-US\"\n)"`, plus empty and garbage output. Add a comment pointing to the mirrored table. It must fail to compile now.
+- [X] T038 [P] [US4] Write `app/src/i18n.test.ts` (vitest). Use the contract's table as a `describe.each`: pref ∈ {missing, `null`, `"auto"`, `"fr"`, `42`, `"es"`, `"en"`} × system ∈ {`es-ES`, `es-419`, `ES`, `en-US`, `fr-FR`, `ja-JP`, `""`, no navigator}, asserting `detect()`. Also assert that `setLanguage("fr")` makes `lang()` `"en"` on an English system, and that `document.documentElement.lang` matches after import and after `setLanguage`. Mock `navigator.language` with `vi.stubGlobal`. Add a header comment saying the table is mirrored in `app/src-tauri/src/daemon.rs` tests and `contracts/language.md`. It must fail now.
+- [X] T039 [P] [US4] Add `#[cfg(test)] mod tests` to `app/src-tauri/src/daemon.rs` for `english_for(pref: Option<&str>, apple_languages: &str) -> bool`. Use the same table as T038, with the system given as `defaults read -g AppleLanguages` output, e.g. `"(\n    \"es-ES\",\n    \"en-US\"\n)"`, plus empty and garbage output. Add a comment pointing to the mirrored table. It must fail to compile now.
 
 ### Implementation
 
-- [ ] T040 [US4] Implement it:
+- [X] T040 [US4] Implement it:
   - in `app/src/i18n.ts`, `detect(setting: unknown): Lang`: `"es"`/`"en"` are explicit; otherwise the system language, where `es*` (case-insensitive) → `es` and anything else, or no navigator → `en`;
   - `setLanguage(setting: unknown)`;
   - call `setLanguage("auto")` at module load so `document.documentElement.lang` is set from the start (guarded for no `document`), and keep the `LangSetting` type for Settings;

@@ -217,15 +217,21 @@ fn health() -> Option<Health> {
 /// Whether the app speaks English: the language picked in Settings (kept by the
 /// daemon), or else the Mac's.
 pub fn english() -> bool {
-    match get::<serde_json::Value>("/api/v1/preferences/language")
-        .as_ref()
-        .and_then(|v| v.as_str())
-    {
+    let value = get::<serde_json::Value>("/api/v1/preferences/language");
+    let pref = value.as_ref().and_then(|v| v.as_str());
+    let langs = output("defaults", &["read", "-g", "AppleLanguages"]).unwrap_or_default();
+    english_for(pref, &langs)
+}
+
+/// The language rule (contracts/language.md): "es"/"en" are explicit; anything else
+/// follows the first entry of `defaults read -g AppleLanguages`, where `es*` is
+/// Spanish and anything else (empty, garbage) is English.
+pub fn english_for(pref: Option<&str>, apple_languages: &str) -> bool {
+    match pref {
         Some("en") => true,
         Some("es") => false,
         _ => {
-            let langs = output("defaults", &["read", "-g", "AppleLanguages"]).unwrap_or_default();
-            let first = langs.split('"').nth(1).unwrap_or("es").to_lowercase();
+            let first = apple_languages.split('"').nth(1).unwrap_or("").to_lowercase();
             !first.starts_with("es")
         }
     }
@@ -242,4 +248,41 @@ fn wait_for_health(timeout: Duration) -> Result<(), String> {
     Err(format!(
         "delilahd did not answer on {ADDR}; see ~/Library/Logs/Delilah/delilahd.log"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::english_for;
+
+    // The table of contracts/language.md, mirrored in app/src/i18n.test.ts.
+    fn apple(first: &str) -> String {
+        format!("(\n    \"{first}\",\n    \"en-US\"\n)")
+    }
+
+    #[test]
+    fn explicit_preference_wins() {
+        for sys in ["es-ES", "en-US", "", "garbage"] {
+            let langs = if sys.is_empty() || sys == "garbage" { sys.to_string() } else { apple(sys) };
+            assert!(english_for(Some("en"), &langs));
+            assert!(!english_for(Some("es"), &langs));
+        }
+    }
+
+    #[test]
+    fn other_preferences_follow_the_system() {
+        for pref in [None, Some("auto"), Some("fr")] {
+            for (sys, en) in [
+                ("es-ES", false),
+                ("es-419", false),
+                ("ES", false),
+                ("en-US", true),
+                ("fr-FR", true),
+                ("ja-JP", true),
+            ] {
+                assert_eq!(english_for(pref, &apple(sys)), en, "{pref:?} {sys}");
+            }
+            assert!(english_for(pref, ""));
+            assert!(english_for(pref, "not a plist"));
+        }
+    }
 }
