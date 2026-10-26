@@ -807,3 +807,6 @@ widens exposure); Cloudflare Tunnel (public, and a third party sees the traffic)
 native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); Tailscale
 identity headers alone (forgeable by any local process).
 See the [research](../specs/008-mobile-access-analysis/research.md).
+
+**97. Background notifications as readable items (2026-10-26).**
+Each `<task-notification>` in a user line (even inside other text, several per message) becomes a `background-done` marker with an optional `background` object (label, status, duration, tool count, tokens, report); hand-backs (`isMeta` lines with `origin.handback`) become items too, and the UI folds each into the matching notification by `task_id`, derived on every render from the raw entries because the conversation is paginated (server-side pairing would need all pages). Agent-message and notification prompts never become a session's last message. *Why a marker and not a new kind:* UIs from before this change render unknown kinds as cards; the cost is a marker variant with a payload its siblings don't use. Reports are cut at 16 KB and there is no detail endpoint (the next step if it is not enough). *Ruled out:* an XML library (the format is small and fixed); reading `queue-operation` lines (not the transcript's contract); server-side pairing.

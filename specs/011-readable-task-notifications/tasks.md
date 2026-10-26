@@ -116,8 +116,8 @@ builds on US1's item; US3 only needs the foundational phase.
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T033 [P] Update `docs/status.md` (chat mode: background notifications are readable items with expandable reports, hand-backs included; known limit: when Claude Code drops a notification in favour of a hand-back, no metrics are shown; reports cut at 16 KB) and `docs/usage.md` (chat view: what a finished background task looks like, how to read its report)
-- [ ] T034 [P] Add decision **97** to `docs/decisions.md` as drafted in plan.md D4 (marker + optional `background` object and why not a new kind; hand-backs as items; client-side fold derived on render; 16 KB cap, no detail endpoint; ruled out: XML library, `queue-operation` lines, server-side pairing), and the line about notifications in `docs/architecture.md` where transcript entries/markers are described, if it lists them
+- [X] T033 [P] Update `docs/status.md` (chat mode: background notifications are readable items with expandable reports, hand-backs included; known limit: when Claude Code drops a notification in favour of a hand-back, no metrics are shown; reports cut at 16 KB) and `docs/usage.md` (chat view: what a finished background task looks like, how to read its report)
+- [X] T034 [P] Add decision **97** to `docs/decisions.md` as drafted in plan.md D4 (marker + optional `background` object and why not a new kind; hand-backs as items; client-side fold derived on render; 16 KB cap, no detail endpoint; ruled out: XML library, `queue-operation` lines, server-side pairing), and the line about notifications in `docs/architecture.md` where transcript entries/markers are described, if it lists them
 - [ ] T035 Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, and `cd app && npx tsc --noEmit && npx vitest run`; fix what fails
 - [ ] T036 Run quickstart.md in a preview (`scripts/preview.sh --fresh`, never the installed daemon): US1 steps 1–5, US2 steps 1–2, US3 step 2, and the compatibility check with the `main` UI; record the result in `specs/011-readable-task-notifications/quickstart.md` under a "Results" heading
 

@@ -11,11 +11,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2A | done | 1 | | |
 | WP-05 | 3 | 3A | done | 2 | | |
 | WP-06 | 3 | 3A | done | 1 | | also edited i18n/en/ConversationView.ts (stale key moved), allowed |
-| WP-07 | 4 | 4A | verified | 1 | | |
-| WP-08 | 4 | 4A | verified | 1 | | |
-| WP-09 | 5 | 5A | pending | 0 | | |
-| WP-10 | 5 | 5B | pending | 0 | | |
-| WP-11 | 6 | 6A | pending | 0 | | |
+| WP-07 | 4 | 4A | done | 1 | | |
+| WP-08 | 4 | 4A | done | 1 | | |
+| WP-09 | 5 | 5A | implementing | 0 | | |
+| WP-10 | 5 | 5B | implementing | 0 | | |
+| WP-11 | 6 | 6A | verified | 1 | | |
 | WP-12 | 6 | 6B | pending | 0 | | |
 
 ## Open findings
@@ -30,3 +30,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | spec | MEDIUM | Status-less / unknown-status notifications lack the "terminada" wording — handed to WP-08 | app/src/components/BackgroundDoneItem.tsx |
 | 3 | spec | LOW | No end-to-end test parses the real stream-background fixtures through `parse` | crates/delilah-agents/src/transcript.rs |
 | 3 | spec | LOW | T015 test doesn't assert compacted/stopped markers unchanged (covered by older tests) | app/src/components/ConversationView.test.tsx |
+| 4 | security | LOW | Typed user text with `<task-notification>` renders as a fake finished item (by design of FR-009; cosmetic) | crates/delilah-agents/src/transcript.rs |
+| 4 | security | LOW | `task_id` (hand-back `from`, `<task-id>`) not length-capped — handed to WP-09 | crates/delilah-agents/src/transcript/background.rs |
+| 4 | spec | LOW | `read_report` fallback/rfind not bounded by `<usage>`/`</task-notification>` on malformed input — handed to WP-09 | crates/delilah-agents/src/transcript/background.rs |
+| 4 | spec | LOW | No render test for a lone hand-back item or a hand-back with empty body | app/src/components/BackgroundDoneItem.test.tsx |
