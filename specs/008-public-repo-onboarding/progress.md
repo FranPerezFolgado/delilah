@@ -21,7 +21,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-14 | 5 | 5A | verified | 1 | e124e91 |  |
 | WP-15 | 5 | 5A | verified | 1 | 8614fd9 | SECURITY.md says no checksums yet; WP-11 must update it |
 | WP-16 | 5 | 5A | pending | 0 | | |
-| WP-17 | 5 | 5A | implementing | 0 | | |
+| WP-17 | 5 | 5A | verified | 1 | 302a7a1 | personal notes moved to ignored CLAUDE.local.md |
 | WP-18 | 5 | 5A | verified | 1 | — | done by orchestrator via gh: {"enabled":true} |
 | WP-19 | 6 | 6A | verified | 1 | d7954db | T041 pending: preview check via ui-verifier; native menu = unit tests only; empty defaults output now → English |
 | WP-20 | 6 | 6B | pending | 0 | | |
