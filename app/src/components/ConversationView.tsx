@@ -9,9 +9,10 @@ import {
 import { on } from "../live";
 import { t } from "../i18n";
 import { AskCard } from "./AskCard";
-import { PermissionCard } from "./PermissionCard";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
+import { Button, Skeleton } from "./ui";
+import "./ConversationView.css";
 
 interface Props {
   session: Session;
@@ -234,12 +235,15 @@ export function ConversationView({
     <div className="conv">
       <div
         className="conv-log"
+        role="log"
+        aria-label={t("Conversación")}
         ref={log}
         onScroll={(ev) => {
           const el = ev.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
+        {!conv && !error && <Skeleton lines={3} />}
         {conv &&
           conv.entries.length === 0 &&
           conv.transcript === "present" &&
@@ -301,16 +305,21 @@ export function ConversationView({
               <div key={e.id} className="conv-marker muted">
                 {e.marker === "compacted"
                   ? t("Conversación compactada")
-                  : t("Detenida")}
+                  : t("Detenida: detuviste a Claude.")}
               </div>
             );
           }
           if (e.ask_kind === "permission") {
+            const ask = { id: e.ask, tool: e.tool, summary: e.summary, suggestion: e.suggestion, rule: e.rule };
             return (
               <div key={e.id} className="conv-card">
-                <PermissionCard
-                  sessionId={id}
-                  ask={{ id: e.ask, tool: e.tool, summary: e.summary, suggestion: e.suggestion, rule: e.rule }}
+                <AskCard
+                  variant="chat"
+                  permission={{
+                    sessionId: id,
+                    ask,
+                    ended: e.outcome === "pending" ? undefined : { outcome: e.outcome === "answered" ? "answered" : e.outcome === "withdrawn" ? "withdrawn" : "expired", decision: e.decision ?? undefined },
+                  }}
                   onDone={load}
                 />
               </div>
@@ -321,6 +330,7 @@ export function ConversationView({
             <div key={e.id} className="conv-card">
               {pending ? (
                 <AskCard
+                  variant="chat"
                   ask={{
                     id: e.ask,
                     questions: e.questions,
@@ -410,13 +420,13 @@ export function ConversationView({
               }
             }}
           />
-          <button className="btn btn-p" disabled={!text.trim()} onClick={send}>
-            {t("Enviar")}
-          </button>
+          <Button variant="primary" disabled={!text.trim()} title={text.trim() ? undefined : t("Escribe un mensaje")} onClick={send}>
+            {t("Enviar")} <span className="conv-key">⌘↵</span>
+          </Button>
           {working && (
-            <button className="btn" onClick={() => guard(api.stopSession(id))}>
+            <Button variant="secondary" onClick={() => guard(api.stopSession(id))}>
               {t("Detener")}
-            </button>
+            </Button>
           )}
         </div>
       )}

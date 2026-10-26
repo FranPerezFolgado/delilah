@@ -44,6 +44,11 @@ describe("ToolCard", () => {
     expect(r.queryByText("total 0")).toBeNull();
   });
 
+  it("is a group named by its summary", () => {
+    const r = setup(tool({ summary: "ls -la", input: { command: "ls -la" } }));
+    expect(r.getByRole("group", { name: "ls -la" })).toBeTruthy();
+  });
+
   it("Bash shows the command and the output", () => {
     const r = setup(tool({ summary: "lista", input: { command: "ls /tmp" }, result: "a\nb" }));
     open(r, "lista");

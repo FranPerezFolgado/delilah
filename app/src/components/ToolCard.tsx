@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type ToolEntry } from "../api";
 import { t, tn } from "../i18n";
 import { DiffRows } from "./DiffRows";
+import "./ToolCard.css";
 
 interface Props {
   entry: ToolEntry;
@@ -137,7 +138,7 @@ export function ToolCard({ entry, sessionId, onOpenFile }: Props) {
 
   const state = pending ? "running" : entry.is_error ? "failed" : "";
   return (
-    <div className={`tool-card ${state}`.trim()}>
+    <div className={`tool-card ${state}`.trim()} role="group" aria-label={entry.summary}>
       <button className="tool-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="muted">{open ? "▾" : "▸"}</span>
         <span className="tool-sum mono trunc">{entry.summary}</span>

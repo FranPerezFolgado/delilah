@@ -38,8 +38,8 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-29 | 5 | 5A | done | 1 | 8a1cdce | Header controls and tabs |
 | WP-30 | 5 | 5A | done | 1 | 7220728 | Cambios, PR and setup panels |
 | WP-31 | 5 | 5B | implementing | 1 |  | Task header |
-| WP-32 | 5 | 5B | done | 1 |  | Task tab |
-| WP-33 | 5 | 5B | implementing | 1 |  | Chat tab |
+| WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
+| WP-33 | 5 | 5B | done | 1 |  | Chat tab |
 | WP-34 | 5 | 5C | pending | 0 | | Task screen integration |
 | WP-35 | 5 | 5D | pending | 0 | | E2E selectors for the task screen |
 | WP-36 | 5 | 5D | pending | 0 | | E2E task-screen flow |
@@ -82,3 +82,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 7 | WP-42 | HIGH | `whereOf()` still falls back to "worktree" when unset (asserted in phases.test.ts); decision: unset = checkout. Fix whereOf + test in WP-47 (Backlog uses it). | whereOf file, app/src/phases.test.ts |
 | 5 | WP-30 | NOTE | WP-34 must wire `PrView onOpenTerminal`, `SetupBanner onOpenTerminal` and `onOpenSettings` in TaskScreen/TaskView; WP-36 e2e: PR `#n` moved into `.pr-chip`. Run vitest with `--no-cache` (stale glob for new en/ files). | app/src/components/TaskScreen.tsx |
 | 4 | WP-25 | NOTE | WP-26: pass Sidebar `rail`, `onToggleRail`, `onAddProject`, `onDone`; drop `onNewTask`; `onDelete` now fires after its own confirm — App must not open DeleteTaskDialog again. Board: wire StatusBar filter + BoardView new props. Banner over main with content greyed. | app/src/App.tsx |
+| 5 | WP-32 | NOTE | WP-34: pass TaskView `asks` (task InboxItem[]) and `onOpenTask`. Check `ManualResume` is allowed from failed (Reanudar). «Main Claude» legacy EN key should read «Main Claude» — fine. | app/src/components/TaskScreen.tsx |
