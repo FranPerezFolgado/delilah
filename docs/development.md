@@ -38,8 +38,12 @@ Clippy warnings are errors: the same checks run in three places.
 
 - **Implementers** (`/orchestrate`): `.claude/verify.sh` runs them for the files an agent changed
   (only the touched crates; `vitest related` for the UI) and sends the agent back while they fail.
-- **CI** (`.github/workflows/`): `ci.yml` (Rust workspace on macOS, web UI on Linux) on every PR
-  and push to `main`; `desktop-shell.yml` only when `app/src-tauri/` changes.
+- **CI** (`.github/workflows/`): `ci.yml` on every PR and push to `main`, as parallel jobs:
+  fmt (workspace and Tauri crate) and the web UI on Linux; clippy (with the install script's
+  shellcheck and `scripts/test-install.sh`), the tests (`cargo nextest`, split in three shards)
+  and `scripts/e2e.sh api` on macOS; `scripts/e2e.sh ui` on Linux.
+  `desktop-shell.yml` (clippy and tests of `app/src-tauri/`) only when that folder changes.
+  The Rust tests stay on macOS: about ten of them rely on macOS behaviour and fail on Linux.
 - **You**: the table above.
 
 The git tests build throwaway repos and need `git -c protocol.file.allow=always`;
@@ -61,7 +65,7 @@ scripts/e2e.sh --real-claude    # the smoke test, see below
 It builds the daemon, the CLI and the harness first, and ends with `api: PASS (Ns)` / `ui: FAIL (Ns)` (non-zero exit if any failed). The first UI run installs Chromium. On a failing UI test, `app/playwright-report/` has the screenshot, trace and daemon log.
 
 - **Safe with the installed Delilah running.** Each test gets a temp root with its own `HOME`, `DELILAH_HOME`, fixture repos and a free port (never 7420 nor 7501-7509), and the daemon runs with `env -i`. A tripwire `claude`/`gh` first on PATH fails the test if either real binary is ever reached. The daemon's one-shot Claude calls (`DELILAH_CLAUDE_BIN`: branch name, submodule suggestion) go to `bin/claude-oneshot`, which logs to `<root>/oneshot.log` and fails, so branches get the title-based name (`feature/<KEY>-<title-slug>`). Nothing touches `~/.delilah`. Never kill a daemon by name here either.
-- **Run it before a PR that touches the daemon, the CLI or the UI.** Local only: there is no CI.
+- **CI runs both layers on every PR** (`E2E API/CLI` on macOS, `E2E UI` on Linux; a failed UI run uploads `playwright-report`). Running them locally before the PR still saves a round trip.
 - `DELILAH_E2E_KEEP=1` keeps the temp roots of failed tests (the path is printed). `target/debug/e2e-env start --jira --keep` starts a debug environment: use its printed `api` with `DELILAH_URL=<api> target/debug/delilah ls`, then Ctrl-D.
 - Waits are bounded (`wait_until`, 15 s by default, 30 s at most): fix flakiness by waiting for the condition, never by raising a timeout.
 

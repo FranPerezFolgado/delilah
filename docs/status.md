@@ -6,7 +6,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Built
 
-**Workspace removal that finishes** (decision [#85](decisions.md)): before a worktree goes, the task's agents' process groups and its preview's group are ended and awaited; a `git worktree remove` that fails with the folder still there falls back to deleting it and `git worktree prune`, and a half-removed worktree can be archived again.
+**Workspace removal that finishes** (decision [#86](decisions.md)): before a worktree goes, the task's agents' process groups and its preview's group are ended and awaited; a `git worktree remove` that fails with the folder still there falls back to deleting it and `git worktree prune`, and a half-removed worktree can be archived again.
 
 **Public-repo onboarding** (spec `008-public-repo-onboarding`; decisions [#79](decisions.md) to [#83](decisions.md)):
 - **Docs:** README rewritten for newcomers (under 200 lines: badges, English screenshots, Install, Quickstart); the full reference in [usage.md](usage.md); an index in [docs/README.md](README.md); docs translated to English; history moved to `docs/archive/` and `specs/` with their own READMEs. The English board screenshots come from `app/e2e/screens.spec.ts` (`DELILAH_SCREENS_LANG`, `DELILAH_SCREENS_ONLY`, `DELILAH_SCREENS_OUT`).
@@ -109,9 +109,10 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 **Autopilot** (a task runs plan → implement → review → draft PR on its own; opt-in per task, spec workflow only, implies saving mode):
 - Option on new tasks, backlog items and running tasks (`--autopilot` / `--no-autopilot`, `delilah autopilot <KEY> on|off|resume`), a mark in the task header, and the chain's preview and PR steps.
-- The implementation starts without asking; a stalled step gets one nudge; questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into an Inbox item (*Resume autopilot* / *Carry on by hand*).
+- The implementation starts without asking; a stalled step gets one nudge, but a turn that ends while background subagents run is not a stall (no nudge, no pause; the step boundary and handoffs still run); questions with one "(Recommended)" option are answered in the hook; permission prompts, other questions and a blocked review pause it into an Inbox item (*Resume autopilot* / *Carry on by hand*).
 - The review writes an outcome file; if ready, the project's preview starts and a draft PR opens per repo (title and body from the review, a loopback preview URL appended). Interrupted finishes recover on the scheduler tick.
 - "Create and launch on autopilot" on the idea card.
+- Waiting on background work is not a stall (decision #39): the fake Claude gained a `stop` object form (`{"message", "background"}`), a `write` step and per-command scenarios (`<task>.<command>.json`), and `crates/delilah-e2e/tests/autopilot.rs` covers a run that waits on subagents and one real stall (one nudge, then pause).
 - See [architecture.md](architecture.md) and decisions [#38](decisions.md) to [#48](decisions.md).
 
 **Dev workflow** (for working on this repo, not a product feature): CI on every PR (`.github/workflows/`), fmt/clippy/tests gating each implementer (`.claude/verify.sh`), a hook guarding the installed app, `scripts/bump-version.sh`. Decisions [#49](decisions.md) and [#50](decisions.md).
@@ -119,7 +120,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 **Previews of a task** (a project's `preview_command`, a field in the project view): started by the daemon in the task's workspace, URL detected from its output, stopped with the task. "Lanzar" / "Parar" and the URL in the task header. For this repo set it to `scripts/preview.sh`.
 
 **End-to-end tests:**
-- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Local only, no CI. See [development.md](development.md#end-to-end-tests).
+- `scripts/e2e.sh` runs 17 flows against a fake Claude, `gh` and Jira, each with its own daemon, temp home and free port: 11 API/CLI (Rust, `crates/delilah-e2e`) and 6 UI (Playwright, `app/e2e`, plus a smoke check). Both layers also run in CI on every PR. See [development.md](development.md#end-to-end-tests).
 
 **Auto-update** (0.8.0):
 - Tauri updater against GitHub Releases: a notice with the open-session count, "Later" / "When they finish", menu item and Settings › Updates; release builds only.

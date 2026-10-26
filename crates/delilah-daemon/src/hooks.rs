@@ -669,6 +669,298 @@ mod tests {
 }
 
 #[cfg(test)]
+mod background_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use delilah_core::{Autopilot, AutopilotState, Step};
+
+    use super::*;
+    use crate::config::Config;
+    use crate::pr_testkit::{TempDir, task_with_workspace};
+    use crate::store_sessions::{SessionKind, SessionRecord};
+
+    const RUNNING: &str = include_str!("../tests/fixtures/hooks/stop-background-running.json");
+    const DONE: &str = include_str!("../tests/fixtures/hooks/stop-background-done.json");
+    const EMPTY: &str = include_str!("../tests/fixtures/hooks/stop-background-empty.json");
+    const NO_FIELD: &str = include_str!("../tests/fixtures/hooks/stop-no-background-field.json");
+
+    /// What a test keeps alive: the task's folder (removed on drop) and the live session,
+    /// whose `sleep` child is killed on drop so it does not outlive the test.
+    struct Fixture {
+        live: crate::sessions::Live,
+        _dir: TempDir,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = self.live.runtime.kill();
+        }
+    }
+
+    /// A task on autopilot whose primary session `s-1` is on `step`; `tasks` is the
+    /// content of its `tasks.md`, if any.
+    async fn on_autopilot(step: Step, tasks: Option<&str>) -> (AppState, TaskKey, Fixture) {
+        // The task, its workspace and its folder (removed on drop) come from the shared
+        // fixture; a launch that tries to start the next step must fail fast, not run a
+        // real agent.
+        let (mut app, key, dir) =
+            task_with_workspace(Arc::new(crate::gh::fake::FakeGh::new()), None).await;
+        app.config = Arc::new(Config {
+            claude_bin: "/nonexistent/claude".into(),
+            ..(*app.config).clone()
+        });
+        app.store.set_saving_mode(&key, true).await.unwrap();
+        let a = Autopilot {
+            state: AutopilotState::Running,
+            stage: None,
+            reason: None,
+            since: Utc::now(),
+            nudged: None,
+            review_session: None,
+        };
+        app.store.set_autopilot(&key, Some(&a)).await.unwrap();
+        app.store
+            .create_session(&SessionRecord {
+                id: "s-1".into(),
+                task: "PROJ-1".into(),
+                kind: SessionKind::Claude,
+                label: "Principal".into(),
+                primary: true,
+                closed: false,
+                read_only: false,
+                conversation: false,
+                step: Some(step),
+            })
+            .await
+            .unwrap();
+        if let Some(tasks) = tasks {
+            let spec = dir.path().join("ws/specs/proj-1-x");
+            std::fs::create_dir_all(&spec).unwrap();
+            std::fs::write(spec.join("tasks.md"), tasks).unwrap();
+        }
+        // The nudge types into the live session: a process that just sits there.
+        let mut cmd = portable_pty::CommandBuilder::new("sleep");
+        cmd.arg("30");
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        let live = app
+            .sessions
+            .insert("s-1", "PROJ-1", SessionKind::Claude, true, pty);
+        (app, key, Fixture { live, _dir: dir })
+    }
+
+    /// Posts a fixture through `apply_hook` as the primary session's turn end. The
+    /// turn-end work is spawned by the hook, so this returns before it has run.
+    async fn post(app: &AppState, fixture: &str) {
+        let mut hook: Value = serde_json::from_str(fixture).unwrap();
+        hook["session_id"] = "s-1".into();
+        let q = HookQuery {
+            task: "PROJ-1".into(),
+            session: Some("s-1".into()),
+        };
+        assert_eq!(
+            apply_hook(app.clone(), q, hook).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+
+    /// The daemon's log, captured on this test's thread (the turn-end work runs on the
+    /// same single-threaded runtime). Keep the guard alive for the whole test.
+    fn capture_logs() -> (crate::logs::LogBuffer, tracing::subscriber::DefaultGuard) {
+        let logs = crate::logs::LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(logs.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .finish();
+        (logs, tracing::subscriber::set_default(subscriber))
+    }
+
+    /// How many turn ends the daemon skipped the stall for because of background work.
+    /// This is the positive signal that the spawned turn-end work ran and chose to wait:
+    /// a fixed sleep, or a count of live tasks, can say "done" before it has run at all.
+    fn skipped(logs: &crate::logs::LogBuffer) -> usize {
+        logs.tail(10_000)
+            .iter()
+            .filter(|l| l.contains(crate::handoff::BACKGROUND_WAIT_LOG))
+            .count()
+    }
+
+    /// Polls (25 ms steps, up to 10 s) until `done` holds.
+    async fn until<F, Fut>(what: &str, mut done: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        for _ in 0..400 {
+            if done().await {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    /// Posts a turn end with background work running and waits until the daemon has
+    /// skipped its stall (the `n`th skip in `logs`).
+    async fn background_stop(app: &AppState, logs: &crate::logs::LogBuffer, n: usize) {
+        post(app, RUNNING).await;
+        until("the stall to be skipped", || async { skipped(logs) >= n }).await;
+    }
+
+    /// Waits until `name` has been recorded `n` times for the task.
+    async fn until_events(app: &AppState, key: &TaskKey, name: &str, n: usize) {
+        until(name, || async { count(app, key, name).await >= n }).await;
+    }
+
+    async fn autopilot(app: &AppState, key: &TaskKey) -> Autopilot {
+        let task = app.store.get_task(key).await.unwrap().unwrap();
+        task.autopilot.unwrap()
+    }
+
+    async fn count(app: &AppState, key: &TaskKey, name: &str) -> usize {
+        let events = app.store.events(key).await.unwrap();
+        events.iter().filter(|e| e.event.name() == name).count()
+    }
+
+    async fn untouched(app: &AppState, key: &TaskKey) {
+        let a = autopilot(app, key).await;
+        assert_eq!(a.state, AutopilotState::Running, "{a:?}");
+        assert_eq!(a.nudged, None);
+        assert_eq!(count(app, key, "autopilot-nudged").await, 0);
+        assert_eq!(count(app, key, "autopilot-paused").await, 0);
+    }
+
+    /// The step's one nudge was taken, once, and nothing paused.
+    async fn nudged_once(app: &AppState, key: &TaskKey, step: Step) {
+        let a = autopilot(app, key).await;
+        assert_eq!(a.state, AutopilotState::Running, "{a:?}");
+        assert_eq!(a.nudged, Some(step));
+        assert_eq!(count(app, key, "autopilot-nudged").await, 1);
+        assert_eq!(count(app, key, "autopilot-paused").await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_plan_turn_end_with_background_work_is_not_a_stall() {
+        let (logs, _g) = capture_logs();
+        let (app, key, _fx) = on_autopilot(Step::Plan, None).await;
+        background_stop(&app, &logs, 1).await;
+        untouched(&app, &key).await;
+    }
+
+    #[tokio::test]
+    async fn repeated_background_turn_ends_never_nudge_or_pause() {
+        let (logs, _g) = capture_logs();
+        let (app, key, _fx) = on_autopilot(Step::Plan, None).await;
+        for n in 1..=3 {
+            background_stop(&app, &logs, n).await;
+            untouched(&app, &key).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_implement_turn_end_with_background_work_is_not_a_stall() {
+        let (logs, _g) = capture_logs();
+        let (app, key, _fx) = on_autopilot(Step::Implement, Some(TASKS)).await;
+        for n in 1..=3 {
+            background_stop(&app, &logs, n).await;
+            untouched(&app, &key).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn the_plan_handoff_still_starts_with_background_work_running() {
+        let (app, key, _fx) = on_autopilot(Step::Plan, Some("- [ ] T001 One\n")).await;
+        post(&app, RUNNING).await;
+        // The handoff ran: the implementation's session exists (or the handoff is on record).
+        until("the handoff to the implementation", || async {
+            let sessions = app.store.open_sessions(Some(key.as_str())).await.unwrap();
+            let task = app.store.get_task(&key).await.unwrap().unwrap();
+            sessions.iter().any(|s| s.step == Some(Step::Implement))
+                || task.handoff.is_some_and(|h| h.to == Step::Implement)
+        })
+        .await;
+    }
+
+    const TASKS: &str = "- [ ] T001 One\n- [ ] T002 Two\n";
+
+    /// FR-003 / SC-002: a turn end that reports no background work running is a stall
+    /// as before: one nudge, then a pause with the unchecked tasks as the reason.
+    async fn nudges_then_pauses(fixture: &str) {
+        let (app, key, _fx) = on_autopilot(Step::Implement, Some(TASKS)).await;
+        post(&app, fixture).await;
+        until_events(&app, &key, "autopilot-nudged", 1).await;
+        nudged_once(&app, &key, Step::Implement).await;
+        post(&app, fixture).await;
+        until_events(&app, &key, "autopilot-paused", 1).await;
+        let a = autopilot(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused, "{a:?}");
+        let reason = a.reason.unwrap();
+        assert!(
+            reason.contains("2 tasks unchecked") || reason.contains("2 tareas sin marcar"),
+            "{reason}"
+        );
+        assert_eq!(count(&app, &key, "autopilot-nudged").await, 1);
+        assert_eq!(count(&app, &key, "autopilot-paused").await, 1);
+    }
+
+    #[tokio::test]
+    async fn all_background_work_finished_is_a_stall() {
+        nudges_then_pauses(DONE).await;
+    }
+
+    #[tokio::test]
+    async fn an_empty_background_list_is_a_stall() {
+        nudges_then_pauses(EMPTY).await;
+    }
+
+    #[tokio::test]
+    async fn no_background_field_is_a_stall() {
+        nudges_then_pauses(NO_FIELD).await;
+    }
+
+    #[tokio::test]
+    async fn waiting_on_background_work_does_not_spend_the_nudge() {
+        let (logs, _g) = capture_logs();
+        let (app, key, _fx) = on_autopilot(Step::Implement, Some(TASKS)).await;
+        for n in 1..=3 {
+            background_stop(&app, &logs, n).await;
+        }
+        untouched(&app, &key).await;
+        post(&app, EMPTY).await;
+        until_events(&app, &key, "autopilot-nudged", 1).await;
+        nudged_once(&app, &key, Step::Implement).await;
+    }
+
+    #[tokio::test]
+    async fn a_running_and_an_empty_turn_end_together_nudge_once() {
+        let (logs, _g) = capture_logs();
+        let (app, key, _fx) = on_autopilot(Step::Implement, Some(TASKS)).await;
+        tokio::join!(post(&app, RUNNING), post(&app, EMPTY));
+        // Both turn-end works have decided: one nudged, the other skipped its stall.
+        until_events(&app, &key, "autopilot-nudged", 1).await;
+        until("the stall to be skipped", || async { skipped(&logs) >= 1 }).await;
+        nudged_once(&app, &key, Step::Implement).await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_turn_with_background_work_still_pauses() {
+        let (app, key, _fx) = on_autopilot(Step::Implement, Some(TASKS)).await;
+        let mut hook: Value = serde_json::from_str(RUNNING).unwrap();
+        hook["hook_event_name"] = "StopFailure".into();
+        let q = HookQuery {
+            task: "PROJ-1".into(),
+            session: Some("s-1".into()),
+        };
+        apply_hook(app.clone(), q, hook).await;
+        until_events(&app, &key, "autopilot-paused", 1).await;
+        let a = autopilot(&app, &key).await;
+        assert_eq!(a.state, AutopilotState::Paused, "{a:?}");
+        assert_eq!(count(&app, &key, "autopilot-nudged").await, 0);
+    }
+}
+
+#[cfg(test)]
 mod limit_tests {
     use axum::body::Body;
     use axum::http::Request;
