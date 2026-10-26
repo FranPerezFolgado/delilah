@@ -461,6 +461,15 @@ second. If the connection drops (the daemon restarts or updates), the app
 reconnects by itself and fetches everything again. A full refresh every 30 s
 stays as a safety net.
 
+**Agent permissions.** Ajustes → «Permisos de los agentes» chooses how Claude decides what
+needs your approval, for task and project sessions in both the terminal and chat mode:
+«Auto» (the default) lets Claude's auto mode handle routine work, so it stops asking for
+every command; «Por defecto de Claude» launches Claude with no mode flag. It applies to
+sessions you start or reopen from then on; running ones are not restarted. Idea
+conversations and read-only sessions keep their own modes. If Claude refuses auto mode at
+start (an account without it), the error says to try «Por defecto de Claude». Actions
+auto mode still escalates show as "¿Permitir?" cards in chat mode.
+
 **Language.** Spanish or English, picked in Ajustes (Automatic follows the Mac). It
 covers the interface, the Mac menu (from the next time the app opens), the
 notifications, and what Delilah writes to Claude (the message after a usage

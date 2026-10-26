@@ -140,6 +140,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
   - the usage-limit notice does not show in the conversation view;
   - the "Creada desde la conversación" label is not shown in the backlog view, only once the task starts;
   - `/hooks/claude` has no authentication, so a local process that knows a project session id could forge a `Nueva tarea` card (the user still has to click `Crear`).
+- **Agent permissions** (spec `009-chat-mode-permissions`, decision [#80](decisions.md)): the `agent-permissions` preference (Ajustes → «Permisos de los agentes»: Auto by default, or «Por defecto de Claude») sets the mode of task and project sessions in both runtimes, so chat mode (`claude -p`, which ignores the user's interactive default) no longer asks for every action. A CLI that rejects the mode at start (an account without auto) fails with a hint to try «Por defecto de Claude», on both runtimes.
+- **Agent permissions, limits:** auto mode's own classifier decides; the spike found no harmless action that auto escalates, so whether an escalation arrives as `can_use_tool` or `permission_denied` is unverified (Delilah handles both); the default widens the terminal for users whose Claude default is not auto; running sessions keep their mode until relaunched.
 - **Chat mode, limits and known problems:**
   - experimental: a stuck chat-mode agent has no terminal; switch back with `delilah runtime <KEY> terminal` (refused mid-turn: press "Detener" first);
   - only task Claude sessions: project sessions, idea conversations and shells always use a PTY;

@@ -277,24 +277,24 @@ after a relaunch.
 
 ## Phase 6: Polish and cross-cutting
 
-- [ ] T021 [P] `docs/status.md`:
+- [X] T021 [P] `docs/status.md`:
   - in "Chat mode, limits and known problems", say chat mode now gets the agent
     permission setting (Auto by default) and stops asking for routine work;
   - add the setting to what is built;
   - note the remaining limit: auto mode's own decisions, and an account without auto
     fails at start with a hint.
-- [ ] T022 [P] `docs/architecture.md`:
+- [X] T022 [P] `docs/architecture.md`:
   - the launch flags per session kind (the table from data-model.md);
   - the `agent-permissions` preference and its validation;
   - in the Chat mode section, how the mode reaches both runtimes.
-- [ ] T023 [P] `docs/decisions.md`: add the next numbered decision, "Agent permission
+- [X] T023 [P] `docs/decisions.md`: add the next numbered decision, "Agent permission
   mode is a Delilah setting applied to both runtimes, Auto by default (2026-10-26)". It
   covers:
   - the cause (print mode ignores the interactive default) and the probe numbers;
   - why a setting and not always-auto-in-chat or reading `~/.claude.json`;
   - that the default widens the terminal for users whose Claude default is not auto;
   - that #43 is unchanged.
-- [ ] T024 [P] `README.md`: the setting in the Ajustes or chat-mode section, as the user
+- [X] T024 [P] `README.md`: the setting in the Ajustes or chat-mode section, as the user
   sees it.
 - [ ] T025 Verify in a preview, following `specs/009-chat-mode-permissions/quickstart.md`
   (`scripts/preview.sh --fresh` in the background; never the installed app). Use the
