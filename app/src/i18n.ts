@@ -19,7 +19,7 @@ let current: Lang = "en";
 /** The rule is in specs/008-public-repo-onboarding/contracts/language.md. */
 export function detect(setting: unknown): Lang {
   if (setting === "es" || setting === "en") return setting;
-  const system = typeof navigator !== "undefined" ? navigator?.language : undefined;
+  const system = typeof navigator !== "undefined" ? navigator.language : undefined;
   return typeof system === "string" && system.toLowerCase().startsWith("es") ? "es" : "en";
 }
 

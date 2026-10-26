@@ -26,14 +26,14 @@ Environment (for `scripts/test-install.sh`; not advertised in the README):
 
 ## Behaviour
 
-1. Requires macOS (`uname -s` = `Darwin`) on `arm64`. Otherwise exit 2: "Delilah needs a Mac with Apple Silicon".
+1. Requires macOS (`uname -s` = `Darwin`) on `arm64`. A shell under Rosetta (`uname -m` = `x86_64`) counts as `arm64` when `sysctl -n hw.optional.arm64` is `1`. Otherwise exit 2: "Delilah needs a Mac with Apple Silicon".
 2. Requires `curl`, `shasum`, `tar` and `ditto` (all ship with macOS). If one is missing, exit 2 and name it.
-3. Downloads `Delilah_aarch64.app.tar.gz` and `SHA256SUMS` into a `mktemp -d` dir that is removed on exit (`trap`), with `curl -fL --retry 2`.
-4. `SHA256SUMS` missing (HTTP 404) → exit 3 with a hint about `DELILAH_SKIP_CHECKSUM=1`, unless that variable is set.
+3. Downloads `Delilah_aarch64.app.tar.gz` and `SHA256SUMS` into a `mktemp -d` dir that is removed on exit (`trap`), with `curl -fL --retry 2` (https only, also on redirects, TLS 1.2+, unless `DELILAH_BASE_URL` is set).
+4. `SHA256SUMS` missing (HTTP 404, or a missing `file://` in tests) → exit 3 with a hint about `DELILAH_SKIP_CHECKSUM=1`, unless that variable is set. Any other failure to fetch it is a download error (exit 9), even with that variable set.
 5. Checks the archive's line in `SHA256SUMS`. On a mismatch, exit 4. Nothing is installed or removed.
-6. Extracts into the temp dir. The archive must contain exactly `Delilah.app`, or exit 5.
+6. Extracts into the temp dir. The archive must contain exactly `Delilah.app`, a directory and not a symlink, or exit 5.
 7. If Delilah is running (`pgrep -x delilah-app`, the app's process name), exit 6: "Quit Delilah first". It never kills it.
-8. If `$INSTALL_DIR/Delilah.app` exists: asks for confirmation (unless `--yes`/no TTY), moves it aside to `Delilah.app.old-<pid>`, `ditto`s the new app into place, and removes the old copy only after the copy succeeds. If the copy fails, it restores the old one and exits 7.
+8. If `$INSTALL_DIR/Delilah.app` exists: asks for confirmation (unless `--yes`/no TTY), `ditto`s the new app into a `mktemp -d` staging dir `Delilah.app.new.XXXXXX` next to the target, moves the old one into `Delilah.app.old.XXXXXX`, moves the new one into place, and removes the old copy only after that succeeds. If the copy fails, it restores the old one and exits 7.
 9. Never runs `sudo` on its own. If `$INSTALL_DIR` isn't writable, exit 8 and suggest re-running with `sudo` or `DELILAH_INSTALL_DIR=~/Applications`.
 10. Clears `com.apple.quarantine` defensively (`xattr -dr`, ignoring errors). `curl` doesn't set it, but a copied file might inherit it.
 11. Prints the installed version (from `Contents/Info.plist` `CFBundleShortVersionString`) and "Open it with: open -a Delilah". It does not launch the app.

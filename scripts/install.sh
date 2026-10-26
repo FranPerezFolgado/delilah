@@ -11,6 +11,11 @@ SUMS="SHA256SUMS"
 BASE_URL="${DELILAH_BASE_URL:-$REPO_URL}"
 INSTALL_DIR="${DELILAH_INSTALL_DIR:-/Applications}"
 ARCH="${DELILAH_ARCH:-$(uname -m)}"
+# A shell running under Rosetta reports x86_64 on an Apple Silicon Mac.
+if [ -z "${DELILAH_ARCH:-}" ] && [ "$ARCH" = "x86_64" ] &&
+  [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = "1" ]; then
+  ARCH="arm64"
+fi
 
 usage() {
   cat <<USAGE
@@ -57,8 +62,11 @@ NEW=""
 FINAL=""
 cleanup() {
   # If an install was interrupted after moving the old app aside, put it back.
-  if [ -n "$OLD" ] && [ -d "$OLD" ] && [ -n "$FINAL" ] && [ ! -e "$FINAL" ]; then
-    mv "$OLD" "$FINAL" 2>/dev/null || true
+  if [ -n "$OLD" ] && [ -d "$OLD/Delilah.app" ] && [ -n "$FINAL" ] && [ ! -e "$FINAL" ]; then
+    mv "$OLD/Delilah.app" "$FINAL" 2>/dev/null || true
+  fi
+  if [ -n "$OLD" ] && [ ! -e "$OLD/Delilah.app" ]; then
+    rm -rf "${OLD:?}"
   fi
   if [ -n "$NEW" ] && [ -d "$NEW" ]; then
     rm -rf "${NEW:?}"
@@ -68,20 +76,29 @@ cleanup() {
 trap cleanup EXIT
 
 # Plain https unless the base URL is overridden (tests use file://).
-fetch() { # fetch <name>
+fetch() { # fetch <name> [extra curl args...]
+  local name="$1"
+  shift
   if [ -z "${DELILAH_BASE_URL:-}" ]; then
-    curl -fL --retry 2 --proto '=https' --tlsv1.2 -sS -o "$TMP/$1" "$BASE_URL/$1"
-  else
-    curl -fL --retry 2 -sS -o "$TMP/$1" "$BASE_URL/$1"
+    set -- --proto '=https' --proto-redir '=https' --tlsv1.2 "$@"
   fi
+  curl -fL --retry 2 -sS "$@" -o "$TMP/$name" "$BASE_URL/$name"
 }
 
 # 3. Download
 echo "Downloading $ASSET ..."
 fetch "$ASSET" || die 9 "could not download $BASE_URL/$ASSET"
 
+# Only a missing file means "no checksums" (HTTP 404, or curl's 37 for a missing file://);
+# any other failure is a download error, never a reason to skip the check.
 HAVE_SUMS=1
-if ! fetch "$SUMS" 2>/dev/null; then
+SUMS_RC=0
+SUMS_HTTP="$(fetch "$SUMS" -w '%{http_code}' 2>"$TMP/sums.err")" || SUMS_RC=$?
+if [ "$SUMS_RC" -ne 0 ]; then
+  if [ "$SUMS_HTTP" != "404" ] && [ "$SUMS_RC" -ne 37 ]; then
+    cat "$TMP/sums.err" >&2
+    die 9 "could not download $BASE_URL/$SUMS"
+  fi
   HAVE_SUMS=0
   if [ "${DELILAH_SKIP_CHECKSUM:-}" != "1" ]; then
     die 3 "this release has no $SUMS, so the download can't be verified.
@@ -105,7 +122,7 @@ fi
 mkdir -p "$TMP/extract"
 tar -xzf "$TMP/$ASSET" -C "$TMP/extract" || die 5 "could not extract $ASSET"
 ENTRIES="$(ls -A "$TMP/extract")"
-if [ "$ENTRIES" != "Delilah.app" ] || [ ! -d "$TMP/extract/Delilah.app" ]; then
+if [ "$ENTRIES" != "Delilah.app" ] || [ -L "$TMP/extract/Delilah.app" ] || [ ! -d "$TMP/extract/Delilah.app" ]; then
   die 5 "the archive must contain exactly Delilah.app"
 fi
 
@@ -133,21 +150,23 @@ if [ -e "$FINAL" ]; then
   fi
 fi
 
-NEW="$INSTALL_DIR/Delilah.app.new-$$"
-if ! ditto "$TMP/extract/Delilah.app" "$NEW"; then
+# Staging dirs come from mktemp, so nobody else can plant a path the install would use.
+NEW="$(mktemp -d "$INSTALL_DIR/Delilah.app.new.XXXXXX")" || die 7 "could not stage the app in $INSTALL_DIR"
+if ! ditto "$TMP/extract/Delilah.app" "$NEW/Delilah.app"; then
   die 7 "copying the app failed; any previous install is untouched"
 fi
 # Clear quarantine defensively (curl doesn't set it, a copied file might carry it)
-xattr -dr com.apple.quarantine "$NEW" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$NEW/Delilah.app" 2>/dev/null || true
 
 if [ -e "$FINAL" ]; then
-  OLD="$INSTALL_DIR/Delilah.app.old-$$"
-  mv "$FINAL" "$OLD" || die 7 "could not move the existing app aside"
+  OLD="$(mktemp -d "$INSTALL_DIR/Delilah.app.old.XXXXXX")" || die 7 "could not move the existing app aside"
+  mv "$FINAL" "$OLD/Delilah.app" || die 7 "could not move the existing app aside"
 fi
-if ! mv "$NEW" "$FINAL"; then
-  if [ -n "$OLD" ]; then mv "$OLD" "$FINAL" || true; fi
+if ! mv "$NEW/Delilah.app" "$FINAL"; then
+  if [ -n "$OLD" ]; then mv "$OLD/Delilah.app" "$FINAL" || true; fi
   die 7 "install failed; the previous app was restored"
 fi
+rm -rf "${NEW:?}"
 NEW=""
 if [ -n "$OLD" ]; then
   rm -rf "${OLD:?}"

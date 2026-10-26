@@ -111,7 +111,12 @@ mod tests {
 
     #[test]
     fn explicit_preference_wins() {
-        for langs in [apple("es-ES"), apple("en-US"), String::new(), "garbage".into()] {
+        for langs in [
+            apple("es-ES"),
+            apple("en-US"),
+            String::new(),
+            "garbage".into(),
+        ] {
             assert_eq!(resolve(Some("en"), &langs), Lang::En);
             assert_eq!(resolve(Some("es"), &langs), Lang::Es);
         }

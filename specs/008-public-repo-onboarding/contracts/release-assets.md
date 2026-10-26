@@ -15,15 +15,18 @@ Asset names other than `SHA256SUMS` are not changed by this feature.
 ## `SHA256SUMS`
 
 - Format: `shasum -a 256` output, one line per asset (`<64 hex>  <name>`), sorted by name.
-  It covers every other asset of the release, as downloaded from the draft release.
+  It covers every other asset of the release, as downloaded from the draft release (a
+  `SHA256SUMS` left by an earlier run of the same tag is dropped before hashing).
 - Uploaded before the release is published. A release is never published without it.
 
 ## Build provenance
 
 - `actions/attest-build-provenance@v3` runs over the same downloaded files
-  (`$RUNNER_TEMP/dist/*`) before the release is published. `SHA256SUMS` is written outside
-  that dir, so it is not attested; the assets it lists are.
-- Verify: `gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`.
+  (`$RUNNER_TEMP/dist/*`) and over `SHA256SUMS` before the release is published. The
+  checksums only prove a download is intact; the attestation proves the files (and the
+  checksums) were built by this repository's workflow.
+- Verify: `gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`
+  (or `SHA256SUMS`).
 - Workflow permissions: `contents: write`, `id-token: write`, `attestations: write`.
 
 ## Unchanged

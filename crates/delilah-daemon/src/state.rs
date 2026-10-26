@@ -102,15 +102,8 @@ impl AppState {
             events,
             asks: Arc::default(),
             permissions: Arc::default(),
-            // English unless told otherwise (decision 81); unit tests keep their Spanish
-            // fixtures and set English where they need it.
-            lang: {
-                let lang = crate::lang::Current::default();
-                if cfg!(test) {
-                    lang.set(crate::lang::Lang::Es);
-                }
-                lang
-            },
+            // English unless told otherwise (decision 81).
+            lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
             transcript_seen: Arc::default(),
             handoffs: Arc::default(),

@@ -40,7 +40,10 @@ is what it does and does not defend against, checked against the code.
   `app/src-tauri/tauri.conf.json`; releases are built and signed by the release workflow
   with the private key held as a repository secret. Releases carry a
   `SHA256SUMS` file and a build provenance attestation (verify with
-  `shasum -a 256 -c SHA256SUMS --ignore-missing` and `gh attestation verify`).
+  `shasum -a 256 -c SHA256SUMS --ignore-missing` and `gh attestation verify`). The
+  checksums are an integrity check only, since they come from the same release; the
+  attestation (which also covers `SHA256SUMS`) is what ties the files to this
+  repository's workflow. `scripts/install.sh` checks the checksum, not the attestation.
 
 ## Known limits
 

@@ -65,6 +65,10 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah
 ```
 
+The checksum only shows the download is intact (`SHA256SUMS` comes from the same
+release). The attestation shows the file was built by this repository's release
+workflow; `SHA256SUMS` itself is attested too.
+
 ### Build from source
 
 You need the Xcode Command Line Tools, Rust and Node 22 or later:

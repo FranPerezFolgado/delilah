@@ -27,12 +27,17 @@ export function problems({ versions, expected, env = {}, publishedTags = [], pub
 
 function publishedTags() {
   try {
-    const json = execFileSync("gh", ["release", "list", "--json", "tagName,isDraft"], {
+    const json = execFileSync("gh", ["release", "list", "--limit", "1000", "--json", "tagName,isDraft"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
     return JSON.parse(json).filter((r) => !r.isDraft).map((r) => r.tagName);
   } catch {
+    // In CI (the release workflow sets GH_TOKEN) a gh failure must not turn the check off.
+    if (process.env.CI) {
+      console.error("error: gh release list failed; can't check whether this version is already published");
+      process.exit(1);
+    }
     console.error("note: gh not available (or not logged in); skipping the published-release check");
     return [];
   }

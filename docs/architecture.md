@@ -1,6 +1,6 @@
 # Architecture
 
-How Delilah is built today. User-facing behaviour is in the [README](../README.md).
+How Delilah is built today. User-facing behaviour is in [usage.md](usage.md).
 The reasons behind these choices are in [decisions.md](decisions.md), and what is
 done or pending is in [status.md](status.md).
 

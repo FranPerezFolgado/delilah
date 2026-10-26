@@ -134,7 +134,7 @@ test("my flow", async ({ page, project, scenario }) => {
 - **Migrations** are a new `crates/delilah-daemon/migrations/NNNN_name.sql`. Never edit one that has shipped, and keep them additive (existing databases are migrated in place). A migration renumbered by a merge (as `0011_idea_conversations` → `0014`) breaks a preview home that already applied the old number: start that preview with `--fresh`.
 - **Status changes** go through `AppState::transition` (`transitions.rs`), so events and notifications fire. **Phase changes** go through `phases::advance` (forward only) or `phases::set` (the user).
 - **Events:** after a change a client must see, emit the right `Topic`.
-- **UI texts** are Spanish inside `t()` / `tn()`, with the English in `app/src/i18n/en/<Component>.ts` (one file per component, merged by `en.ts`; `legacy.ts` holds what has no owner yet). `i18n/coverage.test.ts` fails on a literal without a key. Run vitest with `--no-cache` after adding a file there (the glob list is cached). The daemon picks its texts with `app.lang().pick(es, en)`.
+- **UI texts** are Spanish inside `t()` / `tn()`, with the English in `app/src/i18n/en/<Component>.ts` (one file per component, merged by `en.ts`; `legacy.ts` holds what has no owner yet). `i18n/coverage.test.ts` fails on a literal without a key. Run vitest with `--no-cache` after adding a file there (the glob list is cached). The daemon picks its texts with `app.lang().pick(es, en)`. `AppState::new` starts in English in tests too; the test kits (`pr_testkit`, `asks::tests::app`) and fixtures that assert Spanish texts call `app.lang.set(Lang::Es)`.
 - **CSS** is per component: `Component.css` next to `Component.tsx`, imported by it; `styles.css` holds only the tokens and the base. Kit components live in `app/src/components/ui/` and are imported from its barrel only. Colours come from tokens, never raw values.
 - **UI guards** (vitest, they fail the check): `tokens.test.ts` (contrast of every token pair, light and dark), `styles.test.ts` (font-size and radius scale, no raw colours, no removed tokens), `inline-style.test.ts` (inline `style={{` can only go down), `i18n/coverage.test.ts`.
 - **Tests:** each behaviour gets a test, named as a sentence (`signals_only_move_forward_but_the_user_moves_anywhere`). Daemon tests use `Store::in_memory()`, a `Config` with `notify: false`, and the in-memory secrets.
@@ -156,22 +156,23 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
 
 1. **On the feature branch**, bump the version as CLAUDE.md says, in its own commit
    `chore: bump version to X.Y.Z`: `scripts/bump-version.sh <major|minor|patch|X.Y.Z> [--commit]`.
-   It starts from the version on `origin/main`, writes the **four** places (`Cargo.toml`
+   It starts from the version on `origin/main` (an explicit `X.Y.Z` must be greater), writes the **four** places (`Cargo.toml`
    workspace, `app/src-tauri/Cargo.toml`, `app/package.json`,
    `app/src-tauri/tauri.conf.json`) and the three lockfiles (only their own version
    lines), regenerates `CHANGELOG.md` with `git cliff --tag vX.Y.Z -o CHANGELOG.md`
    (config in `cliff.toml`; needs `brew install git-cliff`, the script stops without it),
-   and with `--commit` makes the commit (changelog included). Check what is merged since the last tag
+   and with `--commit` commits only those files (changelog included), whatever else is staged. Check what is merged since the last tag
    with `git log vX.Y.Z..HEAD`.
 2. Merge the PR into `main`, then `git switch main && git pull`.
 3. `make release` on `main`. With neither `BUMP` nor `VERSION` it releases the version
    already in the files, which is the normal path after the branch bump. Use
    `BUMP=major|minor|patch` or `VERSION=X.Y.Z` only when the branch was not bumped (see
-   `pickVersion` in `scripts/release/cut.mjs`). Notes: `MESSAGE="…"`; `YES=1` skips the
+   `pickVersion` in `scripts/release/cut.mjs`); that path also regenerates `CHANGELOG.md`
+   with git-cliff, so it needs it installed. Notes: `MESSAGE="…"`; `YES=1` skips the
    confirmation. It checks that `gh` is logged in as `FranPerezFolgado`, that you are on
    `main`, level with `origin/main` and clean, bumps the four files only if they are not
    already at that version (refreshing the lockfiles with `cargo metadata` and
-   `npm install --package-lock-only`), commits `chore: release X.Y.Z`, creates the
+   `npm install --package-lock-only`, plus `CHANGELOG.md`), commits `chore: release X.Y.Z`, creates the
    annotated tag `vX.Y.Z` (its message is the release notes) and pushes `main` and the
    tag together.
    Variables are exported to `scripts/release/cut.mjs`, never interpolated.
@@ -181,7 +182,9 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    fetches the annotated tag (`git fetch --force --tags`), runs
    `scripts/release/check.mjs --require-secrets` (versions agree, the public key is
    not the `REPLACE_WITH_UPDATER_PUBKEY` placeholder, the secrets exist, `CHANGELOG.md`
-   has a `## [X.Y.Z]` section; if not, redo the bump on a branch), writes the
+   has a `## [X.Y.Z]` section (if not, redo the bump on a branch), and the version is not
+   already published (in CI a failing `gh release list` is an error; locally it only skips
+   that check)), writes the
    notes (the tag message, else the `feat`/`fix` subjects since the last tag),
    builds with tauri-action and uploads a **draft** release (`includeUpdaterJson:
    false`), builds `latest.json` itself with `manifest.mjs --write` from the local
@@ -190,9 +193,9 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    then publishes it (`gh release edit --draft=false --latest`). A failed run leaves
    at most a draft; re-running the same tag is safe. tauri-action's own
    `latest.json` is not used: it carries temporary `untagged-*` draft URLs (decision 62).
-   It also writes `SHA256SUMS` (`shasum -a 256` of every other asset, sorted by name,
-   outside the attested dir) and attests the assets with
-   `actions/attest-build-provenance@v3` before publishing; a release is never published
+   It also writes `SHA256SUMS` (`shasum -a 256` of every other asset, sorted by name;
+   a `SHA256SUMS` left by an earlier run of the tag is dropped first) and attests the
+   assets and `SHA256SUMS` with `actions/attest-build-provenance@v3` before publishing; a release is never published
    without them. The job needs `contents: write`, `id-token: write` and
    `attestations: write`.
 5. Installed apps check for it within 6 h (or at once with "Check for updates…").
@@ -202,7 +205,8 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
 `gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah`.
 
 **Testing the install script:** `scripts/test-install.sh` runs `scripts/install.sh` against
-local `file://` assets and a temporary install dir. The script reads `DELILAH_BASE_URL`,
+local `file://` assets and a temporary install dir, and (with `python3`) against a local HTTP
+server for the 404-versus-other-error cases of `SHA256SUMS`. The script reads `DELILAH_BASE_URL`,
 `DELILAH_INSTALL_DIR`, `DELILAH_ARCH` and `DELILAH_SKIP_CHECKSUM=1` (only for releases
 before 1.1.0, which have no `SHA256SUMS`; it never skips a mismatch).
 
