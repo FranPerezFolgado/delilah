@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { api, type Project, type Session, type SessionKind, type Task, type TreeEntry } from "../api";
 import { keyOf } from "../shortcuts";
 import { relativeTime } from "../time";
-import { Icon } from "./Icon";
+import { Button, Icon, Row } from "./ui";
 import { Markdown } from "./Markdown";
 import { kindLabel, sessionStatus } from "./sessionLabels";
-import { Button, Row } from "./ui";
 import { t } from "../i18n";
 import "./ProjectView.css";
 

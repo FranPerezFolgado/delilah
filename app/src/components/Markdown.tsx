@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { HEADING_PREFIX, headingIds, resolveRelative, safeUrl, slug, type DocContext } from "../markdown";
 import { openExternal } from "../platform";
 import { MarkdownImage } from "./MarkdownImage";
+import "./Markdown.css";
 
 interface Props {
   text: string;

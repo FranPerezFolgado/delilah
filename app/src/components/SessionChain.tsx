@@ -3,6 +3,7 @@ import { api, type Session, type Task } from "../api";
 import { chainOf, stepLabel, type ChainState } from "../chain";
 import { t } from "../i18n";
 import { HandoffActions } from "./HandoffActions";
+import "./SessionChain.css";
 
 const MARKS: Record<ChainState, string> = { done: "✓", active: "●", pending: "○", waiting: "⏳" };
 const STATES: Record<ChainState, string> = {

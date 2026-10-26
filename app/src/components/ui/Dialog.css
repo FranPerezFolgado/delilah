@@ -1,5 +1,5 @@
 .scrim { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: var(--scrim); }
-.dialog { border-radius: 14px; background: var(--dialog); border: 1px solid var(--bd2); box-shadow: var(--shadow);
+.dialog { width: 520px; text-align: left; border-radius: 14px; background: var(--dialog); border: 1px solid var(--bd2); box-shadow: var(--shadow);
   display: flex; flex-direction: column; max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); min-width: 360px; color: var(--tx); }
 .dialog:focus { outline: none; }
 .dialog-hd { margin: 0; padding: 18px 22px 0; font-size: 15px; font-weight: 600; color: var(--tx-strong); }

@@ -1,0 +1,12 @@
+/* Moved from the pre-v2 stylesheet. */
+.diff { flex: 1; min-height: 0; overflow: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.5; padding-bottom: 24px; }
+.dl { display: grid; grid-template-columns: 48px 48px 1fr; min-width: max-content; }
+.dl .ln { color: var(--tx3); text-align: right; padding-right: 10px; user-select: none; -webkit-user-select: none; }
+.dl .code { white-space: pre; padding-right: 16px; }
+.dl .sign { display: inline-block; width: 16px; color: var(--tx3); user-select: none; -webkit-user-select: none; }
+.dl.add { background: var(--add-bg); }
+.dl.add .sign { color: var(--add-tx); }
+.dl.del { background: var(--del-bg); }
+.dl.del .sign { color: var(--err); }
+.dl.hunk { background: var(--hunk-bg); color: var(--run-tx); margin-top: 6px; }
+.dl.note { color: var(--tx3); font-style: italic; }

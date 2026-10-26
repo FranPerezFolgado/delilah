@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ASK_POSITIONS, type AskPosition, type Health } from "../api";
 import { isDesktop, revealInFinder } from "../platform";
-import { Button } from "./ui/Button";
-import { Row } from "./ui/Row";
-import { Segmented } from "./ui/Segmented";
-import { Toggle } from "./ui/Toggle";
+import { Button, Row, Segmented, Toggle } from "./ui";
 import "./SettingsView.css";
 import { locale, t, type LangSetting } from "../i18n";
 import type { UpdateMeta } from "../updates";

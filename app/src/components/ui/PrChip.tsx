@@ -1,7 +1,7 @@
 import type { PrSnapshot } from "../../api";
 import { t } from "../../i18n";
 import { prStateOf, type PrState } from "../../vocab";
-import { Icon } from "../Icon";
+import { Icon } from "./Icon";
 import "./PrChip.css";
 
 export interface PrChipProps {

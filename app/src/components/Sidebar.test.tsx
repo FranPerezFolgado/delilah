@@ -321,6 +321,13 @@ describe("Sidebar at scale", () => {
     expect(keys().length).toBe(6);
   });
 
+  it("keeps the current task visible even past the cap", () => {
+    const { keys, getByRole } = setup(many, [], { selected: "PROJ-8" });
+    expect(keys()).toEqual(["PROJ-1", "PROJ-2", "PROJ-3", "PROJ-4", "PROJ-5", "PROJ-6", "PROJ-8"]);
+    fireEvent.click(getByRole("button", { name: "Mostrar 1 más" }));
+    expect(keys().length).toBe(8);
+  });
+
   it("filters tasks by title or key", () => {
     const { keys, getByLabelText } = setup(many);
     fireEvent.change(getByLabelText("Filtrar tareas"), { target: { value: "proj-8" } });

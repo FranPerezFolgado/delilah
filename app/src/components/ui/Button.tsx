@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes } from "react";
-import { Icon, type IconName } from "../Icon";
+import { Icon, type IconName } from "./Icon";
 import "./Button.css";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";

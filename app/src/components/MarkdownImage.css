@@ -1,0 +1,4 @@
+/* Moved from the pre-v2 stylesheet. */
+.md-img-alt .mono { font-style: normal; margin-left: 6px; }
+.md-img-alt { color: var(--tx3); font-style: italic; }
+.md-img-ask { font-size: 12px; height: auto; padding: 2px 8px; border: 1px dashed var(--bd2); }

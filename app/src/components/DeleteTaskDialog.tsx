@@ -1,19 +1,22 @@
 import { useRef, useState } from "react";
 import { api, ApiError, isActive, type Task } from "../api";
 import { t } from "../i18n";
-import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { ConfirmDialog } from "./ui";
 
 interface Props {
   task: Task;
   onClose: () => void;
   onDeleted: (key: string) => void;
+  /** Opens straight at «Eliminar igualmente»: the caller already got the unpushed refusal. */
+  startForced?: boolean;
 }
 
 /** Confirms deleting a task for good, on the kit's ConfirmDialog. Unpushed work in its
- *  worktree needs a second, explicit «Eliminar igualmente»; until then nothing is stopped. */
-export function DeleteTaskDialog({ task, onClose, onDeleted }: Props) {
+ *  worktree needs a second, explicit «Eliminar igualmente»; until then nothing is stopped.
+ *  With `startForced` the refusal already happened elsewhere, so it opens at that step. */
+export function DeleteTaskDialog({ task, onClose, onDeleted, startForced = false }: Props) {
   const [error, setError] = useState<string | null>(null);
-  const [unpushed, setUnpushed] = useState(false);
+  const [unpushed, setUnpushed] = useState(startForced);
   const busy = useRef(false);
 
   const remove = async (force: boolean) => {

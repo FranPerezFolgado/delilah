@@ -11,3 +11,6 @@
 .conv-compose { flex: none; display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--bd); }
 .conv-compose textarea { flex: 1; resize: none; min-height: 40px; }
 .conv-key { margin-left: 4px; opacity: .7; font-size: 12px; }
+
+/* Moved from the pre-v2 stylesheet. */
+.conv { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }

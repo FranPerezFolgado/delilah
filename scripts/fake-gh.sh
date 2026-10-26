@@ -31,7 +31,14 @@ case "${1:-} ${2:-}" in
     fi
     ;;
   "pr list")
-    cat "$dir/pr-list.json"
+    # Like gh: --head keeps only the PRs of that branch (entries without headRefName stay).
+    python3 -I -c '
+import json, sys
+head = sys.argv[2]
+prs = json.load(open(sys.argv[1]))
+if head and isinstance(prs, list):
+    prs = [p for p in prs if p.get("headRefName", head) == head]
+json.dump(prs, sys.stdout)' "$dir/pr-list.json" "$(flag --head)"
     ;;
   "pr view")
     n="${3:-}"

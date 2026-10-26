@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { t } from "../i18n";
 import { api, ApiError, type Session } from "../api";
-import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { Segmented } from "./ui/Segmented";
+import { ConfirmDialog, Segmented } from "./ui";
 import "./SessionViewSwitch.css";
 
 export type SessionView = "chat" | "terminal";

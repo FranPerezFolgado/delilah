@@ -1,0 +1,11 @@
+/* Moved from the pre-v2 stylesheet. */
+.chain-step .btn { height: 22px; padding: 0 8px; font-size: 12px; }
+.chain .error { flex-basis: 100%; }
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: none; padding: 6px 14px; background: var(--panel); border-bottom: 1px solid var(--bd); font-size: 12px; }
+.chain-step { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; color: var(--tx3); }
+.chain-arrow { color: var(--tx3); }
+.chain-name { font-weight: 600; }
+.chain-step.is-done { color: var(--ok-tx); }
+.chain-step.is-active { color: var(--tx); }
+.chain-step.is-active .chain-mark { color: var(--run); }
+.chain-step.is-waiting { color: var(--wait-tx); }

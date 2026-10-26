@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ago, api, ApiError, type MergeMethod, type PrCheck, type PullRequest, type TaskPrs } from "../api";
+import { api, ApiError, type MergeMethod, type PrCheck, type PullRequest, type TaskPrs } from "../api";
 import { on } from "../live";
 import { openExternal } from "../platform";
 import { PR_CI, REVIEWS } from "./PrBadge";
@@ -184,7 +184,7 @@ export function PrView({ owner, onOpenTerminal }: { owner: string; onOpenTermina
             <b>{HEADLINES[problem.kind] ? t(HEADLINES[problem.kind]) : problem.message}</b>
             {FIXES[problem.kind] && <div>{t(FIXES[problem.kind])}</div>}
             {(problem.kind === "network" || problem.kind === "rate-limited") && checked && (
-              <span className="muted">{t("comprobado {when}", { when: ago(checked) })}</span>
+              <span className="muted">{t("comprobado {when}", { when: relativeTime(checked) })}</span>
             )}
             <div className="pr-problem-actions">
               {onOpenTerminal && (problem.kind === "signed-out" || problem.kind === "missing") && (
@@ -310,7 +310,7 @@ function PrCard({
         {s?.review_decision && <span>{t(REVIEWS[s.review_decision])}</span>}
         {s && <span>{t("{n} comentarios", { n: s.comments })}</span>}
         {s && <span>{t(PR_CI[s.ci])}</span>}
-        {pr.checked_at && <span>{t("comprobado {when}", { when: ago(pr.checked_at) })}</span>}
+        {pr.checked_at && <span>{t("comprobado {when}", { when: relativeTime(pr.checked_at) })}</span>}
       </div>
       {pr.error && <div className="c-err pr-meta">{pr.error}</div>}
       {s && s.checks.length > 0 && (

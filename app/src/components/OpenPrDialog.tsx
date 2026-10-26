@@ -3,6 +3,7 @@ import { api, type PrProposal, type PullRequest } from "../api";
 import { t } from "../i18n";
 import { Button, Dialog } from "./ui";
 import "./PrView.css";
+import "./OpenPrDialog.css";
 
 interface Props {
   owner: string;

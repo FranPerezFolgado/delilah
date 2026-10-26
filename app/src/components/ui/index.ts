@@ -27,3 +27,5 @@ export { PrChip } from "./PrChip";
 export type { PrChipProps } from "./PrChip";
 export { PhaseBars } from "./PhaseBars";
 export type { PhaseBarsProps } from "./PhaseBars";
+export { Icon } from "./Icon";
+export type { IconName } from "./Icon";

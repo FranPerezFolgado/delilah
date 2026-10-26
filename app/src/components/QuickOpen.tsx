@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { t, tn } from "../i18n";
-import { Dialog } from "./ui/Dialog";
+import { Dialog } from "./ui";
 import "./QuickOpen.css";
 
 const SHOWN = 50;

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Autopilot, SpecPhase, PrSummary, Project, SpecSummary, Task } from "../api";
 import { BOARD_COLUMNS, COLUMNS, boardColumnOf, headerPhaseOf } from "../phases";
-import { t } from "../i18n";
+import { t, tn } from "../i18n";
 import { relativeTime } from "../time";
 import { statusOf, type StatusTone } from "../vocab";
-import { Icon } from "./Icon";
+import { Button, Count, Icon, PhaseBars, PrChip, Segmented, Skeleton, StatusBadge } from "./ui";
 import { FirstRun } from "./FirstRun";
-import { Button, Count, PhaseBars, PrChip, Segmented, Skeleton, StatusBadge } from "./ui";
 import "./BoardView.css";
 
 interface Props {
@@ -135,7 +134,7 @@ export function BoardView({
         {hiddenCols > 0 && (
           <div className="board-more">
             <button onClick={() => boardRef.current?.scrollBy({ left: boardRef.current.clientWidth, behavior: "smooth" })}>
-              {t("{n} columnas más", { n: hiddenCols })} ›
+              {tn(hiddenCols, "{n} columna más", "{n} columnas más")} ›
             </button>
           </div>
         )}

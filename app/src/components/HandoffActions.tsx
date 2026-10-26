@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ago, api, type Autopilot, type Handoff } from "../api";
+import { api, type Autopilot, type Handoff } from "../api";
 import { t } from "../i18n";
+import { relativeTime } from "../time";
 import { Button } from "./ui";
-import "./TaskView.css";
+import "./HandoffActions.css";
 
 interface Props {
   task: string;
@@ -48,10 +49,10 @@ export function HandoffActions({ task, handoff, autopilot, onDone, hideError }: 
   return (
     <>
       {autopilot?.state === "paused" && (
-        <div className="autopilot-banner ha-banner">
+        <div className="ha-banner">
           <strong>{t("Autopiloto en pausa")}</strong>
           {autopilot.reason && <span className="selectable">{autopilot.reason}</span>}
-          {autopilot.since && <span className="muted">{t("en pausa desde {when}", { when: ago(autopilot.since) })}</span>}
+          {autopilot.since && <span className="muted">{t("en pausa desde {when}", { when: relativeTime(autopilot.since) })}</span>}
           <Button variant="primary" size={28} disabled={busy} onClick={() => autopilotAct("resume")}>
             {t("Reanudar autopiloto")}
           </Button>

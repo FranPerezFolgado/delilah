@@ -1,6 +1,5 @@
 .tv { display: flex; flex-direction: column; gap: 16px; }
 .tv-grow { flex: 1; min-width: 0; }
-.tv-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tv-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .tv-meta { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; flex-wrap: wrap; color: var(--tx2); font-size: 13.5px; }
 .tv-branch { color: var(--tx); }
@@ -18,7 +17,7 @@
 .tv-empty { padding: 10px 12px; color: var(--tx2); font-size: 13.5px; }
 .tv-srow { display: flex; align-items: center; gap: 10px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--bd); }
 .tv-srow:last-child { border-bottom: 0; }
-.tv-dot { width: 8px; height: 8px; border-radius: 7px; background: var(--neutral); flex: none; }
+.tv-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral); flex: none; }
 .tv-dot-run { background: var(--run); }
 .tv-dot-wait { background: var(--wait); }
 .tv-sname { font-weight: 600; }
@@ -27,21 +26,3 @@
 .tv-ev:last-child { border-bottom: 0; }
 .tv-when { color: var(--tx3); }
 .tv-history .sk-group { padding: 10px 12px; }
-.tv-bar { width: 120px; height: 6px; border-radius: 7px; background: var(--bd); overflow: hidden; }
-.tv-bar > span { display: block; height: 100%; }
-.tv-bar-run { background: var(--tx-strong); }
-.tv-bar-ok { background: var(--ok); }
-.tv-count { color: var(--tx2); font-size: 12px; }
-.tv-files { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tv-dir { color: var(--tx2); font-size: 12px; margin-right: 4px; }
-.tv-chip { height: 22px; padding: 0 8px; border: 1px solid var(--bd2); border-radius: 7px; background: transparent; color: var(--tx2); font-size: 12px; cursor: pointer; }
-.tv-chip:hover { color: var(--tx); border-color: var(--tx3); }
-.tv-checklist details + details { border-top: 1px solid var(--bd); }
-.tv-checklist summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 13.5px; font-weight: 600; }
-.tv-check { display: flex; align-items: flex-start; gap: 8px; padding: 5px 12px 5px 20px; font-size: 13.5px; }
-.tv-check.is-done { color: var(--tx3); }
-.tv-check.is-current { background: var(--sel); }
-.tv-box { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--bd2); border-radius: 7px; }
-.tv-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 7px; background: var(--neutral-bg); color: var(--neutral-tx); font-size: 12px; }
-.tv-tag-run { background: var(--sel); color: var(--tx-strong); }
-.ha-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

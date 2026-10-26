@@ -4,10 +4,7 @@ import { branchName } from "../branchName";
 import { t } from "../i18n";
 import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
-import { Button } from "./ui/Button";
-import { Dialog } from "./ui/Dialog";
-import { Segmented } from "./ui/Segmented";
-import { Toggle } from "./ui/Toggle";
+import { Button, Dialog, Segmented, Toggle } from "./ui";
 import "./NewTaskDialog.css";
 
 /** A ticket to start from, e.g. picked in the Jira view. */

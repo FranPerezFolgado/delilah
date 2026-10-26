@@ -3,9 +3,8 @@ import {
   api, ApiError, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
   type JiraSprintFilter, type JiraWho, type Task, type TaskStatus,
 } from "../api";
-import { Icon } from "./Icon";
+import { Button, Icon, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
 import { Markdown } from "./Markdown";
-import { Button, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
 import { openExternal } from "../platform";
 import { t, tn } from "../i18n";
 import { useBreakpoints } from "../useWidth";

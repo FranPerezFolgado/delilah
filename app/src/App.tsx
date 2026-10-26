@@ -553,6 +553,7 @@ export function App() {
       {deleting && (
         <DeleteTaskDialog
           task={deleting}
+          startForced
           onClose={() => setDeleting(null)}
           onDeleted={(key) => {
             setDeleting(null);

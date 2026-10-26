@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type SetupInfo, type Task } from "../api";
 import { t } from "../i18n";
 import { openExternal } from "../platform";
-import { Icon } from "./Icon";
-import { Button, pushToast } from "./ui";
+import { Button, Icon, pushToast } from "./ui";
 import "./SetupBanner.css";
 
 interface Props {

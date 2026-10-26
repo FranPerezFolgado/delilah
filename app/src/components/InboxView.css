@@ -24,3 +24,6 @@
 .ib-overlay { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); z-index: 21; background: var(--panel);
   border-left: 1px solid var(--bd); box-shadow: var(--shadow); }
 .ib-close { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+
+/* Moved from the pre-v2 stylesheet. */
+.tag { font-size: 12px; padding: 0 5px; border: 1px solid var(--bd2); border-radius: 7px; color: var(--tx3); white-space: nowrap; }

@@ -64,4 +64,16 @@ describe("DeleteTaskDialog", () => {
     fireEvent.click(buttons[0]);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("startForced opens at «Eliminar igualmente» and forces on the first click", async () => {
+    const del = vi.spyOn(api, "deleteTask").mockResolvedValueOnce(null);
+    const onDeleted = vi.fn();
+    const { getByRole, getByText, queryByText } = render(<DeleteTaskDialog task={running} onClose={() => {}} onDeleted={onDeleted} startForced />);
+    expect(queryByText("Eliminar tarea")).toBeNull();
+    expect(getByRole("dialog").textContent).toContain("Hay trabajo sin subir");
+    fireEvent.click(getByText("Eliminar igualmente"));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("PROJ-1"));
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(del).toHaveBeenCalledWith("PROJ-1", true);
+  });
 });

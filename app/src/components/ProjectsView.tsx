@@ -2,10 +2,9 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type Project, type Task } from "../api";
 import { t, tn } from "../i18n";
-import { Icon } from "./Icon";
+import { Button, ConfirmDialog, Dialog, Icon, IconButton, Menu } from "./ui";
 import { ProjectSettings } from "./ProjectSettings";
 import { AddProjectDialog } from "./AddProjectDialog";
-import { Button, ConfirmDialog, Dialog, IconButton, Menu } from "./ui";
 import "./ProjectsView.css";
 
 interface Props {

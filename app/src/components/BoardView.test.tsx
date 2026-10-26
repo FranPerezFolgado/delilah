@@ -154,3 +154,36 @@ it("has no hint when every column fits", () => {
   setup([task("A-1")]);
   expect(screen.queryByRole("button", { name: /columnas más/ })).toBeNull();
 });
+
+it("each card shows its own task's PR, never another task's", () => {
+  setup([task("A-1", { status: { type: "done" } }), task("A-2", { status: { type: "running" } })], {
+    prs: [
+      { task: "A-2", state: "open", draft: false, ci: "failure", review_decision: null, count: 1, number: 14 },
+      { task: "A-1", state: "merged", draft: false, ci: "success", review_decision: null, count: 1, number: 12 },
+    ],
+  });
+  const done = screen.getByRole("link", { name: "A-1 Title A-1" });
+  expect(within(done).getByText("#12")).not.toBeNull();
+  expect(within(done).queryByText("#14")).toBeNull();
+  expect(within(screen.getByRole("link", { name: "A-2 Title A-2" })).getByText("#14")).not.toBeNull();
+});
+
+it("one hidden column reads in the singular", () => {
+  const defs = ["clientWidth", "offsetLeft", "offsetWidth"].map((k) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, k));
+  const isBoard = (el: HTMLElement) => el.classList.contains("board");
+  const isCol = (el: HTMLElement) => el.classList.contains("col");
+  const index = (el: HTMLElement) => [...el.parentElement!.children].indexOf(el);
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get() { return isBoard(this) ? 1160 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get() { return isCol(this) ? 220 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "offsetLeft", { configurable: true, get() { return isCol(this) ? index(this) * 232 : 0; } });
+  try {
+    setup([task("A-1")]);
+    // only the 6th column (ends at 1380 > 1161) is cut
+    expect(screen.getByRole("button", { name: /columna más/ }).textContent).toBe("1 columna más ›");
+  } finally {
+    ["clientWidth", "offsetLeft", "offsetWidth"].forEach((k, i) => {
+      if (defs[i]) Object.defineProperty(HTMLElement.prototype, k, defs[i]!);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[k];
+    });
+  }
+});

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { api } from "../api";
 import { setLanguage } from "../i18n";
-import { ToastHost, clearToasts } from "./ui/Toast";
+import { clearToasts, ToastHost } from "./ui";
 import { ProposalCard } from "./ProposalCard";
 
 beforeEach(() => setLanguage("es"));

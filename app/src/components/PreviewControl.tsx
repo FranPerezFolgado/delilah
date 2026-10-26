@@ -3,8 +3,7 @@ import { api, ApiError, type PreviewView, type TaskStatus } from "../api";
 import { t } from "../i18n";
 import { on } from "../live";
 import { openExternal } from "../platform";
-import { Button } from "./ui/Button";
-import { Menu } from "./ui/Menu";
+import { Button, Menu } from "./ui";
 import "./PreviewControl.css";
 
 interface Props {

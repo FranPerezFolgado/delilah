@@ -855,15 +855,6 @@ export const statusLabel = (s: TaskStatus): string => {
   }
 };
 
-/** "hace 5 min", "hace 2 h", "ayer"… */
-export function ago(iso: string): string {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return t("ahora");
-  if (s < 3600) return t("hace {n} min", { n: Math.floor(s / 60) });
-  if (s < 86400) return t("hace {n} h", { n: Math.floor(s / 3600) });
-  return s < 172800 ? t("ayer") : t("hace {n} días", { n: Math.floor(s / 86400) });
-}
-
 export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
 
 /** The live text of a chat-mode session: deltas of the message being written, then `done`. */

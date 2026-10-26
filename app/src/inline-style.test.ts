@@ -1,32 +1,10 @@
-// Ratchet: inline `style={{` may only go down. Each file's count is capped by its entry;
-// a file not listed may have none. Lower a number when you remove inline styles.
+// Final allow-list of inline `style={{`: each file's count must equal its entry;
+// a file not listed may have none.
 import { describe, expect, it } from "vitest";
 
-const BASELINE: Record<string, number> = {
-  "App.tsx": 2,
-  "components/BacklogTaskView.tsx": 5,
-  "components/BoardView.tsx": 4,
-  "components/ChangesView.tsx": 8,
-  "components/DeleteTaskDialog.tsx": 3,
-  "components/FileTree.tsx": 4,
-  "components/InboxView.tsx": 6,
-  "components/JiraView.tsx": 17,
-  "components/LogsView.tsx": 5,
-  "components/NewTaskDialog.tsx": 16,
-  "components/OpenPrDialog.tsx": 3,
-  "components/PrView.tsx": 3,
-  "components/ProjectSettings.tsx": 3,
-  "components/ProjectView.tsx": 8,
-  "components/ProjectsView.tsx": 21,
-  "components/QuickOpen.tsx": 2,
-  "components/SettingsView.tsx": 26,
-  "components/SetupBanner.tsx": 3,
-  "components/Sidebar.tsx": 10,
-  "components/SpecPanel.tsx": 12,
-  "components/StatusBar.tsx": 7,
-  "components/TaskScreen.tsx": 14,
-  "components/TaskView.tsx": 15,
-  "components/UpdateNotice.tsx": 1,
+// Only values that are computed at run time may be inline; everything else is a class.
+const ALLOWED: Record<string, number> = {
+  "components/TaskScreen.tsx": 1, // --tree-w, the dragged width of the project tree
 };
 
 const files = import.meta.glob<string>("./**/*.{ts,tsx}", {
@@ -35,15 +13,15 @@ const files = import.meta.glob<string>("./**/*.{ts,tsx}", {
   eager: true,
 });
 
-describe("inline style ratchet", () => {
+describe("inline style allow-list", () => {
   it("no file exceeds its baseline", () => {
     const over: string[] = [];
     for (const [file, src] of Object.entries(files)) {
       if (/\.test\.tsx?$/.test(file)) continue;
       const rel = file.replace(/^\.\//, "");
       const n = (src.match(/style=\{\{/g) ?? []).length;
-      const max = BASELINE[rel] ?? 0;
-      if (n > max) over.push(`${rel}: ${n} > ${max}`);
+      const max = ALLOWED[rel] ?? 0;
+      if (n !== max) over.push(`${rel}: ${n} instead of ${max}`);
     }
     expect(over).toEqual([]);
   });

@@ -9,14 +9,14 @@
 .ttab-main { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .ttab-label { overflow: hidden; text-overflow: ellipsis; }
 .ttab.file .ttab-label { font-family: var(--mono, ui-monospace, monospace); font-size: 13.5px; }
-.ttab-dot { width: 7px; height: 7px; flex: none; border-radius: 7px; background: var(--tx3); }
+.ttab-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--tx3); }
 .ttab-dot.run { background: var(--run); }
 .ttab-dot.wait { background: var(--wait); }
 .ttab-x { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px;
   background: transparent; color: var(--tx3); cursor: pointer; }
 .ttab-x:hover { background: var(--hov); color: var(--tx); }
 .ttab-x svg.i { width: 12px; height: 12px; }
-.ttab-dirty { width: 7px; height: 7px; border-radius: 7px; background: var(--tx2); }
+.ttab-dirty { width: 7px; height: 7px; border-radius: 50%; background: var(--tx2); }
 .ttabs-end { display: flex; align-items: center; flex: none; gap: 4px; padding: 0 8px; }
 .ttabs-more, .ttabs-new { height: 26px; padding: 0 10px; border-radius: 7px; background: transparent; color: var(--tx2); font: inherit; font-size: 13.5px; cursor: pointer; white-space: nowrap; }
 .ttabs-more { border: 0; }

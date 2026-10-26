@@ -8,6 +8,7 @@ import { actionFor } from "../shortcuts";
 import { AGENT_NEW_LINE, isAgentNewLineKey } from "../keys";
 import { t as tr } from "../i18n";
 import { cssVar, onSchemeChange } from "../theme";
+import "./TerminalPane.css";
 
 /** xterm's colours from the app's tokens, read when the scheme changes. */
 const xtermTheme = () => ({

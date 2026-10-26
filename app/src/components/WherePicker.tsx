@@ -1,6 +1,6 @@
 import type { Project } from "../api";
 import { t } from "../i18n";
-import { OptionCard } from "./ui/OptionCard";
+import { OptionCard } from "./ui";
 import "./WherePicker.css";
 
 export type Where = "checkout" | "worktree";

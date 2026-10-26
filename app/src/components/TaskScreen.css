@@ -7,3 +7,35 @@
 .ts-term.off { display: none; }
 .ehost.ts-off { display: none; }
 .ts-preview { margin-left: auto; height: 20px; }
+
+/* Moved from the pre-v2 stylesheet. */
+.md-preview > .md { max-width: 860px; font-size: 13.5px; }
+.tmain > .view-body, .tmain > .changes { flex: 1; min-height: 0; }
+.tpanel-head .sec { flex: 1; }
+.btn.is-on { color: var(--tx-strong); }
+.tterm .pane-term { flex: 1; min-width: 0; min-height: 0; }
+.ask-top { flex-direction: column-reverse; }
+.ask-bottom { flex-direction: column; }
+.ask-right { flex-direction: row; }
+.md-preview { flex: 1; min-height: 0; overflow: auto; padding: 16px 24px; background: var(--term-bg); }
+.tscreen { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
+.tscreen.with-tree { grid-template-columns: minmax(0, 1fr) max(180px, min(var(--tree-w, 260px), calc(100% - 320px))); }
+.tmain { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.tpanel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--bd); background: var(--side); }
+.tpanel-head { display: flex; align-items: center; gap: 2px; height: 32px; flex: none; padding: 0 6px 0 12px; border-bottom: 1px solid var(--bd); }
+.icon-btn { height: 24px; padding: 0 5px; }
+.epath { display: flex; align-items: center; gap: 12px; height: 26px; flex: none; padding: 0 14px; font-size: 12px; border-bottom: 1px solid var(--bd); }
+.ebar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex: none; background: var(--panel); border-bottom: 1px solid var(--bd); font-size: 12px; }
+.ebar.warn { background: var(--wait-bg); }
+.ehost { flex: 1; min-height: 0; background: var(--term-bg); }
+.tterm { flex: 1; min-height: 0; flex-direction: column; background: var(--term-bg); container-type: inline-size; }
+.tterm-body { flex: 1; min-height: 0; display: flex; }
+.ehost .cm-editor { height: 100%; }
+.ask-bar { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; background: var(--panel); overflow-y: auto; }
+.ask-top .ask-bar { border-bottom: 1px solid var(--bd); max-height: 50%; }
+.ask-bottom .ask-bar { border-top: 1px solid var(--bd); max-height: 50%; }
+.ask-right .ask-bar { width: 320px; border-left: 1px solid var(--bd); }
+@container (max-width: 760px) {
+  .ask-right { flex-direction: column; }
+  .ask-right .ask-bar { width: auto; border-left: 0; border-top: 1px solid var(--bd); max-height: 50%; }
+}

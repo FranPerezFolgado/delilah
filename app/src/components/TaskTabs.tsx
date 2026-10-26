@@ -2,9 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { keyOf } from "../shortcuts";
 import type { SessionDot } from "../vocab";
-import { Icon } from "./Icon";
-import { Count } from "./ui/Count";
-import { Menu } from "./ui/Menu";
+import { Count, Icon, Menu } from "./ui";
 import "./TaskTabs.css";
 
 export interface TaskTabItem {

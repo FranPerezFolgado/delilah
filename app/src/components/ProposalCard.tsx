@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
 import { Markdown } from "./Markdown";
-import { Button } from "./ui/Button";
-import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { pushToast } from "./ui/Toast";
+import { Button, ConfirmDialog, pushToast } from "./ui";
 import "./ProposalCard.css";
 
 /** How long «Deshacer» works before the discard is sent to the daemon. */

@@ -26,3 +26,6 @@
 .ac-text { margin: 0; line-height: 1.5; }
 .ac-hint { margin: 0; color: var(--tx3); font-size: 12px; }
 .ac-err { color: var(--err-tx); background: var(--err-bg); border-radius: 7px; padding: 8px 10px; font-size: 13.5px; }
+
+/* Moved from the pre-v2 stylesheet. */
+.ask { display: flex; flex-direction: column; gap: 12px; }

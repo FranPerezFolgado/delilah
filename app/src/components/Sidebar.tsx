@@ -1,9 +1,8 @@
 import { useState } from "react";
 import type { Project, PrSummary, Session, Task } from "../api";
 import { keyOf, type ActionId } from "../shortcuts";
-import { Icon, type IconName } from "./Icon";
+import { ConfirmDialog, Count, Icon, IconButton, type IconName, Menu, Row } from "./ui";
 import { PrBadge } from "./PrBadge";
-import { ConfirmDialog, Count, IconButton, Menu, Row } from "./ui";
 import { sessionDot, statusOf } from "../vocab";
 import { t, tn } from "../i18n";
 import "./Sidebar.css";
@@ -272,8 +271,10 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
         const count = g.sessions.length + g.allTasks.length;
         const tones = [...new Set(g.allTasks.map((t) => statusOf(t.status).tone))].slice(0, 4);
         const open = showAll.has(id) || !!q;
-        const shown = open ? g.tasks : g.tasks.slice(0, VISIBLE_TASKS);
+        // Past the cap the current task still shows, so the row you are on never disappears.
+        const shown = open ? g.tasks : g.tasks.filter((x, i) => i < VISIBLE_TASKS || x.key === selected);
         const hidden = g.tasks.length - VISIBLE_TASKS;
+        const hiddenNow = g.tasks.length - shown.length;
         const backlogOpen = openBacklogs.has(id) || !!q;
         const owner = g.owner;
         const name = g.project?.name ?? t("Sin proyecto");
@@ -361,12 +362,12 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
                 />
               ))}
             {!folded && shown.map(taskRow)}
-            {!folded && !q && hidden > 0 && (
+            {!folded && !q && (open ? hidden > 0 : hiddenNow > 0) && (
               <Row
                 className="sb-row sb-more"
                 aria-expanded={open}
                 onClick={() => toggleAll(id)}
-                title={open ? t("Mostrar menos") : t("Mostrar {n} más", { n: hidden })}
+                title={open ? t("Mostrar menos") : t("Mostrar {n} más", { n: hiddenNow })}
               />
             )}
             {!folded && g.backlog.length > 0 && (

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type ChangeKind, type FileChange, type RepoChanges } from "../api";
-import { Icon } from "./Icon";
-import { Button, Skeleton } from "./ui";
+import { Button, Icon, Skeleton } from "./ui";
 import "./ChangesView.css";
 import { DiffRows, type DiffRowData } from "./DiffRows";
 import { t, tn } from "../i18n";

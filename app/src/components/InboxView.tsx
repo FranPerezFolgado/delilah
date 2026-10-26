@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, hhmm, type Handoff, type InboxItem } from "../api";
 import { HandoffActions } from "./HandoffActions";
-import { Icon } from "./Icon";
+import { Button, Count, Icon, InboxKind, pushToast, Row, Skeleton } from "./ui";
 import { AskCard } from "./AskCard";
 import { locale, t } from "../i18n";
 import { isSendKey } from "../keys";
@@ -10,7 +10,6 @@ import { openExternal } from "../platform";
 import { relativeTime } from "../time";
 import { useBreakpoints } from "../useWidth";
 import { kindOf } from "../vocab";
-import { Button, Count, InboxKind, Row, Skeleton, pushToast } from "./ui";
 import "./InboxView.css";
 
 // Where the webview cannot size a textarea to its text, it is done by hand.

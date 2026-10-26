@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { t } from "../i18n";
 import type { Autopilot } from "../api";
-import { Button } from "./ui/Button";
-import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { Toggle } from "./ui/Toggle";
+import { Button, ConfirmDialog, Toggle } from "./ui";
 import "./AutopilotControls.css";
 
 export interface AutopilotControlsProps {

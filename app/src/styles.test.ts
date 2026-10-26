@@ -19,9 +19,6 @@ const sources = import.meta.glob<string>("./**/*.{ts,tsx}", { query: "?raw", imp
 
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
 const LIGHT_RE = /@media\s*\(prefers-color-scheme:\s*light\)\s*\{\s*:root\s*\{[^}]*\}\s*\}/;
-/** Everything in styles.css below this comment is the pre-v2 stylesheet that T096 deletes. */
-const LEGACY_MARKER = "/* LEGACY";
-
 const rel = (f: string) => f.replace(/^\.\//, "");
 
 /** A stylesheet without comments and, for styles.css, without the two token blocks. */
@@ -108,6 +105,7 @@ function violations(css: string): string[] {
       for (const v of vals) {
         const n = parseFloat(v);
         if (/^(0|inherit|initial|unset)$/.test(v)) continue;
+        if (prop === "border-radius" && v === "50%") continue; // round dots and marks
         const ok = (prop === "font-size" ? FONT_SIZES : RADII).has(n) && v.endsWith("px");
         if (ok) continue;
         if (sels.every((s) => ALLOW[s]?.[prop]?.includes(n) && v.endsWith("px"))) continue;
@@ -119,24 +117,21 @@ function violations(css: string): string[] {
 }
 
 describe("type and radius scale", () => {
-  const scoped = Object.entries(sheets).map(([f, raw]) => {
-    const b = body(f, raw);
-    // comments are stripped from `b`, so locate the marker in the raw text
-    const rawIdx = rel(f) === "styles.css" ? raw.indexOf(LEGACY_MARKER) : -1;
-    const legacy = rawIdx >= 0 ? body(f, raw.slice(rawIdx)) : "";
-    const base = rawIdx >= 0 ? body(f, raw.slice(0, rawIdx) + "\n") : b;
-    return { file: rel(f), base, legacy };
-  });
-
   it("font sizes 19/15/13.5/12 and radii 7/10/14/11, plus the documented allow-list", () => {
-    const bad = scoped.flatMap((s) => violations(s.base).map((v) => `${s.file}: ${v}`));
+    const bad = Object.entries(sheets).flatMap(([f, raw]) => violations(body(f, raw)).map((v) => `${rel(f)}: ${v}`));
     expect(bad).toEqual([]);
   });
 
-  // PENDING: the pre-v2 rules below the LEGACY marker of styles.css use the old sizes; the
-  // screens that own them migrate to co-located sheets and T096 deletes the marker and all.
-  it("pending: the LEGACY section exists only while it still has violations", () => {
-    const s = scoped.find((x) => x.file === "styles.css")!;
-    expect(s.legacy.length > 0).toBe(violations(s.legacy).length > 0);
+  it("the pre-v2 LEGACY section of styles.css is gone", () => {
+    expect(sheets["./styles.css"]).not.toContain("LEGACY");
+  });
+
+  it("round dots and marks use border-radius: 50%", () => {
+    const round = ".sb-dot, .sb-hot, .tv-dot, .ttab-dot, .ttab-dirty, .preview-dot, .fr-mark".split(", ");
+    const all = Object.values(sheets).map(strip).join("\n");
+    for (const c of round) {
+      const rules = [...all.matchAll(new RegExp(`${c.replace(".", "\\.")}\\b[^{}]*\\{([^{}]*)\\}`, "g"))].map((m) => m[1]);
+      expect(rules.some((r) => /border-radius:\s*50%/.test(r)), c).toBe(true);
+    }
   });
 });
