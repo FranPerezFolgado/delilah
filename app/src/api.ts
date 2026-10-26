@@ -420,12 +420,28 @@ export interface ToolEntry {
   message_id?: string;
 }
 
+/** Parsed background-task notification or hand-back, carried by a "background-done" marker. */
+export type BackgroundInfo = {
+  source: "notification" | "handback";
+  task_id?: string;
+  kind: "agent" | "command" | "task";
+  label?: string;
+  status?: string;
+  exit_code?: number;
+  duration_ms?: number;
+  tool_uses?: number;
+  tokens?: number;
+  report?: string;
+  report_truncated?: boolean;
+  report_in_handback?: boolean;
+};
+
 /** One entry of a conversation. */
 export type ConversationEntry =
   | { id: string; at: string; kind: "user"; text: string; state: "queued" | "sent" | "delivered"; from: "view" | "terminal" }
   | { id: string; at: string; kind: "claude"; text: string; message_id?: string }
   | ToolEntry
-  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" | "background-done"; detail?: string }
+  | { id: string; at: string; kind: "marker"; marker: "compacted" | "stopped" | "background-done"; detail?: string; background?: BackgroundInfo }
   | QuestionCardEntry
   | PermissionCardEntry;
 
