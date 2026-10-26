@@ -46,7 +46,7 @@ parallel (different files, no dependency on an unfinished task).
 - [X] T009 [P] [US1] Extend `app/e2e/screens.spec.ts` with `DELILAH_SCREENS_LANG=en` (set the `language` preference to `"en"` through the API before capturing) and an `DELILAH_SCREENS_ONLY` filter on screen names. Then run it as `docs/redesign/README.md` says, with `DELILAH_SCREENS=../docs/images` (or the spec's output-dir variable), `DELILAH_SCREENS_LANG=en` and `DELILAH_SCREENS_ONLY=Tablero`. Save the results as `docs/images/board-light.png` and `docs/images/board-dark.png` (1440×900, under 300 KB each; compress with `sips`/`pngquant` if needed). Never against 7420.
 - [X] T010 [P] [US1] Rename the work project name `plataforma` → `platform` in the test fixtures of `crates/delilah-daemon/src/session_api.rs` and `crates/delilah-daemon/src/store_projects.rs`, and in any other `git grep -n plataforma -- . ':!specs'` hit except README.md (rewritten in T012). Run `cargo test --workspace`.
 - [X] T011 [P] [US1] Translate the remaining Spanish prose and UI labels to English (labels from `app/src/i18n/en*.ts`) in `docs/architecture.md`, `docs/decisions.md`, `docs/development.md`, `docs/status.md`, `docs/vision.md` and `docs/adr/ADR-001-chat-mode-allow-always-allowlist.md`. Quoted UI strings become their English label, and code identifiers stay. In `docs/vision.md` replace the claude.ai design-doc link with a line saying this file is the public summary of the original design. In `docs/decisions.md` #24 and `docs/status.md`, reword "the work Mac" as "a real project".
-- [ ] T012 [US1] Rewrite `README.md` (< 200 lines) per plan Block A step 3:
+- [X] T012 [US1] Rewrite `README.md` (< 200 lines) per plan Block A step 3:
   - title and one-line pitch;
   - badges: CI (`.github/workflows/ci.yml`), license MIT, latest release, "macOS (Apple Silicon)";
   - a `<picture>` with `docs/images/board-dark.png` / `board-light.png`;
@@ -117,7 +117,7 @@ parallel (different files, no dependency on an unfinished task).
   - **Unsigned distribution**: no Apple Developer account; `install.sh` via curl, which sets no quarantine; checksums and build-provenance attestation for trust; ad-hoc signature kept. *Ruled out*: notarization (cost).
   - **No Homebrew tap for now** (research R1): Homebrew removes `--no-quarantine` and ends support for casks that fail Gatekeeper on 2026-09-01. An own tap with a `postflight` xattr is possible but adds a repo and a release step for the same trust trade as `install.sh`. Cite Homebrew/brew#20755.
 - [X] T023 [US2] Add the uninstall steps to `docs/usage.md` ("Uninstall": stop the daemon from the app menu, delete the app, `~/Library/LaunchAgents/dev.delilah.daemon.plist`, optionally `~/.delilah`). Write them in English from the old README text.
-- [ ] T024 [US2] Write the README "Install" section (`README.md`):
+- [X] T024 [US2] Write the README "Install" section (`README.md`):
   1. The script: `curl -fsSL https://raw.githubusercontent.com/FranPerezFolgado/delilah/main/scripts/install.sh | bash`, with one line on what it does and that it verifies the checksum.
   2. "Why unsigned": no paid Apple Developer account, so macOS blocks a downloaded copy.
   3. Manual download of the DMG, then either `xattr -dr com.apple.quarantine /Applications/Delilah.app` or System Settings › Privacy & Security › Open Anyway (after the first blocked launch); right-click › Open no longer works since macOS Sequoia.
