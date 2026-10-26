@@ -14,7 +14,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
 | WP-07 | 3 | 3B | pending | 0 | | |
 | WP-08 | 3 | 3C | pending | 0 | | |
-| WP-10 | 4 | 4A | implementing | 0 | | |
+| WP-10 | 4 | 4A | verified | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
 | WP-12 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4B | pending | 0 | | |
 | WP-13 | 4 | 4B | pending | 0 | | |
