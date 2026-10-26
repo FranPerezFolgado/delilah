@@ -24,7 +24,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-13 | 6 | 6A | done | 1 | 32649b4 | |
 | WP-14 | 6 | 6A | done | 1 | a608e92 | |
 | WP-12F | 6 | 6F | done | 1 | 781345b | blank custom message refused (3 reviewers, FR-012) |
-| WP-15 | 7 | 7A | pending | 0 | | |
+| WP-15 | 7 | 7A | verified | 1 | | |
 | WP-16 | 7 | 7B | pending | 0 | | |
 
 ## Open findings

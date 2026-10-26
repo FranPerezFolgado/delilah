@@ -59,7 +59,8 @@ Start resolution (`run.rs`):
 req.workflow/prompt ─┬─ prompt given, workflow absent → prompt(prompt)
                      ├─ "prompt" + prompt → prompt(prompt)   ("prompt" without prompt → 400)
                      ├─ "none" → nothing
-                     └─ "project"/"feature"/absent → task's stored choice
+                     ├─ "project"/"feature" → follow the project's workflow (stored as `project`)
+                     └─ absent → task's stored choice
 task stored        ─┬─ prompt + start_message → prompt(start_message)
                      ├─ prompt without message (legacy) → nothing
                      ├─ none → nothing

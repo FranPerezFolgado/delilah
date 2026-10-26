@@ -119,9 +119,9 @@ task comes before the task that implements it.
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T047 [P] `docs/decisions.md`: amend 15 (not always `/feature`) and 46 (autopilot ⇔ phased workflow), add a decision for per-project workflow commands (presets, `{task}`, migration to the `/feature` preset, `Project.workflow` deprecated)
-- [ ] T048 [P] `docs/usage.md`: "Flujo de trabajo" settings, presets, placeholders, skill list, per-task start, `--no-prompt`, doubling literal braces in `--prompt`, the official Spec Kit preset's limit (R6); `README.md`: a newcomer line saying tasks start with a built-in prompt and how to plug in a skill
-- [ ] T049 [P] `docs/status.md` (feature done; known debt: deprecated `Project.workflow`) and `docs/architecture.md` (workflow module, skills endpoint, start resolution)
+- [X] T047 [P] `docs/decisions.md`: amend 15 (not always `/feature`) and 46 (autopilot ⇔ phased workflow), add a decision for per-project workflow commands (presets, `{task}`, migration to the `/feature` preset, `Project.workflow` deprecated)
+- [X] T048 [P] `docs/usage.md`: "Flujo de trabajo" settings, presets, placeholders, skill list, per-task start, `--no-prompt`, doubling literal braces in `--prompt`, the official Spec Kit preset's limit (R6); `README.md`: a newcomer line saying tasks start with a built-in prompt and how to plug in a skill
+- [X] T049 [P] `docs/status.md` (feature done; known debt: deprecated `Project.workflow`) and `docs/architecture.md` (workflow module, skills endpoint, start resolution)
 - [ ] T050 Run `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx tsc --noEmit -p e2e && npx vitest run`, and `scripts/e2e.sh api`
 - [ ] T051 Walk quickstart.md §1–§5 in a preview (`scripts/preview.sh --fresh`, and a copy of a pre-upgrade state for §2)
 

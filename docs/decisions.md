@@ -139,6 +139,10 @@ of plan mode; a plugin passed to project-owned sessions.**
 **15. SpecKit is the first workflow, through the user's `/feature` wrapper.**
 Delilah starts `/feature <ticket or text>` and follows the spec files. It never
 drives SpecKit's phases itself, and the repo stays the source of truth.
+*Amended by 97 (2026-10-26):* `/feature` is no longer what every task starts with. It is
+one preset ("Spec Kit (`/feature`)") of the project's workflow commands; a project with
+nothing configured starts with a built-in prompt, and one that existed before the change
+was migrated to that preset, so it keeps starting with `/feature`.
 
 **16. Work in the checkout by default; worktree as an option; project sessions to
 ask.**
@@ -415,6 +419,10 @@ finish's writes also check they still belong to the same review session.
 Not a project session, not another workflow: without spec files there are no handoffs.
 Enforced on every entry point (task create, backlog, `PATCH`, the autopilot endpoint, the
 proposal card) with a 409 `not-spec-workflow`.
+*Amended by 97 (2026-10-26):* it means a task whose start resolves to a **phased** workflow
+(plan, implement and review commands set in the project), not the `feature` name. A task with
+the built-in prompt, a custom message or no first message has no handoffs, so it is refused the
+same way; the code `not-spec-workflow` stays.
 
 **47. Recovering an interrupted finish needs `Autopilot.review_session` (2026-10-22).** It
 names the outcome file to read. Autopilots stored before the field existed do not
@@ -807,3 +815,29 @@ widens exposure); Cloudflare Tunnel (public, and a third party sees the traffic)
 native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); Tailscale
 identity headers alone (forgeable by any local process).
 See the [research](../specs/008-mobile-access-analysis/research.md).
+
+**97. The commands Delilah sends are a per-project setting (2026-10-26).** A project's
+`ProjectSettings.workflow` is either `single` (one start: the built-in prompt, a message
+with placeholders, or nothing) or `phased` (a plan, an implement and a review command).
+Templates use `{ticket}`, `{title}` and `{task}` (`{spec_dir}` only in the implement
+command); `{{` and `}}` are literal braces; anything else, a blank command or a lone brace is
+a 422 with a stable code (`workflow.blank`, `workflow.unknown_placeholder`,
+`workflow.placeholder_not_allowed`, `workflow.unbalanced_brace`). `{task}` is the title for a
+free task (`LIBRE-n`) and the key otherwise. A new project has no workflow and starts with the
+built-in prompt, so a newcomer without the author's skills gets a working first task. Saving
+mode, autopilot and the phase hand-offs exist only for phased workflows, and the hand-offs
+send the project's commands. Presets fill the fields in one click: the built-in prompt,
+nothing, "Spec Kit (`/feature`)" (`/feature {task}`, `/orchestrate {spec_dir}` and today's
+review message) and "Spec Kit (oficial)". *Migration 0022:* every project that had no
+workflow gets the `/feature` preset (the review text in Spanish unless the language
+preference is `en`), so nothing changes for projects that already ran `/feature`; tasks
+stored as `feature` become `project`. A task can override the start (`project` | `prompt` with
+its own `start_message` | `none`) and a backlog task keeps it. The old string
+`projects.workflow` / `Project.workflow` is deprecated: kept in the data, ignored for new
+tasks (`delilah project add --workflow` warns and sends nothing). *Why:* the app has to work
+for people without `/feature`, and the author's flow becomes data instead of code.
+*Ruled out:* a `delilah.toml` in the repo (50); a template engine (four names do not need one);
+a flat struct with optional fields (blank checks everywhere); deciding at read time which
+projects are "old" (fragile). *Behaviour change:* a request prompt (`delilah run --prompt`,
+`prompt` on `POST /runs`) is now a template too, so a literal `{` or `}` must be doubled and an
+unknown placeholder is refused. See the [spec](../specs/011-configurable-task-start/spec.md).

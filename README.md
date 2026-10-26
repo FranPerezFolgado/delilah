@@ -95,6 +95,11 @@ Updates install from inside the app and are not quarantined; see
    Delilah builds the task's workspace and starts Claude Code on it.
 4. Follow it on the board and answer its questions and permission requests from the Inbox.
 
+A new task starts with a built-in prompt (the ticket and title, no skill needed). To start
+with your own skill or workflow instead, open the project's Settings › "Flujo de trabajo",
+pick a skill from the list or write a message, or choose a preset; see
+[Project settings](docs/usage.md#desktop-app).
+
 The desktop app is described in [docs/usage.md](docs/usage.md#desktop-app).
 
 ### Command line (optional)

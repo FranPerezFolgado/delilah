@@ -18,11 +18,14 @@ which requests still accept as an alias.
 
 ## `PUT /api/v1/projects/{name}/settings`
 
-Body: the whole `ProjectSettings`, now with `workflow`. Errors: 400 with `FieldError[]`
-(existing shape) for the codes in data-model.md, e.g.
+Body: the whole `ProjectSettings`, now with `workflow`. Errors: 422 `{error, fields}` where
+`fields` is a `FieldError[]` for the codes in data-model.md (`workflow.blank`,
+`workflow.unknown_placeholder`, `workflow.placeholder_not_allowed`,
+`workflow.unbalanced_brace`), e.g.
 
 ```json
-{ "errors": [ { "field": "workflow.implement", "code": "workflow.unknown_placeholder",
+{ "error": "invalid settings",
+  "fields": [ { "field": "workflow.implement", "code": "workflow.unknown_placeholder",
                 "message": "unknown placeholder {foo}" } ] }
 ```
 
@@ -43,8 +46,8 @@ Body: the whole `ProjectSettings`, now with `workflow`. Errors: 400 with `FieldE
 
 | Field | Before | After |
 |---|---|---|
-| `workflow` | free string, default project's (`feature`) | `project` (default) \| `prompt` \| `none`; `feature` accepted = `project`; anything else 400 |
-| `prompt` | runs: first message | runs: first message (implies `prompt`); **tasks: new**, stored as `start_message` |
+| `workflow` | free string, default project's (`feature`) | `project` \| `prompt` \| `none`; `feature` accepted = `project`; anything else 400. **`POST /tasks` without `workflow` stores `project`** (follows the project's workflow) |
+| `prompt` | runs: first message, sent as typed | runs: first message (implies `prompt`) and now **a template**: `{title}` `{ticket}` `{task}` expand, an unknown placeholder or a lone brace is a 422, literal braces are doubled (`{{` `}}`); **tasks: new**, stored as `start_message`. `workflow: "prompt"` needs a non-blank `prompt` |
 | `saving_mode`, `autopilot` | — | ignored/forced off when the resolved start is not phased; `autopilot: true` there → 409 `not-spec-workflow` (unchanged code) |
 
 ## `Task` (all task responses)
@@ -54,13 +57,14 @@ Body: the whole `ProjectSettings`, now with `workflow`. Errors: 400 with `FieldE
 
 ## `PATCH /api/v1/tasks/{key}` (backlog edit)
 
-Accepts `workflow` and `start_message` (validated like the settings templates; `prompt` needs a
-non-blank message). Refuses `autopilot` when the result would not be phased (409, unchanged).
+Accepts `workflow` and `start_message`. `workflow` is validated strictly (`project` | `prompt` |
+`none`; `feature` is accepted as `project`; anything else 400); `start_message` is validated like
+the settings templates (422 `{error, fields}`), and `prompt` needs a non-blank message. Refuses `autopilot` when the result would not be phased (409, unchanged).
 
 ## CLI
 
 - `delilah run` / `delilah new`: `--prompt <text>` unchanged; new `--no-prompt` (start `none`);
-  `--workflow` accepts `project|prompt|none` (and `feature`).
+  `--workflow` accepts only `project|prompt|none|feature` (the CLI rejects anything else).
 - `delilah project show <name>` prints the workflow (kind and commands).
 - Editing the workflow from the CLI is out of scope for v1 (the settings screen does it);
   `delilah project unset <name> workflow` goes back to the built-in prompt.
