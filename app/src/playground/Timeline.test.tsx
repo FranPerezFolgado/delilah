@@ -72,4 +72,18 @@ describe("Timeline", () => {
     expect(o.getAttribute("aria-label")).toContain("fallida");
     expect(o.getAttribute("aria-label")).toContain("10:42:05");
   });
+
+  it("labels helper and turn events by name, without a kind swatch", () => {
+    const rows = [
+      row(0, { event: "helper_started", kind: undefined, tool: undefined, target: undefined, role: "reviewer" }),
+      row(1, { event: "turn_over", kind: undefined, tool: undefined, target: undefined }),
+    ];
+    const { container } = render(<Timeline rows={rows} selected={null} onSelect={() => {}} />);
+    const opts = screen.getAllByRole("option");
+    expect(opts[0].textContent).toContain("ayudante entra");
+    expect(opts[0].textContent).toContain("reviewer");
+    expect(opts[1].textContent).toContain("fin del turno");
+    expect(opts[0].textContent).not.toContain("Otra");
+    expect(container.querySelectorAll(".timeline-swatch")).toHaveLength(0);
+  });
 });

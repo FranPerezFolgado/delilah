@@ -3,6 +3,7 @@
 .fv-head { display: flex; align-items: center; gap: 12px; height: 30px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--bd); font-size: 12px; color: var(--tx2); }
 .fv-title b { font-weight: 600; color: var(--tx); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .fv-spacer { flex: 1; }
+.fv-pill { padding: 0 8px; border-radius: 10px; background: var(--wait-bg); color: var(--wait-tx); white-space: nowrap; }
 .fv-zoom { display: inline-flex; gap: 4px; }
 .fv-zoom button { height: 22px; min-width: 22px; padding: 0 6px; border: 1px solid var(--bd2); border-radius: 7px; background: var(--panel); color: var(--tx2); font-size: 12px; }
 .fv-zoom button:hover { background: var(--hov); }

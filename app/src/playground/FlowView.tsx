@@ -6,6 +6,7 @@ import { buildFlow, type FlowNode } from "./flowModel";
 import { layoutFlow, type Box } from "./flowLayout";
 import { Timeline, formatTime } from "./Timeline";
 import { useActivityHistory } from "./useActivityHistory";
+import { useFloor } from "./useOffice";
 import "./FlowView.css";
 
 export interface FlowViewProps {
@@ -56,7 +57,8 @@ function useHidden(): boolean {
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 export function duration(n: FlowNode): string {
-  if (!n.end) return t("en curso");
+  if (n.state === "running") return t("en curso");
+  if (!n.end) return t("fin desconocido");
   const ms = Date.parse(n.end) - Date.parse(n.start);
   if (Number.isNaN(ms) || ms < 0) return "";
   if (ms < 1000) return `${ms} ms`;
@@ -69,7 +71,13 @@ export function duration(n: FlowNode): string {
 export function FlowView({ owner, online, headerExtra, className }: FlowViewProps) {
   const { startedAt, sessions, stale } = useActivityHistory(owner, online);
   const hidden = useHidden();
-  const model = useMemo(() => buildFlow({ started_at: startedAt ?? "", sessions }), [startedAt, sessions]);
+  const { floor } = useFloor(owner, online);
+  const liveKey = floor.leads.map((l) => l.session).filter(Boolean).join("\n");
+  const model = useMemo(
+    () => buildFlow({ started_at: startedAt ?? "", sessions }, liveKey ? liveKey.split("\n") : []),
+    [startedAt, sessions, liveKey],
+  );
+  const startTime = formatTime(model.notes.startedAt).slice(0, 5);
   const layout = useMemo(() => layoutFlow(model), [model]);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<Box | null>(null);
@@ -153,6 +161,7 @@ export function FlowView({ owner, online, headerExtra, className }: FlowViewProp
       <header className="fv-head">
         <span className="fv-title"><b>{owner}</b></span>
         <span className="fv-spacer" />
+        {floor.waiting > 0 && <span className="fv-pill">{t("{n} esperando", { n: floor.waiting })}</span>}
         <span className="fv-zoom">
           <button type="button" aria-label={t("Acercar")} onClick={() => zoom(0.8)}>+</button>
           <button type="button" aria-label={t("Alejar")} onClick={() => zoom(1.25)}>−</button>
@@ -161,9 +170,12 @@ export function FlowView({ owner, online, headerExtra, className }: FlowViewProp
         {headerExtra}
       </header>
       {stale && <div className="fv-banner" role="status">{t("Reconectando…")}</div>}
-      {model.notes.dropped && <p className="fv-note">{t("Se perdió parte del historial; el gráfico puede estar incompleto")}</p>}
+      {model.notes.dropped && <p className="fv-note">{t("La actividad más antigua ya no se muestra")}</p>}
+      {model.nodes.some((n) => n.noCalls) && <p className="fv-note">{t("Sin llamadas registradas para este agente")}</p>}
       {model.notes.empty ? (
-        <p className="fv-note">{t("Sin actividad registrada todavía")}</p>
+        <p className="fv-note">
+          {startTime ? t("Sin actividad desde que arrancó Delilah ({time})", { time: startTime }) : t("Sin actividad registrada todavía")}
+        </p>
       ) : (
         <div className="fv-body">
           <svg

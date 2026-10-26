@@ -1,5 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { t } from "../i18n";
+import { Icon, type IconName } from "../components/ui/Icon";
 import { useFloor } from "./useOffice";
 import { Floor } from "./Floor";
 import { FlowView } from "./FlowView";
@@ -44,9 +45,9 @@ function useOfficeView(): [View, (v: View) => void] {
 }
 
 function ViewToggle({ view, onChange }: { view: View; onChange(v: View): void }) {
-  const tabs: { value: View; label: string }[] = [
-    { value: "office", label: t("Oficina") },
-    { value: "flow", label: t("Flujo") },
+  const tabs: { value: View; label: string; icon: IconName }[] = [
+    { value: "office", label: t("Oficina"), icon: "office" },
+    { value: "flow", label: t("Flujo"), icon: "flow" },
   ];
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -65,6 +66,7 @@ function ViewToggle({ view, onChange }: { view: View; onChange(v: View): void })
           tabIndex={o.value === view ? 0 : -1}
           onClick={() => onChange(o.value)}
         >
+          <Icon name={o.icon} />
           {o.label}
         </button>
       ))}

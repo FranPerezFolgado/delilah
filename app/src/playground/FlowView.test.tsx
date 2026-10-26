@@ -16,6 +16,8 @@ const entries: HistoryEntry[] = [
 ] as HistoryEntry[];
 
 const hook = vi.hoisted(() => ({ value: { startedAt: "x", sessions: [] as unknown[], stale: false } }));
+const floorHook = vi.hoisted(() => ({ value: { floor: { leads: [] as { session?: string }[], waiting: 0 }, online: true } }));
+vi.mock("./useOffice", () => ({ useFloor: () => floorHook.value }));
 vi.mock("./useActivityHistory", () => ({ useActivityHistory: () => hook.value }));
 
 const setHistory = (over: Partial<typeof hook.value> = {}, es: HistoryEntry[] = entries, dropped = false) => {
@@ -23,7 +25,10 @@ const setHistory = (over: Partial<typeof hook.value> = {}, es: HistoryEntry[] = 
 };
 const vb = (c: HTMLElement) => c.querySelector("svg")!.getAttribute("viewBox")!.split(" ").map(Number);
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  floorHook.value = { floor: { leads: [], waiting: 0 }, online: true };
+});
 
 describe("FlowView", () => {
   it("draws a node per agent and tool call with state classes", () => {
@@ -89,11 +94,11 @@ describe("FlowView", () => {
   it("notes empty and dropped history", () => {
     setHistory({ sessions: [] });
     const { unmount } = render(<FlowView owner="T-1" />);
-    expect(screen.getByText(t("Sin actividad registrada todavía"))).toBeTruthy();
+    expect(screen.getByText(/\d\d:\d\d/)).toBeTruthy();
     unmount();
     setHistory({}, entries, true);
     render(<FlowView owner="T-1" />);
-    expect(screen.getByText(t("Se perdió parte del historial; el gráfico puede estar incompleto"))).toBeTruthy();
+    expect(screen.getByText(t("La actividad más antigua ya no se muestra"))).toBeTruthy();
   });
 
   it("dims when stale and renders headerExtra", () => {
@@ -101,5 +106,38 @@ describe("FlowView", () => {
     const { container } = render(<FlowView owner="T-1" headerExtra={<i data-testid="x" />} />);
     expect(container.querySelector(".fv--stale")).toBeTruthy();
     expect(screen.getByTestId("x")).toBeTruthy();
+  });
+
+  it("shows a root node and a note for a live agent that reported nothing", () => {
+    setHistory({ sessions: [] });
+    floorHook.value = { floor: { leads: [{ session: "abc" }, { session: "def" }], waiting: 0 }, online: true };
+    render(<FlowView owner="T-1" />);
+    expect(screen.getAllByRole("button", { name: /^(abc|def),/ })).toHaveLength(2);
+    expect(screen.getByText(t("Sin llamadas registradas para este agente"))).toBeTruthy();
+  });
+
+  it("details say 'fin desconocido' for an unknown end and 'en curso' only while running", () => {
+    hook.value = { startedAt: at(0), sessions: [{ session: "x", live: false, dropped: false, entries }], stale: false };
+    render(<FlowView owner="T-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /^Bash,/ }));
+    expect(screen.getByText(t("fin desconocido"), { selector: ".fv-details *" })).toBeTruthy();
+    expect(screen.queryByText(t("en curso"), { selector: ".fv-details *" })).toBeNull();
+  });
+
+  it("explains an empty history with the start time, and a dropped one", () => {
+    setHistory({ sessions: [] });
+    const { container, unmount } = render(<FlowView owner="T-1" />);
+    expect(container.querySelector(".fv-note")!.textContent).toBe(t("Sin actividad desde que arrancó Delilah ({time})", { time: new Date(at(0)).toTimeString().slice(0, 5) }));
+    unmount();
+    setHistory({}, entries, true);
+    render(<FlowView owner="T-1" />);
+    expect(screen.getByText(t("La actividad más antigua ya no se muestra"))).toBeTruthy();
+  });
+
+  it("shows the waiting pill from the floor", () => {
+    setHistory();
+    floorHook.value = { floor: { leads: [], waiting: 2 }, online: true };
+    const { container } = render(<FlowView owner="T-1" />);
+    expect(container.querySelector(".fv-pill")?.textContent).toContain("2");
   });
 });

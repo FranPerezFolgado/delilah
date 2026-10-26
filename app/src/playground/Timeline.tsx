@@ -71,8 +71,9 @@ export function Timeline({ rows, selected, onSelect, className }: Props) {
     <div role="listbox" aria-label={t("Línea de tiempo")} className={`timeline${className ? ` ${className}` : ""}`}>
       {rows.map((r, i) => {
         const time = formatTime(r.at);
-        const kind = kindName(r.kind);
-        const what = [r.tool, r.target].filter(Boolean).join(" ");
+        const isTool = r.event === "tool_started" || r.event === "tool_ended";
+        const kind = isTool ? kindName(r.kind) : "";
+        const what = isTool ? [r.tool, r.target].filter(Boolean).join(" ") : (r.role ?? "");
         const label = [time, kind, what, eventName(r), r.failed ? t("fallida") : ""].filter(Boolean).join(", ");
         return (
           <button
@@ -92,13 +93,13 @@ export function Timeline({ rows, selected, onSelect, className }: Props) {
           >
             <span className="timeline-time">{time}</span>
             <span className="timeline-kind">
-              <span className="timeline-swatch" style={{ "--tint": r.kind ? KIND_COLOURS[r.kind] : KIND_COLOURS.other } as CSSProperties} />
+              {isTool && <span className="timeline-swatch" style={{ "--tint": r.kind ? KIND_COLOURS[r.kind] : KIND_COLOURS.other } as CSSProperties} />}
               {kind}
             </span>
             <span className="timeline-detail">
-              {r.tool}
-              {r.target ? <span className="timeline-target"> {r.target}</span> : null}
-              {" · "}
+              {isTool ? r.tool : r.role}
+              {isTool && r.target ? <span className="timeline-target"> {r.target}</span> : null}
+              {isTool || r.role ? " · " : null}
               {eventName(r)}
               {r.failed ? <span className="timeline-fail"> ✕</span> : null}
             </span>

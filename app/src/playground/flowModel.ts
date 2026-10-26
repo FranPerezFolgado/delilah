@@ -18,6 +18,8 @@ export interface FlowNode {
   /** The agent or helper that owns it (helpers: the session's lead). */
   parent?: string;
   session: string;
+  /** A live agent that has reported no tool calls (an older agent, or nothing yet). */
+  noCalls?: boolean;
 }
 
 export interface FlowEdge {
@@ -35,6 +37,8 @@ export interface TimelineRow {
   tool?: string;
   target?: string | null;
   failed?: boolean;
+  /** helper_started / helper_ended: the helper's role. */
+  role?: string;
 }
 
 export interface FlowModel {
@@ -53,7 +57,8 @@ const time = (at: string) => {
   return Number.isNaN(t) ? 0 : t;
 };
 
-export function buildFlow(history: HistoryResponse): FlowModel {
+/** `liveSessions`: the owner's live Claude session ids; those without history still get a root node. */
+export function buildFlow(history: HistoryResponse, liveSessions: string[] = []): FlowModel {
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
   const timeline: TimelineRow[] = [];
@@ -109,7 +114,7 @@ export function buildFlow(history: HistoryResponse): FlowModel {
       switch (e.type) {
         case "helper_started": {
           const h = ensureHelper(e.agent.id, e.agent.role, e.at);
-          row(e, h.id);
+          row(e, h.id, { role: h.label });
           break;
         }
         case "helper_ended": {
@@ -117,7 +122,7 @@ export function buildFlow(history: HistoryResponse): FlowModel {
           if (!h) break;
           h.state = "done";
           h.end = e.at;
-          row(e, h.id);
+          row(e, h.id, { role: h.label });
           break;
         }
         case "tool_started": {
@@ -163,6 +168,13 @@ export function buildFlow(history: HistoryResponse): FlowModel {
     }
   }
 
+  const seen = new Set(history.sessions.filter((s) => s.entries.length > 0).map((s) => s.session));
+  for (const id of liveSessions) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    add({ id: agentId(id), type: "agent", label: id, state: "running", start: history.started_at, session: id, noCalls: true });
+  }
+
   timeline.sort((a, b) => time(a.at) - time(b.at) || a.seq - b.seq);
   return {
     nodes,
@@ -170,7 +182,7 @@ export function buildFlow(history: HistoryResponse): FlowModel {
     timeline,
     notes: {
       dropped: history.sessions.some((s) => s.dropped),
-      empty: history.sessions.every((s) => s.entries.length === 0),
+      empty: nodes.length === 0,
       startedAt: history.started_at,
     },
   };

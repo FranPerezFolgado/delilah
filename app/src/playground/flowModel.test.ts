@@ -83,4 +83,21 @@ describe("buildFlow", () => {
     expect(m.nodes.filter((n) => n.type === "agent").map((n) => n.id)).toEqual(["s:x", "s:y"]);
     expect(m.timeline[0].node).toBe("s:x");
   });
+
+  it("gives a live session without history a root node flagged noCalls", () => {
+    const m = buildFlow(hist([ts(1, act("a"))]), ["x", "y", "z"]);
+    expect(m.nodes.filter((n) => n.type === "agent").map((n) => n.id)).toEqual(["s:x", "s:y", "s:z"]);
+    const y = m.nodes.find((n) => n.id === "s:y")!;
+    expect(y.state).toBe("running");
+    expect(y.noCalls).toBe(true);
+    expect(m.nodes.find((n) => n.id === "s:x")!.noCalls).toBeUndefined();
+    expect(m.notes.empty).toBe(false);
+  });
+
+  it("a live session whose log is empty is also a root node; none live and no history is empty", () => {
+    const m = buildFlow(hist([]), ["x"]);
+    expect(m.nodes).toHaveLength(1);
+    expect(m.nodes[0].noCalls).toBe(true);
+    expect(buildFlow(hist([])).notes.empty).toBe(true);
+  });
 });

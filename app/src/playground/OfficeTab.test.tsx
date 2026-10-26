@@ -75,3 +75,10 @@ it("falls back to Oficina when storage fails", () => {
   fireEvent.click(screen.getByRole("tab", { name: t("Flujo") }));
   expect(screen.getByTestId("flow")).toBeTruthy();
 });
+
+it("each segment has a line icon", () => {
+  render(<OfficeTab owner="T-9" onOpenSession={() => {}} />);
+  for (const name of [t("Oficina"), t("Flujo")]) {
+    expect(screen.getByRole("tab", { name }).querySelector("svg.i")).toBeTruthy();
+  }
+});
