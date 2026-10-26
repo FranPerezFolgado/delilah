@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setLanguage } from "../i18n";
 import { DEFAULT_PROJECT_SETTINGS, api, ApiError, type PreviewView, type Project } from "../api";
 import { PreviewControl } from "./PreviewControl";
@@ -38,39 +38,52 @@ describe("PreviewControl", () => {
   it("keeps Stop for a running preview after the command is cleared", async () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj(null)]);
     vi.spyOn(api, "getPreview").mockResolvedValue(view({ url: "http://localhost:5173" }));
-    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
-    await findByText("Parar preview");
+    const { findByRole } = render(<PreviewControl taskKey="T-1" project="app" />);
+    fireEvent.click(await findByRole("button", { name: "Preview :5173" }));
+    screen.getByRole("menuitem", { name: "Detener" });
   });
 
   it("starts a preview", async () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     vi.spyOn(api, "getPreview").mockResolvedValue(null);
     const start = vi.spyOn(api, "startPreview").mockResolvedValue(view({ state: "starting" }));
-    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
-    fireEvent.click(await findByText("Lanzar preview"));
-    await findByText("Preview arrancando");
+    const { findByRole } = render(<PreviewControl taskKey="T-1" project="app" />);
+    fireEvent.click(await findByRole("button", { name: "Preview" }));
+    await findByRole("button", { name: "Preview arrancando" });
     expect(start).toHaveBeenCalledWith("T-1");
   });
 
-  it("links the running URL and stops it", async () => {
+  it("shows Preview :port with an ok dot; the menu opens the URL and stops it", async () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     vi.spyOn(api, "getPreview").mockResolvedValue(view({ url: "http://localhost:5173" }));
     const stop = vi.spyOn(api, "stopPreview").mockResolvedValue(null);
-    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
-    fireEvent.click(await findByText("http://localhost:5173"));
+    const { findByRole, container } = render(<PreviewControl taskKey="T-1" project="app" />);
+    const trigger = await findByRole("button", { name: "Preview :5173" });
+    expect(container.querySelector(".preview-dot")).not.toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Abrir" }));
     expect(openExternal).toHaveBeenCalledWith("http://localhost:5173");
-    fireEvent.click(await findByText("Parar preview"));
-    await findByText("Lanzar preview");
+    fireEvent.click(await findByRole("button", { name: "Preview :5173" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Detener" }));
+    await findByRole("button", { name: "Preview" });
     expect(stop).toHaveBeenCalledWith("T-1");
+  });
+
+  it("icon-only drops the text but keeps the accessible name", async () => {
+    vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
+    vi.spyOn(api, "getPreview").mockResolvedValue(null);
+    const { findByRole } = render(<PreviewControl taskKey="T-1" project="app" iconOnly />);
+    const b = await findByRole("button", { name: "Preview" });
+    expect(b.textContent).toBe("");
   });
 
   it("shows a failure with Reintentar", async () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     vi.spyOn(api, "getPreview").mockResolvedValue(view({ state: "failed", error: "puerto ocupado" }));
     const start = vi.spyOn(api, "startPreview").mockResolvedValue(view({ state: "starting" }));
-    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
+    const { findByText, findByRole } = render(<PreviewControl taskKey="T-1" project="app" />);
     fireEvent.click(await findByText("Reintentar"));
-    await findByText("Preview arrancando");
+    await findByRole("button", { name: "Preview arrancando" });
     expect(start).toHaveBeenCalled();
   });
 
@@ -93,8 +106,8 @@ describe("PreviewControl", () => {
   it("refetches when the tasks topic fires", async () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     const get = vi.spyOn(api, "getPreview").mockResolvedValue(null);
-    const { findByText } = render(<PreviewControl taskKey="T-1" project="app" />);
-    await findByText("Lanzar preview");
+    render(<PreviewControl taskKey="T-1" project="app" />);
+    await screen.findByRole("button", { name: "Preview" });
     const calls = get.mock.calls.length;
     live.handlers.tasks();
     await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(calls));
@@ -104,9 +117,9 @@ describe("PreviewControl", () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     const get = vi.spyOn(api, "getPreview").mockResolvedValueOnce(null).mockResolvedValue(view({ url: "http://localhost:1" }));
     vi.spyOn(api, "startPreview").mockRejectedValue(new ApiError("ya en marcha", 409, false, "running"));
-    const { findByText, queryByText } = render(<PreviewControl taskKey="T-1" project="app" />);
-    fireEvent.click(await findByText("Lanzar preview"));
-    await findByText("http://localhost:1");
+    const { findByRole, queryByText } = render(<PreviewControl taskKey="T-1" project="app" />);
+    fireEvent.click(await findByRole("button", { name: "Preview" }));
+    await findByRole("button", { name: "Preview :1" });
     expect(queryByText("ya en marcha")).toBeNull();
     expect(get).toHaveBeenCalledTimes(2);
   });
@@ -126,8 +139,8 @@ describe("PreviewControl", () => {
     vi.spyOn(api, "projects").mockResolvedValue([proj("npm run dev")]);
     vi.spyOn(api, "getPreview").mockResolvedValue(null);
     vi.spyOn(api, "startPreview").mockRejectedValue(new ApiError("the task has no workspace yet", 409, false, "no-workspace"));
-    const { findByText, queryByText } = render(<PreviewControl taskKey="T-1" project="app" status={{ type: "queued" }} />);
-    fireEvent.click(await findByText("Lanzar preview"));
+    const { findByText, findByRole, queryByText } = render(<PreviewControl taskKey="T-1" project="app" status={{ type: "queued" }} />);
+    fireEvent.click(await findByRole("button", { name: "Preview" }));
     await findByText("La tarea aún no tiene espacio de trabajo");
     expect(queryByText(/the task has no workspace/)).toBeNull();
   });

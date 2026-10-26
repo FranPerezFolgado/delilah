@@ -13,7 +13,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-04 | 2 | 2A | done | 1 | 8c35baa | Route skeleton |
 | WP-05 | 2 | 2B | implementing | 1 |  | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
-| WP-07 | 2 | 2B | done | 1 |  | created_at exposed and reopen |
+| WP-07 | 2 | 2B | done | 1 | a3b376d | created_at exposed and reopen |
 | WP-08 | 2 | 2B | implementing | 1 |  | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | implementing | 1 |  | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
@@ -37,7 +37,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
 | WP-29 | 5 | 5A | done | 1 | 8a1cdce | Header controls and tabs |
 | WP-30 | 5 | 5A | done | 1 | 7220728 | Cambios, PR and setup panels |
-| WP-31 | 5 | 5B | implementing | 1 |  | Task header |
+| WP-31 | 5 | 5B | done | 1 |  | Task header |
 | WP-32 | 5 | 5B | done | 1 | 91dc283 | Task tab |
 | WP-33 | 5 | 5B | done | 1 | 3d93e8a | Chat tab |
 | WP-34 | 5 | 5C | pending | 0 | | Task screen integration |
