@@ -22,13 +22,13 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12 | 4 | 4B | done | 1 | 3902f30 | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
 | WP-13 | 4 | 4C | done | 1 | 4868349 | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
 | WP-13F | 4 | fix | done | 1 | 7c1fc5e | Phase 4 review fixes; turn start from UserPromptSubmit on Live |
-| WP-14 | 5 | 5A | verified | 1 | 082e25a | set/retry await evaluate inline; PATCH ci_autofix → autofix::set (409 terminal only when it changes) |
-| WP-15 | 5 | 5A | verified | 1 | ce53e13 | retry requires --repo (CLI error); project show prints ci-autofix |
-| WP-16 | 5 | 5A | verified | 1 | 801a88f | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
-| WP-17 | 6 | 6A | verified | 1 | f9732e5 | inbox button reuses "Descartar"; badge mark via Sidebar |
-| WP-17F | 5-6 | fix | verified | 1 | | Phase 5-6 review fixes |
-| WP-18 | 7 | 7A | verified | 1 | b623194 | decision 87; architecture autofix section; status + usage |
-| WP-19 | 7 | 7B | pending | 0 | | |
+| WP-14 | 5 | 5A | done | 1 | 082e25a | set/retry await evaluate inline; PATCH ci_autofix → autofix::set (409 terminal only when it changes) |
+| WP-15 | 5 | 5A | done | 1 | ce53e13 | retry requires --repo (CLI error); project show prints ci-autofix |
+| WP-16 | 5 | 5A | done | 1 | 801a88f | always sends resolved ci_autofix from dialogs; +TaskScreen passes task to PrView |
+| WP-17 | 6 | 6A | done | 1 | f9732e5 | inbox button reuses "Descartar"; badge mark via Sidebar |
+| WP-17F | 5-6 | fix | done | 1 | 035c440 | Phase 5-6 review fixes |
+| WP-18 | 7 | 7A | done | 1 | b623194 | decision 87; architecture autofix section; status + usage |
+| WP-19 | 7 | 7B | done | 1 | | fmt ok; clippy 1 pre-existing warning; workspace + all e2e pass; tauri tests not run (sidecar binary missing in worktree); T049 quickstart walk + browser check not done |
 
 ## Open findings
 
