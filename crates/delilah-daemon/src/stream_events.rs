@@ -136,7 +136,7 @@ pub fn spawn_pump(
             }
         }
         // The process is gone even if no `Exited` said so: its running work is over.
-        if !exit_applied {
+        if !exit_applied && owns(&app, &session, runtime.as_ref()) {
             if let Some(live) = &live {
                 live.update_progress(|p| {
                     progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now())

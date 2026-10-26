@@ -23,6 +23,12 @@ pub struct Progress {
     /// task_id -> sub-agent tool_use_id, to route `Ended`/`Progress` events.
     #[serde(skip)]
     task_agents: HashMap<String, String>,
+    /// Turns started so far (counted at `Init`), to tell when a sub-agent's end is a turn old.
+    #[serde(skip)]
+    turns: u64,
+    /// A task ended since the last `Init`: a self-started turn after it has a reason.
+    #[serde(skip)]
+    task_ended: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -60,6 +66,9 @@ pub struct Subagent {
     /// `steps` comes from the stream's `tool_uses`, not from counting.
     #[serde(skip)]
     counted_by_stream: bool,
+    /// `Progress::turns` when it finished: dropped when the turn after that ends.
+    #[serde(skip)]
+    ended_turn: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -110,6 +119,7 @@ impl Progress {
             steps: 0,
             recent: vec![],
             counted_by_stream: false,
+            ended_turn: None,
         });
         self.subagents.last_mut().unwrap()
     }
@@ -134,15 +144,23 @@ pub fn apply(p: &mut Progress, event: &StreamEvent, now: DateTime<Utc>) -> bool 
     match event {
         StreamEvent::Init { self_started, .. } => {
             p.background.retain(|b| b.state == "running");
-            p.subagents.retain(|s| s.state == "running");
+            p.turns += 1;
             let by = if *self_started { "claude" } else { "user" };
+            let reason = (*self_started && p.task_ended).then(|| SELF_STARTED_REASON.to_string());
+            p.task_ended = false;
             p.turn = Some(Turn {
                 started_at: now,
                 by,
-                reason: self_started.then(|| SELF_STARTED_REASON.to_string()),
+                reason,
                 step: None,
                 last_signal_at: now,
             });
+        }
+        StreamEvent::ToolStarted { tool, input, .. } if tool == "Agent" || tool == "Task" => {
+            match input.get("description").and_then(Value::as_str) {
+                Some(d) if !d.is_empty() => p.set_step(format!("Subagente: {d}")),
+                _ => p.set_step(step_text(tool, input)),
+            }
         }
         StreamEvent::ToolStarted { tool, input, .. } => p.set_step(step_text(tool, input)),
         StreamEvent::SubagentStep {
@@ -171,7 +189,13 @@ pub fn apply(p: &mut Progress, event: &StreamEvent, now: DateTime<Utc>) -> bool 
             p.set_step(format!("{label} · {summary}"));
         }
         StreamEvent::Task(task) => apply_task(p, task, now),
-        StreamEvent::TurnResult { .. } => p.turn = None,
+        StreamEvent::TurnResult { .. } => {
+            p.turn = None;
+            // Finished sub-agents go when the turn after their end ends (the card has the result).
+            let turns = p.turns;
+            p.subagents
+                .retain(|s| s.ended_turn.is_none_or(|e| turns <= e));
+        }
         StreamEvent::Exited { .. } => {
             p.turn = None;
             for b in p.background.iter_mut().filter(|b| b.state == "running") {
@@ -181,6 +205,7 @@ pub fn apply(p: &mut Progress, event: &StreamEvent, now: DateTime<Utc>) -> bool 
             for s in p.subagents.iter_mut().filter(|s| s.state == "running") {
                 s.state = "stopped";
                 s.ended_at = Some(now);
+                s.ended_turn = Some(p.turns);
             }
         }
         _ => {}
@@ -204,6 +229,10 @@ fn apply_task(p: &mut Progress, task: &TaskEvent, now: DateTime<Utc>) {
                 let agent = p.subagent(id, description, now);
                 if agent.description.is_empty() {
                     agent.description = description.clone();
+                }
+                let has_step = p.turn.as_ref().is_some_and(|t| t.step.is_some());
+                if !has_step && !description.is_empty() {
+                    p.set_step(format!("Subagente: {description}"));
                 }
             }
             if *background {
@@ -255,7 +284,9 @@ fn apply_task(p: &mut Progress, task: &TaskEvent, now: DateTime<Utc>) {
         TaskEvent::Ended {
             task_id, status, ..
         } => {
+            let turns = p.turns;
             let state = status_str(*status);
+            p.task_ended = true;
             if let Some(b) = p.row(task_id).filter(|b| b.state == "running") {
                 b.state = state;
                 b.ended_at = Some(now);
@@ -269,6 +300,7 @@ fn apply_task(p: &mut Progress, task: &TaskEvent, now: DateTime<Utc>) {
                         _ => "completed",
                     };
                     agent.ended_at = Some(now);
+                    agent.ended_turn = Some(turns);
                 }
             }
         }
@@ -306,18 +338,22 @@ fn apply_task(p: &mut Progress, task: &TaskEvent, now: DateTime<Utc>) {
                 if b.state == "running" && !task_ids.contains(&b.task_id) {
                     b.state = "completed";
                     b.ended_at = Some(now);
+                    p.task_ended = true;
                 }
             }
         }
     }
 }
 
-/// Drops final rows and sub-agents 60 s after they ended; returns whether any went.
+/// Drops final rows 60 s after they ended, and sub-agents too when no turn is running (during
+/// a turn they stay until the turn after their end ends); returns whether any went.
 pub fn tick(p: &mut Progress, now: DateTime<Utc>) -> bool {
     let expired = |ended: Option<DateTime<Utc>>| ended.is_some_and(|e| now - e >= FINAL_KEEP);
     let (nb, ns) = (p.background.len(), p.subagents.len());
     p.background.retain(|b| !expired(b.ended_at));
-    p.subagents.retain(|s| !expired(s.ended_at));
+    if p.turn.is_none() {
+        p.subagents.retain(|s| !expired(s.ended_at));
+    }
     (nb, ns) != (p.background.len(), p.subagents.len())
 }
 
@@ -384,9 +420,113 @@ mod tests {
         apply(&mut p, &init(true), t(2));
         let turn = p.turn.clone().unwrap();
         assert_eq!(turn.by, "claude");
-        assert!(turn.reason.is_some());
+        assert_eq!(turn.reason, None, "no task ended: no reason");
         assert!(apply(&mut p, &StreamEvent::Exited { code: None }, t(3)));
         assert!(p.turn.is_none());
+    }
+
+    #[test]
+    fn a_self_started_turn_after_a_task_end_has_the_reason() {
+        let mut p = Progress::default();
+        let result = StreamEvent::TurnResult {
+            subtype: "success".into(),
+            is_error: false,
+            result: None,
+        };
+        apply(&mut p, &init(false), t(0));
+        apply(&mut p, &started("b1", None, TaskKind::Command, true), t(1));
+        apply(&mut p, &result, t(2));
+        apply(&mut p, &ended("b1", TaskStatus::Completed), t(3));
+        apply(&mut p, &init(true), t(4));
+        let turn = p.turn.clone().unwrap();
+        assert_eq!(turn.reason.as_deref(), Some(SELF_STARTED_REASON));
+        // The end was consumed: the next self-started turn has none.
+        apply(&mut p, &result, t(5));
+        apply(&mut p, &init(true), t(6));
+        assert_eq!(p.turn.as_ref().unwrap().reason, None);
+        // A user turn never has one.
+        apply(&mut p, &ended("zz", TaskStatus::Completed), t(7));
+        apply(&mut p, &result, t(8));
+        apply(&mut p, &init(false), t(9));
+        assert_eq!(p.turn.as_ref().unwrap().reason, None);
+    }
+
+    #[test]
+    fn a_finished_subagent_stays_until_the_turn_after_its_end_ends() {
+        let mut p = Progress::default();
+        let result = StreamEvent::TurnResult {
+            subtype: "success".into(),
+            is_error: false,
+            result: None,
+        };
+        apply(&mut p, &init(false), t(0));
+        apply(
+            &mut p,
+            &started("a1", Some("tuA"), TaskKind::Agent, true),
+            t(1),
+        );
+        apply(&mut p, &result, t(2));
+        apply(&mut p, &ended("a1", TaskStatus::Completed), t(3));
+        // The self-started follow-up turn still shows it, however long it runs.
+        apply(&mut p, &init(true), t(4));
+        assert!(!tick(&mut p, t(400)));
+        assert_eq!(p.subagents[0].state, "completed");
+        apply(&mut p, &result, t(401));
+        assert!(p.subagents.is_empty());
+        // A foreground one ending mid-turn goes at the end of the next turn.
+        apply(&mut p, &init(false), t(402));
+        apply(
+            &mut p,
+            &started("a2", Some("tuB"), TaskKind::Agent, false),
+            t(403),
+        );
+        apply(&mut p, &ended("a2", TaskStatus::Completed), t(404));
+        apply(&mut p, &result, t(405));
+        assert_eq!(p.subagents.len(), 1);
+        apply(&mut p, &init(false), t(406));
+        apply(&mut p, &result, t(407));
+        assert!(p.subagents.is_empty());
+    }
+
+    #[test]
+    fn subagent_activity_is_a_sign_of_life_only() {
+        let mut p = Progress::default();
+        apply(&mut p, &init(false), t(0));
+        let act = StreamEvent::SubagentActivity {
+            parent: "tuA".into(),
+        };
+        assert!(apply(&mut p, &act, t(30)));
+        let turn = p.turn.as_ref().unwrap();
+        assert_eq!((turn.last_signal_at, turn.step.clone()), (t(30), None));
+        assert!(p.subagents.is_empty());
+    }
+
+    #[test]
+    fn an_agent_tool_names_the_step_from_its_start() {
+        let mut p = Progress::default();
+        apply(&mut p, &init(false), t(0));
+        let tool = StreamEvent::ToolStarted {
+            tool_use_id: "u".into(),
+            tool: "Agent".into(),
+            input: json!({"description": "Review the diff", "prompt": "x"}),
+        };
+        apply(&mut p, &tool, t(1));
+        assert_eq!(
+            p.turn.as_ref().unwrap().step.as_deref(),
+            Some("Subagente: Review the diff")
+        );
+        // A task start sets it when there is no step yet.
+        let mut q = Progress::default();
+        apply(&mut q, &init(false), t(0));
+        apply(
+            &mut q,
+            &started("a1", Some("tuA"), TaskKind::Agent, false),
+            t(1),
+        );
+        assert_eq!(
+            q.turn.as_ref().unwrap().step.as_deref(),
+            Some("Subagente: desc a1")
+        );
     }
 
     #[test]

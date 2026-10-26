@@ -107,6 +107,8 @@ pub enum StreamEvent {
         tool: String,
         input: Value,
     },
+    /// Any other line of a sub-agent (tool results, stream deltas): a sign of life only.
+    SubagentActivity { parent: String },
     /// A background task or sub-agent event (`system/task_*`).
     Task(TaskEvent),
     /// A piece of assistant text; `message` is the id from the preceding `message_start`.
@@ -381,8 +383,14 @@ impl StreamSession {
     pub async fn send_user(&self, text: &str) -> io::Result<()> {
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.awaiting_turn.store(true, Ordering::SeqCst);
-        self.write(&json!({"type": "user", "message": {"role": "user", "content": text}}))
-            .await
+        let written = self
+            .write(&json!({"type": "user", "message": {"role": "user", "content": text}}))
+            .await;
+        if written.is_err() {
+            // No line reached the agent: no turn of the user's is coming.
+            self.awaiting_turn.store(false, Ordering::SeqCst);
+        }
+        written
     }
 
     /// Asks the agent to stop the current turn; the process stays alive for the next turn.
@@ -581,19 +589,27 @@ impl Parser {
     /// A line of a sub-agent (`parent_tool_use_id` set): only its tool steps count; it never
     /// touches the main message assembly.
     fn subagent_line(&mut self, v: &Value, parent: &str) -> Vec<StreamEvent> {
-        if v["type"] != "assistant" {
-            return vec![];
-        }
         let root = self
             .subagent_root
             .get(parent)
             .cloned()
             .unwrap_or_else(|| parent.to_string());
-        let Some(message) = v.get("message") else {
-            return vec![];
+        let activity = || {
+            vec![StreamEvent::SubagentActivity {
+                parent: root.clone(),
+            }]
         };
-        tool_uses(message)
-            .into_iter()
+        if v["type"] != "assistant" {
+            return activity();
+        }
+        let Some(message) = v.get("message") else {
+            return activity();
+        };
+        let uses = tool_uses(message);
+        if uses.is_empty() {
+            return activity();
+        }
+        uses.into_iter()
             .map(|(id, tool, input)| {
                 if tool == "Agent" || tool == "Task" {
                     self.subagent_root.insert(id, root.clone());
@@ -1159,6 +1175,7 @@ mod tests {
         ] {
             out.extend(p.parse(l));
         }
+        out.retain(|e| !matches!(e, StreamEvent::SubagentActivity { .. }));
         assert_eq!(out.len(), 2, "{out:?}");
         assert_eq!(
             out[0],
@@ -1168,6 +1185,57 @@ mod tests {
             }
         );
         assert!(matches!(&out[1], StreamEvent::MessageDone { message, .. } if message == "m1"));
+    }
+
+    #[test]
+    fn subagent_user_and_stream_lines_are_activity() {
+        let mut p = parser();
+        let user =
+            r#"{"type":"user","parent_tool_use_id":"A","message":{"role":"user","content":[]}}"#;
+        let delta = r#"{"type":"stream_event","parent_tool_use_id":"A","event":{"type":"message_start","message":{"id":"s1"}}}"#;
+        let want = vec![StreamEvent::SubagentActivity { parent: "A".into() }];
+        assert_eq!(p.parse(user), want);
+        assert_eq!(p.parse(delta), want);
+    }
+
+    #[test]
+    fn a_user_line_written_during_a_turn_keeps_the_next_init_user_started() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut p = Parser::new(flag.clone());
+        let init = r#"{"type":"system","subtype":"init","session_id":"s"}"#;
+        let result = r#"{"type":"result","subtype":"success","is_error":false}"#;
+        let self_started = |out: Vec<StreamEvent>| match &out[..] {
+            [StreamEvent::Init { self_started, .. }] => *self_started,
+            other => panic!("{other:?}"),
+        };
+        // Two user lines before one init: both set the flag, one init clears it.
+        flag.store(true, Ordering::SeqCst);
+        flag.store(true, Ordering::SeqCst);
+        assert!(!self_started(p.parse(init)));
+        // A line written after that init, before its result, is the next turn's.
+        flag.store(true, Ordering::SeqCst);
+        p.parse(result);
+        assert!(!self_started(p.parse(init)));
+        p.parse(result);
+        assert!(self_started(p.parse(init)));
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_resets_awaiting_turn() {
+        let mut cmd = tokio::process::Command::new("true");
+        cmd.stdin(std::process::Stdio::piped());
+        let (session, _rx) = StreamSession::spawn(cmd).unwrap();
+        // The process exits at once and closes its stdin: writes end up failing.
+        let mut failed = false;
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if session.send_user("x").await.is_err() {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed);
+        assert!(!session.awaiting_turn.load(Ordering::SeqCst));
     }
 
     #[test]
