@@ -12,7 +12,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-05 | 3 | 3A | verified | 1 | fd20712 |  |
 | WP-06 | 3 | 3A | verified | 1 | 05691c8 | English seed via tr(); seed poll flaky once |
 | WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
-| WP-07 | 3 | 3B | implementing | 0 | | |
+| WP-07 | 3 | 3B | verified | 1 | 38b6381 | 121 lines; includes T024 |
 | WP-08 | 3 | 3C | pending | 0 | | |
 | WP-10 | 4 | 4A | verified | 1 | a5df7ea | user 'no' at prompt exits 0 (contract silent) |
 | WP-12 | 4 | 4A | verified | 1 | 4edfd57 | decisions #79 #80 |
