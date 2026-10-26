@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import "./Toast.css";
 
@@ -32,6 +32,8 @@ const DEFAULT_TTL = 6000;
 let items: ToastItem[] = [];
 let nextId = 1;
 let paused = false;
+/** Text for the screen-reader live region: last push, merge or keyed update. */
+let lastAnnounced = "";
 let timer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 
@@ -83,6 +85,7 @@ function closeToast(id: number) {
 export function clearToasts() {
   items = [];
   paused = false;
+  lastAnnounced = "";
   emit();
 }
 /** Freezes (or resumes) every auto-dismiss timer at once. */
@@ -103,10 +106,14 @@ export function setToastsPaused(p: boolean) {
   emit();
 }
 
-function evict() {
+/** Drops toasts beyond MAX, sparing the just-pushed one (`keepId`) while anything else can go. */
+function evict(keepId: number) {
   while (items.length > MAX) {
+    const others = items.filter((i) => i.id !== keepId);
     const victim =
-      items.find((i) => (i.kind ?? "info") === "info" && !i.action && !i.key) ?? items.find((i) => !i.key);
+      others.find((i) => (i.kind ?? "info") === "info" && !i.action && !i.key) ??
+      others.find((i) => !i.key) ??
+      items.find((i) => !i.key);
     if (!victim) return;
     items = items.filter((i) => i !== victim);
   }
@@ -119,8 +126,10 @@ export function pushToast(input: ToastInput): number {
   if (input.key) {
     const hit = items.find((i) => i.key === input.key);
     if (hit) {
-      const { deadline: _d, remaining: _r, ...rest } = hit;
-      items = items.map((i) => (i === hit ? { ...rest, ...input, id: hit.id } : i));
+      items = items.map((i) =>
+        i === hit ? { ...input, id: hit.id, count: hit.count, aliases: hit.aliases } : i,
+      );
+      lastAnnounced = input.text;
       emit();
       return hit.id;
     }
@@ -133,12 +142,14 @@ export function pushToast(input: ToastInput): number {
       const { deadline: _d, remaining: _r, ...rest } = twin;
       const merged = { ...rest, count: twin.count + 1, aliases: [...twin.aliases, id], ...timing(twin) };
       items = [...items.filter((i) => i !== twin), merged];
+      lastAnnounced = `${input.text} ×${merged.count}`;
       emit();
       return id;
     }
   }
   items = [...items, { ...input, id, count: 1, aliases: [], ...timing(input) }];
-  evict();
+  evict(id);
+  lastAnnounced = input.text;
   emit();
   return id;
 }
@@ -148,6 +159,7 @@ const subscribe = (l: () => void) => {
   return () => void listeners.delete(l);
 };
 const snapshot = () => items;
+const announcedSnapshot = () => lastAnnounced;
 
 /** `toast({text, action?, ttl?, kind?})` from any component. */
 export function useToast() {
@@ -156,7 +168,7 @@ export function useToast() {
 
 function ToastView({ item }: { item: ToastItem }) {
   return (
-    <div className={`toast toast-${item.kind ?? "info"}`} role="status">
+    <div className={`toast toast-${item.kind ?? "info"}`}>
       <span className="toast-text">{item.text}</span>
       {item.count > 1 && (
         <span className="toast-count">{t("×{n}", { n: item.count > 99 ? "99+" : item.count })}</span>
@@ -180,15 +192,62 @@ function ToastView({ item }: { item: ToastItem }) {
   );
 }
 
+/** The user closed everything: tell each owner, then empty the stack. */
+function closeAll() {
+  const all = items;
+  all.forEach((i) => i.onDismiss?.());
+  items = items.filter((i) => !all.includes(i));
+  emit();
+}
+
 /** The one toast stack (bottom-left of main); mount it once. */
 export function ToastHost() {
   const list = useSyncExternalStore(subscribe, snapshot);
+  const announced = useSyncExternalStore(subscribe, announcedSnapshot);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [pinned, setPinned] = useState(false);
   if (list.length === 0) return null;
+  const expanded = hovered || focused || pinned;
+  const more = list.length - 1;
+  const shown = expanded ? list : list.slice(-1);
   return (
-    <div className="toast-host">
-      {list.map((i) => (
+    <div
+      className={`toast-host${expanded ? " toast-expanded" : ""}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        if (!focused) setPinned(false);
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setFocused(false);
+        if (!hovered) setPinned(false);
+      }}
+    >
+      <div role="status" aria-live="polite" className="toast-sr">
+        {announced}
+      </div>
+      {shown.map((i) => (
         <ToastView key={i.id} item={i} />
       ))}
+      {more > 0 && !expanded && (
+        <button
+          type="button"
+          className="toast-more"
+          aria-expanded="false"
+          aria-label={t("Mostrar {n} avisos más", { n: more })}
+          onClick={() => setPinned(true)}
+        >
+          {t("+{n}", { n: more })}
+        </button>
+      )}
+      {more > 0 && expanded && (
+        <button type="button" className="toast-clear" onClick={closeAll}>
+          {t("Cerrar todo")}
+        </button>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ToastHost, useToast, clearToasts, pushToast, dismissToast, dismissToastByKey } from "./Toast";
 
+const MORE = /Mostrar 2 avisos más|Show 2 more notices/;
 let toast: ReturnType<typeof useToast>;
 function Probe() {
   toast = useToast();
@@ -11,6 +12,19 @@ function Probe() {
 }
 function mount() {
   render(<><Probe /><ToastHost /></>);
+}
+/** Text queries that ignore the screen-reader announcer. */
+const gat = (m: string | RegExp) => screen.queryAllByText(m).filter((e) => !e.closest(".toast-sr"));
+const qt = (m: string | RegExp) => gat(m)[0] ?? null;
+const gt = (m: string | RegExp) => {
+  const r = gat(m);
+  if (r.length !== 1) throw new Error(`expected one match for ${m}, got ${r.length}`);
+  return r[0];
+};
+/** Several toasts are collapsed to the newest; hover to read them all. */
+function expand() {
+  const host = document.querySelector(".toast-host");
+  if (host) fireEvent.mouseEnter(host);
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -24,18 +38,18 @@ describe("Toast", () => {
   it("shows a status toast and auto-dismisses info after the default 6 s", () => {
     mount();
     act(() => void toast({ text: "Hecho" }));
-    expect(screen.getByText("Hecho")).not.toBeNull();
+    expect(gt("Hecho")).not.toBeNull();
     act(() => void vi.advanceTimersByTime(5900));
-    expect(screen.queryByText("Hecho")).not.toBeNull();
+    expect(qt("Hecho")).not.toBeNull();
     act(() => void vi.advanceTimersByTime(200));
-    expect(screen.queryByText("Hecho")).toBeNull();
+    expect(qt("Hecho")).toBeNull();
   });
 
   it("honours ttl", () => {
     mount();
     act(() => void toast({ text: "rápido", ttl: 1000 }));
     act(() => void vi.advanceTimersByTime(1100));
-    expect(screen.queryByText("rápido")).toBeNull();
+    expect(qt("rápido")).toBeNull();
   });
 
   it("errors and 'te espera' persist", () => {
@@ -45,8 +59,9 @@ describe("Toast", () => {
       toast({ text: "espera", kind: "wait" });
     });
     act(() => void vi.advanceTimersByTime(60000));
-    expect(screen.queryByText("fallo")).not.toBeNull();
-    expect(screen.queryByText("espera")).not.toBeNull();
+    expand();
+    expect(qt("fallo")).not.toBeNull();
+    expect(qt("espera")).not.toBeNull();
   });
 
   it("keeps at most 3, dropping the oldest", () => {
@@ -54,24 +69,24 @@ describe("Toast", () => {
     act(() => {
       for (const n of ["a", "b", "c", "d"]) toast({ text: n, kind: "error" });
     });
-        expect(screen.queryByText("a")).toBeNull();
-    expect(screen.queryByText("d")).not.toBeNull();
+        expect(qt("a")).toBeNull();
+    expect(qt("d")).not.toBeNull();
   });
 
   it("runs the action and dismisses", () => {
     mount();
     const run = vi.fn();
     act(() => void toast({ text: "Archivada", action: { label: "Deshacer", run } }));
-    fireEvent.click(screen.getByText("Deshacer"));
+    fireEvent.click(gt("Deshacer"));
     expect(run).toHaveBeenCalled();
-    expect(screen.queryByText("Archivada")).toBeNull();
+    expect(qt("Archivada")).toBeNull();
   });
 
   it("can be dismissed by hand", () => {
     mount();
     act(() => void toast({ text: "x", kind: "error" }));
     fireEvent.click(screen.getByRole("button", { name: /Cerrar|Close/ }));
-    expect(screen.queryByText("x")).toBeNull();
+    expect(qt("x")).toBeNull();
   });
 
   it("a keyed push updates in place and returns the same id", () => {
@@ -80,10 +95,10 @@ describe("Toast", () => {
     act(() => void (a = toast({ key: "k", text: "uno", kind: "error" })));
     act(() => void (b = toast({ key: "k", text: "dos", kind: "error", action: { label: "Ir", run: () => {} } })));
     expect(b).toBe(a);
-    expect(screen.queryByText("uno")).toBeNull();
-    expect(screen.getByText("dos")).not.toBeNull();
-    expect(screen.getByText("Ir")).not.toBeNull();
-    expect(screen.getAllByText("×").length).toBe(1);
+    expect(qt("uno")).toBeNull();
+    expect(gt("dos")).not.toBeNull();
+    expect(gt("Ir")).not.toBeNull();
+    expect(gat("×").length).toBe(1);
   });
 
   it("dismissToastByKey removes without onDismiss", () => {
@@ -91,7 +106,7 @@ describe("Toast", () => {
     const onDismiss = vi.fn();
     act(() => void toast({ key: "k", text: "kk", onDismiss }));
     act(() => dismissToastByKey("k"));
-    expect(screen.queryByText("kk")).toBeNull();
+    expect(qt("kk")).toBeNull();
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
@@ -116,9 +131,10 @@ describe("Toast", () => {
     pushToast({ text: "kw", key: "w" });
     vi.advanceTimersByTime(60000);
     mount();
-    expect(screen.queryByText("solo")).toBeNull();
-    expect(screen.queryByText("err")).not.toBeNull();
-    expect(screen.queryByText("kw")).not.toBeNull();
+    expect(qt("solo")).toBeNull();
+    expand();
+    expect(qt("err")).not.toBeNull();
+    expect(qt("kw")).not.toBeNull();
   });
 
   it("evicts plain info first, then oldest non-keyed, never keyed", () => {
@@ -129,13 +145,15 @@ describe("Toast", () => {
       toast({ text: "info" });
       toast({ text: "n1", kind: "error" });
     });
-    expect(screen.queryByText("info")).toBeNull();
-    expect(screen.queryByText("act")).not.toBeNull();
+    expand();
+    expect(qt("info")).toBeNull();
+    expect(qt("act")).not.toBeNull();
     act(() => void toast({ text: "n2", kind: "error" }));
-    expect(screen.queryByText("act")).toBeNull();
-    expect(screen.queryByText("k")).not.toBeNull();
-    expect(screen.queryByText("n1")).not.toBeNull();
-    expect(screen.queryByText("n2")).not.toBeNull();
+    expand();
+    expect(qt("act")).toBeNull();
+    expect(qt("k")).not.toBeNull();
+    expect(qt("n1")).not.toBeNull();
+    expect(qt("n2")).not.toBeNull();
   });
 
   it("merges repeats into one toast with a count, moved to newest", () => {
@@ -146,8 +164,9 @@ describe("Toast", () => {
       toast({ text: "No se pudo conectar", kind: "error" });
       toast({ text: "No se pudo conectar", kind: "error" });
     });
-    expect(screen.getAllByText("No se pudo conectar").length).toBe(1);
-    expect(screen.getByText("×3")).not.toBeNull();
+    expand();
+    expect(gat("No se pudo conectar").length).toBe(1);
+    expect(gt("×3")).not.toBeNull();
     const texts = Array.from(document.querySelectorAll(".toast-text")).map((e) => e.textContent);
     expect(texts).toEqual(["otro", "No se pudo conectar"]);
   });
@@ -158,10 +177,10 @@ describe("Toast", () => {
     act(() => void vi.advanceTimersByTime(5000));
     act(() => void toast({ text: "hola" }));
     act(() => void vi.advanceTimersByTime(5000));
-    expect(screen.queryByText("hola")).not.toBeNull();
-    expect(screen.getByText("×2")).not.toBeNull();
+    expect(qt("hola")).not.toBeNull();
+    expect(gt("×2")).not.toBeNull();
     act(() => void vi.advanceTimersByTime(1100));
-    expect(screen.queryByText("hola")).toBeNull();
+    expect(qt("hola")).toBeNull();
   });
 
   it("does not merge different kinds", () => {
@@ -170,8 +189,9 @@ describe("Toast", () => {
       toast({ text: "igual" });
       toast({ text: "igual", kind: "error" });
     });
-    expect(screen.getAllByText("igual").length).toBe(2);
-    expect(screen.queryByText("×2")).toBeNull();
+    expand();
+    expect(gat("igual").length).toBe(2);
+    expect(qt("×2")).toBeNull();
   });
 
   it("does not merge toasts with an action", () => {
@@ -180,7 +200,8 @@ describe("Toast", () => {
       toast({ text: "Archivada", action: { label: "Deshacer", run: () => {} } });
       toast({ text: "Archivada", action: { label: "Deshacer", run: () => {} } });
     });
-    expect(screen.getAllByText("Deshacer").length).toBe(2);
+    expand();
+    expect(gat("Deshacer").length).toBe(2);
   });
 
   it("dismissToast with any repeat id removes the merged toast", () => {
@@ -190,10 +211,10 @@ describe("Toast", () => {
       for (let n = 0; n < 3; n++) ids.push(toast({ text: "rep", kind: "error" }));
     });
     act(() => dismissToast(ids[1]));
-    expect(screen.queryByText("rep")).toBeNull();
+    expect(qt("rep")).toBeNull();
     act(() => void ids.push(toast({ text: "rep2", kind: "error" })));
     act(() => dismissToast(ids[2]));
-    expect(screen.queryByText("rep2")).not.toBeNull();
+    expect(qt("rep2")).not.toBeNull();
   });
 
   it("caps the displayed count at 99+", () => {
@@ -201,6 +222,102 @@ describe("Toast", () => {
     act(() => {
       for (let n = 0; n < 120; n++) toast({ text: "spam", kind: "error" });
     });
-    expect(screen.getByText("×99+")).not.toBeNull();
+    expect(gt("×99+")).not.toBeNull();
+  });
+
+  it("a keyed update replaces the item: omitted action and onDismiss do not survive", () => {
+    mount();
+    const onDismiss = vi.fn();
+    act(() => void toast({ key: "k", text: "uno", kind: "error", action: { label: "Ir", run: () => {} }, onDismiss }));
+    act(() => void toast({ key: "k", text: "dos", kind: "error" }));
+    expect(qt("Ir")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Cerrar|Close/ }));
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("eviction never drops the toast just pushed", () => {
+    mount();
+    act(() => {
+      toast({ text: "e", kind: "error" });
+      toast({ text: "u", action: { label: "U", run: () => {} } });
+      toast({ text: "w", kind: "wait" });
+      toast({ text: "nuevo" });
+    });
+    expect(qt("nuevo")).not.toBeNull();
+    expect(qt("e")).toBeNull();
+  });
+
+  describe("collapsed stack", () => {
+    const three = () =>
+      act(() => {
+        toast({ text: "uno", kind: "error" });
+        toast({ text: "dos", kind: "error" });
+        toast({ text: "tres", kind: "error" });
+      });
+    const host = () => document.querySelector(".toast-host") as HTMLElement;
+
+    it("one toast has no +N and no Cerrar todo", () => {
+      mount();
+      act(() => void toast({ text: "solo", kind: "error" }));
+      expect(qt(/^\+/)).toBeNull();
+      expect(qt(/Cerrar todo|Close all/)).toBeNull();
+    });
+
+    it("collapses to the newest with a +2 button", () => {
+      mount();
+      three();
+      expect(qt("uno")).toBeNull();
+      expect(qt("dos")).toBeNull();
+      expect(gt("tres")).not.toBeNull();
+      const more = screen.getByRole("button", { name: MORE });
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      expect(more.textContent).toBe("+2");
+    });
+
+    it("expands on hover, focus or click and collapses again", () => {
+      mount();
+      three();
+      fireEvent.mouseEnter(host());
+      expect(gt("uno")).not.toBeNull();
+      fireEvent.mouseLeave(host());
+      expect(qt("uno")).toBeNull();
+
+      fireEvent.focus(screen.getByRole("button", { name: MORE }));
+      expect(gt("uno")).not.toBeNull();
+      fireEvent.blur(screen.getAllByRole("button", { name: /^(Cerrar|Close)$/ })[0]);
+      expect(qt("uno")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: MORE }));
+      expect(gt("uno")).not.toBeNull();
+      expect(gt("dos")).not.toBeNull();
+      fireEvent.mouseLeave(host());
+      fireEvent.blur(host());
+      expect(qt("uno")).toBeNull();
+    });
+
+    it("Cerrar todo dismisses everything and calls each onDismiss", () => {
+      mount();
+      const a = vi.fn(), b = vi.fn();
+      act(() => {
+        toast({ text: "uno", kind: "error", onDismiss: a });
+        toast({ key: "w", text: "dos", kind: "wait", onDismiss: b });
+      });
+      fireEvent.mouseEnter(host());
+      fireEvent.click(gt(/Cerrar todo|Close all/));
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).toHaveBeenCalledTimes(1);
+      expect(document.querySelector(".toast-host")).toBeNull();
+    });
+
+    it("announces through one status region; the stack has no live role", () => {
+      mount();
+      act(() => void toast({ text: "hola", kind: "error" }));
+      act(() => void toast({ text: "hola", kind: "error" }));
+      const regions = screen.getAllByRole("status");
+      expect(regions.length).toBe(1);
+      expect(regions[0].textContent).toBe("hola ×2");
+      act(() => void toast({ key: "k", text: "clave", kind: "wait" }));
+      expect(regions[0].textContent).toBe("clave");
+    });
   });
 });
