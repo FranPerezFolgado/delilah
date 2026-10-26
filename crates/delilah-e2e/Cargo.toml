@@ -64,3 +64,7 @@ required-features = ["e2e"]
 [[test]]
 name = "ui_v2"
 required-features = ["e2e"]
+
+[[test]]
+name = "autopilot"
+required-features = ["e2e"]
