@@ -887,13 +887,15 @@ mod tests {
                 "done",
                 r#"{"workflow":{"kind":"single","start":{"type":"nothing"}}}"#,
             ),
+            ("free", "{}"),
         ] {
             sqlx::query(
                 "INSERT INTO projects (name, path, kind, workflow, created_at, settings)
-                 VALUES (?, ?, 'repo', 'feature', 'x', ?)",
+                 VALUES (?, ?, 'repo', ?, 'x', ?)",
             )
             .bind(name)
             .bind(format!("/tmp/{name}"))
+            .bind(if name == "free" { "custom" } else { "feature" })
             .bind(settings)
             .execute(&pool)
             .await
@@ -967,6 +969,18 @@ mod tests {
             for sql in workflow_updates() {
                 sqlx::query(sql).execute(&pool).await.unwrap();
             }
+            let task_wfs: Vec<String> =
+                sqlx::query_scalar("SELECT workflow FROM tasks ORDER BY key")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(task_wfs, ["project", "prompt", "prompt"], "after replay");
+            let project_wfs: Vec<String> =
+                sqlx::query_scalar("SELECT workflow FROM projects ORDER BY name")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(project_wfs, ["project", "project", "prompt", "project"]);
             assert_eq!(project_settings(&pool, "empty").await["workflow"], want);
             assert_eq!(project_settings(&pool, "tmpl").await["workflow"], want);
         }

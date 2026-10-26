@@ -26,6 +26,11 @@ fn default_workflow() -> String {
     delilah_core::workflow::TaskWorkflow::Project.as_str().into()
 }
 
+/// `feature` is the old name of `project`; anything unknown is refused.
+fn normalise(w: &str) -> Result<String, ApiError> {
+    Ok(crate::api::normalise_workflow(w)?.as_str().into())
+}
+
 pub async fn list_projects(State(app): State<AppState>) -> Result<Json<Vec<Project>>, ApiError> {
     Ok(Json(app.store.list_projects().await?))
 }
@@ -47,7 +52,7 @@ pub async fn add_project(
         name,
         path: root,
         kind: new.kind,
-        workflow: new.workflow,
+        workflow: normalise(&new.workflow)?,
         settings: Default::default(),
         preview_command: None,
     };
@@ -92,7 +97,7 @@ pub async fn update_project(
         project.name = new_name;
     }
     if let Some(workflow) = change.workflow.filter(|w| !w.trim().is_empty()) {
-        project.workflow = workflow;
+        project.workflow = normalise(&workflow)?;
     }
     if let Some(kind) = change.kind {
         project.kind = kind;
@@ -886,7 +891,7 @@ mod tests {
         assert_eq!(listed[0]["preview_command"], "npm run dev");
 
         // Absent keeps it.
-        let kept = patch(json!({ "workflow": "custom" })).await;
+        let kept = patch(json!({ "workflow": "prompt" })).await;
         assert_eq!(kept["preview_command"], "npm run dev");
         let listed = send("GET", "/api/v1/projects", None).await;
         assert_eq!(listed[0]["preview_command"], "npm run dev");

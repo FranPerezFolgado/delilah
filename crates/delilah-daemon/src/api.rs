@@ -350,8 +350,11 @@ fn parse_view(view: &str) -> Result<delilah_core::TaskView, ApiError> {
     })
 }
 
-fn default_workflow() -> String {
-    delilah_core::workflow::TaskWorkflow::Project.as_str().into()
+/// A workflow named in a request; `feature` is the old name of `project`.
+pub(crate) fn normalise_workflow(
+    w: &str,
+) -> Result<delilah_core::workflow::TaskWorkflow, ApiError> {
+    delilah_core::workflow::TaskWorkflow::parse(w).map_err(ApiError::bad_request)
 }
 
 /// `POST /api/v1/tasks/{key}/setup/retry`: from `setup-failed`, runs the setup again.
@@ -464,10 +467,17 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
         false => new.key,
     };
     let key = TaskKey::parse(key).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let workflow = new
-        .workflow
-        .or_else(|| project.as_ref().map(|p| p.workflow.clone()))
-        .unwrap_or_else(default_workflow);
+    // Stored normalised: `feature` (the old name) becomes `project`.
+    let workflow = match new.workflow {
+        Some(w) => normalise_workflow(&w)?,
+        None => match &project {
+            Some(p) => delilah_core::workflow::TaskWorkflow::parse(&p.workflow)
+                .map_err(|e| ApiError::bad_request(format!("{}: {e}", p.name)))?,
+            None => delilah_core::workflow::TaskWorkflow::Project,
+        },
+    }
+    .as_str()
+    .to_string();
     if new.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
@@ -862,7 +872,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "custom".into(),
+                workflow: "prompt".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -1074,7 +1084,7 @@ mod tests {
         assert_eq!(task["status"], json!({"type": "queued"}));
         assert_eq!(task["project"], "web");
         assert_eq!(task["notes"], "con backoff");
-        assert_eq!(task["workflow"], "custom", "the project's workflow");
+        assert_eq!(task["workflow"], "prompt", "the project's workflow");
         assert_eq!(task["in_checkout"], false, "it will work in a worktree");
         let key = TaskKey::new("LIBRE-1");
         assert!(state.store.workspace(&key).await.unwrap().is_none());
@@ -1515,6 +1525,40 @@ mod tests {
         assert!(task["autopilot"].is_object());
         let (_, task) = call(&app, "PATCH", &uri, Some(json!({"saving_mode": false}))).await;
         assert!(task["autopilot"].is_null(), "saving mode off clears it");
+    }
+
+    #[tokio::test]
+    async fn the_old_feature_name_is_stored_as_project_and_keeps_autopilot() {
+        let (app, state) = app_with_project().await;
+        let mut project = state.store.project("web").await.unwrap();
+        project.workflow = "feature".into();
+        state.store.update_project("web", &project).await.unwrap();
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "project": "web"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["workflow"], "project");
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "workflow": "feature", "autopilot": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["workflow"], "project");
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "workflow": "bogus"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

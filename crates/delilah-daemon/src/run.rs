@@ -319,26 +319,35 @@ pub(crate) async fn start_run_with(
         }
         _ => {}
     }
-    let workflow = req
-        .workflow
-        .clone()
-        .or_else(|| existing.as_ref().map(|t| t.workflow.clone()))
-        .unwrap_or_else(|| project.workflow.clone());
-    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+    // `feature` (the old name, still stored by older projects) is `project`.
+    let workflow = match &req.workflow {
+        Some(w) => crate::api::normalise_workflow(w)?,
+        None => {
+            let stored = existing
+                .as_ref()
+                .map(|t| t.workflow.as_str())
+                .unwrap_or(project.workflow.as_str());
+            // A stored free-text value from before the workflow enum: it needs a prompt.
+            TaskWorkflow::parse(stored).unwrap_or(TaskWorkflow::Prompt)
+        }
+    };
+    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, workflow.as_str()) {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
-    let prompt = match (&req.prompt, workflow.as_str()) {
+    let prompt = match (&req.prompt, workflow) {
         (Some(prompt), _) => prompt.clone(),
-        (None, w) if w == TaskWorkflow::Project.as_str() && req.free => {
+        (None, TaskWorkflow::Project) if req.free => {
             format!("/feature {}", req.title.trim())
         }
-        (None, w) if w == TaskWorkflow::Project.as_str() => format!("/feature {}", req.key),
+        (None, TaskWorkflow::Project) => format!("/feature {}", req.key),
         (None, other) => {
             return Err(ApiError::bad_request(format!(
-                "workflow `{other}` needs a --prompt"
+                "workflow `{}` needs a --prompt",
+                other.as_str()
             )));
         }
     };
+    let workflow = workflow.as_str().to_string();
 
     // Named before anything is created, so a refused name leaves a backlog task as it is.
     let notes = req
@@ -3489,6 +3498,42 @@ mod tests {
         req.chat_mode = Some(true);
         req.in_checkout = Some(false);
         req
+    }
+
+    #[tokio::test]
+    async fn a_project_stored_with_the_old_feature_name_still_starts_with_the_feature_message() {
+        let home = std::env::temp_dir().join(format!("delilah-old-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut project = app.store.project("repo").await.unwrap();
+        project.workflow = "feature".into();
+        app.store.update_project("repo", &project).await.unwrap();
+        let (status, Json(started)) = start_run(State(app.clone()), Json(chat_run("LIBRE-1")))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let stdin = read_when_there(home.join("stdin.txt")).await;
+        assert!(stdin.contains("/feature LIBRE-1"), "{stdin}");
+        let task = app.store.get_task(&started.key).await.unwrap().unwrap();
+        assert_eq!(task.workflow, "project", "stored normalised");
+        let _ = app.sessions.primary("LIBRE-1").map(|l| l.runtime.kill());
+    }
+
+    #[tokio::test]
+    async fn a_run_request_naming_feature_with_autopilot_is_accepted() {
+        let home = std::env::temp_dir().join(format!("delilah-old-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut req = chat_run("LIBRE-2");
+        req.workflow = Some("feature".into());
+        req.autopilot = Some(true);
+        req.saving_mode = Some(true);
+        let res = start_run(State(app.clone()), Json(req)).await;
+        if let Err(e) = &res {
+            assert_ne!(e.status, StatusCode::CONFLICT, "{}", e.message);
+        }
+        let _ = app.sessions.primary("LIBRE-2").map(|l| l.runtime.kill());
     }
 
     #[tokio::test]

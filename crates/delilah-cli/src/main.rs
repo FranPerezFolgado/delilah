@@ -311,7 +311,7 @@ enum ProjectCommand {
         /// Defaults to the folder name.
         #[arg(long)]
         name: Option<String>,
-        #[arg(long, default_value = "feature")]
+        #[arg(long, default_value = "project")]
         workflow: String,
     },
     /// Lists the registered projects.

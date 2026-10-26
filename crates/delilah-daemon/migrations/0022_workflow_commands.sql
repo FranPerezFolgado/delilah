@@ -10,6 +10,10 @@ UPDATE projects SET settings = json_set(settings, '$.workflow', json(
 
 ALTER TABLE tasks ADD COLUMN start_message TEXT;
 
+UPDATE projects SET workflow = 'project' WHERE workflow = 'feature';
+
+UPDATE projects SET workflow = 'prompt' WHERE workflow NOT IN ('project', 'prompt', 'none');
+
 UPDATE tasks SET workflow = 'project' WHERE workflow = 'feature';
 
 UPDATE tasks SET workflow = 'prompt' WHERE workflow NOT IN ('project', 'prompt', 'none');
