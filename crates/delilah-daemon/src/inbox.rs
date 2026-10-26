@@ -956,6 +956,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         // Prints, in hex, the exact bytes it receives: the paste plus the Enter.
         let expected = b"\x1b[200~uno\ndos\x1b[201~\r";
         let mut cmd = CommandBuilder::new("bash");
@@ -1451,6 +1452,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = delilah_core::TaskKey::new("PROJ-1");
         let mut task = Task::new(key.clone(), "Fix it", "feature");
         task.status = TaskStatus::Running;
@@ -1700,6 +1702,7 @@ mod tests {
             ..crate::config::Config::test_defaults()
         };
         let app = AppState::new(crate::store::Store::in_memory().await.unwrap(), config);
+        app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = delilah_core::TaskKey::new("PROJ-1");
         let mut t = Task::new(key.clone(), "t", "feature");
         t.saving_mode = true;

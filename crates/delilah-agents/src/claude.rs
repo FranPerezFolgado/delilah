@@ -1,4 +1,4 @@
-//! Claude Code adapter. Findings behind these choices: `docs/spikes/2026-10-19-claude-pty.md`.
+//! Claude Code adapter. Findings behind these choices: `docs/archive/spikes/2026-10-19-claude-pty.md`.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};

@@ -1,4 +1,4 @@
-import { boardCard, expect, startFreeTask, test } from "./fixtures";
+import { boardCard, clickToastButton, expect, startFreeTask, test } from "./fixtures";
 
 test.use({ locale: "en-GB" });
 
@@ -62,7 +62,7 @@ test("Clear notices keeps the blocking question and Undo brings the notices back
   await expect(question).toBeVisible();
   await expect(list.getByRole("group", { name: blocker.key })).toBeVisible();
 
-  await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
+  await clickToastButton(page, "Undo");
   for (const a of avisos) await expect(a.first()).toBeVisible();
   await expect(question).toBeVisible();
 });

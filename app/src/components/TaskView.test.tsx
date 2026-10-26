@@ -5,6 +5,7 @@ import { ApiError, type EventRecord, type InboxItem, type Session, type Task } f
 import { setLanguage, t } from "../i18n";
 import { stepLabel } from "../chain";
 import { clearToasts, ToastHost } from "./ui";
+import { findToast } from "../test/toasts";
 import { TaskView } from "./TaskView";
 
 const events = vi.fn<() => Promise<EventRecord[]>>();
@@ -114,9 +115,9 @@ describe("mark as done", () => {
     done.mockResolvedValue({});
     reopen.mockResolvedValue({});
     const onChanged = vi.fn();
-    const { container, findByRole } = show(running, { onChanged, sessions: [session()] });
+    const { container } = show(running, { onChanged, sessions: [session()] });
     fireEvent.click(byText(container, "button", "Mark as done")!);
-    const toast = await findByRole("status");
+    const toast = await findToast();
     expect(done).toHaveBeenCalledWith("PROJ-1");
     expect(toast.textContent).toContain("Undo");
     await act(async () => {
@@ -129,9 +130,9 @@ describe("mark as done", () => {
   it("shows one human error when the reopen is refused", async () => {
     done.mockResolvedValue({});
     reopen.mockRejectedValue(new ApiError("409 conflict", 409));
-    const { container, findByRole } = show(running, { sessions: [session()] });
+    const { container } = show(running, { sessions: [session()] });
     fireEvent.click(byText(container, "button", "Mark as done")!);
-    const toast = await findByRole("status");
+    const toast = await findToast();
     await act(async () => {
       fireEvent.click(byText(toast, "button", "Undo")!);
     });
@@ -143,16 +144,16 @@ describe("mark as done", () => {
     done.mockResolvedValue({});
     archive.mockResolvedValue({});
     const finished: Task = { ...running, status: { type: "done" } };
-    const { container, findByRole, rerender } = show(running, { sessions: [session()] });
+    const { container, rerender } = show(running, { sessions: [session()] });
     fireEvent.click(byText(container, "button", "Mark as done")!);
-    await findByRole("status");
+    await findToast();
     rerender(
       <>
         <TaskView task={finished} sessions={[]} onOpenSession={noop} onNewSession={async () => {}} onChanged={noop} onViewChanges={noop} />
         <ToastHost />
       </>,
     );
-    await waitFor(() => expect(document.body.querySelector("[role=status]")).toBeNull());
+    await waitFor(() => expect(document.body.querySelector(".toast-host .toast")).toBeNull());
   });
 });
 
