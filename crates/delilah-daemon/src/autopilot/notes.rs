@@ -210,4 +210,21 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[test]
+    fn no_autopilot_note_names_a_slash_command() {
+        let path = Path::new("/h/tasks/PROJ-1/autopilot/review-s1.json");
+        for lang in [Lang::Es, Lang::En] {
+            let mut notes = vec![autopilot_plan_note(lang, "PROJ-1")];
+            for step in [Step::Plan, Step::Implement, Step::Review] {
+                notes.extend(step_note(lang, step, path));
+            }
+            for note in notes {
+                assert!(
+                    !note.split_whitespace().any(|w| w.starts_with('/')),
+                    "{note}"
+                );
+            }
+        }
+    }
 }

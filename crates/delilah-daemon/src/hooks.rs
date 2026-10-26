@@ -509,7 +509,7 @@ mod tests {
         let key = TaskKey::new("PROJ-1");
         state
             .store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         state
@@ -1793,7 +1793,7 @@ mod limit_tests {
         let key = TaskKey::new("PROJ-1");
         state
             .store
-            .create_task(&Task::new(key.clone(), "Card retries", "feature"))
+            .create_task(&Task::new(key.clone(), "Card retries", "project"))
             .await
             .unwrap();
         state.transition(&key, Event::Start).await.unwrap();

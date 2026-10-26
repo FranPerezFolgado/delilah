@@ -37,6 +37,8 @@ delilah project add ~/dev/projects/signal --kind repo # a single repo, Orca-styl
 # Run a task: builds the workspace and starts Claude Code on it
 delilah run PROJ-1234 --project platform --submodules svc-payments,svc-orders --title "Card retries"
 delilah run SIGNAL-12 --project signal --title "Better feed"
+delilah run SIGNAL-16 --project signal --title "Question" --no-prompt   # agent opens with no first message
+delilah run SIGNAL-17 --project signal --prompt 'Investiga {title}'    # this task's own first message (a template)
 
 # Or save it to the project's backlog for later (no workspace, no agent), then start it
 delilah new SIGNAL-13 --project signal --title "Feed cache" --notes "Look at the TTL first"
@@ -52,7 +54,7 @@ delilah runtime SIGNAL-15 terminal   # move a task's agent to the terminal and b
 delilah runtime --session <ID> chat # only that session (no key needed); the task's setting stays the default
 
 # Per-project settings (see "Project settings" below)
-delilah project show signal                          # effective settings, defaults marked
+delilah project show signal                          # effective settings (workflow included), defaults marked
 delilah project set signal workspace worktree        # checkout | worktree
 delilah project set signal branch 'feature/{ticket}-{slug}'
 delilah project set signal setup 'npm ci'
@@ -60,6 +62,7 @@ delilah project set signal shared add .env --copy    # --copy | --link; neither:
 delilah project set signal shared rm .env
 delilah project set signal submodules always add svc-common   # always|never add|rm <path>
 delilah project unset signal setup                   # back to the default
+delilah project unset signal workflow               # back to the built-in prompt (the workflow itself is edited in the app)
 delilah setup retry|skip|cancel SIGNAL-13            # when a task's setup failed or is running
 
 delilah ls                 # tasks and their state
@@ -173,7 +176,9 @@ change the outgoing session saves its notes with `/save-session`. If a handoff
 fails, the Inbox shows it with "Retry"; after a restart Delilah finishes or
 re-offers it. In Settings: "Saving mode by default" (new tasks) and "Save notes
 before switching session" (on by default). Needs the spec files: without a
-`specs/` folder there are no handoffs.
+`specs/` folder there are no handoffs. Only for tasks that follow a project with a phased
+workflow (see "Project settings"): turning it on elsewhere is refused. The handoffs send the
+project's own implement and review commands.
 
 **Agent model.** Delilah picks the Claude model of each task session when it starts.
 In Settings, "Agent model" sets one per phase (Specify, Plan, Implement, Review):
@@ -191,7 +196,7 @@ always run on Claude's default.
 **Autopilot.** A task can run on its own up to the PR: "Autopilot" (next to "Saving
 mode", which it turns on; a toggle on a running task, `--autopilot` /
 `--no-autopilot` in `delilah run` and `new`, `delilah autopilot <KEY> on|off|resume`).
-Only for tasks on the spec workflow. The implementation starts without asking, the
+Only for tasks that start with the project's phased workflow (a task with the built-in prompt, a custom message or no first message is refused). The implementation starts without asking, the
 review runs the project's checks, and when it reports the branch ready Delilah starts
 the project's preview (if it has one) and opens a draft PR with your `gh`. A step that
 stalls gets one nudge; questions that have an option marked "(Recommended)" are
@@ -415,6 +420,37 @@ They are personal to your Delilah (stored by the daemon, nothing is written in t
 repo) and the same ones can be edited with `delilah project show|set|unset`.
 Whatever is not set keeps its default, which `show` marks.
 
+- **Workflow** ("Flujo de trabajo"): what Delilah sends the agent on its own. Two shapes:
+  - *Single*, one start for every task: "Prompt integrado" (the default: a plain message
+    with the ticket and title, e.g. "Work on the task PROJ-12: Retry payments.", plus the
+    notes pointer; no skill, no slash command), "Mensaje propio" (a command or message
+    you write) or "Nada" (the agent opens with no first message and the task waits for
+    you).
+  - *Phased*, three commands: plan (the first message), implement (sent when the plan is
+    done) and review (sent when the implementation is). Only a phased workflow offers saving
+    mode and autopilot, and its hand-offs (including autopilot's) send these commands.
+    All three must be filled in.
+
+  The "Preset" menu fills the fields in one click: *Prompt integrado*, *Nada*, *Spec Kit
+  (`/feature`)* (`/feature {task}`, `/orchestrate {spec_dir}` and a review message; what
+  Delilah always sent before, and what projects that existed already were migrated to; the
+  review text is in Spanish unless the language is English) and *Spec Kit (oficial)*
+  (`/speckit-specify {title}`, `/speckit-implement`, a review message). The official
+  preset has a limit: with saving mode the plan session must stop once `tasks.md` exists,
+  but `/speckit-specify` alone stops after `spec.md`, so extend your plan command to run
+  specify, plan and tasks (the old dotted commands are edited by hand too).
+  Each command field has a list of the skills and slash commands found for the project (the
+  project's `.claude`, yours in `~/.claude`, and enabled plugins' as `plugin:name`, with
+  their descriptions and where each comes from; `CLAUDE_CONFIG_DIR` is ignored on purpose
+  and symlinked skills are skipped, as is a project `.claude` folder that links elsewhere;
+  a folded multi-line `description` is shown on one line), or type any text. A command naming a skill that is
+  not found shows a warning but can be saved. Placeholders: `{ticket}` (the key),
+  `{title}`, `{task}` (the title for a free task, the key otherwise: so
+  `/feature {task}` on a free task starts `/feature <title>`) and `{spec_dir}` (the task's
+  spec folder; only in the implement command). Write `{{` and `}}` for literal braces. A blank
+  command, an unknown placeholder or a lone brace is refused next to the field. A new
+  project has no workflow of its own and uses the built-in prompt. The `workflow` string of
+  `delilah project add --workflow` is deprecated and ignored (it warns).
 - **Where it works** (workspace mode): checkout or worktree, for new tasks. Unset by
   default, and then tasks run in your checkout. A task started
   without saying where follows it (CLI, ideas, the autopilot idea option); the
@@ -459,7 +495,8 @@ Whatever is not set keeps its default, which `show` marks.
 Errors in the form appear next to the field (and as `field: message` in the CLI).
 
 **New tasks.** From a Jira ticket or **free** (no ticket: Delilah names it `LIBRE-n`
-and starts `/feature <what you want to do>`). The agent works either **in your
+and starts it with the project's workflow, e.g. `/feature <what you want to do>` on the
+`/feature` preset or the built-in prompt otherwise). The agent works either **in your
 checkout** (default: a branch in your folder, or in the chosen submodules of a
 parent; one task at a time, with the checkout clean; archiving goes back to the
 branch you were on and keeps the task's branch; files left uncommitted stay in your
@@ -474,6 +511,22 @@ fresh; in your checkout it starts from where your folder is. If the fetch fails 
 last known state and warns "Branch may be behind": an item in the Inbox and a
 banner on the task screen, with "Discard". It never blocks the task, and archiving
 clears it.
+
+**The start of one task.** The new-task form and the backlog task screen show what the
+task will send first ("Al empezar"): "El del proyecto" (the default; saving mode and
+autopilot are offered only when it is a phased workflow), "Mensaje propio" (another skill or
+message for this task, chosen from the same list as in the project settings, with the same
+placeholders) or "Nada". A custom message must not be blank (Start and Save are disabled
+until it has text). A backlog task keeps its choice: starting it later runs it even if the
+project's workflow changed in between; "El del proyecto" follows the project's workflow at
+that moment. A Jira task started with the built-in prompt or a phased plan command also gets
+where its ticket was saved; a message you wrote is sent as written (plus the notes). From the terminal, `--no-prompt` (same as `--workflow none`) starts with no first
+message and `--prompt <text>` gives the task's own message; `--workflow` accepts
+`project`, `prompt`, `none` or `feature` (an alias of `project`). A request prompt
+(`delilah run --prompt`, `prompt` in `POST /runs`) is a template like the settings'
+commands: `{title}`, `{ticket}` and `{task}` expand, and an unknown placeholder or a lone
+brace is refused with 422. **This changed:** before, the text was sent as typed, so a
+literal `{` or `}` must now be doubled (`{{` `}}`).
 
 **Finished tasks.** "Mark as done" offers "Undo" for a moment; later, "Reopen"
 (or `delilah reopen`) brings a done task back while its workspace still exists. The board's

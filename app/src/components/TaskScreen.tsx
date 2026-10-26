@@ -44,6 +44,8 @@ interface Props {
   spec?: SpecSummary;
   /** The project, when the owner is one. */
   project?: Project;
+  /** All projects: a task's proposals use its own project's settings. */
+  projects?: Project[];
   /** Opens the new task dialog (from a project). */
   onNewTask?: () => void;
   /** "Convertir en tarea" on one of the project's Claude sessions. */
@@ -149,8 +151,10 @@ function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: 
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ online, owner, task, spec, project, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
+export function TaskScreen({ online, owner, task, spec, project, projects, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
+  // The settings of the project the task belongs to (`project` is set only for a project's own screen).
+  const taskProjectSettings = (project ?? projects?.find((p) => p.name === task?.project))?.settings;
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
@@ -732,6 +736,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
           {shown === OVERVIEW && task && (
             <TaskView
               task={task}
+              projectSettings={taskProjectSettings}
               sessions={sessions}
               asks={asks}
               onOpenSession={showSession}
@@ -841,7 +846,7 @@ export function TaskScreen({ online, owner, task, spec, project, tasks, sessions
                       <div className="ask-bar">
                         <div className="sec">{t("El agente te pregunta")}</div>
                         {sessionAsks.map((a) => (
-                          <AskCard key={a.ask!.id} ask={a.ask!} onDone={onChanged} onOpenTask={onOpenTask} />
+                          <AskCard key={a.ask!.id} ask={a.ask!} projectSettings={taskProjectSettings} onDone={onChanged} onOpenTask={onOpenTask} />
                         ))}
                       </div>
                     )}

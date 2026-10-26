@@ -389,7 +389,7 @@ mod tests {
             name: "web".into(),
             path: repo,
             kind: ProjectKind::Repo,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             settings: Default::default(),
             preview_command: None,
         };
@@ -452,7 +452,7 @@ mod tests {
             name: "p".into(),
             path: PathBuf::from("/p"),
             kind: ProjectKind::Parent,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             settings: Default::default(),
             preview_command: None,
         };

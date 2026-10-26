@@ -76,3 +76,7 @@ required-features = ["e2e"]
 [[test]]
 name = "autofix"
 required-features = ["e2e"]
+
+[[test]]
+name = "builtin_start"
+required-features = ["e2e"]

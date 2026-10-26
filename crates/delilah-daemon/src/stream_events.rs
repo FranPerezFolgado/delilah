@@ -487,7 +487,7 @@ mod tests {
     async fn running_task(app: &AppState) -> TaskKey {
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         for event in [Event::Start, Event::WorkspaceReady] {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, type ProjectSettings } from "../api";
 import { t } from "../i18n";
+import { isPhased } from "../workflowPresets";
 import { Markdown } from "./Markdown";
 import { Button, ConfirmDialog, dismissToast, pushToast } from "./ui";
 import "./ProposalCard.css";
@@ -8,8 +9,10 @@ import "./ProposalCard.css";
 /** How long «Deshacer» works before the discard is sent to the daemon. */
 const UNDO_MS = 6000;
 
-interface Props {
+export interface ProposalProps {
   ask: { id: string; questions: { question: string }[]; proposal: { title: string; brief: string } };
+  /** The settings of the project the task will be created in; autopilot is offered only if its workflow is phased. */
+  projectSettings?: Pick<ProjectSettings, "workflow"> | null;
   /** Opens the task the proposal created. */
   onOpenTask?: (key: string) => void;
   /** Called once the ask is resolved. */
@@ -18,7 +21,7 @@ interface Props {
 
 /** A task proposal from an idea conversation: title, brief and Crear / Crear con
  *  autopiloto (asks first, like the header toggle) / Cambiar algo / Descartar (with Deshacer). */
-export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
+export function ProposalCard({ ask, projectSettings, onDone, onOpenTask }: ProposalProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
@@ -114,9 +117,13 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
             <Button variant="primary" disabled={busy} onClick={() => send("Crear")}>
               {t("Crear")}
             </Button>
-            <Button variant="secondary" disabled={busy} onClick={() => setAsking(true)}>
-              {t("Crear con autopiloto")}
-            </Button>
+            {isPhased("project", projectSettings) ? (
+              <Button variant="secondary" disabled={busy} onClick={() => setAsking(true)}>
+                {t("Crear con autopiloto")}
+              </Button>
+            ) : (
+              projectSettings && <span className="muted small">{t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
+            )}
             <Button variant="secondary" disabled={busy} onClick={() => send("Cambiar algo")}>
               {t("Cambiar algo")}
             </Button>

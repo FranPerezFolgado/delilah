@@ -126,7 +126,7 @@ mod tests {
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new(key);
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         for event in [Event::Start, Event::WorkspaceReady] {

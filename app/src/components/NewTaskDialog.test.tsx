@@ -75,7 +75,8 @@ describe("NewTaskDialog origins", () => {
   });
 });
 
-const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature", settings: DEFAULT_PROJECT_SETTINGS }];
+const phasedSettings = { ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased" as const, plan: "/p", implement: "/i", review: "/r" } };
+const projects: Project[] = [{ name: "web", path: "/p/web", kind: "repo", workflow: "feature", settings: phasedSettings }];
 const started: Task = {
   created_at: "2026-01-01T00:00:00Z", finished_at: null, key: "LIBRE-1",
   title: "t",
@@ -147,6 +148,21 @@ describe("NewTaskDialog autopilot", () => {
     expect(pressed(saving)).toBe(true);
   });
 
+  it("is offered for a project whose workflow is \"project\"", () => {
+    const { container } = render(
+      <NewTaskDialog projects={[{ ...projects[0], workflow: "project" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(btn(container, "Autopiloto")).toBeDefined();
+  });
+
+  it("follows the project's settings, not its legacy workflow column", () => {
+    // Migration 0024 rewrote an old `custom` column to `prompt` and gave the project the phased preset.
+    const { container } = render(
+      <NewTaskDialog projects={[{ ...projects[0], workflow: "prompt" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(btn(container, "Autopiloto")).toBeDefined();
+  });
+
   it("is sent with the run together with saving mode", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
@@ -170,6 +186,17 @@ describe("NewTaskDialog autopilot", () => {
     expect(create.mock.calls[0][0]).toMatchObject({ autopilot: true, saving_mode: true });
   });
 
+  it("says it needs the project's workflow when the task uses a custom prompt", () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const existing = { ...started, workflow: "prompt" };
+    const { container } = render(
+      <NewTaskDialog projects={projects} existing={existing} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    expect(container.textContent).toContain("no con un prompt propio");
+    expect(container.textContent).not.toContain("flujo por fases");
+  });
+
   it("unticking it on a backlog task that has it sends autopilot: false", async () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
@@ -183,13 +210,26 @@ describe("NewTaskDialog autopilot", () => {
     expect(run.mock.calls[0][0].autopilot).toBe(false);
   });
 
-  it("is hidden outside the spec workflow", () => {
+  it("is hidden, with a reason, when the project's workflow is not phased", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const { container } = render(
       <NewTaskDialog projects={[{ ...web, workflow: "custom" }]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
     );
     expect(btn(container, "Autopiloto")).toBeUndefined();
-    expect(btn(container, "Ahorro")).toBeDefined();
+    expect(btn(container, "Ahorro")).toBeUndefined();
+    expect(container.textContent).toContain("solo están disponibles con un flujo por fases");
+  });
+
+  it("a non-phased task is sent with saving mode off even if the preference is on", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(true);
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = render(
+      <NewTaskDialog projects={[web]} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    await Promise.resolve();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].saving_mode).toBe(false);
   });
 });
 
@@ -480,13 +520,12 @@ describe("NewTaskDialog layout and errors", () => {
     expect(container.textContent).not.toContain("Lanzar");
   });
 
-  it("puts Vista, Rama and Primer mensaje under Opciones avanzadas", () => {
+  it("puts Vista and Rama under Opciones avanzadas", () => {
     vi.spyOn(api, "preference").mockResolvedValue(null);
     const { container } = mount();
     const adv = container.querySelector("details")!;
     expect(adv.querySelector("summary")!.textContent).toBe("Opciones avanzadas");
     expect(adv.querySelector('input[aria-label="Rama"]')).not.toBeNull();
-    expect(adv.querySelector("textarea")).not.toBeNull();
     expect(adv.querySelector('[role="radiogroup"]')).not.toBeNull();
   });
 
@@ -570,12 +609,96 @@ describe("NewTaskDialog layout and errors", () => {
   });
 });
 
+describe("NewTaskDialog start override", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const withWorkflow = (workflow: Project["settings"]["workflow"]): Project[] => [{ ...projects[0], workflow: "project", settings: { ...DEFAULT_PROJECT_SETTINGS, workflow } }];
+  const mountWith = (ps: Project[]) =>
+    render(<NewTaskDialog projects={ps} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
+  const startSelect = (c: HTMLElement) => c.querySelector('select[aria-label="Al empezar"]') as HTMLSelectElement;
+
+  beforeEach(() => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    vi.spyOn(api, "projectSkills").mockResolvedValue([]);
+  });
+
+  it("shows what the project's workflow resolves to, filled with the typed ticket and title", () => {
+    const { container } = mountWith(withWorkflow({ kind: "single", start: { type: "message", template: "/fix {ticket} {title}" } }));
+    expect(startSelect(container).value).toBe("project");
+    expect(container.querySelector(".start-resolved")!.textContent).toBe("/fix PROJ-1 Algo");
+  });
+
+  it("shows the plan of a phased project", () => {
+    const { container } = mountWith(withWorkflow({ kind: "phased", plan: "/feature {task}", implement: "/i", review: "/r" }));
+    expect(container.querySelector(".start-resolved")!.textContent).toBe("/feature PROJ-1");
+  });
+
+  it("sends no override for the project's own start", async () => {
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = mountWith(projects);
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].workflow).toBeUndefined();
+    expect(run.mock.calls[0][0].prompt).toBeUndefined();
+  });
+
+  it("another message is sent as workflow prompt, and hides saving mode and autopilot", async () => {
+    const run = vi.spyOn(api, "run").mockResolvedValueOnce(started);
+    const { container } = mountWith(projects);
+    expect(btn(container, "Autopiloto")).toBeDefined();
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/fix {ticket}" } });
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    expect(btn(container, "Ahorro")).toBeUndefined();
+    expect(container.textContent).toContain("no con un prompt propio");
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0]).toMatchObject({ workflow: "prompt", prompt: "/fix {ticket}", saving_mode: false });
+  });
+
+  it("disables Iniciar and Guardar en backlog while the custom message is blank", () => {
+    const { container, getByText } = mountWith(projects);
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    expect(btn(container, "Iniciar").disabled).toBe(true);
+    expect((getByText("Guardar en backlog") as HTMLButtonElement).closest("button")!.disabled).toBe(true);
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/fix" } });
+    expect(btn(container, "Iniciar").disabled).toBe(false);
+    expect((getByText("Guardar en backlog") as HTMLButtonElement).closest("button")!.disabled).toBe(false);
+  });
+
+  it("Nada is sent as workflow none and hides the phased controls; it is also saved to the backlog", async () => {
+    const create = vi.spyOn(api, "createTask").mockResolvedValueOnce(started);
+    const { container, getByText } = mountWith(projects);
+    fireEvent.change(startSelect(container), { target: { value: "none" } });
+    expect(btn(container, "Autopiloto")).toBeUndefined();
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0]).toMatchObject({ workflow: "none" });
+  });
+
+  it("shows the daemon's template errors inline", async () => {
+    vi.spyOn(api, "run").mockRejectedValueOnce(new ApiError("invalid", 422, false, undefined, undefined, [{ field: "workflow.start.template", code: "x", message: "placeholder desconocido" }]));
+    const { container } = mountWith(projects);
+    fireEvent.change(startSelect(container), { target: { value: "prompt" } });
+    fireEvent.change(container.querySelector('input[aria-label="Comando"]')!, { target: { value: "/x {nope}" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(container.querySelector('[data-field="workflow.start.template"]')).not.toBeNull());
+  });
+
+  it("a backlog task keeps its stored message", () => {
+    const { container } = render(
+      <NewTaskDialog projects={projects} existing={{ ...started, workflow: "prompt", start_message: "/mine" }} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />,
+    );
+    expect(startSelect(container).value).toBe("prompt");
+    expect((container.querySelector('input[aria-label="Comando"]') as HTMLInputElement).value).toBe("/mine");
+  });
+});
+
 describe("NewTaskDialog autofix", () => {
   const draft = { key: "PROJ-1", title: "Algo", components: [] };
   const mountWith = (mode: "off" | "autopilot" | "always" | undefined) =>
     render(
       <NewTaskDialog
-        projects={[{ ...web, settings: { ...DEFAULT_PROJECT_SETTINGS, ci_autofix: mode } }]}
+        projects={[{ ...web, settings: { ...phasedSettings, ci_autofix: mode } }]}
         draft={draft}
         onClose={() => {}}
         onStarted={() => {}}

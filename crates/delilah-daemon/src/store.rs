@@ -105,7 +105,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -116,7 +116,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -145,11 +145,15 @@ impl Store {
             .notes
             .as_ref()
             .map(|n| Some(n.clone()).filter(|n| !n.trim().is_empty()));
+        let start_message = change
+            .start_message
+            .as_ref()
+            .map(|m| Some(m.clone()).filter(|m| !m.trim().is_empty()));
         // A title the user changes is theirs from then on.
         let title_changed = change.title.as_ref().is_some_and(|t| *t != task.title);
         // The status in the WHERE: a start that slipped in between wins.
         let updated = sqlx::query(
-            "UPDATE tasks SET title = ?, title_source = ?, previous_title = ?, project = ?, workflow = ?, notes = ?, in_checkout = ?, updated_at = ?
+            "UPDATE tasks SET title = ?, title_source = ?, previous_title = ?, project = ?, workflow = ?, start_message = ?, notes = ?, in_checkout = ?, updated_at = ?
              WHERE key = ? AND status = ?",
         )
         .bind(change.title.as_ref().unwrap_or(&task.title))
@@ -168,6 +172,7 @@ impl Store {
         })
         .bind(change.project.as_ref().or(task.project.as_ref()))
         .bind(change.workflow.as_ref().unwrap_or(&task.workflow))
+        .bind(start_message.unwrap_or(task.start_message))
         .bind(notes.unwrap_or(task.notes))
         .bind(change.in_checkout.or(task.in_checkout))
         .bind(Utc::now().to_rfc3339())
@@ -179,6 +184,26 @@ impl Store {
             return Err(StoreError::NotInBacklog(key.clone()));
         }
         Ok(self.get_task(key).await?.expect("task was just updated"))
+    }
+
+    /// Sets (or clears) the message a `prompt` task starts with. Not part of
+    /// `BacklogChange`, which callers build field by field.
+    pub async fn set_start_message(
+        &self,
+        key: &TaskKey,
+        message: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let updated =
+            sqlx::query("UPDATE tasks SET start_message = ?, updated_at = ? WHERE key = ?")
+                .bind(message)
+                .bind(Utc::now().to_rfc3339())
+                .bind(key.as_str())
+                .execute(&self.pool)
+                .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
     }
 
     /// Turns saving mode on or off for a task, whatever state it is in. Turning it
@@ -510,7 +535,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -573,13 +598,14 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, model, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, start_message, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, model, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
     .bind(&task.project)
     .bind(&task.workflow)
+    .bind(&task.start_message)
     .bind(&task.phase)
     .bind(serde_json::to_string(&task.status)?)
     .bind(&task.notes)
@@ -615,6 +641,9 @@ pub struct BacklogChange {
     pub project: Option<String>,
     #[serde(default)]
     pub workflow: Option<String>,
+    /// The message a `prompt` task starts with (a template); blank clears it.
+    #[serde(default)]
+    pub start_message: Option<String>,
     /// Where it will work once started: the project's checkout or a worktree.
     pub in_checkout: Option<bool>,
 }
@@ -625,6 +654,7 @@ impl BacklogChange {
             && self.notes.is_none()
             && self.project.is_none()
             && self.workflow.is_none()
+            && self.start_message.is_none()
             && self.in_checkout.is_none()
     }
 }
@@ -659,6 +689,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         phase: row.try_get("phase")?,
         status: task_status.clone(),
         notes: row.try_get("notes")?,
+        start_message: row.try_get("start_message")?,
         in_checkout: row.try_get("in_checkout")?,
         branch: row.try_get("branch")?,
         saving_mode: row.try_get("saving_mode")?,
@@ -732,7 +763,7 @@ mod tests {
     }
 
     fn task(key: &str) -> Task {
-        Task::new(TaskKey::new(key), "Card retries", "feature")
+        Task::new(TaskKey::new(key), "Card retries", "project")
     }
 
     #[tokio::test]
@@ -905,6 +936,167 @@ mod tests {
             .unwrap();
         assert!(!t.chat_mode);
         assert!(t.allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn start_message_round_trips() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut t = task("PROJ-1");
+        t.workflow = "prompt".into();
+        t.start_message = Some("haz {ticket}".into());
+        store.create_task(&t).await.unwrap();
+        let got = store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(got.start_message.as_deref(), Some("haz {ticket}"));
+        assert_eq!(
+            store.list_tasks().await.unwrap()[0]
+                .start_message
+                .as_deref(),
+            Some("haz {ticket}")
+        );
+        store.set_start_message(&key, Some("otro")).await.unwrap();
+        let got = store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(got.start_message.as_deref(), Some("otro"));
+        store.set_start_message(&key, None).await.unwrap();
+        let got = store.get_task(&key).await.unwrap().unwrap();
+        assert_eq!(got.start_message, None);
+        assert!(
+            store
+                .set_start_message(&TaskKey::new("NOPE-1"), None)
+                .await
+                .is_err()
+        );
+    }
+
+    /// The migration's UPDATEs (everything but the ALTER), to replay them.
+    fn workflow_updates() -> Vec<&'static str> {
+        include_str!("../migrations/0024_workflow_commands.sql")
+            .split(';')
+            .map(str::trim)
+            .filter(|s| s.contains("UPDATE"))
+            .collect()
+    }
+
+    async fn migrated_0024(language: Option<&str>) -> SqlitePool {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = old
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 23)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        for (name, settings) in [
+            ("empty", "{}"),
+            ("tmpl", r#"{"branch_template":"x/{key}"}"#),
+            (
+                "done",
+                r#"{"workflow":{"kind":"single","start":{"type":"nothing"}}}"#,
+            ),
+            ("free", "{}"),
+        ] {
+            sqlx::query(
+                "INSERT INTO projects (name, path, kind, workflow, created_at, settings)
+                 VALUES (?, ?, 'repo', ?, 'x', ?)",
+            )
+            .bind(name)
+            .bind(format!("/tmp/{name}"))
+            .bind(if name == "free" { "custom" } else { "feature" })
+            .bind(settings)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        for (key, wf) in [("T-1", "feature"), ("T-2", "prompt"), ("T-3", "bugfix")] {
+            sqlx::query(
+                "INSERT INTO tasks (key, title, project, workflow, phase, status, created_at, updated_at)
+                 VALUES (?, 'T', NULL, ?, 'backlog', '{\"type\":\"queued\"}', 'x', 'x')",
+            )
+            .bind(key)
+            .bind(wf)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        if let Some(l) = language {
+            sqlx::query("INSERT INTO settings (key, value) VALUES ('pref:language', ?)")
+                .bind(serde_json::to_string(l).unwrap())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn project_settings(pool: &SqlitePool, name: &str) -> serde_json::Value {
+        let s: String = sqlx::query_scalar("SELECT settings FROM projects WHERE name = ?")
+            .bind(name)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        serde_json::from_str(&s).unwrap()
+    }
+
+    #[tokio::test]
+    async fn migration_0024_gives_old_projects_the_feature_preset() {
+        use crate::lang::{Lang, feature_preset};
+        for (language, lang) in [
+            (None, Lang::Es),
+            (Some("en"), Lang::En),
+            (Some("es"), Lang::Es),
+        ] {
+            let pool = migrated_0024(language).await;
+            let want = serde_json::to_value(feature_preset(lang)).unwrap();
+            let empty = project_settings(&pool, "empty").await;
+            assert_eq!(empty["workflow"], want, "{language:?}");
+            let tmpl = project_settings(&pool, "tmpl").await;
+            assert_eq!(tmpl["workflow"], want);
+            assert_eq!(tmpl["branch_template"], "x/{key}");
+            // A project that already has a workflow keeps it.
+            let done = project_settings(&pool, "done").await;
+            assert_eq!(done["workflow"]["kind"], "single");
+
+            let wfs: Vec<(String, Option<String>)> =
+                sqlx::query_as("SELECT workflow, start_message FROM tasks ORDER BY key")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                wfs,
+                [
+                    ("project".to_string(), None),
+                    ("prompt".to_string(), None),
+                    ("prompt".to_string(), None)
+                ]
+            );
+
+            // Replaying the UPDATEs changes nothing (the ALTER cannot run twice).
+            for sql in workflow_updates() {
+                sqlx::query(sql).execute(&pool).await.unwrap();
+            }
+            let task_wfs: Vec<String> =
+                sqlx::query_scalar("SELECT workflow FROM tasks ORDER BY key")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(task_wfs, ["project", "prompt", "prompt"], "after replay");
+            let project_wfs: Vec<String> =
+                sqlx::query_scalar("SELECT workflow FROM projects ORDER BY name")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(project_wfs, ["project", "project", "prompt", "project"]);
+            assert_eq!(project_settings(&pool, "empty").await["workflow"], want);
+            assert_eq!(project_settings(&pool, "tmpl").await["workflow"], want);
+        }
     }
 
     #[tokio::test]
@@ -1654,7 +1846,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -1669,6 +1861,7 @@ mod tests {
             project: Some("web".into()),
             workflow: Some("bugfix".into()),
             in_checkout: Some(false),
+            ..Default::default()
         };
         let task = store.update_backlog_task(&key, &change).await.unwrap();
         assert_eq!(task.title, "Reintentos");

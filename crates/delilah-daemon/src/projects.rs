@@ -23,7 +23,14 @@ pub struct NewProject {
 }
 
 fn default_workflow() -> String {
-    "feature".into()
+    delilah_core::workflow::TaskWorkflow::Project
+        .as_str()
+        .into()
+}
+
+/// `feature` is the old name of `project`; anything unknown is refused.
+fn normalise(w: &str) -> Result<String, ApiError> {
+    Ok(crate::api::normalise_workflow(w)?.as_str().into())
 }
 
 pub async fn list_projects(State(app): State<AppState>) -> Result<Json<Vec<Project>>, ApiError> {
@@ -47,7 +54,7 @@ pub async fn add_project(
         name,
         path: root,
         kind: new.kind,
-        workflow: new.workflow,
+        workflow: normalise(&new.workflow)?,
         settings: Default::default(),
         preview_command: None,
     };
@@ -92,7 +99,7 @@ pub async fn update_project(
         project.name = new_name;
     }
     if let Some(workflow) = change.workflow.filter(|w| !w.trim().is_empty()) {
-        project.workflow = workflow;
+        project.workflow = normalise(&workflow)?;
     }
     if let Some(kind) = change.kind {
         project.kind = kind;
@@ -280,6 +287,19 @@ fn localised(lang: crate::lang::Lang, e: &FieldError) -> String {
             "El proyecto no tiene ese submódulo.",
             "This project has no such submodule.",
         ),
+        "workflow.blank" => ("El comando está vacío.", "The command is empty."),
+        "workflow.unknown_placeholder" => (
+            "El comando tiene un marcador desconocido; usa `{ticket}`, `{title}` o `{task}`.",
+            "The command has an unknown placeholder; use `{ticket}`, `{title}` or `{task}`.",
+        ),
+        "workflow.placeholder_not_allowed" => (
+            "`{spec_dir}` solo puede usarse en el comando de implementar.",
+            "`{spec_dir}` can only be used in the implement command.",
+        ),
+        "workflow.unbalanced_brace" => (
+            "Llave sin pareja; escribe `{{` o `}}` para una llave literal.",
+            "Unmatched brace; write `{{` or `}}` for a literal brace.",
+        ),
         _ => return e.message.clone(),
     };
     lang.pick(es, en).to_string()
@@ -347,6 +367,26 @@ pub async fn submodules(
         return Ok(Json(subs));
     }
     Ok(Json(without_never(subs, &never, |s| &s.path)))
+}
+
+/// `GET /api/v1/projects/{name}/skills`: the skills and commands Claude Code can run
+/// for the project. Unreadable files are skipped, so this never fails because of one.
+pub async fn skills(
+    State(app): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<Json<Vec<crate::skills::Skill>>, ApiError> {
+    let project = app.store.project(&name).await?;
+    // The user's Claude Code config lives under their own home, not Delilah's.
+    // Without a HOME only the project's own are listed (an empty path would resolve
+    // `.claude` against the daemon's working folder).
+    let home = std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from);
+    let list =
+        tokio::task::spawn_blocking(move || crate::skills::list(home.as_deref(), &project.path))
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(list))
 }
 
 #[derive(Debug, Deserialize)]
@@ -834,6 +874,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_rejects_bad_workflow_templates_with_localised_fields() {
+        let env = env().await;
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({ "workflow": { "kind": "single", "start": { "type": "message", "template": "/fix {foo}" } } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let f = &body["fields"][0];
+        assert_eq!(f["field"], "workflow.start.template");
+        assert_eq!(f["code"], "workflow.unknown_placeholder");
+        assert!(f["message"].as_str().unwrap().contains("placeholder"));
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({ "workflow": { "kind": "single", "start": { "type": "message", "template": "  " } } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["fields"][0]["code"], "workflow.blank");
+        assert_eq!(body["fields"][0]["message"], "The command is empty.");
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn put_rejects_a_phased_workflow_missing_its_review() {
+        let env = env().await;
+        let (status, body) = put(
+            &env,
+            "parent",
+            json!({ "workflow": { "kind": "phased", "plan": "/feature {task}", "implement": "/orchestrate {spec_dir}", "review": " " } }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["fields"][0]["field"], "workflow.review");
+        assert_eq!(body["fields"][0]["code"], "workflow.blank");
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn skills_endpoint_is_200_for_a_project_and_404_for_unknown() {
+        let env = env().await;
+        let proj = env.dir.join("env/parent/.claude/commands");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("zz-test-skill.md"), "Does a thing\n").unwrap();
+        let (status, body) = call(
+            &env.app,
+            Request::get("/api/v1/projects/parent/skills")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["name"] == "zz-test-skill"
+                    && s["source"] == "project"
+                    && s["description"] == "Does a thing")
+        );
+        let (status, _) = call(
+            &env.app,
+            Request::get("/api/v1/projects/ghost/skills")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn put_unknown_project_is_404() {
         let env = env().await;
         let (status, _) = put(&env, "ghost", json!({})).await;
@@ -891,7 +1005,7 @@ mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -934,7 +1048,7 @@ mod tests {
         assert_eq!(listed[0]["preview_command"], "npm run dev");
 
         // Absent keeps it.
-        let kept = patch(json!({ "workflow": "custom" })).await;
+        let kept = patch(json!({ "workflow": "prompt" })).await;
         assert_eq!(kept["preview_command"], "npm run dev");
         let listed = send("GET", "/api/v1/projects", None).await;
         assert_eq!(listed[0]["preview_command"], "npm run dev");

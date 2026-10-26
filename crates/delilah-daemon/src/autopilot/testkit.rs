@@ -26,7 +26,7 @@ pub(crate) fn running() -> Autopilot {
 }
 
 pub(crate) fn task_with(autopilot: Option<AutopilotState>) -> Task {
-    let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+    let mut t = Task::new(TaskKey::new("PROJ-1"), "t", "project");
     t.saving_mode = true;
     t.autopilot = autopilot.map(|state| Autopilot { state, ..running() });
     t
@@ -140,6 +140,13 @@ pub(crate) async fn task_with_commits(
     subjects: &[&str],
 ) -> (AppState, TaskKey, TempDir) {
     let (app, key, dir) = task_with_workspace(gh, None).await;
+    // Hand-offs send the project's commands: it follows the `/feature` preset.
+    let mut settings = app.store.project("proj").await.unwrap().settings;
+    settings.workflow = Some(crate::lang::feature_preset(crate::lang::Lang::Es));
+    app.store
+        .set_project_settings("proj", &settings)
+        .await
+        .unwrap();
     git_repo_with_origin(
         &dir.path().join("ws"),
         &dir.path().join("origin"),

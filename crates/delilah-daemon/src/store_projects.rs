@@ -200,7 +200,7 @@ mod tests {
             name: name.into(),
             path: path.into(),
             kind,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             settings: Default::default(),
             preview_command: None,
         }
@@ -276,7 +276,7 @@ mod tests {
             .create_project(&project("platform", "/w/p", ProjectKind::Repo))
             .await
             .unwrap();
-        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "project");
         task.project = Some("platform".into());
         store.create_task(&task).await.unwrap();
 

@@ -80,7 +80,7 @@ pub fn heuristic(ticket: &Ticket) -> (AgentModel, String) {
             why.push("its description is very long");
         }
     }
-    if ticket.workflow == "feature" {
+    if matches!(ticket.workflow, "project" | "feature") {
         score += 1;
         why.push("it goes through the spec workflow");
     }

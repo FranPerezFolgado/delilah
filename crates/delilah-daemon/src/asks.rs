@@ -380,7 +380,7 @@ pub(crate) mod tests {
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "Card retries", "feature"))
+            .create_task(&Task::new(key.clone(), "Card retries", "project"))
             .await
             .unwrap();
         app.transition(&key, Event::Start).await.unwrap();
@@ -517,7 +517,7 @@ pub(crate) mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -944,7 +944,7 @@ pub(crate) mod tests {
                 name: "web".into(),
                 path: "/w/web".into(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })

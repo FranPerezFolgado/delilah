@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { AGENT_MODELS, api, isCheckoutDirty, type AgentModel, type BranchProposal, type ModelSuggestion, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
+import { AGENT_MODELS, api, ApiError, isCheckoutDirty, type AgentModel, type BranchProposal, type ModelSuggestion, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
 import { modelLabel } from "../agentModels";
+import { isPhased } from "../workflowPresets";
 import { t } from "../i18n";
 import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
-import { Button, Dialog, Segmented, Toggle } from "./ui";
+import { Button, Dialog, Segmented } from "./ui";
+import { StartPicker, startChoiceOf, startFields, type StartChoice } from "./WorkflowEditor";
 import "./NewTaskDialog.css";
 
 /** A ticket to start from, e.g. picked in the Jira view. */
@@ -73,7 +75,9 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const [view, setView] = useState<TaskView>(existing?.view ?? "chat");
   // Experimental headless mode: only a backlog task can carry it now (no control sets it).
   const chatMode = !!existing?.chat_mode;
-  const [prompt, setPrompt] = useState("");
+  // How this task starts: the project's own start, a message of its own, or nothing.
+  const [start, setStart] = useState<StartChoice>(startChoiceOf(existing));
+  const [startErrors, setStartErrors] = useState<NonNullable<ApiError["fields"]>>([]);
   const [idea, setIdea] = useState("");
   const [suggested, setSuggested] = useState<SubmoduleSuggestion[]>([]);
   const [suggesting, setSuggesting] = useState(false);
@@ -92,9 +96,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     if (!whereTouched.current && project) setWhere(whereOf(null, project, unsetWhere));
   }, [project?.name]);
 
-  // Only the spec workflow has autopilot; a custom prompt runs outside it.
-  const workflow = prompt.trim() ? "prompt" : (existing?.workflow ?? project?.workflow);
-  const autopilotAllowed = workflow === "feature";
+  // Saving mode and autopilot only exist in a phased workflow; a custom message or no start runs outside it.
+  const startKind = start.kind;
+  // The project's start comes from its settings, never from the legacy `projects.workflow` column.
+  const workflow = startKind;
+  const autopilotAllowed = isPhased(workflow, project?.settings);
   const autopilotOn = autopilot && autopilotAllowed;
   // Sent as a boolean whenever there is something to clear: absent keeps the stored one.
   const autopilotField = autopilotAllowed || existing?.autopilot ? { autopilot: autopilotOn } : {};
@@ -261,6 +267,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     setBusy(true);
     setError(null);
     setDirtyRefusal(false);
+    setStartErrors([]);
     if (origin === "claude") {
       try {
         const s = await api.openProjectSession(project.name, { kind: "claude", conversation: true, prompt: idea.trim() || undefined });
@@ -279,7 +286,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         submodules: picked,
         free: origin === "libre",
         in_checkout: inCheckout,
-        saving_mode: savingMode || autopilotOn,
+        saving_mode: autopilotAllowed && (savingMode || autopilotOn),
         model,
         ...autopilotField,
         ci_autofix: autofixOn,
@@ -289,11 +296,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         ...(existing ? { notes } : notes.trim() ? { notes: notes.trim() } : {}),
         ...(branch.trim() && (!template || sureRef.current) ? { branch: fullOf(branch.trim()) } : {}),
         ...(fromSession ? { from_session: fromSession.id } : {}),
-        // A custom prompt runs outside the /feature workflow.
-        ...(prompt.trim() ? { workflow: "prompt", prompt: prompt.trim() } : {}),
+        ...startFields(start, !!existing),
       });
       onStarted(task);
     } catch (err) {
+      if (err instanceof ApiError && err.fields.length > 0) setStartErrors(err.fields);
       setDirtyRefusal(isCheckoutDirty(err));
       setError((err as Error).message);
       setBusy(false);
@@ -304,6 +311,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     if (!project) return;
     setBusy(true);
     setError(null);
+    setStartErrors([]);
     try {
       const task = await api.createTask({
         key: origin === "libre" ? undefined : key.trim(),
@@ -312,15 +320,17 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         notes: notes.trim() || undefined,
         free: origin === "libre",
         in_checkout: where === "checkout",
-        saving_mode: savingMode || autopilotOn,
+        saving_mode: autopilotAllowed && (savingMode || autopilotOn),
         model,
         ...autopilotField,
         ci_autofix: autofixOn,
         view,
         ...(chatMode ? { chat_mode: true } : {}),
+        ...startFields(start),
       });
       onSaved(task);
     } catch (err) {
+      if (err instanceof ApiError && err.fields.length > 0) setStartErrors(err.fields);
       setError((err as Error).message);
       setBusy(false);
     }
@@ -340,7 +350,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
       setError((err as Error).message);
     }
   };
-  const canSave = !!project && !!title.trim() && (origin === "libre" || !!key.trim());
+  const blankStart = start.kind === "prompt" && !start.prompt.trim();
+  const canSave = !blankStart && !!project && !!title.trim() && (origin === "libre" || !!key.trim());
 
   const formId = "new-task-form";
   const title0 = fromSession ? t("Convertir en tarea") : existing ? t("Iniciar {key}", { key: existing.key }) : t("Nueva tarea");
@@ -355,7 +366,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           {t("Guardar en backlog")}
         </Button>
       )}
-      <Button variant="primary" type="submit" form={formId} disabled={busy || !project}>{startLabel}</Button>
+      <Button variant="primary" type="submit" form={formId} disabled={busy || !project || blankStart}>{startLabel}</Button>
     </>
   );
   const setSaving = (on: boolean) => {
@@ -431,6 +442,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               </label>
             )}
             {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
+            {origin !== "claude" && !fromSession && project && (
+              <StartPicker project={project.name} settings={project.settings}
+                ticket={existing ? (existing.key.startsWith("LIBRE-") ? "" : existing.key) : origin === "jira" ? key.trim() : ""} title={title.trim()}
+                value={start} errors={startErrors} onChange={setStart} />
+            )}
             {origin !== "claude" && (
               <div className="field">
                 <span className="ntd-sub-hd">
@@ -471,10 +487,10 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                     onSavingMode={setSaving}
                   />
                 ) : (
-                  <Toggle label={t("Ahorro")} pressed={savingMode} onChange={setSaving} />
+                  <span className="muted ntd-help">{workflow === "none" ? t("Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no sin mensaje de inicio.") : workflow === "prompt" ? t("Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no con un prompt propio.") : t("Ahorro y autopiloto solo están disponibles con un flujo por fases (configúralo en los ajustes del proyecto).")}</span>
                 )}
                 <AutofixControl on={autofixOn} onChange={setAutofix} />
-                <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>
+                {autopilotAllowed && <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>}
               </div>
             )}
             {origin !== "claude" && project?.kind === "parent" && (
@@ -529,15 +545,6 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                     <input className="input mono" aria-label={t("Rama")} value={branch} onChange={(e) => editBranch(e.target.value)} placeholder={analysisNames ? t("la creará el análisis") : t("automática si la dejas vacía")} />
                   </span>
                 </label>
-                {!fromSession && (
-                  <label className="field">
-                    <span>
-                      {t("Primer mensaje (opcional; si lo dejas vacío usa")}{" "}
-                      <span className="mono">/feature {origin === "libre" ? t("<lo que quieres hacer>") : key || "TICKET"}</span>)
-                    </span>
-                    <textarea className="input" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-                  </label>
-                )}
               </details>
             )}
           </>
@@ -547,7 +554,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
           <div className="ntd-dirty" role="alert">
             <div>{t("Tu checkout tiene cambios sin guardar. Guárdalos o descártalos, o inicia la tarea en un worktree aislado.")}</div>
             <div className="ntd-dirty-actions">
-              <Button variant="secondary" size={28} disabled={busy} onClick={startInWorktree}>{t("Iniciar en un worktree")}</Button>
+              <Button variant="secondary" size={28} disabled={busy || blankStart} onClick={startInWorktree}>{t("Iniciar en un worktree")}</Button>
               <Button variant="ghost" size={28} icon="console" disabled={busy} onClick={openTerminal}>{t("Abrir una terminal")}</Button>
             </div>
           </div>

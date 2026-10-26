@@ -36,6 +36,22 @@ pub(crate) fn is_free(key: &TaskKey) -> bool {
     key.as_str().starts_with("LIBRE-")
 }
 
+/// The placeholders of a task's commands: `{task}` is the title for a free task and the
+/// key for a Jira one; the title is trimmed.
+pub(crate) fn task_vars<'a>(
+    key: &'a TaskKey,
+    title: &'a str,
+    spec_dir: Option<&'a str>,
+) -> delilah_core::workflow::Vars<'a> {
+    let title = title.trim();
+    delilah_core::workflow::Vars {
+        ticket: key.as_str(),
+        title,
+        task: if is_free(key) { title } else { key.as_str() },
+        spec_dir,
+    }
+}
+
 /// The repos to look for spec folders in, by label: the main repo (`.`) and, for a
 /// parent project, each chosen submodule (by path).
 pub(crate) fn spec_repos(ws: &Workspace) -> Vec<(String, PathBuf)> {
@@ -737,7 +753,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("delilah-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let key = TaskKey::new(key);
-        let mut task = Task::new(key.clone(), "Idea", "feature");
+        let mut task = Task::new(key.clone(), "Idea", "project");
         task.title_source = TitleSource::Initial;
         app.store.create_task(&task).await.unwrap();
         let ws = Workspace {
@@ -820,6 +836,16 @@ mod tests {
     fn write_spec(path: &Path, text: &str) -> PathBuf {
         std::fs::write(path, text).unwrap();
         path.to_path_buf()
+    }
+
+    #[test]
+    fn task_vars_picks_the_task_and_trims_the_title() {
+        let free = TaskKey::new("LIBRE-3");
+        let v = task_vars(&free, "  Fix it ", None);
+        assert_eq!((v.ticket, v.title, v.task), ("LIBRE-3", "Fix it", "Fix it"));
+        let jira = TaskKey::new("PROJ-1");
+        let v = task_vars(&jira, "Fix it", Some("specs/x"));
+        assert_eq!((v.task, v.spec_dir), ("PROJ-1", Some("specs/x")));
     }
 
     #[test]

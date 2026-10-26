@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { api, ApiError, type Handoff, type InboxItem, type Task } from "../api";
+import { api, ApiError, DEFAULT_PROJECT_SETTINGS, type Handoff, type InboxItem, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import * as platform from "../platform";
 import { InboxView } from "./InboxView";
@@ -202,6 +202,27 @@ describe("InboxView proposal item", () => {
     const link = await screen.findByText("LIBRE-9");
     fireEvent.click(link);
     expect(onOpenTask).toHaveBeenCalledWith("LIBRE-9");
+  });
+});
+
+describe("InboxView proposal autopilot", () => {
+  const proposal: InboxItem = {
+    ...item,
+    kind: "question",
+    task: "@web",
+    ask: { id: "a9", questions: [{ question: "¿Creo la tarea?", options: [] }], proposal: { title: "Idea", brief: "brief" } },
+  };
+  const project = (settings: typeof DEFAULT_PROJECT_SETTINGS) => ({ name: "web", path: "/w", kind: "repo" as const, workflow: "project", settings });
+  const mount = (projects: ReturnType<typeof project>[]) => render(<InboxView items={[proposal]} projects={projects} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);
+
+  it("offers Create with autopilot when the idea's project is phased", async () => {
+    mount([project({ ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased", plan: "/p", implement: "/i", review: "/r" } })]);
+    expect(await screen.findByText("Create with autopilot")).toBeTruthy();
+  });
+
+  it("does not when the project is not phased", async () => {
+    mount([project(DEFAULT_PROJECT_SETTINGS)]);
+    expect(screen.queryByText("Create with autopilot")).toBeNull();
   });
 });
 

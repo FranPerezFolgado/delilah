@@ -681,6 +681,10 @@ mod tests {
         let app = app().await;
         // The project's folder is not there: the start fails.
         project_and_conversation(&app).await;
+        app.store
+            .set_project_settings("web", &crate::autopilot::feature_settings())
+            .await
+            .unwrap();
         let reply = crear_with(&app, Some("autopilot"), "Crear").await;
         let key = reply["task"].as_str().unwrap();
         assert!(reply["error"].is_string(), "{reply}");
@@ -835,8 +839,8 @@ mod tests {
                 name: "web".into(),
                 path: repo.clone(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
-                settings: Default::default(),
+                workflow: "project".into(),
+                settings: crate::autopilot::feature_settings(),
                 preview_command: None,
             })
             .await

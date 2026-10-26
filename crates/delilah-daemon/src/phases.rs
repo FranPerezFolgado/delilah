@@ -218,7 +218,7 @@ mod tests {
         let app = AppState::new(Store::in_memory().await.unwrap(), config);
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "t", "feature"))
+            .create_task(&Task::new(key.clone(), "t", "project"))
             .await
             .unwrap();
         app.transition(&key, Event::Start).await.unwrap();

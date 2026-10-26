@@ -754,7 +754,7 @@ mod tests {
                     ..crate::config::Config::test_defaults()
                 },
             );
-            let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+            let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "project");
             task.chat_mode = true;
             task.status = status;
             app.store.create_task(&task).await.unwrap();

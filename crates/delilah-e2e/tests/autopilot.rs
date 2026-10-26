@@ -9,6 +9,30 @@ use serde_json::{Value, json};
 const T: Duration = Duration::from_secs(60);
 const KEY: &str = "E2E-80";
 
+/// Puts the `/feature` preset (the phased workflow) into the `signal` project: a fresh
+/// project has none, and autopilot needs a phased one.
+fn use_feature_workflow(env: &Env) {
+    let api = env.api();
+    let projects = api.projects();
+    let mut settings = delilah_e2e::api::items(&projects)
+        .iter()
+        .find(|p| p["name"] == "signal")
+        .expect("the signal project")["settings"]
+        .clone();
+    settings["workflow"] = json!({
+        "kind": "phased",
+        "plan": "/feature {task}",
+        "implement": "/orchestrate {spec_dir}",
+        "review": "/review the branch of this task. Then apply the confirmed findings, update the docs they made stale and commit. Do not push or open a PR.",
+    });
+    let (status, body) = api.raw(
+        reqwest::Method::PUT,
+        "/api/v1/projects/signal/settings",
+        Some(settings),
+    );
+    assert_eq!(status, 200, "{body}");
+}
+
 fn running(agent: &str, n: usize) -> Vec<Value> {
     (0..n)
         .map(|i| {
@@ -37,6 +61,7 @@ fn step_started(events: &Value) -> Vec<String> {
 fn autopilot_waits_on_background_work() {
     let env = Env::start(EnvOptions::default());
     env.register_fixtures();
+    use_feature_workflow(&env);
     let dir = format!("specs/{}-x", KEY.to_lowercase());
     env.scenario(
         &format!("{KEY}.feature"),
@@ -100,6 +125,7 @@ fn autopilot_still_catches_a_real_stall() {
     let key = "E2E-81";
     let env = Env::start(EnvOptions::default());
     env.register_fixtures();
+    use_feature_workflow(&env);
     let dir = format!("specs/{}-x", key.to_lowercase());
     env.scenario(
         &format!("{key}.feature"),

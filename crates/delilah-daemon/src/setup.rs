@@ -578,14 +578,14 @@ mod tests {
                 name: "web".into(),
                 path: parent.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 preview_command: None,
                 settings,
             })
             .await
             .unwrap();
         let key = TaskKey::new("PROJ-1");
-        let mut task = Task::new(key.clone(), "Retry", "feature");
+        let mut task = Task::new(key.clone(), "Retry", "project");
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         app.transition(&key, Event::Start).await.unwrap();

@@ -18,6 +18,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const phased = { workflow: { kind: "phased" as const, plan: "/p", implement: "/i", review: "/r" } };
+
 const proposal = {
   id: "a2",
   questions: [{ question: "¿Creo la tarea?" }],
@@ -29,7 +31,26 @@ describe("ProposalCard", () => {
     const { getByRole, getByText } = render(<ProposalCard ask={proposal} />);
     expect(getByRole("heading").textContent).toBe("Reintentos");
     expect(getByText("brief").tagName).toBe("STRONG");
-    for (const b of ["Crear", "Crear con autopiloto", "Cambiar algo", "Descartar"]) expect(getByText(b)).toBeTruthy();
+    for (const b of ["Crear", "Cambiar algo", "Descartar"]) expect(getByText(b)).toBeTruthy();
+  });
+
+  it("offers autopilot only when the project is phased", () => {
+    const none = render(<ProposalCard ask={proposal} />);
+    expect(none.queryByText("Crear con autopiloto")).toBeNull();
+    none.unmount();
+    const single = render(<ProposalCard ask={proposal} projectSettings={{ workflow: { kind: "single", start: { type: "builtin" } } }} />);
+    expect(single.queryByText("Crear con autopiloto")).toBeNull();
+    single.unmount();
+    const yes = render(<ProposalCard ask={proposal} projectSettings={phased} />);
+    expect(yes.getByText("Crear con autopiloto")).toBeTruthy();
+  });
+
+  it("says why autopilot is missing when the project is not phased, and stays quiet when settings are unknown", () => {
+    const unknown = render(<ProposalCard ask={proposal} />);
+    expect(unknown.container.textContent).not.toContain("solo están disponibles con un flujo por fases");
+    unknown.unmount();
+    const single = render(<ProposalCard ask={proposal} projectSettings={{ workflow: { kind: "single", start: { type: "builtin" } } }} />);
+    expect(single.container.textContent).toContain("solo están disponibles con un flujo por fases");
   });
 
   it("Crear answers and shows the created task as a link", async () => {
@@ -60,7 +81,7 @@ describe("ProposalCard", () => {
 
   it("Crear con autopiloto asks first, then answers Crear with launch autopilot and links the task", async () => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-8" });
-    const { getByText, findByText } = render(<ProposalCard ask={proposal} />);
+    const { getByText, findByText } = render(<ProposalCard ask={proposal} projectSettings={phased} />);
     fireEvent.click(getByText("Crear con autopiloto"));
     expect(answer).not.toHaveBeenCalled();
     fireEvent.click(getByText("Iniciar"));
@@ -71,7 +92,7 @@ describe("ProposalCard", () => {
 
   it("launch error shows the error and still links the backlog task", async () => {
     vi.spyOn(api, "answerAsk").mockResolvedValue({ task: "LIBRE-9", error: "no arrancó" });
-    const { getByText, findByText, queryByText } = render(<ProposalCard ask={proposal} />);
+    const { getByText, findByText, queryByText } = render(<ProposalCard ask={proposal} projectSettings={phased} />);
     fireEvent.click(getByText("Crear con autopiloto"));
     fireEvent.click(getByText("Iniciar"));
     expect(await findByText("no arrancó")).toBeTruthy();
@@ -81,7 +102,7 @@ describe("ProposalCard", () => {
 
   it("disables all buttons while busy", async () => {
     vi.spyOn(api, "answerAsk").mockReturnValue(new Promise(() => {}));
-    const { getByText } = render(<ProposalCard ask={proposal} />);
+    const { getByText } = render(<ProposalCard ask={proposal} projectSettings={phased} />);
     fireEvent.click(getByText("Crear"));
     await waitFor(() => expect((getByText("Crear") as HTMLButtonElement).disabled).toBe(true));
     expect((getByText("Crear con autopiloto") as HTMLButtonElement).disabled).toBe(true);
@@ -89,7 +110,7 @@ describe("ProposalCard", () => {
 
   it("Cancelar in the autopilot confirmation answers nothing", () => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
-    const { getByText, queryByText } = render(<ProposalCard ask={proposal} />);
+    const { getByText, queryByText } = render(<ProposalCard ask={proposal} projectSettings={phased} />);
     fireEvent.click(getByText("Crear con autopiloto"));
     fireEvent.click(getByText("Cancelar"));
     expect(queryByText("Iniciar")).toBeNull();

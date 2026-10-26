@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, hhmm, type Handoff, type InboxItem } from "../api";
+import { api, ApiError, hhmm, type Handoff, type InboxItem, type Project, projectOfKey } from "../api";
 import { HandoffActions } from "./HandoffActions";
 import { Button, Count, Icon, InboxKind, pushToast, Row, Skeleton } from "./ui";
 import { AskCard } from "./AskCard";
@@ -47,6 +47,8 @@ interface Props {
   onOpenTask: (task: string, sessionId?: string) => void;
   onOpenChanges: (task: string) => void;
   onChanged: () => void;
+  /** The projects, for the settings a proposal needs (autopilot only with a phased workflow). */
+  projects?: Project[];
 }
 
 interface Group {
@@ -61,7 +63,7 @@ const isTextTarget = (el: EventTarget | null) => {
 };
 
 /** Everything that waits on you, from every task: a list grouped by task and the detail of one. */
-export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged }: Props) {
+export function InboxView({ items, projects = [], loading, onOpenTask, onOpenChanges, onChanged }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   // Below 1200 px the detail is an overlay that only opens when a row is chosen.
   const { overlays } = useBreakpoints();
@@ -198,6 +200,7 @@ export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged
                   <Item
                     key={idOf(current)}
                     item={current}
+                    projects={projects}
                     nav={
                       group && group.items.length > 1
                         ? { index: group.items.indexOf(current), total: group.items.length, onChange: (n) => setSelected(idOf(group.items[n])) }
@@ -264,7 +267,7 @@ function Empty() {
   );
 }
 
-function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem; nav?: NonNullable<Parameters<typeof AskCard>[0]["nav"]> } & Omit<Props, "items" | "loading">) {
+function Item({ item, nav, projects, onOpenTask, onOpenChanges, onChanged }: { item: InboxItem; nav?: NonNullable<Parameters<typeof AskCard>[0]["nav"]> } & Omit<Props, "items" | "loading" | "projects"> & { projects: Project[] }) {
   const [reply, setReply] = useState("");
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
@@ -290,6 +293,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
       live = false;
     };
   }, [item.kind, item.task, item.text]);
+  const projectSettings = projects.find((p) => p.name === projectOfKey(item.task))?.settings;
   const view = kindOf(item.kind);
   const s = item.session;
   const canReply = (item.kind === "question" || item.kind === "waiting") && s?.live && !item.ask;
@@ -335,7 +339,7 @@ function Item({ item, nav, onOpenTask, onOpenChanges, onChanged }: { item: Inbox
       </header>
 
       {item.ask ? (
-        <AskCard variant="inbox" keys nav={nav} ask={item.ask} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />
+        <AskCard variant="inbox" keys nav={nav} ask={item.ask} projectSettings={projectSettings} onDone={onChanged} onOpenTask={(key) => onOpenTask(key)} />
       ) : item.permission && s ? (
         <AskCard variant="inbox" keys nav={nav} permission={{ sessionId: s.id, ask: item.permission }} onDone={onChanged} />
       ) : (

@@ -64,7 +64,7 @@ pub fn session_phase(task: &Task, step: Option<Step>) -> SpecPhase {
         Some(Step::Implement) => SpecPhase::Implement,
         Some(Step::Review) => SpecPhase::Review,
         None => phase.unwrap_or(match task.workflow.as_str() {
-            "feature" => SpecPhase::Specify,
+            "project" | "feature" => SpecPhase::Specify,
             _ => SpecPhase::Implement,
         }),
     }

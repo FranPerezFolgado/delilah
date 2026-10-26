@@ -83,7 +83,7 @@ mod tests {
     async fn store() -> Store {
         let store = Store::in_memory().await.unwrap();
         store
-            .create_task(&Task::new(TaskKey::new("PROJ-1"), "Fix it", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "Fix it", "project"))
             .await
             .unwrap();
         store

@@ -49,6 +49,7 @@ pub mod secrets;
 mod session_api;
 pub mod sessions;
 mod setup;
+pub mod skills;
 pub use setup::recover_interrupted as recover_interrupted_setups;
 pub mod specs;
 pub mod state;

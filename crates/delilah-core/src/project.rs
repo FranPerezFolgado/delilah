@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::workflow::{ProjectWorkflow, validate_workflow};
+
 /// How a project's repos are laid out, which decides how its workspaces are built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -110,6 +112,15 @@ pub struct ProjectSettings {
     pub submodules: SubmoduleRules,
     /// Which tasks get CI autofix on by default.
     pub ci_autofix: AutofixDefault,
+    /// How tasks start; `None` (the default) is a single start with the built-in prompt.
+    pub workflow: Option<ProjectWorkflow>,
+}
+
+impl ProjectSettings {
+    /// The workflow in force: the setting, or a single built-in start.
+    pub fn workflow(&self) -> ProjectWorkflow {
+        self.workflow.clone().unwrap_or_default()
+    }
 }
 
 /// One problem found by [`validate`], tied to the field that has it.
@@ -233,6 +244,10 @@ pub fn validate(settings: &ProjectSettings, kind: ProjectKind) -> Vec<FieldError
                 ));
             }
         }
+    }
+
+    if let Some(w) = &settings.workflow {
+        errors.extend(validate_workflow(w));
     }
 
     errors
@@ -367,7 +382,7 @@ mod tests {
 
     #[test]
     fn full_settings_round_trip() {
-        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]},"ci_autofix":"always"}"#;
+        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]},"ci_autofix":"always","workflow":null}"#;
         let s: ProjectSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.workspace, Some(WorkspaceMode::Worktree));
         assert_eq!(s.shared[0].mode, Some(ShareMode::Copy));
@@ -386,7 +401,7 @@ mod tests {
         let json = serde_json::to_string(&ProjectSettings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]},"ci_autofix":"autopilot"}"#
+            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]},"ci_autofix":"autopilot","workflow":null}"#
         );
     }
 
@@ -478,6 +493,43 @@ mod tests {
                 "case {c}"
             );
         }
+    }
+
+    #[test]
+    fn workflow_defaults_to_single_builtin() {
+        let s: ProjectSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.workflow, None);
+        assert_eq!(
+            s.workflow(),
+            ProjectWorkflow::Single {
+                start: crate::workflow::Start::Builtin
+            }
+        );
+        let s: ProjectSettings = serde_json::from_str(
+            r#"{"workflow":{"kind":"phased","plan":"a","implement":"b","review":"c"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(s.workflow(), ProjectWorkflow::Phased { .. }));
+    }
+
+    #[test]
+    fn workflow_errors_come_with_the_others() {
+        let mut s = settings();
+        s.branch = Some("x".into());
+        s.workflow = Some(ProjectWorkflow::Phased {
+            plan: " ".into(),
+            implement: "{spec_dir} {bad}".into(),
+            review: "{spec_dir}".into(),
+        });
+        assert_eq!(
+            fields(&validate(&s, ProjectKind::Repo)),
+            [
+                ("branch", "branch.missing_ticket"),
+                ("workflow.plan", "workflow.blank"),
+                ("workflow.implement", "workflow.unknown_placeholder"),
+                ("workflow.review", "workflow.placeholder_not_allowed"),
+            ]
+        );
     }
 
     #[test]

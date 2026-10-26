@@ -767,7 +767,7 @@ mod tests {
             .with_gh(gh.clone());
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
         let key = TaskKey::new("PROJ-1");
-        let mut t = Task::new(key.clone(), "t", "feature");
+        let mut t = Task::new(key.clone(), "t", "project");
         t.saving_mode = true;
         app.store.create_task(&t).await.unwrap();
         let a = Autopilot {
@@ -791,7 +791,7 @@ mod tests {
         let ws_dir = dir.path().join("ws");
         git_in(&ws_dir, &["checkout", "-q", "--detach"]);
         let key = TaskKey::new("LIBRE-1");
-        let mut t = Task::new(key.clone(), "Idea", "feature");
+        let mut t = Task::new(key.clone(), "Idea", "project");
         t.saving_mode = true;
         t.autopilot = Some(Autopilot {
             review_session: Some("rev-1".into()),

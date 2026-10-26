@@ -351,7 +351,7 @@ mod tests {
     ) -> delilah_git::Workspace {
         let key = TaskKey::new(key);
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         app.store
@@ -408,7 +408,7 @@ mod tests {
     async fn setup_failed(app: &AppState, repo: &FsPath, key: &str) -> delilah_git::Workspace {
         let key = TaskKey::new(key);
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         app.store
@@ -491,7 +491,7 @@ mod tests {
         let (app, _) = setup().await;
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
 
@@ -503,7 +503,7 @@ mod tests {
         let err = delete_task(&app, "PROJ-1", false).await.unwrap_err();
         assert_eq!(err.status, StatusCode::NOT_FOUND);
         app.store
-            .create_task(&Task::new(key, "again", "feature"))
+            .create_task(&Task::new(key, "again", "project"))
             .await
             .unwrap();
     }
@@ -513,7 +513,7 @@ mod tests {
         let (app, _) = setup().await;
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         app.store
@@ -644,7 +644,7 @@ mod tests {
         let (app, _) = setup().await;
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         for event in [Event::Start, Event::WorkspaceReady, Event::MarkDone] {
@@ -714,7 +714,7 @@ mod tests {
         let (app, _) = setup().await;
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         // As if the start got in after the delete read it from the backlog.
@@ -783,13 +783,13 @@ mod tests {
                 name: "web".into(),
                 path: repo.to_path_buf(),
                 kind: delilah_core::ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
             .await
             .unwrap();
-        let mut task = Task::new(key.clone(), "x", "feature");
+        let mut task = Task::new(key.clone(), "x", "project");
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         for event in [Event::Start, Event::WorkspaceReady, Event::MarkDone] {
@@ -838,7 +838,7 @@ mod tests {
     ) -> (TaskKey, delilah_git::Workspace) {
         let key = TaskKey::new("PROJ-1");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         app.store
@@ -943,7 +943,7 @@ mod tests {
     async fn deleting_a_backlog_task_stops_its_preview() {
         let (app, _) = setup().await;
         app.store
-            .create_task(&Task::new(TaskKey::new("PROJ-3"), "x", "feature"))
+            .create_task(&Task::new(TaskKey::new("PROJ-3"), "x", "project"))
             .await
             .unwrap();
         start_preview(&app, "PROJ-3");

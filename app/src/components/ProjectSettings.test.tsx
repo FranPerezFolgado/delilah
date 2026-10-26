@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { api, ApiError, type Project } from "../api";
 import { setLanguage } from "../i18n";
 import { ProjectSettings } from "./ProjectSettings";
@@ -45,7 +45,7 @@ describe("ProjectSettings", () => {
     expect(document.querySelector("[role=dialog][aria-modal=true]")).not.toBeNull();
     expect(document.querySelector("[role=dialog]")?.textContent).toContain("Dónde trabaja por defecto");
     expect(radios(container).length).toBe(2);
-    expect(document.querySelectorAll(".ps-help").length).toBe(6);
+    expect(document.querySelectorAll(".ps-help").length).toBe(7);
   });
 
   it("the preview command is saved on the project, so saving makes two calls", async () => {
@@ -219,6 +219,28 @@ describe("ProjectSettings", () => {
     const banner = document.querySelector(".error:not(.field-error)")!.textContent!;
     expect(banner).toContain("cuerpo inválido");
     expect(banner).toContain("submodules.unknown_key: clave rara");
+  });
+
+  it("saves a workflow chosen in the section", async () => {
+    vi.spyOn(api, "projectSkills").mockResolvedValue([]);
+    const put = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Inicio"), { target: { value: "nothing" } });
+    fireEvent.submit(form());
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1].workflow).toEqual({ kind: "single", start: { type: "nothing" } });
+  });
+
+  it("shows workflow errors next to the field, not in the banner", async () => {
+    vi.spyOn(api, "projectSkills").mockResolvedValue([]);
+    vi.spyOn(api, "updateProjectSettings").mockRejectedValue(
+      new ApiError("invalid", 422, false, undefined, undefined, [{ field: "workflow.start.template", code: "unknown-placeholder", message: "bad {foo}" }]),
+    );
+    const w: Project = { ...repo, settings: { ...repo.settings, workflow: { kind: "single", start: { type: "message", template: "{foo}" } } } };
+    render(<ProjectSettings project={w} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.submit(form());
+    await waitFor(() => expect(document.querySelector('[data-field="workflow.start.template"]')).not.toBeNull());
+    expect(document.querySelectorAll('[data-field="workflow.start.template"]').length).toBe(1);
   });
 
   it("the autofix select shows the default and saves the chosen mode", async () => {

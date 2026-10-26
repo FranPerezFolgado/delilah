@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_agents::runtime::{self, Runtime, RuntimeKind};
+use delilah_core::workflow::{self, StartRequest, TaskWorkflow};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{Deadline, FetchOutcome, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
@@ -326,24 +327,63 @@ pub(crate) async fn start_run_with(
         }
         _ => {}
     }
-    let workflow = req
-        .workflow
-        .clone()
-        .or_else(|| existing.as_ref().map(|t| t.workflow.clone()))
-        .unwrap_or_else(|| project.workflow.clone());
-    if req.autopilot == Some(true) && !crate::autopilot::allowed(&key, &workflow) {
+    // What the request says about the first message; the stored choice and the
+    // project's workflow decide the rest (`workflow::resolve`).
+    let (stored_workflow, stored_message) = match &existing {
+        Some(t) => (t.workflow.as_str(), t.start_message.as_deref()),
+        // The legacy `projects.workflow` column does not choose the start (it is
+        // deprecated): a new task follows the project's workflow.
+        None => (TaskWorkflow::Project.as_str(), None),
+    };
+    let prompt_text = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
+    // A request prompt is a template like the settings' ones (literal braces doubled).
+    if let Some(p) = prompt_text {
+        let fields = workflow::validate("prompt", p, false);
+        if !fields.is_empty() {
+            return Err(crate::api::template_error(fields));
+        }
+    }
+    let start_req = match (req.workflow.as_deref(), prompt_text) {
+        (None, None) => StartRequest::Inherit,
+        (Some(w), prompt) => match (crate::api::normalise_workflow(w)?, prompt) {
+            (TaskWorkflow::None, _) => StartRequest::Nothing,
+            (_, Some(p)) => StartRequest::Prompt(p.to_string()),
+            (TaskWorkflow::Project, None) => StartRequest::Project,
+            (TaskWorkflow::Prompt, None) if stored_message.is_some() => StartRequest::Inherit,
+            (TaskWorkflow::Prompt, None) => {
+                return Err(crate::api::template_error(vec![delilah_core::FieldError {
+                    field: "prompt".into(),
+                    code: "workflow.blank".into(),
+                    message: "workflow `prompt` needs a --prompt".into(),
+                }]));
+            }
+        },
+        (None, Some(p)) => StartRequest::Prompt(p.to_string()),
+    };
+    if start_req == StartRequest::Inherit && TaskWorkflow::parse(stored_workflow).is_err() {
+        tracing::warn!(task = %key, workflow = stored_workflow, "unknown stored workflow: starting with no message");
+    }
+    let vars = crate::branching::task_vars(&key, &req.title, None);
+    let builtin = delilah_core::workflow::render(crate::lang::builtin_start(app.lang()), &vars);
+    let resolved = workflow::resolve(
+        &start_req,
+        stored_workflow,
+        stored_message,
+        Some(&project.settings),
+        &vars,
+        &builtin,
+    );
+    if req.autopilot == Some(true)
+        && !crate::autopilot::allowed(&key, resolved.workflow.as_str(), Some(&project.settings))
+    {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
-    let prompt = match (&req.prompt, workflow.as_str()) {
-        (Some(prompt), _) => prompt.clone(),
-        (None, "feature") if req.free => format!("/feature {}", req.title.trim()),
-        (None, "feature") => format!("/feature {}", req.key),
-        (None, other) => {
-            return Err(ApiError::bad_request(format!(
-                "workflow `{other}` needs a --prompt"
-            )));
-        }
-    };
+    // Saving mode, autopilot and hand-offs are for phased tasks only.
+    let saving_mode = saving_mode && resolved.phased;
+    let autopilot = autopilot && resolved.phased;
+    let workflow = resolved.workflow.as_str().to_string();
+    let prompt = resolved.prompt.clone().unwrap_or_default();
+    let custom_prompt = written_by_user(resolved.workflow, &project.settings);
 
     // Named before anything is created, so a refused name leaves a backlog task as it is.
     let notes = req
@@ -402,8 +442,14 @@ pub(crate) async fn start_run_with(
                 workflow: Some(workflow.clone()),
                 notes: req.notes.clone(),
                 in_checkout: Some(in_checkout),
+                start_message: None,
             };
             let updated = app.store.update_backlog_task(&key, &change).await?;
+            if updated.start_message != resolved.start_message {
+                app.store
+                    .set_start_message(&key, resolved.start_message.as_deref())
+                    .await?;
+            }
             if updated.saving_mode != saving_mode {
                 app.store.set_saving_mode(&key, saving_mode).await?;
             }
@@ -435,6 +481,7 @@ pub(crate) async fn start_run_with(
                 autopilot,
             );
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
+            task.start_message = resolved.start_message.clone();
             task.model = req.model.flatten();
             if crate::branching::is_free(&key) {
                 task.title_source = delilah_core::TitleSource::Initial;
@@ -496,7 +543,7 @@ pub(crate) async fn start_run_with(
     let launch = AgentLaunch {
         free: req.free,
         prompt,
-        custom_prompt: req.prompt.is_some(),
+        custom_prompt,
         notes,
         adopted,
         saving_mode,
@@ -677,7 +724,7 @@ impl From<LaunchError> for ApiError {
 pub(crate) struct AgentLaunch {
     /// A task without a Jira ticket: nothing to fetch.
     pub free: bool,
-    /// The prompt as resolved (the request's own, or the workflow's default).
+    /// The first message as resolved; empty when none is sent.
     pub prompt: String,
     /// The request gave its own prompt: no ticket pointer is added to it.
     pub custom_prompt: bool,
@@ -803,7 +850,8 @@ pub(crate) async fn launch_agent(
     } = launch;
     // From the default workflow, hand the agent the ticket itself: it may not be able
     // to read Jira on its own. Kept outside the repo, so the workspace stays clean.
-    let issue = match free {
+    let sends = !prompt.is_empty();
+    let issue = match free || !sends {
         true => None,
         false => crate::jira::fetch_issue(app, &key.to_string()).await,
     };
@@ -825,8 +873,14 @@ pub(crate) async fn launch_agent(
         }
         _ => prompt,
     };
-    let prompt = point_to_notes(app, key, prompt, notes.as_deref());
-    let prompt = match !ws.has_branch() {
+    let prompt = match sends {
+        true => point_to_notes(app, key, prompt, notes.as_deref()),
+        false => prompt,
+    };
+    // The branch is created by the plan command (Spec Kit's), so only a phased task is
+    // told to leave it to that.
+    let phased = sends && !ws.has_branch() && is_phased_task(app, key).await;
+    let prompt = match phased {
         true => format!(
             "{prompt} ({})",
             app.lang().pick(
@@ -853,7 +907,7 @@ pub(crate) async fn launch_agent(
         settle,
         guard,
     };
-    tokio::spawn(run.run(adopted, existing, key.to_string(), prompt))
+    tokio::spawn(run.run(adopted, existing, key.to_string(), sends.then_some(prompt)))
         .await
         .map_err(|e| LaunchError::Start(format!("the start was interrupted: {e}")))??;
     Ok(())
@@ -892,7 +946,7 @@ impl Launch {
         adopted: Option<SessionRecord>,
         existing: Option<Task>,
         req_key: String,
-        prompt: String,
+        prompt: Option<String>,
     ) -> Result<(), ApiError> {
         let Self {
             guard,
@@ -934,7 +988,7 @@ impl Launch {
                     rollback_start(&app, &key, &session, None, existing, &reason).await;
                     return Err(e.into());
                 }
-                (session, None, Some(prompt), false)
+                (session, None, prompt, false)
             }
         };
         // A chat-mode agent can fail to come up, and the start is then undone: it is spawned,
@@ -979,6 +1033,10 @@ impl Launch {
         }
         if restore.is_some() {
             app.emit(crate::events::Topic::Sessions);
+        } else if launch_prompt.is_none() {
+            // Started with no first message ("nothing"): the agent waits for the user,
+            // as after a finished turn.
+            app.transition(&key, Event::AgentAsked).await?;
         }
         Ok(())
     }
@@ -1068,9 +1126,17 @@ async fn abort_start(
                 workflow: Some(task.workflow),
                 notes: Some(task.notes.unwrap_or_default()),
                 in_checkout: task.in_checkout,
+                start_message: None,
             };
             if let Err(e) = app.store.update_backlog_task(key, &undo).await {
                 tracing::warn!(task = %key, "cannot put it back as it was: {e}");
+            }
+            if let Err(e) = app
+                .store
+                .set_start_message(key, task.start_message.as_deref())
+                .await
+            {
+                tracing::warn!(task = %key, "cannot put the start message back: {e}");
             }
             if let Err(e) = app.store.set_saving_mode(key, task.saving_mode).await {
                 tracing::warn!(task = %key, "cannot put saving mode back: {e}");
@@ -1153,28 +1219,29 @@ fn new_autopilot() -> delilah_core::Autopilot {
     }
 }
 
-/// A task's first (main) session and the prompt it starts with. In saving mode it is
-/// the plan step, told to stop once the tasks are written; with autopilot it is also
-/// told to answer the workflow's questions itself.
+/// A task's first (main) session and the prompt it starts with (none for a task
+/// that starts with no message). In saving mode (phased tasks only) it is the plan
+/// step, told to stop once the tasks are written; with autopilot it is also told to
+/// answer the workflow's questions itself.
 fn first_session(
     app: &AppState,
     task: &str,
     saving_mode: bool,
     autopilot: bool,
-    prompt: String,
-) -> (SessionRecord, String) {
+    prompt: Option<String>,
+) -> (SessionRecord, Option<String>) {
     let lang = app.lang();
     let (label, step, prompt) = match saving_mode {
         true => (
             crate::handoff::step_label(lang, Step::Plan).to_string(),
             Some(Step::Plan),
-            match autopilot {
+            prompt.map(|prompt| match autopilot {
                 true => format!(
                     "{prompt} {}",
                     crate::autopilot::autopilot_plan_note(lang, task)
                 ),
                 false => format!("{prompt} {}", crate::handoff::plan_note(lang)),
-            },
+            }),
         ),
         false => (lang.pick("Principal", "Main").to_string(), None, prompt),
     };
@@ -1756,6 +1823,39 @@ fn point_to_notes(app: &AppState, key: &TaskKey, prompt: String, notes: Option<&
     }
 }
 
+/// Whether the stored task follows a phased project workflow.
+/// Whether the first message is one the user wrote (the task's or the project's single
+/// message): it is sent as written, without the Jira ticket pointer that the built-in
+/// prompt and a phased plan command get (US2 AC2).
+fn written_by_user(workflow: TaskWorkflow, settings: &delilah_core::ProjectSettings) -> bool {
+    match workflow {
+        TaskWorkflow::Prompt => true,
+        TaskWorkflow::Project => matches!(
+            settings.workflow(),
+            delilah_core::ProjectWorkflow::Single {
+                start: delilah_core::Start::Message { .. }
+            }
+        ),
+        TaskWorkflow::None => false,
+    }
+}
+
+pub(crate) async fn is_phased_task(app: &AppState, key: &TaskKey) -> bool {
+    let Ok(Some(task)) = app.store.get_task(key).await else {
+        return false;
+    };
+    let Some(project) = task.project.as_deref() else {
+        return false;
+    };
+    let (Ok(workflow), Ok(project)) = (
+        TaskWorkflow::parse(&task.workflow),
+        app.store.project(project).await,
+    ) else {
+        return false;
+    };
+    workflow::is_phased(workflow, &project.settings)
+}
+
 /// The setting that holds the last free task's number handed out.
 const FREE_KEY_LAST: &str = "free_key_last";
 
@@ -1852,6 +1952,27 @@ mod tests {
     use crate::state::AgentPermissions::Auto;
 
     #[test]
+    fn only_a_message_the_user_wrote_goes_without_the_ticket_pointer() {
+        use delilah_core::{ProjectSettings, ProjectWorkflow, Start};
+        let with = |workflow| ProjectSettings {
+            workflow,
+            ..ProjectSettings::default()
+        };
+        let message = with(Some(ProjectWorkflow::Single {
+            start: Start::Message {
+                template: "/fix {ticket}".into(),
+            },
+        }));
+        let builtin = with(None);
+        let phased = crate::autopilot::feature_settings();
+        assert!(written_by_user(TaskWorkflow::Prompt, &builtin));
+        assert!(written_by_user(TaskWorkflow::Project, &message));
+        assert!(!written_by_user(TaskWorkflow::Project, &builtin));
+        assert!(!written_by_user(TaskWorkflow::Project, &phased));
+        assert!(!written_by_user(TaskWorkflow::None, &message));
+    }
+
+    #[test]
     fn every_selected_submodule_is_on_the_task_branch() {
         let dir = std::env::temp_dir().join(format!("delilah-run-ws-{}", uuid::Uuid::new_v4()));
         let fixture = std::process::Command::new("bash")
@@ -1867,7 +1988,7 @@ mod tests {
             name: "parent".into(),
             path: dir.join("env/parent"),
             kind: ProjectKind::Parent,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             settings: Default::default(),
             preview_command: None,
         };
@@ -2074,8 +2195,8 @@ mod tests {
                 name: "web".into(),
                 path: app.config.home.join("missing"),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
-                settings: Default::default(),
+                workflow: "project".into(),
+                settings: crate::autopilot::feature_settings(),
                 preview_command: None,
             })
             .await
@@ -2163,7 +2284,7 @@ mod tests {
                 name: "fresh".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -2227,7 +2348,7 @@ mod tests {
                 name: "stale".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -2311,7 +2432,7 @@ mod tests {
         let app = app().await;
         let key = TaskKey::new("PROJ-5");
         app.store
-            .create_task(&Task::new(key.clone(), "x", "feature"))
+            .create_task(&Task::new(key.clone(), "x", "project"))
             .await
             .unwrap();
         let base = |repo: &str, fetch| RepoBase {
@@ -2438,7 +2559,7 @@ mod tests {
     }
 
     async fn backlog_task(app: &AppState, key: &str) -> TaskKey {
-        let mut task = Task::new(TaskKey::new(key), "Reintentos", "feature");
+        let mut task = Task::new(TaskKey::new(key), "Reintentos", "project");
         task.project = Some("web".into());
         app.store.create_task(&task).await.unwrap();
         task.key
@@ -2476,8 +2597,8 @@ mod tests {
                 name: "repo".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
-                settings: Default::default(),
+                workflow: "project".into(),
+                settings: crate::autopilot::feature_settings(),
                 preview_command: None,
             })
             .await
@@ -2648,7 +2769,9 @@ mod tests {
     #[tokio::test]
     async fn saving_mode_gives_the_first_session_the_plan_step_and_a_note() {
         let app = app().await;
-        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
+        let (s, prompt) =
+            first_session(&app, "PROJ-1", true, false, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!(s.step, Some(Step::Plan));
         assert_eq!(s.label, "Spec y plan");
         assert!(s.primary);
@@ -2659,16 +2782,20 @@ mod tests {
         );
 
         app.lang.set(crate::lang::Lang::En);
-        let (s, prompt) = first_session(&app, "PROJ-1", true, false, "/feature PROJ-1".into());
+        let (s, prompt) =
+            first_session(&app, "PROJ-1", true, false, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!(s.label, "Spec and plan");
         assert!(prompt.contains("tasks.md"), "{prompt}");
         assert!(!prompt.ends_with("nueva."), "{prompt}");
 
-        let (s, prompt) = first_session(&app, "PROJ-1", false, false, "/feature PROJ-1".into());
+        let (s, prompt) =
+            first_session(&app, "PROJ-1", false, false, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!((s.label.as_str(), s.step), ("Main", None));
         assert_eq!(prompt, "/feature PROJ-1");
         app.lang.set(crate::lang::Lang::Es);
-        let (s, _) = first_session(&app, "PROJ-1", false, false, String::new());
+        let (s, _) = first_session(&app, "PROJ-1", false, false, None);
         assert_eq!(s.label, "Principal");
     }
 
@@ -2702,7 +2829,7 @@ mod tests {
         assert!(!saving(&app, "PROJ-3").await, "the request wins");
 
         // A backlog task keeps its own choice, and goes back to it if the start fails.
-        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "project");
         task.project = Some("web".into());
         task.saving_mode = true;
         app.store.create_task(&task).await.unwrap();
@@ -2719,7 +2846,8 @@ mod tests {
     #[tokio::test]
     async fn autopilot_replaces_the_saving_mode_note_in_both_languages() {
         let app = app().await;
-        let (s, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        let (s, prompt) = first_session(&app, "PROJ-1", true, true, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert_eq!(s.step, Some(Step::Plan));
         assert!(prompt.starts_with("/feature PROJ-1 "), "{prompt}");
         assert!(prompt.contains("Autopilot"), "{prompt}");
@@ -2727,7 +2855,8 @@ mod tests {
         assert!(!prompt.contains("Modo ahorro:"), "{prompt}");
         assert!(prompt.contains("(Recomendado)"), "{prompt}");
         app.lang.set(crate::lang::Lang::En);
-        let (_, prompt) = first_session(&app, "PROJ-1", true, true, "/feature PROJ-1".into());
+        let (_, prompt) = first_session(&app, "PROJ-1", true, true, Some("/feature PROJ-1".into()));
+        let prompt = prompt.unwrap();
         assert!(prompt.contains("Autopilot"), "{prompt}");
         assert!(prompt.contains("(Recommended)"), "{prompt}");
         assert!(!prompt.contains("Saving mode:"), "{prompt}");
@@ -2844,7 +2973,7 @@ mod tests {
         assert!(get("PROJ-3").await.autopilot.is_none());
 
         // A backlog task keeps its autopilot, and it goes back if the start fails.
-        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-4"), "d", "project");
         task.project = Some("web".into());
         task.saving_mode = true;
         task.autopilot = Some(new_autopilot());
@@ -2912,7 +3041,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_start_leaves_the_backlog_task_as_it_was() {
         let app = app().await;
-        let mut task = Task::new(TaskKey::new("PROJ-1"), "Reintentos", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "Reintentos", "project");
         task.project = Some("web".into());
         task.notes = Some("con backoff".into());
         task.in_checkout = Some(false);
@@ -3076,7 +3205,7 @@ mod tests {
                 name: "web".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 settings: Default::default(),
                 preview_command: None,
             })
@@ -3170,7 +3299,7 @@ mod tests {
         config.agent_program = Some(bin);
         let app = AppState::new(app.store.clone(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
-        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        let mut task = Task::new(TaskKey::new("PROJ-1"), "t", "project");
         task.project = Some("web".into());
         task.chat_mode = chat_mode;
         app.store.create_task(&task).await.unwrap();
@@ -3564,7 +3693,7 @@ mod tests {
         config.agent_program = Some(bin);
         let app = AppState::new(app.store.clone(), config);
         app.lang.set(crate::lang::Lang::Es); // Spanish fixtures
-        let mut task = Task::new(TaskKey::new("LIBRE-1"), "Reintentos", "feature");
+        let mut task = Task::new(TaskKey::new("LIBRE-1"), "Reintentos", "project");
         task.project = Some("repo".into());
         task.in_checkout = Some(false);
         task.chat_mode = true;
@@ -3629,6 +3758,407 @@ mod tests {
         req.chat_mode = Some(true);
         req.in_checkout = Some(false);
         req
+    }
+
+    #[tokio::test]
+    async fn a_project_stored_with_the_old_feature_name_still_starts_with_the_feature_message() {
+        let home = std::env::temp_dir().join(format!("delilah-old-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut project = app.store.project("repo").await.unwrap();
+        project.workflow = "feature".into();
+        app.store.update_project("repo", &project).await.unwrap();
+        let (status, Json(started)) = start_run(State(app.clone()), Json(chat_run("LIBRE-1")))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let stdin = read_when_there(home.join("stdin.txt")).await;
+        assert!(stdin.contains("/feature Chat"), "{stdin}");
+        let task = app.store.get_task(&started.key).await.unwrap().unwrap();
+        assert_eq!(task.workflow, "project", "stored normalised");
+        let _ = app.sessions.primary("LIBRE-1").map(|l| l.runtime.kill());
+    }
+
+    #[tokio::test]
+    async fn a_run_request_naming_feature_with_autopilot_is_accepted() {
+        let home = std::env::temp_dir().join(format!("delilah-old-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut req = chat_run("LIBRE-2");
+        req.workflow = Some("feature".into());
+        req.autopilot = Some(true);
+        req.saving_mode = Some(true);
+        let (status, Json(started)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(started.autopilot.is_some() && started.saving_mode);
+        let _ = app.sessions.primary("LIBRE-2").map(|l| l.runtime.kill());
+    }
+
+    /// Starts `req` on the chat fake agent and returns what it was sent first.
+    async fn first_message(app: &AppState, home: &std::path::Path, req: RunRequest) -> String {
+        let key = req.key.clone();
+        let (status, Json(task)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let key = if key.is_empty() {
+            task.key.to_string()
+        } else {
+            key
+        };
+        let stdin = read_when_there(home.join("stdin.txt")).await;
+        let _ = app.sessions.primary(&key).map(|l| l.runtime.kill());
+        stdin
+    }
+
+    /// A project registered after this feature: no workflow chosen, so no `/feature`.
+    async fn fresh_workflow_project(app: &AppState) {
+        let mut settings = app.store.project("repo").await.unwrap().settings;
+        settings.workflow = None;
+        app.store
+            .set_project_settings("repo", &settings)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_fresh_project_starts_with_the_builtin_prompt_and_no_saving_mode() {
+        let home = std::env::temp_dir().join(format!("delilah-builtin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        fresh_workflow_project(&app).await;
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = chat_run("LIBRE-1");
+        req.free = true;
+        req.key = String::new();
+        req.title = "Arreglar el login".into();
+        req.notes = Some("mira el token".into());
+        let stdin = first_message(&app, &home, req).await;
+        assert!(
+            stdin.contains("Work on the task LIBRE-1: Arreglar el login."),
+            "{stdin}"
+        );
+        assert!(stdin.contains("your notes on the task are at"), "{stdin}");
+        assert!(
+            !stdin.contains("/feature") && !stdin.contains("Saving mode"),
+            "{stdin}"
+        );
+        assert!(!stdin.contains("Spec Kit"), "not phased: {stdin}");
+        let task = app
+            .store
+            .get_task(&TaskKey::new("LIBRE-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!task.saving_mode && task.autopilot.is_none());
+        assert_eq!(task.workflow, "project");
+        let session = app.store.primary_session("LIBRE-1").await.unwrap().unwrap();
+        assert_eq!((session.label.as_str(), session.step), ("Main", None));
+    }
+
+    #[tokio::test]
+    async fn the_feature_preset_starts_with_the_feature_command_and_the_saving_mode_note() {
+        let home = std::env::temp_dir().join(format!("delilah-preset-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut free = chat_run("LIBRE-1");
+        free.free = true;
+        free.title = "Arreglar el login".into();
+        free.saving_mode = Some(true);
+        let stdin = first_message(&app, &home, free).await;
+        assert!(stdin.contains("/feature Arreglar el login"), "{stdin}");
+        assert!(
+            stdin.contains("Spec Kit"),
+            "phased: told about the branch: {stdin}"
+        );
+        assert!(
+            stdin.contains("Delilah will carry on in a new session."),
+            "{stdin}"
+        );
+
+        let _ = std::fs::remove_file(home.join("stdin.txt"));
+        let mut jira = chat_run("PROJ-1");
+        jira.saving_mode = Some(false);
+        let stdin = first_message(&app, &home, jira).await;
+        assert!(stdin.contains("/feature PROJ-1"), "{stdin}");
+        assert!(
+            !stdin.contains("Saving mode") && !stdin.contains("tasks.md"),
+            "{stdin}"
+        );
+    }
+
+    async fn set_project_workflow(
+        app: &AppState,
+        workflow: delilah_core::workflow::ProjectWorkflow,
+    ) {
+        let mut settings = app.store.project("repo").await.unwrap().settings;
+        settings.workflow = Some(workflow);
+        app.store
+            .set_project_settings("repo", &settings)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_phased_project_starts_with_its_plan_command_and_the_saving_mode_note() {
+        use delilah_core::workflow::ProjectWorkflow;
+        let home = std::env::temp_dir().join(format!("delilah-plan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Phased {
+                plan: "/design {ticket}".into(),
+                implement: "/build {spec_dir}".into(),
+                review: "/check".into(),
+            },
+        )
+        .await;
+        let mut req = chat_run("PROJ-12");
+        req.saving_mode = Some(true);
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("/design PROJ-12"), "{stdin}");
+        assert!(!stdin.contains("/feature"), "{stdin}");
+        assert!(
+            stdin.contains("Delilah will carry on in a new session."),
+            "{stdin}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_single_message_start_fills_the_ticket_and_points_to_the_notes() {
+        use delilah_core::workflow::{ProjectWorkflow, Start};
+        let home = std::env::temp_dir().join(format!("delilah-msg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Single {
+                start: Start::Message {
+                    template: "/fix {ticket}".into(),
+                },
+            },
+        )
+        .await;
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = chat_run("PROJ-12");
+        req.notes = Some("mira el token".into());
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("/fix PROJ-12"), "{stdin}");
+        assert!(stdin.contains("your notes on the task are at"), "{stdin}");
+        assert!(
+            !stdin.contains("Saving mode") && !stdin.contains("Spec Kit"),
+            "not phased: {stdin}"
+        );
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-12"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!task.saving_mode);
+    }
+
+    #[tokio::test]
+    async fn a_single_nothing_start_sends_no_message_and_waits_for_the_user() {
+        use delilah_core::workflow::{ProjectWorkflow, Start};
+        let home = std::env::temp_dir().join(format!("delilah-nothing-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Single {
+                start: Start::Nothing,
+            },
+        )
+        .await;
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = chat_run("PROJ-12");
+        req.notes = Some("mira el token".into());
+        let (status, Json(task)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(!task.saving_mode);
+        let stored = app
+            .store
+            .get_task(&TaskKey::new("PROJ-12"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, TaskStatus::WaitingForUser);
+        assert!(!home.join("stdin.txt").exists(), "no first message");
+        let _ = app.sessions.primary("PROJ-12").map(|l| l.runtime.kill());
+    }
+
+    #[tokio::test]
+    async fn a_terminal_nothing_start_has_no_prompt_and_waits_for_the_user() {
+        use delilah_core::workflow::{ProjectWorkflow, Start};
+        let home = std::env::temp_dir().join(format!("delilah-tnothing-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let (app, _repo) = repo_app(&format!(
+            "[ \"$1\" = -p ] && exit 0\nprintf '%s\\n' \"$@\" > '{}/args.txt'\nexec sleep 5",
+            home.display()
+        ))
+        .await;
+        // Only to take the real launch path; the terminal runs `claude_bin`.
+        let mut config = app.config.as_ref().clone();
+        config.agent_program = Some(config.claude_bin.clone());
+        let app = AppState::new(app.store.clone(), config);
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Single {
+                start: Start::Nothing,
+            },
+        )
+        .await;
+        let mut req = run("PROJ-12");
+        req.project = "repo".into();
+        req.title = "Terminal".into();
+        req.chat_mode = Some(false);
+        req.in_checkout = Some(false);
+        req.notes = Some("mira el token".into());
+        let _ = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let stored = app
+            .store
+            .get_task(&TaskKey::new("PROJ-12"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, TaskStatus::WaitingForUser);
+        let args = read_when_there(home.join("args.txt")).await;
+        assert_eq!(
+            args.lines().last(),
+            Some("auto"),
+            "no prompt argument: {args}"
+        );
+        assert!(!args.contains("notes"), "{args}");
+        let _ = app.sessions.primary("PROJ-12").map(|l| l.runtime.kill());
+    }
+
+    #[tokio::test]
+    async fn the_legacy_project_workflow_column_does_not_choose_a_new_tasks_start() {
+        let home = std::env::temp_dir().join(format!("delilah-legacy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        fresh_workflow_project(&app).await;
+        sqlx::query("UPDATE projects SET workflow = 'prompt' WHERE name = 'repo'")
+            .execute(&app.store.pool)
+            .await
+            .unwrap();
+        let stdin = first_message(&app, &home, chat_run("LIBRE-1")).await;
+        assert!(stdin.contains("Work on the task LIBRE-1"), "{stdin}");
+    }
+
+    #[tokio::test]
+    async fn autopilot_on_a_task_that_is_not_phased_is_refused() {
+        let home = std::env::temp_dir().join(format!("delilah-nophase-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        fresh_workflow_project(&app).await;
+        let mut req = chat_run("LIBRE-1");
+        req.autopilot = Some(true);
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
+        // A prompt of its own is not phased either, even on the preset.
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut req = chat_run("LIBRE-2");
+        req.autopilot = Some(true);
+        req.prompt = Some("haz esto".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
+    }
+
+    #[tokio::test]
+    async fn a_request_prompt_is_a_template_and_a_bad_one_is_a_422() {
+        let home = std::env::temp_dir().join(format!("delilah-badreq-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut req = chat_run("LIBRE-1");
+        req.prompt = Some("haz {foo}".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.fields.len(), 1);
+        assert_eq!(err.fields[0].field, "prompt");
+        assert_eq!(err.fields[0].code, "workflow.unknown_placeholder");
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("LIBRE-1"))
+                .await
+                .unwrap()
+                .is_none(),
+            "nothing was created"
+        );
+        // Doubled braces are literal.
+        let mut req = chat_run("LIBRE-2");
+        req.prompt = Some("haz {{foo}} en {title}".into());
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("haz {foo} en Chat"), "{stdin}");
+    }
+
+    #[tokio::test]
+    async fn a_saved_prompt_task_starts_with_its_message_whatever_the_project_does_now() {
+        let home = std::env::temp_dir().join(format!("delilah-saved-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        // The project is phased by now, and the task was saved with saving mode on.
+        let mut task = Task::new(TaskKey::new("LIBRE-7"), "Reintentos", "prompt");
+        task.project = Some("repo".into());
+        task.start_message = Some("Investiga {title}".into());
+        task.saving_mode = true;
+        app.store.create_task(&task).await.unwrap();
+        let mut req = chat_run("LIBRE-7");
+        req.title = String::new();
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("Investiga Reintentos"), "{stdin}");
+        assert!(
+            !stdin.contains("Saving mode") && !stdin.contains("/feature"),
+            "{stdin}"
+        );
+        let stored = app.store.get_task(&task.key).await.unwrap().unwrap();
+        assert!(!stored.saving_mode);
+        assert_eq!(stored.workflow, "prompt");
+        assert_eq!(stored.start_message.as_deref(), Some("Investiga {title}"));
+    }
+
+    #[tokio::test]
+    async fn a_legacy_prompt_task_without_a_message_starts_with_none() {
+        let home = std::env::temp_dir().join(format!("delilah-legacy2-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut task = Task::new(TaskKey::new("LIBRE-8"), "Antigua", "prompt");
+        task.project = Some("repo".into());
+        app.store.create_task(&task).await.unwrap();
+        let mut req = chat_run("LIBRE-8");
+        req.title = String::new();
+        let (status, Json(_)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let stored = app.store.get_task(&task.key).await.unwrap().unwrap();
+        assert_eq!(stored.status, TaskStatus::WaitingForUser);
+        assert!(!home.join("stdin.txt").exists(), "no first message");
+        let _ = app.sessions.primary("LIBRE-8").map(|l| l.runtime.kill());
     }
 
     #[tokio::test]
@@ -3948,9 +4478,9 @@ mod tests {
                 name: "web".into(),
                 path: repo,
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 preview_command: None,
-                settings: Default::default(),
+                settings: crate::autopilot::feature_settings(),
             })
             .await
             .unwrap();
@@ -4163,7 +4693,7 @@ mod tests {
                 name: "web".into(),
                 path: repo.clone(),
                 kind: ProjectKind::Repo,
-                workflow: "feature".into(),
+                workflow: "project".into(),
                 preview_command: None,
                 settings,
             })
@@ -4299,7 +4829,7 @@ mod tests {
             name: "parent".into(),
             path: dir.join("env/parent"),
             kind: ProjectKind::Parent,
-            workflow: "feature".into(),
+            workflow: "project".into(),
             preview_command: None,
             settings: Default::default(),
         };
@@ -4521,7 +5051,7 @@ mod tests {
         let (app, repo) = settings_app(worktree_default()).await;
         app.store
             .create_task(&{
-                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "project");
                 t.project = Some("web".into());
                 t.status = TaskStatus::Queued;
                 t.in_checkout = Some(true);
@@ -4555,7 +5085,7 @@ mod tests {
         let (app, repo) = settings_app(settings(None)).await;
         app.store
             .create_task(&{
-                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "feature");
+                let mut t = Task::new(TaskKey::new("LIBRE-1"), "T", "project");
                 t.project = Some("web".into());
                 t.status = TaskStatus::Queued;
                 t.in_checkout = Some(false);
