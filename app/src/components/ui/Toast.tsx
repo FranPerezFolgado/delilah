@@ -33,7 +33,8 @@ let items: ToastItem[] = [];
 let nextId = 1;
 let paused = false;
 /** Text for the screen-reader live region: last push, merge or keyed update. */
-let lastAnnounced = "";
+let announced: { text: string; seq: number } = { text: "", seq: 0 };
+const announce = (text: string) => void (announced = { text, seq: announced.seq + 1 });
 let timer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 
@@ -85,7 +86,7 @@ function closeToast(id: number) {
 export function clearToasts() {
   items = [];
   paused = false;
-  lastAnnounced = "";
+  announced = { text: "", seq: announced.seq + 1 };
   emit();
 }
 /** Freezes (or resumes) every auto-dismiss timer at once. */
@@ -129,7 +130,7 @@ export function pushToast(input: ToastInput): number {
       items = items.map((i) =>
         i === hit ? { ...input, id: hit.id, count: hit.count, aliases: hit.aliases } : i,
       );
-      lastAnnounced = input.text;
+      announce(input.text);
       emit();
       return hit.id;
     }
@@ -142,14 +143,14 @@ export function pushToast(input: ToastInput): number {
       const { deadline: _d, remaining: _r, ...rest } = twin;
       const merged = { ...rest, count: twin.count + 1, aliases: [...twin.aliases, id], ...timing(twin) };
       items = [...items.filter((i) => i !== twin), merged];
-      lastAnnounced = `${input.text} ×${merged.count}`;
+      announce(`${input.text} ×${merged.count}`);
       emit();
       return id;
     }
   }
   items = [...items, { ...input, id, count: 1, aliases: [], ...timing(input) }];
   evict(id);
-  lastAnnounced = input.text;
+  announce(input.text);
   emit();
   return id;
 }
@@ -159,7 +160,7 @@ const subscribe = (l: () => void) => {
   return () => void listeners.delete(l);
 };
 const snapshot = () => items;
-const announcedSnapshot = () => lastAnnounced;
+const announcedSnapshot = () => announced;
 
 /** `toast({text, action?, ttl?, kind?})` from any component. */
 export function useToast() {
@@ -203,17 +204,32 @@ function closeAll() {
 /** The one toast stack (bottom-left of main); mount it once. */
 export function ToastHost() {
   const list = useSyncExternalStore(subscribe, snapshot);
-  const announced = useSyncExternalStore(subscribe, announcedSnapshot);
+  const live = useSyncExternalStore(subscribe, announcedSnapshot);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinned, setPinned] = useState(false);
   const expanded = hovered || focused || pinned;
   useEffect(() => setToastsPaused(expanded), [expanded]);
   useEffect(() => () => setToastsPaused(false), []);
-  if (list.length === 0) return null;
+  const empty = list.length === 0;
+  // Nothing left under the pointer or focus: no mouseleave/blur will come, so start over.
+  useEffect(() => {
+    if (!empty) return;
+    setHovered(false);
+    setFocused(false);
+    setPinned(false);
+  }, [empty]);
   const more = list.length - 1;
   const shown = expanded ? list : list.slice(-1);
+  const announcer = (
+    <div role="status" aria-live="polite" className="toast-sr">
+      <span key={live.seq}>{live.text}</span>
+    </div>
+  );
   return (
+    <>
+      {announcer}
+      {!empty && (
     <div
       className={`toast-host${expanded ? " toast-expanded" : ""}`}
       onMouseEnter={() => setHovered(true)}
@@ -228,21 +244,18 @@ export function ToastHost() {
         if (!hovered) setPinned(false);
       }}
     >
-      <div role="status" aria-live="polite" className="toast-sr">
-        {announced}
-      </div>
       {shown.map((i) => (
         <ToastView key={i.id} item={i} />
       ))}
-      {more > 0 && !expanded && (
+      {more > 0 && (
         <button
           type="button"
           className="toast-more"
-          aria-expanded="false"
-          aria-label={t("Mostrar {n} avisos más", { n: more })}
-          onClick={() => setPinned(true)}
+          aria-expanded={expanded}
+          aria-label={expanded ? undefined : t("Mostrar {n} avisos más", { n: more })}
+          onClick={() => setPinned((p) => !p)}
         >
-          {t("+{n}", { n: more })}
+          {expanded ? t("Ocultar avisos") : t("+{n}", { n: more })}
         </button>
       )}
       {more > 0 && expanded && (
@@ -251,5 +264,7 @@ export function ToastHost() {
         </button>
       )}
     </div>
+      )}
+    </>
   );
 }

@@ -319,6 +319,59 @@ describe("Toast", () => {
       act(() => void toast({ key: "k", text: "clave", kind: "wait" }));
       expect(regions[0].textContent).toBe("clave");
     });
+
+    it("keeps the status region mounted with no toasts and fills it on the first push", () => {
+      mount();
+      const region = screen.getByRole("status");
+      expect(region.textContent).toBe("");
+      act(() => void toast({ text: "primero" }));
+      expect(screen.getByRole("status")).toBe(region);
+      expect(region.textContent).toBe("primero");
+    });
+
+    it("re-announces an identical consecutive announcement", () => {
+      mount();
+      act(() => void toast({ key: "k", text: "igual", kind: "wait" }));
+      const first = screen.getByRole("status").firstElementChild;
+      act(() => void toast({ key: "k", text: "igual", kind: "wait" }));
+      const second = screen.getByRole("status").firstElementChild;
+      expect(second).not.toBe(first);
+      expect(screen.getByRole("status").textContent).toBe("igual");
+    });
+
+    it("resets hover state when the stack empties so new toasts start collapsed", () => {
+      mount();
+      three();
+      fireEvent.mouseEnter(host());
+      fireEvent.click(gt(/Cerrar todo|Close all/));
+      act(() => {
+        toast({ text: "n1", kind: "error" });
+        toast({ text: "n2", kind: "error" });
+      });
+      expect(qt("n1")).toBeNull();
+      expect(gt("n2")).not.toBeNull();
+      act(() => void toast({ text: "efimero", ttl: 1000 }));
+      act(() => void vi.advanceTimersByTime(1100));
+      expect(qt("efimero")).toBeNull();
+    });
+
+    it("toggle keeps focus, reflects aria-expanded and unpins on a second click", () => {
+      mount();
+      three();
+      const more = screen.getByRole("button", { name: MORE });
+      more.focus();
+      fireEvent.click(more);
+      expect(document.querySelector(".toast-more")).toBe(more);
+      expect(document.activeElement).toBe(more);
+      expect(more.getAttribute("aria-expanded")).toBe("true");
+      expect(gt("uno")).not.toBeNull();
+      // Second click unpins; focus alone still keeps it open, and leaving collapses it.
+      fireEvent.click(more);
+      expect(document.activeElement).toBe(more);
+      act(() => more.blur());
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      expect(qt("uno")).toBeNull();
+    });
   });
 
   describe("pause while expanded", () => {
