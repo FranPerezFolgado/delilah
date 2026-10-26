@@ -380,4 +380,5 @@ restarts the existing daemon with the new binary (as in any install), which rewr
 - **i18n:**
   - Texts are Spanish in the code, wrapped in `t()` / `tn()`, and English lives in `i18n/en/<Component>.ts` (merged by `i18n/en.ts`), keyed by the Spanish text.
   - **Every new text needs an English entry**; dev builds warn in the console and `i18n/coverage.test.ts` fails on a literal without one.
+  - **Language rule** (`i18n.ts` `detect()`/`setLanguage()`, `daemon.rs` `english_for()`): the `language` preference is `auto`, `es` or `en`. `es` and `en` are used as set. Anything else (missing, `auto`, unknown) follows the system: Spanish only if the system language starts with `es`, English otherwise and as the fallback (no system language, empty or garbled `defaults` output). The native menu uses the same rule, reading the first `AppleLanguages` entry. `<html lang>` starts as `en` and follows the result. Contract: `specs/008-public-repo-onboarding/contracts/language.md`.
   - The daemon picks its own texts with `lang().pick(es, en)`.

@@ -628,3 +628,11 @@ casks that fail Gatekeeper on 2026-09-01 (Homebrew/brew#20755). A tap of our own
 `postflight` that clears the quarantine attribute is possible, but it adds a repo and a
 release step for the same trust trade as `install.sh`. *Ruled out:* the official cask
 (it cannot pass Gatekeeper) and an own tap, until there is a signed build.
+
+**81. English is the fallback language.** The language is `auto`, `es` or `en`. `auto`
+(or a missing or unknown value) follows the system: Spanish only when the system language
+starts with `es`, English otherwise and when it cannot be read; the native menu follows the
+same rule (so an unreadable `defaults` output now gives English, not Spanish), and
+`<html lang>` defaults to `en`. *Why:* the repo is public and most users are not Spanish
+speakers, while Spanish systems still get Spanish. *Ruled out:* English-only default even
+for Spanish systems.

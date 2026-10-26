@@ -214,7 +214,7 @@ parallel (different files, no dependency on an unfinished task).
 
   T038 and T039 pass; `cd app && npx tsc --noEmit && npx vitest run`; `cargo test --manifest-path app/src-tauri/Cargo.toml`. `app/src/App.tsx` needs no change. Confirm that it passes the raw preference through `setLanguage`.
 - [ ] T041 [US4] Try it in a preview: `scripts/preview.sh` (background), then open the UI with Settings › Language on Auto. Under an English browser locale the UI is English and `<html lang="en">`. Save a non-standard value through the API (`curl -X PUT <API>/api/v1/preferences/language -d '"fr"'` with the preview's API URL), reload, and expect English. Stop the preview by its process, never by name. The native menu needs the Tauri app: record it as checked by unit tests only in `progress.md`.
-- [ ] T042 [P] [US4] Document the rule in `docs/architecture.md` (the UI section on language: Auto follows the system, Spanish only for Spanish systems, English otherwise and as fallback, native menu same rule) and in `docs/usage.md` (Settings › Language). Add a decision to `docs/decisions.md`: English is the fallback language; *ruled out*: English-only default even for Spanish systems.
+- [X] T042 [P] [US4] Document the rule in `docs/architecture.md` (the UI section on language: Auto follows the system, Spanish only for Spanish systems, English otherwise and as fallback, native menu same rule) and in `docs/usage.md` (Settings › Language). Add a decision to `docs/decisions.md`: English is the fallback language; *ruled out*: English-only default even for Spanish systems.
 
 **Checkpoint**: Story 4 passes on its own.
 
