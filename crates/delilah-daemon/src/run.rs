@@ -328,6 +328,13 @@ pub(crate) async fn start_run_with(
         None => (TaskWorkflow::Project.as_str(), None),
     };
     let prompt_text = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
+    // A request prompt is a template like the settings' ones (literal braces doubled).
+    if let Some(p) = prompt_text {
+        let fields = workflow::validate("prompt", p, false);
+        if !fields.is_empty() {
+            return Err(crate::api::template_error(fields));
+        }
+    }
     let start_req = match (req.workflow.as_deref(), prompt_text) {
         (None, None) => StartRequest::Inherit,
         (Some(w), prompt) => match (crate::api::normalise_workflow(w)?, prompt) {
@@ -423,6 +430,7 @@ pub(crate) async fn start_run_with(
                 workflow: Some(workflow.clone()),
                 notes: req.notes.clone(),
                 in_checkout: Some(in_checkout),
+                start_message: None,
             };
             let updated = app.store.update_backlog_task(&key, &change).await?;
             if updated.start_message != resolved.start_message {
@@ -1093,6 +1101,7 @@ async fn abort_start(
                 workflow: Some(task.workflow),
                 notes: Some(task.notes.unwrap_or_default()),
                 in_checkout: task.in_checkout,
+                start_message: None,
             };
             if let Err(e) = app.store.update_backlog_task(key, &undo).await {
                 tracing::warn!(task = %key, "cannot put it back as it was: {e}");
@@ -3893,6 +3902,79 @@ mod tests {
         req.prompt = Some("haz esto".into());
         let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
         assert_eq!(err.reason.as_deref(), Some("not-spec-workflow"));
+    }
+
+    #[tokio::test]
+    async fn a_request_prompt_is_a_template_and_a_bad_one_is_a_422() {
+        let home = std::env::temp_dir().join(format!("delilah-badreq-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut req = chat_run("LIBRE-1");
+        req.prompt = Some("haz {foo}".into());
+        let err = start_run(State(app.clone()), Json(req)).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.fields.len(), 1);
+        assert_eq!(err.fields[0].field, "prompt");
+        assert_eq!(err.fields[0].code, "workflow.unknown_placeholder");
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("LIBRE-1"))
+                .await
+                .unwrap()
+                .is_none(),
+            "nothing was created"
+        );
+        // Doubled braces are literal.
+        let mut req = chat_run("LIBRE-2");
+        req.prompt = Some("haz {{foo}} en {title}".into());
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("haz {foo} en Chat"), "{stdin}");
+    }
+
+    #[tokio::test]
+    async fn a_saved_prompt_task_starts_with_its_message_whatever_the_project_does_now() {
+        let home = std::env::temp_dir().join(format!("delilah-saved-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        // The project is phased by now, and the task was saved with saving mode on.
+        let mut task = Task::new(TaskKey::new("LIBRE-7"), "Reintentos", "prompt");
+        task.project = Some("repo".into());
+        task.start_message = Some("Investiga {title}".into());
+        task.saving_mode = true;
+        app.store.create_task(&task).await.unwrap();
+        let mut req = chat_run("LIBRE-7");
+        req.title = String::new();
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("Investiga Reintentos"), "{stdin}");
+        assert!(
+            !stdin.contains("Saving mode") && !stdin.contains("/feature"),
+            "{stdin}"
+        );
+        let stored = app.store.get_task(&task.key).await.unwrap().unwrap();
+        assert!(!stored.saving_mode);
+        assert_eq!(stored.workflow, "prompt");
+        assert_eq!(stored.start_message.as_deref(), Some("Investiga {title}"));
+    }
+
+    #[tokio::test]
+    async fn a_legacy_prompt_task_without_a_message_starts_with_none() {
+        let home = std::env::temp_dir().join(format!("delilah-legacy2-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        let mut task = Task::new(TaskKey::new("LIBRE-8"), "Antigua", "prompt");
+        task.project = Some("repo".into());
+        app.store.create_task(&task).await.unwrap();
+        let mut req = chat_run("LIBRE-8");
+        req.title = String::new();
+        let (status, Json(_)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let stored = app.store.get_task(&task.key).await.unwrap().unwrap();
+        assert_eq!(stored.status, TaskStatus::WaitingForUser);
+        assert!(!home.join("stdin.txt").exists(), "no first message");
+        let _ = app.sessions.primary("LIBRE-8").map(|l| l.runtime.kill());
     }
 
     #[tokio::test]

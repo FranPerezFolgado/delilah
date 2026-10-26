@@ -20,8 +20,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-11 | 5 | 5A | done | 1 | cfa17f0 | +AskCard callers (InboxView, TaskView, TaskScreen) allowed by user; useSkills hook |
 | WP-10F | 5 | fix | done | 1 | aec1477 | Vars helper + one phased guard (arch HIGH x2) |
 | WP-11F | 5 | fix | done | 1 | 1b5054d | settings from App.tsx, ProposalCard reason |
-| WP-12 | 6 | 6A | implementing | 0 | | |
-| WP-13 | 6 | 6A | verified | 1 | | |
+| WP-12 | 6 | 6A | verified | 1 | | |
+| WP-13 | 6 | 6A | verified | 1 | 32649b4 | |
 | WP-14 | 6 | 6A | implementing | 0 | | |
 | WP-15 | 7 | 7A | pending | 0 | | |
 | WP-16 | 7 | 7B | pending | 0 | | |

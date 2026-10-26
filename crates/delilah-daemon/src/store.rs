@@ -144,11 +144,15 @@ impl Store {
             .notes
             .as_ref()
             .map(|n| Some(n.clone()).filter(|n| !n.trim().is_empty()));
+        let start_message = change
+            .start_message
+            .as_ref()
+            .map(|m| Some(m.clone()).filter(|m| !m.trim().is_empty()));
         // A title the user changes is theirs from then on.
         let title_changed = change.title.as_ref().is_some_and(|t| *t != task.title);
         // The status in the WHERE: a start that slipped in between wins.
         let updated = sqlx::query(
-            "UPDATE tasks SET title = ?, title_source = ?, previous_title = ?, project = ?, workflow = ?, notes = ?, in_checkout = ?, updated_at = ?
+            "UPDATE tasks SET title = ?, title_source = ?, previous_title = ?, project = ?, workflow = ?, start_message = ?, notes = ?, in_checkout = ?, updated_at = ?
              WHERE key = ? AND status = ?",
         )
         .bind(change.title.as_ref().unwrap_or(&task.title))
@@ -167,6 +171,7 @@ impl Store {
         })
         .bind(change.project.as_ref().or(task.project.as_ref()))
         .bind(change.workflow.as_ref().unwrap_or(&task.workflow))
+        .bind(start_message.unwrap_or(task.start_message))
         .bind(notes.unwrap_or(task.notes))
         .bind(change.in_checkout.or(task.in_checkout))
         .bind(Utc::now().to_rfc3339())
@@ -599,6 +604,9 @@ pub struct BacklogChange {
     pub project: Option<String>,
     #[serde(default)]
     pub workflow: Option<String>,
+    /// The message a `prompt` task starts with (a template); blank clears it.
+    #[serde(default)]
+    pub start_message: Option<String>,
     /// Where it will work once started: the project's checkout or a worktree.
     pub in_checkout: Option<bool>,
 }
@@ -609,6 +617,7 @@ impl BacklogChange {
             && self.notes.is_none()
             && self.project.is_none()
             && self.workflow.is_none()
+            && self.start_message.is_none()
             && self.in_checkout.is_none()
     }
 }
@@ -1627,6 +1636,7 @@ mod tests {
             project: Some("web".into()),
             workflow: Some("bugfix".into()),
             in_checkout: Some(false),
+            ..Default::default()
         };
         let task = store.update_backlog_task(&key, &change).await.unwrap();
         assert_eq!(task.title, "Reintentos");

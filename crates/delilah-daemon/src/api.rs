@@ -335,11 +335,21 @@ pub struct NewTask {
     /// Autopilot on: forces saving mode on, and conflicts with it being off.
     #[serde(default)]
     pub autopilot: Option<bool>,
-    /// Defaults to the project's workflow (`feature` without a project).
+    /// `project` (the default; `feature` is its old name), `prompt` or `none`.
     pub workflow: Option<String>,
     /// `chat` or `terminal`; absent, chat.
     #[serde(default)]
     pub view: Option<String>,
+}
+
+/// The 422 for a template that does not validate, with its field errors.
+pub(crate) fn template_error(fields: Vec<delilah_core::FieldError>) -> ApiError {
+    let summary = fields
+        .iter()
+        .map(|f| f.message.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    ApiError::invalid_fields(summary, fields)
 }
 
 /// Parses a `view` from a request; anything but `chat` or `terminal` is a 400.
@@ -438,13 +448,18 @@ struct CreateTask {
     new: NewTask,
     #[serde(default)]
     chat_mode: bool,
+    /// The first message of a `prompt` task, a template (`{ticket}` `{title}` `{task}`;
+    /// literal braces doubled), stored as its `start_message`. Given without a
+    /// `workflow`, it implies `prompt`.
+    #[serde(default)]
+    prompt: Option<String>,
 }
 
 async fn create_task(
     State(app): State<AppState>,
     Json(body): Json<CreateTask>,
 ) -> Result<(StatusCode, Json<Task>), ApiError> {
-    let mut task = build_task(&app, body.new).await?;
+    let mut task = build_task_with(&app, body.new, body.prompt).await?;
     task.chat_mode = body.chat_mode;
     app.store.create_task(&task).await?;
     app.emit(crate::events::Topic::Tasks);
@@ -454,6 +469,15 @@ async fn create_task(
 /// Everything `POST /tasks` does short of storing: validates, resolves the project and
 /// key, and builds the backlog task.
 pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, ApiError> {
+    build_task_with(app, new, None).await
+}
+
+/// [`build_task`] with the `prompt` the task starts with, if any.
+async fn build_task_with(
+    app: &AppState,
+    new: NewTask,
+    prompt: Option<String>,
+) -> Result<Task, ApiError> {
     if new.title.trim().is_empty() {
         return Err(ApiError::bad_request("say what the task is about"));
     }
@@ -469,16 +493,30 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     };
     let key = TaskKey::parse(key).map_err(|e| ApiError::bad_request(e.to_string()))?;
     // Stored normalised: `feature` (the old name) becomes `project`.
-    let workflow = match new.workflow {
-        Some(w) => normalise_workflow(&w)?,
-        None => match &project {
-            Some(p) => delilah_core::workflow::TaskWorkflow::parse(&p.workflow)
-                .map_err(|e| ApiError::bad_request(format!("{}: {e}", p.name)))?,
-            None => delilah_core::workflow::TaskWorkflow::Project,
-        },
+    let requested = new
+        .workflow
+        .as_deref()
+        .map(normalise_workflow)
+        .transpose()?;
+    let message = prompt.filter(|p| !p.trim().is_empty());
+    if let Some(m) = &message {
+        let fields = delilah_core::workflow::validate("prompt", m, false);
+        if !fields.is_empty() {
+            return Err(template_error(fields));
+        }
     }
-    .as_str()
-    .to_string();
+    use delilah_core::workflow::TaskWorkflow;
+    let workflow = match (requested, &message) {
+        (Some(TaskWorkflow::None), _) => TaskWorkflow::None,
+        (Some(TaskWorkflow::Prompt), _) | (_, Some(_)) => TaskWorkflow::Prompt,
+        _ => TaskWorkflow::Project,
+    };
+    // A `prompt` task with no message is the legacy shape: it starts with nothing.
+    let start_message = message.filter(|_| workflow == TaskWorkflow::Prompt);
+    let phased = project
+        .as_ref()
+        .is_some_and(|p| delilah_core::workflow::is_phased(workflow, &p.settings));
+    let workflow = workflow.as_str().to_string();
     if new.autopilot == Some(true)
         && !crate::autopilot::allowed(&key, &workflow, project.as_ref().map(|p| &p.settings))
     {
@@ -492,10 +530,13 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
     task.view = view.unwrap_or_default();
-    task.saving_mode = match new.saving_mode {
-        Some(on) => on,
-        None => crate::handoff::saving_mode_preference(app).await,
-    };
+    task.start_message = start_message;
+    // Saving mode, autopilot and hand-offs are for phased tasks only.
+    task.saving_mode = phased
+        && match new.saving_mode {
+            Some(on) => on,
+            None => crate::handoff::saving_mode_preference(app).await,
+        };
     if new.autopilot == Some(true) {
         task.saving_mode = true;
         task.autopilot = Some(crate::autopilot::fresh());
@@ -536,11 +577,14 @@ async fn update_task(
         }
     }
     let key = TaskKey::new(key);
+    // Everything about the start is checked before anything is written.
+    let phased = check_start_change(&app, &key, &mut change, autopilot).await?;
     // A view-only change works in any state; a title alone, on any task but an archived
     // one; the rest edits the backlog.
     let title_only = change.notes.is_none()
         && change.project.is_none()
         && change.workflow.is_none()
+        && change.start_message.is_none()
         && change.in_checkout.is_none();
     let mut task = if view.is_some() && change.is_empty() {
         app.store
@@ -555,6 +599,10 @@ async fn update_task(
     };
     if let Some(view) = view.filter(|v| *v != task.view) {
         task = app.store.set_view(&key, view).await?;
+    }
+    // A task that ends up not phased runs with saving mode (and autopilot) off.
+    if phased == Some(false) && task.saving_mode {
+        task = crate::handoff::apply_saving_mode(&app, &key, false).await?;
     }
     if let Some(on) = saving_mode.filter(|on| *on != task.saving_mode) {
         task = crate::handoff::apply_saving_mode(&app, &key, on).await?;
@@ -575,6 +623,77 @@ async fn update_task(
     }
     app.emit(crate::events::Topic::Tasks);
     Ok(Json(task))
+}
+
+/// Validates the start fields of a `PATCH` (`workflow`, `start_message`, `project`) and
+/// normalises them in `change`, so a bad one leaves the task untouched. Returns whether
+/// the task would be phased after the change, or `None` if the change does not touch it.
+async fn check_start_change(
+    app: &AppState,
+    key: &TaskKey,
+    change: &mut crate::store::BacklogChange,
+    autopilot: Option<bool>,
+) -> Result<Option<bool>, ApiError> {
+    use delilah_core::workflow::{self, TaskWorkflow};
+    if change.workflow.is_none() && change.start_message.is_none() && change.project.is_none() {
+        return Ok(None);
+    }
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+    let requested = change
+        .workflow
+        .as_deref()
+        .map(normalise_workflow)
+        .transpose()?;
+    // `Some(None)` = a blank message, which clears it.
+    let given = change
+        .start_message
+        .as_ref()
+        .map(|m| Some(m.clone()).filter(|m| !m.trim().is_empty()));
+    let workflow = match (requested, &given) {
+        (Some(w), _) => w,
+        (None, Some(Some(_))) => TaskWorkflow::Prompt,
+        // An unreadable stored workflow starts with nothing.
+        (None, _) => TaskWorkflow::parse(&task.workflow).unwrap_or(TaskWorkflow::None),
+    };
+    if let Some(Some(message)) = &given {
+        let fields = workflow::validate("start_message", message, false);
+        if !fields.is_empty() {
+            return Err(template_error(fields));
+        }
+    }
+    if change.workflow.is_some() || given.is_some() {
+        change.workflow = Some(workflow.as_str().to_string());
+        change.start_message = Some(String::new());
+        if workflow == TaskWorkflow::Prompt {
+            let message = match given {
+                Some(m) => m,
+                None => task.start_message.clone().filter(|m| !m.trim().is_empty()),
+            };
+            let Some(message) = message else {
+                return Err(template_error(workflow::validate(
+                    "start_message",
+                    "",
+                    false,
+                )));
+            };
+            change.start_message = Some(message);
+        }
+    }
+    let project = match change.project.as_ref().or(task.project.as_ref()) {
+        Some(name) => Some(app.store.project(name).await?),
+        None => None,
+    };
+    let settings = project.as_ref().map(|p| &p.settings);
+    if autopilot == Some(true) && !crate::autopilot::allowed(key, workflow.as_str(), settings) {
+        return Err(crate::autopilot::not_spec_workflow(key));
+    }
+    Ok(Some(
+        settings.is_some_and(|s| workflow::is_phased(workflow, s)),
+    ))
 }
 
 /// `PATCH /api/v1/tasks/{key}`: the backlog change (backlog only) plus saving mode,
@@ -1087,7 +1206,7 @@ mod tests {
         assert_eq!(task["status"], json!({"type": "queued"}));
         assert_eq!(task["project"], "web");
         assert_eq!(task["notes"], "con backoff");
-        assert_eq!(task["workflow"], "prompt", "the project's workflow");
+        assert_eq!(task["workflow"], "project", "follows the project");
         assert_eq!(task["in_checkout"], false, "it will work in a worktree");
         let key = TaskKey::new("LIBRE-1");
         assert!(state.store.workspace(&key).await.unwrap().is_none());
@@ -1173,7 +1292,8 @@ mod tests {
         for body in [
             json!({"title": "z", "notes": "n"}),
             json!({"title": "z", "project": "web"}),
-            json!({"title": "z", "workflow": "w"}),
+            json!({"title": "z", "workflow": "none"}),
+            json!({"title": "z", "start_message": "haz esto"}),
             json!({"title": "z", "in_checkout": true}),
         ] {
             let (status, _) = call(&app, "PATCH", "/api/v1/tasks/PROJ-1", Some(body.clone())).await;
@@ -1561,6 +1681,177 @@ mod tests {
             Some(json!({"free": true, "title": "T", "workflow": "bogus"})),
         )
         .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    fn new_task(extra: Value) -> Value {
+        let mut b = json!({"free": true, "title": "Rate limit", "project": "web"});
+        b.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        b
+    }
+
+    #[tokio::test]
+    async fn a_task_can_start_with_a_message_of_its_own() {
+        let (app, _state) = app_with_project().await;
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(
+                json!({"workflow": "prompt", "prompt": "Investiga {title}", "saving_mode": true}),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["workflow"], "prompt");
+        assert_eq!(task["start_message"], "Investiga {title}");
+        assert_eq!(task["saving_mode"], false, "not phased");
+        // A prompt alone implies the workflow.
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(json!({"prompt": "haz esto"}))),
+        )
+        .await;
+        assert_eq!(task["workflow"], "prompt");
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(json!({"workflow": "none", "prompt": "ignored"}))),
+        )
+        .await;
+        assert_eq!(task["workflow"], "none");
+        assert!(task["start_message"].is_null());
+        assert_eq!(task["saving_mode"], false);
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(
+                json!({"workflow": "feature", "saving_mode": true}),
+            )),
+        )
+        .await;
+        assert_eq!(task["workflow"], "project");
+        assert!(task["start_message"].is_null());
+        assert_eq!(task["saving_mode"], true, "the phased project keeps it");
+        // The legacy shape is accepted: no message, it starts with nothing.
+        let (status, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(json!({"workflow": "prompt"}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert!(task["start_message"].is_null());
+    }
+
+    #[tokio::test]
+    async fn a_task_with_an_unknown_workflow_or_a_bad_template_is_refused() {
+        let (app, state) = app_with_project().await;
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(json!({"workflow": "bugfix"}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, err) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(
+                json!({"workflow": "prompt", "prompt": "haz {foo}"}),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+        assert_eq!(err["fields"][0]["field"], "prompt");
+        assert_eq!(err["fields"][0]["code"], "workflow.unknown_placeholder");
+        assert!(state.store.list_tasks().await.unwrap().is_empty());
+        // Autopilot on a task that is not phased is still the 409.
+        let (status, err) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(new_task(json!({"workflow": "none", "autopilot": true}))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(err["reason"], "not-spec-workflow");
+    }
+
+    #[tokio::test]
+    async fn a_run_with_a_bad_prompt_template_is_refused() {
+        let (app, _state) = app_with_project().await;
+        let (status, err) = call(
+            &app,
+            "POST",
+            "/api/v1/runs",
+            Some(json!({"key": "PROJ-1", "title": "x", "project": "web", "prompt": "haz {foo}"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+        assert_eq!(err["fields"][0]["field"], "prompt");
+        assert_eq!(err["fields"][0]["code"], "workflow.unknown_placeholder");
+    }
+
+    #[tokio::test]
+    async fn patching_a_backlog_task_edits_its_start_all_or_nothing() {
+        let (app, _state) = app_with_project().await;
+        let (_, task) = call(&app, "POST", "/api/v1/tasks", Some(new_task(json!({})))).await;
+        let uri = format!("/api/v1/tasks/{}", task["key"].as_str().unwrap());
+        let (status, task) = call(
+            &app,
+            "PATCH",
+            &uri,
+            Some(json!({"workflow": "prompt", "start_message": "Investiga {title}"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{task}");
+        assert_eq!(task["workflow"], "prompt");
+        assert_eq!(task["start_message"], "Investiga {title}");
+        // A bad message changes nothing, not even the workflow sent with it.
+        let (status, err) = call(
+            &app,
+            "PATCH",
+            &uri,
+            Some(json!({"workflow": "none", "title": "Other", "start_message": "{foo}"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+        assert_eq!(err["fields"][0]["field"], "start_message");
+        let (_, got) = call(&app, "GET", &uri, None).await;
+        assert_eq!(got["workflow"], "prompt");
+        assert_eq!(got["title"], "Rate limit");
+        assert_eq!(got["start_message"], "Investiga {title}");
+        // `prompt` needs a message.
+        let (status, err) = call(&app, "PATCH", &uri, Some(json!({"start_message": "  "}))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{err}");
+        assert_eq!(err["fields"][0]["code"], "workflow.blank");
+        // The old name is normalised; leaving `prompt` clears the message.
+        let (_, got) = call(&app, "PATCH", &uri, Some(json!({"workflow": "feature"}))).await;
+        assert_eq!(got["workflow"], "project");
+        assert!(got["start_message"].is_null());
+        // Not phased afterwards: autopilot is refused and nothing is written.
+        let (status, err) = call(
+            &app,
+            "PATCH",
+            &uri,
+            Some(json!({"workflow": "none", "autopilot": true})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(err["reason"], "not-spec-workflow");
+        let (_, got) = call(&app, "GET", &uri, None).await;
+        assert_eq!(got["workflow"], "project");
+        let (status, _) = call(&app, "PATCH", &uri, Some(json!({"workflow": "bogus"}))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
