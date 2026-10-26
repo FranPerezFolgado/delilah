@@ -103,7 +103,25 @@ async fn apply_signal(
         }
         _ => None,
     };
+    // When this turn began and ended, taken here and now: the autofix judgement runs in
+    // a spawned task, long after, and must not take its own clock for the turn's.
+    let now = Utc::now();
+    let turn = crate::handoff::TurnEnd {
+        session: live.as_ref().map(|l| l.id.clone()),
+        started: match &live {
+            Some(l) if signal == Signal::TurnEnded => l.take_turn_started(),
+            _ => None,
+        },
+        ended: Some(now),
+        background: false,
+    };
     if let Some(live) = &live {
+        // A prompt starts a turn; so does the first work of a session that was idle.
+        if signal == Signal::PromptSubmitted
+            || (signal == Signal::Working && live.state() != LiveState::Working)
+        {
+            live.mark_turn_started(now);
+        }
         live.set_state(match (signal, limit_reset) {
             (_, Some(_)) => LiveState::Paused,
             (Signal::PromptSubmitted | Signal::Working, _) => LiveState::Working,
@@ -175,7 +193,16 @@ async fn apply_signal(
     };
     // What the agent did may move the task's phase (a task's sessions only).
     if crate::store_sessions::project_of(&q.task).is_none() {
-        crate::phases::on_hook(&app, &q.task, signal, &hook, primary, limit_reset.is_some()).await;
+        crate::phases::on_hook(
+            &app,
+            &q.task,
+            signal,
+            &hook,
+            primary,
+            limit_reset.is_some(),
+            turn,
+        )
+        .await;
     }
 
     // A project's session has no task to move: only the session and the inbox change.

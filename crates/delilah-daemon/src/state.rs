@@ -68,6 +68,8 @@ pub struct AppState {
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
     /// Tasks whose CI autofix is being evaluated now: one at a time per task.
     pub(crate) autofix_running: Arc<Mutex<HashSet<String>>>,
+    /// Tasks whose turn end is being judged for CI autofix now: one at a time per task.
+    pub(crate) autofix_judging: Arc<Mutex<HashSet<String>>>,
     /// The previews the daemon runs, one per task at most (see `preview.rs`).
     pub(crate) previews: Arc<crate::preview::Previews>,
 }
@@ -134,6 +136,7 @@ impl AppState {
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),
             autofix_running: Arc::default(),
+            autofix_judging: Arc::default(),
         }
     }
 
@@ -141,6 +144,32 @@ impl AppState {
     pub fn with_gh(mut self, gh: Arc<dyn Gh>) -> Self {
         self.gh = Arc::new(GhClient::new(gh));
         self
+    }
+
+    /// Takes the task's turn-end judging; `None` when another one is running.
+    pub(crate) fn claim_autofix_judging(&self, key: &str) -> Option<AutofixGuard> {
+        let fresh = self
+            .autofix_judging
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.to_string());
+        fresh.then(|| AutofixGuard {
+            running: self.autofix_judging.clone(),
+            key: key.to_string(),
+        })
+    }
+
+    /// Like [`claim_autofix`](Self::claim_autofix), but waits a little for an evaluation
+    /// that is running to end, so what the caller does next (cancel and tear down) comes
+    /// after it. `None` when it did not end in time.
+    pub(crate) async fn claim_autofix_waiting(&self, key: &str) -> Option<AutofixGuard> {
+        for _ in 0..40 {
+            if let Some(guard) = self.claim_autofix(key) {
+                return Some(guard);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        self.claim_autofix(key)
     }
 
     /// Takes the task's autofix evaluation; `None` when another one is running.

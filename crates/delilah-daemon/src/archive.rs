@@ -111,11 +111,11 @@ pub(crate) async fn archive_workspace(
     force: bool,
     verified: &HashMap<String, String>,
 ) -> Result<Outcome, ApiError> {
-    if let Err(e) = crate::autofix::cancel(app, key, None).await {
-        tracing::warn!(task = %key, "autofix: cannot cancel on archive: {e}");
-    }
+    // An evaluation in flight ends first; none starts until the task is torn down.
+    let _slot = app.claim_autofix_waiting(key.as_str()).await;
     let Some((root, ws)) = app.store.workspace(key).await? else {
         stop_sessions(app, key).await;
+        crate::autofix::cancel_logged(app, key, None).await;
         return Ok(Outcome::default());
     };
     let opts = GitOptions {
@@ -139,7 +139,9 @@ pub(crate) async fn archive_workspace(
             verified.insert(".".to_string(), tip);
         }
     }
+    // A refused release leaves the task active, and its autofix with it.
     release_workspace(app, key, force).await?;
+    crate::autofix::cancel_logged(app, key, None).await;
     app.store.delete_workspace(key).await?;
 
     let mut outcome = Outcome::default();

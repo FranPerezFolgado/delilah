@@ -21,9 +21,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-11 | 4 | 4B | verified | 1 | dc3dc77 | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
 | WP-12 | 4 | 4B | verified | 1 | 3902f30 | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
 | WP-13 | 4 | 4C | verified | 1 | 4868349 | e2e fake reads the prompt line by line: prompt_lines()=7 coupling |
-| WP-13F | 4 | fix | implementing | 0 | | Phase 4 review fixes |
+| WP-13F | 4 | fix | verified | 1 | | Phase 4 review fixes; turn start from UserPromptSubmit on Live |
 | WP-14 | 5 | 5A | pending | 0 | | |
-| WP-15 | 5 | 5A | verified | 1 | | retry requires --repo (CLI error); project show prints ci-autofix |
+| WP-15 | 5 | 5A | verified | 1 | ce53e13 | retry requires --repo (CLI error); project show prints ci-autofix |
 | WP-16 | 5 | 5A | implementing | 0 | | |
 | WP-17 | 6 | 6A | pending | 0 | | |
 | WP-18 | 7 | 7A | pending | 0 | | |

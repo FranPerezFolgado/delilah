@@ -51,6 +51,9 @@ pub struct Live {
     pub convo: Arc<Mutex<ConvoState>>,
     /// Where Claude saves this session's transcript, as its latest hook said.
     transcript: Arc<Mutex<Option<PathBuf>>>,
+    /// When the turn in progress began (a prompt was submitted, or the session went
+    /// back to work), as the hooks said; taken when the turn ends.
+    turn_started: Arc<Mutex<Option<chrono::DateTime<chrono::Utc>>>>,
     /// Held while a message is decided on and typed, so two never interleave.
     pub typing: Arc<tokio::sync::Mutex<()>>,
     events: Events,
@@ -71,6 +74,16 @@ impl Live {
         if changed {
             self.events.emit(Topic::Sessions);
         }
+    }
+
+    /// A turn began now.
+    pub fn mark_turn_started(&self, at: chrono::DateTime<chrono::Utc>) {
+        *self.turn_started.lock().unwrap() = Some(at);
+    }
+
+    /// When the turn that is ending began, if a hook said; forgets it.
+    pub fn take_turn_started(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.turn_started.lock().unwrap().take()
     }
 
     pub fn is_idea(&self) -> bool {
@@ -162,6 +175,7 @@ impl Sessions {
             conversation: Arc::default(),
             convo: Arc::default(),
             transcript: Arc::default(),
+            turn_started: Arc::default(),
             typing: Arc::default(),
             events: self.events.clone(),
         };

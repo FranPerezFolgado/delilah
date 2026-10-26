@@ -145,13 +145,14 @@ pub fn signal_phase(hook: &serde_json::Value) -> Option<SpecPhase> {
 }
 
 /// Reacts to a hook of one of a task's sessions (not a project's).
-pub async fn on_hook(
+pub(crate) async fn on_hook(
     app: &AppState,
     task: &str,
     signal: delilah_agents::claude::Signal,
     hook: &serde_json::Value,
     primary: bool,
     limited: bool,
+    turn: crate::handoff::TurnEnd,
 ) {
     use delilah_agents::claude::Signal;
     let key = TaskKey::new(task);
@@ -180,6 +181,7 @@ pub async fn on_hook(
             let app = app.clone();
             let end = crate::handoff::TurnEnd {
                 background: delilah_agents::claude::background_running(hook),
+                ..turn
             };
             tokio::spawn(async move {
                 crate::handoff::on_turn_end(&app, &key, end).await;
@@ -310,10 +312,28 @@ mod tests {
         use delilah_agents::claude::Signal;
         let (app, key) = planning().await;
         let hook = serde_json::json!({});
-        on_hook(&app, "PROJ-1", Signal::TurnEnded, &hook, true, true).await;
+        on_hook(
+            &app,
+            "PROJ-1",
+            Signal::TurnEnded,
+            &hook,
+            true,
+            true,
+            Default::default(),
+        )
+        .await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         assert_eq!(stage(&app, &key).await, None);
-        on_hook(&app, "PROJ-1", Signal::TurnEnded, &hook, true, false).await;
+        on_hook(
+            &app,
+            "PROJ-1",
+            Signal::TurnEnded,
+            &hook,
+            true,
+            false,
+            Default::default(),
+        )
+        .await;
         for _ in 0..50 {
             if stage(&app, &key).await.is_some() {
                 break;
@@ -338,7 +358,16 @@ mod tests {
         app.store.set_handoff(&key, Some(&saving)).await.unwrap();
         let hook = serde_json::json!({});
         for signal in [Signal::TurnEnded, Signal::TurnFailed] {
-            on_hook(&app, "PROJ-1", signal, &hook, true, true).await;
+            on_hook(
+                &app,
+                "PROJ-1",
+                signal,
+                &hook,
+                true,
+                true,
+                Default::default(),
+            )
+            .await;
         }
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert_eq!(
@@ -352,7 +381,16 @@ mod tests {
         use delilah_agents::claude::Signal;
         let (app, key) = planning().await;
         let edit = serde_json::json!({ "tool_name": "Edit", "tool_input": { "file_path": "/w/ws/src/main.rs" } });
-        on_hook(&app, "PROJ-1", Signal::Working, &edit, true, false).await;
+        on_hook(
+            &app,
+            "PROJ-1",
+            Signal::Working,
+            &edit,
+            true,
+            false,
+            Default::default(),
+        )
+        .await;
         assert_eq!(
             stage(&app, &key).await,
             Some(delilah_core::HandoffStage::Skipped)
@@ -405,7 +443,16 @@ mod tests {
             .unwrap();
         let hook = |c: &str| json!({ "tool_name": "Bash", "tool_input": { "command": c } });
         for quiet in ["cargo test", "git status"] {
-            on_hook(&app, "PROJ-1", Signal::Working, &hook(quiet), true, false).await;
+            on_hook(
+                &app,
+                "PROJ-1",
+                Signal::Working,
+                &hook(quiet),
+                true,
+                false,
+                Default::default(),
+            )
+            .await;
         }
         assert!(app.pr_nudges.lock().unwrap().is_empty());
         assert!(fake.calls().is_empty());
@@ -417,6 +464,7 @@ mod tests {
             &hook("git push -u origin x"),
             true,
             false,
+            Default::default(),
         )
         .await;
         // The check itself waits for GitHub: what is asked of the loop is one pending nudge.
