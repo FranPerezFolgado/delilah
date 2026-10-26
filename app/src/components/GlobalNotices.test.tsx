@@ -5,6 +5,7 @@ import type { Task, TaskStatus, UsageReport } from "../api";
 import { setLanguage } from "../i18n";
 import { GlobalNotices } from "./GlobalNotices";
 import { ToastHost, clearToasts } from "./ui";
+import { inToasts, toastsText } from "../test/toasts";
 
 beforeEach(() => setLanguage("es"));
 afterEach(() => {
@@ -68,47 +69,47 @@ function setup() {
 it("groups «te espera» toasts: one task replies, two go to the inbox, none removes it", () => {
   const { onOpen, onInbox, to } = setup();
   to([wait("A-0"), idle("A-1")]);
-  expect(screen.getByText("A-0 te espera")).toBeTruthy();
-  fireEvent.click(screen.getByText("Responder"));
+  expect(inToasts().getByText("A-0 te espera")).toBeTruthy();
+  fireEvent.click(inToasts().getByText("Responder"));
   expect(onOpen).toHaveBeenCalledWith("A-0");
   to([wait("A-0"), wait("A-1")]);
-  expect(screen.queryByText("A-0 te espera")).toBeNull();
-  expect(screen.getByText("2 tareas te esperan")).toBeTruthy();
-  expect(screen.getAllByText("Ver")).toHaveLength(1);
-  fireEvent.click(screen.getByText("Ver"));
+  expect(inToasts().queryByText("A-0 te espera")).toBeNull();
+  expect(inToasts().getByText("2 tareas te esperan")).toBeTruthy();
+  expect(inToasts().getAllByText("Ver")).toHaveLength(1);
+  fireEvent.click(inToasts().getByText("Ver"));
   expect(onInbox).toHaveBeenCalled();
   to([idle("A-0"), wait("A-1")]);
-  expect(screen.getByText("A-1 te espera")).toBeTruthy();
+  expect(inToasts().getByText("A-1 te espera")).toBeTruthy();
   to([idle("A-0"), idle("A-1")]);
-  expect(document.body.textContent).not.toMatch(/te espera|te esperan/);
+  expect(toastsText()).not.toMatch(/te espera|te esperan/);
 });
 
 it("removes a task that leaves the list or becomes current", () => {
   const { to } = setup();
   to([wait("A-0"), wait("A-1")]);
-  expect(screen.getByText("2 tareas te esperan")).toBeTruthy();
+  expect(inToasts().getByText("2 tareas te esperan")).toBeTruthy();
   to([wait("A-0")]);
-  expect(screen.getByText("A-0 te espera")).toBeTruthy();
+  expect(inToasts().getByText("A-0 te espera")).toBeTruthy();
   to([wait("A-0"), wait("A-1")]);
   to([wait("A-0"), wait("A-1")], "A-1");
-  expect(screen.getByText("A-0 te espera")).toBeTruthy();
+  expect(inToasts().getByText("A-0 te espera")).toBeTruthy();
 });
 
 it("never adds the current task", () => {
   const { to } = setup();
   to([idle("A-0"), wait("A-1")], "A-1");
-  expect(document.body.textContent).not.toMatch(/te espera/);
+  expect(toastsText()).not.toMatch(/te espera/);
 });
 
 it("closing the group keeps it closed until a new task waits, then only that one shows", () => {
   const { to } = setup();
   to([wait("A-0"), idle("A-1")]);
   fireEvent.click(screen.getByLabelText("Cerrar"));
-  expect(document.body.textContent).not.toMatch(/te espera/);
+  expect(toastsText()).not.toMatch(/te espera/);
   to([wait("A-0"), idle("A-1")]);
-  expect(document.body.textContent).not.toMatch(/te espera/);
+  expect(toastsText()).not.toMatch(/te espera/);
   to([wait("A-0"), wait("A-1")]);
-  expect(screen.getByText("A-1 te espera")).toBeTruthy();
+  expect(inToasts().getByText("A-1 te espera")).toBeTruthy();
 });
 
 it("removes the toast on unmount", () => {
@@ -117,7 +118,7 @@ it("removes the toast on unmount", () => {
   unmount();
   // Remount only the host: the toast must be gone.
   render(<ToastHost />);
-  expect(screen.queryByText("A-0 te espera")).toBeNull();
+  expect(inToasts().queryByText("A-0 te espera")).toBeNull();
 });
 
 it("does not toast tasks already waiting when the list arrives after an empty first render", () => {
@@ -130,6 +131,6 @@ it("does not toast tasks already waiting when the list arrives after an empty fi
   );
   const { rerender } = render(ui([]));
   act(() => rerender(ui([wait("A-0"), wait("A-1")])));
-  expect(screen.queryByText("A-0 te espera")).toBeNull();
-  expect(screen.queryByText("A-1 te espera")).toBeNull();
+  expect(inToasts().queryByText("A-0 te espera")).toBeNull();
+  expect(inToasts().queryByText("A-1 te espera")).toBeNull();
 });

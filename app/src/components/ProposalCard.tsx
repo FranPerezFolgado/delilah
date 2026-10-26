@@ -27,7 +27,7 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
   const [asking, setAsking] = useState(false);
   // Descartar hides the card and sends the answer after the undo window.
   const [discarding, setDiscarding] = useState(false);
-  const pending = useRef<{ timer: ReturnType<typeof setTimeout> } | null>(null);
+  const pending = useRef<{ timer: ReturnType<typeof setTimeout>; toastId: number } | null>(null);
   const q = ask.questions[0]?.question ?? "";
 
   const send = async (answer: string, launch?: "autopilot") => {
@@ -55,6 +55,7 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
     () => () => {
       if (pending.current) {
         clearTimeout(pending.current.timer);
+        dismissToast(pending.current.toastId);
         pending.current = null;
         void sendRef.current("Descartar");
       }
@@ -71,8 +72,8 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
       dismissToast(toastId);
       void sendRef.current("Descartar");
     }, UNDO_MS);
-    pending.current = { timer };
-    toastId = pushToast({
+    pending.current = { timer, toastId };
+    toastId = pending.current.toastId = pushToast({
       text: t("Tarea descartada"),
       ttl: UNDO_MS,
       action: {

@@ -7,6 +7,7 @@ import { setLanguage } from "../i18n";
 import { clearToasts, ToastHost } from "./ui";
 import { setToastsPaused } from "./ui/Toast";
 import { ProposalCard } from "./ProposalCard";
+import { inToasts } from "../test/toasts";
 
 beforeEach(() => setLanguage("es"));
 
@@ -122,23 +123,39 @@ describe("ProposalCard", () => {
   it("hovering the toast stack past the undo window still sends Descartar and drops the toast", async () => {
     vi.useFakeTimers();
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
-    const { getByText, queryByText } = render(
+    const { getByText } = render(
       <>
         <ProposalCard ask={proposal} />
         <ToastHost />
       </>,
     );
     fireEvent.click(getByText("Descartar"));
-    expect(queryByText("Tarea descartada")).not.toBeNull();
+    expect(inToasts().queryByText("Tarea descartada")).not.toBeNull();
     act(() => setToastsPaused(true));
     fireEvent.mouseEnter(document.body.querySelector(".toast-host")!);
     await act(async () => void vi.advanceTimersByTime(7000));
     expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": "Descartar" });
-    expect(queryByText("Tarea descartada")).toBeNull();
+    expect(inToasts().queryByText("Tarea descartada")).toBeNull();
     act(() => setToastsPaused(false));
   });
 
-  it.each(["Cambiar algo"])("%s answers with it, creates nothing and shows no error", async (label) => {
+  it("unmounting with a discard pending sends Descartar and drops the toast", () => {
+  const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
+  const ui = (card: boolean) => (
+    <>
+      {card && <ProposalCard ask={proposal} />}
+      <ToastHost />
+    </>
+  );
+  const { getByText, rerender } = render(ui(true));
+  fireEvent.click(getByText("Descartar"));
+  expect(inToasts().queryByText("Tarea descartada")).not.toBeNull();
+  rerender(ui(false));
+  expect(answer).toHaveBeenCalledWith("a2", { "¿Creo la tarea?": "Descartar" });
+  expect(inToasts().queryByText("Tarea descartada")).toBeNull();
+});
+
+it.each(["Cambiar algo"])("%s answers with it, creates nothing and shows no error", async (label) => {
     const answer = vi.spyOn(api, "answerAsk").mockResolvedValue({ task: null });
     const onDone = vi.fn();
     const { getByText, container } = render(<ProposalCard ask={proposal} onDone={onDone} />);
