@@ -18,3 +18,9 @@
 .ib-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .ib-actions:empty { display: none; }
 .ib-last { font-size: 12px; }
+.ib-narrow { grid-template-columns: minmax(0, 1fr); position: relative; }
+.ib-narrow .ib-list { border-right: 0; }
+.ib-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 20; }
+.ib-overlay { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); z-index: 21; background: var(--panel);
+  border-left: 1px solid var(--bd); box-shadow: var(--shadow); }
+.ib-close { display: flex; justify-content: flex-end; margin-bottom: 8px; }

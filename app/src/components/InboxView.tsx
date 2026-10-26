@@ -8,6 +8,7 @@ import { isSendKey } from "../keys";
 import { on } from "../live";
 import { openExternal } from "../platform";
 import { relativeTime } from "../time";
+import { useBreakpoints } from "../useWidth";
 import { kindOf } from "../vocab";
 import { Button, Count, InboxKind, Row, Skeleton, pushToast } from "./ui";
 import "./InboxView.css";
@@ -62,6 +63,9 @@ const isTextTarget = (el: EventTarget | null) => {
 /** Everything that waits on you, from every task: a list grouped by task and the detail of one. */
 export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
+  // Below 1200 px the detail is an overlay that only opens when a row is chosen.
+  const { overlays } = useBreakpoints();
+  const [detailOpen, setDetailOpen] = useState(false);
   const groups = useMemo(() => {
     const by = new Map<string, Group>();
     for (const i of items) {
@@ -75,6 +79,19 @@ export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged
   const current = flat.find((i) => idOf(i) === selected) ?? flat[0];
   const currentId = current ? idOf(current) : null;
   const group = groups.find((g) => g.task === current?.task);
+
+  const showOverlay = overlays && detailOpen && !!current;
+  useEffect(() => {
+    if (detailOpen && selected && !flat.some((i) => idOf(i) === selected)) setDetailOpen(false);
+  }, [flat, selected, detailOpen]);
+  useEffect(() => {
+    if (!showOverlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDetailOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showOverlay]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -136,7 +153,7 @@ export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged
       ) : items.length === 0 ? (
         <Empty />
       ) : (
-        <div className="ib">
+        <div className={`ib ${overlays ? "ib-narrow" : ""}`}>
           <div className="ib-list" role="listbox" aria-label={t("Bandeja")}>
             {groups.map((g) => (
               <div key={g.task} className="ib-group" role="group" aria-label={g.task}>
@@ -153,28 +170,47 @@ export function InboxView({ items, loading, onOpenTask, onOpenChanges, onChanged
                     title={<InboxKind kind={i.kind} />}
                     sub={<span className="trunc">{i.text ?? t(NOTICE_TITLE[i.kind] ?? "Aviso")}</span>}
                     trailing={i.since && i.kind !== "paused" ? <span className="ib-when">{relativeTime(i.since)}</span> : undefined}
-                    onClick={() => setSelected(idOf(i))}
+                    onClick={() => {
+                      setSelected(idOf(i));
+                      setDetailOpen(true);
+                    }}
                   />
                 ))}
               </div>
             ))}
           </div>
-          <div className="ib-detail">
-            {current && (
-              <Item
-                key={idOf(current)}
-                item={current}
-                nav={
-                  group && group.items.length > 1
-                    ? { index: group.items.indexOf(current), total: group.items.length, onChange: (n) => setSelected(idOf(group.items[n])) }
-                    : undefined
-                }
-                onOpenTask={onOpenTask}
-                onOpenChanges={onOpenChanges}
-                onChanged={onChanged}
-              />
-            )}
-          </div>
+          {(!overlays || showOverlay) && (
+            <>
+              {overlays && <div className="ib-scrim" onClick={() => setDetailOpen(false)} />}
+              <div
+                className={`ib-detail ${overlays ? "ib-overlay" : ""}`}
+                role={overlays ? "dialog" : undefined}
+                aria-label={overlays ? t("Detalle del aviso") : undefined}
+              >
+                {overlays && (
+                  <div className="ib-close">
+                    <Button variant="secondary" size={28} onClick={() => setDetailOpen(false)}>
+                      {t("Cerrar")}
+                    </Button>
+                  </div>
+                )}
+                {current && (
+                  <Item
+                    key={idOf(current)}
+                    item={current}
+                    nav={
+                      group && group.items.length > 1
+                        ? { index: group.items.indexOf(current), total: group.items.length, onChange: (n) => setSelected(idOf(group.items[n])) }
+                        : undefined
+                    }
+                    onOpenTask={onOpenTask}
+                    onOpenChanges={onOpenChanges}
+                    onChanged={onChanged}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </>

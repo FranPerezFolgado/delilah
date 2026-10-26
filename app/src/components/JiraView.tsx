@@ -8,6 +8,7 @@ import { Markdown } from "./Markdown";
 import { Button, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
 import { openExternal } from "../platform";
 import { t, tn } from "../i18n";
+import { useBreakpoints } from "../useWidth";
 import "./JiraView.css";
 
 interface Props {
@@ -115,6 +116,24 @@ function StatusDot({ category }: { category: string }) {
   return <span className={`jdot jdot-${category || "new"}`} aria-hidden />;
 }
 
+/** Below this window width the three filter chips collapse into one «Filtros · N» menu. */
+const FILTERS_COLLAPSE_BELOW = 1024;
+const narrowFilters = () =>
+  typeof window !== "undefined" && !!window.matchMedia?.(`(max-width: ${FILTERS_COLLAPSE_BELOW - 1}px)`).matches;
+
+function useCollapsedFilters(): boolean {
+  const [collapsed, setCollapsed] = useState(narrowFilters);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(`(max-width: ${FILTERS_COLLAPSE_BELOW - 1}px)`);
+    const update = () => setCollapsed(mq.matches);
+    mq.addEventListener("change", update);
+    update();
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return collapsed;
+}
+
 /** Tickets from Jira, and "Analizar" to start a task on one. */
 export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [settings, setSettings] = useState<JiraSettings | null | undefined>(undefined);
@@ -131,6 +150,19 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [expired, setExpired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Below 1200 px the detail is a drawer that only opens when a row is chosen.
+  const { overlays } = useBreakpoints();
+  const collapsed = useCollapsedFilters();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const showDrawer = overlays && drawerOpen;
+  useEffect(() => {
+    if (!showDrawer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showDrawer]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -217,6 +249,24 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
       )}
     />
   );
+  const activeFilters = Number(who !== "assigned") + Number(progress !== "open") + Number(sprint !== "all");
+  const filterItems = <T extends string>(label: string, options: { value: T; label: string }[], value: T, set: (v: T) => void) =>
+    options.map((o) => ({ label: `${o.value === value ? "✓ " : ""}${label}: ${o.label}`, onSelect: () => set(o.value) }));
+  const filtersMenu = (
+    <Menu
+      items={[
+        ...filterItems(t("De quién"), WHO, who, setWho),
+        ...filterItems(t("Estado"), PROGRESS, progress, setProgress),
+        ...filterItems(t("Sprint"), SPRINT, sprint, setSprint),
+      ]}
+      trigger={(p) => (
+        <button type="button" className="jv-chip" {...p}>
+          <span className="jv-chip-v">{t("Filtros · {n}", { n: activeFilters })}</span>
+          <Icon name="chevron" className="jv-chip-c" />
+        </button>
+      )}
+    />
+  );
   const clearFilters = () => {
     setWho("assigned");
     setProgress("open");
@@ -234,7 +284,10 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
     ].filter(Boolean);
     return (
       <button key={i.key} type="button" className={`jv-row ${child ? "child" : ""} ${i.key === selected ? "on" : ""}`}
-        aria-current={i.key === selected ? "true" : undefined} onClick={() => setSelected(i.key)}>
+        aria-current={i.key === selected ? "true" : undefined} onClick={() => {
+          setSelected(i.key);
+          setDrawerOpen(true);
+        }}>
         <StatusDot category={i.status_category} />
         <span className="jv-main">
           <span className="jv-l1">
@@ -267,9 +320,13 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
         <Button variant="secondary" onClick={() => setEditing(true)}>{t("Conexión")}</Button>
       </div>
       <div className="jv-bar">
-        {chip(t("De quién"), WHO, who, setWho)}
-        {chip(t("Estado"), PROGRESS, progress, setProgress)}
-        {chip(t("Sprint"), SPRINT, sprint, setSprint)}
+        {collapsed ? filtersMenu : (
+          <>
+            {chip(t("De quién"), WHO, who, setWho)}
+            {chip(t("Estado"), PROGRESS, progress, setProgress)}
+            {chip(t("Sprint"), SPRINT, sprint, setSprint)}
+          </>
+        )}
         <span className="jv-bar-end">
           <span className="muted">{t("Agrupar por")}</span>
           <Segmented mode="radio" label={t("Agrupar por")} value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)}
@@ -314,16 +371,24 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
             </div>
           )}
         </div>
-        {issue && <Detail key={issue.key} issue={issue} parentListed={!!issue.parent && issues.some((i) => i.key === issue.parent!.key)}
-          onSelect={setSelected} onAnalyze={onAnalyze} onOpenTask={onOpenTask} />}
+        {issue && (!overlays || showDrawer) && (
+          <>
+            {overlays && <div className="jv-scrim" onClick={() => setDrawerOpen(false)} />}
+            <Detail key={issue.key} issue={issue} parentListed={!!issue.parent && issues.some((i) => i.key === issue.parent!.key)}
+              drawer={overlays} onClose={() => setDrawerOpen(false)}
+              onSelect={setSelected} onAnalyze={onAnalyze} onOpenTask={onOpenTask} />
+          </>
+        )}
       </div>
     </>
   );
 }
 
-function Detail({ issue, parentListed, onSelect, onAnalyze, onOpenTask }: {
+function Detail({ issue, parentListed, drawer, onClose, onSelect, onAnalyze, onOpenTask }: {
   issue: JiraIssue;
   parentListed: boolean;
+  drawer: boolean;
+  onClose: () => void;
   onSelect: (key: string) => void;
   onAnalyze: (issue: JiraIssue) => void;
   onOpenTask: (key: string) => void;
@@ -358,7 +423,12 @@ function Detail({ issue, parentListed, onSelect, onAnalyze, onOpenTask }: {
   }, [subs]);
 
   return (
-    <aside className="jv-detail">
+    <aside className={`jv-detail ${drawer ? "jv-drawer" : ""}`} role={drawer ? "dialog" : undefined} aria-label={drawer ? issue.key : undefined}>
+      {drawer && (
+        <div className="jv-close">
+          <Button variant="secondary" size={28} onClick={onClose}>{t("Cerrar")}</Button>
+        </div>
+      )}
       <div className="jv-dhead">
         <div className="mono muted">{issue.key}</div>
         <h2 className="t-sec selectable">{issue.summary}</h2>

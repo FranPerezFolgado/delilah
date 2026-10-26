@@ -20,8 +20,17 @@ const item: InboxItem = {
 const view = (onChanged = () => {}) =>
   render(<InboxView items={[item]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
 
+/** Fake matchMedia: a query `(max-width: N px)` matches when the window is at most N wide. */
+const setWidth = (w: number) => {
+  window.matchMedia = ((q: string) => {
+    const max = Number(/max-width:\s*(\d+)px/.exec(q)?.[1] ?? Infinity);
+    return { matches: w <= max, media: q, addEventListener: () => {}, removeEventListener: () => {} };
+  }) as unknown as typeof window.matchMedia;
+};
+
 beforeEach(() => setLanguage("en"));
 afterEach(() => {
+  delete (window as { matchMedia?: unknown }).matchMedia;
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -389,5 +398,28 @@ describe("InboxView list and detail", () => {
     renderView([]);
     expect(screen.getByText("Nothing is waiting for you")).toBeTruthy();
     expect(await screen.findByText(/Last activity: PROJ-9 · ran tests · just now/)).toBeTruthy();
+  });
+});
+
+describe("InboxView at width", () => {
+  it("keeps the detail inline at 1280", () => {
+    setWidth(1280);
+    view();
+    expect(document.querySelector(".ib-detail")).toBeTruthy();
+    expect(document.querySelector(".ib-scrim")).toBeNull();
+  });
+
+  it("opens the detail as an overlay below 1200, closed by «Cerrar» and Esc", () => {
+    setWidth(1100);
+    view();
+    expect(document.querySelector(".ib-detail")).toBeNull();
+    fireEvent.click(screen.getAllByRole("option")[0]);
+    expect(document.querySelector(".ib-overlay")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(document.querySelector(".ib-overlay")).toBeNull();
+    fireEvent.click(screen.getAllByRole("option")[0]);
+    expect(document.querySelector(".ib-overlay")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.querySelector(".ib-overlay")).toBeNull();
   });
 });

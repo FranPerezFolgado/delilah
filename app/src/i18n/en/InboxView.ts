@@ -1,4 +1,5 @@
 export const EN: Record<string, string> = {
+  "Detalle del aviso": "Notice detail",
   "Terminó su turno": "Finished its turn",
   "Nada te espera": "Nothing is waiting for you",
   "Última actividad: {task}{text} · {time}": "Last activity: {task}{text} · {time}",

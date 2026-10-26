@@ -1,4 +1,5 @@
 export const EN: Record<string, string> = {
+  "Filtros · {n}": "Filters · {n}",
   "Asignados a mí": "Assigned to me",
   "Reportados por mí": "Reported by me",
   Abiertos: "Open",

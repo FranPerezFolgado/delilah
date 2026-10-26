@@ -53,11 +53,11 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-44 | 7 | 7A | implementing | 1 |  | Projects and project view |
 | WP-45 | 7 | 7A | done | 1 | 16cdf42 | Settings and auto-update preference |
 | WP-46 | 7 | 7B | implementing | 1 |  | Nueva tarea dialog |
-| WP-47 | 7 | 7B | done | 1 |  | Backlog task and project settings |
+| WP-47 | 7 | 7B | done | 1 | f80fe4c | Backlog task and project settings |
 | WP-48 | 7 | 7C | pending | 0 | | E2E dialogs and projects |
 | WP-49 | 7 | 7C | pending | 0 | | E2E new task |
 | WP-50 | 8 | 8A | done | 1 | 864dcdc | Sidebar at scale |
-| WP-51 | 8 | 8A | implementing | 1 |  | Bandeja and Jira at width |
+| WP-51 | 8 | 8A | done | 1 |  | Bandeja and Jira at width |
 | WP-52 | 8 | 8A | pending | 0 | | Task screen and board at width |
 | WP-53 | 8 | 8A | pending | 0 | | Global notices |
 | WP-54 | 8 | 8B | pending | 0 | | E2E widths |
@@ -87,3 +87,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 5 | WP-31 | NOTE | WP-34: render SessionChain row + base-stale bar under TaskHeader; TaskHeaderProps in WP-31 report (task, phase, owner, hasWorkspace, showTree, onToggleTree, sessionSwitch, autopilotBusy, onAutopilot, onSavingMode, pr, doneAt, onChanged, onError). | app/src/components/TaskScreen.tsx |
 | 9 | orchestrator | MEDIUM | i18n coverage test fails under vitest because the transformed `en.ts` glob list is cached while files are added in parallel; re-run with a clean cache after integration (WP-55/58) and confirm it really finds literals. | app/src/i18n |
 | 8 | WP-50 | LOW | The 6-task cap can hide the selected task; always show the current task even past the cap. | app/src/components/Sidebar.tsx |
+| 7 | WP-47 | MEDIUM | Dirty-checkout refusal is detected by matching error text; give it a daemon error code (`checkout-dirty`) and use it in BacklogTaskView + NewTaskDialog. | crates/delilah-daemon/src/run.rs, app |

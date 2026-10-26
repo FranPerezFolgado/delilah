@@ -56,3 +56,6 @@
 .jv-note { margin: 0; font-size: 12px; }
 .jv-actions { display: flex; gap: 8px; }
 .jv-ferr { font-size: 12px; font-weight: 400; color: var(--err-tx); }
+.jv-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 20; }
+.jv-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100%); z-index: 21; box-shadow: var(--shadow); }
+.jv-close { display: flex; justify-content: flex-end; }

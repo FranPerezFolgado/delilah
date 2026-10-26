@@ -24,6 +24,14 @@ const view = (onAnalyze = vi.fn(), onOpenTask = vi.fn()) => {
   return { onAnalyze, onOpenTask };
 };
 
+/** Fake matchMedia: a query `(max-width: N px)` matches when the window is at most N wide. */
+const setWidth = (w: number) => {
+  window.matchMedia = ((q: string) => {
+    const max = Number(/max-width:\s*(\d+)px/.exec(q)?.[1] ?? Infinity);
+    return { matches: w <= max, media: q, addEventListener: () => {}, removeEventListener: () => {} };
+  }) as unknown as typeof window.matchMedia;
+};
+
 beforeEach(() => {
   setLanguage("es");
   vi.spyOn(api, "jira").mockResolvedValue({ settings });
@@ -32,6 +40,7 @@ beforeEach(() => {
   vi.spyOn(api, "tasks").mockResolvedValue([]);
 });
 afterEach(() => {
+  delete (window as { matchMedia?: unknown }).matchMedia;
   cleanup();
   vi.restoreAllMocks();
 });
@@ -138,5 +147,36 @@ describe("JiraView connect form", () => {
     fireEvent.click(await screen.findByRole("radio", { name: "Datos de ejemplo" }));
     fireEvent.click(screen.getByRole("button", { name: "Conectar" }));
     await waitFor(() => expect(connect).toHaveBeenCalledWith({ mode: "sample", jql: undefined }));
+  });
+});
+
+describe("JiraView at width", () => {
+  it("shows the detail as a drawer below 1200, closed by «Cerrar» and Esc", async () => {
+    setWidth(1100);
+    view();
+    fireEvent.click(await screen.findByText("Otra cosa"));
+    expect(document.querySelector(".jv-drawer")).toBeTruthy();
+    expect(document.querySelector(".jv-scrim")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(document.querySelector(".jv-drawer")).toBeNull();
+    fireEvent.click(screen.getByText("Otra cosa"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.querySelector(".jv-drawer")).toBeNull();
+  });
+
+  it("keeps the detail inline at 1280", async () => {
+    setWidth(1280);
+    view();
+    await screen.findByText("Otra cosa");
+    expect(document.querySelector(".jv-detail")).toBeTruthy();
+    expect(document.querySelector(".jv-drawer")).toBeNull();
+  });
+
+  it("collapses the filters into one «Filtros · N» menu at 1024 and below", async () => {
+    setWidth(1000);
+    view();
+    await screen.findByText("Otra cosa");
+    expect(document.querySelectorAll(".jv-chip").length).toBe(1);
+    expect(screen.getByText("Filtros · 0")).toBeTruthy();
   });
 });
