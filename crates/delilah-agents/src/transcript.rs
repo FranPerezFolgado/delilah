@@ -793,9 +793,118 @@ fn diff_rows(old: &str, new: &str, rows: &mut Vec<DiffRow>) -> bool {
     false
 }
 
+/// Tokens a session used, as the agent reports them. `total` is new input, output and
+/// cache writes; re-read cached context (`cache_read`) is not counted in it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct TokenUsage {
+    pub total: u64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+}
+
+impl TokenUsage {
+    pub fn add(&mut self, other: &TokenUsage) {
+        self.total += other.total;
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_write += other.cache_write;
+        self.cache_read += other.cache_read;
+    }
+}
+
+/// What `usage_delta` read: the usage of the new lines, how many bytes it consumed and
+/// the last message id counted (to pass to the next call).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageDelta {
+    pub usage: TokenUsage,
+    pub consumed: usize,
+    pub last_id: Option<String>,
+}
+
+/// Sums the usage of the assistant lines in `bytes`. Only complete lines are read (the
+/// bytes after the last `\n` are not consumed). Lines of one `message.id` (one per
+/// content block) count once; `last_id` carries that across calls. Bad JSON is skipped.
+pub fn usage_delta(bytes: &[u8], last_id: Option<&str>) -> UsageDelta {
+    let consumed = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let mut usage = TokenUsage::default();
+    let mut last = last_id.map(String::from);
+    for line in bytes[..consumed].split(|&b| b == b'\n') {
+        let Ok(v) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if v["type"].as_str() != Some("assistant") {
+            continue;
+        }
+        let msg = &v["message"];
+        if !msg["usage"].is_object() {
+            continue;
+        }
+        if let Some(id) = msg["id"].as_str() {
+            if last.as_deref() == Some(id) {
+                continue;
+            }
+            last = Some(id.to_string());
+        }
+        let n = |k: &str| msg["usage"][k].as_u64().unwrap_or(0);
+        let (input, output, cache_write) =
+            (n("input_tokens"), n("output_tokens"), n("cache_creation_input_tokens"));
+        usage.add(&TokenUsage {
+            total: input + cache_write + output,
+            input,
+            output,
+            cache_write,
+            cache_read: n("cache_read_input_tokens"),
+        });
+    }
+    UsageDelta { usage, consumed, last_id: last }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn asst(id: &str, u: Value) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type":"assistant","message":{"id":id,"usage":u}})
+        )
+    }
+
+    #[test]
+    fn usage_delta_counts_one_message_once_and_excludes_cache_read() {
+        let u = serde_json::json!({"input_tokens":3,"output_tokens":5,"cache_creation_input_tokens":7,"cache_read_input_tokens":100});
+        let text = asst("m1", u.clone()) + &asst("m1", u.clone()) + &asst("m2", u);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.consumed, text.len());
+        assert_eq!(d.last_id.as_deref(), Some("m2"));
+        assert_eq!(
+            d.usage,
+            TokenUsage { total: 30, input: 6, output: 10, cache_write: 14, cache_read: 200 }
+        );
+    }
+
+    #[test]
+    fn usage_delta_carries_last_id_across_calls() {
+        let u = serde_json::json!({"input_tokens":1,"output_tokens":1});
+        let text = asst("m1", u);
+        let d = usage_delta(text.as_bytes(), Some("m1"));
+        assert_eq!(d.usage, TokenUsage::default());
+        assert_eq!(d.consumed, text.len());
+    }
+
+    #[test]
+    fn usage_delta_leaves_partial_line_and_skips_noise() {
+        let u = serde_json::json!({"output_tokens":4});
+        let full = asst("m1", u.clone());
+        let text = format!("not json\n{{\"type\":\"user\"}}\n{full}{}", &asst("m2", u)[..20]);
+        let d = usage_delta(text.as_bytes(), None);
+        assert_eq!(d.consumed, text.len() - 20);
+        assert_eq!(d.usage, TokenUsage { total: 4, output: 4, ..Default::default() });
+        assert_eq!(usage_delta(b"", None).consumed, 0);
+        assert_eq!(usage_delta(b"{\"type\":\"assi", None).consumed, 0);
+    }
 
     fn fixture(name: &str) -> Vec<u8> {
         std::fs::read(format!(

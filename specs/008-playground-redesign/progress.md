@@ -7,9 +7,9 @@ Scheduling: by "Depends on" in packages.md (early start approved for WP-09/WP-12
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | implementing | 1 | |  |
-| WP-02 | 2 | 2A | implementing | 1 | |  |
+| WP-02 | 2 | 2A | verified | 1 | PENDING |  |
 | WP-03 | 2 | 2A | implementing | 1 | |  |
-| WP-06 | 2 | 2A | verified | 1 | PENDING |  |
+| WP-06 | 2 | 2A | verified | 1 | 6eca0a4 |  |
 | WP-04 | 2 | 2B | pending | 0 | | needs 02,03 |
 | WP-07 | 2 | 2B | pending | 0 | | needs 01 |
 | WP-08 | 2 | 2C | pending | 0 | | needs 01,07 |

@@ -722,6 +722,8 @@ pub enum ActivityEvent {
     ToolEnded {
         agent: Option<AgentRef>,
         id: String,
+        /// The tool call failed (`PostToolUseFailure`).
+        failed: bool,
     },
     HelperStarted {
         agent: AgentRef,
@@ -818,9 +820,10 @@ pub fn classify_activity(hook: &Value) -> Option<ActivityEvent> {
                 &tool_use_id,
             ),
         }),
-        "PostToolUse" | "PostToolUseFailure" => Some(ActivityEvent::ToolEnded {
+        ev @ ("PostToolUse" | "PostToolUseFailure") => Some(ActivityEvent::ToolEnded {
             agent,
             id: tool_use_id,
+            failed: ev == "PostToolUseFailure",
         }),
         "SubagentStart" => agent.map(|agent| ActivityEvent::HelperStarted { agent }),
         "SubagentStop" => agent.map(|a| ActivityEvent::HelperEnded { id: a.id }),
@@ -1811,13 +1814,14 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        for ev in ["PostToolUse", "PostToolUseFailure"] {
+        for (ev, failed) in [("PostToolUse", false), ("PostToolUseFailure", true)] {
             let h = json!({"hook_event_name": ev, "tool_use_id": "t1"});
             assert_eq!(
                 classify_activity(&h),
                 Some(ActivityEvent::ToolEnded {
                     agent: None,
-                    id: "t1".into()
+                    id: "t1".into(),
+                    failed
                 })
             );
         }

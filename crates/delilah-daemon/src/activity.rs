@@ -40,12 +40,12 @@ impl Activity {
                     h.action = Some(action);
                 }
             }
-            ActivityEvent::ToolEnded { agent: None, id } => {
+            ActivityEvent::ToolEnded { agent: None, id, .. } => {
                 if self.action.as_ref().is_some_and(|a| a.id == id) {
                     self.action = None;
                 }
             }
-            ActivityEvent::ToolEnded { agent: Some(a), id } => {
+            ActivityEvent::ToolEnded { agent: Some(a), id, .. } => {
                 // Only an existing helper: a late end after SubagentStop must not revive it.
                 let key = shorten(&a.id);
                 if let Some(h) = self.helpers.iter_mut().find(|h| h.id == key)
@@ -133,7 +133,7 @@ mod tests {
         ActivityEvent::ToolStarted { agent, action: action(id) }
     }
     fn end(agent: Option<AgentRef>, id: &str) -> ActivityEvent {
-        ActivityEvent::ToolEnded { agent, id: id.into() }
+        ActivityEvent::ToolEnded { agent, id: id.into(), failed: false }
     }
 
     #[test]
