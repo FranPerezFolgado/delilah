@@ -50,7 +50,9 @@ on, "off" otherwise). `session` stays internal.
 `GET /api/v1/prs` is unchanged: the badge's autofix mark comes from `Task.ci_autofix`.
 All new TS fields are optional (an older daemon omits them).
 
-### Project settings *(changed)*: `GET/PATCH /projects/{name}`
+### Project settings *(changed)*: `PUT /api/v1/projects/{name}/settings`
+
+(The settings are nested in `GET /projects/{name}`.)
 
 `settings.ci_autofix`: `"off" | "autopilot" | "always"` (absent = `"autopilot"`).
 Invalid value → 422 with field error `ci_autofix` / code `ci_autofix.invalid`.

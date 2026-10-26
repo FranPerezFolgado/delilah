@@ -1124,7 +1124,7 @@ mod tests {
             (
                 Event::AutofixStopped {
                     repo: "r".into(),
-                    reason: "no push".into(),
+                    reason: "no-push".into(),
                 },
                 "autofix-stopped",
             ),

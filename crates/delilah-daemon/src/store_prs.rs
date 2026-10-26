@@ -91,11 +91,24 @@ fn opt_time(raw: Option<String>) -> Result<Option<DateTime<Utc>>, StoreError> {
     raw.as_deref().map(time).transpose()
 }
 
+/// Reads the stored autofix state; a value that does not parse (a newer or damaged
+/// row) reads as `None` so it cannot take the PR list down.
+fn lenient_autofix(pr_id: i64, raw: Option<String>) -> Option<PrAutofix> {
+    match serde_json::from_str(&raw?) {
+        Ok(autofix) => Some(autofix),
+        Err(e) => {
+            tracing::warn!(pr = pr_id, error = %e, "unreadable autofix state, treating it as none");
+            None
+        }
+    }
+}
+
 fn pr_row(row: &SqliteRow) -> Result<PrRow, StoreError> {
     let snapshot: Option<String> = row.try_get("snapshot")?;
     let autofix: Option<String> = row.try_get("autofix")?;
+    let id: i64 = row.try_get("id")?;
     Ok(PrRow {
-        id: row.try_get("id")?,
+        id,
         task_key: row.try_get("task_key")?,
         repo: row.try_get("repo")?,
         host: row.try_get("host")?,
@@ -114,7 +127,7 @@ fn pr_row(row: &SqliteRow) -> Result<PrRow, StoreError> {
         error: row.try_get("error")?,
         error_kind: row.try_get("error_kind")?,
         created_at: time(&row.try_get::<String, _>("created_at")?)?,
-        autofix: autofix.map(|s| serde_json::from_str(&s)).transpose()?,
+        autofix: lenient_autofix(id, autofix),
     })
 }
 
@@ -190,7 +203,7 @@ impl Store {
         expected: Option<&PrAutofix>,
         next: Option<&PrAutofix>,
     ) -> Result<bool, StoreError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let stored: Option<Option<String>> =
             sqlx::query_scalar("SELECT autofix FROM pull_requests WHERE id = ?")
                 .bind(pr_id)
@@ -199,7 +212,7 @@ impl Store {
         let Some(stored) = stored else {
             return Ok(false);
         };
-        let current: Option<PrAutofix> = stored.map(|s| serde_json::from_str(&s)).transpose()?;
+        let current = lenient_autofix(pr_id, stored);
         if current.as_ref() != expected {
             return Ok(false);
         }
@@ -253,6 +266,7 @@ impl Store {
                checked_at = CASE WHEN url = excluded.url THEN checked_at END,
                error = CASE WHEN url = excluded.url THEN error END,
                error_kind = CASE WHEN url = excluded.url THEN error_kind END,
+               autofix = CASE WHEN url = excluded.url THEN autofix END,
                url = excluded.url",
         )
         .bind(key.as_str())
@@ -652,6 +666,65 @@ mod tests {
         let next = fixing("ccc", 1);
         assert!(store.update_pr_autofix(pr.id, Some(&got), Some(&next)).await.unwrap());
         assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(next));
+    }
+
+    #[tokio::test]
+    async fn concurrent_autofix_cas_on_a_file_store_has_one_winner_and_no_error() {
+        let dir = std::env::temp_dir().join(format!("delilah-prs-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(&dir.join("delilah.db")).await.unwrap();
+        store
+            .create_task(&Task::new(TaskKey::new("PROJ-1"), "title", "feature"))
+            .await
+            .unwrap();
+        let pr = link(&store, "PROJ-1", ".", 1).await;
+        for round in 0..20 {
+            let (a, b) = (fixing("aaa", round), fixing("bbb", round));
+            let (x, y) = tokio::join!(
+                store.update_pr_autofix(pr.id, None, Some(&a)),
+                store.update_pr_autofix(pr.id, None, Some(&b)),
+            );
+            let (x, y) = (x.expect("no error"), y.expect("no error"));
+            assert!(x ^ y, "exactly one winner (round {round})");
+            let now = store.pr(pr.id).await.unwrap().unwrap().autofix;
+            assert!(store.update_pr_autofix(pr.id, now.as_ref(), None).await.unwrap());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn relinking_keeps_autofix_for_the_same_url_and_drops_it_for_another() {
+        let store = store_with(&["PROJ-1"]).await;
+        let pr = link(&store, "PROJ-1", ".", 1).await;
+        let a = fixing("aaa", 1);
+        assert!(store.update_pr_autofix(pr.id, None, Some(&a)).await.unwrap());
+        let same = link(&store, "PROJ-1", ".", 1).await;
+        assert_eq!(same.autofix, Some(a));
+        let other = link(&store, "PROJ-1", ".", 2).await;
+        assert_eq!(other.id, pr.id);
+        assert_eq!(other.autofix, None);
+    }
+
+    #[tokio::test]
+    async fn unreadable_autofix_reads_as_none_and_can_be_overwritten() {
+        let store = store_with(&["PROJ-1", "PROJ-2"]).await;
+        let pr = link(&store, "PROJ-1", ".", 1).await;
+        let other = link(&store, "PROJ-2", ".", 2).await;
+        for bad in ["not json", "{\"state\":\"from-the-future\",\"attempts\":0}"] {
+            sqlx::query("UPDATE pull_requests SET autofix = ? WHERE id = ?")
+                .bind(bad)
+                .bind(pr.id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, None);
+            assert_eq!(store.prs_of(&TaskKey::new("PROJ-1")).await.unwrap().len(), 1);
+            assert!(store.open_prs().await.unwrap().len() >= 1);
+            let next = fixing("ddd", 1);
+            assert!(store.update_pr_autofix(pr.id, None, Some(&next)).await.unwrap());
+            assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(next));
+        }
+        assert_eq!(store.pr(other.id).await.unwrap().unwrap().autofix, None);
     }
 
     async fn table_count(store: &Store, table: &str) -> i64 {

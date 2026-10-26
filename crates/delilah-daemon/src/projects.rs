@@ -147,8 +147,12 @@ pub async fn update_settings(
     let mut settings: ProjectSettings = serde_json::from_slice(&body).map_err(|e| {
         let text = e.to_string();
         // serde names the offending key between backticks: "unknown field `x`, ..."
-        // An unknown value of `ci_autofix` is `unknown variant `x`, expected one of ...`.
-        if text.starts_with("unknown variant") && text.contains("`always`") {
+        // A `ci_autofix` that is not off, autopilot or always (of any JSON type).
+        let bad_autofix = serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("ci_autofix").cloned())
+            .is_some_and(|v| !matches!(v.as_str(), Some("off" | "autopilot" | "always")));
+        if bad_autofix {
             let message = "The CI autofix default must be off, autopilot or always.";
             let field = FieldError {
                 field: "ci_autofix".into(),
@@ -742,6 +746,10 @@ mod tests {
         assert_eq!(f["field"], "ci_autofix");
         assert_eq!(f["code"], "ci_autofix.invalid");
         assert!(!f["message"].as_str().unwrap().is_empty());
+        let (status, body) = put(&env, "parent", json!({ "ci_autofix": 1 })).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["fields"][0]["field"], "ci_autofix");
+        assert_eq!(body["fields"][0]["code"], "ci_autofix.invalid");
         let saved = project(&env, "parent").await;
         assert_eq!(saved["settings"]["ci_autofix"], "always");
         std::fs::remove_dir_all(&env.dir).unwrap();
