@@ -323,7 +323,9 @@ pub(crate) async fn start_run_with(
     // project's workflow decide the rest (`workflow::resolve`).
     let (stored_workflow, stored_message) = match &existing {
         Some(t) => (t.workflow.as_str(), t.start_message.as_deref()),
-        None => (project.workflow.as_str(), None),
+        // The legacy `projects.workflow` column does not choose the start (it is
+        // deprecated): a new task follows the project's workflow.
+        None => (TaskWorkflow::Project.as_str(), None),
     };
     let prompt_text = req.prompt.as_deref().filter(|p| !p.trim().is_empty());
     let start_req = match (req.workflow.as_deref(), prompt_text) {
@@ -1005,6 +1007,10 @@ impl Launch {
         }
         if restore.is_some() {
             app.emit(crate::events::Topic::Sessions);
+        } else if launch_prompt.is_none() {
+            // Started with no first message ("nothing"): the agent waits for the user,
+            // as after a finished turn.
+            app.transition(&key, Event::AgentAsked).await?;
         }
         Ok(())
     }
@@ -3701,6 +3707,153 @@ mod tests {
             !stdin.contains("Saving mode") && !stdin.contains("tasks.md"),
             "{stdin}"
         );
+    }
+
+    async fn set_project_workflow(
+        app: &AppState,
+        workflow: delilah_core::workflow::ProjectWorkflow,
+    ) {
+        let mut settings = app.store.project("repo").await.unwrap().settings;
+        settings.workflow = Some(workflow);
+        app.store
+            .set_project_settings("repo", &settings)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_single_message_start_fills_the_ticket_and_points_to_the_notes() {
+        use delilah_core::workflow::{ProjectWorkflow, Start};
+        let home = std::env::temp_dir().join(format!("delilah-msg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Single {
+                start: Start::Message {
+                    template: "/fix {ticket}".into(),
+                },
+            },
+        )
+        .await;
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = chat_run("PROJ-12");
+        req.notes = Some("mira el token".into());
+        let stdin = first_message(&app, &home, req).await;
+        assert!(stdin.contains("/fix PROJ-12"), "{stdin}");
+        assert!(stdin.contains("your notes on the task are at"), "{stdin}");
+        assert!(
+            !stdin.contains("Saving mode") && !stdin.contains("Spec Kit"),
+            "not phased: {stdin}"
+        );
+        let task = app
+            .store
+            .get_task(&TaskKey::new("PROJ-12"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!task.saving_mode);
+    }
+
+    #[tokio::test]
+    async fn a_single_nothing_start_sends_no_message_and_waits_for_the_user() {
+        use delilah_core::workflow::{ProjectWorkflow, Start};
+        let home = std::env::temp_dir().join(format!("delilah-nothing-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Single {
+                start: Start::Nothing,
+            },
+        )
+        .await;
+        app.store
+            .set_setting("pref:saving-mode", &serde_json::json!(true))
+            .await
+            .unwrap();
+        let mut req = chat_run("PROJ-12");
+        req.notes = Some("mira el token".into());
+        let (status, Json(task)) = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(!task.saving_mode);
+        let stored = app
+            .store
+            .get_task(&TaskKey::new("PROJ-12"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, TaskStatus::WaitingForUser);
+        assert!(!home.join("stdin.txt").exists(), "no first message");
+        let _ = app.sessions.primary("PROJ-12").map(|l| l.runtime.kill());
+    }
+
+    #[tokio::test]
+    async fn a_terminal_nothing_start_has_no_prompt_and_waits_for_the_user() {
+        use delilah_core::workflow::{ProjectWorkflow, Start};
+        let home = std::env::temp_dir().join(format!("delilah-tnothing-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let (app, _repo) = repo_app(&format!(
+            "[ \"$1\" = -p ] && exit 0\nprintf '%s\\n' \"$@\" > '{}/args.txt'\nexec sleep 5",
+            home.display()
+        ))
+        .await;
+        // Only to take the real launch path; the terminal runs `claude_bin`.
+        let mut config = app.config.as_ref().clone();
+        config.agent_program = Some(config.claude_bin.clone());
+        let app = AppState::new(app.store.clone(), config);
+        set_project_workflow(
+            &app,
+            ProjectWorkflow::Single {
+                start: Start::Nothing,
+            },
+        )
+        .await;
+        let mut req = run("PROJ-12");
+        req.project = "repo".into();
+        req.title = "Terminal".into();
+        req.chat_mode = Some(false);
+        req.in_checkout = Some(false);
+        req.notes = Some("mira el token".into());
+        let _ = start_run(State(app.clone()), Json(req))
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        let stored = app
+            .store
+            .get_task(&TaskKey::new("PROJ-12"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, TaskStatus::WaitingForUser);
+        let args = read_when_there(home.join("args.txt")).await;
+        assert_eq!(
+            args.lines().last(),
+            Some("auto"),
+            "no prompt argument: {args}"
+        );
+        assert!(!args.contains("notes"), "{args}");
+        let _ = app.sessions.primary("PROJ-12").map(|l| l.runtime.kill());
+    }
+
+    #[tokio::test]
+    async fn the_legacy_project_workflow_column_does_not_choose_a_new_tasks_start() {
+        let home = std::env::temp_dir().join(format!("delilah-legacy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let app = chat_repo_app(&hello_script(&home.display().to_string())).await;
+        fresh_workflow_project(&app).await;
+        sqlx::query("UPDATE projects SET workflow = 'prompt' WHERE name = 'repo'")
+            .execute(&app.store.pool)
+            .await
+            .unwrap();
+        let stdin = first_message(&app, &home, chat_run("LIBRE-1")).await;
+        assert!(stdin.contains("Work on the task LIBRE-1"), "{stdin}");
     }
 
     #[tokio::test]
