@@ -276,7 +276,7 @@ macOS-only dependencies; that costs more runner minutes than Linux.
 - **Isolation:** each run has a temp `HOME` (the daemon reads `~/.claude/settings.json` and the login shell's rc files), its own `DELILAH_HOME`, fixtures and a free port, never 7420 nor 7501-7509. A tripwire `claude`/`gh` first on PATH fails the test if the real one is reached; the one-shot Claude calls (`DELILAH_CLAUDE_BIN`) get a fake that always fails, so branch names are the daemon's deterministic fallback. The only exception is the opt-in real-Claude smoke test.
 - **A separate crate, `delilah-e2e`, with an `e2e` feature**, so `cargo test --workspace` stays as fast as before and the flows are not mixed with the `#[ignore]`d smoke test.
 - **UI: one daemon and one Vite per run, tests serial.** `VITE_DELILAH_URL` is fixed when Vite starts; each test makes its own repos and projects instead.
-- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI. *(Superseded by 79: both layers now run in CI.)*
+- **Local only:** no CI workflow. Run it before a PR that touches the daemon, the CLI or the UI. *(Superseded by 80: both layers now run in CI.)*
 - **Ruled out:** a shell fake (hard to handle JSON and to keep in step with `claude.rs`); a fake that posts to `/hooks/claude` itself (skips the settings file); a `claude` shim on PATH (the agent's PATH comes from the login shell); replaying real sessions (they depend on the real Claude and its cost); reusing `preview.sh` (user's `HOME`, fixed slots, interactive); tests in `crates/delilah-daemon/tests/` (bloats its dev-dependencies); CI on macOS runners (cost, and the checks run locally anyway); a runtime daemon switch in the UI (`?daemon=`, code that exists only for tests); Cypress (Playwright has traces and runs from Node).
 
 ## Pull requests
@@ -618,7 +618,21 @@ runs only on a non-draft open PR with passing checks, with a method the repo all
 is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
 draft PR). *Ruled out:* a merge queue or auto-merge.
 
-**79. CI as parallel jobs; Rust tests on macOS, sharded (2026-10-26).** `ci.yml` runs fmt,
+**79. One grouped "te espera" toast, owned by `GlobalNotices`.** All waiting tasks share a
+single persistent toast ("{key} te espera · Responder", or "{n} tareas te esperan · Ver" opening
+the Inbox) instead of one per task; closing it empties the group, and a task leaves it when it
+stops waiting, its screen is opened or it leaves the list. The toast store merges repeats only
+for the same kind and exact text with no action or key ("×N", capped "×99+"), keeps at most 3
+(evicting plain info first, then toasts without an action, never a keyed one such as the waiting
+toast; an undo action is time-bound and cannot be raised again, an error can) and shows more than one collapsed
+as stacked cards ("+N", "Cerrar todo" whenever there is more than one). *Why:* several waiting tasks flooded the corner and buried the rest;
+the kit stays task-agnostic, so the group lives in `GlobalNotices` as one keyed toast. Actions
+carry closures (each "Deshacer" undoes a different thing), so toasts with an action never merge;
+exact text keeps the rule predictable. *Ruled out:* a lower MAX (loses toasts); a notification
+centre (overlaps the Inbox); moving waiting notices to the `gn-bar` (duplicates the
+Inbox/StatusBar and takes permanent space; the ask was to group toasts, not remove them).
+
+**80. CI as parallel jobs; Rust tests on macOS, sharded (2026-10-26).** `ci.yml` runs fmt,
 clippy, the tests, the web UI and both e2e layers as separate jobs at the same time. Tests use
 `cargo nextest`, split in three macOS shards (`--partition count:N/3`) that share one cache.
 fmt, the web UI and the UI e2e run on Linux; clippy, the tests and the API e2e on macOS.

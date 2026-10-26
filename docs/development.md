@@ -157,8 +157,10 @@ A release is a tag `vX.Y.Z` on `main`; the GitHub Actions workflow
 (`.github/workflows/release.yml`) builds, signs and publishes it, and the installed
 apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
 
-1. **On the feature branch**, bump the version as CLAUDE.md says, in its own commit
-   `chore: bump version to X.Y.Z`: `scripts/bump-version.sh <major|minor|patch|X.Y.Z> [--commit]`.
+1. **When you decide to release** (not on every feature branch: several features go
+   in one release), bump the version on a branch in its own commit
+   `chore: bump version to X.Y.Z`: `scripts/bump-version.sh <major|minor|patch|X.Y.Z> [--commit]`,
+   or skip this step and let `make release BUMP=…` do it on `main`.
    It starts from the version on `origin/main`, writes the **four** places (`Cargo.toml`
    workspace, `app/src-tauri/Cargo.toml`, `app/package.json`,
    `app/src-tauri/tauri.conf.json`) and the three lockfiles (only their own version
@@ -166,7 +168,7 @@ apps pick it up (see Updates in [architecture.md](architecture.md#updates)).
    with `git log vX.Y.Z..HEAD`.
 2. Merge the PR into `main`, then `git switch main && git pull`.
 3. `make release` on `main`. With neither `BUMP` nor `VERSION` it releases the version
-   already in the files, which is the normal path after the branch bump. Use
+   already in the files, the path after a branch bump. Use
    `BUMP=major|minor|patch` or `VERSION=X.Y.Z` only when the branch was not bumped (see
    `pickVersion` in `scripts/release/cut.mjs`). Notes: `MESSAGE="…"`; `YES=1` skips the
    confirmation. It checks that `gh` is logged in as `FranPerezFolgado`, that you are on
