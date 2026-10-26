@@ -77,7 +77,7 @@ one place, and a client that missed messages just refetches.
 - File access is confined to the workspace, symlinks included.
 - The Jira token lives in the Keychain.
 
-Mobile access (via Tailscale) will need pairing tokens first.
+Mobile access (via Tailscale) needs device tokens first (79).
 
 ## Agents
 
@@ -617,3 +617,19 @@ runs only on a non-draft open PR with passing checks, with a method the repo all
 (`snapshot.merge_methods`; none known, no merge), and only if the `gh` account for the host
 is the one the PR tab showed. It never merges on its own (autopilot keeps stopping at the
 draft PR). *Ruled out:* a merge queue or auto-merge.
+
+**79. Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26).**
+The phone reaches the daemon with `tailscale serve` (tailnet only, never Funnel) and uses the
+UI as a web app added to the home screen. The daemon serves the built UI itself, same-origin,
+because the macOS Tailscale app refuses to serve folders (found in the experiment). *Rule:* a
+loopback `Host` is local (no token, as today); the tailnet `Host` is remote and always needs a
+device token, with or without `Origin`; the daemon accepts the tailnet `Host` only while token
+enforcement is on (one switch, enforced in code), because the experiment showed that accepting
+it without tokens gave the whole API to any tailnet caller (curl with no `Origin` got 200).
+Destructive and config actions are refused to device tokens, server-side. On the work Mac only
+if IT allows Tailscale. *Why:* free, no developer account, valid HTTPS (needed for push and
+for installing on iOS), never public. *Ruled out:* same-Wi-Fi LAN (no valid HTTPS, home only,
+widens exposure); Cloudflare Tunnel (public, and a third party sees the traffic); a sideloaded
+native wrapper (free Apple ID: 7-day expiry, 3 apps, no push); Funnel (public); Tailscale
+identity headers alone (forgeable by any local process).
+See the [research](../specs/008-mobile-access-analysis/research.md).
