@@ -5,13 +5,13 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | a1a0733 | run with WP-02 (same file) |
-| WP-02 | 2 | 2A | verified | 1 | a1a0733 | run with WP-01; store.rs literal allowed |
-| WP-03 | 2 | 2B | verified | 1 | 07b53e1 | set_start_message instead of BacklogChange field; review text duplicated from handoff::step_prompt (WP-10 to dedupe) |
-| WP-04 | 2 | 2C | verified | 1 | cb1d2c2 | scope widened to all daemon src (user); API requests sending "feature" not normalised yet → WP-05 |
-| WP-04F | 2 | fix | verified | 1 | b0a55dc | review fix: feature alias normalisation, projects.workflow migration; unknown workflow values now 400 |
-| WP-04F2 | 2 | fix | verified | 1 | | 2nd fix round: UI autopilot check accepts "project" (interim until T037) |
-| WP-05 | 3 | 3A | pending | 0 | | |
+| WP-01 | 1 | 1A | done | 1 | a1a0733 | run with WP-02 (same file) |
+| WP-02 | 2 | 2A | done | 1 | a1a0733 | run with WP-01; store.rs literal allowed |
+| WP-03 | 2 | 2B | done | 1 | 07b53e1 | set_start_message instead of BacklogChange field; review text duplicated from handoff::step_prompt (WP-10 to dedupe) |
+| WP-04 | 2 | 2C | done | 1 | cb1d2c2 | scope widened to all daemon src (user); API requests sending "feature" not normalised yet → WP-05 |
+| WP-04F | 2 | fix | done | 1 | b0a55dc | review fix: feature alias normalisation, projects.workflow migration; unknown workflow values now 400 |
+| WP-04F2 | 2 | fix | done | 1 | a5ba4b6 | 2nd fix round: UI autopilot check accepts "project" (interim until T037) |
+| WP-05 | 3 | 3A | implementing | 0 | | +core workflow.rs, autopilot/api.rs allowed |
 | WP-06 | 4 | 4A | pending | 0 | | |
 | WP-07 | 4 | 4A | pending | 0 | | |
 | WP-08 | 4 | 4A | pending | 0 | | |
