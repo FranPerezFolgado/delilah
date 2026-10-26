@@ -380,7 +380,7 @@ export class ConflictError extends Error {}
 
 export type InboxKind =
   | "permission" | "question" | "error" | "waiting" | "review" | "handoff" | "suggest-review" | "paused" | "failed"
-  | "pr-failed" | "pr-review" | "pr-blocked" | "branch" | "autopilot" | "base-stale" | "turn-done" | "pr-opened";
+  | "pr-failed" | "pr-review" | "pr-autofix" | "pr-blocked" | "branch" | "autopilot" | "base-stale" | "turn-done" | "pr-opened";
 
 
 /** One question of Claude's AskUserQuestion, as the agent wrote it. */
@@ -518,7 +518,7 @@ export function parseAskPosition(v: unknown): AskPosition {
 }
 
 /** The kinds that block an agent until you act: they count in the badge. */
-export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-blocked"];
+export const BLOCKING: InboxKind[] = ["permission", "question", "error", "waiting", "pr-failed", "pr-review", "pr-autofix", "pr-blocked"];
 
 /** The stale-base warnings of one task, for its screen's banner. */
 export const baseStaleNotices = (inbox: InboxItem[], task: string): InboxItem[] =>

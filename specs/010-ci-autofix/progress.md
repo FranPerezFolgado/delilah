@@ -18,9 +18,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 3 | 3C | done | 1 | 3a4ee36 | POST /runs has no ci_autofix (test uses PATCH) |
 | WP-09F | 3 | fix | done | 1 | 9ee01f0 | Phase 3 review fixes; manual forward holds per-task autofix slot (InFlight → 409) |
 | WP-10 | 4 | 4A | verified | 1 | f65133f | turn start unknown: started=None proxy (first turn end after sent_at counts) |
-| WP-11 | 4 | 4B | verified | 1 | | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
-| WP-12 | 4 | 4B | implementing | 0 | | |
-| WP-13 | 4 | 4C | pending | 0 | | |
+| WP-11 | 4 | 4B | verified | 1 | dc3dc77 | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
+| WP-12 | 4 | 4B | verified | 1 | | +blocking fixture, api.ts InboxKind/BLOCKING, alerts.ts label (es only like neighbours) |
+| WP-13 | 4 | 4C | implementing | 0 | | |
 | WP-14 | 5 | 5A | pending | 0 | | |
 | WP-15 | 5 | 5A | pending | 0 | | |
 | WP-16 | 5 | 5A | pending | 0 | | |
@@ -36,7 +36,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | 1 | architecture | LOW | Placeholder fns with `#[allow(dead_code)]`; drop the attribute as each gets a caller (`cancel` not in plan's mod.rs description) | crates/delilah-daemon/src/autofix/mod.rs:8-15 |
 | 1 | migration | LOW | Backfill also matches autopilot `paused`; confirm intended | crates/delilah-daemon/migrations/0022_ci_autofix.sql:9 |
 | 1 | migration | LOW | PRs with NULL snapshot get no seeded sha: a pre-upgrade failure could fire on first check; PrAutofix.sha must accept null | crates/delilah-daemon/migrations/0022_ci_autofix.sql:16-19 |
-| 2-3 | orchestrator | MEDIUM | Flaky test `conversation::tests::a_message_sent_while_a_card_is_pending_is_queued` (fails ~1 in 3–4 full runs); file untouched by this feature | crates/delilah-daemon/src/conversation.rs:2257 |
+| 2-4 | orchestrator | MEDIUM | Flaky PTY-timing tests under load: `conversation::tests::a_message_sent_while_a_card_is_pending_is_queued`, `inbox::tests::a_reply_of_several_lines_is_one_paste_and_one_enter`, setup::tests::retry_runs_it_again_in_the_worktree, run::tests::free_tasks_start_branchless_and_jira_ones_on_their_feature_branch (fails ~1 in 3–4 full runs); file untouched by this feature | crates/delilah-daemon/src/conversation.rs:2257 |
 | 2 | contract | HIGH (tracked) | UI settings PUT drops `ci_autofix` → resets to autopilot; must be fixed by WP-16 (TS type + DEFAULT_PROJECT_SETTINGS + round trip) before release | app/src/api.ts:101-109 |
 | 2 | contract | MEDIUM | Version skew: new CLI vs old daemon 422 on project set (deny_unknown_fields); ship together, note in release notes; event downgrade also fails | crates/delilah-cli/src/main.rs:924 |
 | 2 | spec-compliance | MEDIUM (tracked) | PATCH `ci_autofix` flips the column without the toggle's side effects/409 → WP-14 must route PATCH through the same toggle fn or limit it to backlog | crates/delilah-daemon/src/api.rs:563-566 |

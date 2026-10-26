@@ -271,6 +271,11 @@ pub async fn forward(
     let prompt = match notice.kind.as_str() {
         "ci-failed" => ci_prompt(lang, &url, &detail),
         "changes-requested" | "comments" => review_prompt(lang, &url, &detail),
+        "autofix-stopped" => {
+            return Err(ApiError::conflict(
+                "an autofix-stopped notice has nothing to forward: retry the autofix".to_string(),
+            ));
+        }
         other => {
             return Err(ApiError::conflict(format!(
                 "a {other} notice has nothing to forward"
@@ -660,6 +665,33 @@ mod tests {
                 .resolved_at
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn forwarding_an_autofix_stopped_notice_is_409_and_types_nothing() {
+        let (router, app, _dir) = setup(fake()).await;
+        let mut out = cat_session(&app);
+        let id = notice(&app, "autofix-stopped", json!({ "reason": "limit" })).await;
+        let (s, v) = call(
+            &router,
+            "POST",
+            &format!("/api/v1/pr-notices/{id}/forward"),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("nothing to forward"));
+        assert!(
+            app.store
+                .notice(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .resolved_at
+                .is_none()
+        );
+        let typed = tokio::time::timeout(Duration::from_millis(300), out.recv()).await;
+        assert!(typed.is_err(), "something was typed: {typed:?}");
     }
 
     #[tokio::test]
