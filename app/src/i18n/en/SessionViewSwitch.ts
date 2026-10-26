@@ -7,6 +7,7 @@ export const EN: Record<string, string> = {
   "Cambiar": "Switch",
   "La sesión se reanuda en modo chat, sin terminal.": "The session resumes in chat mode, without a terminal.",
   "La sesión se reanuda en la terminal, sin modo chat.": "The session resumes in the terminal, without chat mode.",
+  "Hay trabajo en segundo plano: espera a que termine o pulsa Detener": "Background work is running: wait for it to finish or press Stop",
   "Espera a que termine el turno": "Wait for the turn to end",
   "No se pudo cambiar: {error}": "Could not switch: {error}",
   "Solo las sesiones de Claude de una tarea cambian de modo.": "Only a task's Claude sessions change mode.",
