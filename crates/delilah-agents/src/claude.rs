@@ -675,6 +675,19 @@ pub fn classify(hook: &Value) -> Signal {
     }
 }
 
+/// Whether Claude Code's `Stop` hook reports a background task still running.
+/// The payload carries `background_tasks`, a list of entries with a `status`;
+/// only `status == "running"` counts. Any other shape (field missing, not an
+/// array, empty, no running entry) means nothing is running. The field is
+/// observed in practice, not documented by Claude Code.
+pub fn background_running(hook: &Value) -> bool {
+    hook["background_tasks"].as_array().is_some_and(|tasks| {
+        tasks
+            .iter()
+            .any(|t| t["status"].as_str() == Some("running"))
+    })
+}
+
 /// Whether the screen shows the folder-trust dialog a new workspace gets once.
 pub fn shows_trust_dialog(screen: &[u8]) -> bool {
     let text = String::from_utf8_lossy(screen).to_lowercase();
@@ -1389,6 +1402,29 @@ mod tests {
         assert_eq!(classify(&hook("Notification")), Signal::NeedsUser);
         assert_eq!(classify(&hook("UserPromptSubmit")), Signal::PromptSubmitted);
         assert_eq!(classify(&hook("PreCompact")), Signal::Other);
+    }
+
+    #[test]
+    fn background_running_reads_the_stop_payload() {
+        let stop = |tasks: Value| json!({ "hook_event_name": "Stop", "background_tasks": tasks });
+        // A running entry, alone or among finished ones.
+        assert!(background_running(&stop(json!([{ "status": "running" }]))));
+        assert!(background_running(&stop(json!([
+            { "status": "completed" },
+            { "status": "running" },
+            { "status": "failed" }
+        ]))));
+        // Nothing running.
+        assert!(!background_running(&stop(json!([
+            { "status": "completed" },
+            { "status": "failed" }
+        ]))));
+        assert!(!background_running(&stop(json!([]))));
+        // Missing, not an array, or an entry without a status.
+        assert!(!background_running(&json!({ "hook_event_name": "Stop" })));
+        assert!(!background_running(&stop(json!("running"))));
+        assert!(!background_running(&stop(json!({ "status": "running" }))));
+        assert!(!background_running(&stop(json!([{ "id": "x" }]))));
     }
 
     #[test]

@@ -29,8 +29,8 @@ parts share no files and run in parallel.
 
 ### Payload rule (delilah-agents)
 
-- [ ] T002 [P] Write unit tests for `background_running` in `crates/delilah-agents/src/claude.rs` (tests module, beside the `classify` tests). Cover: a running entry → true; one running among finished → true; all `completed`/`failed` → false; `[]` → false; field missing → false; field not an array → false; an entry with no `status` → false. Run them and see them fail (function missing).
-- [ ] T003 Implement `pub fn background_running(hook: &Value) -> bool` next to `classify` in `crates/delilah-agents/src/claude.rs`, with a doc comment: Claude Code's `Stop` reports `background_tasks`; only `status == "running"` counts; any other shape means nothing is running. Run `cargo test -p delilah-agents background_running` green.
+- [X] T002 [P] Write unit tests for `background_running` in `crates/delilah-agents/src/claude.rs` (tests module, beside the `classify` tests). Cover: a running entry → true; one running among finished → true; all `completed`/`failed` → false; `[]` → false; field missing → false; field not an array → false; an entry with no `status` → false. Run them and see them fail (function missing).
+- [X] T003 Implement `pub fn background_running(hook: &Value) -> bool` next to `classify` in `crates/delilah-agents/src/claude.rs`, with a doc comment: Claude Code's `Stop` reports `background_tasks`; only `status == "running"` counts; any other shape means nothing is running. Run `cargo test -p delilah-agents background_running` green.
 
 ### Fake Claude (delilah-e2e)
 
