@@ -118,15 +118,17 @@ async fn set_session_runtime_with(
         Some(l) => Some(l.typing.clone().lock_owned().await),
         None => None,
     };
-    if let Some(l) = &live
-        && is_busy(&app, l).await?
-    {
-        return Err(ApiError::conflict(BUSY));
-    }
+    // Background work first: a session that has it stays working, so the busy check
+    // would always answer for it.
     if let Some(l) = &live
         && l.progress().has_background()
     {
         return Err(background_refusal(&app));
+    }
+    if let Some(l) = &live
+        && is_busy(&app, l).await?
+    {
+        return Err(ApiError::conflict(BUSY));
     }
 
     app.store.set_runtime_override(&id, Some(target)).await?;
@@ -230,11 +232,11 @@ async fn set_runtime_with(
         _typing.push(l.typing.clone().lock_owned().await);
     }
     for (l, _) in &live {
-        if is_busy(&app, l).await? {
-            return Err(ApiError::conflict(BUSY));
-        }
         if l.progress().has_background() {
             return Err(background_refusal(&app));
+        }
+        if is_busy(&app, l).await? {
+            return Err(ApiError::conflict(BUSY));
         }
     }
 
@@ -625,6 +627,11 @@ mod tests {
                 chrono::Utc::now(),
             )
         });
+        // As in a real session: the turn ended but the held work keeps it working.
+        app.sessions
+            .get(id)
+            .unwrap()
+            .set_state(crate::sessions::LiveState::Working);
     }
 
     #[tokio::test]

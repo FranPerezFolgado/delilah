@@ -1488,17 +1488,12 @@ pub(crate) async fn spawn_session(
     let id = session.id.clone();
     let watched = runtime.clone();
     let exit_app = app.clone();
+    let exiting = live.clone();
     tokio::spawn(async move {
         watched.wait().await;
         // A Stop held behind background work applies first, as after a normal turn end;
-        // only for this process, not for a newer one on the same id.
-        if exit_app
-            .sessions
-            .get(&id)
-            .is_some_and(|live| live.runtime.same(&watched))
-        {
-            crate::stream_events::on_process_exit(&exit_app, &id).await;
-        }
+        // this process's own session, even if already out of the registry, never a newer one's.
+        crate::stream_events::on_process_exit(&exit_app, &exiting).await;
         sessions.remove_if_same(&id, &watched);
         tracing::info!(session = %id, "session exited");
     });

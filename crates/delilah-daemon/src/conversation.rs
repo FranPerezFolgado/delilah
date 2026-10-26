@@ -735,7 +735,9 @@ pub async fn stop(
         }
     }
     crate::permissions::release_session(&app, &id).await;
-    if live.runtime.as_stream().is_none() {
+    // A stream session with only background work (no turn) gets no `result` from the
+    // interrupt, so nothing else would ever interrupt it: do it here.
+    if live.runtime.as_stream().is_none() || live.progress().turn.is_none() {
         turn_interrupted(&app, &live).await;
     }
     if let Err(e) = app
@@ -1722,6 +1724,43 @@ mod tests {
         .expect("Detener is immediate");
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert_eq!(f.live.state(), LiveState::Waiting);
+    }
+
+    #[tokio::test]
+    async fn stop_with_only_background_work_and_no_turn_waits_and_drops_the_held_stop() {
+        use delilah_agents::stream::{StreamEvent, TaskEvent, TaskKind};
+        let f = Fixture::new().await;
+        let _ = f.live.runtime.kill();
+        let mut cmd = tokio::process::Command::new("sleep");
+        cmd.arg("5");
+        let (session, _rx) = delilah_agents::stream::StreamSession::spawn(cmd).unwrap();
+        let session = std::sync::Arc::new(session);
+        let live =
+            f.app
+                .sessions
+                .insert("conv", "@web", SessionKind::Claude, false, session.clone());
+        live.update_progress(|p| {
+            crate::progress::apply(
+                p,
+                &StreamEvent::Task(TaskEvent::Started {
+                    task_id: "bg-1".into(),
+                    tool_use_id: None,
+                    kind: TaskKind::Command,
+                    description: "sleep".into(),
+                    background: true,
+                }),
+                Utc::now(),
+            )
+        });
+        assert!(live.progress().turn.is_none());
+        assert!(live.hold_stop_if_background(stop("listo")));
+        live.set_state(LiveState::Working);
+        let (status, _) = f.post("/api/v1/sessions/conv/stop", json!({})).await;
+        session.kill();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert!(!live.has_held_stop());
+        assert_eq!(live.progress().background[0].state, "running");
     }
 
     #[tokio::test]

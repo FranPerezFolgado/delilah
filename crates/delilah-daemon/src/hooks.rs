@@ -104,12 +104,21 @@ pub(crate) async fn apply_signal(
         _ => None,
     };
     if let Some(live) = &live {
-        // The user's next turn, or a tool running again, makes a held Stop stale.
+        // Only a new turn makes a held Stop stale. A tool hook (`Working`) does not: a
+        // background sub-agent posts them to this same session after the turn's Stop.
         let agent_start = signal == Signal::PromptSubmitted && agent_prompt(&hook);
-        if matches!(signal, Signal::PromptSubmitted | Signal::Working)
+        if signal == Signal::PromptSubmitted
             && (!agent_start || live.state() == LiveState::Waiting)
         {
             live.drop_held_stop();
+        }
+        // A background sub-agent's tool hook (it carries `agent_id`) arriving once the
+        // session waits again is not a turn: it must not flip the session back to working.
+        if signal == Signal::Working
+            && hook.get("agent_id").is_some()
+            && live.state() == LiveState::Waiting
+        {
+            return;
         }
         // The CLI also posts the `<task-notification>` prompt mid-turn, when a background
         // task ends during it: no new turn, so nothing of a prompt's effects applies (it
@@ -856,7 +865,6 @@ mod tests {
 
         for hook in [
             json!({ "hook_event_name": "UserPromptSubmit", "prompt": "hola" }),
-            json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash" }),
         ] {
             post(&state, URL, stop_hook()).await;
             assert!(live.has_held_stop());
@@ -874,6 +882,39 @@ mod tests {
         )
         .await;
         assert!(live.has_held_stop(), "the agent prompt is not a turn start");
+    }
+
+    #[tokio::test]
+    async fn a_background_sub_agents_tool_hook_neither_drops_the_held_stop_nor_wakes_a_waiting_session() {
+        let state = running_task().await;
+        let live = stream_session(&state, "s-1", true).await;
+        feed(&live, bg_started());
+        post(&state, URL, stop_hook()).await;
+        assert!(live.has_held_stop());
+
+        let sub = json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash",
+                          "agent_id": "a696ef4688000ea5e" });
+        post(&state, URL, sub.clone()).await;
+        assert!(live.has_held_stop(), "a sub-agent tool is not a new turn");
+        assert_eq!(live.state(), LiveState::Working);
+
+        // The set empties: the replay applies the Stop.
+        feed(
+            &live,
+            delilah_agents::stream::StreamEvent::Task(delilah_agents::stream::TaskEvent::Ended {
+                task_id: "b1".into(),
+                status: delilah_agents::stream::TaskStatus::Completed,
+                summary: None,
+            }),
+        );
+        let held = live.take_held_stop().unwrap();
+        apply_signal(state.clone(), "PROJ-1", Some("s-1"), Signal::TurnEnded, &held).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+
+        // A late sub-agent hook does not flip it back.
+        post(&state, URL, sub).await;
+        assert_eq!(live.state(), LiveState::Waiting);
+        assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
     }
 
     #[tokio::test]

@@ -161,12 +161,13 @@ impl Live {
         }
     }
 
+    /// Drops the held Stop and cancels the fallback timer, under one lock so a timer that
+    /// fires meanwhile finds nothing.
     pub fn drop_held_stop(&self) {
-        self.progress.lock().unwrap().held_stop = None;
+        self.cancel_held_stop();
     }
 
-    /// A new turn began: the held Stop is stale and the fallback timer is cancelled,
-    /// both under one lock so a timer that fires meanwhile finds nothing.
+    /// A new turn began: the held Stop is stale and the fallback timer is cancelled.
     pub fn cancel_held_stop(&self) {
         let mut state = self.progress.lock().unwrap();
         state.held_stop = None;
@@ -196,8 +197,13 @@ impl Live {
         state.held_stop.take()
     }
 
+    /// Takes the held Stop; the fallback timer, if armed, is cancelled with it.
     pub fn take_held_stop(&self) -> Option<serde_json::Value> {
-        self.progress.lock().unwrap().held_stop.take()
+        let mut state = self.progress.lock().unwrap();
+        if let Some(token) = state.fallback.take() {
+            token.store(true, Ordering::SeqCst);
+        }
+        state.held_stop.take()
     }
 
     pub fn has_held_stop(&self) -> bool {
@@ -382,6 +388,17 @@ mod tests {
         assert!(live.hold_stop_if_background(json!({"a": 3})));
         live.drop_held_stop();
         assert_eq!(live.take_held_stop(), None);
+        // Dropping or taking the payload cancels the armed fallback too.
+        for take in [true, false] {
+            let token = live.arm_fallback();
+            assert!(live.hold_stop_if_background(json!({"a": 3})));
+            if take {
+                live.take_held_stop();
+            } else {
+                live.drop_held_stop();
+            }
+            assert!(token.load(Ordering::SeqCst));
+        }
     }
 
     #[tokio::test]

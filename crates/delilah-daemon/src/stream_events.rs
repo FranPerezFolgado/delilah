@@ -62,13 +62,19 @@ pub async fn replay_held_stop(app: &AppState, task: &str, session: &str, held: O
 
 /// A stream process is gone: its running rows become stopped and the Stop held behind them
 /// applies first, as after a normal turn end, before the exit is handled.
-pub async fn on_process_exit(app: &AppState, session: &str) {
-    let Some(live) = app.sessions.get(session) else {
-        return;
-    };
+pub async fn on_process_exit(app: &AppState, live: &crate::sessions::Live) {
     live.update_progress(|p| progress::apply(p, &StreamEvent::Exited { code: None }, Utc::now()));
     let held = live.take_held_stop();
-    replay_held_stop(app, &live.task, session, held).await;
+    // A newer process on the same id owns the session now: its state is not touched.
+    // Not in the registry at all (already removed) the held Stop still applies.
+    if app
+        .sessions
+        .get(&live.id)
+        .is_some_and(|current| !current.runtime.same(&live.runtime))
+    {
+        return;
+    }
+    replay_held_stop(app, &live.task, &live.id, held).await;
 }
 
 /// Whether a finished row or sub-agent still waits to expire from the progress.
@@ -1042,6 +1048,23 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
+        let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_process_exit_replays_the_held_stop_even_if_the_session_left_the_registry() {
+        let app = test_app().await;
+        let live = insert_stream(&app, "sleep", &["5"]);
+        let key = running_task(&app).await;
+        let (tx, rx) = mpsc::unbounded_channel();
+        spawn_pump(&app, "s-1", "PROJ-1", rx);
+        held_behind_background(&tx, &live).await;
+        assert!(live.has_held_stop());
+        app.sessions.remove_if_same("s-1", &live.runtime);
+        assert!(app.sessions.get("s-1").is_none());
+        on_process_exit(&app, &live).await;
+        assert!(!live.has_held_stop());
         assert_eq!(status(&app, &key).await, TaskStatus::WaitingForUser);
         let _ = live.runtime.kill();
     }
