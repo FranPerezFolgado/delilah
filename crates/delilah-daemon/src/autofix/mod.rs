@@ -802,8 +802,40 @@ async fn judge(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub(crate) fn cancel() {}
+/// Autofix stops for the task (toggle off, PR merged or closed, task archived or deleted):
+/// every PR that was `fixing` goes back to `watching` (the sent sha stays, so the same
+/// head is not sent again if autofix is turned back on) and the `autofix-stopped` notices
+/// of those PRs are resolved, whatever their state. `repo` limits it to one PR. Nothing is
+/// sent and a running turn is never interrupted. Each write is a compare-and-set, and
+/// `AutofixCancelled` is recorded only when it won. Whether anything changed.
+pub(crate) async fn cancel(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+) -> Result<bool, StoreError> {
+    let mut changed = false;
+    for row in app.store.prs_of(key).await? {
+        if repo.is_some_and(|r| r != row.repo) {
+            continue;
+        }
+        if let Some(a) = row.autofix.as_ref()
+            && a.state == State::Fixing
+            && claim(app, row.id, Some(a), &watching(Some(a))).await?
+        {
+            let event = Event::AutofixCancelled {
+                repo: row.repo.clone(),
+            };
+            app.transition(key, event).await?;
+            changed = true;
+        }
+        changed |= resolve_stopped(app, key, &row.repo).await?;
+    }
+    if changed {
+        app.emit(Topic::Prs);
+        app.emit(Topic::Inbox);
+    }
+    Ok(changed)
+}
 
 #[cfg(test)]
 mod tests {
@@ -1622,5 +1654,58 @@ mod tests {
         on_turn_ended(&app, &key, "s-1", None).await;
         assert_eq!(stored(&app, &key).await.state, State::Fixing);
         assert!(history(&app, &key).await.is_empty());
+    }
+
+    // --- cancel ---
+
+    #[tokio::test]
+    async fn cancel_returns_a_fixing_pr_to_watching_and_sends_nothing() {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+        assert!(cancel(&app, &key, None).await.unwrap());
+        let a = stored(&app, &key).await;
+        assert_eq!(
+            (a.state, a.attempts, a.sha.as_deref()),
+            (State::Watching, 0, Some("abc"))
+        );
+        assert_eq!(history(&app, &key).await, ["autofix-cancelled"]);
+        // Nothing to cancel the second time.
+        assert!(!cancel(&app, &key, None).await.unwrap());
+        assert_eq!(history(&app, &key).await, ["autofix-cancelled"]);
+    }
+
+    #[tokio::test]
+    async fn cancel_resolves_the_stopped_notice_and_keeps_the_row() {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+        on_turn_ended(&app, &key, "s-1", None).await;
+        assert_eq!(stored(&app, &key).await.state, State::Stopped);
+        assert!(cancel(&app, &key, None).await.unwrap());
+        let open = app.store.open_notices().await.unwrap();
+        assert!(open.iter().all(|n| n.kind != "autofix-stopped"));
+        assert_eq!(history(&app, &key).await, ["autofix-stopped"]);
+    }
+
+    #[tokio::test]
+    async fn cancel_of_another_repo_leaves_the_pr_alone() {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+        assert!(!cancel(&app, &key, Some("elsewhere")).await.unwrap());
+        assert_eq!(stored(&app, &key).await.state, State::Fixing);
+    }
+
+    #[tokio::test]
+    async fn a_merged_or_closed_pr_cancels_its_fixing_row() {
+        for state in ["MERGED", "CLOSED"] {
+            let gh = two_reads("abc", Ok(&ci_snapshot(state, "abc", "FAILURE")));
+            let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
+            pr_loop::check_task(&app, &key, true).await;
+            assert_eq!(stored(&app, &key).await.state, State::Watching, "{state}");
+            assert!(
+                history(&app, &key)
+                    .await
+                    .contains(&"autofix-cancelled".to_string())
+            );
+        }
     }
 }

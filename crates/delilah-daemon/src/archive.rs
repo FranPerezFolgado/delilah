@@ -111,6 +111,9 @@ pub(crate) async fn archive_workspace(
     force: bool,
     verified: &HashMap<String, String>,
 ) -> Result<Outcome, ApiError> {
+    if let Err(e) = crate::autofix::cancel(app, key, None).await {
+        tracing::warn!(task = %key, "autofix: cannot cancel on archive: {e}");
+    }
     let Some((root, ws)) = app.store.workspace(key).await? else {
         stop_sessions(app, key).await;
         return Ok(Outcome::default());

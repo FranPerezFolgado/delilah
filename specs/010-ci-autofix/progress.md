@@ -17,8 +17,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 3 | 3B | done | 1 | 39c4788 | no re-read from gh before send (uses just-saved snapshot, FR-006?); stopped notice hook for WP-12 |
 | WP-09 | 3 | 3C | done | 1 | 3a4ee36 | POST /runs has no ci_autofix (test uses PATCH) |
 | WP-09F | 3 | fix | done | 1 | 9ee01f0 | Phase 3 review fixes; manual forward holds per-task autofix slot (InFlight → 409) |
-| WP-10 | 4 | 4A | verified | 1 | | turn start unknown: started=None proxy (first turn end after sent_at counts) |
-| WP-11 | 4 | 4B | implementing | 0 | | |
+| WP-10 | 4 | 4A | verified | 1 | f65133f | turn start unknown: started=None proxy (first turn end after sent_at counts) |
+| WP-11 | 4 | 4B | verified | 1 | | no back-to-backlog action exists; toggle-off caller → WP-14; delete drops the cancel event with the task |
 | WP-12 | 4 | 4B | implementing | 0 | | |
 | WP-13 | 4 | 4C | pending | 0 | | |
 | WP-14 | 5 | 5A | pending | 0 | | |
