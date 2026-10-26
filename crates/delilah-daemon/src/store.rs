@@ -805,6 +805,117 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn migration_0022_backfills_autofix_for_watched_autopilot_tasks() {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = old
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 21)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        // (key, status type, autopilot, workspace)
+        let tasks = [
+            ("RUN-AP", "running", Some("on"), false),
+            ("RUN-NO", "running", None, false),
+            ("DONE-WS", "done", Some("on"), true),
+            ("DONE-NOWS", "done", Some("on"), false),
+            ("FAIL-NOWS", "failed", Some("on"), false),
+            ("SETUP-AP", "setup-failed", Some("on"), true),
+        ];
+        for (key, status, autopilot, ws) in tasks {
+            sqlx::query(
+                "INSERT INTO tasks (key, title, project, workflow, phase, status, autopilot, created_at, updated_at)
+                 VALUES (?, 'T', NULL, 'feature', 'backlog', ?, ?, 'x', 'x')",
+            )
+            .bind(key)
+            .bind(format!("{{\"type\":\"{status}\"}}"))
+            .bind(autopilot)
+            .execute(&pool)
+            .await
+            .unwrap();
+            if ws {
+                sqlx::query(
+                    "INSERT INTO workspaces (task_key, parent, path, branch, submodules)
+                     VALUES (?, '/p', '/w', 'b', '[]')",
+                )
+                .bind(key)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+            let snapshot = (key != "RUN-NO").then(|| format!("{{\"head\":\"h-{key}\"}}"));
+            sqlx::query(
+                "INSERT INTO pull_requests (task_key, repo, host, owner_name, number, url, linked_by, snapshot, created_at)
+                 VALUES (?, '.', 'github.com', 'o/n', 1, 'u', 'detected', ?, 'x')",
+            )
+            .bind(key)
+            .bind(snapshot)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        // A PR of a backfilled task that has no snapshot yet.
+        sqlx::query(
+            "INSERT INTO pull_requests (task_key, repo, host, owner_name, number, url, linked_by, snapshot, created_at)
+             VALUES ('RUN-AP', 'sub', 'github.com', 'o/n', 2, 'u2', 'detected', NULL, 'x')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        Store::connect(pool.clone()).await.unwrap();
+
+        let flags: Vec<(String, i64)> =
+            sqlx::query_as("SELECT key, ci_autofix FROM tasks ORDER BY key")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let flag = |k: &str| flags.iter().find(|(key, _)| key == k).unwrap().1;
+        assert_eq!(flag("RUN-AP"), 1);
+        assert_eq!(flag("RUN-NO"), 0);
+        assert_eq!(flag("DONE-WS"), 1);
+        assert_eq!(flag("DONE-NOWS"), 0);
+        assert_eq!(flag("FAIL-NOWS"), 0);
+        assert_eq!(flag("SETUP-AP"), 1);
+
+        let autofix = |task: &'static str, repo: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT autofix FROM pull_requests WHERE task_key = ? AND repo = ?",
+                )
+                .bind(task)
+                .bind(repo)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        let watching = |k: &str| {
+            let v: serde_json::Value = serde_json::json!({
+                "state": "watching", "attempts": 0, "sha": format!("h-{k}")
+            });
+            v
+        };
+        let parse = |s: Option<String>| s.map(|s| serde_json::from_str::<serde_json::Value>(&s).unwrap());
+        assert_eq!(parse(autofix("RUN-AP", ".").await), Some(watching("RUN-AP")));
+        assert_eq!(autofix("RUN-AP", "sub").await, None);
+        assert_eq!(autofix("RUN-NO", ".").await, None);
+        assert_eq!(parse(autofix("DONE-WS", ".").await), Some(watching("DONE-WS")));
+        assert_eq!(autofix("DONE-NOWS", ".").await, None);
+        assert_eq!(autofix("FAIL-NOWS", ".").await, None);
+        assert_eq!(parse(autofix("SETUP-AP", ".").await), Some(watching("SETUP-AP")));
+    }
+
+    #[tokio::test]
     async fn migrations_0020_and_0021_keep_existing_tasks_and_sessions() {
         let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
         let pool = SqlitePoolOptions::new()
