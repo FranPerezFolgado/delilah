@@ -175,6 +175,19 @@ re-offers it. In Settings: "Saving mode by default" (new tasks) and "Save notes
 before switching session" (on by default). Needs the spec files: without a
 `specs/` folder there are no handoffs.
 
+**Agent model.** Delilah picks the Claude model of each task session when it starts.
+In Settings, "Agent model" sets one per phase (Specify, Plan, Implement, Review):
+Opus, Sonnet, Opus plan (Opus while planning, Sonnet otherwise), Haiku, or Claude's
+default (no `--model`). Out of the box: Opus to specify and plan, Sonnet to
+implement and review. A task can override it with "Model" in the new-task dialog
+("Per Settings" follows the phases). A session keeps the model it started on, even
+when resumed, so its prompt cache is not lost; a change applies to the next session
+(with saving mode, each phase is one). With "Suggest a model when creating a task"
+on (off by default), the dialog shows "Suggest": Delilah sizes the task from its
+type, labels, description and workflow, asks Haiku to confirm, and shows the
+suggestion with a reason; "Apply" sets it. Project sessions and idea conversations
+always run on Claude's default.
+
 **Autopilot.** A task can run on its own up to the PR: "Autopilot" (next to "Saving
 mode", which it turns on; a toggle on a running task, `--autopilot` /
 `--no-autopilot` in `delilah run` and `new`, `delilah autopilot <KEY> on|off|resume`).

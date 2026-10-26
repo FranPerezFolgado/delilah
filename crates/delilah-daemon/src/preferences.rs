@@ -45,6 +45,14 @@ pub async fn put(
             "`agent-permissions` must be \"auto\" or \"default\"",
         ));
     }
+    if key == crate::models::MODELS_PREF {
+        crate::models::validate(&value)?;
+    }
+    if key == crate::models::SUGGEST_PREF && !value.is_boolean() {
+        return Err(ApiError::bad_request(
+            "`model-suggestion` must be true or false",
+        ));
+    }
     app.store.set_setting(&setting_key(&key)?, &value).await?;
     match key.as_str() {
         "language" => app.load_language().await,
@@ -174,6 +182,44 @@ mod tests {
             assert_eq!(saved, json!("default"), "{bad}");
             assert_eq!(app.agent_permissions(), AgentPermissions::Default);
         }
+    }
+
+    #[tokio::test]
+    async fn the_agent_models_are_checked_before_saving() {
+        let app = app().await;
+        let uri = "/api/v1/preferences/agent-models";
+        let good = json!({"specify": "opus", "plan": "opusplan", "implement": "haiku", "review": "default"});
+        let (code, _) = call(&app, "PUT", uri, Some(good.clone())).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            crate::models::phase_models(&app).await.implement,
+            delilah_core::AgentModel::Haiku
+        );
+        for bad in [
+            json!({"specify": "opus"}),
+            json!({"specify": "gpt-5", "plan": "opus", "implement": "opus", "review": "opus"}),
+            json!("sonnet"),
+        ] {
+            let (code, _) = call(&app, "PUT", uri, Some(bad.clone())).await;
+            assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+            let (_, saved) = call(&app, "GET", uri, None).await;
+            assert_eq!(saved, good, "{bad}");
+        }
+        // `null` is the defaults again.
+        let (code, _) = call(&app, "PUT", uri, Some(json!(null))).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(
+            crate::models::phase_models(&app).await,
+            delilah_core::PhaseModels::default()
+        );
+        let (code, _) = call(
+            &app,
+            "PUT",
+            "/api/v1/preferences/model-suggestion",
+            Some(json!("on")),
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

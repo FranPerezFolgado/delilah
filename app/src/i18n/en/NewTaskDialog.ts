@@ -10,4 +10,10 @@ export const EN: Record<string, string> = {
   "Tu checkout tiene cambios sin guardar. Guárdalos o descártalos, o inicia la tarea en un worktree aislado.":
     "Your checkout has unsaved changes. Save or discard them, or start the task in an isolated worktree.",
   "Iniciar en un worktree": "Start in a worktree",
+  Modelo: "Model",
+  Sugerir: "Suggest",
+  "Pensando…": "Thinking…",
+  "Según ajustes": "Per Settings",
+  "Sugerencia: {model} · {reason}": "Suggestion: {model} · {reason}",
+  Aplicar: "Apply",
 };

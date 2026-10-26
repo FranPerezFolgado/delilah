@@ -122,7 +122,7 @@ describe("NewTaskDialog saving mode", () => {
     );
     await Promise.resolve();
     expect(pressed(btn(container, "Ahorro"))).toBe(true);
-    expect(pref).not.toHaveBeenCalled();
+    expect(pref).not.toHaveBeenCalledWith("saving-mode");
   });
 });
 
@@ -625,5 +625,62 @@ describe("NewTaskDialog autofix", () => {
     fireEvent.click(getByText("Guardar en backlog"));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create.mock.calls[0][0].ci_autofix).toBe(true);
+  });
+});
+
+describe("NewTaskDialog model", () => {
+  const draft = { key: "PROJ-1", title: "Algo", components: [] };
+  const dialog = () =>
+    render(<NewTaskDialog projects={projects} draft={draft} onClose={() => {}} onStarted={() => {}} onSaved={() => {}} onConversation={() => {}} />);
+
+  it("follows Settings by default and sends the chosen model with the run and the backlog task", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValue(started);
+    const { container, getByLabelText } = dialog();
+    const select = getByLabelText("Modelo") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    fireEvent.change(select, { target: { value: "haiku" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].model).toBe("haiku");
+  });
+
+  it("sends the chosen model when saving to the backlog", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const create = vi.spyOn(api, "createTask").mockResolvedValue(started);
+    const { getByLabelText, getByText } = dialog();
+    fireEvent.change(getByLabelText("Modelo"), { target: { value: "opusplan" } });
+    fireEvent.click(getByText("Guardar en backlog"));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].model).toBe("opusplan");
+  });
+
+  it("sends null when left on Según ajustes", async () => {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const run = vi.spyOn(api, "run").mockResolvedValue(started);
+    const { container } = dialog();
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(run).toHaveBeenCalled());
+    expect(run.mock.calls[0][0].model).toBeNull();
+  });
+
+  it("has no Sugerir button while the suggestion is off", async () => {
+    const pref = vi.spyOn(api, "preference").mockResolvedValue(null);
+    const { queryByText } = dialog();
+    await waitFor(() => expect(pref).toHaveBeenCalledWith("model-suggestion"));
+    expect(queryByText("Sugerir")).toBeNull();
+  });
+
+  it("suggests on demand and applies it only when asked", async () => {
+    vi.spyOn(api, "preference").mockImplementation((async (k: string) => (k === "model-suggestion" ? true : null)) as never);
+    const suggest = vi.spyOn(api, "suggestModel").mockResolvedValue({ model: "opus", reason: "big refactor", source: "heuristic" });
+    const { getByText, getByLabelText, findByText } = dialog();
+    fireEvent.click(await findByText("Sugerir"));
+    await findByText(/big refactor/);
+    expect(suggest).toHaveBeenCalledTimes(1);
+    expect(suggest.mock.calls[0][0]).toMatchObject({ title: "Algo", key: "PROJ-1" });
+    expect((getByLabelText("Modelo") as HTMLSelectElement).value).toBe("");
+    fireEvent.click(getByText("Aplicar"));
+    expect((getByLabelText("Modelo") as HTMLSelectElement).value).toBe("opus");
   });
 });

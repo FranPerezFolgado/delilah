@@ -340,6 +340,7 @@ mod tests {
             append_system_prompt: None,
             remote_control: None,
             program: Some(program),
+            model: None,
         }
     }
 

@@ -25,6 +25,7 @@ mod jira;
 pub mod lang;
 mod live;
 pub mod logs;
+mod models;
 pub mod notify;
 mod owners;
 pub mod permissions;

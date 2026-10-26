@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api, isCheckoutDirty, type BranchProposal, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
+import { AGENT_MODELS, api, isCheckoutDirty, type AgentModel, type BranchProposal, type ModelSuggestion, type Project, type Session, type Submodule, type SubmoduleSuggestion, type Task, type TaskView } from "../api";
 import { branchName } from "../branchName";
+import { modelLabel } from "../agentModels";
 import { t } from "../i18n";
 import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
@@ -60,6 +61,11 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   // Each step in a fresh session: a backlog task keeps its choice, a new one starts from the preference.
   const [savingMode, setSavingMode] = useState(existing?.saving_mode ?? false);
   const savingTouched = useRef(!!existing);
+  // The task's own model; null follows Settings.
+  const [model, setModel] = useState<AgentModel | null>(existing?.model ?? null);
+  // The "Sugerir" button exists only while the model-suggestion preference is on.
+  const [suggestionOn, setSuggestionOn] = useState(false);
+  const [modelHint, setModelHint] = useState<ModelSuggestion | "loading" | null>(null);
   // Autopilot implies saving mode: ticked and locked while it is on.
   const [autopilot, setAutopilot] = useState(!!existing?.autopilot);
   // CI autofix: null until the user touches it, then it follows the project default and autopilot.
@@ -116,6 +122,13 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     api
       .preference<boolean>("saving-mode")
       .then((on) => !savingTouched.current && setSavingMode(on === true))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api
+      .preference<boolean>("model-suggestion")
+      .then((on) => setSuggestionOn(on === true))
       .catch(() => {});
   }, []);
 
@@ -212,6 +225,24 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     }
   };
 
+  // Asks for a model on demand; the user applies it, it is never set silently.
+  const suggestModel = async () => {
+    setModelHint("loading");
+    try {
+      setModelHint(
+        await api.suggestModel({
+          title: title.trim(),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+          ...(workflow ? { workflow } : {}),
+          ...(origin === "jira" && key.trim() ? { key: key.trim() } : {}),
+          free: origin === "libre",
+        }),
+      );
+    } catch {
+      setModelHint(null);
+    }
+  };
+
   const toggle = (path: string) => !always.includes(path) && setPicked((p) => (p.includes(path) ? p.filter((x) => x !== path) : [...p, path]));
 
   const validate = () => {
@@ -249,6 +280,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         free: origin === "libre",
         in_checkout: inCheckout,
         saving_mode: savingMode || autopilotOn,
+        model,
         ...autopilotField,
         ci_autofix: autofixOn,
         view,
@@ -281,6 +313,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         free: origin === "libre",
         in_checkout: where === "checkout",
         saving_mode: savingMode || autopilotOn,
+        model,
         ...autopilotField,
         ci_autofix: autofixOn,
         view,
@@ -398,6 +431,32 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
               </label>
             )}
             {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
+            {origin !== "claude" && (
+              <div className="field">
+                <span className="ntd-sub-hd">
+                  {t("Modelo")}
+                  {suggestionOn && (
+                    <Button variant="secondary" size={28} className="ntd-suggest" onClick={suggestModel}
+                      disabled={!title.trim() || modelHint === "loading"}>
+                      {modelHint === "loading" ? t("Pensando…") : t("Sugerir")}
+                    </Button>
+                  )}
+                </span>
+                <select className="input" aria-label={t("Modelo")} value={model ?? ""}
+                  onChange={(e) => setModel((e.target.value || null) as AgentModel | null)}>
+                  <option value="">{t("Según ajustes")}</option>
+                  {AGENT_MODELS.map((m) => <option key={m} value={m}>{modelLabel(m)}</option>)}
+                </select>
+                {modelHint && modelHint !== "loading" && (
+                  <span className="muted ntd-help">
+                    {t("Sugerencia: {model} · {reason}", { model: modelLabel(modelHint.model), reason: modelHint.reason })}{" "}
+                    {model !== modelHint.model && (
+                      <Button variant="ghost" size={28} onClick={() => setModel(modelHint.model)}>{t("Aplicar")}</Button>
+                    )}
+                  </span>
+                )}
+              </div>
+            )}
             {origin !== "claude" && (
               <div className="ntd-auto">
                 {autopilotAllowed ? (

@@ -1164,6 +1164,7 @@ fn pty_turn(
         append_system_prompt: None,
         remote_control: None,
         program: None,
+        model: None,
     });
     if let Some(mode) = &ctx.permission_mode {
         cmd.arg("--permission-mode");

@@ -1,10 +1,12 @@
 //! Task model and state machine. Pure logic, no I/O.
 
 pub mod branch;
+pub mod model;
 mod project;
 mod spec;
 mod task;
 
+pub use model::{AgentModel, PhaseModels};
 pub use project::{
     AutofixDefault, FieldError, Project, ProjectKind, ProjectSettings, ShareMode, SharedEntry,
     SubmoduleRules, WorkspaceMode, branch_name, slug, validate,
