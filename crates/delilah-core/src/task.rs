@@ -163,6 +163,31 @@ pub enum Event {
     AutopilotFinished {
         prs: Vec<String>,
     },
+    /// CI autofix sent the agent the failed checks of a PR's commit (history only).
+    AutofixSent {
+        repo: String,
+        sha: String,
+        attempt: u32,
+        checks: Vec<String>,
+    },
+    /// The checks of the repo's PR went green after an autofix attempt.
+    AutofixFixed {
+        repo: String,
+    },
+    /// The checks of the new commit failed again.
+    AutofixFailedAgain {
+        repo: String,
+        sha: String,
+    },
+    /// Autofix gave up on the repo (e.g. the agent pushed nothing).
+    AutofixStopped {
+        repo: String,
+        reason: String,
+    },
+    /// The user cancelled the autofix of the repo.
+    AutofixCancelled {
+        repo: String,
+    },
     /// The user reopens a finished task to keep working on it.
     #[serde(rename = "reopened")]
     Reopen,
@@ -209,6 +234,11 @@ impl Event {
             Self::AutopilotAnswered { .. } => "autopilot-answered",
             Self::AutopilotNudged { .. } => "autopilot-nudged",
             Self::AutopilotFinished { .. } => "autopilot-finished",
+            Self::AutofixSent { .. } => "autofix-sent",
+            Self::AutofixFixed { .. } => "autofix-fixed",
+            Self::AutofixFailedAgain { .. } => "autofix-failed-again",
+            Self::AutofixStopped { .. } => "autofix-stopped",
+            Self::AutofixCancelled { .. } => "autofix-cancelled",
             Self::Reopen => "reopened",
             Self::RuntimeSwitched { .. } => "runtime-switched",
             Self::PermissionAsked { .. } => "permission-asked",
@@ -430,6 +460,9 @@ pub struct Task {
     /// Runtime of the task's Claude sessions: chat (stream-json) instead of the terminal.
     #[serde(default)]
     pub chat_mode: bool,
+    /// CI autofix: send the agent the failed checks of the task's PRs.
+    #[serde(default)]
+    pub ci_autofix: bool,
     /// Permission rules granted with "allow always in this task".
     #[serde(default)]
     pub allowed_tools: Vec<String>,
@@ -462,6 +495,7 @@ impl Task {
             autopilot: None,
             view: TaskView::default(),
             chat_mode: false,
+            ci_autofix: false,
             allowed_tools: Vec::new(),
             created_at: Utc::now(),
             finished_at: None,
@@ -489,6 +523,11 @@ impl Task {
                 | Event::AutopilotAnswered { .. }
                 | Event::AutopilotNudged { .. }
                 | Event::AutopilotFinished { .. }
+                | Event::AutofixSent { .. }
+                | Event::AutofixFixed { .. }
+                | Event::AutofixFailedAgain { .. }
+                | Event::AutofixStopped { .. }
+                | Event::AutofixCancelled { .. }
                 | Event::RuntimeSwitched { .. }
                 | Event::PermissionAsked { .. }
                 | Event::PermissionExpired { .. }
@@ -1060,6 +1099,64 @@ mod tests {
             assert_eq!(event.name(), name);
             assert_eq!(serde_json::from_value::<Event>(json).unwrap(), event);
         }
+    }
+
+    #[test]
+    fn autofix_events_serialise_kebab_case_and_keep_status() {
+        let events = vec![
+            (
+                Event::AutofixSent {
+                    repo: "r".into(),
+                    sha: "abc".into(),
+                    attempt: 1,
+                    checks: vec!["build".into()],
+                },
+                "autofix-sent",
+            ),
+            (Event::AutofixFixed { repo: "r".into() }, "autofix-fixed"),
+            (
+                Event::AutofixFailedAgain {
+                    repo: "r".into(),
+                    sha: "abc".into(),
+                },
+                "autofix-failed-again",
+            ),
+            (
+                Event::AutofixStopped {
+                    repo: "r".into(),
+                    reason: "no push".into(),
+                },
+                "autofix-stopped",
+            ),
+            (
+                Event::AutofixCancelled { repo: "r".into() },
+                "autofix-cancelled",
+            ),
+        ];
+        for (event, name) in events {
+            let json = serde_json::to_value(&event).unwrap();
+            assert_eq!(json["type"], name);
+            assert_eq!(event.name(), name);
+            assert_eq!(serde_json::from_value::<Event>(json).unwrap(), event);
+            let mut task = running_task();
+            let before = task.clone();
+            task.apply(event).unwrap();
+            assert_eq!(task, before);
+        }
+    }
+
+    #[test]
+    fn old_tasks_load_without_ci_autofix() {
+        let json = r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,
+            "status":{"type":"queued"}}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(!task.ci_autofix);
+        let on: Task = serde_json::from_str(
+            r#"{"key":"PROJ-1","title":"t","workflow":"feature","phase":null,
+            "status":{"type":"queued"},"ci_autofix":true}"#,
+        )
+        .unwrap();
+        assert!(on.ci_autofix);
     }
 
     #[test]

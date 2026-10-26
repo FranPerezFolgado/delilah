@@ -642,6 +642,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         branch_error: row.try_get("branch_error")?,
         view: TaskView::parse(&row.try_get::<String, _>("view")?).unwrap_or_default(),
         chat_mode: row.try_get("chat_mode")?,
+        ci_autofix: false,
         allowed_tools: allowed_tools_from_json(
             row.try_get::<Option<String>, _>("allowed_tools")?
                 .as_deref(),

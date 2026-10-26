@@ -147,6 +147,23 @@ pub async fn update_settings(
     let mut settings: ProjectSettings = serde_json::from_slice(&body).map_err(|e| {
         let text = e.to_string();
         // serde names the offending key between backticks: "unknown field `x`, ..."
+        // An unknown value of `ci_autofix` is `unknown variant `x`, expected one of ...`.
+        if text.starts_with("unknown variant") && text.contains("`always`") {
+            let message = "The CI autofix default must be off, autopilot or always.";
+            let field = FieldError {
+                field: "ci_autofix".into(),
+                code: "ci_autofix.invalid".into(),
+                message: message.into(),
+            };
+            let shown = localised(lang, &field);
+            return ApiError::invalid_fields(
+                format!("{shown}: {text}"),
+                vec![FieldError {
+                    message: shown,
+                    ..field
+                }],
+            );
+        }
         let field = text.split('`').nth(1).unwrap_or_default().to_string();
         let field = FieldError {
             field,
@@ -250,6 +267,10 @@ fn localised(lang: crate::lang::Lang, e: &FieldError) -> String {
         "submodules.conflict" => (
             "El submódulo está en las listas always y never a la vez.",
             "The submodule is in both the always and never lists.",
+        ),
+        "ci_autofix.invalid" => (
+            "El valor por defecto del autofix de CI debe ser off, autopilot o always.",
+            "The CI autofix default must be off, autopilot or always.",
         ),
         "submodules.unknown" => (
             "El proyecto no tiene ese submódulo.",
@@ -704,6 +725,25 @@ mod tests {
         assert!(body["error"].as_str().unwrap().contains("branch"));
         let saved = project(&env, "parent").await;
         assert_eq!(saved["settings"]["branch"], Value::Null);
+        std::fs::remove_dir_all(&env.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn ci_autofix_default_is_saved_and_unknown_values_are_a_field_error() {
+        let env = env().await;
+        let p = project(&env, "parent").await;
+        assert_eq!(p["settings"]["ci_autofix"], "autopilot");
+        let (status, body) = put(&env, "parent", json!({ "ci_autofix": "always" })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["settings"]["ci_autofix"], "always");
+        let (status, body) = put(&env, "parent", json!({ "ci_autofix": "sometimes" })).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let f = &body["fields"][0];
+        assert_eq!(f["field"], "ci_autofix");
+        assert_eq!(f["code"], "ci_autofix.invalid");
+        assert!(!f["message"].as_str().unwrap().is_empty());
+        let saved = project(&env, "parent").await;
+        assert_eq!(saved["settings"]["ci_autofix"], "always");
         std::fs::remove_dir_all(&env.dir).unwrap();
     }
 
