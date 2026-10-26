@@ -138,7 +138,7 @@ parallel (different files, no dependency on an unfinished task).
 **Independent test**: The Story 3 block of [quickstart.md](quickstart.md). After merge, the community profile is at 100%.
 
 - [X] T025 [P] [US3] Create `LICENSE` (standard MIT text, "Copyright (c) 2026 Francisco Pérez Folgado") and add `"license": "MIT"` to `app/package.json` (after `"version"`). The workspace `Cargo.toml` and `app/src-tauri/Cargo.toml` already declare MIT; confirm that.
-- [ ] T026 [P] [US3] Create `CONTRIBUTING.md`, short and linking to `docs/development.md` for detail. Cover:
+- [X] T026 [P] [US3] Create `CONTRIBUTING.md`, short and linking to `docs/development.md` for detail. Cover:
   - prerequisites: macOS on Apple Silicon, Xcode CLT, Rust stable, Node 22+, Claude Code;
   - the fixtures (`scripts/make-fixture-parent.sh`);
   - running a preview of a branch (`scripts/preview.sh`, and why never the installed app);
@@ -147,7 +147,7 @@ parallel (different files, no dependency on an unfinished task).
   - the versioning policy (major/minor/patch rules from CLAUDE.md, `scripts/bump-version.sh <level> --commit`, which also regenerates CHANGELOG.md and needs git-cliff);
   - the PR flow (branch, PR template, CI green);
   - Spec Kit (`specs/README.md`) as optional.
-- [ ] T027 [P] [US3] Create `SECURITY.md`:
+- [X] T027 [P] [US3] Create `SECURITY.md`:
   - **Reporting**: GitHub private vulnerability reporting (Security tab › Report a vulnerability), acknowledgement within ~7 days, no public issues for vulnerabilities.
   - **Supported versions**: the latest release.
   - **Threat model**, checked against the code:
