@@ -100,7 +100,7 @@ waits and no nudge or pause.
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Add daemon tests in the tests module of `crates/delilah-daemon/src/hooks.rs`, with the T009 setup. Cover:
+- [X] T013 [P] [US2] Add daemon tests in the tests module of `crates/delilah-daemon/src/hooks.rs`, with the T009 setup. Cover:
   - `stop-background-done.json`, `stop-background-empty.json` and `stop-no-background-field.json` on an implement step with unchecked tasks: the first takes the nudge (`nudged == Some(Implement)`, an `autopilot-nudged` event); a second pauses with the "N tasks unchecked" reason;
   - running ×3 then empty: the empty one nudges and does not pause;
   - running and empty posted together (`tokio::join!`): exactly one `autopilot-nudged` event;
