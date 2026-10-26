@@ -28,6 +28,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-21 | 7 | 7A | verified | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
 | WP-22 | 8 | 8A | verified | 1 | 41285a5 | decision #82 |
 | WP-19F | 6 | 6F | verified | 1 | a688a90 | lang.rs/state.rs → English fallback; bare AppleLanguages entries; parseSetting in App |
+| WP-04F | 3 | 3F | verified | 1 | eb3eb40 | fix: Spanish labels in docs (HIGH), app-only quickstart, CLAUDE.md pointers |
 | WP-23 | 8 | 8B | pending | 0 | | |
 | WP-24 | 8 | 8C | pending | 0 | | |
 
