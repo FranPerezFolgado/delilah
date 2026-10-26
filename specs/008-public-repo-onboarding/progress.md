@@ -26,11 +26,11 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-19 | 6 | 6A | done | 1 | d7954db | T041 PASS in preview (headless Playwright, en-US/es-ES, fr→en); native menu = unit tests only; empty defaults output now → English |
 | WP-20 | 6 | 6B | done | 1 | bbc08f3 | decision #81 |
 | WP-21 | 7 | 7A | done | 1 | 8061b28 | gitleaks: 0 findings over all refs; report in ~/.delilah/tasks/LIBRE-15/secret-scan.md |
-| WP-22 | 8 | 8A | verified | 1 | 41285a5 | decision #82 |
+| WP-22 | 8 | 8A | done | 1 | 41285a5 | decision #82 |
 | WP-19F | 6 | 6F | done | 1 | a688a90 | lang.rs/state.rs → English fallback; bare AppleLanguages entries; parseSetting in App |
 | WP-04F | 3 | 3F | done | 1 | eb3eb40 | fix: Spanish labels in docs (HIGH), app-only quickstart, CLAUDE.md pointers |
-| WP-23 | 8 | 8B | verified | 1 | 56ddac6 | all suites, shellcheck, test-install, release tests, greps, lychee pass; secret scan refreshed (657 commits, 0 leaks) |
-| WP-24 | 8 | 8C | pending | 0 | | |
+| WP-23 | 8 | 8B | done | 1 | 56ddac6 | all suites, shellcheck, test-install, release tests, greps, lychee pass; secret scan refreshed (657 commits, 0 leaks) |
+| WP-24 | 8 | 8C | done | 1 | 465edb7 | minor: 1.0.0 → 1.1.0 (new user-facing install script and English fallback, backwards compatible) |
 
 ## Open findings
 
@@ -70,3 +70,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | spec | HIGH | Spanish UI labels left in current docs (Abrir PR, Rama, Restaurar, …) → fixed in eb3eb40 | docs/decisions.md, status.md, architecture.md, usage.md |
 | 6 | implementer WP-19F | LOW | AppState::new defaults to Es under cfg!(test) only (≈800 tests assert Spanish), so production (En) and test defaults differ | crates/delilah-daemon/src/state.rs |
 | 6 | architecture (re-review) | LOW | first_language duplicated between daemon lang.rs and shell daemon.rs (guarded by mirrored tests) | crates/delilah-daemon/src/lang.rs:52 |
+| 8 | orchestrator | LOW | CHANGELOG 1.1.0 lists the orchestration commits (feat(008): WP-xx …) and progress commits; consider rewording or squash-merging | CHANGELOG.md:5 |

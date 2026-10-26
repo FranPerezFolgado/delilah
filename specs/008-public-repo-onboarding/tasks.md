@@ -246,7 +246,7 @@ parallel (different files, no dependency on an unfinished task).
   - every grep and the link check in [quickstart.md](quickstart.md).
 
   Fix whatever fails.
-- [ ] T048 Bump the version last: `scripts/bump-version.sh minor --commit` (1.0.0 → 1.1.0; it regenerates CHANGELOG.md with the 1.1.0 section). Re-check the version on `main` first. Note the level and why in the PR description: minor, for the English fallback and the new release assets; the rest is patch-level.
+- [X] T048 Bump the version last: `scripts/bump-version.sh minor --commit` (1.0.0 → 1.1.0; it regenerates CHANGELOG.md with the 1.1.0 section). Re-check the version on `main` first. Note the level and why in the PR description: minor, for the English fallback and the new release assets; the rest is patch-level.
 
 ---
 
