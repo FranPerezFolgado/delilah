@@ -5,12 +5,12 @@ Facts marked **[verify in X]** are confirmed by the experiment in [quickstart.md
 before the docs are updated (task phase "Verify").
 
 Code facts (from the current tree):
-- Daemon binds loopback only; non-loopback `DELILAH_ADDR` is refused (`crates/delilah-daemon/src/config.rs:14,74`).
+- Daemon binds loopback only (default `127.0.0.1:7420`, `config.rs:6`); non-loopback `DELILAH_ADDR` is refused (`crates/delilah-daemon/src/config.rs:14,74`).
 - Origin guard + CORS allow `tauri://localhost`, `http://tauri.localhost`, `http://localhost:1420`, plus `DELILAH_UI_ORIGIN` (`crates/delilah-daemon/src/api.rs:24-31`).
-- `Host` must be a loopback name (`api.rs:240-283`). A request **without** `Origin` passes (known problem, `docs/status.md:150`).
+- `Host` must be a loopback name (guard `api.rs:244`, check `api.rs:264-267`, `is_loopback_host` `api.rs:274`). A request **without** `Origin` passes (`api.rs:255`; known problem, `docs/status.md:150`).
 - The UI uses no Tauri commands; it finds the daemon via `VITE_DELILAH_URL` (`app/src/api.ts:2,5`).
 - The daemon serves no static files; the UI is served by Vite (dev/preview) or the Tauri bundle.
-- Live channels: events WS (`app/src/live.ts:42`), terminal binary WS (`api.ts:825`), chat live WS (`api.ts:861`), conversation polling with cursor (`api.ts:771`). Reconnect backoff 0.5→5 s (`live.ts:60`).
+- Live channels: events WS (`app/src/live.ts:42`), terminal binary WS (URL `api.ts:825`, opened at `TerminalPane.tsx:70`), chat live WS (`api.ts:861`), conversation polling with cursor (`api.ts:771`). Reconnect backoff 0.5→5 s (`live.ts:58-61`); on every (re)connect the client refetches all topics (`live.ts:46-49`).
 - Layout breakpoints are desktop-only (`app/src/useWidth.ts:5-8`: 1300/1200/960 px).
 
 ---
@@ -28,6 +28,9 @@ Code facts (from the current tree):
 | Push to iPhone | Yes, as a home-screen web app (iOS 16.4+) | Only with the self-signed CA trusted; fragile | Yes | Native push needs a paid account → **no** | Yes |
 | Setup | ~10 min: install on both, enable HTTPS certs, one `serve` command | Bind change + CA on phone | Domain on Cloudflare, `cloudflared`, Access policy | Xcode/AltServer, refresh weekly | Like A |
 | Mac asleep/off | Unreachable; page shows offline | Same | Same, Cloudflare shows 502 | Same | Same |
+| iPhone / Android | iPhone: PWA from Safari, push from iOS 16.4+. Android: same web app, push works in Chrome too (not the target, FR-010) | iPhone: Safari tab only, no push without the CA | Same as A | iPhone: needs AltStore/SideStore + a Mac or PC. Android: APK, no store needed | Same as A |
+| Live updates / background | WebSocket live while the screen is on; drops on lock, refetch on return (R2). Push covers the gap | Same | Same | Same, plus native background limits | Same as A |
+| Terminal | Same web terminal; read-only on the phone (R2) | Same | Same | Same | Same |
 | Work Mac | Only if IT allows Tailscale | Usually blocked by Wi-Fi isolation / policy | Outbound tunnel; IT policy almost certainly forbids exposing a work machine publicly | — | Ruled out |
 
 **Decision**: **A. Tailscale `serve`** for the personal Mac. The phone uses the same web UI as
@@ -36,6 +39,27 @@ a home-screen web app (PWA).
 **Rationale**: it is the only option that is free, needs no developer account, gives valid
 HTTPS (and therefore push and installability on iOS), and is never on the public internet.
 It is the sketch already in `docs/vision.md`.
+
+**Trade-offs accepted**: Tailscale on Mac and phone, a coordination service run by a third party
+(metadata only), no access when the Mac sleeps, push only from the Home Screen app, a
+read-mostly terminal on the phone, and no use on the work Mac unless IT agrees (R5).
+
+**Against the vision sketch** (`docs/vision.md`, "Mobile, through Tailscale"):
+
+| Sketch item | Outcome |
+|---|---|
+| `tailscale serve`, never the public internet | **Kept** |
+| PWA served by the daemon | **Kept** (R4; preferred, not required) |
+| Token pairing | **Kept**, made concrete: QR + one-time code, per-device revocable token (R3) |
+| Web push | **Kept**, content-free payloads, Home Screen app only (R2, R3.8) |
+| Scope: see, answer, approve | **Kept** |
+| Destructive actions on the desktop | **Kept**, and enforced server-side (R3.6) |
+| Launching work (it was an open question) | **Changed**: allowed from the phone, with an explicit confirm |
+| Which Mac / IT allows Tailscale | **Changed**: conditional; personal Mac first, work Mac only if IT approves (R5) |
+| Bandeja-first scope, QR pairing (were "proposed") | **Decided** yes |
+| iPhone or Android | **Decided**: iPhone first (FR-010) |
+
+Dropped: nothing.
 
 **Alternatives ruled out**:
 - **B (LAN):** no valid HTTPS without a home-made CA on the phone; does not work outside home;
@@ -64,8 +88,8 @@ web app manifest and a service worker), with a phone layout.
   **[verify in Q4]** on the user's iOS version.
 - The terminal (xterm.js) works in iOS Safari but is hard to use without a hardware
   keyboard. Phone scope: **conversation view first**, terminal read-only.
-- One viewer resizing the PTY would affect the Mac (`TerminalPane.tsx:24-30`: the focused pane
-  sets the size, and a phone would be focused). The phone must **never resize**. That needs a
+- One viewer resizing the PTY would affect the Mac (`TerminalPane.tsx:24-30,80,84`: the focused pane
+  sends `resize` and claims the size, and a phone would be focused). The phone must **never resize**. That needs a
   read-only client mode, and the daemon must also **drop `resize` messages from device tokens**
   so the rule does not depend on the UI.
 
@@ -74,7 +98,7 @@ web app manifest and a service worker), with a phone layout.
 **Key finding**: behind `tailscale serve`, every request reaches the daemon **from 127.0.0.1**,
 so the loopback bind no longer says who is calling. Today the daemon still fails closed:
 `serve` is expected to forward the original `Host` (`<mac>.<tailnet>.ts.net`) **[verify in Q2]**,
-and the `Host` guard (`api.rs:262`) refuses it. The danger is created by **relaxing `Host`/`Origin`
+and the `Host` guard (`api.rs:264-267`) refuses it. The danger is created by **relaxing `Host`/`Origin`
 to accept the tailnet name**. From then on, a tailnet caller with no `Origin` (curl, a script)
 would get the whole API with no authentication.
 **Rule:** the daemon accepts the tailnet `Host` only while token enforcement for it is active.
@@ -97,15 +121,22 @@ worsen.
    chat), not per-handler code.
 2. **Pairing by QR from the desktop**: the desktop shows a one-time code (QR + 6 digits)
    valid for 5 minutes. The phone opens the URL and redeems the code once for a token.
+   The redeem route is the only remote route that needs no token; it is rate limited and a
+   code dies after 5 wrong tries. The token lives in the web app's own storage and travels
+   in headers, never in a cookie, so a page on another site cannot ride it. Several devices
+   (phone and tablet) can be paired at once, each with its own token and its own revoke.
 3. **Origin**: add the tailnet origin (configured, not hardcoded) to the allow-list **only
    together with** a token requirement for that origin. Local app origins keep working
-   without a token. Mobile off means no extra origin and unchanged behaviour (SC-006).
+   without a token. Mobile off means no extra origin, no extra `Host`, no pairing route and unchanged behaviour:
+   the exposure is today's (SC-006).
 4. **Host**: accept the configured `*.ts.net` name only when mobile is on.
 5. **Tailscale identity headers** (`Tailscale-User-Login`, set by `serve`, [docs](https://tailscale.com/kb/1312/serve)):
    use them as defence in depth only (log and match the owner), never as the only check. Any
    local process can reach 127.0.0.1 directly and forge them.
 6. **Launch actions** (create task, start an agent, move a phase) are allowed from the phone
-   with an explicit confirm step. Destructive actions are not offered on the phone at all
+   with an explicit confirm step that shows, as text, what will run (project, prompt). There is
+   no re-authentication in v1: the paired token plus the confirm is the bar. Passkey step-up
+   is a later option (see Alternatives). Destructive actions are not offered on the phone at all
    (delete task/idea, discard workspace, force push, edit settings or hooks). The API refuses
    them for device tokens: the rule is enforced server-side, not just hidden in the UI. Each
    route gets a **permission class** (read / answer / launch / destructive-config) declared
@@ -118,8 +149,10 @@ worsen.
    token-authenticated fetch.
 9. **Stolen phone**: until revoked, it can see, answer and launch. Mitigations: iOS passcode,
    token revocation from the desktop (immediate), removing the device from the tailnet
-   (Tailscale admin), token lifetime 30 days sliding. Destructive actions are impossible from it.
-10. **Tailscale ACL**: recommend restricting port 443 of the Mac to the user's own devices.
+   (Tailscale admin), token lifetime 30 days sliding (an unused device expires by itself). Destructive actions are impossible from it.
+10. **Reachability**: the daemon is never on the public internet; there is no exception. Only
+    the user's tailnet devices reach the `serve` port, and only after a token check.
+11. **Tailscale ACL**: recommend restricting port 443 of the Mac to the user's own devices.
 
 **Alternatives**: Tailscale identity headers alone (forgeable locally); a single shared
 password (no per-device revocation); mTLS client certs (iOS install friction); WebAuthn/passkeys
@@ -140,9 +173,16 @@ separate static server (one more process).
 **Decision**: mobile access is **personal-Mac-first**. On the work Mac it is available **only
 if IT approves Tailscale**. There is no fallback that keeps work content off third parties and
 off the public internet: B is blocked by Wi-Fi isolation and policy, C exposes publicly.
-Data leaving the work Mac with A: Tailscale coordination metadata (device names, IPs, keys).
-Traffic is end-to-end encrypted. Push payloads go through Apple's push service, which is why
-they carry no content (R3.8).
+Data leaving the work Mac, per option:
+
+| Option | Leaves the Mac | Through |
+|---|---|---|
+| A. Tailscale `serve` | Coordination metadata (device names, IPs, keys). Content is end-to-end encrypted and usually direct; if no direct path exists it goes through a Tailscale relay (DERP), still encrypted | Tailscale |
+| B. LAN | Nothing leaves the network | None (Wi-Fi devices can see it) |
+| C. Cloudflare | All traffic, decrypted at Cloudflare | Cloudflare |
+| D. Wrapper | Same as its transport | A/B/C |
+| E. Funnel | All traffic, public | Tailscale relays |
+| Push (A, step 4) | Payload with no content ("LIBRE-16 needs approval") | Apple push service |
 **Action for the user**: ask IT before installing anything on the work Mac. The analysis does
 not depend on the answer.
 
@@ -157,18 +197,29 @@ not depend on the answer.
 | New task (idea / ticket), start agent, move phase | ✅ with confirm | |
 | Delete, discard workspace, force operations, settings, hooks, project config | | ✅ |
 | Editor, diff review, spec editing | | ✅ (later, maybe read-only) |
+| Pair / revoke devices | | ✅ (pairing is started on the desktop) |
+
+Phone vs desktop-only is enforced by the permission class of each route (R3.6), not by the UI.
 
 ## R7. Roadmap (FR-005): independently shippable steps
 
-Each step: mobile off means today's behaviour.
+Each step: mobile off means today's behaviour (last column).
 
-| # | Step | Size | Depends |
-|---|---|---|---|
-| 1 | **Device auth**: devices table, pairing code, one shared token layer for HTTP and the three sockets, permission class per route (destructive/config refused to device tokens), terminal `resize` dropped for device tokens, desktop "Devices" panel with revoke | M–L | — |
-| 2 | **Mobile switch**: config for the tailnet name; one switch turns on the tailnet `Host`/`Origin` **and** token enforcement for them (never one without the other); UI served same-origin by the daemon, or mounted by `serve` (R4); setup guide for `tailscale serve` | S | 1 |
-| 3 | **Phone layout**: breakpoint < 600 px; Bandeja + task list + conversation as stacked screens; terminal read-only, no resize | M | 2 (usable in a browser earlier) |
-| 4 | **Installable app + push**: manifest, service worker, Web Push (VAPID keys in Keychain), push on inbox events, content-free payloads | M | 2 |
-| 5 | **Launch from phone**: create task / start / move phase screens with a confirm step (the server side already exists from step 1) | S | 1, 3 |
+| # | Step | Size | Depends | Mobile off |
+|---|---|---|---|---|
+| 1 | **Device auth**: devices table, pairing code, one shared token layer for HTTP and the three sockets, permission class per route (destructive/config refused to device tokens), terminal `resize` dropped for device tokens, desktop "Devices" panel with revoke | M–L | — | No tailnet `Host`/`Origin` accepted, no pairing route; local callers need no token. Same as today. The devices table is additive |
+| 2 | **Mobile switch**: config for the tailnet name; one switch turns on the tailnet `Host`/`Origin` **and** token enforcement for them (never one without the other); UI served same-origin by the daemon, or mounted by `serve` (R4); setup guide for `tailscale serve` | S | 1 | Switch off: nothing is served or accepted beyond today's |
+| 3 | **Phone layout**: breakpoint < 600 px; Bandeja + task list + conversation as stacked screens; terminal read-only, no resize | M | 2 (usable in a browser earlier) | Desktop widths are untouched (breakpoints only add a narrower one, `useWidth.ts:5-8`) |
+| 4 | **Installable app + push**: manifest, service worker, Web Push (VAPID keys in Keychain), push on inbox events, content-free payloads | M | 2 | No device subscribed, so nothing is sent; the desktop keeps its native notifications |
+| 5 | **Launch from phone**: create task / start / move phase screens with a confirm step (the server side already exists from step 1) | S | 1, 3 | Screens are reachable only from a paired device |
+
+**Input for /feature (step 1)**: "Add per-device authentication to the Delilah daemon so remote
+callers can be told apart and cut off: pairing by one-time QR code from the desktop, hashed
+revocable bearer tokens (HTTP and the events, terminal and chat sockets, through one shared
+layer), a permission class per route (read / answer / launch / destructive-config; the last is
+refused to devices), `resize` dropped from devices on the terminal socket, and a Devices panel
+on the desktop (name, paired at, last seen, revoke). Local callers (CLI, hooks, desktop app)
+and behaviour with mobile off do not change. Context: research.md R3 and R7."
 
 Step 1 makes remote callers safe. It does not change local ones: `docs/status.md:150` stays a
 separate problem.
@@ -180,3 +231,62 @@ iPhone. This confirms R2/R3 facts **without changing shipped code**: launch the 
 `DELILAH_UI_ORIGIN` set to the tailnet origin, and serve the Vite UI and the preview API
 through `serve`. Steps in [quickstart.md](quickstart.md). If the user prefers not to install
 Tailscale yet, the facts stay marked "from docs, unverified".
+
+## R9. Journeys on the phone (US3–US6)
+
+For the recommended option (A: `tailscale serve` + Home Screen web app, steps 1–5 built).
+Times are estimates for SC-004 and are confirmed when built; claims that need the phone are
+marked.
+
+**US3. Answer a waiting agent** (target < 30 s).
+
+| # | Action | Taps | Seconds |
+|---|---|---|---|
+| 1 | Push arrives: "LIBRE-16 needs approval" (no content, R3.8) | 0 | — |
+| 2 | Tap it; Face ID unlocks; the Home Screen app opens on that inbox item (deep link) **[verify in step 4]** | 1 | 3–5 |
+| 3 | App reconnects and refetches (R2); the card shows the permission, question or plan | 0 | 2–5 **[verify in Q3]** |
+| 4 | Read the ask | 0 | 5–10 |
+| 5 | Tap *Allow once* / *Deny*, or pick an option | 1 | 1–2 |
+
+Total about 12–22 s, **2 taps** for a permission or a choice. A free-text answer adds the
+field tap, typing and *Send*: 3 taps, 25–40 s (over the target; the target is for the tap
+answer). A plan approval is 2 taps plus reading time.
+Works: a Home Screen app on iOS 16.4+ gets the push. Limits: no push in a Safari tab; no push
+or answer when the Mac is asleep or off (the phone shows offline); the card loads only after
+unlock.
+
+**US4. Catch up after the lock** (10 min locked).
+iOS suspends the page and the sockets drop (R2). On return `live.ts` reconnects (backoff up
+to 5 s) and its `onopen` refetches every topic (`live.ts:46-49`), so no message is lost by
+design. Estimate: 1–6 s to a current view **[verify in Q3]**. Step 3 should also reconnect at
+once on `visibilitychange` instead of waiting for the backoff timer **[verify in Q3]**.
+Switching Wi-Fi to mobile data drops the socket the same way and follows the same path; it
+also needs the Tailscale VPN to stay connected **[verify in Q1]**. Limit: while locked there is
+no live view, only push.
+
+**US5. Follow a session** (conversation vs terminal).
+
+| View | On the phone | Taps from the Home Screen app |
+|---|---|---|
+| Conversation | Works: cursor polling plus the chat live socket (`api.ts:771,861`), plain text, a stacked phone layout (step 3). Replying is possible | 3 (Tasks, task, session) |
+| Terminal | Read-only: no typing, no resize. Hard to use without a keyboard (R2) **[verify in Q5]** | 4 (adds the terminal tab) |
+
+The Mac's view is not affected only if the phone never sends `resize`. Today it would, since
+the focused pane claims the size (`TerminalPane.tsx:80,84`) **[verify in Q6]**. So the phone
+uses the read-only mode and the daemon drops `resize` from device tokens (step 1).
+
+**US6. Launch work** (task + agent).
+
+| # | Action | Taps |
+|---|---|---|
+| 1 | Open the app, tap New task | 2 |
+| 2 | Write the idea (or pick a ticket) | 1 + typing |
+| 3 | Tap Create | 1 |
+| 4 | Tap Start agent; a confirm sheet shows the project and the prompt as text | 1 |
+| 5 | Tap Confirm | 1 |
+
+About 6 taps and 30–60 s, mostly typing. While the agent starts the phone shows the task and
+its agent status from the events socket; it gets a push the first time the agent waits.
+Limits: no re-authentication in v1 (R3.6); creating from a ticket needs the Mac's own ticket
+setup to work; moving a phase is 1 tap plus the confirm. Delete, discard and settings are not
+offered (R6).
