@@ -114,7 +114,7 @@ function Desk({ seat, scale, look, label, name, onOpen }: DeskProps) {
           {character}
         </div>
       )}
-      {glow && <span className="fl-halo" data-glow={glow} style={{ ...at({ x: d.x + 3, y: d.y + 1 }, scale), width: px(8, scale), height: px(4, scale), boxShadow: `0 0 ${scale * 3}px ${scale}px ${glow}66` }} aria-hidden="true" />}
+      {glow && <span className="fl-halo" data-glow={glow} style={{ ...at({ x: d.x + 3, y: d.y + 1 }, scale), width: px(8, scale), height: px(4, scale), "--glow": `0 0 ${scale * 3}px ${scale}px ${glow}66` } as CSSProperties} aria-hidden="true" />}
       <PixelSprite sprite="desk" scale={scale} className="fl-abs" recolour={glow ? { j: glow, J: glow } : undefined} style={at(d, scale)} />
       <PixelSprite sprite="desk_cup" scale={scale} className="fl-abs" style={at({ x: d.x + desk.marks.cup[0], y: d.y + desk.marks.cup[1] }, scale)} />
       {tier > 0 && (
@@ -192,7 +192,7 @@ export function Floor({ floor, online, onOpenSession, headerExtra, className }: 
         <span className="fl-legend">
           {KINDS.map((k) => (
             <span key={k.kind} className="fl-key">
-              <i style={{ background: KIND_COLOURS[k.kind] }} />
+              <i style={{ "--tint": KIND_COLOURS[k.kind] } as CSSProperties} />
               {t(k.name)}
             </span>
           ))}

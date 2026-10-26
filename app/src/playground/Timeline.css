@@ -21,3 +21,4 @@
 .timeline-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeline-target { color: var(--tx3); }
 .timeline-row.failed .timeline-fail { color: var(--err); font-weight: 600; }
+.timeline-swatch { background: var(--tint); }

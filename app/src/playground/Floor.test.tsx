@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Action } from "../api";
 import { KIND_COLOURS } from "./art/kinds";
+import { setLanguage } from "../i18n";
 import { Floor } from "./Floor";
 import type { DeskSeat, FloorModel } from "./useOffice";
+
+beforeAll(() => setLanguage("es"));
 
 afterEach(() => {
   cleanup();

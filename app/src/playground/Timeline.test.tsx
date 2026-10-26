@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { TimelineRow } from "./flowModel";
+import { setLanguage } from "../i18n";
 import { Timeline } from "./Timeline";
+
+beforeAll(() => setLanguage("es"));
 
 const row = (seq: number, over: Partial<TimelineRow> = {}): TimelineRow => ({
   seq,

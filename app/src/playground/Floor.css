@@ -17,7 +17,7 @@
 .fl-char { position: absolute; padding: 0; border: 0; background: none; border-radius: 7px; }
 button.fl-char { cursor: pointer; }
 button.fl-char:hover, button.fl-char:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.fl-halo { position: absolute; pointer-events: none; }
+.fl-halo { position: absolute; pointer-events: none; box-shadow: var(--glow); }
 .fl-tower { position: absolute; display: block; }
 .fl-bar { position: absolute; width: 3px; background: var(--wait); }
 .fl-bubble { position: absolute; font-size: 12px; font-weight: 600; line-height: 14px; padding: 0 4px; border-radius: 7px; background: var(--panel); border: 1px solid var(--bd2); pointer-events: none; }
@@ -33,3 +33,4 @@ button.fl-char:hover, button.fl-char:focus-visible { outline: 2px solid var(--fo
 .fl--stale .fl-leaver { animation-play-state: paused; }
 .pg-paused .fl-leaver { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .fl-leaver { animation: none; transition: none !important; } }
+.fl-key i { background: var(--tint); }

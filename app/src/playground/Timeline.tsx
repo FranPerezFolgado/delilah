@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
 import type { ActionKind } from "../api";
 import { t } from "../i18n";
 import { KIND_COLOURS } from "./art/kinds";
@@ -92,7 +92,7 @@ export function Timeline({ rows, selected, onSelect, className }: Props) {
           >
             <span className="timeline-time">{time}</span>
             <span className="timeline-kind">
-              <span className="timeline-swatch" style={{ background: r.kind ? KIND_COLOURS[r.kind] : KIND_COLOURS.other }} />
+              <span className="timeline-swatch" style={{ "--tint": r.kind ? KIND_COLOURS[r.kind] : KIND_COLOURS.other } as CSSProperties} />
               {kind}
             </span>
             <span className="timeline-detail">
