@@ -84,10 +84,10 @@ fn launches_with_the_real_arguments_and_clean_env() {
     start(&env, "E2E-1", "Echo task", "[fake:echo]");
     let rec = wait_record(&env, "E2E-1", "the echo record", |r| r.scenario == "echo");
 
-    let ws = env.root.join("delilah/workspaces/E2E-1");
+    // The checkout is the default workspace (decision 57): the agent runs in the repo itself.
     assert_eq!(
         std::fs::canonicalize(&rec.cwd).unwrap(),
-        std::fs::canonicalize(&ws).unwrap()
+        std::fs::canonicalize(&env.fixtures.repo).unwrap()
     );
     assert_eq!(rec.mode, "new");
     let sid = wait_state(&env, "E2E-1", "waiting");

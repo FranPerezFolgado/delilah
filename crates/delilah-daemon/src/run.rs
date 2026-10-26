@@ -2047,7 +2047,11 @@ mod tests {
         assert_eq!(e.reason.as_deref(), Some("checkout-dirty"));
         assert!(e.message.contains("uncommitted changes"), "{}", e.message);
         assert!(
-            app.store.get_task(&TaskKey::new("PROJ-9")).await.unwrap().is_none(),
+            app.store
+                .get_task(&TaskKey::new("PROJ-9"))
+                .await
+                .unwrap()
+                .is_none(),
             "a refused start leaves no task behind"
         );
     }

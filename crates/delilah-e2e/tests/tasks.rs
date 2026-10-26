@@ -72,7 +72,9 @@ fn worktree_mode_creates_the_workspace_on_the_feature_branch() {
         env.cli()
             .run(&["new", "E2E-20", "--title", "Worktree", "--project", &repo]);
     assert!(status.success(), "new: {out}\n{err}");
-    let (status, out, err) = env.cli().run(&["run", "E2E-20", "--project", &repo]);
+    let (status, out, err) = env
+        .cli()
+        .run(&["run", "E2E-20", "--project", &repo, "--worktree"]);
     assert!(status.success(), "run: {out}\n{err}");
     wait_working(&env, "E2E-20");
 
@@ -108,7 +110,7 @@ fn a_parent_task_initialises_only_the_chosen_submodule() {
     let (_, parent) = env.register_fixtures();
     env.api().start_run(json!({
         "key": "E2E-30", "title": "Parent", "project": parent, "prompt": "Parent",
-        "submodules": ["svc-orders"],
+        "submodules": ["svc-orders"], "in_checkout": false,
     }));
     wait_working(&env, "E2E-30");
     let w = ws(&env, "E2E-30");
