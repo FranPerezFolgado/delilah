@@ -16,3 +16,14 @@ describe("HandoffActions", () => {
     expect(queryAllByRole("button")).toHaveLength(0);
   });
 });
+
+describe("HandoffActions offer", () => {
+  beforeEach(() => setLanguage("en"));
+  afterEach(cleanup);
+
+  it("uses the kit buttons: primary to implement, secondary to stay", () => {
+    const { getByText } = render(<HandoffActions task="A-1" handoff={{ to: "review", stage: "offered" }} />);
+    expect(getByText("Implement in a new session").closest("button")!.className).toContain("b-p");
+    expect(getByText("Keep going here").closest("button")!.className).toContain("b-s");
+  });
+});

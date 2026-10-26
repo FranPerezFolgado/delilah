@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { api, type SpecPhase, type SpecProgress, type Task } from "../api";
+import { api, type SpecProgress, type Task } from "../api";
 import { on } from "../live";
-import { COLUMNS, columnOf, type Column } from "../phases";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
+import { Button, Dialog } from "./ui";
+import "./TaskView.css";
 import { t } from "../i18n";
 
 /** A task's SpecKit spec: the phase it is in, its documents and the tasks.md checklist. */
@@ -36,30 +37,42 @@ export function SpecPanel({ task }: { task: Task }) {
   // No workspace (yet, or archived): nothing to follow.
   if (!spec) return null;
 
-  const column = columnOf(task, spec);
-  const at = COLUMNS.findIndex((c) => c.id === column);
   const running = task.status.type === "running";
   const showFile = (name: string) =>
     api
       .specFile(task.key, name)
       .then((text) => setOpen({ name, text }))
       .catch(() => {});
+  const others = spec.files.filter((f) => f !== "tasks.md");
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Stepper at={at} onPick={task.status.type === "done" ? undefined : (phase) => api.setPhase(task.key, phase).catch(() => {})} />
+    <section className="tv-section">
+      <div className="tv-title">
+        <h3>{t("Tareas de la spec")}</h3>
+        {spec.total > 0 && (
+          <>
+            <span className="tv-bar" role="progressbar" aria-valuemin={0} aria-valuemax={spec.total} aria-valuenow={spec.done}>
+              <span className={spec.done === spec.total ? "tv-bar-ok" : "tv-bar-run"} ref={(el) => {
+                if (el) el.style.width = `${(spec.done / spec.total) * 100}%`;
+              }} />
+            </span>
+            <span className="mono tv-count">{spec.done}/{spec.total}</span>
+          </>
+        )}
+        {spec.files.includes("tasks.md") && (
+          <Button variant="ghost" size={28} onClick={() => showFile("tasks.md")}>
+            {t("Abrir tasks.md")}
+          </Button>
+        )}
+      </div>
 
       {!spec.dir ? (
-        <div className="muted" style={{ fontSize: 12 }}>
-          {t("Aún no hay carpeta de spec en specs/. Aparece aquí en cuanto el agente la cree.")}
-        </div>
+        <div className="tv-empty">{t("Aún no hay carpeta de spec en specs/. Aparece aquí en cuanto el agente la cree.")}</div>
       ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span className="mono muted selectable" style={{ fontSize: 11.5, marginRight: 4 }}>
-            {spec.dir}/
-          </span>
-          {spec.files.map((f) => (
-            <button key={f} className="btn btn-ghost chip" onClick={() => showFile(f)}>
+        <div className="tv-files">
+          <span className="mono selectable tv-dir">{spec.dir}/</span>
+          {others.map((f) => (
+            <button key={f} type="button" className="tv-chip mono" onClick={() => showFile(f)}>
               {f}
             </button>
           ))}
@@ -67,79 +80,41 @@ export function SpecPanel({ task }: { task: Task }) {
       )}
 
       {spec.total > 0 && (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <span className="sec">{t("Subtareas")}</span>
-            <span className="bar" style={{ width: 120 }}>
-              <span style={{ width: `${(spec.done / spec.total) * 100}%`, background: spec.done === spec.total ? "var(--ok)" : "var(--run)" }} />
-            </span>
-            <span className="mono muted" style={{ fontSize: 11.5 }}>
-              {spec.done}/{spec.total}
-            </span>
-          </div>
-          <div className="card checklist">
-            {spec.groups.map((g, gi) => {
-              const done = g.items.filter((i) => i.done).length;
-              return (
-                <details key={gi} open={done < g.items.length}>
-                  <summary>
-                    <span className="trunc" style={{ flex: 1 }}>{g.title || t("Tareas")}</span>
-                    <span className="mono muted">
-                      {done}/{g.items.length}
-                    </span>
-                  </summary>
-                  {g.items.map((item, ii) => {
-                    const current = !item.done && `${item.id ? item.id + " " : ""}${item.text}` === spec.current;
-                    return (
-                      <div key={ii} className={`check ${item.done ? "is-done" : ""} ${current ? "is-current" : ""}`}>
-                        <span className={`box ${item.done ? "c-done" : "c-mut"}`}>{item.done ? <Icon name="done" /> : <span className="empty-box" />}</span>
-                        {item.id && <span className="mono muted">{item.id}</span>}
-                        <span className="selectable" style={{ flex: 1 }}>{item.text}</span>
-                        {item.parallel && <span className="tag" title={t("Se puede hacer en paralelo")}>P</span>}
-                        {item.story && <span className="tag">{item.story}</span>}
-                        {current && <span className="tag tag-run">{running ? t("en curso") : t("siguiente")}</span>}
-                      </div>
-                    );
-                  })}
-                </details>
-              );
-            })}
-          </div>
+        <div className="tv-card tv-checklist">
+          {spec.groups.map((g, gi) => {
+            const done = g.items.filter((i) => i.done).length;
+            return (
+              <details key={gi} open={done < g.items.length}>
+                <summary>
+                  <span className="tv-grow tv-trunc">{g.title || t("Tareas")}</span>
+                  <span className="mono tv-count">
+                    {done}/{g.items.length}
+                  </span>
+                </summary>
+                {g.items.map((item, ii) => {
+                  const now = !item.done && `${item.id ? item.id + " " : ""}${item.text}` === spec.current;
+                  return (
+                    <div key={ii} className={`tv-check ${item.done ? "is-done" : ""} ${now ? "is-current" : ""}`}>
+                      <span className={item.done ? "c-done" : "c-mut"}>{item.done ? <Icon name="done" /> : <span className="tv-box" />}</span>
+                      {item.id && <span className="mono tv-count">{item.id}</span>}
+                      <span className="selectable tv-grow">{item.text}</span>
+                      {item.parallel && <span className="tv-tag" title={t("Se puede hacer en paralelo")}>P</span>}
+                      {item.story && <span className="tv-tag">{item.story}</span>}
+                      {now && <span className="tv-tag tv-tag-run">{running ? t("en curso") : t("siguiente")}</span>}
+                    </div>
+                  );
+                })}
+              </details>
+            );
+          })}
         </div>
       )}
 
       {open && (
-        <div className="backdrop" onClick={() => setOpen(null)}>
-          <div className="dialog doc" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={open.name}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h2 className="mono" style={{ flex: 1 }}>{open.name}</h2>
-              <button className="btn btn-ghost" onClick={() => setOpen(null)} aria-label="Cerrar">
-                <Icon name="close" />
-              </button>
-            </div>
-            <Markdown text={open.text} />
-          </div>
-        </div>
+        <Dialog title={open.name} onClose={() => setOpen(null)} size={{ w: 760, h: 560 }}>
+          <Markdown text={open.text} />
+        </Dialog>
       )}
-    </div>
-  );
-}
-
-/** The phases; clicking one moves the task there (not "Hecha": that is marking it done). */
-function Stepper({ at, onPick }: { at: number; onPick?: (phase: SpecPhase) => void }) {
-  return (
-    <ol className="stepper">
-      {COLUMNS.map((c: { id: Column; label: string }, i) => {
-        const pick = onPick && c.id !== "done" && i !== at ? () => onPick(c.id as SpecPhase) : undefined;
-        return (
-          <li key={c.id} className={(i < at ? "past" : i === at ? "now" : "") + (pick ? " pickable" : "")}>
-            <button type="button" disabled={!pick} onClick={pick} title={pick ? t("Mover a {phase}", { phase: t(c.label) }) : undefined}>
-              <span className="dot-step">{i < at ? <Icon name="done" /> : i + 1}</span>
-              {t(c.label)}
-            </button>
-          </li>
-        );
-      })}
-    </ol>
+    </section>
   );
 }

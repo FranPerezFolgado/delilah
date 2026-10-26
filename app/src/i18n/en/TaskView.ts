@@ -1,0 +1,23 @@
+export const EN: Record<string, string> = {
+  "sin proyecto": "no project",
+  flujo: "workflow",
+  "Marcar como hecha": "Mark as done",
+  "Más": "More",
+  "Abrir cambios": "Open changes",
+  "Archivar workspace": "Archive workspace",
+  "Eliminar tarea…": "Delete task…",
+  "Eliminar tarea": "Delete task",
+  "«{title}» se elimina para siempre: se detiene su agente y se libera su workspace (la rama se queda).":
+    "«{title}» is deleted for good: its agent is stopped and its workspace released (the branch stays).",
+  "{key} marcada como hecha": "{key} marked as done",
+  Deshacer: "Undo",
+  "No se pudo deshacer: el workspace ya no está.": "Could not undo: the workspace is gone.",
+  Reanudar: "Resume",
+  Sesiones: "Sessions",
+  "Tareas de la spec": "Spec tasks",
+  "Abrir tasks.md": "Open tasks.md",
+  Historial: "History",
+  "Sin eventos todavía.": "No events yet.",
+  "Implementar en sesión nueva": "Implement in a new session",
+  "Seguir aquí": "Keep going here",
+};
