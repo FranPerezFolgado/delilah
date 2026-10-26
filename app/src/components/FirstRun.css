@@ -1,8 +1,8 @@
-.firstrun { max-width: 480px; margin: 48px auto; padding: 20px; border: 1px solid var(--bd2); border-radius: 12px; background: var(--bg2); }
+.firstrun { max-width: 480px; margin: 48px auto; padding: 20px; border: 1px solid var(--bd2); border-radius: 10px; background: var(--bg2); }
 .firstrun h2 { margin: 0 0 12px; font-size: 15px; color: var(--tx); }
 .firstrun ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.firstrun li { display: flex; align-items: center; gap: 10px; min-height: 36px; color: var(--tx); font-size: 13px; }
-.firstrun .fr-mark { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--bd2); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--tx2); flex: none; }
+.firstrun li { display: flex; align-items: center; gap: 10px; min-height: 36px; color: var(--tx); font-size: 13.5px; }
+.firstrun .fr-mark { width: 18px; height: 18px; border-radius: 7px; border: 1px solid var(--bd2); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: var(--tx2); flex: none; }
 .firstrun li.done .fr-mark { background: var(--ok); border-color: var(--ok); color: var(--bg); }
 .firstrun li.done .fr-label { color: var(--tx2); }
 .firstrun .fr-label { flex: 1; }

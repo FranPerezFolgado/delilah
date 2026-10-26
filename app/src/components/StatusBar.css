@@ -3,7 +3,7 @@
 .sb-ok { background: var(--ok); }
 .sb-down { background: var(--err); }
 .sb-counts { display: flex; gap: 4px; }
-.sb-btn { height: 20px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--tx2); font: inherit; }
+.sb-btn { height: 20px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--tx2); font: inherit; }
 .sb-btn:hover { background: var(--hov); color: var(--tx); }
 .sb-err { color: var(--err-tx); }
 .sb-usage { margin-left: auto; display: flex; gap: 14px; }

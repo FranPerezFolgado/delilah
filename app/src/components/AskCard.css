@@ -6,23 +6,23 @@
 .ac-next .i { transform: rotate(180deg); }
 .ac-q { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .ac-q legend { display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 8px; font-weight: 600; color: var(--tx-strong); }
-.ac-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 5px; background: var(--neutral-bg); color: var(--neutral-tx); font-size: 11.5px; font-weight: 500; }
+.ac-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 7px; background: var(--neutral-bg); color: var(--neutral-tx); font-size: 12px; font-weight: 500; }
 .ac-muted { color: var(--tx2); font-size: 12px; font-weight: 400; }
 .ac-options { display: flex; flex-direction: column; gap: 6px; }
-.ac-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 12px; text-align: left; color: var(--tx); background: var(--panel); border: 1px solid var(--bd2); border-radius: 8px; }
+.ac-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 12px; text-align: left; color: var(--tx); background: var(--panel); border: 1px solid var(--bd2); border-radius: 7px; }
 .ac-opt:hover:not(:disabled) { border-color: var(--tx3); background: var(--hov); }
 .ac-opt.on { border-color: var(--tx3); background: var(--sel); }
 .ac-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ac-num { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 5px; border: 1px solid var(--bd2); color: var(--tx2); font: 500 11.5px var(--mono, ui-monospace, monospace); }
-.ac-preview { padding: 10px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--bd); max-height: 220px; overflow: auto; }
+.ac-num { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 7px; border: 1px solid var(--bd2); color: var(--tx2); font: 500 11.5px var(--mono, ui-monospace, monospace); }
+.ac-preview { padding: 10px 12px; border-radius: 7px; background: var(--panel); border: 1px solid var(--bd); max-height: 220px; overflow: auto; }
 .ac-reply { height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--bd2); background: var(--panel); color: var(--tx); font-size: 13.5px; }
 .ac-reply:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .ac-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ac-key { opacity: 0.7; font-size: 12px; }
 .ac-what { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
-.ac-cmd { margin: 0; align-self: stretch; padding: 10px 12px; border-radius: 8px; background: var(--term-bg); color: var(--term-tx); border: 1px solid var(--bd); font: 12.5px/1.5 var(--mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; }
+.ac-cmd { margin: 0; align-self: stretch; padding: 10px 12px; border-radius: 7px; background: var(--term-bg); color: var(--term-tx); border: 1px solid var(--bd); font: 12.5px/1.5 var(--mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; }
 .ac-rule { color: var(--tx2); font: 12px var(--mono, ui-monospace, monospace); word-break: break-all; }
-.ac-ended { margin: 0; color: var(--tx2); font-size: 12.5px; }
+.ac-ended { margin: 0; color: var(--tx2); font-size: 13.5px; }
 .ac-text { margin: 0; line-height: 1.5; }
 .ac-hint { margin: 0; color: var(--tx3); font-size: 12px; }
-.ac-err { color: var(--err-tx); background: var(--err-bg); border-radius: 7px; padding: 8px 10px; font-size: 12.5px; }
+.ac-err { color: var(--err-tx); background: var(--err-bg); border-radius: 7px; padding: 8px 10px; font-size: 13.5px; }
