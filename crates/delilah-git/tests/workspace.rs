@@ -108,6 +108,42 @@ fn archives_a_workspace_with_no_new_work() {
 }
 
 #[test]
+fn archives_a_workspace_that_a_failed_removal_left_half_gone() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let ws = create_workspace(&repo, &fx.repo_spec(), &opts(), dl())
+        .unwrap()
+        .0;
+    // What a `git worktree remove` stopped halfway leaves: git has forgotten the
+    // worktree, some files are still there.
+    let admin = git(&ws.path, &["rev-parse", "--absolute-git-dir"]);
+    std::fs::remove_dir_all(admin).unwrap();
+    std::fs::remove_dir_all(ws.path.join("src")).unwrap();
+    std::fs::create_dir_all(ws.path.join("target/debug")).unwrap();
+    std::fs::write(ws.path.join("target/debug/big.bin"), "build output").unwrap();
+
+    archive_workspace(&repo, &ws, false, &opts()).unwrap();
+    assert!(!ws.path.exists());
+    assert_eq!(git(&repo, &["worktree", "list"]).lines().count(), 1);
+    assert!(!git(&repo, &["branch", "--list", "feature/SIGNAL-12"]).is_empty());
+}
+
+#[test]
+fn removing_a_workspace_never_deletes_the_project_checkout() {
+    let fx = Fixture::new();
+    let repo = fx.repo();
+    let ws = Workspace {
+        path: repo.clone(),
+        branch: "main".into(),
+        kind: ProjectKind::Repo,
+        submodules: vec![],
+    };
+
+    assert!(remove_workspace(&repo, &ws, &opts()).is_err());
+    assert!(repo.join("src/service.sh").exists());
+}
+
+#[test]
 fn refuses_to_archive_while_work_would_be_lost() {
     let fx = Fixture::new();
     let ws = create_workspace(&fx.parent(), &fx.spec(&["svc-payments"]), &opts(), dl())

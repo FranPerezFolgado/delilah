@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use delilah_core::TaskKey;
@@ -31,7 +31,9 @@ const TAIL_LINES: usize = 20;
 /// How long the command has to print its URL.
 pub const URL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Between asking a process group to end and forcing it.
-const GRACE: Duration = Duration::from_secs(5);
+pub(crate) const GRACE: Duration = Duration::from_secs(5);
+/// How long after a stop `stop_and_wait` still waits for that group.
+const RECENT_STOP: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -76,6 +78,9 @@ pub struct Previews {
     events: Events,
     url_timeout: Duration,
     next_id: AtomicU64,
+    /// Groups `stop` asked to end, with when, for `stop_and_wait`: a caller that is
+    /// about to delete the workspace waits for them even when someone else stopped it.
+    ending: Mutex<HashMap<String, (u32, Instant)>>,
     /// Bumped on every change of any preview, for `wait_settled`.
     changes: tokio::sync::watch::Sender<u64>,
     /// Waiter tasks alive, to check none lingers.
@@ -91,6 +96,7 @@ impl Previews {
     pub fn with_timeout(events: Events, url_timeout: Duration) -> Self {
         Self {
             entries: Mutex::default(),
+            ending: Mutex::default(),
             events,
             url_timeout,
             next_id: AtomicU64::new(1),
@@ -365,12 +371,30 @@ impl Previews {
             // A failed one may still have a group (its timeout is ending it).
             if let Some(pid) = e.group {
                 signal_group(pid, "TERM");
+                self.lock_ending()
+                    .insert(task.to_string(), (pid, Instant::now()));
             }
             if let Some(cancel) = e.cancel.take() {
                 let _ = cancel.send(());
             }
             self.changed();
         }
+    }
+
+    /// [`Previews::stop`], then waits until nothing of its process group is left (a
+    /// dev server or build still writing in the workspace), forcing it after the grace
+    /// period. Also waits for a stop someone else did shortly before (a task that ended).
+    pub async fn stop_and_wait(&self, task: &str) {
+        self.stop(task);
+        let ending = self.lock_ending().remove(task);
+        // An old one has surely ended, and its pid may be someone else's by now.
+        if let Some((pid, since)) = ending.filter(|(_, since)| since.elapsed() < RECENT_STOP) {
+            end_group(pid, GRACE.saturating_sub(since.elapsed())).await;
+        }
+    }
+
+    fn lock_ending(&self) -> std::sync::MutexGuard<'_, HashMap<String, (u32, Instant)>> {
+        self.ending.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// For the daemon's shutdown: nothing is left running behind it.
@@ -474,18 +498,43 @@ async fn read_capped_line<R: AsyncBufRead + Unpin>(
 }
 
 /// Signals a whole process group (no `unsafe` here, so through `kill(1)`).
-fn signal_group(pid: u32, signal: &str) {
+fn signal_group(pid: u32, signal: &str) -> bool {
     if pid == 0 {
-        return;
+        return false;
     }
-    let _ = std::process::Command::new("/bin/kill")
+    std::process::Command::new("/bin/kill")
         .arg(format!("-{signal}"))
         .arg("--")
         .arg(format!("-{pid}"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Ends the process group `pid` and waits until none of it is left: SIGTERM, then
+/// SIGKILL if something is still there after `grace`. Best effort, bounded.
+pub(crate) async fn end_group(pid: u32, grace: Duration) {
+    let alive = || signal_group(pid, "0");
+    if !alive() {
+        return;
+    }
+    signal_group(pid, "TERM");
+    let gone = |limit: Duration| async move {
+        let until = Instant::now() + limit;
+        while alive() {
+            if Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        true
+    };
+    if !gone(grace).await {
+        signal_group(pid, "KILL");
+        gone(Duration::from_secs(2)).await;
+    }
 }
 
 /// The first `http://` or `https://` URL in a line (`https?://[^\s)'"]+`).
@@ -623,6 +672,45 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
         panic!("the grandchild is still alive");
+    }
+
+    #[tokio::test]
+    async fn stop_and_wait_returns_once_the_group_is_gone_even_if_it_ignores_term() {
+        let p = previews(60_000);
+        let pid_file = dir().join(format!("delilah-preview-{}", uuid::Uuid::new_v4()));
+        let cmd = format!(
+            "sh -c 'trap \"\" TERM; sleep 30' & echo $! > {}; echo http://x; wait",
+            pid_file.display()
+        );
+        p.start("T-1", &dir(), &cmd).unwrap();
+        until(&p, "T-1", running).await;
+        let pid = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .to_string();
+        let _ = std::fs::remove_file(&pid_file);
+        // Stopped first by someone else (a task that ended): the wait still covers it.
+        p.stop("T-1");
+        p.stop_and_wait("T-1").await;
+        // Gone, or a zombie not reaped yet (it writes nothing any more).
+        let stat = std::process::Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", &pid])
+            .output()
+            .unwrap()
+            .stdout;
+        let stat = String::from_utf8_lossy(&stat);
+        assert!(
+            stat.trim().is_empty() || stat.contains('Z'),
+            "the grandchild is still alive: {stat}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_and_wait_without_a_preview_returns_at_once() {
+        let p = previews(60_000);
+        tokio::time::timeout(Duration::from_millis(500), p.stop_and_wait("T-1"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
