@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { PlaygroundWindow } from "./playground/PlaygroundWindow";
 import "./styles.css";
 
 // A native app has no "Inspect Element": no context menu, except where it is useful
@@ -15,6 +16,6 @@ window.addEventListener("contextmenu", (e) => {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    {location.hash === "#playground" ? <PlaygroundWindow /> : <App />}
   </StrictMode>,
 );

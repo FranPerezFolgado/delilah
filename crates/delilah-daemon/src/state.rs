@@ -56,8 +56,9 @@ pub struct AppState {
     pub lang: crate::lang::Current,
     /// Tasks the inbox suggests moving to review (see `phases.rs`).
     pub review_hints: Arc<Mutex<std::collections::HashSet<String>>>,
-    /// Last size seen of each live session's transcript (see `transcript_watch.rs`).
-    pub(crate) transcript_seen: Arc<Mutex<HashMap<String, u64>>>,
+    /// Per live session: the transcript size seen and its token meter (see `transcript_watch.rs`).
+    pub(crate) transcript_progress:
+        Arc<Mutex<HashMap<String, crate::transcript_watch::TranscriptProgress>>>,
     /// The saving-mode handoffs' lock and in-flight starts (see `handoff.rs`).
     pub handoffs: Arc<crate::handoff::HandoffCoordinator>,
     /// One lock per task for the branch and name triggers (see `branching.rs`).
@@ -80,6 +81,11 @@ pub struct AppState {
     pub(crate) pr_nudges: Arc<Mutex<HashSet<String>>>,
     /// The previews the daemon runs, one per task at most (see `preview.rs`).
     pub(crate) previews: Arc<crate::preview::Previews>,
+    /// Recent activity events per Claude session (see `activity_log.rs`).
+    pub activity_log: Arc<Mutex<crate::activity_log::ActivityLog>>,
+    /// Set when the log grew without the `Activity` view changing; the watcher's tick
+    /// announces it.
+    pub activity_dirty: Arc<AtomicBool>,
 }
 
 /// Unit tests must never touch the real Keychain; `DELILAH_SECRETS=memory` also asks for it.
@@ -117,7 +123,7 @@ impl AppState {
             // English unless told otherwise (decision 81).
             lang: crate::lang::Current::default(),
             review_hints: Arc::default(),
-            transcript_seen: Arc::default(),
+            transcript_progress: Arc::default(),
             handoffs: Arc::default(),
             branching: Arc::default(),
             finishing: Arc::default(),
@@ -129,6 +135,10 @@ impl AppState {
             pr_backoff: Arc::default(),
             pr_checking: Arc::default(),
             pr_nudges: Arc::default(),
+            activity_log: Arc::new(Mutex::new(
+                crate::activity_log::ActivityLog::new(Utc::now()),
+            )),
+            activity_dirty: Arc::default(),
         }
     }
 

@@ -7,6 +7,8 @@ export const OVERVIEW = "\0overview";
 export const CHANGES = "\0changes";
 /** The task's pull requests. Not saved apart from being the active tab. */
 export const PRS = "\0prs";
+/** The owner's office floor (Oficina). Not saved apart from being the active tab. */
+export const OFFICE = "\0office";
 /** A terminal tab: this prefix and the daemon's session id. */
 export const SESSION = "\0session:";
 export const sessionTab = (id: string) => SESSION + id;
@@ -30,7 +32,7 @@ export interface TaskSession {
   /** Open files, in tab order. */
   tabs: Tab[];
   changesOpen: boolean;
-  /** OVERVIEW, CHANGES, a session tab or a file path. */
+  /** OVERVIEW, OFFICE, CHANGES, a session tab or a file path. */
   active: string;
   states: Map<string, EditorState>;
   /** Folders open in the tree. */

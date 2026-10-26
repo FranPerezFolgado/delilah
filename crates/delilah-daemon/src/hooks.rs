@@ -9,6 +9,7 @@ use delilah_agents::limits;
 use delilah_core::{Event, TaskKey};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::atomic::Ordering;
 use tokio::io::AsyncWriteExt;
 
 use crate::events::Topic;
@@ -53,7 +54,12 @@ async fn apply_hook(app: AppState, q: HookQuery, hook: Value) -> StatusCode {
     }
     // Kept raw: the exact payloads (e.g. a real StopFailure) are what the next
     // iteration of the adapter is built from.
-    if let Err(e) = append_raw(&app, &q.task, &hook).await {
+    // PreToolUse is not logged: it fires for every tool with the full tool_input
+    // (e.g. Write contents), which PostToolUse already carries; logging both
+    // would double the file.
+    if hook["hook_event_name"].as_str() != Some("PreToolUse")
+        && let Err(e) = append_raw(&app, &q.task, &hook).await
+    {
         tracing::warn!(task = %q.task, "cannot log hook: {e}");
     }
     let signal = claude::classify(&hook);
@@ -154,6 +160,22 @@ pub(crate) async fn apply_signal(
     if let Some(id) = &session_id {
         crate::conversation::on_hook(&app, id, live.as_ref(), signal, &hook).await;
         note_activity(&app, id, signal, &hook).await;
+    }
+
+    if let Some(live) = &live
+        && let Some(event) = claude::classify_activity(&hook)
+    {
+        // Snapshot before locking the log: never call `sessions` under its lock.
+        let live_ids: std::collections::HashSet<String> =
+            app.sessions.all().into_iter().map(|l| l.id).collect();
+        app.activity_log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(&live.id, &live.task, Utc::now(), event.clone(), &live_ids);
+        // A change is announced at once; an append that changes nothing waits for the tick.
+        if !live.update_activity(event) {
+            app.activity_dirty.store(true, Ordering::Relaxed);
+        }
     }
 
     // What the session now waits on you for, for the inbox.
@@ -551,6 +573,202 @@ mod tests {
         )
         .await;
         assert!(inbox(&state).await.is_empty());
+    }
+
+    /// A live Claude session `s-1` of PROJ-1 (a quiet process behind it).
+    fn live_claude(state: &AppState) {
+        let mut cmd = portable_pty::CommandBuilder::new("bash");
+        cmd.args(["--noprofile", "--norc", "-c", "sleep 5"]);
+        let pty = delilah_agents::pty::PtySession::spawn(cmd, 80, 24, None).unwrap();
+        state.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+    }
+
+    async fn activity(state: &AppState) -> Value {
+        let req = Request::get("/api/v1/activity")
+            .body(Body::empty())
+            .unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn history(state: &AppState, query: &str) -> (StatusCode, Value) {
+        let req = Request::get(format!("/api/v1/activity/history{query}"))
+            .body(Body::empty())
+            .unwrap();
+        let res = crate::api::router(state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        let code = res.status();
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (code, serde_json::from_slice(&body).unwrap_or(Value::Null))
+    }
+
+    const LIVE: &str = "/hooks/claude?task=PROJ-1&session=s-1";
+
+    fn pre_edit() -> Value {
+        json!({ "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_use_id": "t1",
+                "tool_input": { "file_path": "/repo/src/main.rs" } })
+    }
+
+    #[tokio::test]
+    async fn pre_tool_use_is_not_logged_but_post_tool_use_is() {
+        let state = running_task().await;
+        live_claude(&state);
+        let log = state.config.task_dir("PROJ-1").join("hooks.jsonl");
+        let lines = || std::fs::read_to_string(&log).map_or(0, |s| s.lines().count());
+        post(&state, LIVE, pre_edit()).await;
+        assert_eq!(lines(), 0);
+        post(
+            &state,
+            LIVE,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
+        )
+        .await;
+        assert_eq!(lines(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_shows_in_the_activity_until_it_ends() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        let a = activity(&state).await;
+        assert_eq!(a["sessions"]["s-1"]["action"]["kind"], "edit");
+        assert_eq!(a["sessions"]["s-1"]["action"]["target"], "main.rs");
+
+        post(
+            &state,
+            LIVE,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Edit", "tool_use_id": "t1" }),
+        )
+        .await;
+        assert_eq!(
+            activity(&state).await,
+            json!({ "sessions": {}, "tokens": {} })
+        );
+    }
+
+    #[tokio::test]
+    async fn waiting_clears_the_activity() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        assert!(activity(&state).await["sessions"]["s-1"].is_object());
+        post(&state, LIVE, json!({ "hook_event_name": "Notification" })).await;
+        assert_eq!(
+            activity(&state).await,
+            json!({ "sessions": {}, "tokens": {} })
+        );
+        assert_eq!(
+            state.sessions.get("s-1").unwrap().state(),
+            LiveState::Waiting
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tool_call_of_an_unknown_session_is_ignored() {
+        let state = running_task().await;
+        let code = post(&state, "/hooks/claude?task=PROJ-1&session=nope", pre_edit()).await;
+        assert_eq!(code, StatusCode::NO_CONTENT);
+        assert_eq!(
+            activity(&state).await,
+            json!({ "sessions": {}, "tokens": {} })
+        );
+    }
+
+    #[tokio::test]
+    async fn activity_is_announced_on_change_only() {
+        let state = running_task().await;
+        live_claude(&state);
+        let mut rx = state.events.subscribe();
+        let drain = |rx: &mut tokio::sync::broadcast::Receiver<Topic>| {
+            let mut topics = vec![];
+            while let Ok(t) = rx.try_recv() {
+                topics.push(t);
+            }
+            topics
+        };
+        post(&state, LIVE, pre_edit()).await;
+        assert!(drain(&mut rx).contains(&Topic::Activity));
+        // The end of a call that is not the current one changes nothing.
+        let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
+        post(&state, LIVE, other).await;
+        assert!(!drain(&mut rx).contains(&Topic::Activity));
+    }
+
+    #[tokio::test]
+    async fn a_no_change_append_is_recorded_and_marks_the_log_dirty() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        state.activity_dirty.store(false, Ordering::Relaxed);
+        // The end of a call that is not the current one changes nothing, but is logged.
+        let other = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "other" });
+        post(&state, LIVE, other).await;
+        assert!(state.activity_dirty.load(Ordering::Relaxed));
+        let (code, h) = history(&state, "?owner=PROJ-1").await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(h["sessions"][0]["entries"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn history_returns_entries_after_a_seq_and_keeps_ended_sessions() {
+        let state = running_task().await;
+        live_claude(&state);
+        post(&state, LIVE, pre_edit()).await;
+        let (_, h) = history(&state, "?owner=PROJ-1").await;
+        assert!(h["started_at"].is_string());
+        assert_eq!(h["sessions"][0]["session"], "s-1");
+        assert_eq!(h["sessions"][0]["live"], true);
+        assert_eq!(h["sessions"][0]["entries"][0]["type"], "tool_started");
+        let seq = h["sessions"][0]["entries"][0]["seq"].as_u64().unwrap();
+
+        let end = json!({ "hook_event_name": "PostToolUse", "tool_use_id": "t1" });
+        post(&state, LIVE, end).await;
+        let (_, h) = history(&state, &format!("?owner=PROJ-1&after={seq}")).await;
+        let entries = h["sessions"][0]["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["type"], "tool_ended");
+
+        let last = entries[0]["seq"].as_u64().unwrap();
+        let live = state.sessions.get("s-1").unwrap();
+        state.sessions.remove_if_same("s-1", &live.runtime);
+        let (_, h) = history(&state, &format!("?owner=PROJ-1&after={last}")).await;
+        assert_eq!(h["sessions"][0]["live"], false);
+        assert!(h["sessions"][0]["entries"].as_array().unwrap().is_empty());
+
+        let (code, h) = history(&state, "?owner=NOPE-1").await;
+        assert_eq!(
+            (code, h["sessions"].as_array().map(Vec::len)),
+            (StatusCode::OK, Some(0))
+        );
+    }
+
+    #[tokio::test]
+    async fn history_rejects_a_missing_owner_and_a_bad_after() {
+        let state = running_task().await;
+        assert_eq!(history(&state, "").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(history(&state, "?owner=").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            history(&state, "?owner=PROJ-1&after=x").await.0,
+            StatusCode::BAD_REQUEST
+        );
     }
 
     fn session_record(id: &str, primary: bool) -> crate::store_sessions::SessionRecord {

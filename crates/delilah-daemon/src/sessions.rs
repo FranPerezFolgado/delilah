@@ -5,10 +5,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use delilah_agents::claude::ActivityEvent;
 use delilah_agents::runtime::Runtime;
 use serde::Serialize;
 use tokio::sync::{Notify, watch};
 
+use crate::activity::Activity;
 use crate::events::{Events, Topic};
 use crate::progress::Progress;
 use crate::store_sessions::SessionKind;
@@ -68,6 +70,9 @@ pub struct Live {
     progress_tx: Arc<watch::Sender<Progress>>,
     /// Held while a message is decided on and typed, so two never interleave.
     pub typing: Arc<tokio::sync::Mutex<()>>,
+    /// What its agents are doing right now (Claude sessions only), for `/activity`.
+    /// Not to be confused with [`Live::activity`], a conversation's one-line status.
+    pub activity: Arc<Mutex<Activity>>,
     events: Events,
 }
 
@@ -86,6 +91,30 @@ impl Live {
         if changed {
             self.events.emit(Topic::Sessions);
         }
+        // Waiting on the user or paused: nothing is running any more.
+        if matches!(state, LiveState::Waiting | LiveState::Paused) {
+            let cleared = self
+                .activity
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+            if cleared {
+                self.events.emit(Topic::Activity);
+            }
+        }
+    }
+
+    /// Applies one activity event, announcing it when the view changed; says whether it did.
+    pub fn update_activity(&self, event: ActivityEvent) -> bool {
+        let changed = self
+            .activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .apply(event);
+        if changed {
+            self.events.emit(Topic::Activity);
+        }
+        changed
     }
 
     pub fn is_idea(&self) -> bool {
@@ -263,6 +292,7 @@ impl Sessions {
             progress: Arc::default(),
             progress_tx: Arc::new(watch::channel(Progress::default()).0),
             typing: Arc::default(),
+            activity: Arc::default(),
             events: self.events.clone(),
         };
         self.live
@@ -300,6 +330,19 @@ impl Sessions {
             .values()
             .filter(|l| l.task == task)
             .cloned()
+            .collect()
+    }
+
+    /// Every live session with its activity, for those that have any.
+    pub fn busy(&self) -> Vec<(String, Activity)> {
+        let lives: Vec<Live> = self.live.lock().unwrap().values().cloned().collect();
+        lives
+            .into_iter()
+            .filter(|l| l.kind == SessionKind::Claude)
+            .filter_map(|l| {
+                let a = l.activity.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                (!a.is_empty()).then_some((l.id, a))
+            })
             .collect()
     }
 

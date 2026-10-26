@@ -4,8 +4,9 @@ import { InboxView } from "./components/InboxView";
 import { LogsView } from "./components/LogsView";
 import { connect, on, type Topic } from "./live";
 import { useDesktopAlerts } from "./alerts";
+import { onOpenTask } from "./platform";
 import { parseSetting, setLanguage, t, type LangSetting } from "./i18n";
-import { CHANGES, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
+import { CHANGES, OFFICE, persist, sessionFor, sessionOf, sessionTab } from "./editor/session";
 import { ideaToOpen } from "./components/ideas";
 import { BoardView } from "./components/BoardView";
 import { JiraView } from "./components/JiraView";
@@ -31,6 +32,8 @@ import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "
 // The task screen carries CodeMirror, most of the bundle: load it when a task opens.
 const TaskScreen = lazy(() => import("./components/TaskScreen").then((m) => ({ default: m.TaskScreen })));
 
+const PlaygroundView = lazy(() => import("./playground/PlaygroundView").then((m) => ({ default: m.PlaygroundView })));
+
 const RAIL_KEY = "delilah:rail";
 const loadRail = (): boolean | null => {
   try {
@@ -48,6 +51,7 @@ const VIEW_LABEL: Record<View, () => string> = {
   inbox: () => t("Bandeja"),
   jira: () => "Jira",
   projects: () => t("Proyectos"),
+  playground: () => t("Playground"),
   settings: () => t("Ajustes"),
   tasks: () => t("Tareas"),
 };
@@ -143,6 +147,7 @@ export function App() {
       prs: () => api.prSummaries().then(setPrs),
       // The open conversation view subscribes to this topic itself.
       conversations: () => Promise.resolve(),
+      activity: async () => {}, // nothing here reads it; the playground views fetch it themselves
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
@@ -214,10 +219,10 @@ export function App() {
   };
 
   /** Shows a task's screen, on one of its session tabs if given. */
-  const openTask = (key: string, sessionId?: string) => {
-    if (sessionId) {
+  const openTask = (key: string, target?: string) => {
+    if (target) {
       const ts = sessionFor(key);
-      ts.active = sessionTab(sessionId);
+      ts.active = target === OFFICE ? OFFICE : sessionTab(target);
       persist(key, ts);
     }
     setSelected(key);
@@ -289,6 +294,8 @@ export function App() {
         return setView("jira");
       case "view-projects":
         return setView("projects");
+      case "view-playground":
+        return setView("playground");
     }
   };
 
@@ -306,6 +313,15 @@ export function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  // A click in the playground window opens that task's terminal here.
+  const openTaskRef = useRef(openTask);
+  openTaskRef.current = openTask;
+  useEffect(() => {
+    const off = onOpenTask(({ task, session }) => openTaskRef.current(task, session));
+    off.catch(() => {});
+    return () => void off.then((f) => f()).catch(() => {});
   }, []);
 
   const task = tasks.find((t) => t.key === selected);
@@ -390,6 +406,11 @@ export function App() {
           <GlobalNotices tasks={tasks} usage={usage} current={view === "tasks" ? selected : null} onOpenTask={openTask} onOpenInbox={() => setView("inbox")} />
           <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
           {view === "inbox" && <InboxView items={inbox} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
+          {view === "playground" && (
+            <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
+              <PlaygroundView onOpenFloor={(owner) => openTask(owner, OFFICE)} online={!offline} />
+            </Suspense>
+          )}
           {view === "board" && (
             <BoardView
               tasks={tasks}
@@ -427,6 +448,7 @@ export function App() {
               <Suspense fallback={<div className="empty">{t("Cargando…")}</div>}>
                 <TaskScreen
                   key={owner}
+                  online={!offline}
                   owner={owner}
                   task={task}
                   spec={specs[owner]}

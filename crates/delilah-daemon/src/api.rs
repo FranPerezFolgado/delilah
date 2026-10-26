@@ -93,6 +93,11 @@ pub fn router(state: AppState) -> Router {
             post(crate::pr_api::dismiss),
         )
         .route("/api/v1/sessions", get(session_api::list_all))
+        .route("/api/v1/activity", get(session_api::activity))
+        .route(
+            "/api/v1/activity/history",
+            get(session_api::activity_history),
+        )
         // PUT answers 400 for a bad name, a value over 64 KiB, or (for `agent-permissions`)
         // anything but the JSON strings "auto" or "default"; the stored value is kept.
         .route(

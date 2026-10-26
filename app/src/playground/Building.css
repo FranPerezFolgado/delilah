@@ -1,0 +1,18 @@
+/* The building: floors stacked as compact rows (six fit in a 900px window). */
+.bld { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--tx); }
+.bld-count { font-size: 12px; color: var(--tx3); }
+.bld-count--on { color: var(--wait-tx); font-weight: 600; }
+.bld-spacer { flex: 1; }
+.bld-empty { margin: auto; color: var(--tx3); }
+.bld-body { gap: 8px; padding: 12px 20px; }
+.bld-floors { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; }
+.bld-floors .fm:last-child { border-bottom: 0; }
+
+/* Connection lost: keep the last picture, dimmed and still, under a banner. */
+.bld-banner { flex: none; padding: 8px 16px; background: var(--err-bg); border-bottom: 1px solid var(--err); color: var(--err-tx); font-size: 12px; font-weight: 600; text-align: center; }
+.bld--stale .bld-body { opacity: .5; }
+.bld--stale *, .bld--paused * { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bld *, .bld *::before, .bld *::after { animation: none !important; transition: none !important; }
+}

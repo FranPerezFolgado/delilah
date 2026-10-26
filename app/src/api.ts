@@ -811,6 +811,13 @@ export const api = {
     post<PullRequest>(`/api/v1/tasks/${key}/prs`, req),
   unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),
+  activity: () =>
+    request<ActivityResponse>("/api/v1/activity").then((a) => ({ ...a, tokens: a.tokens ?? {} })),
+  activityHistory: (owner: string, after?: number) => {
+    const q = new URLSearchParams({ owner });
+    if (after !== undefined) q.set("after", String(after));
+    return request<HistoryResponse>(`/api/v1/activity/history?${q}`);
+  },
   inbox: () => request<InboxItem[]>("/api/v1/inbox"),
   reply: (sessionId: string, text: string) => post<null>(`/api/v1/sessions/${sessionId}/reply`, { text }),
   answerAsk: (id: string, answers: Record<string, string>, launch?: "autopilot") =>
@@ -908,3 +915,62 @@ export const hhmm = (iso: string) => new Date(iso).toLocaleTimeString(locale(), 
 
 /** The live text of a chat-mode session: deltas of the message being written, then `done`. */
 export const liveSocket = (sessionId: string) => new WebSocket(`${DAEMON_URL.replace(/^http/, "ws")}/api/v1/sessions/${sessionId}/live`);
+
+export type ActionKind = "edit" | "read" | "run" | "delegate" | "other";
+
+/** What a session is doing right now (a tool call in flight). */
+export interface Action {
+  id: string;
+  kind: ActionKind;
+  tool: string;
+  target: string | null;
+  background: boolean;
+  /** RFC 3339. */
+  since: string;
+}
+
+/** A helper (sub-agent) of a session; `role` may be empty. */
+export interface Helper {
+  id: string;
+  role: string;
+  action: Action | null;
+  since: string;
+}
+
+export interface Activity {
+  action: Action | null;
+  helpers: Helper[];
+}
+
+/** Who ran a tool or is a helper: the helper's id and role. */
+export interface AgentRef {
+  id: string;
+  role: string;
+}
+
+export interface TokenUsage {
+  total: number;
+  input: number;
+  output: number;
+  cache_write: number;
+  cache_read: number;
+}
+
+/** `tokens` is absent from an older daemon; `api.activity()` defaults it to `{}`. */
+export interface ActivityResponse {
+  sessions: Record<string, Activity>;
+  tokens: Record<string, TokenUsage>;
+}
+
+export type HistoryEntry = { seq: number; at: string } & (
+  | { type: "tool_started"; agent: AgentRef | null; action: Action }
+  | { type: "tool_ended"; agent: AgentRef | null; id: string; failed: boolean }
+  | { type: "helper_started"; agent: AgentRef }
+  | { type: "helper_ended"; id: string }
+  | { type: "turn_over" }
+);
+
+export interface HistoryResponse {
+  started_at: string;
+  sessions: { session: string; live: boolean; dropped: boolean; entries: HistoryEntry[] }[];
+}
