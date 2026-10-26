@@ -10,7 +10,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-03 | 3 | 3A | verified | 1 | 3baf382 |  |
 | WP-04 | 3 | 3A | verified | 1 | 8f3b63a | Codex/Pi reworded as other agents |
 | WP-05 | 3 | 3A | verified | 1 | fd20712 |  |
-| WP-06 | 3 | 3A | implementing | 0 | | |
+| WP-06 | 3 | 3A | verified | 1 | 05691c8 | English seed via tr(); seed poll flaky once |
 | WP-09 | 3 | 3A | verified | 1 | — | done by orchestrator via gh (account FranPerezFolgado checked) |
 | WP-07 | 3 | 3B | pending | 0 | | |
 | WP-08 | 3 | 3C | pending | 0 | | |
