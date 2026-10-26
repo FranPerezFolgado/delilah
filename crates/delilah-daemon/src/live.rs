@@ -54,9 +54,19 @@ pub async fn session_live(
 }
 
 async fn relay(
+    socket: WebSocket,
+    events: broadcast::Receiver<StreamEvent>,
+    progress: watch::Receiver<Progress>,
+) {
+    relay_with(socket, events, progress, || {}).await
+}
+
+/// `relay`, calling `on_turn` once per loop turn (a seam for tests).
+async fn relay_with(
     mut socket: WebSocket,
     mut events: broadcast::Receiver<StreamEvent>,
     mut progress: watch::Receiver<Progress>,
+    mut on_turn: impl FnMut(),
 ) {
     // The current state goes first, so a client that connects mid-turn is up to date.
     let first = json!({ "progress": &*progress.borrow_and_update() });
@@ -70,11 +80,15 @@ async fn relay(
     let mut last_sent = Instant::now();
     // A change that came inside the window: the latest value goes out when it ends.
     let mut due: Option<Instant> = None;
+    // False once the sender is gone: polling `changed()` again would return at once.
+    let mut progress_open = true;
     loop {
+        on_turn();
         tokio::select! {
-            changed = progress.changed() => {
+            changed = progress.changed(), if progress_open => {
                 if changed.is_err() {
-                    // The session is gone; the stream branch ends the relay.
+                    // The sender is gone; the stream branch ends the relay.
+                    progress_open = false;
                     due = None;
                     continue;
                 }
@@ -142,6 +156,7 @@ mod tests {
 
     use crate::config::Config;
     use crate::state::AppState;
+    use delilah_agents::stream::StreamEvent;
     use crate::store::Store;
     use crate::store_sessions::SessionKind;
 
@@ -359,5 +374,51 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("404"), "{err}");
+    }
+
+    /// A dropped progress sender must not turn the relay into a busy loop, and the
+    /// text keeps flowing.
+    #[tokio::test]
+    async fn relay_does_not_spin_when_progress_sender_is_dropped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let turns = Arc::new(AtomicUsize::new(0));
+        let (tx, _) = tokio::sync::broadcast::channel::<StreamEvent>(16);
+        let (ptx, prx) = tokio::sync::watch::channel(crate::progress::Progress::default());
+        drop(ptx);
+        let (events, counter) = (tx.subscribe(), turns.clone());
+        let slot = Arc::new(std::sync::Mutex::new(Some((events, prx))));
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(move |ws: axum::extract::WebSocketUpgrade| async move {
+                let (events, prx) = slot.lock().unwrap().take().unwrap();
+                ws.on_upgrade(move |socket| async move {
+                    super::relay_with(socket, events, prx, move || {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                    })
+                    .await
+                })
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/"))
+            .await
+            .unwrap();
+        let first = next_json(&mut ws).await;
+        assert!(first.get("progress").is_some());
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        tx.send(StreamEvent::TextDelta {
+            message: "m1".into(),
+            text: "hi".into(),
+        })
+        .unwrap();
+        let got = next_json(&mut ws).await;
+        assert_eq!(got["text"], "hi");
+        let n = turns.load(Ordering::SeqCst);
+        assert!(n < 20, "relay spun: {n} loop turns");
     }
 }
