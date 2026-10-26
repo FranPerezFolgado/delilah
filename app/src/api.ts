@@ -65,6 +65,8 @@ export interface Task {
   saving_mode: boolean;
   /** Autopilot: null when off. */
   autopilot?: Autopilot | null;
+  /** CI autofix: a red PR check is forwarded to the agent to fix. Absent from an older daemon. */
+  ci_autofix?: boolean;
   /** How the task's agent is shown: the chat view or its terminal. */
   view?: TaskView;
   /** Experimental: the agent runs headless (stream-json) with no terminal. */
@@ -98,6 +100,9 @@ export interface SharedEntry {
   mode: SharedMode | null;
 }
 
+/** A project's CI autofix default: never, for autopilot tasks only, or for every task. */
+export type CiAutofixMode = "off" | "autopilot" | "always";
+
 export interface ProjectSettings {
   /** null: not chosen, so the checkout. */
   workspace: WorkspaceMode | null;
@@ -106,6 +111,8 @@ export interface ProjectSettings {
   shared: SharedEntry[];
   setup: string | null;
   submodules: { always: string[]; never: string[] };
+  /** Absent (older daemon) reads as "autopilot". */
+  ci_autofix?: CiAutofixMode;
 }
 
 /** Body of a 422 from the settings endpoint: one message per invalid field. */
@@ -121,6 +128,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   shared: [],
   setup: null,
   submodules: { always: [], never: [] },
+  ci_autofix: "autopilot",
 };
 
 export interface Project {
@@ -163,6 +171,8 @@ export interface NewBacklogTask {
   saving_mode?: boolean;
   /** Implies saving mode. */
   autopilot?: boolean;
+  /** Absent: the project's default. */
+  ci_autofix?: boolean;
   view?: TaskView;
   /** Experimental chat mode: no terminal. */
   chat_mode?: boolean;
@@ -178,6 +188,8 @@ export interface BacklogChange {
   saving_mode?: boolean;
   /** Implies saving mode. */
   autopilot?: boolean;
+  /** Absent: the project's default. */
+  ci_autofix?: boolean;
   view?: TaskView;
 }
 
@@ -196,6 +208,8 @@ export interface RunRequest {
   saving_mode?: boolean;
   /** Implies saving mode. */
   autopilot?: boolean;
+  /** Absent: the project's default. */
+  ci_autofix?: boolean;
   view?: TaskView;
   /** Experimental chat mode: no terminal. */
   chat_mode?: boolean;
@@ -555,6 +569,15 @@ export interface PrSnapshot {
   /** What the repository allows; [] when unknown. */
   merge_methods: MergeMethod[];
 }
+/** Where CI autofix stands on one PR. */
+export interface PrAutofix {
+  state: "watching" | "fixing" | "stopped";
+  attempts: number;
+  limit: number;
+  sha: string | null;
+  sent_at: string | null;
+  reason: null | "limit" | "no-push" | "no-session";
+}
 export interface PullRequest {
   id: number;
   repo: string;
@@ -563,6 +586,8 @@ export interface PullRequest {
   number: number;
   url: string;
   linked_by: "detected" | "opened" | "pasted";
+  /** What CI autofix did on this PR; null/absent when it never acted. */
+  autofix?: PrAutofix | null;
   checked_at: string | null;
   error: string | null;
   snapshot: PrSnapshot | null;
@@ -729,6 +754,8 @@ export const api = {
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
   /** Moves the task between chat mode and terminal; its sessions resume in the new runtime. */
   setRuntime: (key: string, mode: "chat" | "terminal") => post<null>(`/api/v1/tasks/${key}/runtime`, { mode }),
+  setAutofix: (key: string, action: "on" | "off" | "retry", repo?: string) =>
+    post<Task>(`/api/v1/tasks/${key}/autofix`, repo === undefined ? { action } : { action, repo }),
   setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),

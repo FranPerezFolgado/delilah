@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type MergeMethod, type PrCheck, type PullRequest, type TaskPrs } from "../api";
+import { api, ApiError, type MergeMethod, type PrAutofix, type PrCheck, type PullRequest, type Task, type TaskPrs } from "../api";
 import { on } from "../live";
 import { openExternal } from "../platform";
 import { PR_CI, REVIEWS } from "./PrBadge";
 import { t } from "../i18n";
 import { relativeTime } from "../time";
+import { AutofixControl } from "./AutofixControl";
 import { OpenPrDialog } from "./OpenPrDialog";
 import { Button, ConfirmDialog, PrChip, pushToast } from "./ui";
 import "./PrView.css";
@@ -68,14 +69,26 @@ const CANNOT: Record<string, string> = {
   "no-workspace": "La tarea no tiene workspace",
 };
 
+// Why autofix stopped on a PR.
+const STOP_REASON: Record<string, string> = {
+  limit: "alcanzó el límite de intentos",
+  "no-push": "el agente no subió ningún cambio",
+  "no-session": "no hay sesión del agente",
+};
+
 const OUTCOME_CLASS = { pending: "c-wait", success: "c-done", failure: "c-err", neutral: "c-mut" } as const;
 
 /** The PR tab: the task's PRs with their checks and review, and the means to link one by URL. */
-export function PrView({ owner, onOpenTerminal }: { owner: string; onOpenTerminal?: () => void }) {
+export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: string; task?: Task | null; onTaskChanged?: () => void; onOpenTerminal?: () => void }) {
   const [data, setData] = useState<TaskPrs | null>(null);
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The task's own switch: the answer to our last change until the task prop catches up.
+  const [override, setOverride] = useState<boolean | null>(null);
+  useEffect(() => setOverride(null), [task?.ci_autofix]);
+  const autofix = task ? (override ?? !!task.ci_autofix) : null;
+  const finished = task?.status.type === "done";
 
   // Whether a PR can be opened: null while unknown, else the reason it can't (or "" if it can).
   const [cannot, setCannot] = useState<string | null>(null);
@@ -140,6 +153,13 @@ export function PrView({ owner, onOpenTerminal }: { owner: string; onOpenTermina
     }
   };
 
+  const setAutofixMode = (f: () => Promise<Task>) =>
+    run(async () => {
+      const updated = await f();
+      setOverride(!!updated.ci_autofix);
+      onTaskChanged?.();
+    });
+
   const link = () => {
     const u = url.trim();
     if (!u) return;
@@ -167,6 +187,14 @@ export function PrView({ owner, onOpenTerminal }: { owner: string; onOpenTermina
           {data?.account ? t("Cuenta: {account}", { account: data.account }) : t("Sin cuenta de gh")}
         </span>
         <span className="pr-grow" />
+        {autofix !== null && (
+          <AutofixControl
+            on={autofix}
+            busy={busy}
+            disabled={finished}
+            onChange={(on) => setAutofixMode(() => api.setAutofix(owner, on ? "on" : "off"))}
+          />
+        )}
         {!none && cannot === "" && (
           <Button variant="primary" size={28} onClick={() => setOpening(true)}>
             {t("Abrir PR")}
@@ -233,6 +261,8 @@ export function PrView({ owner, onOpenTerminal }: { owner: string; onOpenTermina
               pr={pr}
               disabled={busy}
               grouped={grouped}
+              taskAutofix={autofix}
+              onRetryAutofix={() => setAutofixMode(() => api.setAutofix(owner, "retry", pr.repo))}
               onUnlink={() => run(() => api.unlinkPr(owner, pr.id))}
               onMerge={(method) => merge(pr, method)}
             />
@@ -256,16 +286,29 @@ export function PrView({ owner, onOpenTerminal }: { owner: string; onOpenTermina
   );
 }
 
+/** The one-line state of autofix on a PR; no record means "watching" if the task has it on. */
+function autofixText(a: PrAutofix | null | undefined, taskOn: boolean): string {
+  if (!a) return taskOn ? t("Autofix: vigilando") : t("Autofix: apagado");
+  if (a.state === "watching") return t("Autofix: vigilando");
+  if (a.state === "fixing") return t("Autofix: arreglando ({n}/{limit})", { n: a.attempts, limit: a.limit });
+  const why = a.reason ? STOP_REASON[a.reason] : undefined;
+  return why ? `${t("Autofix: parado")} · ${t(why)}` : t("Autofix: parado");
+}
+
 function PrCard({
   pr,
   disabled,
   grouped,
+  taskAutofix,
+  onRetryAutofix,
   onUnlink,
   onMerge,
 }: {
   pr: PullRequest;
   disabled: boolean;
   grouped: boolean;
+  taskAutofix: boolean | null;
+  onRetryAutofix: () => void;
   onUnlink: () => void;
   onMerge: (method: MergeMethod) => void;
 }) {
@@ -312,6 +355,16 @@ function PrCard({
         {s && <span>{t(PR_CI[s.ci])}</span>}
         {pr.checked_at && <span>{t("comprobado {when}", { when: relativeTime(pr.checked_at) })}</span>}
       </div>
+      {(pr.autofix || taskAutofix !== null) && (
+        <div className="muted pr-meta pr-autofix">
+          <span>{autofixText(pr.autofix, !!taskAutofix)}</span>
+          {pr.autofix?.state === "stopped" && (
+            <Button variant="secondary" size={28} icon="retry" disabled={disabled} onClick={onRetryAutofix}>
+              {t("Reintentar autofix")}
+            </Button>
+          )}
+        </div>
+      )}
       {pr.error && <div className="c-err pr-meta">{pr.error}</div>}
       {s && s.checks.length > 0 && (
         <ul className="pr-checks" role="list" aria-label={t("Checks")}>

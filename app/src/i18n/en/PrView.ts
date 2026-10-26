@@ -24,4 +24,12 @@ export const EN: Record<string, string> = {
   "No se pudo saber qué métodos de fusión permite el repositorio": "Couldn't tell which merge methods the repository allows",
   "Hay checks fallando": "Some checks are failing",
   "Los checks aún no han terminado correctamente": "The checks haven't passed yet",
+  "Autofix: vigilando": "Autofix: watching",
+  "Autofix: arreglando ({n}/{limit})": "Autofix: fixing ({n}/{limit})",
+  "Autofix: parado": "Autofix: stopped",
+  "Autofix: apagado": "Autofix: off",
+  "alcanzó el límite de intentos": "reached the attempt limit",
+  "el agente no subió ningún cambio": "the agent pushed no change",
+  "no hay sesión del agente": "no agent session",
+  "Reintentar autofix": "Retry autofix",
 };

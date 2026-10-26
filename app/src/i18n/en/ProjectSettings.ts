@@ -12,4 +12,10 @@ export const EN: Record<string, string> = {
   "Delilah lo ejecuta en el workspace de una tarea para que puedas probarla. Déjalo vacío si el proyecto no tiene preview.": "Delilah runs it in a task's workspace so you can try it. Leave it empty if the project has no preview.",
   "Entran en todo workspace de este proyecto.": "Included in every workspace of this project.",
   "Nunca se clonan ni se incluyen en un workspace.": "Never cloned or included in a workspace.",
+  "Arreglar el CI automáticamente": "Fix CI automatically",
+  "Nunca": "Never",
+  "Solo en tareas con autopiloto": "Only on autopilot tasks",
+  "En todas las tareas": "On every task",
+  "Si falla el CI de una PR, el agente recibe el fallo y lo arregla. Cada tarea puede cambiarlo.":
+    "If a PR's CI fails, the agent gets the failure and fixes it. Each task can change it.",
 };
