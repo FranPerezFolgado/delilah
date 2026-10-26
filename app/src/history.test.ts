@@ -11,6 +11,7 @@ const SLUGS = [
   "skip-setup", "created-from-conversation", "step-started", "autopilot-paused", "autopilot-resumed",
   "autopilot-answered", "autopilot-nudged", "autopilot-finished", "reopened", "runtime-switched",
   "permission-asked", "permission-expired",
+  "autofix-sent", "autofix-fixed", "autofix-failed-again", "autofix-stopped", "autofix-cancelled",
 ];
 
 describe("historyLine", () => {
@@ -21,6 +22,11 @@ describe("historyLine", () => {
       expect(line, type).not.toBe(type);
       expect(line, type).not.toContain(type);
     }
+  });
+
+  it("labels the first autofix attempt", () => {
+    setLanguage("en");
+    expect(historyLine({ type: "autofix-sent", repo: ".", sha: "abc", attempt: 1, checks: ["test"] })).toBe("CI autofix: attempt 1 of 3");
   });
 
   it("never shows the slug of an unknown event", () => {

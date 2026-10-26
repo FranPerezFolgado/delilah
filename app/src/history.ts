@@ -10,6 +10,12 @@ type Ev = EventRecord["event"];
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+const AUTOFIX_STOP: Record<string, string> = {
+  limit: "alcanzó el límite de intentos",
+  "no-push": "el agente no subió ningún cambio",
+  "no-session": "no hay sesión del agente",
+};
+
 function expired(outcome: string): string {
   if (outcome === "terminal") return t("se respondió en la terminal");
   if (outcome === "withdrawn") return t("se retiró");
@@ -50,6 +56,15 @@ export function historyLine(ev: Ev): string {
       return str(ev.mode) === "chat" || str(ev.mode) === "stream" ? t("La sesión pasó a chat") : t("La sesión pasó a la terminal");
     case "permission-asked": return t("Claude pidió permiso para {tool}: {summary}", { tool: str(ev.tool), summary: short(str(ev.summary)) });
     case "permission-expired": return t("Caducó el permiso de {tool} · {outcome}", { tool: str(ev.tool), outcome: expired(str(ev.outcome)) });
+    case "autofix-sent":
+      return t("Autofix de CI: intento {n} de {limit}", { n: Number(ev.attempt) || 1, limit: Number(ev.limit) || 3 });
+    case "autofix-fixed": return t("Autofix de CI: CI arreglado");
+    case "autofix-failed-again": return t("Autofix de CI: el CI sigue fallando");
+    case "autofix-stopped": {
+      const why = AUTOFIX_STOP[str(ev.reason)];
+      return why ? t("Autofix de CI parado: {reason}", { reason: t(why) }) : t("Autofix de CI parado");
+    }
+    case "autofix-cancelled": return t("Autofix de CI cancelado");
     default: return t("Pasó algo en la tarea");
   }
 }

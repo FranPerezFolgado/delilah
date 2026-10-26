@@ -290,7 +290,7 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
 function autofixText(a: PrAutofix | null | undefined, taskOn: boolean): string {
   if (!a) return taskOn ? t("Autofix: vigilando") : t("Autofix: apagado");
   if (a.state === "watching") return t("Autofix: vigilando");
-  if (a.state === "fixing") return t("Autofix: arreglando ({n}/{limit})", { n: a.attempts, limit: a.limit });
+  if (a.state === "fixing") return t("Arreglando CI: intento {n} de {limit}", { n: a.attempts, limit: a.limit });
   const why = a.reason ? STOP_REASON[a.reason] : undefined;
   return why ? `${t("Autofix: parado")} · ${t(why)}` : t("Autofix: parado");
 }
@@ -326,6 +326,7 @@ function PrCard({
           : t("Los checks aún no han terminado correctamente")
         : null;
   const comments = s?.review_comments ?? [];
+  const failedChecks = (s?.checks ?? []).filter((c) => c.outcome === "failure").map((c) => c.name);
   return (
     <section className="pr-card">
       <div className="pr-card-top">
@@ -358,6 +359,12 @@ function PrCard({
       {(pr.autofix || taskAutofix !== null) && (
         <div className="muted pr-meta pr-autofix">
           <span>{autofixText(pr.autofix, !!taskAutofix)}</span>
+          {pr.autofix?.state === "fixing" && failedChecks.length > 0 && (
+            <span>{t("Checks fallidos: {names}", { names: failedChecks.join(", ") })}</span>
+          )}
+          {pr.autofix?.state === "fixing" && pr.autofix.sent_at && (
+            <span>{t("enviado {when}", { when: relativeTime(pr.autofix.sent_at) })}</span>
+          )}
           {pr.autofix?.state === "stopped" && (
             <Button variant="secondary" size={28} icon="retry" disabled={disabled} onClick={onRetryAutofix}>
               {t("Reintentar autofix")}

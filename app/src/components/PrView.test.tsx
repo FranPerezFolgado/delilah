@@ -255,6 +255,16 @@ describe("PrView", () => {
       await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "retry", "api"));
     });
 
+    it("a fixing PR shows the attempt, the failed checks and when it was sent", async () => {
+      const fixing = { state: "fixing" as const, attempts: 1, limit: 3, sha: "abc", sent_at: new Date().toISOString(), reason: null };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, autofix: fixing }] }));
+      const { findByText, container } = render(<PrView owner="PROJ-1" task={task} />);
+      await findByText(/Fixing CI: attempt 1 of 3/);
+      const line = container.querySelector(".pr-autofix")!.textContent!;
+      expect(line).toContain("Failed checks: test");
+      expect(line).toContain("sent");
+    });
+
     it("a PR with no autofix record reads watching when the task has it on, off otherwise", async () => {
       vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
       const on = render(<PrView owner="PROJ-1" task={task} />);

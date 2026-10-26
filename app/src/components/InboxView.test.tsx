@@ -431,3 +431,34 @@ describe("InboxView at width", () => {
     expect(document.querySelector(".ib-overlay")).toBeNull();
   });
 });
+
+describe("InboxView pr-autofix", () => {
+  const stopped: InboxItem = {
+    id: "item-9", kind: "pr-autofix", task: "PROJ-1", title: "Reintentos", session: null,
+    text: "CI autofix gave up after 3 attempts", since: null, notice: 11, repo: "api", reason: "limit", attempts: 3,
+  };
+  const show = (onChanged = () => {}) =>
+    render(<InboxView items={[stopped]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+
+  it("retries autofix on its repo", async () => {
+    const set = vi.spyOn(api, "setAutofix").mockResolvedValue({} as Task);
+    const onChanged = vi.fn();
+    show(onChanged);
+    expect(screen.getByText("CI autofix stopped")).toBeTruthy();
+    fireEvent.click(screen.getByText("Retry autofix"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(set).toHaveBeenCalledWith("PROJ-1", "retry", "api");
+  });
+
+  it("dismisses the notice", async () => {
+    const dismiss = vi.spyOn(api, "dismissNotice").mockResolvedValue(null as never);
+    show();
+    fireEvent.click(screen.getByText("Discard"));
+    await waitFor(() => expect(dismiss).toHaveBeenCalledWith(11));
+  });
+
+  it("still renders an unknown kind", () => {
+    render(<InboxView items={[{ ...stopped, kind: "from-the-future" as never }]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={() => {}} />);
+    expect(screen.getAllByText("CI autofix gave up after 3 attempts").length).toBeGreaterThan(0);
+  });
+});

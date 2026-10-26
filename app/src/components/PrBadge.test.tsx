@@ -38,4 +38,12 @@ describe("PrBadge", () => {
     const { container } = render(<PrBadge pr={{ ...base, ci: "none" }} />);
     expect(container.querySelector(".pr-dot")).toBeNull();
   });
+
+  it("shows a mark only when the task has autofix on", () => {
+    const on = render(<PrBadge pr={base} autofix />);
+    expect(on.container.querySelector(".pr-autofix-mark")).not.toBeNull();
+    cleanup();
+    const off = render(<PrBadge pr={base} />);
+    expect(off.container.querySelector(".pr-autofix-mark")).toBeNull();
+  });
 });

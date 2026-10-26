@@ -129,7 +129,7 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
               title={<span className="sb-title" title={tooltip}>{task.title}</span>}
               trailing={
                 <>
-                  {pr && <PrBadge pr={pr} />}
+                  {pr && <PrBadge pr={pr} autofix={!!task.ci_autofix} />}
                   <span className="sb-key mono">{task.key}</span>
                 </>
               }

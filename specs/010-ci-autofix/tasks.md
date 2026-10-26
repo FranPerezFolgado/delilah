@@ -127,11 +127,11 @@ Paths: daemon `crates/delilah-daemon/src/`, core `crates/delilah-core/src/`, CLI
 
 ### Tests for User Story 4
 
-- [ ] T043 [P] [US4] Vitest `app/src/components/PrView.test.tsx`: off / watching / fixing (attempt N of 3, failed checks, sent time) / stopped (reason + "Retry autofix" calling `setAutofix(key,'retry',repo)`); `PrBadge.test.tsx`: mark when `task.ci_autofix`; `InboxView.test.tsx`: `pr-autofix` item with Retry and Dismiss, and an unknown kind still renders
+- [X] T043 [P] [US4] Vitest `app/src/components/PrView.test.tsx`: off / watching / fixing (attempt N of 3, failed checks, sent time) / stopped (reason + "Retry autofix" calling `setAutofix(key,'retry',repo)`); `PrBadge.test.tsx`: mark when `task.ci_autofix`; `InboxView.test.tsx`: `pr-autofix` item with Retry and Dismiss, and an unknown kind still renders
 
 ### Implementation for User Story 4
 
-- [ ] T044 [US4] Per-PR autofix state line in `app/src/components/PrView.tsx` (via `AutofixControl`), mark in `app/src/components/PrBadge.tsx`, `pr-autofix` item in `app/src/components/InboxView.tsx`; history labels for the autofix events wherever history events are labelled in `app/src/`; i18n es/en
+- [X] T044 [US4] Per-PR autofix state line in `app/src/components/PrView.tsx` (via `AutofixControl`), mark in `app/src/components/PrBadge.tsx`, `pr-autofix` item in `app/src/components/InboxView.tsx`; history labels for the autofix events wherever history events are labelled in `app/src/`; i18n es/en
 
 **Checkpoint**: everything autofix does is visible.
 

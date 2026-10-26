@@ -520,6 +520,10 @@ export interface InboxItem {
   permission?: PermissionAsk;
   /** The pr_notices row behind a base-stale item: dismiss it with `dismissNotice`. */
   notice?: number;
+  /** The repo, reason and attempts of a pr-autofix item (autofix stopped on a PR). */
+  repo?: string;
+  reason?: "limit" | "no-push" | "no-session";
+  attempts?: number;
 }
 
 /** Where a session's questions with options sit, next to its terminal. */
