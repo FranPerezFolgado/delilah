@@ -46,3 +46,7 @@
 
 - CHK003, CHK011, CHK012, CHK013, CHK016 were gaps; the spec was updated in the same step.
 - CHK022 left open on purpose: an analysis can only estimate it.
+- After the experiment (2026-10-26): CHK007–CHK016 still hold. CHK010/CHK014 are now backed by
+  evidence (Q2: today's `Host` guard refuses the tailnet name; accepting it without tokens gave
+  a no-`Origin` caller the whole API). CHK022 stays open: US3 took ~63 s without push, not
+  comparable to SC-004.

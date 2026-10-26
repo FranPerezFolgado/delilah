@@ -55,13 +55,13 @@ Tests: none (not requested; nothing executable ships).
 - [X] T014 [P] [US2] Rewrite the "Mobile, through Tailscale" section of `docs/vision.md` with the decided approach (serve + home-screen web app, device tokens first, scope see/answer/launch, work Mac only if IT allows), link `../specs/008-mobile-access-analysis/research.md`, and remove the answered open questions (which Mac/IT, iPhone or Android, answer-only vs launching); keep "Proposed but not decided" only for what is still open
 - [X] T015 [P] [US2] Add decision **79** at the end of `docs/decisions.md`: "Mobile through Tailscale serve and a home-screen web app; device tokens first (2026-10-26)", with why, the local-vs-remote rule, and ruled out (LAN, Cloudflare Tunnel, sideloaded wrapper, Funnel, identity headers alone); change the last line of decision 12 to point to 79
 - [X] T016 [P] [US2] In `docs/status.md`, replace the line starting `- **Mobile access:**` (find it by content) with "analysed (decision 79, [research](../specs/008-mobile-access-analysis/research.md)); next: roadmap step 1, device auth"
-- [ ] T017 Check that `docs/architecture.md` and `README.md` need no change (nothing built) and that links added in T014–T016 resolve
+- [X] T017 Check that `docs/architecture.md` and `README.md` need no change (nothing built) and that links added in T014–T016 resolve
 
 ---
 
 ## Phase 5: Close
 
-- [ ] T018 Mark `specs/008-mobile-access-analysis/checklists/security.md` items still true after T013; note any changed by the experiment
+- [X] T018 Mark `specs/008-mobile-access-analysis/checklists/security.md` items still true after T013; note any changed by the experiment
 - [ ] T019 Bump the version, **patch** (docs only, no new behaviour): `scripts/bump-version.sh patch --commit` (from `origin/main`; commit `chore: bump version to X.Y.Z`)
 - [ ] T020 Draft the PR text (pr-writer), in English, stating the bump level and why; the user pushes and opens it
 
