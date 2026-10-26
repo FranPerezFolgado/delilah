@@ -109,10 +109,10 @@ choice → the project's `settings.workspace` → **checkout** (was: worktree). 
 | Method + path | Handler | Body | Response | Errors | Topic |
 |---|---|---|---|---|---|
 | `POST /api/v1/tasks/{key}/reopen` | `actions::reopen` | — | `Task` | 404 no task; 409 not done, or no workspace (archived) | `Tasks`, `Inbox` |
-| `POST /api/v1/tasks/{key}/prs/{id}/merge` | `pr_api::merge::merge` | `{ "method"?: MergeMethod }` | `PullRequest` (refreshed) | 404; 409 draft / not open / checks not passing / `merge_methods` unknown (`[]`) / method not allowed / the logged-in `gh` account for the host is not the task's account (checked explicitly before running anything); 502 gh failure with `AccessProblem` body as other PR routes | `Prs`, `Tasks` |
+| `POST /api/v1/tasks/{key}/prs/{id}/merge` | `pr_api::merge::merge` | `{ "method"?: MergeMethod }` | `PullRequest` (refreshed) | 404; 409 draft / not open / checks not passing / `merge_methods` unknown (`[]`) / method not allowed / the `gh` account for the host is unknown (never read) or changed since the PR tab showed it (checked explicitly before running anything); unknown body fields are ignored; 502 gh failure with `AccessProblem` body as other PR routes | `Prs`, `Tasks` |
 | `GET /api/v1/tasks/{key}/setup` | `setup::info` | — | `SetupInfo` | 404 no setup ran | — |
 | `GET /api/v1/tasks/{key}/setup/log` | `setup::log` | — | `text/plain` (whole log) | 404 no log | — |
-| `POST /api/v1/inbox/{id}/dismiss` | `inbox::dismiss` | — (`{id}` percent-encoded by the client: ids contain `:`) | 204 | 404 not listed now; 409 blocking kind | `Inbox` |
+| `POST /api/v1/inbox/{id}/dismiss` | `inbox::dismiss` | — (`{id}` percent-encoded by the client: ids contain `:`) | 204 | 404 not listed now; 409 blocking kind, or the item belongs to a project (not a task); a repeat dismiss of a listed item is 204; the notice behind a turn-done / pr-opened aviso stays open, so `/inbox/restore` works for every clearable kind | `Inbox` |
 | `POST /api/v1/inbox/clear` | `inbox::clear` | — | `{ "ids": string[] }` (only non-blocking) | — | `Inbox` |
 | `POST /api/v1/inbox/restore` | `inbox::restore` | `{ "ids": string[] }` | 204 (unknown ids ignored) | 400 > 500 ids | `Inbox` |
 | `GET /api/v1/jira/issues/{key}/subtasks` | `jira::subtasks` | — | `JiraIssue[]` (any assignee/status, ≤ 50) | 404 unknown parent; 409 Jira not connected | — |
@@ -165,3 +165,10 @@ TS calls (all in `api.ts`): `reopen(key)`, `mergePr(key, id, method?)`, `setupIn
   checks not passing, disabled with the reason.
 - The connection observer (`onRequestResult`) is client-only; retries back off to at most
   5 s.
+
+## 409 `reason`
+
+A 409 from the merge route carries `reason` (besides `error`) so the client tells the cases
+apart: `account-unknown`, `account-changed`, `not-read`, `not-open`, `draft`, `checks`,
+`merge-methods-unknown`, `method-not-allowed`. When `gh` itself cannot be used the reason is
+the `AccessProblem` kind (e.g. `signed-out`).

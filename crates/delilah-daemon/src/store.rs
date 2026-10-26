@@ -104,7 +104,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -115,7 +115,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -475,7 +475,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -500,6 +500,12 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        // Done by this very event, or still done from an earlier one.
+        task.finished_at = match (&task.status, &event) {
+            (TaskStatus::Done, Event::MarkDone | Event::AgentFinished) => Some(at),
+            (TaskStatus::Done, _) => task.finished_at,
+            _ => None,
+        };
         Ok(task)
     }
 
@@ -607,13 +613,14 @@ fn allowed_tools_from_json(json: Option<&str>) -> Vec<String> {
 
 fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
     let status: String = row.try_get("status")?;
+    let task_status = serde_json::from_str::<TaskStatus>(&status)?;
     Ok(Task {
         key: TaskKey::new(row.try_get::<String, _>("key")?),
         title: row.try_get("title")?,
         project: row.try_get("project")?,
         workflow: row.try_get("workflow")?,
         phase: row.try_get("phase")?,
-        status: serde_json::from_str::<TaskStatus>(&status)?,
+        status: task_status.clone(),
         notes: row.try_get("notes")?,
         in_checkout: row.try_get("in_checkout")?,
         branch: row.try_get("branch")?,
@@ -648,6 +655,14 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
                     Utc::now()
                 })
         },
+        // The time of the event that made it done; only while it is.
+        finished_at: if matches!(task_status, TaskStatus::Done) {
+            row.try_get::<Option<String>, _>("done_at")?
+                .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
+                .map(|t| t.with_timezone(&Utc))
+        } else {
+            None
+        },
     })
 }
 
@@ -675,6 +690,37 @@ mod tests {
 
     fn task(key: &str) -> Task {
         Task::new(TaskKey::new(key), "Card retries", "feature")
+    }
+
+    #[tokio::test]
+    async fn a_done_task_carries_when_it_finished() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        let t0: DateTime<Utc> = "2026-02-03T04:05:06Z".parse().unwrap();
+        let t1: DateTime<Utc> = "2026-02-03T05:00:00Z".parse().unwrap();
+        for e in [Event::Start, Event::WorkspaceReady] {
+            store.apply_event(&key, e, t0).await.unwrap();
+        }
+        assert_eq!(
+            store.get_task(&key).await.unwrap().unwrap().finished_at,
+            None
+        );
+        let done = store.apply_event(&key, Event::MarkDone, t1).await.unwrap();
+        assert_eq!(done.finished_at, Some(t1));
+        assert_eq!(
+            store.get_task(&key).await.unwrap().unwrap().finished_at,
+            Some(t1)
+        );
+        assert_eq!(store.list_tasks().await.unwrap()[0].finished_at, Some(t1));
+        // Reopened: not finished any more.
+        let t2: DateTime<Utc> = "2026-02-04T05:00:00Z".parse().unwrap();
+        let reopened = store.apply_event(&key, Event::Reopen, t2).await.unwrap();
+        assert_eq!(reopened.finished_at, None);
+        assert_eq!(
+            store.get_task(&key).await.unwrap().unwrap().finished_at,
+            None
+        );
     }
 
     #[tokio::test]
@@ -755,6 +801,75 @@ mod tests {
             .unwrap();
         assert!(!t.chat_mode);
         assert!(t.allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn migrations_0020_and_0021_keep_existing_tasks_and_sessions() {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = old
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 19)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (key, title, project, workflow, phase, status, created_at, updated_at)
+             VALUES ('OLD-1', 'Old', NULL, 'feature', 'backlog', '{\"type\":\"queued\"}', 'x', 'x')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let cols: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('sessions')")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(!cols.contains(&"runtime".to_string()));
+        sqlx::query(
+            "INSERT INTO sessions (id, task_key, kind, label, is_primary, created_at)
+             VALUES ('s1', 'OLD-1', 'claude', 'Main', 1, 'x')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = Store::connect(pool).await.unwrap();
+        assert!(
+            store
+                .get_task(&TaskKey::new("OLD-1"))
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let session = store.session("s1").await.unwrap().unwrap();
+        assert_eq!(session.label, "Main");
+        store
+            .dismiss(&[("a".into(), "OLD-1".into())])
+            .await
+            .unwrap();
+        assert_eq!(store.dismissed().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_task_cascades_its_dismissals() {
+        let store = Store::in_memory().await.unwrap();
+        store.create_task(&task("PROJ-1")).await.unwrap();
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        store
+            .dismiss(&[("a".into(), "PROJ-1".into()), ("b".into(), "PROJ-2".into())])
+            .await
+            .unwrap();
+        store.delete_task(&TaskKey::new("PROJ-1")).await.unwrap();
+        let left = store.dismissed().await.unwrap();
+        assert_eq!(left, std::collections::HashSet::from(["b".to_string()]));
     }
 
     #[tokio::test]

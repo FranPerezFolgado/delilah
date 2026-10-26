@@ -632,11 +632,6 @@ impl ApiError {
         }
     }
 
-    /// A 501 for a route that is registered but not built yet.
-    pub fn not_implemented() -> Self {
-        Self::new(StatusCode::NOT_IMPLEMENTED, "not implemented yet")
-    }
-
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }

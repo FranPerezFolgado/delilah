@@ -47,16 +47,29 @@ impl Store {
         Ok(ids.into_iter().collect())
     }
 
-    /// Drops the dismissals made before `older_than`; how many.
+    /// Drops the dismissals made before `older_than` whose id is not in `listed` (the
+    /// items still raised by their cause); how many.
     pub(crate) async fn purge_dismissals(
         &self,
         older_than: DateTime<Utc>,
+        listed: &HashSet<String>,
     ) -> Result<u64, StoreError> {
-        let result = sqlx::query("DELETE FROM inbox_dismissals WHERE dismissed_at < ?")
-            .bind(older_than.to_rfc3339())
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected())
+        let old: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM inbox_dismissals WHERE dismissed_at < ?")
+                .bind(older_than.to_rfc3339())
+                .fetch_all(&self.pool)
+                .await?;
+        let mut tx = self.pool.begin().await?;
+        let mut purged = 0;
+        for id in old.iter().filter(|id| !listed.contains(*id)) {
+            let result = sqlx::query("DELETE FROM inbox_dismissals WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            purged += result.rows_affected();
+        }
+        tx.commit().await?;
+        Ok(purged)
     }
 }
 
@@ -113,6 +126,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn purge_keeps_old_dismissals_whose_cause_is_still_listed() {
+        let store = store().await;
+        store.dismiss(&[item("open"), item("gone")]).await.unwrap();
+        let old = (Utc::now() - Duration::days(31)).to_rfc3339();
+        sqlx::query("UPDATE inbox_dismissals SET dismissed_at = ?")
+            .bind(old)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let listed = HashSet::from(["open".to_string()]);
+        let purged = store
+            .purge_dismissals(Utc::now() - Duration::days(30), &listed)
+            .await
+            .unwrap();
+        assert_eq!(purged, 1);
+        assert_eq!(store.dismissed().await.unwrap(), listed);
+    }
+
+    #[tokio::test]
     async fn purge_removes_only_rows_older_than_the_cutoff() {
         let store = store().await;
         store.dismiss(&[item("old"), item("new")]).await.unwrap();
@@ -123,7 +155,7 @@ mod tests {
             .await
             .unwrap();
         let purged = store
-            .purge_dismissals(Utc::now() - Duration::days(30))
+            .purge_dismissals(Utc::now() - Duration::days(30), &HashSet::new())
             .await
             .unwrap();
         assert_eq!(purged, 1);

@@ -325,7 +325,15 @@ async fn purge_if_due(app: &AppState, last: &Mutex<Option<Instant>>, now: Instan
         *last = Some(now);
     }
     let cutoff = Utc::now() - chrono::Duration::days(DISMISSAL_KEEP_DAYS);
-    if let Err(e) = app.store.purge_dismissals(cutoff).await {
+    // A dismissal whose cause is still listed stays, or the item would come back.
+    let listed: HashSet<String> = match collect(app).await {
+        Ok(items) => items.into_iter().map(|i| i.id).collect(),
+        Err(e) => {
+            tracing::warn!("cannot purge the old inbox dismissals: {}", e.message);
+            return true;
+        }
+    };
+    if let Err(e) = app.store.purge_dismissals(cutoff, &listed).await {
         tracing::warn!("cannot purge the old inbox dismissals: {e}");
     }
     true
@@ -366,7 +374,8 @@ fn item_id(i: &InboxItem) -> String {
 }
 
 /// `POST /inbox/{id}/dismiss`: removes one item. 404 if it is not listed, 409 if it
-/// blocks an agent.
+/// blocks an agent or belongs to a project (not a task). A repeat is 204. The notice behind
+/// an aviso stays open, so `/inbox/restore` brings the item back.
 pub async fn dismiss(
     State(app): State<AppState>,
     Path(id): Path<String>,
@@ -379,6 +388,11 @@ pub async fn dismiss(
     if item.kind.is_blocking() {
         return Err(ApiError::conflict(
             "this item waits on you; answer it instead of removing it",
+        ));
+    }
+    if crate::store_sessions::project_of(&item.task).is_some() {
+        return Err(ApiError::conflict(
+            "this item belongs to a project, not a task: it cannot be removed",
         ));
     }
     app.store.dismiss(&[(id, item.task.clone())]).await?;
@@ -1199,6 +1213,57 @@ mod tests {
                 .iter()
                 .all(|i| i.kind != ItemKind::Failed)
         );
+    }
+
+    #[tokio::test]
+    async fn clear_then_restore_brings_back_a_notice_backed_aviso() {
+        let app = app_with_pr_task().await;
+        notify(&app, crate::store_prs::KIND_PR_OPENED, "opened").await;
+        let before = app.store.open_avisos().await.unwrap().len();
+        let item = items_of(&app)
+            .await
+            .into_iter()
+            .find(|i| i.kind == ItemKind::PrOpened)
+            .expect("a pr-opened item");
+        let (status, body) = post_json(&app, "/api/v1/inbox/clear", None).await;
+        assert_eq!(status, 200);
+        assert!(body["ids"].as_array().unwrap().contains(&json!(item.id)));
+        assert!(items_of(&app).await.iter().all(|i| i.id != item.id));
+        // The notice itself stays open, and a repeat dismiss is still 204.
+        assert_eq!(app.store.open_avisos().await.unwrap().len(), before);
+        let uri = format!("/api/v1/inbox/{}/dismiss", item.id.replace(':', "%3A"));
+        let (status, _) = post_json(&app, &uri, None).await;
+        assert_eq!(status, 204);
+
+        let (status, _) = post_json(
+            &app,
+            "/api/v1/inbox/restore",
+            Some(json!({ "ids": [item.id] })),
+        )
+        .await;
+        assert_eq!(status, 204);
+        assert!(items_of(&app).await.iter().any(|i| i.id == item.id));
+    }
+
+    #[tokio::test]
+    async fn old_dismissals_of_still_listed_items_are_kept() {
+        let app = app_with_a_question_and_a_failure().await;
+        let failed = items_of(&app)
+            .await
+            .into_iter()
+            .find(|i| i.kind == ItemKind::Failed)
+            .unwrap();
+        app.store
+            .dismiss(&[(failed.id.clone(), failed.task.clone())])
+            .await
+            .unwrap();
+        sqlx::query("UPDATE inbox_dismissals SET dismissed_at = ?")
+            .bind((Utc::now() - chrono::Duration::days(31)).to_rfc3339())
+            .execute(&app.store.pool)
+            .await
+            .unwrap();
+        assert!(purge_if_due(&app, &Mutex::new(None), Instant::now()).await);
+        assert!(app.store.dismissed().await.unwrap().contains(&failed.id));
     }
 
     #[tokio::test]

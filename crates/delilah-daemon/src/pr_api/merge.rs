@@ -23,7 +23,6 @@ use crate::prs;
 use crate::state::AppState;
 
 #[derive(Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 struct MergeRequest {
     #[serde(default)]
     method: Option<MergeMethod>,
@@ -55,8 +54,17 @@ pub async fn merge(
     // The account first: nothing else is worth saying with the wrong credentials.
     let shown = app.gh.cached_user(&row.host);
     match app.gh.user_fresh(&row.host).await {
-        Ok(now) => {
-            if shown.is_some_and(|shown| shown != now) {
+        Ok(now) => match shown {
+            None => {
+                return Err(refuse(
+                    format!(
+                        "the gh account on {} is not known yet (now {now}): check the PR tab and try again",
+                        row.host
+                    ),
+                    "account-unknown",
+                ));
+            }
+            Some(shown) if shown != now => {
                 return Err(refuse(
                     format!(
                         "the gh account on {} changed to {now}: check the PR tab and try again",
@@ -65,7 +73,8 @@ pub async fn merge(
                     "account-changed",
                 ));
             }
-        }
+            Some(_) => {}
+        },
         Err(e) => return Err(refuse(e.to_string(), classify(&e).kind())),
     }
 
@@ -184,7 +193,13 @@ mod tests {
         assert_eq!(v["snapshot"]["state"], "merged");
         assert_eq!(
             merges(&gh),
-            [["pr", "merge", "https://github.com/o/r/pull/7", "--merge"]]
+            [[
+                "pr",
+                "merge",
+                "--merge",
+                "--",
+                "https://github.com/o/r/pull/7"
+            ]]
         );
         let mut topics = vec![];
         while let Ok(t) = events.try_recv() {
@@ -241,13 +256,13 @@ mod tests {
         let (router, _app, gh, id, _dir) = ready(gh_with(&green)).await;
         let (s, _) = call(&router, "POST", &uri(id), None).await;
         assert_eq!(s, StatusCode::OK);
-        assert_eq!(merges(&gh)[0][3], "--squash");
+        assert_eq!(merges(&gh)[0][2], "--squash");
 
         // An explicit, allowed method wins over the default.
         let (router, _app, gh, id, _dir) = ready(gh_with(&open_green())).await;
         let (s, _) = call(&router, "POST", &uri(id), Some(json!({"method": "squash"}))).await;
         assert_eq!(s, StatusCode::OK);
-        assert_eq!(merges(&gh)[0][3], "--squash");
+        assert_eq!(merges(&gh)[0][2], "--squash");
 
         // A method that does not exist is a bad request, not the default.
         let (router, _app, gh, id, _dir) = ready(gh_with(&open_green())).await;
@@ -268,6 +283,27 @@ mod tests {
         assert_eq!(v["reason"], "account-changed");
         assert!(merges(&gh).is_empty());
 
+        // No account remembered (the PR tab never read it): refused, nothing run.
+        let unread = FakeGh::new()
+            .on(&["repo", "view"], Ok(REPO_VIEW))
+            .on(&["pr", "list"], Ok(PR_LIST))
+            .on(&["api", "graphql"], Ok(&green))
+            .on(&["pr", "merge"], Ok(""))
+            .on(
+                &["api", "user"],
+                Err(GhError::Failed {
+                    code: Some(1),
+                    stderr: "boom".into(),
+                }),
+            )
+            .on(&["api", "user"], Ok("me\n"));
+        let (router, app, gh, id, _dir) = ready(unread).await;
+        assert!(app.gh.cached_user("github.com").is_none());
+        let (s, v) = call(&router, "POST", &uri(id), None).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{v}");
+        assert_eq!(v["reason"], "account-unknown");
+        assert!(merges(&gh).is_empty());
+
         // Signed out: the problem's kind, nothing run.
         let signed_out = FakeGh::new()
             .on(&["repo", "view"], Ok(REPO_VIEW))
@@ -285,6 +321,15 @@ mod tests {
         assert_eq!(s, StatusCode::CONFLICT);
         assert_eq!(v["reason"], "signed-out");
         assert!(merges(&gh).is_empty());
+    }
+
+    #[tokio::test]
+    async fn unknown_fields_in_the_body_are_tolerated() {
+        let (router, _app, gh, id, _dir) = ready(gh_with(&open_green())).await;
+        let body = json!({"method": "squash", "extra": 1});
+        let (s, _) = call(&router, "POST", &uri(id), Some(body)).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(merges(&gh).len(), 1);
     }
 
     #[tokio::test]

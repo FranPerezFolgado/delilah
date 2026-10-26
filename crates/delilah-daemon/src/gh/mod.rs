@@ -431,7 +431,11 @@ impl GhClient {
     /// Merges the PR at `url` with `method` (`gh pr merge`). Runs outside any repo folder:
     /// the URL names the PR.
     pub async fn pr_merge(&self, url: &str, method: MergeMethod) -> Result<(), GhError> {
-        let args = strings(&["pr", "merge", url, method.flag()]);
+        // `--` so a URL can never be read as an option.
+        if !url.starts_with("https://") {
+            return Err(GhError::Parse(format!("`{url}` is not an https URL")));
+        }
+        let args = strings(&["pr", "merge", method.flag(), "--", url]);
         self.inner.run(None, args, None).await.map(drop)
     }
 
@@ -511,6 +515,27 @@ mod tests {
     fn client(fake: FakeGh) -> (Arc<FakeGh>, GhClient) {
         let fake = Arc::new(fake);
         (fake.clone(), GhClient::new(fake))
+    }
+
+    #[tokio::test]
+    async fn pr_merge_takes_only_https_urls_after_a_double_dash() {
+        let (fake, gh) = client(FakeGh::new().on(&["pr", "merge"], Ok("")));
+        let bad = gh.pr_merge("--admin", MergeMethod::Merge).await;
+        assert!(matches!(bad, Err(GhError::Parse(_))));
+        assert!(fake.calls().is_empty());
+        gh.pr_merge("https://github.com/o/r/pull/7", MergeMethod::Squash)
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.calls()[0],
+            [
+                "pr",
+                "merge",
+                "--squash",
+                "--",
+                "https://github.com/o/r/pull/7"
+            ]
+        );
     }
 
     fn failed(stderr: &str) -> GhError {
