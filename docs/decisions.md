@@ -711,19 +711,35 @@ default widens the terminal for users whose Claude default is not auto. Auto mod
 classifier decides what it escalates; Delilah turns `can_use_tool` into a card; `system/permission_denied` is currently ignored. [#43](decisions.md) is
 unchanged: Delilah's autopilot still never answers a permission prompt.
 
+**88. Background work holds the turn end in memory; progress is live-only.** In chat mode
+the `Stop` hook of a session with background tasks running is held by the daemon (released
+30 s after the set empties with no follow-up turn, or on process exit; dropped by a real new
+turn or "Stop") instead of adding a task state; the task stays `running`. Progress (activity,
+sub-agent steps, background rows) is a `watch` value per live session, relayed on `/live`
+at most every 250 ms and included in `GET …/conversation`; never persisted. A turn Claude
+starts by itself is detected from the stream (`init` without a user line since the previous
+`init`), not from hooks, which also fire for `<task-notification>` prompts mid-turn; it is
+recorded as the history event `agent-resumed`. *Why:* a new state needs a migration and
+touches every consumer (board, Inbox, autopilot); hiding it in the UI alone leaves them
+wrong; persisting progress adds writes for data that is meaningless after a restart (the
+process is gone). History is the typed `Event` enum, so an older daemon cannot decode a
+history containing `agent-resumed` (accepted: downgrade or mixed versions only). *Ruled out:*
+a "background" task state; progress as messages on the stream-event broadcast (no throttle,
+lag resets would drop live text); polling the conversation route.
+
 ## Playground
 
 Decided while building the agent playground (spec `004-agent-playground`, 2026-10-26).
 
-**88. The playground is DOM + SVG pixel maps.** Each character, desk and helper is
+**89. The playground is DOM + SVG pixel maps.** Each character, desk and helper is
 a small pixel map in code (`sprites.ts`) drawn as SVG, animated with CSS. It stays
 in the React tree: it is accessible (real buttons with names), follows reduced
 motion and costs nothing while hidden. Ruled out: a canvas (no accessibility, a
 render loop for a handful of desks), game engines (a heavy dependency for a view
 that shows a few sprites) and third-party sprite sheets (licences, and a look we
-could not change). The "no third-party sprite sheets" part was replaced by #91.
+could not change). The "no third-party sprite sheets" part was replaced by #92.
 
-**89. Activity is in memory, on its own topic.** What a session is doing right now
+**90. Activity is in memory, on its own topic.** What a session is doing right now
 lasts seconds and is rebuilt by the next hook, so it is not stored in SQLite and
 not mixed into `sessions`. It has its own `activity` topic and
 `GET /api/v1/activity`, so the frequent tool events refetch only that. Revised
@@ -734,24 +750,24 @@ sessions stay viewable without touching the session-end paths. Appends mark a
 dirty flag and the transcript watcher's 1 s tick emits `activity` once, so a burst
 of hooks is one refetch (`GET /api/v1/activity/history?owner=&after=`).
 
-**90. "Supervising" is derived from a foreground `Agent` call.** While Claude is
+**91. "Supervising" is derived from a foreground `Agent` call.** While Claude is
 inside a foreground `Agent` call it is waiting on a sub-agent and has no tool
 event of its own, so the desk shows the phone pose and "Supervisando". An `Agent`
 call run in the background does not block Claude, so that desk keeps its thinking
 pose. Ruled out: a dedicated hook (none exists) and guessing from silence
 (thinking looks the same).
 
-**91. The office art is pixtuoid's (MIT), ported by a script.** The 1x sprites,
+**92. The office art is pixtuoid's (MIT), ported by a script.** The 1x sprites,
 palette and ramps of [pixtuoid](https://github.com/ivanwang123/pixtuoid) (pinned commit, © Ivan Wang) are
 converted by `scripts/port-pixtuoid.py` into the checked-in
 `app/src/playground/art/pixtuoid.ts`; the licence and commit are in
-`app/src/playground/CREDITS.md`. This supersedes #88's "no third-party sprite
-sheets"; rendering stays DOM + SVG (#88). Colours of shirt, pants, hair and skin are
+`app/src/playground/CREDITS.md`. This supersedes #89's "no third-party sprite
+sheets"; rendering stays DOM + SVG (#89). Colours of shirt, pants, hair and skin are
 re-derived per character (OKLab steps in `art/ramp.ts`), the outfit is seeded by the
 project name. Hairstyles exist only in the 4x art, which was left out (16 times the
 pixels), so there are none. Ruled out: copying the 4x art, drawing our own set again.
 
-**92. Tokens come from the transcript: fresh spend, once per message.** The
+**93. Tokens come from the transcript: fresh spend, once per message.** The
 transcript watcher reads the appended bytes of each session's trusted transcript
 (at most 1 MiB per tick, complete lines only) and sums `input + cache creation +
 output` tokens. Claude Code writes one line per content block repeating the same
@@ -763,14 +779,14 @@ restarts from 0. The totals sit in `AppState` independent of the live sessions a
 come in `GET /api/v1/activity` as `tokens`. Ruled out: hook payloads (no usage),
 a chars/4 estimate, counting cache reads.
 
-**93. Flow is drawn without a graph library.** Nodes (agents, helpers, tool calls
+**94. Flow is drawn without a graph library.** Nodes (agents, helpers, tool calls
 paired by tool use id) and edges come from the history entries (`flowModel.ts`);
 `flowLayout.ts` is a deterministic tree plus a column of tool rows per agent, drawn as
 SVG with pan/zoom, and a timeline of buttons beside it. A node never moves once
 placed. Ruled out: d3-force (jitter, dependency), React Flow (heavy), canvas
 (accessibility).
 
-**94. A building of floors, one floor per owner.** The playground is a building:
+**95. A building of floors, one floor per owner.** The playground is a building:
 one floor per task or project (owner), newest on top, each with its own desks that keep
 fixed slots. In the app, a floor opens the task's "Oficina" tab (office and Flow
 with a toggle remembered in `localStorage` as `delilah.office.view`); in the separate

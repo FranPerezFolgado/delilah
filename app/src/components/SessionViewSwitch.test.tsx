@@ -34,6 +34,8 @@ it("humanError maps the daemon's runtime conflicts to Spanish and never shows En
   expect(humanError(new ApiError("wait for the turn to end or press Detener", 409))).toBe("Espera a que termine el turno");
   expect(humanError(new ApiError("only a task's Claude sessions switch runtime", 409))).toBe("Solo las sesiones de Claude de una tarea cambian de modo.");
   expect(humanError(new ApiError("the session already runs in chat", 409))).toBe("La sesión ya está en ese modo.");
+  expect(humanError(new ApiError("Hay trabajo en segundo plano: espera a que termine o pulsa Detener", 409))).toBe("Hay trabajo en segundo plano: espera a que termine o pulsa Detener");
+  expect(humanError(new ApiError("Background work is running: wait for it to finish or press Stop", 409))).toBe("Hay trabajo en segundo plano: espera a que termine o pulsa Detener");
   expect(humanError(new Error("boom"))).toBe("No se pudo completar la acción");
 });
 

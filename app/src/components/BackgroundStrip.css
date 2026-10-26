@@ -1,0 +1,9 @@
+.bg-strip { align-self: stretch; border: 1px solid var(--bd); border-radius: 7px; background: var(--panel); font-size: 12px; padding: 4px 10px; }
+.bg-title { padding-bottom: 2px; }
+.bg-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0; }
+.bg-kind { color: var(--tx3); font-family: monospace; }
+.bg-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bg-clock { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bg-state { white-space: nowrap; }
+.bg-row.running .bg-state { color: var(--run); }
+.bg-row.failed .bg-state { color: var(--err); }

@@ -36,6 +36,7 @@ pub mod pr_types;
 mod preferences;
 pub mod preview;
 mod preview_api;
+mod progress;
 mod projects;
 pub mod proposals;
 pub mod prs;

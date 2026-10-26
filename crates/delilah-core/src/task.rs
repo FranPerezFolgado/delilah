@@ -182,6 +182,10 @@ pub enum Event {
         summary: String,
         outcome: String,
     },
+    /// Claude started a turn by itself (a background task ended, say); history only.
+    AgentResumed {
+        reason: Option<String>,
+    },
 }
 
 impl Event {
@@ -213,6 +217,7 @@ impl Event {
             Self::RuntimeSwitched { .. } => "runtime-switched",
             Self::PermissionAsked { .. } => "permission-asked",
             Self::PermissionExpired { .. } => "permission-expired",
+            Self::AgentResumed { .. } => "agent-resumed",
         }
     }
 }
@@ -492,6 +497,7 @@ impl Task {
                 | Event::RuntimeSwitched { .. }
                 | Event::PermissionAsked { .. }
                 | Event::PermissionExpired { .. }
+                | Event::AgentResumed { .. }
         ) {
             return Ok(());
         }
@@ -1151,6 +1157,13 @@ mod tests {
                 },
                 "permission-expired",
             ),
+            (
+                Event::AgentResumed {
+                    reason: Some("background-done".into()),
+                },
+                "agent-resumed",
+            ),
+            (Event::AgentResumed { reason: None }, "agent-resumed"),
         ]
     }
 

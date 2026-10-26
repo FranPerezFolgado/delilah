@@ -215,6 +215,14 @@ while the agent works or waits for you (wait, answer, or press "Stop"). A termin
 task goes the other way with the switch (or `delilah runtime <KEY> chat`). Project sessions and
 idea conversations always use the terminal.
 
+While Claude works the chat shows what it is doing ("Working" with a clock and the current
+step), sub-agents appear as cards with their latest steps (one line each, not their whole
+conversation), and background commands and sub-agents are listed in an "In the
+background" strip with "Stop". The task stays "Working" until that work ends; if Claude
+resumes on its own afterwards the chat says "Claude continues: background task finished".
+While background work runs you can type to Claude, but the Chat / Terminal switch answers
+"Background work is running: wait for it to finish or press Stop".
+
 When a chat-mode agent needs a permission it shows a permission card (also in the
 Inbox) with the tool and what it will do: "Allow once", "Deny" (with an
 optional reason that Claude is told) or "Always allow in this task". The last one is
