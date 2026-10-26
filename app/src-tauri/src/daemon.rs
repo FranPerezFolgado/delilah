@@ -266,7 +266,11 @@ mod tests {
     #[test]
     fn english_for_explicit_preference_wins() {
         for sys in ["es-ES", "en-US", "", "garbage"] {
-            let langs = if sys.is_empty() || sys == "garbage" { sys.to_string() } else { apple(sys) };
+            let langs = if sys.is_empty() || sys == "garbage" {
+                sys.to_string()
+            } else {
+                apple(sys)
+            };
             assert!(english_for(Some("en"), &langs));
             assert!(!english_for(Some("es"), &langs));
         }
