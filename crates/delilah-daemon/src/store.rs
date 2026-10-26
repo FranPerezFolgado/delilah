@@ -104,7 +104,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -115,7 +115,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -301,6 +301,20 @@ impl Store {
         Ok(())
     }
 
+    /// Turns the task's CI autofix on or off.
+    pub async fn set_ci_autofix(&self, key: &TaskKey, on: bool) -> Result<(), StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET ci_autofix = ?, updated_at = ? WHERE key = ?")
+            .bind(on)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        Ok(())
+    }
+
     /// Records why the task's branch couldn't be created, or clears it.
     pub async fn set_branch_error(
         &self,
@@ -475,7 +489,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -538,8 +552,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, allowed_tools, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -557,6 +571,7 @@ async fn insert_task<'e>(
     .bind(&task.branch_error)
     .bind(task.view.as_str())
     .bind(task.chat_mode)
+    .bind(task.ci_autofix)
     .bind(allowed_tools_json(&task.allowed_tools)?)
     .bind(task.created_at.to_rfc3339())
     .bind(&now)
@@ -642,7 +657,7 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
         branch_error: row.try_get("branch_error")?,
         view: TaskView::parse(&row.try_get::<String, _>("view")?).unwrap_or_default(),
         chat_mode: row.try_get("chat_mode")?,
-        ci_autofix: false,
+        ci_autofix: row.try_get("ci_autofix")?,
         allowed_tools: allowed_tools_from_json(
             row.try_get::<Option<String>, _>("allowed_tools")?
                 .as_deref(),
@@ -691,6 +706,50 @@ mod tests {
 
     fn task(key: &str) -> Task {
         Task::new(TaskKey::new(key), "Card retries", "feature")
+    }
+
+    #[tokio::test]
+    async fn ci_autofix_persists_and_autofix_events_reach_the_history() {
+        let store = Store::in_memory().await.unwrap();
+        let key = TaskKey::new("PROJ-1");
+        let mut t = task("PROJ-1");
+        t.ci_autofix = true;
+        store.create_task(&t).await.unwrap();
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        assert!(store.get_task(&key).await.unwrap().unwrap().ci_autofix);
+        let listed = store.list_tasks().await.unwrap();
+        assert!(listed[0].ci_autofix && !listed[1].ci_autofix);
+
+        store.set_ci_autofix(&key, false).await.unwrap();
+        assert!(!store.get_task(&key).await.unwrap().unwrap().ci_autofix);
+        store.set_ci_autofix(&key, true).await.unwrap();
+        assert!(store.list_tasks().await.unwrap()[0].ci_autofix);
+        assert!(matches!(
+            store.set_ci_autofix(&TaskKey::new("NOPE-1"), true).await,
+            Err(StoreError::NotFound(_))
+        ));
+
+        let at = Utc::now();
+        for event in [
+            Event::AutofixSent { repo: ".".into(), sha: "a".into(), attempt: 1, checks: vec!["ci".into()] },
+            Event::AutofixFailedAgain { repo: ".".into(), sha: "b".into() },
+            Event::AutofixFixed { repo: ".".into() },
+            Event::AutofixStopped { repo: ".".into(), reason: "limit".into() },
+            Event::AutofixCancelled { repo: ".".into() },
+        ] {
+            store.apply_event(&key, event, at).await.unwrap();
+        }
+        let types: Vec<_> = store
+            .events(&key)
+            .await
+            .unwrap()
+            .iter()
+            .map(|r| r.event.name())
+            .collect();
+        assert_eq!(
+            types,
+            ["autofix-sent", "autofix-failed-again", "autofix-fixed", "autofix-stopped", "autofix-cancelled"]
+        );
     }
 
     #[tokio::test]

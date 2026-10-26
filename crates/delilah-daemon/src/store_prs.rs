@@ -7,6 +7,7 @@ use serde_json::Value;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
+use crate::autofix::PrAutofix;
 use crate::pr_types::{Marks, PrState, Snapshot};
 use crate::store::{Store, StoreError};
 
@@ -29,6 +30,8 @@ pub(crate) struct PrRow {
     /// The kind of problem behind `error` (see `AccessProblem::kind`).
     pub error_kind: Option<String>,
     pub created_at: DateTime<Utc>,
+    /// CI autofix state; `None` until autofix first acts on the PR.
+    pub autofix: Option<PrAutofix>,
 }
 
 /// What the inbox shows for a PR.
@@ -66,7 +69,7 @@ pub(crate) struct NewNotice {
 }
 
 const PR_COLUMNS: &str = "id, task_key, repo, host, owner_name, number, url, linked_by, snapshot, \
-     ci_failed_sha, review_seen, issue_comment_seen, review_comment_seen, checked_at, error, error_kind, created_at";
+     ci_failed_sha, review_seen, issue_comment_seen, review_comment_seen, checked_at, error, error_kind, created_at, autofix";
 /// The `pr_notices.kind` of "the branch started from a base that could not be
 /// refreshed". It belongs to the task's start, not to a PR, so PR changes leave it.
 pub(crate) const KIND_BASE_STALE: &str = "base-stale";
@@ -90,6 +93,7 @@ fn opt_time(raw: Option<String>) -> Result<Option<DateTime<Utc>>, StoreError> {
 
 fn pr_row(row: &SqliteRow) -> Result<PrRow, StoreError> {
     let snapshot: Option<String> = row.try_get("snapshot")?;
+    let autofix: Option<String> = row.try_get("autofix")?;
     Ok(PrRow {
         id: row.try_get("id")?,
         task_key: row.try_get("task_key")?,
@@ -110,6 +114,7 @@ fn pr_row(row: &SqliteRow) -> Result<PrRow, StoreError> {
         error: row.try_get("error")?,
         error_kind: row.try_get("error_kind")?,
         created_at: time(&row.try_get::<String, _>("created_at")?)?,
+        autofix: autofix.map(|s| serde_json::from_str(&s)).transpose()?,
     })
 }
 
@@ -175,6 +180,38 @@ async fn insert_notice_in(
 }
 
 impl Store {
+    /// Compare-and-set of the PR's autofix state: writes `next` only if the stored
+    /// state equals `expected` (compared by value, not as text: the migration's JSON
+    /// differs from serde's). `false` when it differs, leaving the row as it was.
+    #[allow(dead_code)]
+    pub(crate) async fn update_pr_autofix(
+        &self,
+        pr_id: i64,
+        expected: Option<&PrAutofix>,
+        next: Option<&PrAutofix>,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.pool.begin().await?;
+        let stored: Option<Option<String>> =
+            sqlx::query_scalar("SELECT autofix FROM pull_requests WHERE id = ?")
+                .bind(pr_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some(stored) = stored else {
+            return Ok(false);
+        };
+        let current: Option<PrAutofix> = stored.map(|s| serde_json::from_str(&s)).transpose()?;
+        if current.as_ref() != expected {
+            return Ok(false);
+        }
+        sqlx::query("UPDATE pull_requests SET autofix = ? WHERE id = ?")
+            .bind(next.map(serde_json::to_string).transpose()?)
+            .bind(pr_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     /// Links a PR to a task's repo, replacing the one there. Linking the same URL again
     /// keeps what was seen of it; a different one starts from nothing.
     pub(crate) async fn link_pr(&self, key: &TaskKey, pr: &NewPr) -> Result<PrRow, StoreError> {
@@ -566,6 +603,55 @@ mod tests {
         let now = opened(&store).await;
         assert_eq!(now.len(), 1);
         assert_eq!(now[0].cause, url(2));
+    }
+
+    fn fixing(sha: &str, attempts: u32) -> PrAutofix {
+        PrAutofix {
+            state: crate::autofix::State::Fixing,
+            attempts,
+            sha: Some(sha.into()),
+            session: Some("s1".into()),
+            sent_at: Some("2026-01-01T00:00:00Z".into()),
+            reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn update_pr_autofix_is_a_compare_and_set() {
+        let store = store_with(&["PROJ-1"]).await;
+        let pr = link(&store, "PROJ-1", ".", 1).await;
+        assert_eq!(pr.autofix, None);
+        let a = fixing("aaa", 1);
+        let b = fixing("bbb", 2);
+        // None -> Some on a NULL row.
+        assert!(store.update_pr_autofix(pr.id, None, Some(&a)).await.unwrap());
+        // A stale expected changes nothing.
+        assert!(!store.update_pr_autofix(pr.id, None, Some(&b)).await.unwrap());
+        assert!(!store.update_pr_autofix(pr.id, Some(&b), Some(&b)).await.unwrap());
+        assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(a.clone()));
+        assert!(store.update_pr_autofix(pr.id, Some(&a), Some(&b)).await.unwrap());
+        assert!(store.update_pr_autofix(pr.id, Some(&b), None).await.unwrap());
+        assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, None);
+        assert!(!store.update_pr_autofix(9999, None, Some(&a)).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn update_pr_autofix_matches_the_migration_backfill_shape() {
+        let store = store_with(&["PROJ-1"]).await;
+        let pr = link(&store, "PROJ-1", ".", 1).await;
+        sqlx::query(
+            "UPDATE pull_requests SET autofix = '{\"sha\": null,  \"attempts\":0,\"state\":\"watching\"}' WHERE id = ?",
+        )
+        .bind(pr.id)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let got = store.pr(pr.id).await.unwrap().unwrap().autofix.unwrap();
+        assert_eq!(got.state, crate::autofix::State::Watching);
+        assert_eq!((got.attempts, got.sha.clone(), got.session.clone()), (0, None, None));
+        let next = fixing("ccc", 1);
+        assert!(store.update_pr_autofix(pr.id, Some(&got), Some(&next)).await.unwrap());
+        assert_eq!(store.pr(pr.id).await.unwrap().unwrap().autofix, Some(next));
     }
 
     async fn table_count(store: &Store, table: &str) -> i64 {
