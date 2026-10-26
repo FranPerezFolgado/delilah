@@ -135,7 +135,13 @@ fn reveal_path(path: String) -> Result<(), String> {
         .arg(real)
         .status()
         .map_err(|e| e.to_string())
-        .and_then(|s| if s.success() { Ok(()) } else { Err(format!("open exited with {s}")) })
+        .and_then(|s| {
+            if s.success() {
+                Ok(())
+            } else {
+                Err(format!("open exited with {s}"))
+            }
+        })
 }
 
 /// The usual macOS menus, minus "Close Window": in a terminal app Cmd+W closes the
