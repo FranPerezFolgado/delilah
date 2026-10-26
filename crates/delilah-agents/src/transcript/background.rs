@@ -140,6 +140,8 @@ fn read_report(block: &str) -> (Option<String>, bool, bool) {
         return (None, false, false);
     };
     let rest = &block[start..];
+    // Never past the notification's own closing tag.
+    let rest = &rest[..rest.rfind("</task-notification>").unwrap_or(rest.len())];
     // The last `</result>`, so a report that quotes one stays whole.
     let end = rest
         .rfind("</result>")
@@ -188,7 +190,7 @@ pub(crate) fn read_handback(origin: &Value) -> Option<BackgroundInfo> {
     };
     Some(BackgroundInfo {
         source: BackgroundSource::Handback,
-        task_id: text("from").map(String::from),
+        task_id: text("from").map(|s| s.chars().take(200).collect()),
         kind: BackgroundKind::Agent,
         label: text("name").map(|n| n.chars().take(200).collect()),
         status: Some("completed".into()),
@@ -196,6 +198,55 @@ pub(crate) fn read_handback(origin: &Value) -> Option<BackgroundInfo> {
         report_truncated,
         ..Default::default()
     })
+}
+
+/// A piece of a user text: what the user wrote, or a `<task-notification>` block.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Segment<'a> {
+    Text(&'a str),
+    Notification(&'a str),
+}
+
+const OPEN: &str = "<task-notification>";
+const CLOSE: &str = "</task-notification>";
+
+/// Split a text into its notifications and the text around them, in order. A
+/// notification ends at its closing tag, else at the next opening tag or the end.
+pub(crate) fn split_notifications(text: &str) -> Vec<Segment<'_>> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find(OPEN) {
+        if i > 0 {
+            out.push(Segment::Text(&rest[..i]));
+        }
+        let block = &rest[i..];
+        let after = OPEN.len();
+        let next_open = block[after..].find(OPEN).map(|j| j + after);
+        let end = match (
+            block[after..].find(CLOSE).map(|j| j + after + CLOSE.len()),
+            next_open,
+        ) {
+            (Some(c), Some(n)) if n < c => n,
+            (Some(c), _) => c,
+            (None, Some(n)) => n,
+            (None, None) => block.len(),
+        };
+        out.push(Segment::Notification(&block[..end]));
+        rest = &block[end..];
+    }
+    if !rest.is_empty() || out.is_empty() {
+        out.push(Segment::Text(rest));
+    }
+    out
+}
+
+/// Whether a user text comes from another agent or the CLI, not from the user: it has a
+/// `<task-notification>` anywhere, or is a message from another Claude session.
+pub fn is_agent_message(text: &str) -> bool {
+    text.contains(OPEN)
+        || text
+            .trim_start()
+            .starts_with("Another Claude session sent a message")
 }
 
 /// Read a `<task-notification>` block. Never panics: whatever cannot be read stays
@@ -211,7 +262,7 @@ pub(crate) fn read_notification(block: &str) -> BackgroundInfo {
         source: BackgroundSource::Notification,
         task_id: tag(block, "task-id")
             .filter(|s| !s.is_empty())
-            .map(String::from),
+            .map(|s| s.chars().take(200).collect()),
         kind,
         label,
         status: tag(block, "status")
@@ -472,5 +523,60 @@ mod tests {
             v,
             json!({"id": "t:u:0", "at": "a", "kind": "marker", "marker": "compacted"})
         );
+    }
+
+    #[test]
+    fn splits_notifications_and_text() {
+        use Segment::*;
+        let a = "<task-notification>a</task-notification>";
+        let b = "<task-notification>b</task-notification>";
+        assert_eq!(
+            split_notifications(&format!("{a}{b}")),
+            [Notification(a), Notification(b)]
+        );
+        assert_eq!(
+            split_notifications(&format!("hi {a} bye")),
+            [Text("hi "), Notification(a), Text(" bye")]
+        );
+        assert_eq!(
+            split_notifications("x<task-notification>a<task-notification>b"),
+            [
+                Text("x"),
+                Notification("<task-notification>a"),
+                Notification("<task-notification>b")
+            ]
+        );
+        assert_eq!(
+            split_notifications("<task-notification>áé"),
+            [Notification("<task-notification>áé")]
+        );
+        assert_eq!(split_notifications("plain"), [Text("plain")]);
+    }
+
+    #[test]
+    fn unclosed_result_never_keeps_the_closing_tag() {
+        let b = read_notification("<task-notification><result>done</task-notification>");
+        assert_eq!(b.report.as_deref(), Some("done"));
+        let b =
+            read_notification("<task-notification><result>done<usage></usage></task-notification>");
+        assert_eq!(b.report.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn recognises_agent_messages() {
+        assert!(is_agent_message("hola <task-notification>"));
+        assert!(is_agent_message(
+            "\n  Another Claude session sent a message:\n<agent-message>"
+        ));
+        assert!(!is_agent_message("what is a task-notification?"));
+    }
+
+    #[test]
+    fn task_id_is_capped_at_200() {
+        let long = "x".repeat(300);
+        let b = read_notification(&format!("<task-notification><task-id>{long}</task-id>"));
+        assert_eq!(b.task_id.unwrap().chars().count(), 200);
+        let h = read_handback(&json!({"kind":"peer","handback":true,"from":long}));
+        assert_eq!(h.unwrap().task_id.unwrap().chars().count(), 200);
     }
 }

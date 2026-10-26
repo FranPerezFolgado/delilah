@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff};
 
 mod background;
-pub use background::{BackgroundInfo, BackgroundKind, BackgroundSource};
+pub use background::{BackgroundInfo, BackgroundKind, BackgroundSource, is_agent_message};
 
 /// Tool results and long input strings are cut to this many bytes in entries.
 pub const MAX_TEXT: usize = 4096;
@@ -411,21 +411,20 @@ fn line_items(line: &Value, skipped: &mut usize) -> Vec<Item> {
             background: None,
         })];
     }
+    // A notification that no text block carries (the CLI marks it in `origin`) still
+    // gives its marker.
     if line.get("type").and_then(Value::as_str) == Some("user")
+        && line.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification")
         && let Some(message) = line.get("message")
+        && !user_text(message).contains("<task-notification>")
     {
-        let from_origin =
-            line.pointer("/origin/kind").and_then(Value::as_str) == Some("task-notification");
-        let text = user_text(message);
-        if from_origin || text.trim_start().starts_with("<task-notification>") {
-            return vec![Item::Entry(Entry::Marker {
-                id: format!("t:{uuid}:0"),
-                at,
-                marker: MarkerKind::BackgroundDone,
-                detail: notification_summary(&text),
-                background: Some(background::read_notification(notification_block(&text))),
-            })];
-        }
+        return vec![Item::Entry(Entry::Marker {
+            id: format!("t:{uuid}:0"),
+            at,
+            marker: MarkerKind::BackgroundDone,
+            detail: None,
+            background: Some(background::read_notification("")),
+        })];
     }
     match line.get("message") {
         Some(message) => message_items(message, uuid, &at, skipped),
@@ -447,17 +446,6 @@ fn user_text(message: &Value) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         _ => String::new(),
-    }
-}
-
-/// The `<task-notification>` block of a text: from its opening tag to the closing tag
-/// or the end. Without an opening tag, the whole text.
-fn notification_block(text: &str) -> &str {
-    let from = text.find("<task-notification>").unwrap_or(0);
-    let block = &text[from..];
-    match block.find("</task-notification>") {
-        Some(end) => &block[..end],
-        None => block,
     }
 }
 
@@ -486,6 +474,7 @@ pub fn tool_step_summary(tool: &str, input: &Value) -> Option<String> {
 fn is_injected(text: &str) -> bool {
     let t = text.trim_start();
     t.is_empty()
+        || background::is_agent_message(t)
         || t.starts_with("<system-reminder>")
         || t.starts_with("<user-prompt-submit-hook>")
         || t.starts_with("<command-")
@@ -512,14 +501,39 @@ fn message_items(message: &Value, uuid: &str, at: &str, skipped: &mut usize) -> 
             Some("text") => {
                 let text = block.get("text").and_then(Value::as_str).unwrap_or("");
                 if user {
-                    if !is_injected(text) {
-                        items.push(Item::Entry(Entry::User {
-                            id,
-                            at,
-                            text: text.to_string(),
-                            state: UserState::Delivered,
-                            from: UserFrom::Terminal,
-                        }));
+                    let mut k = 0;
+                    for segment in background::split_notifications(text) {
+                        let id = if k == 0 {
+                            id.clone()
+                        } else {
+                            format!("{id}:{k}")
+                        };
+                        let at = at.clone();
+                        match segment {
+                            background::Segment::Text(t) => {
+                                let t = t.trim();
+                                if !is_injected(t) {
+                                    items.push(Item::Entry(Entry::User {
+                                        id,
+                                        at,
+                                        text: t.to_string(),
+                                        state: UserState::Delivered,
+                                        from: UserFrom::Terminal,
+                                    }));
+                                    k += 1;
+                                }
+                            }
+                            background::Segment::Notification(block) => {
+                                items.push(Item::Entry(Entry::Marker {
+                                    id,
+                                    at,
+                                    marker: MarkerKind::BackgroundDone,
+                                    detail: notification_summary(block),
+                                    background: Some(background::read_notification(block)),
+                                }));
+                                k += 1;
+                            }
+                        }
                     }
                 } else if !text.trim().is_empty() {
                     items.push(Item::Entry(Entry::Claude {
@@ -1330,6 +1344,65 @@ mod tests {
         assert_eq!(*detail, None);
         let json = serde_json::to_value(&p.entries[0]).unwrap();
         assert!(json.get("detail").is_none());
+    }
+
+    fn entries_of(content: &str) -> Vec<Entry> {
+        parse(&user_line("", content), 0).entries
+    }
+
+    fn marker_id(e: &Entry) -> &str {
+        match e {
+            Entry::Marker { id, .. } => id,
+            Entry::User { id, .. } => id,
+            _ => panic!("unexpected entry"),
+        }
+    }
+
+    #[test]
+    fn two_notifications_in_one_string_give_two_markers() {
+        let content = r#""<task-notification><task-id>a</task-id></task-notification>\n<task-notification><task-id>b</task-id></task-notification>""#;
+        let e = entries_of(content);
+        assert_eq!(e.len(), 2);
+        assert_eq!(marker_id(&e[0]), "t:n1:0");
+        assert_eq!(marker_id(&e[1]), "t:n1:0:1");
+    }
+
+    #[test]
+    fn notification_in_a_second_block_and_around_text() {
+        let e = entries_of(
+            r#"[{"type":"text","text":"hola"},{"type":"text","text":"<task-notification><task-id>a</task-id></task-notification>"}]"#,
+        );
+        assert_eq!(e.len(), 2);
+        assert!(matches!(&e[0], Entry::User { text, .. } if text == "hola"));
+        assert_eq!(marker_id(&e[0]), "t:n1:0");
+        assert!(matches!(&e[1], Entry::Marker { .. }));
+        assert_eq!(marker_id(&e[1]), "t:n1:1");
+
+        let e = entries_of(
+            r#""hola\n<task-notification><task-id>a</task-id></task-notification>\nadiós""#,
+        );
+        assert_eq!(e.len(), 3);
+        assert!(matches!(&e[0], Entry::User { text, .. } if text == "hola"));
+        assert!(matches!(&e[1], Entry::Marker { .. }));
+        assert!(matches!(&e[2], Entry::User { text, .. } if text == "adiós"));
+        let ids: Vec<_> = e.iter().map(marker_id).collect();
+        assert_eq!(ids, ["t:n1:0", "t:n1:0:1", "t:n1:0:2"]);
+    }
+
+    #[test]
+    fn agent_messages_never_become_user_entries() {
+        for content in [
+            r#""Another Claude session sent a message:\n<agent-message from=\"x\">hi</agent-message>""#,
+            r#""a <task-notification>unterminated""#,
+        ] {
+            for entry in entries_of(content) {
+                if let Entry::User { text, .. } = entry {
+                    assert!(
+                        !text.contains("<task-notification") && !text.contains("<agent-message")
+                    );
+                }
+            }
+        }
     }
 
     #[test]
