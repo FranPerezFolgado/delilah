@@ -811,7 +811,7 @@ See the [research](../specs/008-mobile-access-analysis/research.md).
 **97. A terminal holds its turn end by the `Stop`'s `background_tasks` (2026-10-26).** In
 terminal mode the `Stop` hook of a turn that ends with background sub-agents running (an
 entry with `type: "subagent"`, `status: "running"`) is held like chat mode's (#88). The task
-stays `running` instead of `waiting-for-user` while `/orchestrate` sub-agents implement.
+stays `running` instead of `waiting-for-user` while `/orchestrate` sub-agents implement, so neither the daemon nor the app sends a "waiting" or "turn done" notification for it.
 With the `Stop` held, the next prompt (a sub-agent's `<agent-message>`, a
 `<task-notification>`, the user's) is a new turn and drops it. A late `idle_prompt` is
 ignored. After `SubagentStop` for every listed sub-agent, the 30 s fallback applies it, as

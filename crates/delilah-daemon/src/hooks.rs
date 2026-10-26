@@ -1277,9 +1277,13 @@ mod tests {
 
     /// A terminal session `id` of PROJ-1 (its process just sleeps), working.
     async fn pty_session(state: &AppState, id: &str) -> crate::sessions::Live {
+        pty_session_as(state, id, true).await
+    }
+
+    async fn pty_session_as(state: &AppState, id: &str, primary: bool) -> crate::sessions::Live {
         state
             .store
-            .create_session(&session_record(id, true))
+            .create_session(&session_record(id, primary))
             .await
             .unwrap();
         let mut cmd = portable_pty::CommandBuilder::new("sleep");
@@ -1289,7 +1293,7 @@ mod tests {
             id,
             "PROJ-1",
             crate::store_sessions::SessionKind::Claude,
-            true,
+            primary,
             pty,
         );
         live.set_state(LiveState::Working);
@@ -1344,6 +1348,36 @@ mod tests {
         post(&state, URL, terminal_stop(&[])).await;
         assert_eq!(live.state(), LiveState::Waiting);
         assert_eq!(status(&state).await, TaskStatus::WaitingForUser);
+    }
+
+    #[tokio::test]
+    async fn nothing_notifies_while_a_terminals_sub_agents_work() {
+        let state = running_task().await;
+        let _main = pty_session(&state, "s-1").await;
+        let _review = pty_session_as(&state, "s-2", false).await;
+        let review_url = "/hooks/claude?task=PROJ-1&session=s-2";
+        let idle = json!({ "hook_event_name": "Notification", "notification_type": "idle_prompt",
+                           "message": "Claude is waiting for your input" });
+        for url in [URL, review_url] {
+            post(&state, url, terminal_stop(&["a1"])).await;
+            post(&state, url, idle.clone()).await;
+        }
+        // No desktop notification from the daemon and no Inbox item for the app to
+        // notify ("te espera", "terminó su turno").
+        assert!(state.notifier.recorded().is_empty());
+        assert!(inbox(&state).await.is_empty());
+
+        // The turn that really ends says so, once.
+        post(
+            &state,
+            URL,
+            json!({ "hook_event_name": "UserPromptSubmit",
+                                  "prompt": "<agent-message from=\"a1\">done</agent-message>" }),
+        )
+        .await;
+        post(&state, URL, terminal_stop(&[])).await;
+        assert_eq!(state.notifier.recorded().len(), 1);
+        assert_eq!(inbox(&state).await.len(), 1);
     }
 
     #[tokio::test]
