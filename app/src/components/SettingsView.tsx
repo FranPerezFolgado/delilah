@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, ASK_POSITIONS, type AgentPermissions, type AskPosition, type Health } from "../api";
+import { AGENT_MODELS, api, ASK_POSITIONS, DEFAULT_AGENT_MODELS, type AgentModel, type AgentModels, type AgentPermissions, type AskPosition, type Health } from "../api";
+import { modelLabel } from "../agentModels";
 import { isDesktop, revealInFinder } from "../platform";
 import { Button, Row, Segmented, Toggle } from "./ui";
 import "./SettingsView.css";
@@ -30,10 +31,22 @@ function lastCheckText(meta: UpdateMeta): string {
   return result ? `${when} · ${result}` : when;
 }
 
+const MODEL_PHASES = ["specify", "plan", "implement", "review"] as const;
+
+function phaseLabel(phase: (typeof MODEL_PHASES)[number]): string {
+  switch (phase) {
+    case "specify": return t("Especificar");
+    case "plan": return t("Planificar");
+    case "implement": return t("Implementar");
+    case "review": return t("Revisar");
+  }
+}
+
 const SECTIONS = [
   { id: "general", label: "General" },
   { id: "preguntas", label: "Preguntas" },
   { id: "ahorro", label: "Modo ahorro" },
+  { id: "modelo", label: "Modelo del agente" },
   { id: "actualizaciones", label: "Actualizaciones" },
   { id: "atajos", label: "Atajos de teclado" },
   { id: "diagnostico", label: "Diagnóstico" },
@@ -159,6 +172,49 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
     }
   };
 
+  const [models, setModels] = useState<AgentModels>(DEFAULT_AGENT_MODELS);
+  const [suggestion, setSuggestion] = useState(false);
+  const [modelsBusy, setModelsBusy] = useState(true);
+
+  useEffect(() => {
+    Promise.all([api.preference<AgentModels>("agent-models"), api.preference<boolean>("model-suggestion")])
+      .then(([saved, suggest]) => {
+        setModels({ ...DEFAULT_AGENT_MODELS, ...saved });
+        setSuggestion(suggest === true);
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setModelsBusy(false));
+  }, []);
+
+  const chooseModel = async (phase: keyof AgentModels, model: AgentModel) => {
+    if (model === models[phase]) return;
+    const next = { ...models, [phase]: model };
+    setError(null);
+    setModelsBusy(true);
+    try {
+      // The whole object; the daemon refuses a bad value and the select goes back.
+      await api.setPreference("agent-models", next);
+      setModels(next);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setModelsBusy(false);
+    }
+  };
+
+  const toggleSuggestion = async (on: boolean) => {
+    setError(null);
+    setModelsBusy(true);
+    try {
+      await api.setPreference("model-suggestion", on);
+      setSuggestion(on);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setModelsBusy(false);
+    }
+  };
+
   const save = async (next: Bindings) => {
     setError(null);
     try {
@@ -281,6 +337,27 @@ export function SettingsView({ bindings, onChange, language, onLanguage, askPosi
                 <p className="settings-help">
                   {t("Antes de pasar a la sesión siguiente, la actual guarda sus notas con /save-session.")}
                 </p>
+              </div>
+            </section>
+            <section id="settings-modelo" aria-labelledby="settings-modelo-h">
+              <h2 id="settings-modelo-h">{t("Modelo del agente")}</h2>
+              <div className="settings-field">
+                {MODEL_PHASES.map((phase) => (
+                  <label key={phase} className="settings-line">
+                    <span>{phaseLabel(phase)}</span>
+                    <select className="input" aria-label={phaseLabel(phase)} value={models[phase]} disabled={modelsBusy}
+                      onChange={(e) => chooseModel(phase, e.target.value as AgentModel)}>
+                      {AGENT_MODELS.map((m) => <option key={m} value={m}>{modelLabel(m)}</option>)}
+                    </select>
+                  </label>
+                ))}
+                <p className="settings-help">
+                  {t("Se elige al empezar cada sesión (en modo ahorro, una por fase) y no cambia mientras la sesión sigue en marcha. Una tarea puede fijar el suyo al crearla.")}
+                </p>
+              </div>
+              <div className="settings-field">
+                <Toggle label={t("Sugerir modelo al crear una tarea")} pressed={suggestion} disabled={modelsBusy} onChange={toggleSuggestion} />
+                <p className="settings-help">{t("Delilah propone un modelo según la tarea; tú decides si lo aplicas.")}</p>
               </div>
             </section>
             <section id="settings-actualizaciones" aria-labelledby="settings-actualizaciones-h">

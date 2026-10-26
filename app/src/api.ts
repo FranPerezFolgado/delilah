@@ -46,6 +46,20 @@ export interface PreviewView {
   started_at: string;
 }
 
+/** The Claude model of an agent session; "default" is the account's (no `--model`). */
+export type AgentModel = "opus" | "sonnet" | "opusplan" | "haiku" | "default";
+export const AGENT_MODELS: AgentModel[] = ["opus", "sonnet", "opusplan", "haiku", "default"];
+/** The `agent-models` preference: a model per phase. */
+export type AgentModels = Record<"specify" | "plan" | "implement" | "review", AgentModel>;
+/** What the preference holds until it is saved. */
+export const DEFAULT_AGENT_MODELS: AgentModels = { specify: "opus", plan: "opus", implement: "sonnet", review: "sonnet" };
+
+export interface ModelSuggestion {
+  model: AgentModel;
+  reason: string;
+  source: "heuristic" | "claude";
+}
+
 export interface Task {
   key: string;
   /** When the task was created (RFC 3339). */
@@ -63,6 +77,8 @@ export interface Task {
   in_checkout?: boolean | null;
   /** The branch of the task's workspace; absent without a workspace (read-only). */
   branch?: string | null;
+  /** The task's own model; null or absent: follow Settings. */
+  model?: AgentModel | null;
   /** Saving mode: each step runs in a fresh session. */
   saving_mode: boolean;
   /** Autopilot: null when off. */
@@ -171,6 +187,8 @@ export interface NewBacklogTask {
   /** Where it will work once started: the project's checkout or a worktree. */
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Absent or null: follow Settings. */
+  model?: AgentModel | null;
   /** Implies saving mode. */
   autopilot?: boolean;
   /** Absent: the project's default. */
@@ -188,6 +206,8 @@ export interface BacklogChange {
   project?: string;
   in_checkout?: boolean;
   saving_mode?: boolean;
+  /** Absent: unchanged; null: back to following Settings. */
+  model?: AgentModel | null;
   /** Implies saving mode. */
   autopilot?: boolean;
   /** Absent: the project's default. */
@@ -208,6 +228,8 @@ export interface RunRequest {
   in_checkout?: boolean;
   /** Saving mode; absent: the `saving-mode` preference (kept for backlog tasks). */
   saving_mode?: boolean;
+  /** Absent: a backlog task keeps its own; null: follow Settings; a value sets it. */
+  model?: AgentModel | null;
   /** Implies saving mode. */
   autopilot?: boolean;
   /** Absent: the project's default. */
@@ -839,6 +861,9 @@ export const api = {
   // but "auto" | "default"; the stored value is kept.
   setPreference: (key: string, value: unknown) =>
     request<unknown>(`/api/v1/preferences/${key}`, { method: "PUT", body: JSON.stringify(value) }),
+  /** The model to suggest for a task; 409 when the `model-suggestion` preference is off. */
+  suggestModel: (req: { title: string; notes?: string; workflow?: string; key?: string; free?: boolean }) =>
+    post<ModelSuggestion>("/api/v1/model-suggestion", req),
   openSession: (task: string, s: { kind: SessionKind; label?: string; prompt?: string }) =>
     post<Session>(`/api/v1/tasks/${task}/sessions`, s),
   closeSession: (id: string) => post<null>(`/api/v1/sessions/${id}/close`),

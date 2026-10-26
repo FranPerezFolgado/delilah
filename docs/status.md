@@ -6,6 +6,8 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Built
 
+**Agent model per phase and per task** (decision [#100](decisions.md)): Settings › "Agent model" maps specify/plan/implement/review to opus, sonnet, opusplan, haiku or Claude's default (defaults: Opus to specify and plan, Sonnet to implement and review); a task may set its own model (new-task dialog, `model` on `POST /tasks`, `/runs` and `PATCH /tasks/{key}`). The model is chosen when each task session starts and stored on the session, so a resume never switches it. Optional, off by default: "Suggest a model when creating a task" (`POST /api/v1/model-suggestion`, a heuristic refined by a Haiku one-shot; the user applies it). Project sessions and idea conversations stay on Claude's default. Not yet: a model flag in the CLI.
+
 **Workspace removal that finishes** (decision [#86](decisions.md)): before a worktree goes, the task's agents' process groups and its preview's group are ended and awaited; a `git worktree remove` that fails with the folder still there falls back to deleting it and `git worktree prune`, and a half-removed worktree can be archived again.
 
 **Public-repo onboarding** (spec `008-public-repo-onboarding`; decisions [#79](decisions.md) to [#83](decisions.md)):

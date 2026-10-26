@@ -3,7 +3,8 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use delilah_core::{
-    Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TaskView, TitleSource, TransitionError,
+    AgentModel, Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TaskView, TitleSource,
+    TransitionError,
 };
 use serde::Serialize;
 use sqlx::Row;
@@ -104,7 +105,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -115,7 +116,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -217,6 +218,26 @@ impl Store {
     pub async fn set_chat_mode(&self, key: &TaskKey, chat_mode: bool) -> Result<Task, StoreError> {
         let updated = sqlx::query("UPDATE tasks SET chat_mode = ?, updated_at = ? WHERE key = ?")
             .bind(chat_mode)
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(&self.pool)
+            .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        self.get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))
+    }
+
+    /// Sets the model the task's next sessions start on (`None`: the phase's); returns the task.
+    pub async fn set_model(
+        &self,
+        key: &TaskKey,
+        model: Option<AgentModel>,
+    ) -> Result<Task, StoreError> {
+        let updated = sqlx::query("UPDATE tasks SET model = ?, updated_at = ? WHERE key = ?")
+            .bind(model.map(AgentModel::name))
             .bind(Utc::now().to_rfc3339())
             .bind(key.as_str())
             .execute(&self.pool)
@@ -489,7 +510,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -552,8 +573,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, model, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -573,6 +594,7 @@ async fn insert_task<'e>(
     .bind(task.chat_mode)
     .bind(task.ci_autofix)
     .bind(allowed_tools_json(&task.allowed_tools)?)
+    .bind(task.model.map(AgentModel::name))
     .bind(task.created_at.to_rfc3339())
     .bind(&now)
     .execute(executor)
@@ -662,6 +684,11 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
             row.try_get::<Option<String>, _>("allowed_tools")?
                 .as_deref(),
         ),
+        // An unknown name (a newer daemon's) follows the phase.
+        model: row
+            .try_get::<Option<String>, _>("model")?
+            .as_deref()
+            .and_then(AgentModel::parse),
         created_at: {
             let text: String = row.try_get("created_at")?;
             DateTime::parse_from_rfc3339(&text)

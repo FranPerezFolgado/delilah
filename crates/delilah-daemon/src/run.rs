@@ -183,6 +183,10 @@ pub struct RunRequest {
     /// default (`always`, `autopilot` or `off`).
     #[serde(default)]
     pub ci_autofix: Option<bool>,
+    /// The model of all its sessions. Left out: what a backlog task chose; `null`, each
+    /// phase's (`agent-models`).
+    #[serde(default, deserialize_with = "crate::models::present")]
+    pub model: Option<Option<delilah_core::AgentModel>>,
 }
 
 pub async fn start_run(
@@ -414,6 +418,9 @@ pub(crate) async fn start_run_with(
             if let Some(on) = req.ci_autofix.filter(|&on| on != updated.ci_autofix) {
                 app.store.set_ci_autofix(&key, on).await?;
             }
+            if let Some(model) = req.model.filter(|&m| m != updated.model) {
+                app.store.set_model(&key, model).await?;
+            }
             updated.notes
         }
         None => {
@@ -428,6 +435,7 @@ pub(crate) async fn start_run_with(
                 autopilot,
             );
             task.notes = req.notes.clone().filter(|n| !n.trim().is_empty());
+            task.model = req.model.flatten();
             if crate::branching::is_free(&key) {
                 task.title_source = delilah_core::TitleSource::Initial;
             }
@@ -1549,6 +1557,8 @@ pub(crate) async fn spawn_session(
             )
             .map_err(|e| LaunchError::Start(format!("cannot write agent settings: {e}")))?;
             let remote_name = app.remote_control().then(|| remote_name(session));
+            // Chosen once per session and kept on resume (the prompt cache stays valid).
+            let model = crate::models::for_session(app, session, resume).await?;
             let launch = claude::Launch {
                 workspace,
                 session_id: &session.id,
@@ -1562,6 +1572,7 @@ pub(crate) async fn spawn_session(
                 append_system_prompt,
                 remote_control: remote_name.as_deref(),
                 program: app.config.agent_program.as_deref(),
+                model: model.as_deref(),
             };
             runtime::spawn_with_events(&launch, kind, Some(log)).map_err(spawn_error)?
         }
@@ -3091,6 +3102,7 @@ mod tests {
                 free: true,
                 view: None,
                 ci_autofix: None,
+                model: None,
             },
         )
         .await
@@ -3220,6 +3232,62 @@ mod tests {
             "no positional prompt: {args}"
         );
         let _ = live.runtime.kill();
+    }
+
+    #[tokio::test]
+    async fn a_task_session_starts_on_its_phase_model_and_keeps_it() {
+        let home = std::env::temp_dir().join(format!("delilah-model-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&home).unwrap();
+        let (app, ws) = chat_app(&hello_script(&home.display().to_string()), true).await;
+        let record = session("PROJ-1", "Main");
+        app.store.create_session(&record).await.unwrap();
+        launch_session_with(
+            &app,
+            &record,
+            &ws,
+            Some("go"),
+            false,
+            Duration::from_secs(10),
+        )
+        .await
+        .map_err(|e| e.message)
+        .unwrap();
+        // A `feature` task with no phase yet specifies: Opus by default.
+        let args = read_when_there(home.join("args.txt")).await;
+        assert!(args.contains("--model\nopus\n"), "{args}");
+        assert_eq!(
+            app.store.session_model("sess-1").await.unwrap().as_deref(),
+            Some("opus")
+        );
+        let _ = app.sessions.get("sess-1").unwrap().runtime.kill();
+        // A new model for the task does not move the session it already started.
+        let key = TaskKey::new("PROJ-1");
+        app.store
+            .set_model(&key, Some(delilah_core::AgentModel::Haiku))
+            .await
+            .unwrap();
+        let again = crate::models::for_session(&app, &record, false)
+            .await
+            .map_err(|e| e.message);
+        assert_eq!(again.unwrap().as_deref(), Some("opus"));
+        // A new session takes it; a project's session gets none.
+        let next = SessionRecord {
+            id: "sess-2".into(),
+            ..session("PROJ-1", "Second")
+        };
+        app.store.create_session(&next).await.unwrap();
+        let model = crate::models::for_session(&app, &next, false)
+            .await
+            .map_err(|e| e.message);
+        assert_eq!(model.unwrap().as_deref(), Some("haiku"));
+        let project = SessionRecord {
+            id: "sess-3".into(),
+            ..session("@web", "Project")
+        };
+        let model = crate::models::for_session(&app, &project, false)
+            .await
+            .map_err(|e| e.message);
+        assert_eq!(model.unwrap(), None);
     }
 
     #[tokio::test]
@@ -4133,6 +4201,7 @@ mod tests {
             from_session: None,
             chat_mode: None,
             ci_autofix: None,
+            model: None,
         }
     }
 

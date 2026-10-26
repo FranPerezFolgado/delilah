@@ -471,6 +471,10 @@ pub struct Task {
     /// Permission rules granted with "allow always in this task".
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+    /// The model the task's sessions start on; `None` follows the phase's (the
+    /// `agent-models` preference).
+    #[serde(default)]
+    pub model: Option<crate::AgentModel>,
     /// When the task was created.
     #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
@@ -502,6 +506,7 @@ impl Task {
             chat_mode: false,
             ci_autofix: false,
             allowed_tools: Vec::new(),
+            model: None,
             created_at: Utc::now(),
             finished_at: None,
         }

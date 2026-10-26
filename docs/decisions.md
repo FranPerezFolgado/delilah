@@ -846,3 +846,18 @@ twice; a manual forward takes the same per-task slot. *Ruled out:* forwarding re
 (they come from people and bots, and are judgment calls); an unbounded loop; a time-based
 retry (the head is the trigger, not the clock); a lock in memory only (a restart would forget
 what was sent).
+
+**100. The agent model is chosen per phase and per task, once per session (2026-10-26).**
+Task agents used to run with no `--model`, so on the account's default (Opus). Now the
+`agent-models` preference maps each phase to a Claude Code alias (opus, sonnet, opusplan,
+haiku) or `default` (no flag), defaulting to Opus for specify/plan and Sonnet for
+implement/review; a task's own `model` wins over its phase. The model is resolved when a
+task session starts and stored on the session, and a resume reuses it. *Why:* most of the
+spend is implementation and review turns that do not need Opus, while specs and plans do;
+switching models inside a running session would throw away its prompt cache and cost more
+than it saves, so a change waits for the next session (saving mode already gives one per
+phase). The optional suggestion (off by default) is a heuristic plus a Haiku one-shot, and
+the user applies it; it never sets the model by itself. *Ruled out:* third-party model
+routers (jev-router, Claude Code Router), which put another process between Delilah and
+Claude and see the traffic; switching the model mid-session with `/model`; picking a model
+for project sessions and idea conversations (they stay on the default).

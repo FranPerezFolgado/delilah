@@ -393,6 +393,26 @@ impl Store {
         Ok(())
     }
 
+    /// The model the session was started on (`None`: none was passed).
+    pub async fn session_model(&self, id: &str) -> Result<Option<String>, StoreError> {
+        let model: Option<Option<String>> =
+            sqlx::query_scalar("SELECT model FROM sessions WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(model.flatten())
+    }
+
+    /// Records the model a session starts on, so a resume keeps it.
+    pub async fn set_session_model(&self, id: &str, model: Option<&str>) -> Result<(), StoreError> {
+        sqlx::query("UPDATE sessions SET model = ? WHERE id = ?")
+            .bind(model)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Follows the task again: every session of it loses its own runtime.
     pub async fn clear_runtime_overrides(&self, task: &str) -> Result<(), StoreError> {
         sqlx::query("UPDATE sessions SET runtime = NULL WHERE task_key = ?")

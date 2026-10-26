@@ -16,4 +16,13 @@ export const EN: Record<string, string> = {
   "Versión del daemon": "Daemon version",
   "Carpeta de datos": "Data folder",
   "Mostrar en Finder": "Show in Finder",
+  "Modelo del agente": "Agent model",
+  Especificar: "Specify",
+  Planificar: "Plan",
+  Implementar: "Implement",
+  Revisar: "Review",
+  "Se elige al empezar cada sesión (en modo ahorro, una por fase) y no cambia mientras la sesión sigue en marcha. Una tarea puede fijar el suyo al crearla.":
+    "It is chosen when each session starts (in saving mode, one per phase) and does not change while the session is running. A task can set its own when created.",
+  "Sugerir modelo al crear una tarea": "Suggest a model when creating a task",
+  "Delilah propone un modelo según la tarea; tú decides si lo aplicas.": "Delilah proposes a model for the task; you decide whether to apply it.",
 };

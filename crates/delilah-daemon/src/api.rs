@@ -222,6 +222,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/projects/{name}/suggest-submodules",
             post(projects::suggest_submodules),
         )
+        .route("/api/v1/model-suggestion", post(crate::models::suggest))
         .route("/api/v1/runs", post(run::start_run))
         .route("/hooks/claude", post(hooks::claude_hook))
         .route("/hooks/claude/statusline", post(hooks::claude_statusline))
@@ -343,6 +344,9 @@ pub struct NewTask {
     /// CI autofix on or off; absent, the project's default decides.
     #[serde(default)]
     pub ci_autofix: Option<bool>,
+    /// The model of all its sessions; absent or `null`, each phase's (`agent-models`).
+    #[serde(default)]
+    pub model: Option<delilah_core::AgentModel>,
 }
 
 /// Whether a new task has CI autofix on: the explicit value wins, else the project
@@ -505,6 +509,7 @@ pub(crate) async fn build_task(app: &AppState, new: NewTask) -> Result<Task, Api
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
     task.in_checkout = new.in_checkout;
+    task.model = new.model;
     task.view = view.unwrap_or_default();
     task.saving_mode = match new.saving_mode {
         Some(on) => on,
@@ -541,6 +546,7 @@ async fn update_task(
         autopilot,
         view,
         ci_autofix,
+        model,
     } = body;
     check_autopilot(autopilot, saving_mode)?;
     let view = view.as_deref().map(parse_view).transpose()?;
@@ -569,22 +575,26 @@ async fn update_task(
         && change.project.is_none()
         && change.workflow.is_none()
         && change.in_checkout.is_none();
-    let mut task = if (view.is_some() || ci_autofix.is_some()) && change.is_empty() {
-        app.store
-            .get_task(&key)
-            .await?
-            .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?
-    } else {
-        match &change.title {
-            Some(title) if title_only => app.store.set_title(&key, title).await?,
-            _ => app.store.update_backlog_task(&key, &change).await?,
-        }
-    };
+    let mut task =
+        if (view.is_some() || ci_autofix.is_some() || model.is_some()) && change.is_empty() {
+            app.store
+                .get_task(&key)
+                .await?
+                .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?
+        } else {
+            match &change.title {
+                Some(title) if title_only => app.store.set_title(&key, title).await?,
+                _ => app.store.update_backlog_task(&key, &change).await?,
+            }
+        };
     if let Some(on) = ci_autofix.filter(|on| *on != task.ci_autofix) {
         // The toggle's side effects (reset or cancel, evaluate) and its 409 on a finished
         // task, as the `autofix` route has them.
         crate::autofix::set(&app, &key, on).await?;
         task.ci_autofix = on;
+    }
+    if let Some(model) = model.filter(|m| *m != task.model) {
+        task = app.store.set_model(&key, model).await?;
     }
     if let Some(view) = view.filter(|v| *v != task.view) {
         task = app.store.set_view(&key, view).await?;
@@ -625,6 +635,10 @@ struct UpdateTask {
     /// Absent leaves it as it is: the project default applies only at creation.
     #[serde(default)]
     ci_autofix: Option<bool>,
+    /// Absent leaves it; `null` goes back to each phase's model. Takes effect in the
+    /// task's next new session: a running one keeps its model.
+    #[serde(default, deserialize_with = "crate::models::present")]
+    model: Option<Option<delilah_core::AgentModel>>,
 }
 
 async fn get_task(
@@ -1605,6 +1619,41 @@ mod tests {
         assert_eq!(task["ci_autofix"], false);
         let (_, task) = call(&app, "PATCH", &uri, Some(json!({"autopilot": true}))).await;
         assert_eq!(task["ci_autofix"], false);
+    }
+
+    #[tokio::test]
+    async fn a_task_takes_a_model_and_patch_null_clears_it() {
+        let (app, _state) = app_with_project().await;
+        let (_, task) = call(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            Some(json!({"free": true, "title": "T", "project": "web", "model": "haiku"})),
+        )
+        .await;
+        assert_eq!(task["model"], "haiku");
+        let uri = format!("/api/v1/tasks/{}", task["key"].as_str().unwrap());
+        // Absent leaves it; `null` clears it.
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"notes": "n"}))).await;
+        assert_eq!(task["model"], "haiku");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"model": "opusplan"}))).await;
+        assert_eq!(task["model"], "opusplan");
+        let (_, task) = call(&app, "PATCH", &uri, Some(json!({"model": null}))).await;
+        assert_eq!(task["model"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_model_suggestion_is_a_409_while_its_preference_is_off() {
+        let (app, _state) = app_with_project().await;
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/api/v1/model-suggestion",
+            Some(json!({"title": "T"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["reason"], "suggestion-off");
     }
 
     #[tokio::test]
