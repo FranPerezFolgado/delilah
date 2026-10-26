@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { t } from "../i18n";
 import { Markdown } from "./Markdown";
-import { Button, ConfirmDialog, pushToast } from "./ui";
+import { Button, ConfirmDialog, dismissToast, pushToast } from "./ui";
 import "./ProposalCard.css";
 
 /** How long «Deshacer» works before the discard is sent to the daemon. */
@@ -64,12 +64,15 @@ export function ProposalCard({ ask, onDone, onOpenTask }: Props) {
 
   const discard = () => {
     setDiscarding(true);
+    // The toast can be paused by hover; the discard can't, so it closes the toast itself.
+    let toastId = -1;
     const timer = setTimeout(() => {
       pending.current = null;
+      dismissToast(toastId);
       void sendRef.current("Descartar");
     }, UNDO_MS);
     pending.current = { timer };
-    pushToast({
+    toastId = pushToast({
       text: t("Tarea descartada"),
       ttl: UNDO_MS,
       action: {
