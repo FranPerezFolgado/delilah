@@ -11,14 +11,14 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-02 | 2 | 2A | done | 1 | 7874870 | Client read types and calls (api.ts) |
 | WP-03 | 2 | 2A | done | 1 | 87b9863 | Core events and created_at |
 | WP-04 | 2 | 2A | done | 1 | 8c35baa | Route skeleton |
-| WP-05 | 2 | 2B | done | 1 |  | Pending permission waits; ended permission cards |
+| WP-05 | 2 | 2B | done | 1 | d9b6b49 | Pending permission waits; ended permission cards |
 | WP-06 | 2 | 2B | done | 1 | 18ba302 | Checkout is the default workspace |
 | WP-07 | 2 | 2B | done | 1 | a3b376d | created_at exposed and reopen |
 | WP-08 | 2 | 2B | done | 1 | a224417 | Inbox store, ids, removal and new avisos |
 | WP-09 | 2 | 2B | done | 1 | 47ffad7 | PR check times, review comments, merge |
 | WP-10 | 2 | 2B | done | 1 | 718c733 | Setup failure detail and Jira subtasks |
 | WP-11 | 2 | 2B | done | 1 | 49ec9d7 | Reveal in Finder (Tauri + platform.ts) |
-| WP-12 | 2 | 2C | pending | 0 | | Session activity and per-session runtime |
+| WP-12 | 2 | 2C | implementing | 1 |  | Session activity and per-session runtime |
 | WP-13 | 2 | 2D | pending | 0 | | CLI |
 | WP-14 | 2 | 2D | pending | 0 | | API e2e flows |
 | WP-15 | 3 | 3A | done | 1 | 1c4a8d0 | Token guards and v2 tokens |
@@ -32,7 +32,7 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | WP-23 | 4 | 4A | done | 1 | 48806d0 | Connection, breakpoints, sidebar shortcut |
 | WP-24 | 4 | 4B | done | 1 | 1537fa3 | Logs view, statusbar, disconnected banner |
 | WP-25 | 4 | 4B | done | 1 | 973db8b | Sidebar rewrite |
-| WP-26 | 4 | 4C | implementing | 1 |  | App shell |
+| WP-26 | 4 | 4C | done | 1 |  | App shell |
 | WP-27 | 4 | 4D | pending | 0 | | E2E selectors for the shell |
 | WP-28 | 5 | 5A | done | 1 | 1e376aa | History sentences and AskCard |
 | WP-29 | 5 | 5A | done | 1 | 8a1cdce | Header controls and tabs |
@@ -90,3 +90,4 @@ Orchestrator decisions: packages never raise the inline-style ratchet (WP-55 set
 | 7 | WP-47 | MEDIUM | Dirty-checkout refusal is detected by matching error text; give it a daemon error code (`checkout-dirty`) and use it in BacklogTaskView + NewTaskDialog. | crates/delilah-daemon/src/run.rs, app |
 | 5 | WP-34 | HIGH | Base-stale bar can only show the notice text: «main avanzó N commits · Actualizar rama» needs the commit count and an update-branch endpoint (daemon + api.ts + TaskScreen). Same API-gap fix package as PrSummary.number / finished date. | crates/delilah-daemon, app/src/api.ts, TaskScreen.tsx |
 | 9 | orchestrator | HIGH | styles.test: ~40 font-size/radius values outside the scale across new component CSS (AskCard, AutopilotControls, BacklogTaskView, BoardView, ChangesView, ConversationView, …) and an old token/raw colour in BoardView.css. One fix package after WP-52/WP-44/WP-26. | app/src/components/*.css |
+| 2 | WP-05 | MEDIUM | `setup::tests::exit_zero_runs_the_task_and_launches_the_agent` fails in full daemon runs (maybe WP-10 setup.json write order or load); investigate in WP-14/58. | crates/delilah-daemon/src/setup.rs |

@@ -19,12 +19,36 @@ import { UpdateNotice } from "./components/UpdateNotice";
 import { useUpdates } from "./useUpdates";
 import { canUpdate } from "./platform";
 import { StatusBar, type StatusFilter } from "./components/StatusBar";
+import { pushToast, ToastHost } from "./components/ui";
+import { useBreakpoints } from "./useWidth";
+import "./App.css";
 import { DisconnectedBanner } from "./components/DisconnectedBanner";
 import { useConnection } from "./connection";
 import { actionFor, type ActionId, type Bindings, DEFAULTS, setBindings } from "./shortcuts";
 
 // The task screen carries CodeMirror, most of the bundle: load it when a task opens.
 const TaskScreen = lazy(() => import("./components/TaskScreen").then((m) => ({ default: m.TaskScreen })));
+
+const RAIL_KEY = "delilah:rail";
+const loadRail = (): boolean | null => {
+  try {
+    const v = localStorage.getItem(RAIL_KEY);
+    return v === null ? null : v === "1";
+  } catch {
+    return null;
+  }
+};
+const setToast = (text: string) => void pushToast({ text, kind: "error" });
+const notify = (text: string) => void pushToast({ text });
+
+const VIEW_LABEL: Record<View, () => string> = {
+  board: () => t("Tareas"),
+  inbox: () => t("Bandeja"),
+  jira: () => "Jira",
+  projects: () => t("Proyectos"),
+  settings: () => t("Ajustes"),
+  tasks: () => t("Tareas"),
+};
 
 export function App() {
   const [view, setView] = useState<View>("board");
@@ -35,19 +59,31 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [usage, setUsage] = useState<UsageReport | null>(null);
-  const [online, setOnline] = useState(true);
   const conn = useConnection();
-  const [, setStatusFilter] = useState<StatusFilter | null>(null); // board wiring: WP-26
+  const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
+  const bp = useBreakpoints();
+  // ⌘\ overrides the automatic rail (narrow window), remembered per viewer.
+  const [railPref, setRailPref] = useState<boolean | null>(loadRail);
+  const rail = railPref ?? bp.rail;
+  const toggleRail = () => {
+    const next = !rail;
+    setRailPref(next);
+    try {
+      localStorage.setItem(RAIL_KEY, next ? "1" : "0");
+    } catch {
+      /* private mode: the choice lasts until the window closes */
+    }
+  };
   const [selected, setSelected] = useState<string | null>(null);
   const [newTask, setNewTask] = useState(false);
   const [draft, setDraft] = useState<TaskDraft | undefined>(undefined);
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
-  const [toast, setToast] = useState<string | null>(null);
   const [convertFrom, setConvertFrom] = useState<Session | null>(null);
   // A backlog task being started ("Empezar"), and one being deleted.
   const [starting, setStarting] = useState<Task | null>(null);
   const [deleting, setDeleting] = useState<Task | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   // "Eliminar" from a task's own view.
   useEffect(() => {
@@ -83,9 +119,9 @@ export function App() {
       setSessions(s);
       setProjects(p);
       setUsage(u);
-      setOnline(true);
+      setLoaded(true);
     } catch {
-      setOnline(false);
+      /* the connection state is tracked by useConnection */
     }
   }, []);
 
@@ -105,7 +141,6 @@ export function App() {
     };
     const offs = (Object.keys(fetchers) as Topic[]).map((t) => on(t, () => fetchers[t]().catch(() => {})));
     const stop = connect((connected) => {
-      setOnline(connected);
       // Lost the feed: fall back to a full fetch now, and the slow refresh after.
       if (!connected) refresh();
     });
@@ -149,12 +184,6 @@ export function App() {
   useEffect(() => {
     if (!selected && tasks.length > 0) setSelected(tasks[tasks.length - 1].key);
   }, [tasks, selected]);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   const applyBindings = (b: Bindings) => {
     setBindings(b);
@@ -206,7 +235,7 @@ export function App() {
         const kind: SessionKind = action === "new-terminal" ? "shell" : "claude";
         // In a task the new session opens as one of its tabs.
         if (view === "tasks" && (selected?.startsWith("@") || sessions.some((s) => s.task === selected))) return void window.dispatchEvent(new CustomEvent("delilah:new-session", { detail: kind }));
-        setToast(t("Abre una tarea con workspace, o un proyecto, para abrir una sesión."));
+        notify(t("Abre una tarea con workspace, o un proyecto, para abrir una sesión."));
         return;
       }
       case "close-session":
@@ -228,6 +257,8 @@ export function App() {
       case "toggle-preview":
         if (view === "tasks") window.dispatchEvent(new Event("delilah:toggle-preview"));
         return;
+      case "toggle-sidebar":
+        return toggleRail();
       case "new-task":
         return setNewTask(true);
       case "view-inbox":
@@ -260,15 +291,31 @@ export function App() {
   const task = tasks.find((t) => t.key === selected);
   // `@<name>` selects a project's own screen (sessions on its checkout).
   const project = selected?.startsWith("@") ? projects.find((p) => p.name === selected.slice(1)) : undefined;
+  const asks: Record<string, string> = {};
+  for (const i of inbox) if (i.kind === "waiting" && !(i.task in asks)) asks[i.task] = i.text ?? i.title;
   const owner = task?.key ?? (project ? `@${project.name}` : null);
+
+  const crumbs: { text: string; mono?: boolean }[] = [{ text: "Delilah" }];
+  if (view === "tasks" && owner) {
+    const proj = task?.project ?? project?.name;
+    if (proj) crumbs.push({ text: proj });
+    if (task) crumbs.push({ text: task.key, mono: true });
+  } else {
+    crumbs.push({ text: VIEW_LABEL[view]() });
+  }
+  const offline = conn.status === "down";
 
   return (
     <div className="window">
       <header className="titlebar" data-tauri-drag-region>
-        <span data-tauri-drag-region>Delilah</span>
-        {owner && view === "tasks" && (
-          <span data-tauri-drag-region className="mono" style={{ color: "var(--tx)" }}>/ {task?.key ?? project?.name}</span>
-        )}
+        <nav className="crumbs" aria-label={t("Ruta de navegación")} data-tauri-drag-region>
+          {crumbs.map((c, i) => (
+            <span key={i} data-tauri-drag-region className={`crumb trunc${i === crumbs.length - 1 ? " crumb-last" : ""}${c.mono ? " mono" : ""}`} title={c.text}>
+              {i > 0 && <span className="crumb-sep" data-tauri-drag-region>/ </span>}
+              {c.text}
+            </span>
+          ))}
+        </nav>
       </header>
       <div className="body">
         <Sidebar
@@ -300,35 +347,34 @@ export function App() {
               .catch((e) => setToast((e as Error).message))
           }
           onOpenIdeas={openIdeas}
-          onNewTask={() => setNewTask(true)}
+          onAddProject={() => setView("projects")}
+          onDone={(tk) => api.done(tk.key).then(refresh).catch((e) => setToast((e as Error).message))}
+          rail={rail}
+          onToggleRail={toggleRail}
           onDelete={setDeleting}
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
-        <main>
-          <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
-          {!online && (
-            <div className="notice" style={{ margin: 12, borderColor: "var(--err)" }}>
-              <span className="c-err">●</span>
-              <span>
-                {t("No hay conexión con delilahd.")}{" "}
-                {import.meta.env.DEV ? (
-                  <>
-                    {t("En desarrollo arráncalo con")} <span className="mono selectable">scripts/dev-daemon.sh</span>.
-                  </>
-                ) : (
-                  <>
-                    {t("Delilah lo arranca al abrirse; si sigue así, prueba Delilah → Reiniciar el daemon, o mira Ayuda → Ver logs.")}
-                  </>
-                )}
-              </span>
+        <main className="shell-main">
+          {offline && (
+            <div className="shell-banner">
+              <DisconnectedBanner lastOk={conn.lastOk} onRetry={conn.retry} />
             </div>
           )}
-          {view === "inbox" && <InboxView items={inbox} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
+          <div className={`shell-content${offline ? " is-offline" : ""}`} aria-disabled={offline || undefined} {...(offline ? { inert: true } : {})}>
+          <UpdateNotice state={updates.state} dispatch={updates.dispatch} installed={updates.meta.installed} />
+          {view === "inbox" && <InboxView items={inbox} loading={!loaded} onOpenTask={openTask} onOpenChanges={openChanges} onChanged={refresh} />}
           {view === "board" && (
             <BoardView
               tasks={tasks}
               prs={prs}
               specs={specs}
+              projects={projects}
+              statusFilter={statusFilter}
+              onClearStatusFilter={() => setStatusFilter(null)}
+              loading={!loaded}
+              asks={asks}
+              onAddProject={() => setView("projects")}
+              onConnectJira={() => setView("jira")}
               onOpen={(key) => {
                 setSelected(key);
                 setView("tasks");
@@ -408,16 +454,21 @@ export function App() {
                 api.setPreference("language", l).catch((e) => setToast((e as Error).message));
               }}
             />}
+          </div>
         </main>
       </div>
-      {conn.status === "down" && <DisconnectedBanner lastOk={conn.lastOk} onRetry={conn.retry} />}
-      <StatusBar status={conn.status} tasks={tasks} usage={usage} onFilter={setStatusFilter} onLogs={() => setShowLogs(true)} />
+      <StatusBar
+        status={conn.status}
+        tasks={tasks}
+        usage={usage}
+        onFilter={(f) => {
+          setStatusFilter((cur) => (cur === f ? null : f));
+          setView("board");
+        }}
+        onLogs={() => setShowLogs(true)}
+      />
       {showLogs && <LogsView onClose={() => setShowLogs(false)} />}
-      {toast && (
-        <div className="toast" role="status">
-          {toast}
-        </div>
-      )}
+      <ToastHost />
       {newTask && (
         <NewTaskDialog
           projects={projects}
@@ -448,7 +499,7 @@ export function App() {
             setNewTask(false);
             setDraft(undefined);
             refresh();
-            setToast(t("{key} guardada en el backlog de {project}", { key: saved.key, project: saved.project ?? "-" }));
+            notify(t("{key} guardada en el backlog de {project}", { key: saved.key, project: saved.project ?? "-" }));
           }}
         />
       )}
