@@ -126,8 +126,8 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 - [X] T039 [US3] `crates/delilah-daemon/src/pr_api/merge.rs`: `MergeRequest.confirm_live_subtasks`; refuse with `live-subtasks` and the keys when false and `integration::live_subtasks` is not empty
 - [X] T040 [US3] `crates/delilah-daemon/src/base_update.rs`: parent task refs = `origin/<own branch>` then default; `subtask_commits` in base-status; T035 passes
 - [X] T041 [US3] `crates/delilah-daemon/src/pr_loop/mod.rs` / `pr_loop/merge.rs`: on a subtask merge emit `Topic::Tasks` for its parent task; push `parent-task-ready` once (dedupe by parent task key + PR); T036 passes
-- [ ] T042 [P] [US3] `app/src/components/ProjectSettings.tsx`: "Parent task merge method" (merge / squash / rebase), noting it falls back to what the repository allows; vitest
-- [ ] T043 [US3] `app/src/components/PrView.tsx` for a parent task: draft badge; "Mark ready" suggestion when `subtask_progress.ready` and the PR is a draft; on `no-commits` offer "Add an empty commit and open"; on `live-subtasks` a confirmation dialog naming them, retrying with `confirm_live_subtasks`; base banner with "N merged subtask commits not in your workspace" (`subtask_commits`); i18n; vitest
+- [X] T042 [P] [US3] `app/src/components/ProjectSettings.tsx`: "Parent task merge method" (merge / squash / rebase), noting it falls back to what the repository allows; vitest
+- [X] T043 [US3] `app/src/components/PrView.tsx` for a parent task: draft badge; "Mark ready" suggestion when `subtask_progress.ready` and the PR is a draft; on `no-commits` offer "Add an empty commit and open"; on `live-subtasks` a confirmation dialog naming them, retrying with `confirm_live_subtasks`; base banner with "N merged subtask commits not in your workspace" (`subtask_commits`); i18n; vitest
 
 **Checkpoint**: parent task PR flow complete (quickstart 4–5).
 

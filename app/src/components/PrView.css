@@ -29,3 +29,5 @@
 .pr-group { display: flex; flex-direction: column; gap: 8px; }
 .pr-group-title { margin: 6px 0 0; font-size: 12px; font-weight: 600; }
 .pr-base-warning { font-size: 12px; color: var(--wait); }
+.pr-draft { font-size: 12px; padding: 1px 8px; border-radius: 7px; background: var(--neutral-bg); color: var(--neutral-tx); }
+.pr-ready-hint { display: flex; align-items: center; gap: 8px; font-size: 12px; }

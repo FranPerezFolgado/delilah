@@ -46,7 +46,7 @@ describe("ProjectSettings", () => {
     expect(document.querySelector("[role=dialog][aria-modal=true]")).not.toBeNull();
     expect(document.querySelector("[role=dialog]")?.textContent).toContain("Dónde trabaja por defecto");
     expect(radios(container).length).toBe(2);
-    expect(document.querySelectorAll(".ps-help").length).toBe(7);
+    expect(document.querySelectorAll(".ps-help").length).toBe(8);
   });
 
   it("the preview command is saved on the project, so saving makes two calls", async () => {
@@ -264,5 +264,17 @@ describe("ProjectSettings", () => {
     fireEvent.submit(form());
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][1]).toMatchObject({ setup: "npm i", ci_autofix: "off" });
+  });
+
+  it("saves the parent task merge method", async () => {
+    const update = vi.spyOn(api, "updateProjectSettings").mockResolvedValue(repo);
+    render(<ProjectSettings project={repo} onClose={() => {}} onSaved={() => {}} />);
+    const sel = document.querySelector<HTMLSelectElement>("select[name=parent_task_merge]")!;
+    expect(sel.value).toBe("merge");
+    expect(document.querySelector(".ps")?.textContent).toContain("Si el repositorio no lo permite");
+    fireEvent.change(sel, { target: { value: "squash" } });
+    fireEvent.submit(form());
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1].parent_task_merge).toBe("squash");
   });
 });

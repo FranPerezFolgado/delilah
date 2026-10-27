@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type MergeMethod, type PrAutofix, type PrCheck, type PullRequest, type Task, type TaskPrs } from "../api";
+import { api, ApiError, taskKind, type BaseStatus, type MergeMethod, type PrAutofix, type PrCheck, type PullRequest, type Task, type TaskPrs } from "../api";
 import { on } from "../live";
 import { openExternal } from "../platform";
 import { PR_CI, REVIEWS } from "./PrBadge";
@@ -94,6 +94,12 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
   // Whether a PR can be opened: null while unknown, else the reason it can't (or "" if it can).
   const [cannot, setCannot] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  // Why the proposal failed, kept apart from its text: a parent task may open anyway on `no-commits`.
+  const [cannotReason, setCannotReason] = useState<string | null>(null);
+  // A merge the daemon held back because the parent task still has live subtasks.
+  const [held, setHeld] = useState<{ pr: PullRequest; method: MergeMethod; names: string[] } | null>(null);
+  const isParent = !!task && taskKind(task) === "parent_task";
+  const [base, setBase] = useState<BaseStatus | null>(null);
   const none = !!data && data.prs.length === 0;
   // Re-asks whenever the set of PRs changes: a repo may be free even if the task has PRs.
   const prKey = data ? data.prs.map((p) => p.id).join(",") : null;
@@ -103,10 +109,11 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
     let live = true;
     api
       .prProposal(owner)
-      .then(() => live && setCannot(""))
+      .then(() => live && (setCannot(""), setCannotReason(null)))
       .catch((e) => {
         if (!live) return;
         const reason = e instanceof ApiError ? e.reason : undefined;
+        setCannotReason(reason ?? null);
         setCannot(reason ? t(CANNOT[reason] ?? e.message) : e instanceof ApiError ? e.message : "");
       });
     return () => {
@@ -126,14 +133,26 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
     return on("prs", load);
   }, [load]);
 
-  const merge = async (pr: PullRequest, method: MergeMethod) => {
+  // A parent task's branch may lack the commits of subtasks merged into the integration branch.
+  const loadBase = useCallback(() => {
+    if (isParent) api.baseStatus(owner).then(setBase).catch(() => {});
+  }, [owner, isParent]);
+  useEffect(() => {
+    loadBase();
+    return on("prs", loadBase);
+  }, [loadBase]);
+
+  const merge = async (pr: PullRequest, method: MergeMethod, confirmLive = false) => {
     setBusy(true);
     setError(null);
     try {
-      await api.mergePr(owner, pr.id, method);
+      await (confirmLive ? api.mergePr(owner, pr.id, method, true) : api.mergePr(owner, pr.id, method));
       pushToast({ text: t("PR #{n} fusionada", { n: pr.number }) });
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.reason === "live-subtasks") {
+        const names = e.detail?.subtasks;
+        setHeld({ pr, method, names: Array.isArray(names) ? names.map(String) : [] });
+      } else setError((e as Error).message);
     } finally {
       // A 409 means the PR changed under us (checks turned failing, …): show where it stands now.
       load();
@@ -170,6 +189,9 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
       setBusy(false);
     }
   };
+
+  const openEmpty = () =>
+    run(() => api.openPr(owner, { repo: ".", title: task?.title ?? owner, body: "", draft: true, empty_commit: true }));
 
   const link = () => {
     const u = url.trim();
@@ -239,6 +261,11 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
         </div>
       )}
       {error && <div className="error">{error}</div>}
+      {isParent && !!base?.subtask_commits && (
+        <div className="pr-base-warning" role="status">
+          {t("{n} commits de subtareas fusionados que no están en tu workspace", { n: base.subtask_commits })}
+        </div>
+      )}
 
       {none && (
         <div className="empty">
@@ -249,6 +276,11 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
                 {t("Abrir PR")}
               </Button>
               {why && <span className="muted">{why}</span>}
+              {isParent && cannotReason === "no-commits" && !problem && (
+                <Button variant="secondary" disabled={busy} onClick={openEmpty}>
+                  {t("Añadir un commit vacío y abrir")}
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -276,10 +308,27 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
               onRetryAutofix={() => setAutofixMode(() => api.setAutofix(owner, "retry", pr.repo))}
               onUnlink={() => run(() => api.unlinkPr(owner, pr.id))}
               onMerge={(method) => merge(pr, method)}
+              readyHint={isParent && !!task?.subtask_progress?.ready}
+              onReady={() => run(() => api.markReady(owner, pr.id))}
             />
           ))}
         </div>
       ))}
+
+      {held && (
+        <ConfirmDialog
+          danger
+          title={t("Subtareas sin terminar")}
+          body={t("Estas subtareas siguen activas: {names}. Se quedarán sin integrar. ¿Fusionar igualmente?", { names: held.names.join(", ") })}
+          action={t("Fusionar igualmente")}
+          onClose={() => setHeld(null)}
+          onConfirm={() => {
+            const h = held;
+            setHeld(null);
+            merge(h.pr, h.method, true);
+          }}
+        />
+      )}
 
       <div className="pr-link">
         <input
@@ -315,6 +364,8 @@ function PrCard({
   onRetryAutofix,
   onUnlink,
   onMerge,
+  readyHint,
+  onReady,
 }: {
   pr: PullRequest;
   disabled: boolean;
@@ -323,6 +374,9 @@ function PrCard({
   onRetryAutofix: () => void;
   onUnlink: () => void;
   onMerge: (method: MergeMethod) => void;
+  /** A parent task whose subtasks are all merged: a draft PR can go ready. */
+  readyHint: boolean;
+  onReady: () => void;
 }) {
   const s = pr.snapshot;
   const [confirming, setConfirming] = useState(false);
@@ -357,6 +411,7 @@ function PrCard({
         >
           {s?.title ?? pr.owner_name}
         </a>
+        {s?.draft && s.state === "open" && <span className="pr-draft">{t("Borrador")}</span>}
         <span className="pr-grow" />
         <Button variant="ghost" size={28} disabled={disabled} onClick={onUnlink}>
           {t("Desvincular")}
@@ -373,6 +428,14 @@ function PrCard({
       {misbased && (
         <div className="pr-base-warning" role="alert">
           {t("Esta PR apunta a {base}, pero debería apuntar a {expected}", { base: pr.base_branch ?? "", expected: pr.expected_base ?? "" })}
+        </div>
+      )}
+      {readyHint && s?.draft && s.state === "open" && (
+        <div className="pr-ready-hint">
+          <span>{t("Todas las subtareas están fusionadas: la PR puede salir de borrador")}</span>
+          <Button variant="primary" size={28} disabled={disabled} onClick={onReady}>
+            {t("Marcar como lista")}
+          </Button>
         </div>
       )}
       {(pr.autofix || taskAutofix !== null) && (

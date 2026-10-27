@@ -19,7 +19,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12 | 4 | 4A | done | 1 | | |
 | WP-13 | 5 | 5A | verified | 1 | | |
 | WP-14 | 5 | 5A | verified | 1 | | |
-| WP-15 | 5 | 5B | pending | 0 | | |
+| WP-15 | 5 | 5B | verified | 0 | | |
 | WP-16 | 6 | 6A | pending | 0 | | |
 | WP-17 | 7 | 7A | pending | 0 | | |
 | WP-18 | 8 | 8A | pending | 0 | | |

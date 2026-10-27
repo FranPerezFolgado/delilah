@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type Project, type ProjectSettings as Settings, type CiAutofixMode, type SettingsError, type SharedMode, type Submodule } from "../api";
+import { api, ApiError, type Project, type ProjectSettings as Settings, type CiAutofixMode, type MergeMethod, type SettingsError, type SharedMode, type Submodule } from "../api";
 import { t } from "../i18n";
 import { WorkflowEditor } from "./WorkflowEditor";
 import { Button, ConfirmDialog, Dialog, OptionCard } from "./ui";
@@ -187,6 +187,16 @@ export function ProjectSettings({ project, onClose, onSaved }: { project: Projec
           </select>
           <Help>{t("Si falla el CI de una PR, el agente recibe el fallo y lo arregla. Cada tarea puede cambiarlo.")}</Help>
           <Err field="ci_autofix" />
+        </label>
+        <label className="field">
+          <span>{t("Método de fusión de la tarea padre")}</span>
+          <select className="input" name="parent_task_merge" value={s.parent_task_merge ?? "merge"}
+            onChange={(e) => setS({ ...s, parent_task_merge: e.target.value as MergeMethod })}>
+            <option value="merge">{t("Merge commit") + t(" · por defecto")}</option>
+            <option value="squash">{t("Squash")}</option>
+            <option value="rebase">{t("Rebase")}</option>
+          </select>
+          <Help>{t("Cómo se fusiona la PR de una tarea padre. Si el repositorio no lo permite, se usa el que permita.")}</Help>
         </label>
 
         {parent && (["always", "never"] as const).map((list) => (
