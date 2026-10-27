@@ -8,8 +8,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01 | 1 | 1A | verified | 1 | | |
 | WP-02 | 2 | 2A | verified | 1 | ed727b8 | |
 | WP-03 | 2 | 2A | verified | 1 | e8291d0 | |
-| WP-04 | 2 | 2B | pending | 0 | | |
-| WP-05 | 2 | 2B | verified | 1 | | |
+| WP-04 | 2 | 2B | verified | 1 | | |
+| WP-05 | 2 | 2B | verified | 1 | 1e6a9a3 | |
 | WP-06 | 2 | 2C | pending | 0 | | |
 | WP-07 | 3 | 3A | pending | 0 | | |
 | WP-10 | 3 | 3A | pending | 0 | | |

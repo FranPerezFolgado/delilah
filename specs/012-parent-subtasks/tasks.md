@@ -36,8 +36,8 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 ### Storage
 
-- [ ] T006 Create `crates/delilah-daemon/migrations/0025_task_hierarchy.sql` (data-model §Migration: `kind TEXT NOT NULL DEFAULT 'normal'`, `parent_task TEXT`, index `tasks_parent_task`), with a comment above as in 0023
-- [ ] T007 Read and write `kind` and `parent_task` in `crates/delilah-daemon/src/store.rs`: `insert_task` columns and binds (~L595), the SELECT lists of `get_task`/`list_tasks` (~L106–124), `task_from_row` (~L681); add `subtasks_of(parent_key) -> Vec<Task>`, `set_kind(key, kind, parent_task)` and `clear_parent_task_links(parent_key)`; tests: round trip, `subtasks_of`, and a pre-upgrade DB (0024 schema with rows) migrates with every task `normal`
+- [X] T006 Create `crates/delilah-daemon/migrations/0025_task_hierarchy.sql` (data-model §Migration: `kind TEXT NOT NULL DEFAULT 'normal'`, `parent_task TEXT`, index `tasks_parent_task`), with a comment above as in 0023
+- [X] T007 Read and write `kind` and `parent_task` in `crates/delilah-daemon/src/store.rs`: `insert_task` columns and binds (~L595), the SELECT lists of `get_task`/`list_tasks` (~L106–124), `task_from_row` (~L681); add `subtasks_of(parent_key) -> Vec<Task>`, `set_kind(key, kind, parent_task)` and `clear_parent_task_links(parent_key)`; tests: round trip, `subtasks_of`, and a pre-upgrade DB (0024 schema with rows) migrates with every task `normal`
 
 ### Git
 

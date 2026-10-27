@@ -2,6 +2,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use delilah_core::hierarchy::TaskKind;
 use delilah_core::{
     AgentModel, Autopilot, Event, Handoff, Task, TaskKey, TaskStatus, TaskView, TitleSource,
     TransitionError,
@@ -105,7 +106,7 @@ impl Store {
 
     pub async fn get_task(&self, key: &TaskKey) -> Result<Option<Task>, StoreError> {
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.kind, t.parent_task, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -116,7 +117,7 @@ impl Store {
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.kind, t.parent_task, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
         )
         .fetch_all(&self.pool)
@@ -494,6 +495,49 @@ impl Store {
 
     /// Removes a task for good. Its events, workspace record and sessions go with it
     /// (`ON DELETE CASCADE`), in the same statement: it is either all there or all gone.
+    /// The subtasks of a parent task, oldest first.
+    pub async fn subtasks_of(&self, parent_key: &TaskKey) -> Result<Vec<Task>, StoreError> {
+        Ok(self
+            .list_tasks()
+            .await?
+            .into_iter()
+            .filter(|t| t.parent_task.as_ref() == Some(parent_key))
+            .collect())
+    }
+
+    /// Sets what a task is in the hierarchy (the rules are `delilah_core::hierarchy`'s).
+    pub async fn set_kind(
+        &self,
+        key: &TaskKey,
+        kind: TaskKind,
+        parent_task: Option<&TaskKey>,
+    ) -> Result<Task, StoreError> {
+        let updated =
+            sqlx::query("UPDATE tasks SET kind = ?, parent_task = ?, updated_at = ? WHERE key = ?")
+                .bind(kind_name(kind))
+                .bind(parent_task.map(TaskKey::as_str))
+                .bind(Utc::now().to_rfc3339())
+                .bind(key.as_str())
+                .execute(&self.pool)
+                .await?;
+        if updated.rows_affected() == 0 {
+            return Err(StoreError::NotFound(key.clone()));
+        }
+        self.get_task(key)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(key.clone()))
+    }
+
+    /// Forgets a deleted parent task on its (archived) subtasks, so a reused key never
+    /// inherits them.
+    pub async fn clear_parent_task_links(&self, parent_key: &TaskKey) -> Result<(), StoreError> {
+        sqlx::query("UPDATE tasks SET parent_task = NULL WHERE parent_task = ?")
+            .bind(parent_key.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn delete_task(&self, key: &TaskKey) -> Result<(), StoreError> {
         let deleted = sqlx::query("DELETE FROM tasks WHERE key = ?")
             .bind(key.as_str())
@@ -535,7 +579,7 @@ impl Store {
         // first's result, instead of the second failing with SQLITE_BUSY.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let row = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.kind, t.parent_task, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
              FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key WHERE t.key = ?",
         )
         .bind(key.as_str())
@@ -598,8 +642,8 @@ async fn insert_task<'e>(
 ) -> Result<(), StoreError> {
     let now = Utc::now().to_rfc3339();
     let result = sqlx::query(
-        "INSERT INTO tasks (key, title, project, workflow, start_message, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, model, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (key, title, project, workflow, start_message, phase, status, notes, in_checkout, saving_mode, handoff, autopilot, title_source, previous_title, branch_error, view, chat_mode, ci_autofix, allowed_tools, model, kind, parent_task, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(task.key.as_str())
     .bind(&task.title)
@@ -621,6 +665,8 @@ async fn insert_task<'e>(
     .bind(task.ci_autofix)
     .bind(allowed_tools_json(&task.allowed_tools)?)
     .bind(task.model.map(AgentModel::name))
+    .bind(kind_name(task.kind))
+    .bind(task.parent_task.as_ref().map(TaskKey::as_str))
     .bind(task.created_at.to_rfc3339())
     .bind(&now)
     .execute(executor)
@@ -678,6 +724,23 @@ fn allowed_tools_from_json(json: Option<&str>) -> Vec<String> {
     })
 }
 
+fn kind_name(kind: TaskKind) -> &'static str {
+    match kind {
+        TaskKind::Normal => "normal",
+        TaskKind::ParentTask => "parent_task",
+        TaskKind::Subtask => "subtask",
+    }
+}
+
+fn kind_from_name(name: &str) -> Result<TaskKind, StoreError> {
+    match name {
+        "normal" => Ok(TaskKind::Normal),
+        "parent_task" => Ok(TaskKind::ParentTask),
+        "subtask" => Ok(TaskKind::Subtask),
+        other => Err(StoreError::Corrupt(format!("unknown task kind `{other}`"))),
+    }
+}
+
 fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
     let status: String = row.try_get("status")?;
     let task_status = serde_json::from_str::<TaskStatus>(&status)?;
@@ -720,6 +783,10 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
             .try_get::<Option<String>, _>("model")?
             .as_deref()
             .and_then(AgentModel::parse),
+        kind: kind_from_name(&row.try_get::<String, _>("kind")?)?,
+        parent_task: row
+            .try_get::<Option<String>, _>("parent_task")?
+            .map(TaskKey::new),
         created_at: {
             let text: String = row.try_get("created_at")?;
             DateTime::parse_from_rfc3339(&text)
@@ -936,6 +1003,87 @@ mod tests {
             .unwrap();
         assert!(!t.chat_mode);
         assert!(t.allowed_tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn hierarchy_round_trips_and_subtasks_of_lists_children() {
+        let store = Store::in_memory().await.unwrap();
+        let parent = TaskKey::new("PROJ-1");
+        let mut p = task("PROJ-1");
+        p.kind = TaskKind::ParentTask;
+        store.create_task(&p).await.unwrap();
+        let mut c = task("PROJ-2");
+        c.kind = TaskKind::Subtask;
+        c.parent_task = Some(parent.clone());
+        store.create_task(&c).await.unwrap();
+        store.create_task(&task("PROJ-3")).await.unwrap();
+
+        let got = store
+            .get_task(&TaskKey::new("PROJ-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(got.kind, TaskKind::Subtask);
+        assert_eq!(got.parent_task, Some(parent.clone()));
+        let listed = store.list_tasks().await.unwrap();
+        assert_eq!(listed[0].kind, TaskKind::ParentTask);
+        assert_eq!(listed[2].kind, TaskKind::Normal);
+        assert_eq!(listed[2].parent_task, None);
+
+        let kids = store.subtasks_of(&parent).await.unwrap();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(kids[0].key.as_str(), "PROJ-2");
+
+        let t3 = TaskKey::new("PROJ-3");
+        let moved = store
+            .set_kind(&t3, TaskKind::Subtask, Some(&parent))
+            .await
+            .unwrap();
+        assert_eq!(moved.parent_task, Some(parent.clone()));
+        assert_eq!(store.subtasks_of(&parent).await.unwrap().len(), 2);
+        store.clear_parent_task_links(&parent).await.unwrap();
+        assert!(store.subtasks_of(&parent).await.unwrap().is_empty());
+        assert!(
+            store
+                .set_kind(&TaskKey::new("NOPE-1"), TaskKind::ParentTask, None)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_0025_makes_existing_tasks_normal() {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let mut old = sqlx::migrate!("./migrations");
+        old.migrations = old
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 24)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        old.run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (key, title, project, workflow, phase, status, created_at, updated_at)
+             VALUES ('OLD-1', 'Old', NULL, 'feature', 'backlog', '{\"type\":\"queued\"}', 'x', 'x')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let store = Store::connect(pool).await.unwrap();
+        let t = store
+            .get_task(&TaskKey::new("OLD-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(t.kind, TaskKind::Normal);
+        assert_eq!(t.parent_task, None);
     }
 
     #[tokio::test]
