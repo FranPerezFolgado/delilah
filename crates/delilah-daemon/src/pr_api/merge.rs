@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use delilah_core::TaskKey;
 use serde::Deserialize;
 
-use super::dto::PrView;
+use super::dto::{PrView, TaskContext};
 use super::known_task;
 use crate::api::ApiError;
 use crate::events::Topic;
@@ -94,6 +94,7 @@ pub async fn merge(
     ) {
         return Err(refuse("the checks of the PR are not passing", "checks"));
     }
+    let ctx = TaskContext::of(&app, &key).await?;
     let method = match request.method {
         _ if snapshot.merge_methods.is_empty() => {
             return Err(refuse(
@@ -108,7 +109,9 @@ pub async fn merge(
                 "method-not-allowed",
             ));
         }
-        None => snapshot.merge_methods[0],
+        None => ctx
+            .method(&snapshot.merge_methods)
+            .unwrap_or(snapshot.merge_methods[0]),
     };
 
     if let Err(e) = app.gh.pr_merge(&row.url, method).await {
@@ -129,7 +132,7 @@ pub async fn merge(
     app.emit(Topic::Prs);
     app.emit(Topic::Tasks);
     let row = app.store.pr(id).await?.unwrap_or(row);
-    Ok(Json(PrView::from(&row)))
+    Ok(Json(PrView::with(&row, &ctx)))
 }
 
 async fn refresh(app: &AppState, key: &TaskKey) {
@@ -365,5 +368,85 @@ mod tests {
         let (s, v) = call(&router, "POST", &wrong, None).await;
         assert_eq!(s, StatusCode::NOT_FOUND);
         let _: Value = v;
+    }
+
+    /// Makes `PROJ-1` a subtask of a started parent task on `feature/P-1`.
+    async fn as_subtask(app: &AppState) {
+        use delilah_core::hierarchy::TaskKind;
+        let parent = TaskKey::new("P-1");
+        let mut p = delilah_core::Task::new(parent.clone(), "parent", "project");
+        p.kind = TaskKind::ParentTask;
+        app.store.create_task(&p).await.unwrap();
+        let ws = delilah_git::Workspace {
+            path: "/tmp/parent-ws".into(),
+            branch: "feature/P-1".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store
+            .save_workspace(&parent, std::path::Path::new("/parent"), &ws)
+            .await
+            .unwrap();
+        app.store
+            .set_kind(&TaskKey::new(KEY), TaskKind::Subtask, Some(&parent))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_subtask_merges_by_squash_unless_the_request_says_otherwise() {
+        let merged = ci_snapshot("MERGED", "abc", "SUCCESS");
+        let (router, app, gh, id, _dir) = ready(gh(&open_green(), &merged)).await;
+        as_subtask(&app).await;
+        let (s, v) = call(&router, "POST", &uri(id), None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(merges(&gh)[0][2], "--squash");
+    }
+
+    #[tokio::test]
+    async fn a_subtask_falls_back_to_the_first_allowed_method_when_squash_is_not() {
+        let green = open_green().replace(
+            "\"squashMergeAllowed\":true",
+            "\"squashMergeAllowed\":false",
+        );
+        let (router, app, gh, id, _dir) = ready(gh_with(&green)).await;
+        as_subtask(&app).await;
+        let (s, v) = call(&router, "POST", &uri(id), None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(merges(&gh)[0][2], "--merge");
+    }
+
+    #[tokio::test]
+    async fn the_pr_view_carries_the_method_and_the_bases() {
+        let (_router, app, _gh, id, _dir) = ready(gh_with(&open_green())).await;
+        let key = TaskKey::new(KEY);
+        let view = async |app: &AppState| {
+            let row = app.store.pr(id).await.unwrap().unwrap();
+            let Ok(ctx) = TaskContext::of(app, &key).await else {
+                panic!("no context")
+            };
+            serde_json::to_value(PrView::with(&row, &ctx)).unwrap()
+        };
+        let v = view(&app).await;
+        assert_eq!(v["method"], "merge");
+        assert!(v["expected_base"].is_null());
+        assert_eq!(v["base_branch"], v["snapshot"]["base"]);
+        as_subtask(&app).await;
+        let v = view(&app).await;
+        assert_eq!(v["method"], "squash");
+        assert_eq!(v["expected_base"], "feature/P-1");
+    }
+
+    #[tokio::test]
+    async fn get_prs_returns_method_and_expected_base_for_a_subtask() {
+        let (router, app, _gh, _id, _dir) = ready(gh_with(&open_green())).await;
+        let uri = format!("/api/v1/tasks/{KEY}/prs");
+        let (_, v) = call(&router, "GET", &uri, None).await;
+        assert_eq!(v["prs"][0]["method"], "merge");
+        assert!(v["prs"][0]["expected_base"].is_null());
+        as_subtask(&app).await;
+        let (_, v) = call(&router, "GET", &uri, None).await;
+        assert_eq!(v["prs"][0]["method"], "squash");
+        assert_eq!(v["prs"][0]["expected_base"], "feature/P-1");
     }
 }

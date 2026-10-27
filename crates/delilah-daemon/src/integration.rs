@@ -4,7 +4,7 @@
 //! live and how its PR is merged. Only store queries here: no `gh`, no git.
 
 use delilah_core::hierarchy::{self, ChildFacts, Progress, Refusal, TaskKind};
-use delilah_core::{ProjectSettings, Task, TaskKey};
+use delilah_core::{MergePreference, ProjectSettings, Task, TaskKey};
 use sqlx::Row;
 
 use crate::pr_types::{MergeMethod, PrState, Snapshot};
@@ -59,6 +59,22 @@ pub async fn base_for(store: &Store, task: &Task) -> Result<Base, IntegrationErr
     let workspace = store.workspace(parent).await?;
     hierarchy::check_start_subtask(workspace.is_some()).map_err(IntegrationError::Refused)?;
     Ok(Base::Branch(workspace.expect("checked above").1.branch))
+}
+
+/// A refusal of [`base_for`] as the API answers it.
+pub fn api_error(
+    lang: crate::lang::Lang,
+    task: &Task,
+    e: IntegrationError,
+) -> crate::api::ApiError {
+    match e {
+        IntegrationError::Refused(r) => {
+            let detail =
+                serde_json::json!({ "key": task.parent_task.as_ref().map(|k| k.to_string()) });
+            crate::api::ApiError::refused(lang, r, detail)
+        }
+        IntegrationError::Store(e) => e.into(),
+    }
 }
 
 /// How a task of a hierarchy kind starts (R4-R7): always in its own worktree, named at
@@ -211,11 +227,11 @@ pub fn preferred_method(
 ) -> Option<MergeMethod> {
     let wanted = match kind {
         TaskKind::Subtask => Some(MergeMethod::Squash),
-        // `MergePreference` is not exported by delilah-core's root; its serde name
-        // (lowercase) is the same as `MergeMethod`'s (kebab-case) for these three.
-        TaskKind::ParentTask => serde_json::to_value(settings.parent_task_merge)
-            .ok()
-            .and_then(|v| serde_json::from_value(v).ok()),
+        TaskKind::ParentTask => Some(match settings.parent_task_merge {
+            MergePreference::Merge => MergeMethod::Merge,
+            MergePreference::Squash => MergeMethod::Squash,
+            MergePreference::Rebase => MergeMethod::Rebase,
+        }),
         TaskKind::Normal => None,
     };
     wanted
