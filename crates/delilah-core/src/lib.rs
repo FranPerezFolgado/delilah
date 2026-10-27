@@ -1,6 +1,7 @@
 //! Task model and state machine. Pure logic, no I/O.
 
 pub mod branch;
+pub mod hierarchy;
 pub mod model;
 mod project;
 mod spec;

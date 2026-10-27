@@ -21,7 +21,7 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 ## Phase 1: Setup
 
-- [ ] T001 Add the empty module `crates/delilah-core/src/hierarchy.rs` and export it from `crates/delilah-core/src/lib.rs`; add the empty modules `crates/delilah-daemon/src/integration.rs` and `crates/delilah-daemon/src/api_hierarchy.rs` and declare them in `crates/delilah-daemon/src/lib.rs` (or `main.rs`, wherever the daemon declares modules)
+- [X] T001 Add the empty module `crates/delilah-core/src/hierarchy.rs` and export it from `crates/delilah-core/src/lib.rs`; add the empty modules `crates/delilah-daemon/src/integration.rs` and `crates/delilah-daemon/src/api_hierarchy.rs` and declare them in `crates/delilah-daemon/src/lib.rs` (or `main.rs`, wherever the daemon declares modules)
 
 ---
 
