@@ -85,24 +85,41 @@ Naming: in code and docs it is always **parent task** (`TaskKind::ParentTask`,
   Vec<(Task, ChildFacts)>`, `progress(app, key)`, `live_subtasks(app, key)`,
   `preferred_method(kind, settings, allowed)`.
 - `api.rs`: `NewTask.kind/parent_task` + validation in `build_task_with` (project inherited,
-  parent task stored with workflow none and toggles off — R4/R7); `TaskView` with
-  `subtask_progress` for GET task/list; routes `subtasks`, `make-parent-task`, `attach`,
-  `prs/{id}/ready`.
-- `run.rs`: kind forces `in_checkout = false` and no branchless start (R5); subtask start
+  parent task stored with workflow none and toggles off — R4/R7); `TaskDto` (not
+  `TaskView`, which exists in core) with `subtask_progress` for GET task/list. The new routes
+  (`subtasks`, `make-parent-task`, `attach`, `push-branch`) live in a new `api_hierarchy.rs`,
+  not in `api.rs` (2.4k lines); `prs/{id}/ready` in `pr_api`.
+- `run.rs` (5.1k lines): only the calls; the kind rules (forced worktree, base, submodules,
+  skip primary session) are functions in `integration.rs`. Kind forces `in_checkout = false` and no branchless start (R5); subtask start
   checks the parent task's workspace and passes `WorkspaceSpec.base` and the parent task's
   submodules (R6/R7); parent task: after `WorkspaceReady`, push the branch and skip the
   primary session (R4). `branching.rs`: `starts_branchless` false for both kinds; spec-name
   adoption skips them.
-- `pr_api/open.rs`: `base_of` → `integration::base_for`; draft forced for a parent task unless
+- `pr_api/open.rs`: every base call site goes through `integration::base_for` (`base_of` at
+  :102 and :236, the literal `--base` at :467), so autopilot, forward and hand-off PRs get it
+  too; a test asserts no PR path uses the default branch for a subtask (SC-002).
+  `pr_api/dto.rs`: `base_branch` and `expected_base`; `PrView` warns when a subtask PR
+  targets another branch, naming it (FR-013; Delilah never retargets); draft forced for a parent task unless
   progress is ready; `empty_commit` path (R11). `pr_api/merge.rs`: `preferred_method`,
   `confirm_live_subtasks` (R10/R12); new `ready` handler. `pr_api/dto.rs`: `method`.
   `gh/mod.rs`: `pr_ready`.
-- `base_update.rs`: refs to merge from `base_for` (R9); `subtask_commits`, `base` in the status.
+- `base_update.rs`: refs to merge from `base_for` (R9); no second resolver: the integration
+  ref is a parameter of the shared `delilah-git` base helper, used by both `prepare_base` and
+  `base_update`; `subtask_commits`, `base` in the status.
 - `actions.rs` (archive, delete) and `pr_loop/merge.rs::archive_merged`: `live_subtasks`
   refusal / done-not-archived + notice (R13). `pr_loop`: emit `Topic::Tasks` for the parent
   task when a subtask's PR merges, and the one-time `parent-task-ready` notice (FR-023).
+- `integration.rs` rule: no `gh` or git calls; its IO is store queries (`subtasks_of` + PR
+  rows), so the modules that call it don't pick up git/gh coupling through it.
+- Push again (spec edge case "integration branch not on the remote"): `POST
+  /tasks/{key}/push-branch` for a parent task (existing `push_branch`), shown by `TaskHeader`
+  and in the `parent-task-branch-missing` refusal of a subtask start.
+- Agent-less `Running` (R4) is verified in phase 4: startup recovery, idle/stale detection and
+  extra-session ending must not move a parent task; test: restart leaves it `Running`.
+- Delete path: `parent_task` links of archived subtasks are cleared when their parent task is
+  deleted, so a reused `LIBRE-N` key never inherits orphans.
 - `inbox.rs`: kinds `parent-task-live`, `parent-task-ready`. `lang.rs`: messages for every
-  `Refusal`.
+  `Refusal` (the core returns only the enum; reason strings and text stay in the daemon).
 
 ### CLI (`crates/delilah-cli`)
 
@@ -145,7 +162,7 @@ specs/012-parent-subtasks/
 crates/delilah-core/src/{hierarchy.rs (new), task.rs, project.rs, lib.rs}
 crates/delilah-git/src/{workspace.rs, base.rs, lib.rs}
 crates/delilah-daemon/migrations/0025_task_hierarchy.sql (new)
-crates/delilah-daemon/src/{integration.rs (new), api.rs, store.rs, run.rs, branching.rs,
+crates/delilah-daemon/src/{integration.rs (new), api_hierarchy.rs (new), api.rs, store.rs, run.rs, branching.rs,
                            base_update.rs, actions.rs, inbox.rs, lang.rs, gh/mod.rs,
                            pr_api/{open.rs, merge.rs, dto.rs}, pr_loop/{mod.rs, merge.rs}}
 crates/delilah-daemon/tests/  (e2e: subtask base, PR base, archive refusal)
@@ -169,7 +186,7 @@ module that owns "base of a task" and the hierarchy queries, one new UI componen
 4. **Create & start (US1)**: `integration.rs` (base_for, progress), `api.rs` create/views,
    `run.rs` + `branching.rs`, make-parent-task/attach endpoints.
 5. **PR flows (US2/US3)**: open (base, draft, empty commit), merge (method, confirmation),
-   ready, base-status/update-branch, PR-loop events and ready notice.
+   ready, base-status/update-branch, PR target warning, PR-loop events and ready notice.
 6. **Archive/delete (US4)**: actions + `archive_merged` + notice.
 7. **CLI**.
 8. **UI**: api.ts, sidebar tree, task screen/header, subtask list, new-task dialog, backlog

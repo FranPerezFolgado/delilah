@@ -163,8 +163,9 @@ Decisions R1–R14. Code references are to the tree at the start of the branch.
 
 ## API view of progress
 
-- **Decision**: `GET /tasks` and `GET /tasks/{key}` return a `TaskView` (`#[serde(flatten)]
+- **Decision**: `GET /tasks` and `GET /tasks/{key}` return a `TaskDto` (`#[serde(flatten)]
   Task` + `subtask_progress: Option<Progress>` for parent tasks); `GET /tasks/{key}/subtasks`
   returns the children with status, archived flag and PR state. Additive: older clients ignore
   the new fields.
+- `TaskDto`, not `TaskView`: `delilah_core::TaskView { Chat, Terminal }` exists (`task.rs:371`).
 - **Alternative**: put progress on `Task` (core type would carry derived, I/O-backed data).

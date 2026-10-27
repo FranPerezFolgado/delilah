@@ -37,7 +37,8 @@ interface ProjectSettings { /* existing */ parent_task_merge: "merge" | "squash"
 | POST | `/api/v1/tasks/{key}/prs/{id}/ready` | **new** → PR DTO; runs `gh pr ready` |
 | POST | `/api/v1/tasks/{key}/prs` (open) | body gains `empty_commit?: bool` |
 | POST | `/api/v1/tasks/{key}/prs/{id}/merge` | body gains `confirm_live_subtasks?: bool` |
-| GET | PR DTO | gains `method?: "merge" \| "squash" \| "rebase"` (what Merge will use) |
+| POST | `/api/v1/tasks/{key}/push-branch` | **new** (parent task) → pushes its branch again |
+| GET | PR DTO | gains `base_branch`, `expected_base` (FR-013 warning) and `method?: "merge" \| "squash" \| "rebase"` (what Merge will use) |
 | GET | `/api/v1/tasks/{key}/base-status` | gains `subtask_commits: number` (parent tasks) and `base: string` (branch compared against) |
 | POST | `/api/v1/runs` (start) | refusals below |
 | POST | `/api/v1/tasks/{key}/update-branch` | merges the refs listed in research R9, in order |

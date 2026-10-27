@@ -25,7 +25,8 @@ Invariants (checked in `hierarchy.rs`, enforced on create/convert/attach):
 - **archived(t)** = `t.status` terminal ∧ no workspace row.
 - **merged(t)** = t has ≥ 1 PR ∧ every PR is `Merged`.
 - **dropped(t)** = archived(t) ∧ ¬merged(t).
-- **live(t)** = ¬archived(t).
+- **live(t)** = ¬archived(t). (A done, unarchived parent task is live too; only subtasks'
+  liveness gates the parent task's archive.)
 - **Progress** of a parent task over its existing subtasks:
   `counted = |subtasks| − |dropped|`, `merged = |merged subtasks|`, `dropped = |dropped|`.
   `ready = counted > 0 ∧ merged == counted`.
@@ -50,7 +51,8 @@ CREATE INDEX tasks_parent_task ON tasks(parent_task);
 No foreign key (the `tasks` table has none today and deletes are by key); deleting a
 subtask needs nothing on the parent task; deleting a parent task is refused while it has
 live subtasks, and its archived subtasks keep the dangling key (shown as "parent task
-deleted" if ever read).
+deleted" if ever read). Deleting a parent task clears `parent_task` on its archived
+subtasks, so a reused free key never inherits them.
 
 ## Lifecycle
 
