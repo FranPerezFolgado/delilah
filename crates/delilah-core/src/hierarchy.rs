@@ -44,7 +44,12 @@ pub fn progress(children: &[ChildFacts]) -> Progress {
     let merged = children.iter().filter(|c| c.merged).count() as u32;
     let dropped = children.iter().filter(|c| c.archived && !c.merged).count() as u32;
     let counted = children.len() as u32 - dropped;
-    Progress { merged, counted, dropped, ready: counted > 0 && merged == counted }
+    Progress {
+        merged,
+        counted,
+        dropped,
+        ready: counted > 0 && merged == counted,
+    }
 }
 
 /// A subtask is live until archived.
@@ -78,7 +83,9 @@ pub fn check_new_subtask(
     parent_archived: bool,
     explicit_project: Option<&str>,
 ) -> Result<(), Refusal> {
-    let parent = parent.filter(|p| p.kind == TaskKind::ParentTask).ok_or(Refusal::NotAParentTask)?;
+    let parent = parent
+        .filter(|p| p.kind == TaskKind::ParentTask)
+        .ok_or(Refusal::NotAParentTask)?;
     if parent_archived {
         return Err(Refusal::ParentTaskArchived);
     }
@@ -183,7 +190,10 @@ mod tests {
         let p = progress(&[c(false, true), c(true, false), c(false, false)]);
         assert_eq!((p.merged, p.counted, p.dropped, p.ready), (1, 2, 1, false));
         let all = progress(&[c(false, true), c(false, true)]);
-        assert_eq!((all.merged, all.counted, all.dropped, all.ready), (0, 0, 2, false));
+        assert_eq!(
+            (all.merged, all.counted, all.dropped, all.ready),
+            (0, 0, 2, false)
+        );
     }
 
     #[test]
@@ -196,8 +206,14 @@ mod tests {
 
     #[test]
     fn kind_serde_and_default() {
-        assert_eq!(serde_json::to_string(&TaskKind::ParentTask).unwrap(), "\"parent_task\"");
-        assert_eq!(serde_json::from_str::<TaskKind>("\"subtask\"").unwrap(), TaskKind::Subtask);
+        assert_eq!(
+            serde_json::to_string(&TaskKind::ParentTask).unwrap(),
+            "\"parent_task\""
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskKind>("\"subtask\"").unwrap(),
+            TaskKind::Subtask
+        );
         assert_eq!(TaskKind::default(), TaskKind::Normal);
     }
 
@@ -206,12 +222,24 @@ mod tests {
         let parent = task("P-1", TaskKind::ParentTask, Some("app"));
         assert_eq!(check_new_subtask(Some(&parent), false, None), Ok(()));
         assert_eq!(check_new_subtask(Some(&parent), false, Some("app")), Ok(()));
-        assert_eq!(check_new_subtask(None, false, None), Err(Refusal::NotAParentTask));
+        assert_eq!(
+            check_new_subtask(None, false, None),
+            Err(Refusal::NotAParentTask)
+        );
         let normal = task("P-2", TaskKind::Normal, Some("app"));
-        assert_eq!(check_new_subtask(Some(&normal), false, None), Err(Refusal::NotAParentTask));
+        assert_eq!(
+            check_new_subtask(Some(&normal), false, None),
+            Err(Refusal::NotAParentTask)
+        );
         let sub = task("P-3", TaskKind::Subtask, Some("app"));
-        assert_eq!(check_new_subtask(Some(&sub), false, None), Err(Refusal::NotAParentTask));
-        assert_eq!(check_new_subtask(Some(&parent), true, None), Err(Refusal::ParentTaskArchived));
+        assert_eq!(
+            check_new_subtask(Some(&sub), false, None),
+            Err(Refusal::NotAParentTask)
+        );
+        assert_eq!(
+            check_new_subtask(Some(&parent), true, None),
+            Err(Refusal::ParentTaskArchived)
+        );
         assert_eq!(
             check_new_subtask(Some(&parent), false, Some("other")),
             Err(Refusal::ProjectMismatch)
@@ -222,12 +250,24 @@ mod tests {
     fn make_parent_task_refusals() {
         let mut t = task("P-1", TaskKind::Normal, None);
         assert_eq!(check_make_parent_task(&t, false, false), Ok(()));
-        assert_eq!(check_make_parent_task(&t, true, false), Err(Refusal::HasOpenPr));
-        assert_eq!(check_make_parent_task(&t, false, true), Err(Refusal::HasSession));
+        assert_eq!(
+            check_make_parent_task(&t, true, false),
+            Err(Refusal::HasOpenPr)
+        );
+        assert_eq!(
+            check_make_parent_task(&t, false, true),
+            Err(Refusal::HasSession)
+        );
         t.in_checkout = Some(true);
-        assert_eq!(check_make_parent_task(&t, false, false), Err(Refusal::InCheckout));
+        assert_eq!(
+            check_make_parent_task(&t, false, false),
+            Err(Refusal::InCheckout)
+        );
         let sub = task("P-2", TaskKind::Subtask, None);
-        assert_eq!(check_make_parent_task(&sub, false, false), Err(Refusal::Nesting));
+        assert_eq!(
+            check_make_parent_task(&sub, false, false),
+            Err(Refusal::Nesting)
+        );
     }
 
     #[test]
@@ -237,24 +277,48 @@ mod tests {
         assert_eq!(check_attach(&t, &parent, false, false), Ok(()));
         let unset = task("P-3", TaskKind::Normal, None);
         assert_eq!(check_attach(&unset, &parent, false, false), Ok(()));
-        assert_eq!(check_attach(&t, &parent, true, false), Err(Refusal::ParentTaskArchived));
-        assert_eq!(check_attach(&t, &parent, false, true), Err(Refusal::AlreadyStarted));
+        assert_eq!(
+            check_attach(&t, &parent, true, false),
+            Err(Refusal::ParentTaskArchived)
+        );
+        assert_eq!(
+            check_attach(&t, &parent, false, true),
+            Err(Refusal::AlreadyStarted)
+        );
         let normal = task("P-4", TaskKind::Normal, Some("app"));
-        assert_eq!(check_attach(&t, &normal, false, false), Err(Refusal::NotAParentTask));
+        assert_eq!(
+            check_attach(&t, &normal, false, false),
+            Err(Refusal::NotAParentTask)
+        );
         let other = task("P-5", TaskKind::Normal, Some("other"));
-        assert_eq!(check_attach(&other, &parent, false, false), Err(Refusal::ProjectMismatch));
+        assert_eq!(
+            check_attach(&other, &parent, false, false),
+            Err(Refusal::ProjectMismatch)
+        );
         let pt = task("P-6", TaskKind::ParentTask, Some("app"));
-        assert_eq!(check_attach(&pt, &parent, false, false), Err(Refusal::Nesting));
+        assert_eq!(
+            check_attach(&pt, &parent, false, false),
+            Err(Refusal::Nesting)
+        );
         let sub = task("P-7", TaskKind::Subtask, Some("app"));
-        assert_eq!(check_attach(&sub, &parent, false, false), Err(Refusal::Nesting));
+        assert_eq!(
+            check_attach(&sub, &parent, false, false),
+            Err(Refusal::Nesting)
+        );
         let mut co = task("P-8", TaskKind::Normal, Some("app"));
         co.in_checkout = Some(true);
-        assert_eq!(check_attach(&co, &parent, false, false), Err(Refusal::InCheckout));
+        assert_eq!(
+            check_attach(&co, &parent, false, false),
+            Err(Refusal::InCheckout)
+        );
     }
 
     #[test]
     fn start_subtask_needs_parent_workspace() {
         assert_eq!(check_start_subtask(true), Ok(()));
-        assert_eq!(check_start_subtask(false), Err(Refusal::ParentTaskNotStarted));
+        assert_eq!(
+            check_start_subtask(false),
+            Err(Refusal::ParentTaskNotStarted)
+        );
     }
 }

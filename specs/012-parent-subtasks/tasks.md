@@ -164,7 +164,7 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 - [X] T052 [P] `docs/decisions.md`: new decision — task kinds, the integration branch pattern, stacked PRs not supported, progress derived on read, naming "parent task" vs parent repository (FR-030)
 - [X] T053 [P] `docs/usage.md`: parent tasks and subtasks as the user sees them (create, start, PRs, Update branch, merge methods, Mark ready, archive rules, CLI); called the "integration branch" pattern
 - [X] T054 [P] `docs/status.md` (built; Jira adapter pending) and `docs/architecture.md` (task kinds, `hierarchy.rs`, `integration.rs`, migration 0025)
-- [ ] T055 Full checks: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`
+- [X] T055 Full checks: `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`
 - [ ] T056 Run quickstart.md in a preview (`scripts/preview.sh --fresh`, `DELILAH_PR_POLL_SECS=5`); UI checks through `ui-verifier`
 
 ---

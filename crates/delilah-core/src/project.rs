@@ -329,7 +329,10 @@ mod tests {
         assert_eq!(s.parent_task_merge, MergePreference::Merge);
         let s: ProjectSettings = serde_json::from_str(r#"{"parent_task_merge":"squash"}"#).unwrap();
         assert_eq!(s.parent_task_merge, MergePreference::Squash);
-        assert_eq!(serde_json::to_string(&MergePreference::Rebase).unwrap(), "\"rebase\"");
+        assert_eq!(
+            serde_json::to_string(&MergePreference::Rebase).unwrap(),
+            "\"rebase\""
+        );
     }
 
     fn settings() -> ProjectSettings {
