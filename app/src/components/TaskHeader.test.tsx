@@ -190,3 +190,23 @@ it("offers to push the parent task's branch again only when it is missing", asyn
   expect(push).toHaveBeenCalledWith("DEL-1");
   await waitFor(() => expect(props.onChanged).toHaveBeenCalled());
 });
+
+it("offers «Convertir en tarea padre» on a started normal task and shows the refusal", async () => {
+  const make = vi.spyOn(api, "makeParentTask").mockResolvedValueOnce(task({ kind: "parent_task" })).mockRejectedValueOnce(new Error("Tiene un PR abierto"));
+  const { props } = setup({}, { kind: "normal" });
+  fireEvent.click(screen.getByRole("button", { name: "Tarea padre" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Convertir en tarea padre" }));
+  expect(make).toHaveBeenCalledWith("DEL-12");
+  await waitFor(() => expect(props.onChanged).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Tarea padre" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Convertir en tarea padre" }));
+  await waitFor(() => expect(props.onError).toHaveBeenCalledWith("Tiene un PR abierto"));
+});
+
+it("has no parent task menu on a parent task or a subtask", () => {
+  setup({}, { kind: "parent_task" });
+  expect(screen.queryByRole("button", { name: "Tarea padre" })).toBeNull();
+  cleanup();
+  setup({}, { kind: "subtask", parent_task: "DEL-1" });
+  expect(screen.queryByRole("button", { name: "Tarea padre" })).toBeNull();
+});

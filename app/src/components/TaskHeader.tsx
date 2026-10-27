@@ -66,6 +66,8 @@ export function TaskHeader(p: TaskHeaderProps) {
     if (parentKey) api.pushBranch(parentKey).then(p.onChanged).catch(fail);
   };
 
+  const makeParent = () => api.makeParentTask(task.key).then(p.onChanged).catch(fail);
+
   const bars = <PhaseBars phase={phase} status={task.status} labelInTooltip={compact} />;
   const phases = COLUMNS.filter((c) => c.id !== "done");
 
@@ -106,6 +108,14 @@ export function TaskHeader(p: TaskHeaderProps) {
         <span className="badge neutral th-progress" title={t("Tarea padre")}>{progressLabel(task)}</span>
       ) : (
         <StatusBadge status={task.status} />
+      )}
+      {kind === "normal" && !done && (
+        <Menu
+          trigger={(m) => (
+            <button type="button" className="th-link" aria-label={t("Tarea padre")} title={t("Tarea padre")} {...m}>⋯</button>
+          )}
+          items={[{ label: t("Convertir en tarea padre"), onSelect: makeParent }]}
+        />
       )}
       {p.branchMissing && parentKey && (
         <Button variant="secondary" size={28} onClick={pushBranch}>{t("Volver a subir la rama")}</Button>

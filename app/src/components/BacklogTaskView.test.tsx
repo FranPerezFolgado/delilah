@@ -268,4 +268,39 @@ describe("BacklogTaskView subtask of a parent task without branch", () => {
     await findByText("boom");
     expect(queryByText("Volver a subir la rama")).toBeNull();
   });
+
+  describe("parent task actions", () => {
+    const parent = (key: string, project = "web", status: Task["status"] = { type: "queued" }): Task => ({ ...task, key, project, kind: "parent_task", status });
+
+    it("«Hacer tarea padre» converts the task and refreshes", async () => {
+      const make = vi.spyOn(api, "makeParentTask").mockResolvedValue({ ...task, kind: "parent_task" });
+      const onChanged = vi.fn();
+      const { container } = mount(task, { onChanged });
+      fireEvent.click(btn(container, "Hacer tarea padre"));
+      await waitFor(() => expect(make).toHaveBeenCalledWith("LIBRE-9"));
+      await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    });
+
+    it("shows the refusal reason", async () => {
+      vi.spyOn(api, "makeParentTask").mockRejectedValue(new ApiError("Una subtarea no puede ser tarea padre", 409));
+      const { container, findByText } = mount(task);
+      fireEvent.click(btn(container, "Hacer tarea padre"));
+      expect(await findByText("Una subtarea no puede ser tarea padre")).toBeTruthy();
+    });
+
+    it("«Adjuntar a tarea padre…» lists the project's open parent tasks and attaches to the chosen", async () => {
+      vi.spyOn(api, "tasks").mockResolvedValue([parent("P-1"), parent("P-2", "api"), parent("P-3", "web", { type: "done" }), { ...task, key: "N-1" }]);
+      const attach = vi.spyOn(api, "attach").mockResolvedValue({ ...task, kind: "subtask", parent_task: "P-1" });
+      const onChanged = vi.fn();
+      const { container } = mount(task, { onChanged });
+      fireEvent.click(btn(container, "Adjuntar a tarea padre…"));
+      await waitFor(() => expect(document.body.textContent).toContain("P-1"));
+      expect(document.body.textContent).not.toContain("P-2");
+      expect(document.body.textContent).not.toContain("P-3");
+      expect(document.body.textContent).not.toContain("N-1");
+      fireEvent.click(Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("P-1"))!);
+      await waitFor(() => expect(attach).toHaveBeenCalledWith("LIBRE-9", "P-1"));
+      await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    });
+  });
 });

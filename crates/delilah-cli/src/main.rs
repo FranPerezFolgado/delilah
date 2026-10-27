@@ -320,8 +320,14 @@ enum Command {
         #[command(flatten)]
         autofix: AutofixFlags,
     },
-    /// Opens the live terminal of a task's agent (Ctrl-] detaches).
-    Attach { key: String },
+    /// Opens the live terminal of a task's agent (Ctrl-] detaches). With `--parent
+    /// <KEY>` it instead attaches a never-started normal task to that parent task.
+    Attach {
+        key: String,
+        /// Attach the task to this parent task as a subtask.
+        #[arg(long)]
+        parent: Option<String>,
+    },
     /// Moves a task's live agent between chat (experimental) and the terminal, keeping
     /// the conversation. Refused while the agent works or waits for an answer.
     /// With `--session <ID>` it moves only that session (no key needed).
@@ -352,6 +358,8 @@ enum Command {
     },
     /// Marks a task as done and stops its agent.
     Done { key: String },
+    /// Turns a normal task into a parent task (no PR, no open session, not in the checkout).
+    MakeParentTask { key: String },
     /// Removes the workspace of a finished task (a worktree is kept while work is
     /// unpushed, unless --force).
     Archive {
@@ -1095,7 +1103,17 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 println!("Watch it with `delilah attach {key}`.");
             }
         }
-        Command::Attach { key } => attach::attach(&api.base, &key)?,
+        Command::Attach { key, parent: None } => attach::attach(&api.base, &key)?,
+        Command::Attach {
+            key,
+            parent: Some(parent),
+        } => {
+            let task: Task = api.post(
+                &format!("/api/v1/tasks/{key}/attach"),
+                &json!({ "parent_task": parent }),
+            )?;
+            println!("{} is now a subtask of {parent}.", task.key);
+        }
         Command::Resume { key } => {
             let task: Task = api.post(&format!("/api/v1/tasks/{key}/resume"), &json!({}))?;
             println!("{} is {} again.", task.key, status_label(&task.status));
@@ -1157,6 +1175,11 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             let task: Task =
                 api.post(&format!("/api/v1/tasks/{key}/setup/{action}"), &json!({}))?;
             println!("{} is {}.", task.key, status_label(&task.status));
+        }
+        Command::MakeParentTask { key } => {
+            let task: Task =
+                api.post(&format!("/api/v1/tasks/{key}/make-parent-task"), &json!({}))?;
+            println!("{} is now a parent task.", task.key);
         }
         Command::Archive { key, force } => {
             let query = if force { "?force=true" } else { "" };

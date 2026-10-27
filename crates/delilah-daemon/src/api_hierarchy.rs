@@ -95,6 +95,95 @@ pub async fn push_branch(
     Ok(Json(serde_json::json!({ "branch": ws.branch })))
 }
 
+/// A known task, 404 otherwise.
+async fn known(app: &AppState, key: &str) -> Result<delilah_core::Task, ApiError> {
+    let key = TaskKey::new(key);
+    app.store
+        .get_task(&key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no task {key}")))
+}
+
+/// `POST /api/v1/tasks/{key}/make-parent-task`: turns a normal task into a parent task.
+/// A running task keeps its workspace; its agent settings are turned off and no agent starts.
+pub async fn make_parent_task(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<delilah_core::Task>, ApiError> {
+    let task = known(&app, &key).await?;
+    let has_open_pr = app
+        .store
+        .prs_of(&task.key)
+        .await?
+        .iter()
+        .any(|p| p.snapshot.as_ref().is_none_or(|s| s.state == PrState::Open));
+    let has_session = !app
+        .store
+        .open_sessions(Some(task.key.as_str()))
+        .await?
+        .is_empty();
+    delilah_core::hierarchy::check_make_parent_task(&task, has_open_pr, has_session)
+        .map_err(|r| ApiError::refused(app.lang(), r, serde_json::Value::Null))?;
+    if task.kind == TaskKind::ParentTask {
+        return Ok(Json(task));
+    }
+    sqlx::query(
+        "UPDATE tasks SET workflow = 'none', saving_mode = 0, autopilot = NULL, ci_autofix = 0,
+         handoff = NULL WHERE key = ?",
+    )
+    .bind(task.key.as_str())
+    .execute(&app.store.pool)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let updated = app
+        .store
+        .set_kind(&task.key, TaskKind::ParentTask, None)
+        .await?;
+    app.emit(crate::events::Topic::Tasks);
+    Ok(Json(updated))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct AttachBody {
+    pub parent_task: String,
+}
+
+/// `POST /api/v1/tasks/{key}/attach`: makes a never-started normal task a subtask.
+pub async fn attach(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+    Json(body): Json<AttachBody>,
+) -> Result<Json<delilah_core::Task>, ApiError> {
+    use delilah_core::hierarchy::Refusal;
+    let task = known(&app, &key).await?;
+    let parent_key = TaskKey::new(&body.parent_task);
+    let parent = app.store.get_task(&parent_key).await?;
+    let refused = |r: Refusal| {
+        let detail = serde_json::json!({ "key": parent_key.as_str() });
+        ApiError::refused(app.lang(), r, detail)
+    };
+    let Some(parent) = parent else {
+        return Err(refused(Refusal::NotAParentTask));
+    };
+    let archived = parent.status.is_terminal() && app.store.workspace(&parent.key).await?.is_none();
+    let started = task.status != delilah_core::TaskStatus::Queued
+        || app.store.workspace(&task.key).await?.is_some();
+    delilah_core::hierarchy::check_attach(&task, &parent, archived, started).map_err(refused)?;
+    // A subtask takes its parent task's project.
+    sqlx::query("UPDATE tasks SET project = ? WHERE key = ?")
+        .bind(parent.project.as_deref())
+        .bind(task.key.as_str())
+        .execute(&app.store.pool)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let updated = app
+        .store
+        .set_kind(&task.key, TaskKind::Subtask, Some(&parent.key))
+        .await?;
+    app.emit(crate::events::Topic::Tasks);
+    Ok(Json(updated))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::Router;
@@ -346,5 +435,223 @@ mod tests {
         )
         .await;
         assert_eq!(s, StatusCode::CONFLICT);
+    }
+
+    async fn status_of(app: &Router, key: &str) -> Value {
+        call(app, "GET", &format!("/api/v1/tasks/{key}"), None)
+            .await
+            .1
+    }
+
+    async fn normal(app: &Router, title: &str) -> String {
+        let (s, t) = create(app, json!({"free": true, "title": title, "project": "web"})).await;
+        assert_eq!(s, StatusCode::CREATED, "{t}");
+        t["key"].as_str().unwrap().to_string()
+    }
+
+    async fn post(app: &Router, key: &str, verb: &str, body: Option<Value>) -> (StatusCode, Value) {
+        call(app, "POST", &format!("/api/v1/tasks/{key}/{verb}"), body).await
+    }
+
+    #[tokio::test]
+    async fn make_parent_task_converts_a_normal_task_and_refuses_the_rest() {
+        let (app, state) = app().await;
+        let k = normal(&app, "n").await;
+        let (s, t) = post(&app, &k, "make-parent-task", None).await;
+        assert_eq!(s, StatusCode::OK, "{t}");
+        assert_eq!(t["kind"], "parent_task");
+        assert_eq!(t["workflow"], "none");
+        assert_eq!(t["saving_mode"], false);
+        assert!(t["autopilot"].is_null());
+        // Again: already a parent task, nothing changes.
+        assert_eq!(
+            post(&app, &k, "make-parent-task", None).await.0,
+            StatusCode::OK
+        );
+
+        let p = parent(&app).await;
+        let (_, sub) = create(
+            &app,
+            json!({"free": true, "title": "s", "parent_task": p["key"]}),
+        )
+        .await;
+        let (s, b) = post(&app, sub["key"].as_str().unwrap(), "make-parent-task", None).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("nesting")),
+            "{b}"
+        );
+
+        let c = normal(&app, "c").await;
+        sqlx::query("UPDATE tasks SET in_checkout = 1 WHERE key = ?")
+            .bind(&c)
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (s, b) = post(&app, &c, "make-parent-task", None).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("in-checkout")),
+            "{b}"
+        );
+
+        let w = normal(&app, "w").await;
+        sqlx::query(
+            "INSERT INTO sessions (id, task_key, kind, label, is_primary, created_at)
+             VALUES ('s1', ?, 'claude', 'Main', 1, 'x')",
+        )
+        .bind(&w)
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+        let (s, b) = post(&app, &w, "make-parent-task", None).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("has-session")),
+            "{b}"
+        );
+
+        let o = normal(&app, "o").await;
+        state
+            .store
+            .link_pr(
+                &delilah_core::TaskKey::new(&o),
+                &crate::store_prs::NewPr {
+                    repo: "r".into(),
+                    host: "github.com".into(),
+                    owner_name: "me/r".into(),
+                    number: 1,
+                    url: "https://github.com/me/r/pull/1".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let (s, b) = post(&app, &o, "make-parent-task", None).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("has-open-pr")),
+            "{b}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_running_task_converted_keeps_its_workspace_and_starts_no_agent() {
+        let (app, state) = app().await;
+        let k = normal(&app, "r").await;
+        let key = delilah_core::TaskKey::new(&k);
+        state
+            .store
+            .save_workspace(
+                &key,
+                "/tmp/parent".as_ref(),
+                &delilah_git::Workspace {
+                    path: "/tmp/ws".into(),
+                    branch: format!("feature/{k}"),
+                    kind: delilah_core::ProjectKind::Repo,
+                    submodules: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tasks SET status = '{\"type\":\"running\"}', autopilot = NULL, saving_mode = 1, ci_autofix = 1 WHERE key = ?")
+            .bind(&k)
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (s, t) = post(&app, &k, "make-parent-task", None).await;
+        assert_eq!(s, StatusCode::OK, "{t}");
+        assert_eq!(t["kind"], "parent_task");
+        assert_eq!(t["status"]["type"], "running");
+        assert_eq!(t["saving_mode"], false);
+        assert_eq!(t["ci_autofix"], false);
+        assert!(state.store.workspace(&key).await.unwrap().is_some());
+        assert!(
+            state
+                .store
+                .open_sessions(Some(&k))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn attach_makes_a_never_started_task_a_subtask_in_the_parents_project() {
+        let (app, state) = app().await;
+        let p = parent(&app).await;
+        let pk = p["key"].as_str().unwrap().to_string();
+        let (_, n) = create(&app, json!({"free": true, "title": "n"})).await;
+        assert!(n["project"].is_null(), "{n}");
+        let nk = n["key"].as_str().unwrap();
+        let (s, t) = post(&app, nk, "attach", Some(json!({"parent_task": pk}))).await;
+        assert_eq!(s, StatusCode::OK, "{t}");
+        assert_eq!(t["kind"], "subtask");
+        assert_eq!(t["parent_task"], pk.as_str());
+        assert_eq!(t["project"], "web");
+        assert_eq!(status_of(&app, nk).await["project"], "web");
+
+        let o = create(&app, json!({"free": true, "title": "o", "project": "api"}))
+            .await
+            .1;
+        let (s, b) = post(
+            &app,
+            o["key"].as_str().unwrap(),
+            "attach",
+            Some(json!({"parent_task": pk})),
+        )
+        .await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("project-mismatch")),
+            "{b}"
+        );
+
+        // Already a subtask: nesting.
+        let (s, b) = post(&app, nk, "attach", Some(json!({"parent_task": pk}))).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("nesting")),
+            "{b}"
+        );
+
+        let m = normal(&app, "m").await;
+        let (s, b) = post(&app, &m, "attach", Some(json!({"parent_task": m}))).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not-a-parent-task")),
+            "{b}"
+        );
+        let (s, b) = post(&app, &m, "attach", Some(json!({"parent_task": "NOPE-1"}))).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("not-a-parent-task")),
+            "{b}"
+        );
+
+        sqlx::query("UPDATE tasks SET status = '{\"type\":\"running\"}' WHERE key = ?")
+            .bind(&m)
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (s, b) = post(&app, &m, "attach", Some(json!({"parent_task": pk}))).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("already-started")),
+            "{b}"
+        );
+
+        let q = normal(&app, "q").await;
+        sqlx::query("UPDATE tasks SET status = '{\"type\":\"done\"}' WHERE key = ?")
+            .bind(&pk)
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (s, b) = post(&app, &q, "attach", Some(json!({"parent_task": pk}))).await;
+        assert_eq!(
+            (s, b["error"].as_str()),
+            (StatusCode::CONFLICT, Some("parent-task-archived")),
+            "{b}"
+        );
     }
 }

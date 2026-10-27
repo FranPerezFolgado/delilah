@@ -136,6 +136,14 @@ pub fn router(state: AppState) -> Router {
             get(crate::api_hierarchy::subtasks),
         )
         .route(
+            "/api/v1/tasks/{key}/make-parent-task",
+            post(crate::api_hierarchy::make_parent_task),
+        )
+        .route(
+            "/api/v1/tasks/{key}/attach",
+            post(crate::api_hierarchy::attach),
+        )
+        .route(
             "/api/v1/tasks/{key}/push-branch",
             post(crate::api_hierarchy::push_branch),
         )

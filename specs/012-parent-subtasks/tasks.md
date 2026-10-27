@@ -152,10 +152,10 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 **Independent Test**: spec US5 / quickstart step 7.
 
-- [ ] T048 [P] [US5] API tests for `POST /api/v1/tasks/{key}/make-parent-task` (refusals `has-open-pr`, `has-session`, `in-checkout`, `nesting`; a converted running task keeps its workspace, its agent fields are turned off and it starts no new agent) and `POST /api/v1/tasks/{key}/attach` (`already-started`, `not-a-parent-task`, `parent-task-archived`, `nesting`, project change to the parent task's)
-- [ ] T049 [US5] Implement both handlers in `crates/delilah-daemon/src/api_hierarchy.rs` with `hierarchy::check_make_parent_task` / `check_attach` and `store.set_kind`; emit `Topic::Tasks`; T048 passes
-- [ ] T050 [P] [US5] CLI `make-parent-task <KEY>` and `attach <KEY> --parent <KEY>` in `crates/delilah-cli/src/main.rs`
-- [ ] T051 [P] [US5] `app/src/components/BacklogTaskView.tsx` (and the task menu in `TaskHeader.tsx` for started normal tasks): "Make parent task" and "Attach to parent task…" (picker of the project's non-archived parent tasks), showing refusal reasons; vitest
+- [X] T048 [P] [US5] API tests for `POST /api/v1/tasks/{key}/make-parent-task` (refusals `has-open-pr`, `has-session`, `in-checkout`, `nesting`; a converted running task keeps its workspace, its agent fields are turned off and it starts no new agent) and `POST /api/v1/tasks/{key}/attach` (`already-started`, `not-a-parent-task`, `parent-task-archived`, `nesting`, project change to the parent task's)
+- [X] T049 [US5] Implement both handlers in `crates/delilah-daemon/src/api_hierarchy.rs` with `hierarchy::check_make_parent_task` / `check_attach` and `store.set_kind`; emit `Topic::Tasks`; T048 passes
+- [X] T050 [P] [US5] CLI `make-parent-task <KEY>` and `attach <KEY> --parent <KEY>` in `crates/delilah-cli/src/main.rs`
+- [X] T051 [P] [US5] `app/src/components/BacklogTaskView.tsx` (and the task menu in `TaskHeader.tsx` for started normal tasks): "Make parent task" and "Attach to parent task…" (picker of the project's non-archived parent tasks), showing refusal reasons; vitest
 
 ---
 

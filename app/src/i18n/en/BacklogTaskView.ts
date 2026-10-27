@@ -13,4 +13,8 @@ export const EN: Record<string, string> = {
     "Saving mode and autopilot are only available with the project workflow, not with a custom prompt.",
   "Ahorro y autopiloto solo están disponibles con el flujo del proyecto, no sin mensaje de inicio.":
     "Saving mode and autopilot are only available with the project workflow, not without a start message.",
+  "Hacer tarea padre": "Make parent task",
+  "Adjuntar a tarea padre…": "Attach to parent task…",
+  "Adjuntar a tarea padre": "Attach to parent task",
+  "No hay tareas padre abiertas en este proyecto.": "There are no open parent tasks in this project.",
 };

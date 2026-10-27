@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, isCheckoutDirty, type Project, type Task } from "../api";
+import { api, ApiError, isCheckoutDirty, taskKind, type Project, type Task } from "../api";
 import { t } from "../i18n";
 import { isPhased } from "../workflowPresets";
 import { relativeTime } from "../time";
@@ -7,7 +7,7 @@ import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
 import { StartPicker, startChoiceOf, startFields, type StartChoice } from "./WorkflowEditor";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
-import { Button, ConfirmDialog, StatusBadge, useToast } from "./ui";
+import { Button, ConfirmDialog, Dialog, StatusBadge, useToast } from "./ui";
 import "./BacklogTaskView.css";
 
 interface Props {
@@ -26,6 +26,29 @@ const startChange = (c: StartChoice): { workflow: string; start_message: string 
   const f = startFields(c, true);
   return { workflow: f.workflow!, start_message: f.prompt ?? "" };
 };
+
+/** The project's parent tasks that can still take a subtask. */
+function AttachDialog({ task, onPick, onClose }: { task: Task; onPick: (parent: string) => void; onClose: () => void }) {
+  const [parents, setParents] = useState<Task[] | null>(null);
+  useEffect(() => {
+    api.tasks().then((all) => setParents(all.filter((o) => taskKind(o) === "parent_task" && !o.status.type.match(/^(done|failed)$/) && (!task.project || o.project === task.project)))).catch(() => setParents([]));
+  }, [task.project]);
+  return (
+    <Dialog title={t("Adjuntar a tarea padre")} onClose={onClose}>
+      {parents === null ? null : parents.length === 0 ? (
+        <p className="muted small">{t("No hay tareas padre abiertas en este proyecto.")}</p>
+      ) : (
+        <div className="bt-parents">
+          {parents.map((o) => (
+            <button key={o.key} type="button" className="btn" onClick={() => onPick(o.key)}>
+              <span className="mono">{o.key}</span> {o.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </Dialog>
+  );
+}
 
 /** A task saved to the backlog: what it is about, editable until it starts. */
 export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
@@ -47,6 +70,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
   const [branchMissing, setBranchMissing] = useState(false);
   const [refused, setRefused] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   /** The task as the daemon returned it after «Iniciar». */
   const [started, setStarted] = useState<Task | null>(null);
 
@@ -127,6 +151,20 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
       toast({ text: t("{key} iniciada", { key: task.key }), action: { label: t("Abrir"), run: () => open(task.key) } });
     });
 
+  const makeParent = () =>
+    guard(async () => {
+      await api.makeParentTask(task.key);
+      onChanged();
+    });
+
+  const attach = (parent: string) => {
+    setAttaching(false);
+    return guard(async () => {
+      await api.attach(task.key, parent);
+      onChanged();
+    });
+  };
+
   const remove = () =>
     guard(async () => {
       await api.deleteTask(task.key);
@@ -201,11 +239,18 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
           <Button variant="secondary" disabled={locked || blankStart || !dirty || !title.trim()} onClick={save}>
             {t("Guardar")}
           </Button>
+          {taskKind(task) === "normal" && (
+            <>
+              <Button variant="secondary" disabled={locked} onClick={makeParent}>{t("Hacer tarea padre")}</Button>
+              <Button variant="secondary" disabled={locked} onClick={() => setAttaching(true)}>{t("Adjuntar a tarea padre…")}</Button>
+            </>
+          )}
           <Button variant="danger" className="bt-delete" disabled={locked} onClick={() => setDeleting(true)}>
             {t("Eliminar…")}
           </Button>
         </div>
       </div>
+      {attaching && <AttachDialog task={task} onPick={attach} onClose={() => setAttaching(false)} />}
       {deleting && (
         <ConfirmDialog
           danger
