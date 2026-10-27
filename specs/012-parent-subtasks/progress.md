@@ -21,8 +21,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-14 | 5 | 5A | done | 1 | | |
 | WP-15 | 5 | 5B | done | 0 | a7b5001 | |
 | WP-16 | 6 | 6A | done | 1 | 06196e2 | |
-| WP-17 | 7 | 7A | verified | 1 | | |
-| WP-18 | 8 | 8A | pending | 0 | | |
+| WP-17 | 7 | 7A | done | 1 | 8d80308 | |
+| WP-18 | 8 | 8A | done | 1 | | |
 | WP-19 | 8 | 8B | pending | 0 | | |
 
 ## Open findings
@@ -43,3 +43,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | security | LOW | `pr_ready` has no gh account check; task title unsanitised in empty-commit message; empty commit goes to `source_of` repo | pr_api/ready.rs, open.rs |
 | 5 | ui | LOW | Empty-commit open always uses repo "." and draft; draft badge shows on any draft PR | PrView.tsx |
 | 6 | spec | LOW | T047 names TaskHeader.tsx but change is in TaskView.tsx; archive of a parent with only archived subtasks untested | TaskView.tsx, actions.rs |
+| 7 | contract | LOW | attach with unknown parent key gives 409 not-a-parent-task (not 404); UI hides done/failed parents but daemon only refuses archived; attach/make-parent-task writes not in one transaction; make-parent-task on an existing parent returns 200 no-op (undocumented) | api_hierarchy.rs |

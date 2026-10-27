@@ -895,3 +895,28 @@ a flat struct with optional fields (blank checks everywhere); deciding at read t
 projects are "old" (fragile). *Behaviour change:* a request prompt (`delilah run --prompt`,
 `prompt` on `POST /runs`) is now a template too, so a literal `{` or `}` must be doubled and an
 unknown placeholder is refused. See the [spec](../specs/011-configurable-task-start/spec.md).
+
+**102. Parent tasks and subtasks: the integration branch pattern (2026-10-27).** A task has a
+`kind`: `normal` (all the old ones), `parent_task` or `subtask`, and a subtask holds the key of
+its `parent_task` (migration 0025: `kind`, `parent_task`, an index; no foreign key). Two levels
+only; the kind never goes back (`normal → parent_task`, `normal → subtask` by attaching a task
+that never started). The parent task owns the *integration branch*: a worktree and a branch
+pushed to `origin`, with no agent session and no phases (workflow `none`, no autopilot, no
+saving mode). Each subtask branches from `origin/<parent task branch>` and its PR targets that
+branch; when every subtask PR is merged, the parent task's own PR (opened as a **draft**) goes
+to the default branch, and "Mark ready" (`gh pr ready`) is offered once progress is ready
+(notice `parent-task-ready`, once per parent task). *Progress is derived on read*, never stored:
+archived subtasks that were not merged count as dropped and leave the denominator, `ready` =
+at least one counted and all merged. *Merge methods:* a subtask PR into the integration branch
+defaults to squash; the parent task PR uses the project setting `parent_task_merge`
+(`merge` | `squash` | `rebase`, default merge), falling back to the first allowed method.
+*Archive and delete:* a parent task with live subtasks cannot be archived or deleted, not even
+with force (409 `live-subtasks`, naming them); when its PR merges meanwhile it stays Done with
+its workspace and a `parent-task-live` notice; deleting one clears the link on its archived
+subtasks. *Convert and attach:* `make-parent-task` (any normal task, a running one keeps its
+workspace) and `attach --parent` (a task that never started, in the parent's project). *Naming
+(FR-030):* "parent task" is this feature; "parent repository" (`ProjectKind::Parent`, a repo with
+submodules) is unrelated and keeps its name; the pattern is called "integration branch" in the
+user docs. *Ruled out:* stacked PRs (a subtask based on another subtask: not supported, the
+two-level tree has one base); storing progress (it would go stale on every archive or merge);
+more than two levels. See the [spec](../specs/012-parent-subtasks/spec.md).

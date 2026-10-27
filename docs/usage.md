@@ -7,6 +7,7 @@ sessions. For what Delilah is, see the [README](../README.md).
 
 - [Command line](#command-line)
 - [Desktop app](#desktop-app)
+- [Parent tasks and subtasks](#parent-tasks-and-subtasks)
 - [Jira](#jira)
 - [Sessions](#sessions)
 - [Resource usage](#resource-usage)
@@ -65,7 +66,12 @@ delilah project unset signal setup                   # back to the default
 delilah project unset signal workflow               # back to the built-in prompt (the workflow itself is edited in the app)
 delilah setup retry|skip|cancel SIGNAL-13            # when a task's setup failed or is running
 
-delilah ls                 # tasks and their state
+delilah new --parent-task --project signal --title "Checkout revamp"   # a parent task (integration branch), in the backlog
+delilah new --parent LIBRE-1 --title "Cart API"   # a subtask of LIBRE-1 (takes its project)
+delilah make-parent-task LIBRE-4                  # turn a normal task into a parent task
+delilah attach LIBRE-5 --parent LIBRE-4           # make a never-started task a subtask (`attach` alone is the terminal)
+
+delilah ls                 # tasks and their state (subtasks nested under their parent task, with [merged/total])
 delilah attach PROJ-1234   # live terminal of the agent; Ctrl-] detaches
 delilah usage              # subscription usage windows, as Claude reports them
 delilah resume PROJ-1234   # resume a task paused by the usage limit right away
@@ -636,6 +642,39 @@ any text without a translation.
 
 **Help.** Help › View logs (⌘⇧L) shows the daemon's last lines live, to see what is
 going on while testing.
+
+## Parent tasks and subtasks
+
+For a feature split into several pieces that land together, Delilah supports the
+*integration branch* pattern: a **parent task** owns a branch, its **subtasks** are normal
+tasks that branch from it and open their PRs into it, and the parent task's own PR takes the
+whole thing to the default branch. (This has nothing to do with a "parent" project, a repo with
+submodules.)
+
+- **Create.** "New task" offers a kind: normal or parent task. A parent task has no agent,
+  workflow or autopilot, and starts in the backlog. A subtask is created from the parent task's
+  screen ("New subtask") or with `delilah new --parent KEY`; it takes the parent's project.
+- **Start.** Starting the parent task makes its worktree and pushes its branch to `origin`; it
+  stays *Running* and shows "N/M subtasks merged" instead of an agent. Subtasks cannot start
+  before that (`parent-task-not-started`); they branch from `origin/<parent branch>`, in
+  parallel. If the remote branch is gone, "Push branch again" on the parent task puts it back.
+- **Subtask PRs.** They target the parent task's branch and merge by squash by default.
+  "main moved ahead" becomes "N commits behind" the parent task's branch, and **Update branch**
+  merges it in (a merge, never a rebase). When a subtask PR merges, the subtask is archived
+  and the parent task's progress moves.
+- **Parent task PR.** "Open PR" on the parent task opens it as a **draft** (if the branch has
+  no commits, the app offers an empty commit). When every subtask is merged, the Inbox and the
+  PR tab suggest **Mark ready** (`gh pr ready`). It merges with the project's "Parent task
+  merge method" (Project settings; default merge commit).
+- **Progress.** Counted live from the subtasks: a subtask archived without merging is dropped
+  and no longer counts. The sidebar nests subtasks under their parent, with an N/M badge.
+- **Archive and delete.** A parent task with live subtasks cannot be archived or deleted, not
+  even with force; the message names them. If its PR merges first, it stays Done and the
+  Inbox says it was not archived.
+- **Convert.** On a backlog task, "Make parent task" and "Attach to parent task…"; on a
+  started task, the "Parent task" menu in its header converts it (a running task keeps its
+  workspace). Attaching a task that already started is refused (`already-started`).
+- **Not supported.** A subtask based on another subtask (stacked PRs) and more than two levels.
 
 ## Jira
 
