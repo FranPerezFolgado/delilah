@@ -87,9 +87,14 @@ fn verify(dir: &Path, refname: &str, opts: &GitOptions) -> Option<String> {
     .filter(|s| !s.is_empty())
 }
 
-/// The first usable of `origin/HEAD` (by the name it points to), `origin/main`,
-/// `origin/master`, `main`, `master` and `HEAD`.
-fn resolve_base(dir: &Path, opts: &GitOptions) -> Option<(String, String)> {
+/// With `base` (a branch name on `origin`), only `origin/<base>`; else the first
+/// usable of `origin/HEAD` (by the name it points to), `origin/main`, `origin/master`,
+/// `main`, `master` and `HEAD`.
+fn resolve_base(dir: &Path, base: Option<&str>, opts: &GitOptions) -> Option<(String, String)> {
+    if let Some(branch) = base {
+        let refname = format!("origin/{branch}");
+        return verify(dir, &format!("refs/remotes/{refname}"), opts).map(|sha| (refname, sha));
+    }
     let head = git_with_timeout(
         dir,
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
@@ -162,6 +167,21 @@ pub(crate) fn locked_fetch(
 /// Fetches `origin` (bounded by `deadline`) and says which commit a new branch should
 /// start from. Only fetches and reads: no local branch is moved or created.
 pub fn prepare_base(dir: &Path, label: &str, opts: &GitOptions, deadline: Deadline) -> RepoBase {
+    // Without an override nothing can be missing.
+    prepare_base_on(dir, label, None, opts, deadline).expect("the default base never fails")
+}
+
+/// Like [`prepare_base`], but with `base` set (a branch name on `origin`) the start is
+/// that branch, never the default one. Fails with [`GitError::BaseMissing`] when
+/// `origin` has no such branch after the fetch (a failed fetch falls back to the last
+/// known ref, as for the default).
+pub fn prepare_base_on(
+    dir: &Path,
+    label: &str,
+    base: Option<&str>,
+    opts: &GitOptions,
+    deadline: Deadline,
+) -> Result<RepoBase, GitError> {
     let fetch = if !has_origin(dir, opts) {
         FetchOutcome::NoRemote
     } else {
@@ -170,16 +190,23 @@ pub fn prepare_base(dir: &Path, label: &str, opts: &GitOptions, deadline: Deadli
             Err(reason) => FetchOutcome::Failed(reason),
         }
     };
-    let (refname, sha) = match resolve_base(dir, opts) {
+    let (refname, sha) = match resolve_base(dir, base, opts) {
         Some((refname, sha)) => (refname, Some(sha)),
-        None => ("HEAD".into(), None),
+        None => match base {
+            Some(branch) => {
+                return Err(GitError::BaseMissing {
+                    branch: branch.to_string(),
+                });
+            }
+            None => ("HEAD".into(), None),
+        },
     };
-    RepoBase {
+    Ok(RepoBase {
         repo: label.to_string(),
         refname,
         sha,
         fetch,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -248,6 +275,96 @@ mod tests {
         .unwrap_err();
         assert!(start.elapsed() < Duration::from_secs(5), "{err}");
         assert!(repo_lock(tmp.path(), &o).try_lock().is_ok());
+    }
+
+    fn commit(dir: &Path, msg: &str) {
+        git(
+            dir,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                msg,
+            ],
+            &GitOptions::default(),
+        )
+        .unwrap();
+    }
+
+    /// A clone of a bare origin that has `main` and `feat/x` (one commit ahead).
+    fn clone_with_feature() -> (tempfile::TempDir, PathBuf) {
+        let o = GitOptions::default();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let origin = tmp.path().join("origin.git");
+        let seed = tmp.path().join("seed");
+        let clone = tmp.path().join("clone");
+        std::fs::create_dir(&origin).unwrap();
+        std::fs::create_dir(&seed).unwrap();
+        git(&origin, &["init", "-q", "--bare", "-b", "main"], &o).unwrap();
+        git(&seed, &["init", "-q", "-b", "main"], &o).unwrap();
+        commit(&seed, "base");
+        git(
+            &seed,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+            &o,
+        )
+        .unwrap();
+        git(&seed, &["push", "-q", "origin", "main"], &o).unwrap();
+        git(&seed, &["checkout", "-q", "-b", "feat/x"], &o).unwrap();
+        commit(&seed, "feature");
+        git(&seed, &["push", "-q", "origin", "feat/x"], &o).unwrap();
+        git(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                clone.to_str().unwrap(),
+            ],
+            &o,
+        )
+        .unwrap();
+        (tmp, clone)
+    }
+
+    fn dl() -> Deadline {
+        Deadline::after(Duration::from_secs(10))
+    }
+
+    #[test]
+    fn an_override_resolves_that_origin_branch_not_the_default() {
+        let (_tmp, clone) = clone_with_feature();
+        let o = GitOptions::default();
+        let b = prepare_base_on(&clone, "svc", Some("feat/x"), &o, dl()).unwrap();
+        assert_eq!(b.refname, "origin/feat/x");
+        assert_eq!(b.fetch, FetchOutcome::Fetched);
+        let want = git(&clone, &["rev-parse", "origin/feat/x"], &o).unwrap();
+        let default = git(&clone, &["rev-parse", "origin/main"], &o).unwrap();
+        assert_eq!(b.sha.as_deref(), Some(want.as_str()));
+        assert_ne!(want, default);
+    }
+
+    #[test]
+    fn a_missing_override_is_base_missing_never_the_default() {
+        let (_tmp, clone) = clone_with_feature();
+        let err =
+            prepare_base_on(&clone, "svc", Some("nope"), &GitOptions::default(), dl()).unwrap_err();
+        assert!(matches!(err, GitError::BaseMissing { ref branch } if branch == "nope"));
+    }
+
+    #[test]
+    fn a_failed_fetch_keeps_an_existing_override_with_a_warning() {
+        let (_tmp, clone) = clone_with_feature();
+        let o = GitOptions::default();
+        git(&clone, &["remote", "set-url", "origin", "/nonexistent"], &o).unwrap();
+        let b = prepare_base_on(&clone, "svc", Some("feat/x"), &o, dl()).unwrap();
+        assert_eq!(b.refname, "origin/feat/x");
+        assert!(matches!(b.fetch, FetchOutcome::Failed(_)));
     }
 
     fn repo_with_origin(origin: &str) -> tempfile::TempDir {

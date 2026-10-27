@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use delilah_core::ProjectKind;
 use serde::{Deserialize, Serialize};
 
-use crate::base::{FetchOutcome, RepoBase, prepare_base};
+use crate::base::{FetchOutcome, RepoBase, prepare_base_on};
 use crate::command::{Deadline, GitError, GitOptions, NETWORK_LIMIT, git, git_code};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,6 +24,9 @@ pub struct WorkspaceSpec {
     pub kind: ProjectKind,
     /// `parent` only: submodule paths, as listed by [`list_submodules`].
     pub submodules: Vec<String>,
+    /// `None`: new branches start at `origin`'s default branch. `Some(b)`: at `origin/b`
+    /// (a parent task's branch); `GitError::BaseMissing` when it is not there.
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,7 +218,7 @@ pub fn create_workspace(
             if !spec.submodules.is_empty() {
                 return Err(GitError::SubmodulesInRepo);
             }
-            let base = prepare_base(root, ".", opts, deadline);
+            let base = prepare_base_on(root, ".", spec.base.as_deref(), opts, deadline)?;
             let start = base.start().to_string();
             match &spec.branch {
                 Some(branch) => git(
@@ -248,7 +251,7 @@ pub fn create_workspace(
             {
                 return Err(GitError::UnknownSubmodule(unknown.clone()));
             }
-            let base = prepare_base(root, ".", opts, deadline);
+            let base = prepare_base_on(root, ".", spec.base.as_deref(), opts, deadline)?;
             let start = base.start().to_string();
             git(
                 root,
@@ -292,7 +295,7 @@ fn init_submodules(
     let mut bases = Vec::new();
     for sub in &spec.submodules {
         let dir = ws.join(sub);
-        let base = prepare_base(&dir, sub, opts, deadline);
+        let base = prepare_base_on(&dir, sub, spec.base.as_deref(), opts, deadline)?;
         let start = base.start().to_string();
         // Without a branch the submodule is detached at its fresh base, where the
         // branch made later starts.
@@ -553,7 +556,7 @@ pub type Previous = Vec<(String, String)>;
 /// Puts the task's branch in the project's own checkout instead of a worktree:
 /// creates it (or switches to it) in the repo, or in each chosen submodule. Refuses
 /// while there are uncommitted changes (before any fetch). A new branch starts at the
-/// fresh `origin` default branch (see [`prepare_base`]) with no upstream; one that
+/// fresh `origin` default branch (see [`prepare_base_on`]) with no upstream; one that
 /// already exists is switched to as it is, never moved. With no branch it switches
 /// and fetches nothing, and a parent's own checkout (`"."`) is recorded too, as a hook
 /// may switch it. Returns the workspace, per folder the branch (or commit) it was on,
@@ -615,14 +618,15 @@ pub fn use_checkout(
                     fetch: FetchOutcome::Existing,
                 })
         } else {
-            let base = prepare_base(dir, location, opts, deadline);
-            let start = base.start().to_string();
-            git(
-                dir,
-                &["checkout", "-q", "--no-track", "-b", branch, &start],
-                opts,
-            )
-            .map(|_| base)
+            prepare_base_on(dir, location, spec.base.as_deref(), opts, deadline).and_then(|base| {
+                let start = base.start().to_string();
+                git(
+                    dir,
+                    &["checkout", "-q", "--no-track", "-b", branch, &start],
+                    opts,
+                )
+                .map(|_| base)
+            })
         };
         let base = match switched {
             Ok(base) => base,
@@ -655,6 +659,26 @@ pub fn use_checkout(
         submodules: spec.submodules.clone(),
     };
     Ok((ws, previous, bases))
+}
+
+/// Makes an empty commit (`--allow-empty`) with `message` in `dir`.
+pub fn commit_empty(dir: &Path, message: &str, opts: &GitOptions) -> Result<(), GitError> {
+    git(dir, &["commit", "-q", "--allow-empty", "-m", message], opts).map(|_| ())
+}
+
+/// Merges each of `refs` into the checked-out branch of `dir`, in order. On a conflict
+/// (or any failure) it runs `git merge --abort`, resets to the commit it started at and
+/// returns the error, so the branch is left as it was.
+pub fn merge_refs(dir: &Path, refs: &[String], opts: &GitOptions) -> Result<(), GitError> {
+    let start = git(dir, &["rev-parse", "HEAD"], opts)?;
+    for r in refs {
+        if let Err(e) = git(dir, &["merge", "--no-edit", r], opts) {
+            let _ = git(dir, &["merge", "--abort"], opts);
+            let _ = git(dir, &["reset", "-q", "--hard", &start], opts);
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 /// Ends a task that worked in the project's checkout: goes back to the branches it
@@ -908,5 +932,81 @@ pub fn delete_branch(
     match expected {
         Some(sha) => git(dir, &["update-ref", "-d", &reference, sha], opts).map(|_| ()),
         None => git(dir, &["branch", "-D", branch], opts).map(|_| ()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn o() -> GitOptions {
+        GitOptions::default()
+    }
+
+    fn repo() -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for a in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.name", "t"],
+            &["config", "user.email", "t@t"],
+        ] {
+            git(tmp.path(), a, &o()).unwrap();
+        }
+        commit_empty(tmp.path(), "init", &o()).unwrap();
+        tmp
+    }
+
+    fn write_commit(dir: &Path, file: &str, content: &str) {
+        std::fs::write(dir.join(file), content).unwrap();
+        git(dir, &["add", file], &o()).unwrap();
+        commit_empty(dir, &format!("{file}={content}"), &o()).unwrap();
+    }
+
+    #[test]
+    fn commit_empty_adds_a_commit_without_changes() {
+        let r = repo();
+        let before = git(r.path(), &["rev-list", "--count", "HEAD"], &o()).unwrap();
+        commit_empty(r.path(), "Initial commit", &o()).unwrap();
+        let after = git(r.path(), &["rev-list", "--count", "HEAD"], &o()).unwrap();
+        assert_eq!(
+            after.parse::<u32>().unwrap(),
+            before.parse::<u32>().unwrap() + 1
+        );
+        assert_eq!(
+            git(r.path(), &["log", "-1", "--format=%s"], &o()).unwrap(),
+            "Initial commit"
+        );
+    }
+
+    #[test]
+    fn merge_refs_merges_in_order() {
+        let r = repo();
+        let d = r.path();
+        git(d, &["checkout", "-q", "-b", "a"], &o()).unwrap();
+        write_commit(d, "a.txt", "a");
+        git(d, &["checkout", "-q", "main"], &o()).unwrap();
+        git(d, &["checkout", "-q", "-b", "b"], &o()).unwrap();
+        write_commit(d, "b.txt", "b");
+        git(d, &["checkout", "-q", "-b", "task", "main"], &o()).unwrap();
+        merge_refs(d, &["a".into(), "b".into()], &o()).unwrap();
+        assert!(d.join("a.txt").exists() && d.join("b.txt").exists());
+    }
+
+    #[test]
+    fn merge_refs_undoes_everything_on_conflict() {
+        let r = repo();
+        let d = r.path();
+        git(d, &["checkout", "-q", "-b", "a"], &o()).unwrap();
+        write_commit(d, "f.txt", "from a");
+        git(d, &["checkout", "-q", "main"], &o()).unwrap();
+        git(d, &["checkout", "-q", "-b", "b"], &o()).unwrap();
+        write_commit(d, "f.txt", "from b");
+        git(d, &["checkout", "-q", "-b", "task", "main"], &o()).unwrap();
+        let start = git(d, &["rev-parse", "HEAD"], &o()).unwrap();
+        assert!(merge_refs(d, &["a".into(), "b".into()], &o()).is_err());
+        assert_eq!(git(d, &["rev-parse", "HEAD"], &o()).unwrap(), start);
+        assert!(!d.join("f.txt").exists());
+        assert!(git(d, &["status", "--porcelain"], &o()).unwrap().is_empty());
+        assert!(git(d, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], &o()).is_err());
     }
 }

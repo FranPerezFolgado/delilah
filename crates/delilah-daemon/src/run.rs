@@ -493,6 +493,7 @@ pub(crate) async fn start_run_with(
     app.transition(&key, Event::Start).await?;
 
     let spec = WorkspaceSpec {
+        base: None,
         path: app.config.workspaces_dir().join(&req.key),
         // Only a free task with nothing typed and no template starts without a branch:
         // the first analysis creates it (decision 65).
@@ -1994,6 +1995,7 @@ mod tests {
         };
         let subs = vec!["svc-orders".to_string(), "svc-payments".to_string()];
         let spec = WorkspaceSpec {
+            base: None,
             path: dir.join("workspaces/PROJ-9"),
             branch: Some("feature/PROJ-9-add-retry".into()),
             kind: project.kind,

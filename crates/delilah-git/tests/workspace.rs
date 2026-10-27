@@ -297,6 +297,7 @@ fn a_task_can_work_in_the_checkout_and_leave_it_as_it_was() {
     // The fixture's parent has its submodules initialised, like a dev's checkout.
     git(&parent, &["submodule", "update", "--init", "-q"]);
     let spec = WorkspaceSpec {
+        base: None,
         path: parent.clone(),
         branch: Some("feature/PROJ-9".into()),
         kind: ProjectKind::Parent,
@@ -342,6 +343,7 @@ fn the_checkout_is_not_used_with_uncommitted_changes() {
     let repo = fx.repo();
     std::fs::write(repo.join("wip.txt"), "mine\n").unwrap();
     let spec = WorkspaceSpec {
+        base: None,
         path: repo.clone(),
         branch: Some("feature/X-1".into()),
         kind: ProjectKind::Repo,
@@ -733,6 +735,7 @@ fn repo_workspace_starts_from_the_old_origin_when_the_fetch_fails() {
 
 fn checkout_spec(branch: &str) -> WorkspaceSpec {
     WorkspaceSpec {
+        base: None,
         path: PathBuf::new(),
         branch: Some(branch.into()),
         kind: ProjectKind::Repo,
@@ -788,6 +791,7 @@ fn current_branch_is_none_on_a_detached_head() {
 
 fn branchless(spec: WorkspaceSpec) -> WorkspaceSpec {
     WorkspaceSpec {
+        base: None,
         branch: None,
         ..spec
     }
@@ -968,6 +972,7 @@ fn parent_workspace_starts_each_submodule_from_its_own_default_branch() {
 
 fn parent_checkout_spec(parent: &Path, subs: &[&str]) -> WorkspaceSpec {
     WorkspaceSpec {
+        base: None,
         path: parent.to_path_buf(),
         branch: Some("feature/PROJ-9".into()),
         kind: ProjectKind::Parent,

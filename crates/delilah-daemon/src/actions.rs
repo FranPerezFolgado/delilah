@@ -359,6 +359,7 @@ mod tests {
             .await
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
+            base: None,
             path: app.config.workspaces_dir().join(key.as_str()),
             branch,
             kind: delilah_core::ProjectKind::Repo,
@@ -416,6 +417,7 @@ mod tests {
             .await
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
+            base: None,
             path: app.config.workspaces_dir().join(key.as_str()),
             branch: Some(format!("feature/{key}")),
             kind: delilah_core::ProjectKind::Repo,
@@ -846,6 +848,7 @@ mod tests {
             .await
             .unwrap();
         let spec = delilah_git::WorkspaceSpec {
+            base: None,
             path: app.config.workspaces_dir().join("PROJ-1"),
             branch: None,
             kind: delilah_core::ProjectKind::Parent,

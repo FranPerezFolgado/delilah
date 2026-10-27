@@ -348,6 +348,7 @@ mod tests {
                 }
             } else {
                 let spec = WorkspaceSpec {
+                    base: None,
                     path: base.join("ws"),
                     branch: Some(BRANCH.into()),
                     kind: ProjectKind::Repo,
@@ -621,6 +622,7 @@ mod tests {
         let root = fixture_parent(dir.path());
         let subs = ["svc-payments", "svc-orders"];
         let spec = WorkspaceSpec {
+            base: None,
             path: dir.path().join("cs-ws"),
             branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
@@ -737,6 +739,7 @@ mod tests {
             task_with_workspace(Arc::new(FakeGh::new()), Some(SpecPhase::Review)).await;
         let root = fixture_parent(dir.path());
         let spec = WorkspaceSpec {
+            base: None,
             path: dir.path().join("unused"),
             branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
