@@ -178,6 +178,30 @@ describe("More menu", () => {
     });
     expect(deleteTask).toHaveBeenCalledWith("PROJ-1");
   });
+
+  it("shows a live-subtasks refusal naming them, with no force offer", async () => {
+    const refusal = () => new ApiError("The parent task has live subtasks: C-1.", 409, false, "live-subtasks", undefined, [], { subtasks: ["C-1"] });
+    archive.mockRejectedValue(refusal());
+    deleteTask.mockRejectedValue(refusal());
+    const finished: Task = { ...running, status: { type: "done" } };
+    const { container, findAllByRole, findByRole } = show(finished, { sessions: [session()] });
+    fireEvent.click(byText(container, "button", "More")!);
+    await act(async () => {
+      fireEvent.click((await findAllByRole("menuitem"))[1]);
+    });
+    await waitFor(() => expect(document.body.textContent).toContain("live subtasks: C-1"));
+    expect(byText(container, "button", "Archive anyway")).toBeFalsy();
+    expect(document.body.textContent).not.toMatch(/archive anyway|force/i);
+
+    fireEvent.click(byText(container, "button", "More")!);
+    fireEvent.click((await findAllByRole("menuitem"))[2]);
+    const dialog = await findByRole("dialog");
+    await act(async () => {
+      fireEvent.click(byText(dialog, "button", "Delete task")!);
+    });
+    expect(deleteTask).toHaveBeenCalledWith("PROJ-1");
+    expect(document.body.textContent).toContain("live subtasks: C-1");
+  });
 });
 
 describe("review notice", () => {

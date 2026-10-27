@@ -139,10 +139,10 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 **Independent Test**: spec US4 / quickstart step 6.
 
-- [ ] T044 [P] [US4] Tests: `actions::archive` and `actions::delete` on a parent task with a live subtask ⇒ 409 `live-subtasks` naming it (`--force` does not override); with only archived subtasks ⇒ allowed, and delete clears their `parent_task`; `archive_merged` on a parent task with live subtasks ⇒ `Done`, workspace kept, `parent-task-live` notice; a subtask's own archive/delete unchanged (`crates/delilah-daemon/src/actions.rs`, `crates/delilah-daemon/src/pr_loop/merge.rs` test modules)
-- [ ] T045 [US4] `crates/delilah-daemon/src/actions.rs` (~L103–170): `integration::live_subtasks` check in archive and delete; delete of a parent task calls `store.clear_parent_task_links`; archiving or deleting a subtask emits `Topic::Tasks` for its parent task so progress refreshes (SC-006)
-- [ ] T046 [US4] `crates/delilah-daemon/src/pr_loop/merge.rs::archive_merged` (~L51–116): after `MarkDone`, if the task is a parent task with live subtasks skip release/archive and push `parent-task-live`; T044 passes
-- [ ] T047 [P] [US4] CLI `archive`/`rm` and UI archive/delete actions (`app/src/components/TaskHeader.tsx`, `crates/delilah-cli/src/main.rs`) show the refusal naming the live subtasks; vitest
+- [X] T044 [P] [US4] Tests: `actions::archive` and `actions::delete` on a parent task with a live subtask ⇒ 409 `live-subtasks` naming it (`--force` does not override); with only archived subtasks ⇒ allowed, and delete clears their `parent_task`; `archive_merged` on a parent task with live subtasks ⇒ `Done`, workspace kept, `parent-task-live` notice; a subtask's own archive/delete unchanged (`crates/delilah-daemon/src/actions.rs`, `crates/delilah-daemon/src/pr_loop/merge.rs` test modules)
+- [X] T045 [US4] `crates/delilah-daemon/src/actions.rs` (~L103–170): `integration::live_subtasks` check in archive and delete; delete of a parent task calls `store.clear_parent_task_links`; archiving or deleting a subtask emits `Topic::Tasks` for its parent task so progress refreshes (SC-006)
+- [X] T046 [US4] `crates/delilah-daemon/src/pr_loop/merge.rs::archive_merged` (~L51–116): after `MarkDone`, if the task is a parent task with live subtasks skip release/archive and push `parent-task-live`; T044 passes
+- [X] T047 [P] [US4] CLI `archive`/`rm` and UI archive/delete actions (`app/src/components/TaskHeader.tsx`, `crates/delilah-cli/src/main.rs`) show the refusal naming the live subtasks; vitest
 
 ---
 

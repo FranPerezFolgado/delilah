@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use delilah_core::hierarchy::{Progress, TaskKind};
 use delilah_core::{
     AutofixDefault, AutopilotState, Event, Project, ProjectSettings, ProjectWorkflow, ShareMode,
     SharedEntry, Start, Task, TaskStatus, WorkspaceMode,
 };
-use delilah_core::hierarchy::{Progress, TaskKind};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::json;
@@ -861,7 +861,10 @@ fn show_hierarchy(view: &TaskView, subtasks: &[SubtaskSummary]) -> Vec<String> {
             }
             lines.push("  subtasks:".to_string());
             for s in subtasks {
-                let pr = s.pr.as_ref().map(|p| format!(", PR {}", p.state)).unwrap_or_default();
+                let pr =
+                    s.pr.as_ref()
+                        .map(|p| format!(", PR {}", p.state))
+                        .unwrap_or_default();
                 let flag = if s.dropped {
                     " (dropped)"
                 } else if s.archived {
@@ -1002,10 +1005,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 "/api/v1/tasks",
                 &with_ci_autofix(
                     with_autopilot(
-                        with_saving_mode(
-                            with_chat(body, chat),
-                            saving.choice(),
-                        ),
+                        with_saving_mode(with_chat(body, chat), saving.choice()),
                         autopilot.choice(),
                     ),
                     autofix.choice(),
@@ -2301,7 +2301,10 @@ mod tests {
     #[test]
     fn ls_nests_subtasks_under_their_parent_task_with_progress() {
         let tasks = vec![
-            view(task_json("LIBRE-2", json!({"kind": "subtask", "parent_task": "LIBRE-1"}))),
+            view(task_json(
+                "LIBRE-2",
+                json!({"kind": "subtask", "parent_task": "LIBRE-1"}),
+            )),
             view(task_json("LIBRE-3", json!({}))),
             view(task_json(
                 "LIBRE-1",
@@ -2334,8 +2337,15 @@ mod tests {
         assert!(out.contains("kind:     parent task"));
         assert!(out.contains("0/1 (1 dropped) subtasks merged"));
         assert!(out.contains("LIBRE-2") && out.contains("PR open"));
-        let sub = view(task_json("LIBRE-2", json!({"kind": "subtask", "parent_task": "LIBRE-1"})));
-        assert!(show_hierarchy(&sub, &[]).join("\n").contains("parent task: LIBRE-1"));
+        let sub = view(task_json(
+            "LIBRE-2",
+            json!({"kind": "subtask", "parent_task": "LIBRE-1"}),
+        ));
+        assert!(
+            show_hierarchy(&sub, &[])
+                .join("\n")
+                .contains("parent task: LIBRE-1")
+        );
         assert!(show_hierarchy(&view(task_json("LIBRE-9", json!({}))), &[]).is_empty());
     }
 
@@ -2346,5 +2356,13 @@ mod tests {
         assert_eq!(e.error, "No nesting.");
         let e: ErrorBody = serde_json::from_value(json!({"error": "plain"})).unwrap();
         assert_eq!(e.error, "plain");
+    }
+
+    #[test]
+    fn a_live_subtasks_refusal_prints_its_message_naming_them() {
+        let body = r#"{"error":"live-subtasks","message":"The parent task has live subtasks: C-1, C-2.","subtasks":["C-1","C-2"]}"#;
+        let e: ErrorBody = serde_json::from_str(body).unwrap();
+        assert!(!e.unpushed);
+        assert!(e.error.contains("C-1") && e.error.contains("C-2"));
     }
 }

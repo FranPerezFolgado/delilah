@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use delilah_core::hierarchy::{Refusal, TaskKind};
 use delilah_core::{Event, Task, TaskKey, TaskStatus};
 use delilah_git::GitOptions;
 
@@ -47,6 +48,26 @@ pub async fn done(
     Ok(Json(task))
 }
 
+/// A parent task cannot be archived or deleted while it has subtasks not archived yet;
+/// `--force` does not override it (FR-026).
+async fn refuse_live_subtasks(app: &AppState, task: &Task) -> Result<(), ApiError> {
+    if task.kind != TaskKind::ParentTask {
+        return Ok(());
+    }
+    let live = crate::integration::live_subtasks(&app.store, &task.key)
+        .await
+        .map_err(|e| crate::integration::api_error(app.lang(), task, e))?;
+    if live.is_empty() {
+        return Ok(());
+    }
+    let keys: Vec<String> = live.iter().map(|k| k.to_string()).collect();
+    Err(ApiError::refused(
+        app.lang(),
+        Refusal::LiveSubtasks,
+        serde_json::json!({ "subtasks": keys }),
+    ))
+}
+
 #[derive(Debug, Default, serde::Deserialize)]
 pub struct ArchiveQuery {
     /// Remove a worktree even with work that is not pushed (the user confirmed).
@@ -67,6 +88,7 @@ pub async fn archive(
         .get_task(&key)
         .await?
         .ok_or(StoreError::NotFound(key.clone()))?;
+    refuse_live_subtasks(&app, &task).await?;
     if !task.status.can_archive() {
         return Err(ApiError::conflict(format!(
             "{key} is {}; mark it done first (`delilah done {key}`)",
@@ -116,6 +138,7 @@ pub async fn delete(
             "{key} is preparing its workspace; try again in a few seconds"
         )));
     }
+    refuse_live_subtasks(&app, &task).await?;
     // A checkout keeps the branch and its folder: only a worktree can lose work.
     if !q.force
         && let Some((_, ws)) = app.store.workspace(&key).await?
@@ -150,6 +173,10 @@ pub async fn delete(
         // Already checked (or forced): the release no longer asks.
         release_workspace(&app, &key, true).await?;
         app.store.delete_task(&key).await?;
+    }
+    // Its archived subtasks must not be adopted by a task that reuses the key.
+    if task.kind == TaskKind::ParentTask {
+        app.store.clear_parent_task_links(&key).await?;
     }
 
     app.asks.release_task(key.as_str());
@@ -403,6 +430,89 @@ mod tests {
             axum::extract::Query(DeleteQuery { force }),
         )
         .await
+    }
+
+    async fn parent_with_child(app: &AppState, child_status_archived: bool) {
+        let mut p = Task::new(TaskKey::new("P-1"), "parent", "project");
+        p.kind = TaskKind::ParentTask;
+        app.store.create_task(&p).await.unwrap();
+        let mut c = Task::new(TaskKey::new("C-1"), "child", "project");
+        c.kind = TaskKind::Subtask;
+        c.parent_task = Some(TaskKey::new("P-1"));
+        app.store.create_task(&c).await.unwrap();
+        if child_status_archived {
+            for e in [Event::Start, Event::WorkspaceReady, Event::MarkDone] {
+                app.store
+                    .apply_event(&c.key, e, chrono::Utc::now())
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
+    fn live_refusal(e: &ApiError) -> bool {
+        e.status == StatusCode::CONFLICT
+            && e.refusal
+                .as_ref()
+                .is_some_and(|b| b["error"] == "live-subtasks" && b["subtasks"][0] == "C-1")
+    }
+
+    #[tokio::test]
+    async fn a_parent_task_with_a_live_subtask_cannot_be_archived_or_deleted_even_forced() {
+        let (app, _repo) = setup().await;
+        parent_with_child(&app, false).await;
+        let err = delete_task(&app, "P-1", true).await.unwrap_err();
+        assert!(live_refusal(&err), "{}", err.message);
+        let err = archive(
+            State(app.clone()),
+            Path("P-1".into()),
+            axum::extract::Query(ArchiveQuery { force: true }),
+        )
+        .await
+        .unwrap_err();
+        assert!(live_refusal(&err), "{}", err.message);
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("P-1"))
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_parent_task_with_only_archived_subtasks_clears_their_link() {
+        let (app, _repo) = setup().await;
+        parent_with_child(&app, true).await;
+        // Archived: done and without a workspace.
+        assert!(delete_task(&app, "P-1", false).await.is_ok());
+        let c = app
+            .store
+            .get_task(&TaskKey::new("C-1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(c.parent_task, None);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_subtask_tells_the_tasks_topic() {
+        let (app, _repo) = setup().await;
+        parent_with_child(&app, false).await;
+        let mut rx = app.events.subscribe();
+        assert!(delete_task(&app, "C-1", false).await.is_ok());
+        let mut seen = vec![];
+        while let Ok(t) = rx.try_recv() {
+            seen.push(t);
+        }
+        assert!(seen.contains(&Topic::Tasks));
+        assert!(
+            app.store
+                .get_task(&TaskKey::new("P-1"))
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     /// A task stopped in `setup-failed`, with a worktree and a saved launch.

@@ -17,10 +17,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-09 | 3 | 3B | done | 1 | | |
 | WP-11 | 4 | 4A | done | 1 | | |
 | WP-12 | 4 | 4A | done | 1 | | |
-| WP-13 | 5 | 5A | verified | 1 | | |
-| WP-14 | 5 | 5A | verified | 1 | | |
-| WP-15 | 5 | 5B | verified | 0 | | |
-| WP-16 | 6 | 6A | pending | 0 | | |
+| WP-13 | 5 | 5A | done | 1 | | |
+| WP-14 | 5 | 5A | done | 1 | | |
+| WP-15 | 5 | 5B | done | 0 | a7b5001 | |
+| WP-16 | 6 | 6A | verified | 0 | | |
 | WP-17 | 7 | 7A | pending | 0 | | |
 | WP-18 | 8 | 8A | pending | 0 | | |
 | WP-19 | 8 | 8B | pending | 0 | | |
@@ -39,3 +39,6 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | architecture | MEDIUM | parent-task start branch inline in run.rs (~30 lines); StartPlan.in_checkout/branchless unread (rule duplicated with branching.rs) | run.rs, integration.rs, branching.rs |
 | 3 | spec | LOW | failed branch push of a parent task at start is only logged | run.rs |
 | 3 | notes | INFO | Phase 3 HIGHs (UI refusal parsing, push helper) fixed in the WP-03F commit; the reviewers were not re-run on the fix (tests cover both). ui-verifier not run yet: do it against a preview at the end. |  |
+| 4-5 | various | LOW | `parent_ref`-missing refusal untested; TS `method` lacks `\| null`; `expected_base` null when `base_for` errors; non-draft open when ready untested; first-ref conflict untested | pr_api, api.ts |
+| 5 | security | LOW | `pr_ready` has no gh account check; task title unsanitised in empty-commit message; empty commit goes to `source_of` repo | pr_api/ready.rs, open.rs |
+| 5 | ui | LOW | Empty-commit open always uses repo "." and draft; draft badge shows on any draft PR | PrView.tsx |

@@ -15,7 +15,7 @@ use crate::archive::{
     stop_sessions,
 };
 use crate::events::Topic;
-use crate::inbox::KIND_PARENT_TASK_READY;
+use crate::inbox::{KIND_PARENT_TASK_LIVE, KIND_PARENT_TASK_READY};
 use crate::pr_types::PrState;
 use crate::state::AppState;
 use crate::store::StoreError;
@@ -64,6 +64,36 @@ async fn archive_merged(app: &AppState, key: &TaskKey, rows: &[PrRow]) -> Result
         tracing::warn!(task = %key, "cannot mark it done after the merge: {e}");
         tell(app, key, &task, &Verdict::Blocked(e.to_string()));
         return Ok(());
+    }
+    // A parent task with live subtasks stays as it is: they still work on its branch.
+    if task.kind == TaskKind::ParentTask {
+        let live = crate::integration::live_subtasks(&app.store, key)
+            .await
+            .unwrap_or_default();
+        if !live.is_empty() {
+            let list: Vec<String> = live.iter().map(|k| k.to_string()).collect();
+            let text = format!(
+                "{}: {}",
+                app.lang().pick(
+                    "La PR de la tarea madre se mergeó con subtareas vivas, no se archiva",
+                    "The parent task's PR merged with live subtasks; it is not archived"
+                ),
+                list.join(", ")
+            );
+            let fresh = notice(
+                app,
+                key,
+                KIND_PARENT_TASK_LIVE,
+                text,
+                Some(json!({ "subtasks": list })),
+            )
+            .await?;
+            if fresh {
+                app.emit(Topic::Inbox);
+            }
+            app.emit(Topic::Tasks);
+            return Ok(());
+        }
     }
     // Whatever the state, nothing may write to the repos while they are checked.
     stop_sessions(app, key).await;
@@ -1005,7 +1035,7 @@ mod tests {
         let mut p = Task::new(TaskKey::new("P-1"), "parent", "app");
         p.kind = TaskKind::ParentTask;
         app.store.create_task(&p).await.unwrap();
-        let mut put = |key: String, n: i64, state: PrState, draft: bool| {
+        let put = |key: String, n: i64, state: PrState, draft: bool| {
             let app = app.clone();
             async move {
                 let row = app
@@ -1106,5 +1136,29 @@ mod tests {
             on_subtask_merged(&app, &c, true).await;
         }
         assert_eq!(ready_notices(&app).await, 0, "the third is still open");
+    }
+
+    #[tokio::test]
+    async fn a_merged_parent_task_with_live_subtasks_is_done_but_not_archived() {
+        let env = Env::repo(false, "MERGED").await;
+        env.app
+            .store
+            .set_kind(&env.key, TaskKind::ParentTask, None)
+            .await
+            .unwrap();
+        let mut c = Task::new(TaskKey::new("C-9"), "child", "app");
+        c.kind = TaskKind::Subtask;
+        c.parent_task = Some(env.key.clone());
+        env.app.store.create_task(&c).await.unwrap();
+
+        check_task(&env.app, &env.key, true).await;
+
+        assert_eq!(env.status().await, TaskStatus::Done);
+        assert!(env.ws.path.exists());
+        assert!(env.app.store.workspace(&env.key).await.unwrap().is_some());
+        assert_eq!(env.kinds().await, ["parent-task-live"]);
+        // Told once.
+        check_task(&env.app, &env.key, true).await;
+        assert_eq!(env.kinds().await, ["parent-task-live"]);
     }
 }
