@@ -250,3 +250,22 @@ describe("BacklogTaskView start", () => {
     expect(toggle(withAuto.container, "Arreglar CI").getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+describe("BacklogTaskView subtask of a parent task without branch", () => {
+  it("offers «Volver a subir la rama» on the parent-task-branch-missing refusal and pushes the parent's branch", async () => {
+    vi.spyOn(api, "run").mockRejectedValue(new ApiError("parent-task-branch-missing", 409, false, "parent-task-branch-missing"));
+    const push = vi.spyOn(api, "pushBranch").mockResolvedValue(null);
+    const { container, findByText } = mount({ ...task, kind: "subtask", parent_task: "LIBRE-1" });
+    fireEvent.click(btn(container, "Iniciar"));
+    fireEvent.click(await findByText("Volver a subir la rama"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("LIBRE-1"));
+  });
+
+  it("does not offer it for other refusals", async () => {
+    vi.spyOn(api, "run").mockRejectedValue(new ApiError("boom", 409));
+    const { container, findByText, queryByText } = mount({ ...task, kind: "subtask", parent_task: "LIBRE-1" });
+    fireEvent.click(btn(container, "Iniciar"));
+    await findByText("boom");
+    expect(queryByText("Volver a subir la rama")).toBeNull();
+  });
+});

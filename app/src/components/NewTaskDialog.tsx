@@ -29,6 +29,8 @@ interface Props {
   fromSession?: { id: string; label: string };
   /** "Empezar": a backlog task to start; its key stays, the rest comes prefilled. */
   existing?: Task;
+  /** Opened from a parent task: creates a subtask of it, in its project. */
+  parentTask?: Task;
   onClose: () => void;
   onStarted: (task: Task) => void;
   /** "Guardar en backlog": saved, not started. */
@@ -37,17 +39,23 @@ interface Props {
   onConversation: (project: string, session: Session) => void;
 }
 
-export function NewTaskDialog({ projects, draft, project: initialProject, fromSession, existing, onClose, onStarted, onSaved, onConversation }: Props) {
+export function NewTaskDialog({ projects, draft, project: initialProject, fromSession, existing, parentTask, onClose, onStarted, onSaved, onConversation }: Props) {
   // A Jira ticket, or a free task Delilah names itself (LIBRE-n).
   const [origin, setOrigin] = useState<"jira" | "libre" | "claude">(
     fromSession || existing?.key.startsWith("LIBRE-") ? "libre" : "jira",
   );
   const [key, setKey] = useState(existing?.key ?? draft?.key ?? "");
   const [title, setTitle] = useState(existing?.title ?? draft?.title ?? "");
+  // A normal task, or a parent task (a container: no agent, no workspace choice). Under a parent task it is a subtask.
+  const [kind, setKind] = useState<"normal" | "parent_task">("normal");
+  const kindChoice = !existing && !fromSession && !parentTask && !draft;
+  const container = !existing && !fromSession && (!!parentTask || kind === "parent_task");
+  const asParent = container && !parentTask;
   const [notes, setNotes] = useState(existing?.notes ?? "");
   // A ticket with components most likely belongs to the parent project.
   const preferred =
     projects.find((p) => p.name === existing?.project) ??
+    projects.find((p) => p.name === parentTask?.project) ??
     projects.find((p) => p.name === initialProject) ??
     (draft?.components.length ? projects.find((p) => p.kind === "parent") : undefined) ??
     projects[0];
@@ -255,7 +263,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     const errs: typeof fieldErrors = {};
     if (origin === "jira" && !key.trim()) errs.key = t("Falta el ticket");
     if (origin !== "claude" && !title.trim()) errs.title = origin === "jira" ? t("Falta el título") : t("Cuéntanos qué quieres hacer");
-    if (origin !== "claude" && project?.kind === "parent" && picked.length === 0) errs.submodules = t("Elige al menos un submódulo");
+    if (origin !== "claude" && !container && project?.kind === "parent" && picked.length === 0) errs.submodules = t("Elige al menos un submódulo");
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -264,6 +272,8 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
     e?.preventDefault();
     if (!project || busy) return;
     if (!validate()) return;
+    // A parent task or a subtask is created in the backlog; starting it is a later step.
+    if (container && origin !== "claude") return saveToBacklog();
     setBusy(true);
     setError(null);
     setDirtyRefusal(false);
@@ -319,14 +329,20 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
         project: project.name,
         notes: notes.trim() || undefined,
         free: origin === "libre",
-        in_checkout: where === "checkout",
-        saving_mode: autopilotAllowed && (savingMode || autopilotOn),
-        model,
-        ...autopilotField,
-        ci_autofix: autofixOn,
-        view,
-        ...(chatMode ? { chat_mode: true } : {}),
-        ...startFields(start),
+        ...(parentTask ? { kind: "subtask" as const, parent_task: parentTask.key } : asParent ? { kind: "parent_task" as const } : {}),
+        // No workspace choice for a parent task or a subtask; a parent task has no agent options either.
+        ...(container ? {} : { in_checkout: where === "checkout" }),
+        ...(asParent
+          ? {}
+          : {
+              saving_mode: autopilotAllowed && (savingMode || autopilotOn),
+              model,
+              ...autopilotField,
+              ci_autofix: autofixOn,
+              view,
+              ...(chatMode ? { chat_mode: true } : {}),
+              ...startFields(start),
+            }),
       });
       onSaved(task);
     } catch (err) {
@@ -354,13 +370,13 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
   const canSave = !blankStart && !!project && !!title.trim() && (origin === "libre" || !!key.trim());
 
   const formId = "new-task-form";
-  const title0 = fromSession ? t("Convertir en tarea") : existing ? t("Iniciar {key}", { key: existing.key }) : t("Nueva tarea");
-  const startLabel = busy ? t("Preparando workspace…") : origin === "claude" ? t("Abrir conversación") : fromSession ? t("Convertir") : t("Iniciar");
+  const title0 = parentTask ? t("Nueva subtarea de {key}", { key: parentTask.key }) : asParent ? t("Nueva tarea padre") : fromSession ? t("Convertir en tarea") : existing ? t("Iniciar {key}", { key: existing.key }) : t("Nueva tarea");
+  const startLabel = busy ? t("Preparando workspace…") : origin === "claude" ? t("Abrir conversación") : parentTask ? t("Crear subtarea") : asParent ? t("Crear tarea padre") : fromSession ? t("Convertir") : t("Iniciar");
   const footer = (
     <>
       <span className="ntd-hint">{t("⌘↵ Iniciar")}</span>
       <Button variant="ghost" onClick={onClose}>{t("Cancelar")}</Button>
-      {origin !== "claude" && !fromSession && !existing && (
+      {origin !== "claude" && !fromSession && !existing && !container && (
         <Button variant="secondary" disabled={busy || !canSave} onClick={saveToBacklog}
           title={t("Se queda en el backlog del proyecto, sin workspace ni agente, hasta que la empieces")}>
           {t("Guardar en backlog")}
@@ -395,6 +411,13 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                   { value: "claude", label: t("Con Claude") },
                 ]} />
             )}
+            {kindChoice && origin !== "claude" && (
+              <Segmented mode="radio" label={t("Tipo de tarea")} value={kind} onChange={(v) => setKind(v as typeof kind)}
+                options={[
+                  { value: "normal", label: t("Tarea normal") },
+                  { value: "parent_task", label: t("Tarea padre") },
+                ]} />
+            )}
             {origin === "claude" ? null : origin === "jira" ? (
               <div className="ntd-ticket">
                 <label className="field">
@@ -420,7 +443,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
             )}
             <label className="field">
               <span>{t("Proyecto")}</span>
-              <select className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)} disabled={!!fromSession}>
+              <select className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)} disabled={!!fromSession || !!parentTask}>
                 {projects.map((p) => (
                   <option key={p.name} value={p.name}>
                     {p.name} · {p.kind === "parent" ? "parent" : "repo"}
@@ -441,13 +464,13 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
               </label>
             )}
-            {origin !== "claude" && !fromSession && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
-            {origin !== "claude" && !fromSession && project && (
+            {origin !== "claude" && !fromSession && !container && <WherePicker value={where} onChange={(w) => { whereTouched.current = true; setWhere(w ?? "checkout"); }} project={project} />}
+            {origin !== "claude" && !fromSession && !asParent && project && (
               <StartPicker project={project.name} settings={project.settings}
                 ticket={existing ? (existing.key.startsWith("LIBRE-") ? "" : existing.key) : origin === "jira" ? key.trim() : ""} title={title.trim()}
                 value={start} errors={startErrors} onChange={setStart} />
             )}
-            {origin !== "claude" && (
+            {origin !== "claude" && !asParent && (
               <div className="field">
                 <span className="ntd-sub-hd">
                   {t("Modelo")}
@@ -473,7 +496,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 )}
               </div>
             )}
-            {origin !== "claude" && (
+            {origin !== "claude" && !asParent && (
               <div className="ntd-auto">
                 {autopilotAllowed ? (
                   <AutopilotControls
@@ -493,7 +516,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 {autopilotAllowed && <span className="muted ntd-help">{t("Ahorro: una sesión de Claude nueva por fase, para gastar menos contexto")}</span>}
               </div>
             )}
-            {origin !== "claude" && project?.kind === "parent" && (
+            {origin !== "claude" && !container && project?.kind === "parent" && (
               <div className="field">
                 <span className="ntd-sub-hd">
                   {t("Submódulos que toca la tarea")}
@@ -523,7 +546,7 @@ export function NewTaskDialog({ projects, draft, project: initialProject, fromSe
                 )}
               </div>
             )}
-            {origin !== "claude" && (
+            {origin !== "claude" && !container && (
               <details className="ntd-adv">
                 <summary>{t("Opciones avanzadas")}</summary>
                 <div className="field">

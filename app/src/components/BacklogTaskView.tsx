@@ -43,6 +43,8 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
   const [autofix, setAutofix] = useState<boolean | null>(task.ci_autofix ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The start was refused because the parent task's branch is not on the remote.
+  const [branchMissing, setBranchMissing] = useState(false);
   const [refused, setRefused] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** The task as the daemon returned it after «Iniciar». */
@@ -87,11 +89,13 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     setError(null);
     setStartErrors([]);
     setRefused(false);
+    setBranchMissing(false);
     try {
       await run();
     } catch (e) {
       const message = (e as Error).message;
       if (e instanceof ApiError && e.fields.length > 0) setStartErrors(e.fields);
+      if (e instanceof ApiError && (e.reason === "parent-task-branch-missing" || e.message.includes("parent-task-branch-missing"))) setBranchMissing(true);
       if (isCheckoutDirty(e)) setRefused(true);
       else setError(message);
     } finally {
@@ -184,6 +188,11 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
           </div>
         )}
         {error && <div className="error selectable">{error}</div>}
+        {branchMissing && task.parent_task && (
+          <Button variant="secondary" size={28} disabled={busy} onClick={() => guard(async () => { await api.pushBranch(task.parent_task!); })}>
+            {t("Volver a subir la rama")}
+          </Button>
+        )}
         {started && <div className="bt-started" role="status">{t("{key} iniciada", { key: task.key })}</div>}
         <div className="bt-actions">
           <Button variant="primary" icon="run" disabled={locked || blankStart || !title.trim() || !project} onClick={() => start(where === "checkout")}>

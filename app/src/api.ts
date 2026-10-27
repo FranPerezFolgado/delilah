@@ -161,7 +161,7 @@ export interface ProjectSettings {
   /** Absent (older daemon) reads as "autopilot". */
   ci_autofix?: CiAutofixMode;
   /** How a parent task's PR into the base is merged. Absent (older daemon) reads as "merge". */
-  parent_task_merge: MergeMethod;
+  parent_task_merge?: MergeMethod;
 }
 
 /** What a single-session task sends first. */

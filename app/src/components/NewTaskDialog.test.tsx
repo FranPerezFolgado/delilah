@@ -807,3 +807,52 @@ describe("NewTaskDialog model", () => {
     expect((getByLabelText("Modelo") as HTMLSelectElement).value).toBe("opus");
   });
 });
+
+describe("NewTaskDialog parent tasks and subtasks", () => {
+  const saved = { key: "LIBRE-5" } as Task;
+
+  function open(parentTask?: Task) {
+    vi.spyOn(api, "preference").mockResolvedValue(null);
+    const props = { onClose: vi.fn(), onStarted: vi.fn(), onSaved: vi.fn(), onConversation: vi.fn() };
+    const view = render(<NewTaskDialog projects={[web]} parentTask={parentTask} {...props} />);
+    return { ...view, ...props };
+  }
+
+  it("creates a parent task in the backlog, with no workspace choice nor agent options", async () => {
+    const create = vi.spyOn(api, "createTask").mockResolvedValue(saved);
+    const { getByText, getByPlaceholderText, queryByText, queryByLabelText, container, onSaved } = open();
+    fireEvent.click(getByText("Tarea libre"));
+    fireEvent.click(getByText("Tarea padre"));
+    expect(queryByText("Dónde trabaja el agente")).toBeNull();
+    expect(queryByLabelText("Modelo")).toBeNull();
+    expect(queryByText("Guardar en backlog")).toBeNull();
+    fireEvent.change(getByPlaceholderText(/caché de tarifas/), { target: { value: "Rates" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
+    const body = create.mock.calls[0][0];
+    expect(body).toMatchObject({ title: "Rates", project: "web", kind: "parent_task", free: true });
+    expect(body).not.toHaveProperty("in_checkout");
+    expect(body).not.toHaveProperty("model");
+  });
+
+  it("opened from a parent task, creates a subtask of it in its project", async () => {
+    const create = vi.spyOn(api, "createTask").mockResolvedValue(saved);
+    const parent = { key: "LIBRE-1", project: "web", kind: "parent_task" } as Task;
+    const { getByText, getByPlaceholderText, queryByText, container, onSaved } = open(parent);
+    expect(getByText("Nueva subtarea de LIBRE-1")).not.toBeNull();
+    expect(queryByText("Tarea padre")).toBeNull();
+    expect(queryByText("Dónde trabaja el agente")).toBeNull();
+    fireEvent.click(getByText("Tarea libre"));
+    fireEvent.change(getByPlaceholderText(/caché de tarifas/), { target: { value: "Part" } });
+    fireEvent.submit(container.querySelector("form")!);
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
+    expect(create.mock.calls[0][0]).toMatchObject({ title: "Part", project: "web", kind: "subtask", parent_task: "LIBRE-1" });
+    expect(create.mock.calls[0][0]).not.toHaveProperty("in_checkout");
+  });
+
+  it("a normal task is unchanged: it offers the workspace choice and no parent_task", async () => {
+    const { getByText, queryByText } = open();
+    expect(getByText("Tarea normal")).not.toBeNull();
+    expect(queryByText("Crear tarea padre")).toBeNull();
+  });
+});

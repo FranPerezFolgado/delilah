@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { Project, PrSummary, Session, Task } from "../api";
+import { Fragment, useState } from "react";
+import { taskKind, type Project, type PrSummary, type Session, type Task } from "../api";
 import { keyOf, type ActionId } from "../shortcuts";
 import { ConfirmDialog, Count, Icon, IconButton, type IconName, Menu, Row } from "./ui";
 import { PrBadge } from "./PrBadge";
@@ -53,6 +53,8 @@ const VISIBLE_TASKS = 6;
 const COLLAPSED_KEY = "delilah.collapsed-projects";
 /** Backlogs start folded: these are the ones the viewer opened. */
 const OPEN_BACKLOGS_KEY = "delilah.open-backlogs";
+/** Parent tasks the viewer folded: their subtasks start unfolded. */
+const FOLDED_SUBTASKS_KEY = "delilah.folded-subtasks";
 function loadSet(key: string): Set<string> {
   try {
     return new Set(JSON.parse(localStorage.getItem(key) ?? "[]"));
@@ -83,6 +85,7 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
   // would otherwise take the whole sidebar.
   const [collapsed, toggle] = useRememberedSet(COLLAPSED_KEY);
   const [openBacklogs, toggleBacklog] = useRememberedSet(OPEN_BACKLOGS_KEY);
+  const [foldedSubtasks, toggleSubtasks] = useRememberedSet(FOLDED_SUBTASKS_KEY);
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState<Set<string>>(new Set());
   const q = filter.trim().toLowerCase();
@@ -98,11 +101,17 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
   const prOf = new Map(prs.map((p) => [p.task, p]));
   const tip = (label: string, action: ActionId) => `${label} (${keyOf(action)})`;
 
-  const taskRow = (task: Task) => {
+  // A parent task's live subtasks, in the order the lists show them (set by `group`).
+  const subtasksOf = new Map<string, Task[]>();
+  const taskRow = (task: Task): React.ReactNode => {
+    const kids = subtasksOf.get(task.key) ?? [];
+    const isParent = taskKind(task) === "parent_task";
+    const progress = isParent ? task.subtask_progress : undefined;
+    const kidsOpen = !foldedSubtasks.has(task.key) || !!q;
     const st = statusOf(task.status);
     const pr = prOf.get(task.key);
     const tooltip = `${task.key} · ${task.title} · ${st.label}`;
-    return (
+    const menu = (
       <Menu
         key={task.key}
         items={[
@@ -129,6 +138,11 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
               title={<span className="sb-title" title={tooltip}>{task.title}</span>}
               trailing={
                 <>
+                  {progress && (
+                    <span className="sb-count mono" title={t("{merged} de {counted} subtareas integradas", { merged: progress.merged, counted: progress.counted })}>
+                      {progress.merged}/{progress.counted}
+                    </span>
+                  )}
                   {pr && <PrBadge pr={pr} autofix={!!task.ci_autofix} />}
                   <span className="sb-key mono">{task.key}</span>
                 </>
@@ -138,6 +152,22 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
         )}
       />
     );
+    if (!isParent || kids.length === 0) return <Fragment key={task.key}>{menu}</Fragment>;
+    return (
+      <Fragment key={task.key}>
+        <div className="sb-parent">
+          <IconButton
+            className={`sb-chev ${kidsOpen ? "open" : ""}`}
+            label={kidsOpen ? t("Plegar {name}", { name: task.key }) : t("Desplegar {name}", { name: task.key })}
+            icon="chevron"
+            aria-expanded={kidsOpen}
+            onClick={() => toggleSubtasks(task.key)}
+          />
+          <div className="sb-parent-row">{menu}</div>
+        </div>
+        {kidsOpen && <div className="sb-subtasks">{kids.map(taskRow)}</div>}
+      </Fragment>
+    );
   };
   // As in Orca: everything grouped by project, its own sessions first, then its tasks.
   const group = (project: Project | null) => {
@@ -146,14 +176,25 @@ export function Sidebar({ view, onView, tasks, prs = [], projects, sessions, sel
     const active = mine
       .filter((t) => t.status.type !== "done" && t.status.type !== "queued")
       .sort((a, b) => ORDER.indexOf(a.status.type) - ORDER.indexOf(b.status.type));
+    const queued = mine.filter((t) => t.status.type === "queued");
+    // Subtasks nest under their parent task when it is listed too; otherwise they show at top level.
+    const listedParents = new Set([...active, ...queued].filter((t) => taskKind(t) === "parent_task").map((t) => t.key));
+    const nested = (t: Task) => taskKind(t) === "subtask" && !!t.parent_task && listedParents.has(t.parent_task);
+    const kidsOf = (p: Task) => [...active, ...queued].filter((t) => nested(t) && t.parent_task === p.key);
+    // A parent task shows when it or one of its subtasks matches the filter, and then its matching subtasks.
+    const visible = (t: Task) => matches(t) || kidsOf(t).some(matches);
+    for (const p of [...active, ...queued].filter((t) => taskKind(t) === "parent_task")) {
+      subtasksOf.set(p.key, matches(p) ? kidsOf(p) : kidsOf(p).filter(matches));
+    }
+    const withKids = (list: Task[]) => list.filter((t) => !nested(t)).filter(visible);
     return {
       owner,
       project,
       sessions: owner ? sessions.filter((s) => s.task === owner) : [],
-      tasks: active.filter(matches),
+      tasks: withKids(active),
       allTasks: active,
       // Oldest first: the daemon lists tasks in the order they were created.
-      backlog: mine.filter((t) => t.status.type === "queued").filter(matches),
+      backlog: withKids(queued),
       done: mine.filter((t) => t.status.type === "done").length,
     };
   };
