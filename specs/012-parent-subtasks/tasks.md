@@ -29,10 +29,10 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 ### Core model
 
-- [ ] T002 [P] Write unit tests in `crates/delilah-core/src/hierarchy.rs` for: `progress()` (merged/counted/dropped/ready, zero subtasks ⇒ not ready, all dropped ⇒ counted 0), `is_live`, and every `Refusal` from `check_new_subtask`, `check_make_parent_task`, `check_attach`, `check_start_subtask` (data-model §Invariants, contracts §Refusals)
-- [ ] T003 Implement `TaskKind { Normal, ParentTask, Subtask }` (serde `"normal"|"parent_task"|"subtask"`, default `Normal`), `ChildFacts { merged, archived }`, `Progress { merged, counted, dropped, ready }`, `progress`, `is_live`, the `Refusal` enum (one variant per contract reason, no strings) and the four `check_*` functions in `crates/delilah-core/src/hierarchy.rs` until T002 passes
-- [ ] T004 Add `kind: TaskKind` and `parent_task: Option<TaskKey>` to `struct Task` in `crates/delilah-core/src/task.rs` with `#[serde(default)]` / `skip_serializing_if`; test that old JSON without the fields reads as a normal task
-- [ ] T005 [P] Add `MergePreference { Merge, Squash, Rebase }` (serde lowercase, default `Merge`) and `ProjectSettings.parent_task_merge` with `#[serde(default)]` in `crates/delilah-core/src/project.rs`; test that old settings JSON reads `merge`
+- [X] T002 [P] Write unit tests in `crates/delilah-core/src/hierarchy.rs` for: `progress()` (merged/counted/dropped/ready, zero subtasks ⇒ not ready, all dropped ⇒ counted 0), `is_live`, and every `Refusal` from `check_new_subtask`, `check_make_parent_task`, `check_attach`, `check_start_subtask` (data-model §Invariants, contracts §Refusals)
+- [X] T003 Implement `TaskKind { Normal, ParentTask, Subtask }` (serde `"normal"|"parent_task"|"subtask"`, default `Normal`), `ChildFacts { merged, archived }`, `Progress { merged, counted, dropped, ready }`, `progress`, `is_live`, the `Refusal` enum (one variant per contract reason, no strings) and the four `check_*` functions in `crates/delilah-core/src/hierarchy.rs` until T002 passes
+- [X] T004 Add `kind: TaskKind` and `parent_task: Option<TaskKey>` to `struct Task` in `crates/delilah-core/src/task.rs` with `#[serde(default)]` / `skip_serializing_if`; test that old JSON without the fields reads as a normal task
+- [X] T005 [P] Add `MergePreference { Merge, Squash, Rebase }` (serde lowercase, default `Merge`) and `ProjectSettings.parent_task_merge` with `#[serde(default)]` in `crates/delilah-core/src/project.rs`; test that old settings JSON reads `merge`
 
 ### Storage
 
@@ -41,9 +41,9 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 ### Git
 
-- [ ] T008 [P] Write tests in `crates/delilah-git/src/base.rs` (fixture repos with a bare origin) for a base override: `prepare_base` with `Some("feat/x")` resolves `origin/feat/x` after fetch, never the default branch; missing ref ⇒ `GitError::BaseMissing { branch }`; fetch failure with an existing ref ⇒ stale warning as today
-- [ ] T009 Add `WorkspaceSpec.base: Option<String>` in `crates/delilah-git/src/workspace.rs` (~L19) and pass it through `create_workspace` (~L218, L251) to `prepare_base`; make the base ref a parameter of one shared resolver in `crates/delilah-git/src/base.rs` (no second resolver); add `GitError::BaseMissing`; update every `WorkspaceSpec { .. }` literal in the workspace (grep) with `base: None`; T008 passes
-- [ ] T010 [P] Add `commit_empty(dir, message)` (`git commit --allow-empty -m`) and `merge_refs(dir, &[String])` (merge each ref in order, on conflict `git merge --abort` and reset to the starting commit) in `crates/delilah-git/src/workspace.rs`, with tests on fixture repos
+- [X] T008 [P] Write tests in `crates/delilah-git/src/base.rs` (fixture repos with a bare origin) for a base override: `prepare_base` with `Some("feat/x")` resolves `origin/feat/x` after fetch, never the default branch; missing ref ⇒ `GitError::BaseMissing { branch }`; fetch failure with an existing ref ⇒ stale warning as today
+- [X] T009 Add `WorkspaceSpec.base: Option<String>` in `crates/delilah-git/src/workspace.rs` (~L19) and pass it through `create_workspace` (~L218, L251) to `prepare_base`; make the base ref a parameter of one shared resolver in `crates/delilah-git/src/base.rs` (no second resolver); add `GitError::BaseMissing`; update every `WorkspaceSpec { .. }` literal in the workspace (grep) with `base: None`; T008 passes
+- [X] T010 [P] Add `commit_empty(dir, message)` (`git commit --allow-empty -m`) and `merge_refs(dir, &[String])` (merge each ref in order, on conflict `git merge --abort` and reset to the starting commit) in `crates/delilah-git/src/workspace.rs`, with tests on fixture repos
 
 ### Daemon foundation
 

@@ -486,6 +486,16 @@ pub struct Task {
     /// `null` in any other state.
     #[serde(default)]
     pub finished_at: Option<DateTime<Utc>>,
+    /// Normal task, parent task or subtask (spec 012); old tasks are normal.
+    #[serde(default, skip_serializing_if = "is_normal")]
+    pub kind: crate::hierarchy::TaskKind,
+    /// The parent task of a subtask; set iff `kind` is `Subtask`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_task: Option<TaskKey>,
+}
+
+fn is_normal(kind: &crate::hierarchy::TaskKind) -> bool {
+    *kind == crate::hierarchy::TaskKind::Normal
 }
 
 impl Task {
@@ -514,6 +524,8 @@ impl Task {
             model: None,
             created_at: Utc::now(),
             finished_at: None,
+            kind: crate::hierarchy::TaskKind::Normal,
+            parent_task: None,
         }
     }
 
@@ -613,6 +625,23 @@ mod tests {
 
     fn at(hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 19, hour, min, 0).unwrap()
+    }
+
+    #[test]
+    fn old_json_without_hierarchy_fields_reads_as_normal_task() {
+        let task = Task::new(TaskKey::new("PROJ-1"), "t", "feature");
+        let mut v = serde_json::to_value(&task).unwrap();
+        assert!(v.get("kind").is_none() && v.get("parent_task").is_none());
+        v.as_object_mut().unwrap().remove("kind");
+        let back: Task = serde_json::from_value(v).unwrap();
+        assert_eq!(back.kind, crate::hierarchy::TaskKind::Normal);
+        assert_eq!(back.parent_task, None);
+        let mut sub = task;
+        sub.kind = crate::hierarchy::TaskKind::Subtask;
+        sub.parent_task = Some(TaskKey::new("PROJ-2"));
+        let back: Task = serde_json::from_str(&serde_json::to_string(&sub).unwrap()).unwrap();
+        assert_eq!(back.kind, crate::hierarchy::TaskKind::Subtask);
+        assert_eq!(back.parent_task, Some(TaskKey::new("PROJ-2")));
     }
 
     #[test]
