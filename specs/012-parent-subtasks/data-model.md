@@ -50,9 +50,8 @@ CREATE INDEX tasks_parent_task ON tasks(parent_task);
 
 No foreign key (the `tasks` table has none today and deletes are by key); deleting a
 subtask needs nothing on the parent task; deleting a parent task is refused while it has
-live subtasks, and its archived subtasks keep the dangling key (shown as "parent task
-deleted" if ever read). Deleting a parent task clears `parent_task` on its archived
-subtasks, so a reused free key never inherits them.
+live subtasks; when it is deleted, `parent_task` is cleared on its archived subtasks, so
+a reused free key never inherits them.
 
 ## Lifecycle
 
