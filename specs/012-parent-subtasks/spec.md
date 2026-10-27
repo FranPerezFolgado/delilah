@@ -40,6 +40,12 @@ other, they all hang from the parent task.
 | Agent when started | yes | no; sessions on demand | yes |
 | Archived | when merged | when merged; blocked while it has live subtasks | when merged into the parent task |
 
+## Clarifications
+
+### Session 2026-10-27
+
+- Q: Where does a parent task's workspace live? → A: Always an isolated worktree, like subtasks, so the user's checkout stays free and the finished integration branch sits in its own workspace.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Split a feature into a parent task and subtasks (Priority: P1)
@@ -61,8 +67,8 @@ branch, and that both run in parallel.
 **Acceptance Scenarios**:
 
 1. **Given** a project, **When** the user creates a parent task and starts it, **Then**
-   it gets a workspace and a branch from the freshly fetched default branch, the branch
-   is pushed, and no agent session is started.
+   it gets an isolated workspace (never the user's checkout) and a branch from the
+   freshly fetched default branch, the branch is pushed, and no agent session is started.
 2. **Given** a started parent task, **When** the user opens a Claude or terminal session
    on it, **Then** the session opens in the parent task's workspace, as for any task.
 3. **Given** a parent task, **When** the user creates a subtask from its screen, with
@@ -193,10 +199,13 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
    becomes a parent task.
 2. **Given** a normal task with an open PR, **When** the user tries to turn it into a
    parent task, **Then** it is refused with the reason.
-3. **Given** a normal task in the backlog (never started) in the same project as a
+3. **Given** a normal task running in the user's checkout, **When** the user tries to
+   turn it into a parent task, **Then** it is refused: parent tasks only live in an
+   isolated workspace.
+4. **Given** a normal task in the backlog (never started) in the same project as a
    parent task, **When** the user attaches it to that parent task, **Then** it becomes
    its subtask.
-4. **Given** a subtask, or a parent task with subtasks, **When** the user tries to turn
+5. **Given** a subtask, or a parent task with subtasks, **When** the user tries to turn
    it into another kind, **Then** it is refused.
 
 ---
@@ -215,8 +224,9 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
 - **Parent task in a parent repository**: subtasks work in the same repositories (the
   same submodules) as their parent task; each repository's integration branch is the
   parent task's branch in that repository.
-- **Parent task in the user's checkout**: allowed; subtasks always get isolated
-  workspaces, so they never touch the user's folder.
+- **Checkout mode**: neither parent tasks nor subtasks ever use the user's checkout,
+  whatever the project's or the task's workspace mode says; both always get an isolated
+  workspace, so a long-lived feature never holds the user's folder.
 - **Integration branch fetch fails when starting a subtask** (offline): the subtask
   starts from the last known state and warns "Branch may be behind", as today.
 - **Conflicts on "Update branch"** in a subtask: refused with the reason, branch left as
@@ -252,13 +262,14 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
   exist, is archived, or is not a parent task.
 - **FR-007**: New subtasks MUST wait in the backlog without workspace or agent until
   started, as backlog tasks do today.
-- **FR-008**: Users MUST be able to turn a normal task with no open PR and no running
-  agent session into a parent task, and attach a never-started normal task of the same
+- **FR-008**: Users MUST be able to turn a normal task with no open PR, no running
+  agent session and not in the user's checkout into a parent task, and attach a never-started normal task of the same
   project to a parent task as a subtask. No other kind change is allowed.
 
 **Starting**
 
-- **FR-009**: Starting a parent task MUST create its workspace and its branch from the
+- **FR-009**: Starting a parent task MUST create an isolated workspace (never the user's
+  checkout, whatever the workspace mode) and its branch from the
   freshly fetched default branch, push the branch, and start no agent session; the user
   opens Claude or terminal sessions on it on demand.
 - **FR-010**: Starting a subtask MUST create an isolated workspace (never the user's
