@@ -3234,6 +3234,8 @@ mod tests {
                 view: None,
                 ci_autofix: None,
                 model: None,
+                kind: None,
+                parent_task: None,
             },
         )
         .await

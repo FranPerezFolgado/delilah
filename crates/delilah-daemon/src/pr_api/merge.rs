@@ -120,6 +120,7 @@ pub async fn merge(
             fields: Vec::new(),
             resume_at: None,
             reason: Some(problem.kind().to_string()),
+            refusal: None,
         });
     }
 

@@ -229,6 +229,8 @@ async fn create_from_proposal(
         view: None,
         ci_autofix: None,
         model: None,
+        kind: None,
+        parent_task: None,
     };
     let mut autopilot = autopilot;
     // Another conversation may take the key between allocating it and storing the
