@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use delilah_core::hierarchy::Refusal;
 use delilah_core::workflow::ProjectWorkflow;
+use serde_json::{Map, Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -124,6 +126,141 @@ impl Current {
     }
 }
 
+/// The reason a refusal goes by in the 409 body (`error`), as the contract names it.
+pub fn refusal_reason(r: Refusal) -> &'static str {
+    match r {
+        Refusal::NotAParentTask => "not-a-parent-task",
+        Refusal::ParentTaskArchived => "parent-task-archived",
+        Refusal::Nesting => "nesting",
+        Refusal::ProjectMismatch => "project-mismatch",
+        Refusal::ParentTaskNotStarted => "parent-task-not-started",
+        Refusal::ParentTaskBranchMissing => "parent-task-branch-missing",
+        Refusal::HasOpenPr => "has-open-pr",
+        Refusal::HasSession => "has-session",
+        Refusal::InCheckout => "in-checkout",
+        Refusal::AlreadyStarted => "already-started",
+        Refusal::LiveSubtasks => "live-subtasks",
+        Refusal::NoCommits => "no-commits",
+        Refusal::EmptyCommitNotAllowed => "empty-commit-not-allowed",
+    }
+}
+
+/// The localised message of a refusal. `detail` is the object that goes in the body
+/// (`key`, `project`, `branch`, `subtasks`); what it names is woven into the text.
+pub fn refusal_message(lang: Lang, r: Refusal, detail: &Value) -> String {
+    let s = |field: &str| detail.get(field).and_then(Value::as_str).unwrap_or("?").to_string();
+    match r {
+        Refusal::NotAParentTask => {
+            let k = s("key");
+            lang.pick(
+                &format!("{k} no es una tarea padre."),
+                &format!("{k} is not a parent task."),
+            )
+            .to_string()
+        }
+        Refusal::ParentTaskArchived => {
+            let k = s("key");
+            lang.pick(
+                &format!("La tarea padre {k} está archivada."),
+                &format!("The parent task {k} is archived."),
+            )
+            .to_string()
+        }
+        Refusal::Nesting => lang
+            .pick(
+                "Las subtareas no se anidan: una tarea padre no puede ser subtarea ni al revés.",
+                "Subtasks do not nest: a parent task cannot be a subtask, nor the other way round.",
+            )
+            .to_string(),
+        Refusal::ProjectMismatch => {
+            let p = s("project");
+            lang.pick(
+                &format!("El proyecto {p} no es el de la tarea padre."),
+                &format!("Project {p} is not the parent task's project."),
+            )
+            .to_string()
+        }
+        Refusal::ParentTaskNotStarted => {
+            let k = s("key");
+            lang.pick(
+                &format!("Primero inicia la tarea padre {k}: aún no tiene workspace."),
+                &format!("Start the parent task {k} first: it has no workspace yet."),
+            )
+            .to_string()
+        }
+        Refusal::ParentTaskBranchMissing => {
+            let b = s("branch");
+            lang.pick(
+                &format!("La rama {b} de la tarea padre no está en el remoto; súbela primero."),
+                &format!("The parent task's branch {b} is not on the remote; push it first."),
+            )
+            .to_string()
+        }
+        Refusal::HasOpenPr => lang
+            .pick(
+                "La tarea tiene una PR abierta; ciérrala o fusiónala antes de convertirla en tarea padre.",
+                "The task has an open PR; close or merge it before making it a parent task.",
+            )
+            .to_string(),
+        Refusal::HasSession => lang
+            .pick(
+                "La tarea ya tiene sesiones; solo una tarea sin empezar puede ser tarea padre.",
+                "The task already has sessions; only a task never run can become a parent task.",
+            )
+            .to_string(),
+        Refusal::InCheckout => lang
+            .pick(
+                "La tarea está en tu checkout; devuélvela antes de cambiarla de tipo.",
+                "The task is in your checkout; put it back before changing its kind.",
+            )
+            .to_string(),
+        Refusal::AlreadyStarted => lang
+            .pick(
+                "La tarea ya se ha ejecutado; solo una tarea sin empezar puede adjuntarse a una tarea padre.",
+                "The task has already run; only a never-started task can be attached to a parent task.",
+            )
+            .to_string(),
+        Refusal::LiveSubtasks => {
+            let list = detail
+                .get("subtasks")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+                .unwrap_or_default();
+            lang.pick(
+                &format!("La tarea padre tiene subtareas vivas: {list}."),
+                &format!("The parent task has live subtasks: {list}."),
+            )
+            .to_string()
+        }
+        Refusal::NoCommits => lang
+            .pick(
+                "La rama no tiene commits que proponer.",
+                "The branch has no commits to propose.",
+            )
+            .to_string(),
+        Refusal::EmptyCommitNotAllowed => lang
+            .pick(
+                "Un commit vacío solo se admite en una tarea padre.",
+                "An empty commit is only allowed on a parent task.",
+            )
+            .to_string(),
+    }
+}
+
+/// The 409 body of a refusal: `{ error, message, ...detail }`.
+pub fn refusal_body(lang: Lang, r: Refusal, detail: Value) -> Value {
+    let message = refusal_message(lang, r, &detail);
+    let mut body = Map::new();
+    body.insert("error".into(), json!(refusal_reason(r)));
+    body.insert("message".into(), json!(message));
+    if let Value::Object(d) = detail {
+        for (k, v) in d {
+            body.entry(k).or_insert(v);
+        }
+    }
+    Value::Object(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +366,49 @@ mod tests {
         assert_eq!(from_setting(Some("en")), Lang::En);
         assert_eq!(from_setting(Some("es")), Lang::Es);
         assert_eq!(Lang::En.pick("hola", "hello"), "hello");
+    }
+
+    const ALL_REFUSALS: [Refusal; 13] = [
+        Refusal::NotAParentTask,
+        Refusal::ParentTaskArchived,
+        Refusal::Nesting,
+        Refusal::ProjectMismatch,
+        Refusal::ParentTaskNotStarted,
+        Refusal::ParentTaskBranchMissing,
+        Refusal::HasOpenPr,
+        Refusal::HasSession,
+        Refusal::InCheckout,
+        Refusal::AlreadyStarted,
+        Refusal::LiveSubtasks,
+        Refusal::NoCommits,
+        Refusal::EmptyCommitNotAllowed,
+    ];
+
+    #[test]
+    fn every_refusal_has_its_reason_and_both_messages() {
+        for r in ALL_REFUSALS {
+            // The reason is the serde (kebab-case) name of the variant.
+            assert_eq!(json!(refusal_reason(r)), serde_json::to_value(r).unwrap());
+            let es = refusal_message(Lang::Es, r, &json!({}));
+            let en = refusal_message(Lang::En, r, &json!({}));
+            assert!(!es.is_empty() && !en.is_empty() && es != en, "{r:?}");
+        }
+    }
+
+    #[test]
+    fn refusal_body_carries_error_message_and_detail() {
+        let body = refusal_body(
+            Lang::En,
+            Refusal::LiveSubtasks,
+            json!({ "subtasks": ["P-2", "P-3"] }),
+        );
+        assert_eq!(body["error"], "live-subtasks");
+        assert_eq!(body["subtasks"], json!(["P-2", "P-3"]));
+        assert!(body["message"].as_str().unwrap().contains("P-2, P-3"));
+        let body = refusal_body(Lang::Es, Refusal::NotAParentTask, json!({ "key": "P-9" }));
+        assert_eq!(body["key"], "P-9");
+        assert!(body["message"].as_str().unwrap().contains("P-9"));
+        let body = refusal_body(Lang::En, Refusal::Nesting, Value::Null);
+        assert_eq!(body.as_object().unwrap().len(), 2);
     }
 }
