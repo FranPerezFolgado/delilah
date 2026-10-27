@@ -16,6 +16,7 @@ const repo: Project = {
     shared: [{ path: ".env", mode: "copy" }],
     setup: "npm ci",
     submodules: { always: [], never: [] },
+    parent_task_merge: "merge",
   },
 };
 const parent: Project = { ...repo, name: "mono", kind: "parent" };

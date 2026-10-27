@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ApiError, DAEMON_URL, api, baseStaleNotices, isCheckoutDirty, onRequestResult,
+  ApiError, DAEMON_URL, DEFAULT_PROJECT_SETTINGS, api, taskKind, baseStaleNotices, isCheckoutDirty, onRequestResult,
   type Health, type HistoryEntry, type InboxItem, type InboxKind, type JiraIssue, type MergeMethod, type PermissionCardEntry,
   type PrCheck, type PrSnapshot, type ReviewComment, type Session, type SetupInfo, type Task,
 } from "./api";
@@ -172,5 +172,47 @@ describe("activity calls", () => {
   it("history entries narrow by type", () => {
     const e: HistoryEntry = { seq: 1, at: "t", type: "tool_ended", agent: null, id: "a", failed: false };
     expect(e.type === "tool_ended" && e.failed).toBe(false);
+  });
+});
+
+describe("parent tasks and subtasks", () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  beforeEach(() => {
+    calls.length = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return new Response("[]", { status: 200 });
+    }));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const last = () => calls[calls.length - 1];
+  const path = () => last().url.replace(DAEMON_URL, "");
+
+  it("reads an absent kind as normal", () => {
+    expect(taskKind({})).toBe("normal");
+    expect(taskKind({ kind: "subtask" })).toBe("subtask");
+    expect(DEFAULT_PROJECT_SETTINGS.parent_task_merge).toBe("merge");
+  });
+
+  it("calls the new endpoints", async () => {
+    await api.subtasks("P-1");
+    expect(path()).toBe("/api/v1/tasks/P-1/subtasks");
+    await api.makeParentTask("P-1");
+    expect([path(), last().init?.method]).toEqual(["/api/v1/tasks/P-1/make-parent-task", "POST"]);
+    await api.attach("P-2", "P-1");
+    expect([path(), last().init?.body]).toEqual(["/api/v1/tasks/P-2/attach", JSON.stringify({ parent_task: "P-1" })]);
+    await api.pushBranch("P-1");
+    expect(path()).toBe("/api/v1/tasks/P-1/push-branch");
+    await api.markReady("P-1", 7);
+    expect([path(), last().init?.method]).toEqual(["/api/v1/tasks/P-1/prs/7/ready", "POST"]);
+  });
+
+  it("sends the new merge and open-PR fields only when set", async () => {
+    await api.mergePr("P-1", 3);
+    expect(last().init?.body).toBe("{}");
+    await api.mergePr("P-1", 3, "squash", true);
+    expect(JSON.parse(String(last().init?.body))).toEqual({ method: "squash", confirm_live_subtasks: true });
+    await api.openPr("P-1", { repo: "r", title: "t", body: "", draft: false, empty_commit: true });
+    expect(JSON.parse(String(last().init?.body)).empty_commit).toBe(true);
   });
 });
