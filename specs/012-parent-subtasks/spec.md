@@ -27,7 +27,10 @@ other, they all hang from the parent task.
 - **Normal task**: every task as it exists today.
 - **Integration branch**: the parent task's branch, into which subtasks are merged.
 - **Live subtask**: a subtask that is neither archived nor deleted (backlog, running,
-  waiting, done but not yet archived).
+  waiting, done but not yet archived, including one merged whose archive was held back
+  by leftover changes).
+- **Dropped subtask**: a subtask archived or deleted without its PR merged. A subtask
+  whose PR was closed without merging but that is still live is not dropped.
 
 ### Behaviour per kind
 
@@ -235,6 +238,8 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
   parent task's project.
 - **Free (branchless) start**: parent tasks and subtasks always start with a branch;
   the branchless start of free tasks does not apply to them.
+- **Reopening**: a done parent task or subtask reopens as a task does today and keeps
+  its kind and its parent task.
 - **Phased workflow, saving mode, autopilot, CI autofix** apply to subtasks as to any
   task (autopilot's PR targets the integration branch); none apply to a parent task's
   start, since it starts no agent.
@@ -264,7 +269,9 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
   started, as backlog tasks do today.
 - **FR-008**: Users MUST be able to turn a normal task with no open PR, no running
   agent session and not in the user's checkout into a parent task, and attach a never-started normal task of the same
-  project to a parent task as a subtask. No other kind change is allowed.
+  project to a parent task as a subtask, from the UI, the CLI and the API. No other kind
+  change is allowed: a subtask cannot be detached, and a parent task cannot go back to
+  normal.
 
 **Starting**
 
@@ -282,17 +289,26 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
 **PRs, updating and merging**
 
 - **FR-013**: A subtask's PR MUST target the parent task's branch, however it is opened
-  (by hand, by autopilot, by the CLI or the API).
+  (by hand, by autopilot, by the CLI or the API). A subtask PR found targeting another
+  branch (opened outside Delilah) MUST be shown with a warning naming its target;
+  Delilah does not retarget it.
 - **FR-014**: A parent task's PR MUST target the default branch and MUST be opened as a
-  draft. When the integration branch has no commits, opening it MUST offer to add an
+  draft, unless every counted subtask is already merged (then the user chooses, as for
+  any task). When the integration branch has no commits, opening it MUST offer to add an
   empty commit first.
 - **FR-015**: For a subtask, the "behind" indicator and "Update branch" MUST use the
   parent task's branch instead of the default branch.
 - **FR-016**: For a parent task, "Update branch" MUST first bring in the integration
-  branch's remote commits (merged subtasks), then merge the default branch as today.
+  branch's remote commits (merged subtasks), then merge the default branch as today. As
+  today, it MUST refuse with a reason, and leave the branch as it was, when the workspace
+  has tracked changes or either step conflicts.
+- **FR-016a**: A parent task MUST show, apart from "main moved N commits ahead", how many
+  merged subtask commits are not yet in its workspace, so the user knows to update it
+  before working on it.
 - **FR-017**: "Merge" MUST use squash for a subtask PR, and the project's parent task
   merge method for a parent task PR. If the repository does not allow that method, it
-  MUST use one the repository allows. The PR tab MUST show the method before merging.
+  MUST fall back to the method Delilah picks for that repository today. The PR tab MUST
+  show the method before merging.
 - **FR-018**: The project MUST have a "parent task merge method" setting, default merge
   commit.
 - **FR-019**: Merging a parent task PR from Delilah while it has live subtasks MUST ask
@@ -308,7 +324,9 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
 - **FR-022**: A parent task MUST list its subtasks with their state and PR state, and
   subtasks archived or deleted unmerged as dropped.
 - **FR-023**: When every counted subtask is merged (and there is at least one), the
-  parent task MUST suggest marking its PR ready for review.
+  parent task MUST suggest marking its PR ready for review, on its screen and as one
+  Inbox notice. A parent task with no counted subtasks shows "0 subtasks" and no
+  suggestion. Each subtask merge notifies as a task merge does today.
 - **FR-024**: A subtask MUST show which parent task it belongs to, with a link to it.
 - **FR-025**: The sidebar MUST show subtasks grouped under their parent task.
 
@@ -324,7 +342,8 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
 **Contract and docs**
 
 - **FR-029**: The task's kind, its parent task and (for a parent task) its progress
-  MUST be available through the API and the CLI, so the UI and future tracker adapters
+  MUST be available through the API and the CLI (task list and task detail), as
+  additive changes that older clients ignore, so the UI and future tracker adapters
   (Jira, GitHub sub-issues, Linear) can build on them without special cases.
 - **FR-030**: The user docs MUST describe the feature as the "integration branch"
   pattern and say plainly that stacked PRs are not supported.
@@ -354,7 +373,7 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
 - **SC-005**: Every existing task and flow (normal tasks) behaves exactly as before:
   the existing test suite passes unchanged.
 - **SC-006**: The parent task's progress is right after every merge, archive or delete
-  of a subtask, with no manual refresh.
+  of a subtask, no later than Delilah notices a merged PR today, with no manual refresh.
 
 ## Assumptions
 
@@ -369,5 +388,6 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
   when they want, once the integration branch has commits or with the offered empty
   commit.
 - Keys of subtasks created without a tracker are generated as for free tasks today.
-- Out of scope: stacked PRs, dependencies between subtasks, slicing a task into
+- Out of scope: detaching a subtask, turning a parent task back into a normal task,
+  stacked PRs, dependencies between subtasks, slicing a task into
   subtasks from a `/feature` plan, the Jira adapter (next spec), other trackers.
