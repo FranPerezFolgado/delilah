@@ -101,7 +101,7 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 - [ ] T030 [US2] Replace `base_of` (`crates/delilah-daemon/src/pr_api/open.rs` ~L85, used ~L102, ~L236) and the literal base (~L467) with `integration::base_for`; opening a subtask PR when `origin/<parent task branch>` is missing is refused with `parent-task-branch-missing` (spec edge case; test in T028); T028 passes
 - [ ] T031 [US2] In `crates/delilah-daemon/src/base_update.rs`, take the refs to compare and merge from `integration::base_for` (subtask: `origin/<parent task branch>`) in `inspect` (~L113), `update` (~L152) and `merge_all` (~L179) using `delilah_git::merge_refs`; base-status gains `base`; T029 passes
 - [ ] T032 [US2] `crates/delilah-daemon/src/pr_api/merge.rs` (~L97–112): without a method in the request use `integration::preferred_method`; `crates/delilah-daemon/src/pr_api/dto.rs` gains `method`, `base_branch`, `expected_base`; tests: subtask ⇒ squash, squash not allowed ⇒ `allowed[0]`
-- [ ] T033 [US2] `app/src/components/PrView.tsx`: show `pr.method` instead of `merge_methods[0]` (~L329, L448, L456); warning naming the target branch when `base_branch ≠ expected_base` for a subtask (no retarget action); vitest
+- [X] T033 [US2] `app/src/components/PrView.tsx`: show `pr.method` instead of `merge_methods[0]` (~L329, L448, L456); warning naming the target branch when `base_branch ≠ expected_base` for a subtask (no retarget action); vitest
 
 **Checkpoint**: US1 + US2 = the MVP: integration branch fed by subtasks.
 

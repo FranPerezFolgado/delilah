@@ -326,7 +326,9 @@ function PrCard({
 }) {
   const s = pr.snapshot;
   const [confirming, setConfirming] = useState(false);
-  const method = s?.merge_methods?.[0];
+  const method = pr.method ?? s?.merge_methods?.[0];
+  // A subtask's PR aimed somewhere other than its parent's branch (no retarget action).
+  const misbased = !!pr.base_branch && !!pr.expected_base && pr.base_branch !== pr.expected_base;
   // Why "Fusionar" is unavailable, or null when it can go ahead.
   const blocked = !s
     ? null
@@ -368,6 +370,11 @@ function PrCard({
         {s && <span>{t(PR_CI[s.ci])}</span>}
         {pr.checked_at && <span>{t("comprobado {when}", { when: relativeTime(pr.checked_at) })}</span>}
       </div>
+      {misbased && (
+        <div className="pr-base-warning" role="alert">
+          {t("Esta PR apunta a {base}, pero debería apuntar a {expected}", { base: pr.base_branch ?? "", expected: pr.expected_base ?? "" })}
+        </div>
+      )}
       {(pr.autofix || taskAutofix !== null) && (
         <div className="muted pr-meta pr-autofix">
           <span>{autofixText(pr.autofix, !!taskAutofix)}</span>

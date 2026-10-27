@@ -35,4 +35,5 @@ export const EN: Record<string, string> = {
   "no hay sesión del agente": "no agent session",
   "La tarea ya terminó: el autofix no se puede cambiar": "The task has finished: autofix can no longer be changed",
   "Reintentar autofix": "Retry autofix",
+  "Esta PR apunta a {base}, pero debería apuntar a {expected}": "This PR targets {base}, but should target {expected}",
 };

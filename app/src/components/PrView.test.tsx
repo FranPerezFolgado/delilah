@@ -195,6 +195,29 @@ describe("PrView", () => {
     await waitFor(() => expect(merge).toHaveBeenCalledWith("PROJ-1", 7, "squash"));
   });
 
+  it("uses the PR's own method and warns when a subtask PR is mis-based", async () => {
+    prPending();
+    vi.spyOn(api, "taskPrs").mockResolvedValue(
+      data({ prs: [{ ...open({ merge_methods: ["squash", "merge"] }), method: "merge", base_branch: "main", expected_base: "feat/parent" }] }),
+    );
+    const merge = vi.spyOn(api, "mergePr").mockResolvedValue(pr);
+    const { findByText, getByRole } = render(<PrView owner="PROJ-1" />);
+    const alert = await findByText(/This PR targets main, but should target feat\/parent/);
+    expect(alert).toBeTruthy();
+    fireEvent.click(await findByText("Merge"));
+    const dialog = getByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Merge"));
+    await waitFor(() => expect(merge).toHaveBeenCalledWith("PROJ-1", 7, "merge"));
+  });
+
+  it("shows no base warning when the base is the expected one", async () => {
+    prPending();
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...open({}), base_branch: "main", expected_base: "main" }] }));
+    const { findByText, queryByRole } = render(<PrView owner="PROJ-1" />);
+    await findByText("Reintentos");
+    expect(queryByRole("alert")).toBeNull();
+  });
+
   it("disables Merge with a reason while checks fail", async () => {
     prPending();
     vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [open({ ci: "failure", merge_methods: ["merge"] })] }));
