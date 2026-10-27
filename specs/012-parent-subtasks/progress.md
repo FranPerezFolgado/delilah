@@ -44,3 +44,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 5 | ui | LOW | Empty-commit open always uses repo "." and draft; draft badge shows on any draft PR | PrView.tsx |
 | 6 | spec | LOW | T047 names TaskHeader.tsx but change is in TaskView.tsx; archive of a parent with only archived subtasks untested | TaskView.tsx, actions.rs |
 | 7 | contract | LOW | attach with unknown parent key gives 409 not-a-parent-task (not 404); UI hides done/failed parents but daemon only refuses archived; attach/make-parent-task writes not in one transaction; make-parent-task on an existing parent returns 200 no-op (undocumented) | api_hierarchy.rs |
+| 8 | T056 | MEDIUM | Quickstart verified only over CLI/API (steps 1, 2, 6, 7 pass). Not checked: UI in browser (no browser tool), steps 3–5 (subtask PR, progress, parent PR need real GitHub), console/network errors, `already-started` code seen only as message. Quickstart CLI wording fixed. | quickstart.md |

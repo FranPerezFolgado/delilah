@@ -8,12 +8,12 @@ D=target/debug/delilah
 
 Register a fixture repo with a GitHub-like remote (the preview prints them). Then:
 
-1. **Parent task**: `$D new --parent-task "Checkout revamp" --project fixture` → `LIBRE-1`.
-   `$D start LIBRE-1`: a worktree appears, branch pushed to `origin`, no agent session;
+1. **Parent task**: `$D new --free --title "Checkout revamp" --parent-task --project <name>` → `LIBRE-1`.
+   `$D run --worktree --no-prompt LIBRE-1`: a worktree appears, branch pushed to `origin`, no agent session;
    the UI shows "0/0 subtasks merged" instead of "Running".
-2. **Subtasks**: `$D new --parent LIBRE-1 "Cart API"` → `LIBRE-2`, and `LIBRE-3`.
+2. **Subtasks**: `$D new --free --title "Cart API" --parent LIBRE-1` → `LIBRE-2`, and `LIBRE-3`.
    Starting `LIBRE-2` before step 1 is refused with `parent-task-not-started`.
-   `$D start LIBRE-2 LIBRE-3`: two worktrees branched from `origin/<LIBRE-1 branch>`
+   `$D run --worktree --no-prompt LIBRE-2 LIBRE-3`: two worktrees branched from `origin/<LIBRE-1 branch>`
    (`git -C <ws> merge-base --is-ancestor origin/<LIBRE-1 branch> HEAD`).
 3. **Subtask PR**: open it from the UI; `gh pr view --json baseRefName` shows the parent
    task's branch. Merge shows "Squash"; merge it.
@@ -25,8 +25,8 @@ Register a fixture repo with a GitHub-like remote (the preview prints them). The
    ready"; the button runs `gh pr ready`. Merge shows "Merge commit" (project setting).
 6. **Archive rules**: with `LIBRE-3` still live, `$D archive LIBRE-1` and `$D rm LIBRE-1`
    are refused, naming `LIBRE-3`.
-7. **Convert / attach**: `$D new "Old idea"` → `LIBRE-4`; `$D make-parent-task LIBRE-4`
-   works; `$D new "Loose"` → `LIBRE-5`; `$D attach LIBRE-5 --parent LIBRE-4` works;
+7. **Convert / attach**: `$D new --free --title "Old idea" --project <name>` → `LIBRE-4`; `$D make-parent-task LIBRE-4`
+   works; `$D new --free --title "Loose" --project <name>` → `LIBRE-5`; `$D attach LIBRE-5 --parent LIBRE-4` works;
    attaching a started task is refused with `already-started`.
 
 GitHub operations need a real remote: the e2e tests use the fake `gh` of spec 005; by hand,
