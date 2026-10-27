@@ -1,5 +1,100 @@
 //! HTTP handlers for parent tasks and subtasks.
 
+use axum::Json;
+use axum::extract::{Path, State};
+use delilah_core::TaskKey;
+use delilah_core::hierarchy::TaskKind;
+use serde::Serialize;
+
+use crate::api::ApiError;
+use crate::integration::{self, SubtaskPr};
+use crate::pr_types::PrState;
+use crate::state::AppState;
+
+#[derive(Debug, Serialize)]
+pub struct SubtaskPrSummary {
+    pub url: String,
+    /// `open`, `merged` or `closed`; `open` also while the PR was not read yet.
+    pub state: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubtaskSummary {
+    pub key: String,
+    pub title: String,
+    pub status: delilah_core::TaskStatus,
+    pub archived: bool,
+    pub dropped: bool,
+    pub pr: Option<SubtaskPrSummary>,
+}
+
+impl From<SubtaskPr> for SubtaskPrSummary {
+    fn from(p: SubtaskPr) -> Self {
+        let state = match p.state {
+            Some(PrState::Merged) => "merged",
+            Some(PrState::Closed) => "closed",
+            _ => "open",
+        };
+        Self { url: p.url, state }
+    }
+}
+
+/// The task `key`, which must be a parent task (404 otherwise).
+async fn parent_task(app: &AppState, key: &str) -> Result<delilah_core::Task, ApiError> {
+    let key = TaskKey::new(key);
+    match app.store.get_task(&key).await? {
+        Some(t) if t.kind == TaskKind::ParentTask => Ok(t),
+        Some(_) => Err(ApiError::not_found(format!("{key} is not a parent task"))),
+        None => Err(ApiError::not_found(format!("no task {key}"))),
+    }
+}
+
+/// `GET /api/v1/tasks/{key}/subtasks`.
+pub async fn subtasks(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<Vec<SubtaskSummary>>, ApiError> {
+    let parent = parent_task(&app, &key).await?;
+    let facts = integration::subtask_facts(&app.store, &parent.key)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(
+        facts
+            .into_iter()
+            .map(|f| SubtaskSummary {
+                key: f.task.key.to_string(),
+                title: f.task.title,
+                status: f.task.status,
+                archived: f.facts.archived,
+                dropped: f.facts.archived && !f.facts.merged,
+                pr: f.pr.map(Into::into),
+            })
+            .collect(),
+    ))
+}
+
+/// `POST /api/v1/tasks/{key}/push-branch`: pushes the parent task's branch again.
+pub async fn push_branch(
+    State(app): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let parent = parent_task(&app, &key).await?;
+    let (_, ws) = app
+        .store
+        .workspace(&parent.key)
+        .await?
+        .ok_or_else(|| ApiError::conflict(format!("{} has no workspace yet", parent.key)))?;
+    let opts = delilah_git::GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    };
+    let (dir, branch) = (ws.path.clone(), ws.branch.clone());
+    tokio::task::spawn_blocking(move || delilah_git::push_branch(&dir, &branch, &opts))
+        .await
+        .map_err(|e| ApiError::internal(format!("git task failed: {e}")))?
+        .map_err(|e| ApiError::conflict(e.to_string()))?;
+    Ok(Json(serde_json::json!({ "branch": ws.branch })))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::Router;
@@ -206,5 +301,38 @@ mod tests {
         let (_, one) = call(&app, "GET", &format!("/api/v1/tasks/{pk}"), None).await;
         assert_eq!(one["subtask_progress"]["counted"], 2);
         assert_eq!(one["kind"], "parent_task");
+    }
+
+    #[tokio::test]
+    async fn subtasks_lists_the_children_and_404s_for_other_kinds() {
+        let (app, _) = app().await;
+        let p = parent(&app).await;
+        let pk = p["key"].as_str().unwrap();
+        let (_, a) = create(&app, json!({"free": true, "title": "a", "parent_task": pk})).await;
+        let (s, list) = call(&app, "GET", &format!("/api/v1/tasks/{pk}/subtasks"), None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        assert_eq!(list[0]["key"], a["key"]);
+        assert_eq!(list[0]["archived"], false);
+        assert_eq!(list[0]["dropped"], false);
+        assert!(list[0]["pr"].is_null());
+        let ak = a["key"].as_str().unwrap();
+        let (s, _) = call(&app, "GET", &format!("/api/v1/tasks/{ak}/subtasks"), None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = call(&app, "GET", "/api/v1/tasks/NOPE-1/subtasks", None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn push_branch_is_for_started_parent_tasks_only() {
+        let (app, _) = app().await;
+        let p = parent(&app).await;
+        let pk = p["key"].as_str().unwrap();
+        let (_, a) = create(&app, json!({"free": true, "title": "a", "parent_task": pk})).await;
+        let ak = a["key"].as_str().unwrap();
+        let (s, _) = call(&app, "POST", &format!("/api/v1/tasks/{ak}/push-branch"), None).await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = call(&app, "POST", &format!("/api/v1/tasks/{pk}/push-branch"), None).await;
+        assert_eq!(s, StatusCode::CONFLICT);
     }
 }

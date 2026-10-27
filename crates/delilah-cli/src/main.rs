@@ -12,6 +12,7 @@ use delilah_core::{
     AutofixDefault, AutopilotState, Event, Project, ProjectSettings, ProjectWorkflow, ShareMode,
     SharedEntry, Start, Task, TaskStatus, WorkspaceMode,
 };
+use delilah_core::hierarchy::{Progress, TaskKind};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use serde_json::json;
@@ -231,7 +232,13 @@ enum Command {
         title: String,
         /// Registered project (see `delilah project ls`).
         #[arg(long, env = "DELILAH_PROJECT")]
-        project: String,
+        project: Option<String>,
+        /// Create a parent task: it groups subtasks and has no agent of its own.
+        #[arg(long, conflicts_with = "parent")]
+        parent_task: bool,
+        /// Create a subtask of this parent task (it takes the parent task's project).
+        #[arg(long, value_name = "KEY")]
+        parent: Option<String>,
         /// What to keep with the task; the agent gets it when the task starts.
         #[arg(long)]
         notes: Option<String>,
@@ -722,6 +729,7 @@ struct UsageReport {
 }
 
 #[derive(Deserialize)]
+#[serde(from = "RawErrorBody")]
 struct ErrorBody {
     error: String,
     /// Refused because work in the task's worktree would be lost.
@@ -730,6 +738,155 @@ struct ErrorBody {
     /// A 422 on project settings: one entry per problem.
     #[serde(default)]
     fields: Vec<FieldMessage>,
+}
+
+/// The body as sent: a refusal (parent tasks) has the reason in `error` and the
+/// localised text in `message`, which is what to print.
+#[derive(Deserialize)]
+struct RawErrorBody {
+    error: String,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    unpushed: bool,
+    #[serde(default)]
+    fields: Vec<FieldMessage>,
+}
+
+impl From<RawErrorBody> for ErrorBody {
+    fn from(raw: RawErrorBody) -> Self {
+        Self {
+            error: raw.message.unwrap_or(raw.error),
+            unpushed: raw.unpushed,
+            fields: raw.fields,
+        }
+    }
+}
+
+/// A task with what only the API adds: the progress of a parent task.
+#[derive(Deserialize)]
+struct TaskView {
+    #[serde(flatten)]
+    task: Task,
+    #[serde(default)]
+    subtask_progress: Option<Progress>,
+}
+
+#[derive(Deserialize)]
+struct SubtaskSummary {
+    key: String,
+    title: String,
+    status: TaskStatus,
+    #[serde(default)]
+    archived: bool,
+    #[serde(default)]
+    dropped: bool,
+    #[serde(default)]
+    pr: Option<SubtaskPr>,
+}
+
+#[derive(Deserialize)]
+struct SubtaskPr {
+    state: String,
+}
+
+/// "N/M" of a parent task: merged over counted subtasks.
+fn progress_label(p: &Progress) -> String {
+    let mut label = format!("{}/{}", p.merged, p.counted);
+    if p.dropped > 0 {
+        label.push_str(&format!(" ({} dropped)", p.dropped));
+    }
+    label
+}
+
+/// One line of `ls`: subtasks are indented under their parent task.
+fn ls_line(view: &TaskView, indent: bool) -> String {
+    let task = &view.task;
+    let key = if indent {
+        format!("  {}", task.key)
+    } else {
+        task.key.to_string()
+    };
+    let progress = view
+        .subtask_progress
+        .as_ref()
+        .map(|p| format!(" [{}]", progress_label(p)))
+        .unwrap_or_default();
+    format!(
+        "{:<12} {:<14} {:<20} {:<10} {}{}",
+        key,
+        task.project.as_deref().unwrap_or("-"),
+        status_label(&task.status),
+        task.phase.as_deref().unwrap_or("-"),
+        task.title,
+        progress
+    )
+}
+
+/// The tasks in `ls` order: each parent task followed by its subtasks (indented); a
+/// subtask whose parent task is not listed stays at the top level.
+fn ls_order(tasks: &[TaskView]) -> Vec<(&TaskView, bool)> {
+    let is_nested = |t: &TaskView| {
+        t.task.kind == TaskKind::Subtask
+            && t.task.parent_task.as_ref().is_some_and(|p| {
+                tasks
+                    .iter()
+                    .any(|o| o.task.key == *p && o.task.kind == TaskKind::ParentTask)
+            })
+    };
+    let mut out = Vec::with_capacity(tasks.len());
+    for t in tasks.iter().filter(|t| !is_nested(t)) {
+        out.push((t, false));
+        if t.task.kind == TaskKind::ParentTask {
+            out.extend(
+                tasks
+                    .iter()
+                    .filter(|c| is_nested(c) && c.task.parent_task.as_ref() == Some(&t.task.key))
+                    .map(|c| (c, true)),
+            );
+        }
+    }
+    out
+}
+
+/// The `show` lines about the hierarchy (none for a normal task).
+fn show_hierarchy(view: &TaskView, subtasks: &[SubtaskSummary]) -> Vec<String> {
+    let mut lines = Vec::new();
+    match view.task.kind {
+        TaskKind::Normal => {}
+        TaskKind::ParentTask => {
+            lines.push("  kind:     parent task".to_string());
+            if let Some(p) = &view.subtask_progress {
+                lines.push(format!("  progress: {} subtasks merged", progress_label(p)));
+            }
+            lines.push("  subtasks:".to_string());
+            for s in subtasks {
+                let pr = s.pr.as_ref().map(|p| format!(", PR {}", p.state)).unwrap_or_default();
+                let flag = if s.dropped {
+                    " (dropped)"
+                } else if s.archived {
+                    " (archived)"
+                } else {
+                    ""
+                };
+                lines.push(format!(
+                    "    {:<12} {}{}  [{}{}]",
+                    s.key,
+                    s.title,
+                    flag,
+                    status_label(&s.status),
+                    pr
+                ));
+            }
+        }
+        TaskKind::Subtask => {
+            lines.push("  kind:     subtask".to_string());
+            if let Some(parent) = &view.task.parent_task {
+                lines.push(format!("  parent task: {parent}"));
+            }
+        }
+    }
+    lines
 }
 
 #[derive(Deserialize)]
@@ -796,27 +953,22 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             println!("delilahd {} at {}", health.version, api.base);
         }
         Command::Ls => {
-            let tasks: Vec<Task> = api.get("/api/v1/tasks")?;
+            let tasks: Vec<TaskView> = api.get("/api/v1/tasks")?;
             if tasks.is_empty() {
                 println!(
                     "No tasks yet. Save one with `delilah new <KEY> --title ... --project ...`"
                 );
             }
-            for task in tasks {
-                println!(
-                    "{:<12} {:<14} {:<20} {:<10} {}",
-                    task.key,
-                    task.project.as_deref().unwrap_or("-"),
-                    status_label(&task.status),
-                    task.phase.as_deref().unwrap_or("-"),
-                    task.title
-                );
+            for (view, indent) in ls_order(&tasks) {
+                println!("{}", ls_line(view, indent));
             }
         }
         Command::New {
             key,
             title,
             project,
+            parent_task,
+            parent,
             notes,
             free,
             checkout,
@@ -828,26 +980,30 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             autopilot,
             autofix,
         } => {
+            // A subtask takes the parent task's project and has a free key.
+            let free = free || parent.is_some() || parent_task && key.is_none();
             if key.is_none() && !free {
                 return Err("say the ticket's KEY, or --free for a task without one".into());
             }
+            if project.is_none() && parent.is_none() {
+                return Err("say the --project (or --parent, which takes its project)".into());
+            }
+            let mut body = new_body(
+                key.unwrap_or_default(),
+                title,
+                project.unwrap_or_default(),
+                notes,
+                free,
+                choice(checkout, worktree),
+                start_workflow(workflow, no_prompt),
+            );
+            with_hierarchy(&mut body, parent_task, parent.as_deref());
             let task: Task = api.post(
                 "/api/v1/tasks",
                 &with_ci_autofix(
                     with_autopilot(
                         with_saving_mode(
-                            with_chat(
-                                new_body(
-                                    key.unwrap_or_default(),
-                                    title,
-                                    project,
-                                    notes,
-                                    free,
-                                    choice(checkout, worktree),
-                                    start_workflow(workflow, no_prompt),
-                                ),
-                                chat,
-                            ),
+                            with_chat(body, chat),
                             saving.choice(),
                         ),
                         autopilot.choice(),
@@ -863,9 +1019,19 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
             );
         }
         Command::Show { key } => {
-            let task: Task = api.get(&format!("/api/v1/tasks/{key}"))?;
+            let view: TaskView = api.get(&format!("/api/v1/tasks/{key}"))?;
             let events: Vec<EventRecord> = api.get(&format!("/api/v1/tasks/{key}/events"))?;
+            let subtasks: Vec<SubtaskSummary> = if view.task.kind == TaskKind::ParentTask {
+                api.get(&format!("/api/v1/tasks/{key}/subtasks"))?
+            } else {
+                Vec::new()
+            };
+            let hierarchy = show_hierarchy(&view, &subtasks);
+            let task = view.task;
             println!("{}  {}", task.key, task.title);
+            for line in hierarchy {
+                println!("{line}");
+            }
             println!("  workflow: {}", task.workflow);
             println!("  phase:    {}", task.phase.as_deref().unwrap_or("-"));
             println!("  status:   {}", status_label(&task.status));
@@ -1284,6 +1450,20 @@ fn choice(checkout: bool, worktree: bool) -> Option<bool> {
 fn with_choice(body: &mut serde_json::Value, in_checkout: Option<bool>) {
     if let Some(c) = in_checkout {
         body["in_checkout"] = json!(c);
+    }
+}
+
+/// Adds `kind` (a parent task) or `parent_task` (a subtask) to a `new` body. An empty
+/// project is left out so that a subtask takes its parent task's.
+fn with_hierarchy(body: &mut serde_json::Value, parent_task: bool, parent: Option<&str>) {
+    if parent_task {
+        body["kind"] = json!("parent_task");
+    }
+    if let Some(parent) = parent {
+        body["parent_task"] = json!(parent);
+        if body["project"] == "" {
+            body.as_object_mut().expect("object").remove("project");
+        }
     }
 }
 
@@ -2076,5 +2256,95 @@ mod tests {
                 .unwrap()
                 .starts_with("POST /api/v1/tasks/K-1/reopen")
         );
+    }
+
+    fn view(v: serde_json::Value) -> TaskView {
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn task_json(key: &str, extra: serde_json::Value) -> serde_json::Value {
+        let mut t = serde_json::to_value(Task::new(
+            delilah_core::TaskKey::new(key),
+            format!("title {key}"),
+            "web",
+        ))
+        .unwrap();
+        t.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        t
+    }
+
+    #[test]
+    fn parent_task_and_parent_are_mutually_exclusive() {
+        let ok = |a: &[&str]| {
+            let mut argv = vec!["delilah", "new", "--free", "--title", "t"];
+            argv.extend_from_slice(a);
+            Cli::try_parse_from(argv)
+        };
+        assert!(ok(&["--project", "web", "--parent-task"]).is_ok());
+        assert!(ok(&["--parent", "LIBRE-1"]).is_ok());
+        assert!(ok(&["--parent-task", "--parent", "LIBRE-1"]).is_err());
+    }
+
+    #[test]
+    fn new_body_carries_the_hierarchy() {
+        let mut b = new_body("".into(), "t".into(), "web".into(), None, true, None, None);
+        with_hierarchy(&mut b, true, None);
+        assert_eq!(b["kind"], "parent_task");
+        let mut b = new_body("".into(), "t".into(), "".into(), None, true, None, None);
+        with_hierarchy(&mut b, false, Some("LIBRE-1"));
+        assert_eq!(b["parent_task"], "LIBRE-1");
+        assert!(b.get("project").is_none() && b.get("kind").is_none());
+    }
+
+    #[test]
+    fn ls_nests_subtasks_under_their_parent_task_with_progress() {
+        let tasks = vec![
+            view(task_json("LIBRE-2", json!({"kind": "subtask", "parent_task": "LIBRE-1"}))),
+            view(task_json("LIBRE-3", json!({}))),
+            view(task_json(
+                "LIBRE-1",
+                json!({"kind": "parent_task",
+                       "subtask_progress": {"merged": 1, "counted": 2, "dropped": 0, "ready": false}}),
+            )),
+        ];
+        let lines: Vec<String> = ls_order(&tasks)
+            .into_iter()
+            .map(|(t, i)| ls_line(t, i))
+            .collect();
+        assert!(lines[0].starts_with("LIBRE-3"));
+        assert!(lines[1].starts_with("LIBRE-1") && lines[1].ends_with("[1/2]"));
+        assert!(lines[2].starts_with("  LIBRE-2"));
+    }
+
+    #[test]
+    fn show_lists_kind_progress_and_subtasks() {
+        let parent = view(task_json(
+            "LIBRE-1",
+            json!({"kind": "parent_task",
+                   "subtask_progress": {"merged": 0, "counted": 1, "dropped": 1, "ready": false}}),
+        ));
+        let subs: Vec<SubtaskSummary> = serde_json::from_value(json!([
+            {"key": "LIBRE-2", "title": "a", "status": {"type": "queued"},
+             "archived": false, "dropped": false, "pr": {"url": "u", "state": "open"}}
+        ]))
+        .unwrap();
+        let out = show_hierarchy(&parent, &subs).join("\n");
+        assert!(out.contains("kind:     parent task"));
+        assert!(out.contains("0/1 (1 dropped) subtasks merged"));
+        assert!(out.contains("LIBRE-2") && out.contains("PR open"));
+        let sub = view(task_json("LIBRE-2", json!({"kind": "subtask", "parent_task": "LIBRE-1"})));
+        assert!(show_hierarchy(&sub, &[]).join("\n").contains("parent task: LIBRE-1"));
+        assert!(show_hierarchy(&view(task_json("LIBRE-9", json!({}))), &[]).is_empty());
+    }
+
+    #[test]
+    fn a_refusal_prints_its_message() {
+        let e: ErrorBody =
+            serde_json::from_value(json!({"error": "nesting", "message": "No nesting."})).unwrap();
+        assert_eq!(e.error, "No nesting.");
+        let e: ErrorBody = serde_json::from_value(json!({"error": "plain"})).unwrap();
+        assert_eq!(e.error, "plain");
     }
 }

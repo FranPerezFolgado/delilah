@@ -128,6 +128,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{key}/setup", get(crate::setup::info))
         .route("/api/v1/tasks/{key}/setup/log", get(crate::setup::log))
         .route(
+            "/api/v1/tasks/{key}/subtasks",
+            get(crate::api_hierarchy::subtasks),
+        )
+        .route(
+            "/api/v1/tasks/{key}/push-branch",
+            post(crate::api_hierarchy::push_branch),
+        )
+        .route(
             "/api/v1/tasks/{key}/base-status",
             get(crate::base_update::status),
         )
