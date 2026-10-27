@@ -11,10 +11,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2B | done | 1 | ffb857f | |
 | WP-05 | 2 | 2B | done | 1 | 1e6a9a3 | |
 | WP-06 | 2 | 2C | done | 1 | | |
-| WP-07 | 3 | 3A | verified | 1 | | |
-| WP-10 | 3 | 3A | verified | 1 | | |
-| WP-08 | 3 | 3B | verified | 1 | | |
-| WP-09 | 3 | 3B | verified | 1 | | |
+| WP-07 | 3 | 3A | done | 1 | | |
+| WP-10 | 3 | 3A | done | 1 | | |
+| WP-08 | 3 | 3B | done | 1 | | |
+| WP-09 | 3 | 3B | done | 1 | | |
 | WP-11 | 4 | 4A | pending | 0 | | |
 | WP-12 | 4 | 4A | pending | 0 | | |
 | WP-13 | 5 | 5A | pending | 0 | | |
@@ -36,3 +36,6 @@ Mode: format=markdown commits=yes autonomy=auto
 | 2 | architecture | MEDIUM | merge_refs duplicates base_update::merge_all (reuse in WP-14) | delilah-git, base_update.rs |
 | 2 | contract | MEDIUM | TS ProjectSettings.parent_task_merge required; make optional (`?? "merge"`) | app/src/api.ts |
 | 2 | migration | LOW | doc comment stranded above subtasks_of; subtasks_of scans all tasks; no CHECK on kind | store.rs |
+| 3 | architecture | MEDIUM | parent-task start branch inline in run.rs (~30 lines); StartPlan.in_checkout/branchless unread (rule duplicated with branching.rs) | run.rs, integration.rs, branching.rs |
+| 3 | spec | LOW | failed branch push of a parent task at start is only logged | run.rs |
+| 3 | notes | INFO | Phase 3 HIGHs (UI refusal parsing, push helper) fixed in the WP-03F commit; the reviewers were not re-run on the fix (tests cover both). ui-verifier not run yet: do it against a preview at the end. |  |

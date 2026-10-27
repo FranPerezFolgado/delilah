@@ -75,6 +75,18 @@ pub struct StartPlan {
     pub launch_agent: bool,
 }
 
+/// Pushes the workspace's branch to every repo that holds it (each submodule of a parent
+/// project, the repo itself otherwise). Blocking: call it from `spawn_blocking`. Shared by
+/// the parent task's start and `push-branch`, so the retry repairs what the start left.
+pub fn push_workspace_branch(
+    ws: &delilah_git::Workspace,
+    opts: &delilah_git::GitOptions,
+) -> Result<(), delilah_git::GitError> {
+    ws.repos()
+        .iter()
+        .try_for_each(|(_, dir)| delilah_git::push_branch(dir, &ws.branch, opts))
+}
+
 /// The start rules of `task`; `None` for a normal task, which starts as it always did.
 /// A subtask whose parent task has no workspace is refused (`ParentTaskNotStarted`).
 pub async fn start_rules(

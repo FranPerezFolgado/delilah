@@ -165,7 +165,7 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
   // The parent task's integration branch is gone from the remote: the header offers to push it again.
   const [branchMissing, setBranchMissing] = useState(false);
   const reportHierarchyError = (e: unknown) => {
-    if (e instanceof ApiError && (e.reason === "parent-task-branch-missing" || e.message.includes("parent-task-branch-missing"))) setBranchMissing(true);
+    if (e instanceof ApiError && e.reason === "parent-task-branch-missing") setBranchMissing(true);
     setError((e as Error).message);
   };
   const [closing, setClosing] = useState<string | null>(null);

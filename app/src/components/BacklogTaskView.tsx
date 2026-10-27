@@ -95,7 +95,7 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     } catch (e) {
       const message = (e as Error).message;
       if (e instanceof ApiError && e.fields.length > 0) setStartErrors(e.fields);
-      if (e instanceof ApiError && (e.reason === "parent-task-branch-missing" || e.message.includes("parent-task-branch-missing"))) setBranchMissing(true);
+      if (e instanceof ApiError && e.reason === "parent-task-branch-missing") setBranchMissing(true);
       if (isCheckoutDirty(e)) setRefused(true);
       else setError(message);
     } finally {

@@ -216,3 +216,25 @@ describe("parent tasks and subtasks", () => {
     expect(JSON.parse(String(last().init?.body)).empty_commit).toBe(true);
   });
 });
+
+describe("request() error shapes", () => {
+  const failWith = (status: number, body: unknown) =>
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
+
+  it("uses message and keeps the refusal reason and detail", async () => {
+    failWith(409, { error: "parent-task-branch-missing", message: "La rama del padre no existe", key: "P-1", branch: "b" });
+    const e = await api.tasks().catch((x) => x);
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.message).toBe("La rama del padre no existe");
+    expect(e.reason).toBe("parent-task-branch-missing");
+    expect(e.detail).toMatchObject({ key: "P-1", branch: "b" });
+  });
+
+  it("keeps plain {error} bodies and an explicit reason as before", async () => {
+    failWith(400, { error: "boom" });
+    const a = await api.tasks().catch((x) => x);
+    expect([a.message, a.reason]).toEqual(["boom", undefined]);
+    failWith(409, { error: "x", reason: "has-pr" });
+    expect((await api.tasks().catch((x) => x)).reason).toBe("has-pr");
+  });
+});

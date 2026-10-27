@@ -582,11 +582,9 @@ pub(crate) async fn start_run_with(
         log_share_notes(&app, &key, &notes);
         ready(&app, &key).await?;
         // The branch lives in the repo, or in each submodule of a parent project.
-        let (repos, branch) = (ws.repos(), ws.branch.clone());
+        let pushed_ws = ws.clone();
         let pushed = tokio::task::spawn_blocking(move || {
-            repos
-                .iter()
-                .try_for_each(|(_, dir)| delilah_git::push_branch(dir, &branch, &push_opts))
+            crate::integration::push_workspace_branch(&pushed_ws, &push_opts)
         })
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;

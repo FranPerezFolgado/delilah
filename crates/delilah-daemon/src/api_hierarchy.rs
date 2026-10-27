@@ -87,8 +87,8 @@ pub async fn push_branch(
     let opts = delilah_git::GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
-    let (dir, branch) = (ws.path.clone(), ws.branch.clone());
-    tokio::task::spawn_blocking(move || delilah_git::push_branch(&dir, &branch, &opts))
+    let pushing = ws.clone();
+    tokio::task::spawn_blocking(move || integration::push_workspace_branch(&pushing, &opts))
         .await
         .map_err(|e| ApiError::internal(format!("git task failed: {e}")))?
         .map_err(|e| ApiError::conflict(e.to_string()))?;

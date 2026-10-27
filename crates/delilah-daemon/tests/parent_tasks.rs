@@ -468,6 +468,22 @@ async fn a_subtask_takes_the_parent_task_submodules_in_a_parent_project() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
 
+    // A submodule push lost after the start is repaired by `push-branch`.
+    let pws = env.workspace(&parent).await;
+    let remote = git(&pws.path.join("svc-orders"), &["remote", "get-url", "origin"]);
+    let remote = std::path::PathBuf::from(remote.trim());
+    let remote = if remote.is_relative() {
+        pws.path.join("svc-orders").join(remote)
+    } else {
+        remote
+    };
+    git(&remote, &["branch", "-D", &pws.branch]);
+    let (status, body) = env
+        .call("POST", &format!("/api/v1/tasks/{parent}/push-branch"), json!({}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    git(&remote, &["rev-parse", "--verify", &pws.branch]);
+
     let sub = env.create(None, Some(&parent)).await;
     let (status, body) = env.start(&sub).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");

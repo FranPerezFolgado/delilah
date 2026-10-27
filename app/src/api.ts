@@ -814,6 +814,8 @@ export class ApiError extends Error {
     readonly resumeAt?: string,
     /** A 422 from the settings endpoint: one message per invalid field. */
     readonly fields: SettingsError["fields"] = [],
+    /** The rest of a 409 refusal's body (`key`, `branch`, `project`, `subtasks`…). */
+    readonly detail?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -844,7 +846,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at, Array.isArray(data?.fields) ? data.fields : []);
+    // A refusal is `{error: <reason>, message, ...detail}`; other errors only carry `error`.
+    throw new ApiError(
+      data?.message ?? data?.error ?? t("delilahd respondió {status}", { status: res.status }),
+      res.status, data?.unpushed === true,
+      data?.reason ?? (data?.message ? data.error : undefined),
+      data?.resume_at, Array.isArray(data?.fields) ? data.fields : [],
+      data && typeof data === "object" ? data : undefined,
+    );
   return data as T;
 }
 
