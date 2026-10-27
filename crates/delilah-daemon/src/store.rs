@@ -50,6 +50,10 @@ pub struct Store {
     pub(crate) pool: SqlitePool,
 }
 
+/// The columns of a task row and the join they need; callers add `WHERE`/`ORDER BY`.
+const TASK_SELECT: &str = "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.kind, t.parent_task, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
+     FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key";
+
 impl Store {
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
         let options = SqliteConnectOptions::new()
@@ -116,12 +120,8 @@ impl Store {
     }
 
     pub async fn list_tasks(&self) -> Result<Vec<Task>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT t.key, t.title, t.project, t.workflow, t.start_message, t.phase, t.status, t.notes, t.in_checkout, t.saving_mode, t.handoff, t.autopilot, t.title_source, t.previous_title, t.branch_error, t.view, t.chat_mode, t.ci_autofix, t.allowed_tools, t.model, t.kind, t.parent_task, t.created_at, NULLIF(w.branch, '') AS branch, (SELECT e.at FROM task_events e WHERE e.task_key = t.key AND json_extract(e.event, '$.type') IN ('mark-done', 'agent-finished') ORDER BY e.id DESC LIMIT 1) AS done_at
-             FROM tasks t LEFT JOIN workspaces w ON w.task_key = t.key ORDER BY t.created_at, t.key",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let sql = format!("{TASK_SELECT} ORDER BY t.created_at, t.key");
+        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
         rows.iter().map(task_from_row).collect()
     }
 
@@ -493,16 +493,14 @@ impl Store {
         Ok(())
     }
 
-    /// Removes a task for good. Its events, workspace record and sessions go with it
-    /// (`ON DELETE CASCADE`), in the same statement: it is either all there or all gone.
     /// The subtasks of a parent task, oldest first.
     pub async fn subtasks_of(&self, parent_key: &TaskKey) -> Result<Vec<Task>, StoreError> {
-        Ok(self
-            .list_tasks()
-            .await?
-            .into_iter()
-            .filter(|t| t.parent_task.as_ref() == Some(parent_key))
-            .collect())
+        let sql = format!("{TASK_SELECT} WHERE t.parent_task = ? ORDER BY t.created_at, t.key");
+        let rows = sqlx::query(&sql)
+            .bind(parent_key.as_str())
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(task_from_row).collect()
     }
 
     /// Sets what a task is in the hierarchy (the rules are `delilah_core::hierarchy`'s).
@@ -538,6 +536,8 @@ impl Store {
         Ok(())
     }
 
+    /// Removes a task for good. Its events, workspace record and sessions go with it
+    /// (`ON DELETE CASCADE`), in the same statement: it is either all there or all gone.
     pub async fn delete_task(&self, key: &TaskKey) -> Result<(), StoreError> {
         let deleted = sqlx::query("DELETE FROM tasks WHERE key = ?")
             .bind(key.as_str())

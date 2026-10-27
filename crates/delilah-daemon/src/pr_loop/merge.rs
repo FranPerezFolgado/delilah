@@ -67,9 +67,13 @@ async fn archive_merged(app: &AppState, key: &TaskKey, rows: &[PrRow]) -> Result
     }
     // A parent task with live subtasks stays as it is: they still work on its branch.
     if task.kind == TaskKind::ParentTask {
-        let live = crate::integration::live_subtasks(&app.store, key)
-            .await
-            .unwrap_or_default();
+        let live = match crate::integration::live_subtasks(&app.store, key).await {
+            Ok(live) => live,
+            Err(e) => {
+                tracing::warn!(task = %key, "cannot list its subtasks, not archiving: {e}");
+                return Ok(());
+            }
+        };
         if !live.is_empty() {
             let list: Vec<String> = live.iter().map(|k| k.to_string()).collect();
             let text = format!(
