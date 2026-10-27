@@ -330,9 +330,21 @@ mod tests {
         let pk = p["key"].as_str().unwrap();
         let (_, a) = create(&app, json!({"free": true, "title": "a", "parent_task": pk})).await;
         let ak = a["key"].as_str().unwrap();
-        let (s, _) = call(&app, "POST", &format!("/api/v1/tasks/{ak}/push-branch"), None).await;
+        let (s, _) = call(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{ak}/push-branch"),
+            None,
+        )
+        .await;
         assert_eq!(s, StatusCode::NOT_FOUND);
-        let (s, _) = call(&app, "POST", &format!("/api/v1/tasks/{pk}/push-branch"), None).await;
+        let (s, _) = call(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{pk}/push-branch"),
+            None,
+        )
+        .await;
         assert_eq!(s, StatusCode::CONFLICT);
     }
 }

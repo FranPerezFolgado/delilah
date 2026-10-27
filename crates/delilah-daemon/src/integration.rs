@@ -61,6 +61,48 @@ pub async fn base_for(store: &Store, task: &Task) -> Result<Base, IntegrationErr
     Ok(Base::Branch(workspace.expect("checked above").1.branch))
 }
 
+/// How a task of a hierarchy kind starts (R4-R7): always in its own worktree, named at
+/// start, and for a subtask from the parent task's branch and submodules. A parent task
+/// gets a workspace and a pushed branch but no agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartPlan {
+    pub in_checkout: bool,
+    pub branchless: bool,
+    /// The parent task's branch (a subtask only): the start is `origin/<base>`.
+    pub base: Option<String>,
+    /// The parent task's submodules (a subtask only).
+    pub submodules: Option<Vec<String>>,
+    pub launch_agent: bool,
+}
+
+/// The start rules of `task`; `None` for a normal task, which starts as it always did.
+/// A subtask whose parent task has no workspace is refused (`ParentTaskNotStarted`).
+pub async fn start_rules(
+    store: &Store,
+    task: &Task,
+) -> Result<Option<StartPlan>, IntegrationError> {
+    let plan = |base, submodules, launch_agent| StartPlan {
+        in_checkout: false,
+        branchless: false,
+        base,
+        submodules,
+        launch_agent,
+    };
+    match task.kind {
+        TaskKind::Normal => Ok(None),
+        TaskKind::ParentTask => Ok(Some(plan(None, None, false))),
+        TaskKind::Subtask => {
+            let parent = task.parent_task.as_ref().ok_or(Refusal::NotAParentTask);
+            let parent = parent.map_err(IntegrationError::Refused)?;
+            let workspace = store.workspace(parent).await?;
+            hierarchy::check_start_subtask(workspace.is_some())
+                .map_err(IntegrationError::Refused)?;
+            let ws = workspace.expect("checked above").1;
+            Ok(Some(plan(Some(ws.branch), Some(ws.submodules), true)))
+        }
+    }
+}
+
 /// The subtasks of `parent` with their facts: one task query, one PR query and one
 /// workspace query, whatever the number of children.
 pub async fn subtask_facts(
@@ -82,13 +124,20 @@ pub async fn subtask_facts(
     for row in &prs {
         let snapshot: Option<String> = row.try_get("snapshot")?;
         let state = match snapshot {
-            Some(s) => Some(serde_json::from_str::<Snapshot>(&s).map_err(StoreError::from)?.state),
+            Some(s) => Some(
+                serde_json::from_str::<Snapshot>(&s)
+                    .map_err(StoreError::from)?
+                    .state,
+            ),
             None => None,
         };
         by_task
             .entry(row.try_get("task_key")?)
             .or_default()
-            .push(SubtaskPr { url: row.try_get("url")?, state });
+            .push(SubtaskPr {
+                url: row.try_get("url")?,
+                state,
+            });
     }
     let with_workspace: std::collections::HashSet<String> = sqlx::query_scalar(
         "SELECT w.task_key FROM workspaces w
@@ -107,14 +156,22 @@ pub async fn subtask_facts(
                 merged: !prs.is_empty() && prs.iter().all(|p| p.state == Some(PrState::Merged)),
                 archived: task.status.is_terminal() && !with_workspace.contains(task.key.as_str()),
             };
-            SubtaskFact { task, facts, pr: prs.into_iter().last() }
+            SubtaskFact {
+                task,
+                facts,
+                pr: prs.into_iter().last(),
+            }
         })
         .collect())
 }
 
 /// "N/M subtasks merged" of a parent task.
 pub async fn progress(store: &Store, parent: &TaskKey) -> Result<Progress, IntegrationError> {
-    let facts: Vec<_> = subtask_facts(store, parent).await?.into_iter().map(|f| f.facts).collect();
+    let facts: Vec<_> = subtask_facts(store, parent)
+        .await?
+        .into_iter()
+        .map(|f| f.facts)
+        .collect();
     Ok(hierarchy::progress(&facts))
 }
 
@@ -258,6 +315,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn start_rules_by_kind() {
+        let store = store().await;
+        let normal = Task::new(TaskKey::new("N-1"), "n", "app");
+        assert_eq!(start_rules(&store, &normal).await.unwrap(), None);
+        let parent = store.get_task(&TaskKey::new("P-1")).await.unwrap().unwrap();
+        let plan = start_rules(&store, &parent).await.unwrap().unwrap();
+        assert!(!plan.launch_agent && !plan.in_checkout && !plan.branchless);
+        assert_eq!((plan.base, plan.submodules), (None, None));
+        let sub = child(&store, "C-1").await;
+        assert!(matches!(
+            start_rules(&store, &sub).await,
+            Err(IntegrationError::Refused(Refusal::ParentTaskNotStarted))
+        ));
+        workspace(&store, "P-1", "feature/P-1").await;
+        let plan = start_rules(&store, &sub).await.unwrap().unwrap();
+        assert!(plan.launch_agent && !plan.in_checkout && !plan.branchless);
+        assert_eq!(plan.base.as_deref(), Some("feature/P-1"));
+        assert_eq!(plan.submodules, Some(vec![]));
+    }
+
+    #[tokio::test]
     async fn progress_counts_merged_archived_and_missing_children() {
         let store = store().await;
         let parent = TaskKey::new("P-1");
@@ -276,8 +354,22 @@ mod tests {
         finish(&store, "C-4").await;
         workspace(&store, "C-4", "feature/C-4").await;
         let facts = subtask_facts(&store, &parent).await.unwrap();
-        assert!(!facts.iter().find(|f| f.task.key.as_str() == "C-4").unwrap().facts.archived);
-        assert!(facts.iter().find(|f| f.task.key.as_str() == "C-3").unwrap().facts.archived);
+        assert!(
+            !facts
+                .iter()
+                .find(|f| f.task.key.as_str() == "C-4")
+                .unwrap()
+                .facts
+                .archived
+        );
+        assert!(
+            facts
+                .iter()
+                .find(|f| f.task.key.as_str() == "C-3")
+                .unwrap()
+                .facts
+                .archived
+        );
         let c2 = facts.iter().find(|f| f.task.key.as_str() == "C-2").unwrap();
         assert!(!c2.facts.merged);
         assert_eq!(c2.pr.as_ref().unwrap().state, Some(PrState::Open));
@@ -305,8 +397,12 @@ mod tests {
         finish(&store, "C-2").await;
         workspace(&store, "C-3", "feature/C-3").await;
         finish(&store, "C-3").await;
-        let live: Vec<_> =
-            live_subtasks(&store, &parent).await.unwrap().iter().map(|k| k.to_string()).collect();
+        let live: Vec<_> = live_subtasks(&store, &parent)
+            .await
+            .unwrap()
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
         assert_eq!(live, ["C-1", "C-3"]);
     }
 
@@ -316,13 +412,28 @@ mod tests {
         let mut s = ProjectSettings::default();
         let all = [Merge, Squash, Rebase];
         assert_eq!(preferred_method(TaskKind::Subtask, &s, &all), Some(Squash));
-        assert_eq!(preferred_method(TaskKind::Normal, &s, &[Rebase, Merge]), Some(Rebase));
-        assert_eq!(preferred_method(TaskKind::ParentTask, &s, &all), Some(Merge));
+        assert_eq!(
+            preferred_method(TaskKind::Normal, &s, &[Rebase, Merge]),
+            Some(Rebase)
+        );
+        assert_eq!(
+            preferred_method(TaskKind::ParentTask, &s, &all),
+            Some(Merge)
+        );
         s.parent_task_merge = serde_json::from_str("\"rebase\"").unwrap();
-        assert_eq!(preferred_method(TaskKind::ParentTask, &s, &all), Some(Rebase));
+        assert_eq!(
+            preferred_method(TaskKind::ParentTask, &s, &all),
+            Some(Rebase)
+        );
         // Not allowed: the first allowed.
-        assert_eq!(preferred_method(TaskKind::ParentTask, &s, &[Squash, Merge]), Some(Squash));
-        assert_eq!(preferred_method(TaskKind::Subtask, &s, &[Merge]), Some(Merge));
+        assert_eq!(
+            preferred_method(TaskKind::ParentTask, &s, &[Squash, Merge]),
+            Some(Squash)
+        );
+        assert_eq!(
+            preferred_method(TaskKind::Subtask, &s, &[Merge]),
+            Some(Merge)
+        );
         assert_eq!(preferred_method(TaskKind::Subtask, &s, &[]), None);
     }
 }

@@ -148,7 +148,13 @@ pub fn refusal_reason(r: Refusal) -> &'static str {
 /// The localised message of a refusal. `detail` is the object that goes in the body
 /// (`key`, `project`, `branch`, `subtasks`); what it names is woven into the text.
 pub fn refusal_message(lang: Lang, r: Refusal, detail: &Value) -> String {
-    let s = |field: &str| detail.get(field).and_then(Value::as_str).unwrap_or("?").to_string();
+    let s = |field: &str| {
+        detail
+            .get(field)
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_string()
+    };
     match r {
         Refusal::NotAParentTask => {
             let k = s("key");

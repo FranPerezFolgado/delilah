@@ -164,6 +164,25 @@ pub(crate) fn locked_fetch(
     Ok(())
 }
 
+/// Whether `name` is safe to hand to git as a branch or ref: git's ref-name rules
+/// (`check-ref-format`) plus no leading `-` (it would read as an option) and no `@{`.
+pub(crate) fn valid_ref_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with(['-', '/'])
+        && !name.ends_with(['/', '.'])
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.contains("//")
+        && !name.ends_with(".lock")
+        && name != "@"
+        && !name
+            .split('/')
+            .any(|c| c.starts_with('.') || c.ends_with(".lock"))
+        && !name
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "~^:?*[\\".contains(c))
+}
+
 /// Fetches `origin` (bounded by `deadline`) and says which commit a new branch should
 /// start from. Only fetches and reads: no local branch is moved or created.
 pub fn prepare_base(dir: &Path, label: &str, opts: &GitOptions, deadline: Deadline) -> RepoBase {
@@ -182,6 +201,9 @@ pub fn prepare_base_on(
     opts: &GitOptions,
     deadline: Deadline,
 ) -> Result<RepoBase, GitError> {
+    if let Some(branch) = base.filter(|b| !valid_ref_name(b)) {
+        return Err(GitError::InvalidBranch(branch.to_string()));
+    }
     let fetch = if !has_origin(dir, opts) {
         FetchOutcome::NoRemote
     } else {
@@ -213,6 +235,53 @@ pub fn prepare_base_on(
 mod tests {
     use super::*;
     use crate::command::git;
+
+    #[test]
+    fn ref_names_that_git_could_misread_are_rejected() {
+        for ok in ["main", "feature/LIBRE-1", "a.b/c-d"] {
+            assert!(valid_ref_name(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "-x",
+            "--upload-pack=x",
+            "a..b",
+            "a~1",
+            "a^",
+            "a@{1}",
+            "a b",
+            "a\tb",
+            "a:b",
+            "a/",
+            "/a",
+            "a//b",
+            ".a",
+            "a/.b",
+            "a.lock",
+            "a.",
+            "@",
+            "a?",
+            "a*",
+            "a[",
+            "a\\b",
+        ] {
+            assert!(!valid_ref_name(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn an_invalid_base_name_never_reaches_git() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let err = prepare_base_on(
+            tmp.path(),
+            "r",
+            Some("--bad"),
+            &GitOptions::default(),
+            Deadline::after(std::time::Duration::from_secs(1)),
+        )
+        .unwrap_err();
+        assert!(matches!(err, GitError::InvalidBranch(_)));
+    }
 
     #[test]
     fn a_worktree_shares_its_main_checkout_lock() {

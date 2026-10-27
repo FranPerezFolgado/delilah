@@ -251,7 +251,9 @@ pub fn create_workspace(
             {
                 return Err(GitError::UnknownSubmodule(unknown.clone()));
             }
-            let base = prepare_base_on(root, ".", spec.base.as_deref(), opts, deadline)?;
+            // The integration branch lives in the submodules only: the root starts from
+            // its default base.
+            let base = prepare_base_on(root, ".", None, opts, deadline)?;
             let start = base.start().to_string();
             git(
                 root,
@@ -670,9 +672,12 @@ pub fn commit_empty(dir: &Path, message: &str, opts: &GitOptions) -> Result<(), 
 /// (or any failure) it runs `git merge --abort`, resets to the commit it started at and
 /// returns the error, so the branch is left as it was.
 pub fn merge_refs(dir: &Path, refs: &[String], opts: &GitOptions) -> Result<(), GitError> {
+    if let Some(bad) = refs.iter().find(|r| !crate::base::valid_ref_name(r)) {
+        return Err(GitError::InvalidBranch(bad.clone()));
+    }
     let start = git(dir, &["rev-parse", "HEAD"], opts)?;
     for r in refs {
-        if let Err(e) = git(dir, &["merge", "--no-edit", r], opts) {
+        if let Err(e) = git(dir, &["merge", "--no-edit", "--", r], opts) {
             let _ = git(dir, &["merge", "--abort"], opts);
             let _ = git(dir, &["reset", "-q", "--hard", &start], opts);
             return Err(e);

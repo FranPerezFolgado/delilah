@@ -139,16 +139,25 @@ pub(crate) fn slug(title: &str) -> String {
 
 /// Whether a starting task begins without a branch (decision 65): a free task whose
 /// request typed no branch, in a project with no branch template. Everything else is
-/// named at start (typed branch, then template, then the proposal).
-pub(crate) fn starts_branchless(project: &Project, key: &TaskKey, typed: bool) -> bool {
-    is_free(key) && !typed && !crate::branch_name::has_template(project)
+/// named at start (typed branch, then template, then the proposal). A parent task and a
+/// subtask always are: their branch is the integration point from the first moment.
+pub(crate) fn starts_branchless(
+    project: &Project,
+    key: &TaskKey,
+    typed: bool,
+    kind: delilah_core::hierarchy::TaskKind,
+) -> bool {
+    kind == delilah_core::hierarchy::TaskKind::Normal
+        && is_free(key)
+        && !typed
+        && !crate::branch_name::has_template(project)
 }
 
 /// Whether the task still has something to take from its first analysis: a free task
 /// that has no branch yet, still carries its initial title, or has a branch that a
 /// submodule is not on yet (and no failure to wait for the user's retry on).
 async fn pending(app: &AppState, task: &Task) -> bool {
-    if !is_free(&task.key) {
+    if !is_free(&task.key) || task.kind != delilah_core::hierarchy::TaskKind::Normal {
         return false;
     }
     if task.title_source == TitleSource::Initial {
@@ -1488,5 +1497,32 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.status, axum::http::StatusCode::CONFLICT);
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+    use delilah_core::hierarchy::TaskKind;
+
+    #[test]
+    fn parent_tasks_and_subtasks_are_never_branchless() {
+        let project = Project {
+            name: "app".into(),
+            path: "/tmp/app".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            workflow: "project".into(),
+            settings: Default::default(),
+            preview_command: None,
+        };
+        let key = TaskKey::new("LIBRE-7");
+        assert!(starts_branchless(&project, &key, false, TaskKind::Normal));
+        assert!(!starts_branchless(
+            &project,
+            &key,
+            false,
+            TaskKind::ParentTask
+        ));
+        assert!(!starts_branchless(&project, &key, false, TaskKind::Subtask));
     }
 }

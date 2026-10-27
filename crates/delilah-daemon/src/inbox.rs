@@ -1493,9 +1493,17 @@ mod tests {
         fixture.sort();
         assert_eq!(blocking, fixture);
         // The new notice kinds are listed, as their own items.
-        assert_eq!(notice_kind(KIND_PARENT_TASK_LIVE), Some(ItemKind::ParentTaskLive));
-        assert_eq!(notice_kind(KIND_PARENT_TASK_READY), Some(ItemKind::ParentTaskReady));
-        assert!(!ItemKind::ParentTaskLive.is_blocking() && !ItemKind::ParentTaskReady.is_blocking());
+        assert_eq!(
+            notice_kind(KIND_PARENT_TASK_LIVE),
+            Some(ItemKind::ParentTaskLive)
+        );
+        assert_eq!(
+            notice_kind(KIND_PARENT_TASK_READY),
+            Some(ItemKind::ParentTaskReady)
+        );
+        assert!(
+            !ItemKind::ParentTaskLive.is_blocking() && !ItemKind::ParentTaskReady.is_blocking()
+        );
         // `name` is the serde name.
         for k in all {
             assert_eq!(serde_json::to_value(k).unwrap(), k.name());

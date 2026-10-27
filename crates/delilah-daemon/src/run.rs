@@ -9,10 +9,12 @@ use axum::http::StatusCode;
 use delilah_agents::claude;
 use delilah_agents::pty::PtySession;
 use delilah_agents::runtime::{self, Runtime, RuntimeKind};
+use delilah_core::hierarchy::{Refusal, TaskKind};
 use delilah_core::workflow::{self, StartRequest, TaskWorkflow};
 use delilah_core::{Event, ProjectKind, Step, Task, TaskKey, TaskStatus};
 use delilah_git::{Deadline, FetchOutcome, GitOptions, RepoBase, WorkspaceSpec};
 use serde::Deserialize;
+use serde_json::json;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::ApiError;
@@ -281,6 +283,17 @@ pub(crate) async fn start_run_with(
     let project = app.store.project(&req.project).await?;
     // The request wins, then what the backlog task chose, then the project's setting;
     // with none of them, the checkout (decision 57 reversed).
+    // A parent task or a subtask follows its kind's rules, whatever the request, the
+    // backlog task or the project say (R4-R7).
+    let plan = match &existing {
+        Some(task) => crate::integration::start_rules(&app.store, task)
+            .await
+            .map_err(|e| start_rules_error(&app, task, e))?,
+        None => None,
+    };
+    if let Some(submodules) = plan.as_ref().and_then(|p| p.submodules.clone()) {
+        req.submodules = submodules;
+    }
     let in_checkout = req
         .in_checkout
         .or_else(|| existing.as_ref().and_then(|t| t.in_checkout))
@@ -289,8 +302,13 @@ pub(crate) async fn start_run_with(
             .workspace
             .map(|m| m == delilah_core::WorkspaceMode::Checkout))
         .unwrap_or(true);
+    let in_checkout = in_checkout && plan.is_none();
     let rules = &project.settings.submodules;
-    if project.kind == ProjectKind::Parent && !(rules.always.is_empty() && rules.never.is_empty()) {
+    // A subtask takes its parent task's submodules as they are.
+    if plan.as_ref().is_none_or(|p| p.submodules.is_none())
+        && project.kind == ProjectKind::Parent
+        && !(rules.always.is_empty() && rules.never.is_empty())
+    {
         let root = project.path.clone();
         let available: Vec<String> =
             tokio::task::spawn_blocking(move || delilah_git::list_submodules(&root))
@@ -397,7 +415,8 @@ pub(crate) async fn start_run_with(
         .as_deref()
         .map(str::trim)
         .is_some_and(|b| !b.is_empty());
-    let branchless = crate::branching::starts_branchless(&project, &key, typed);
+    let kind = existing.as_ref().map_or(TaskKind::Normal, |t| t.kind);
+    let branchless = crate::branching::starts_branchless(&project, &key, typed, kind);
     let branch = match branchless {
         true => None,
         false => Some(
@@ -492,8 +511,9 @@ pub(crate) async fn start_run_with(
     };
     app.transition(&key, Event::Start).await?;
 
+    let base = plan.as_ref().and_then(|p| p.base.clone());
     let spec = WorkspaceSpec {
-        base: None,
+        base: base.clone(),
         path: app.config.workspaces_dir().join(&req.key),
         // Only a free task with nothing typed and no template starts without a branch:
         // the first analysis creates it (decision 65).
@@ -506,6 +526,7 @@ pub(crate) async fn start_run_with(
     };
     let root = project.path.clone();
     let deadline = Deadline::after(delilah_git::NETWORK_LIMIT);
+    let push_opts = opts.clone();
     let created = tokio::task::spawn_blocking(move || {
         if in_checkout {
             delilah_git::use_checkout(&root, &spec, &opts, deadline)
@@ -524,6 +545,7 @@ pub(crate) async fn start_run_with(
             let fresh = existing.is_none();
             // A checkout with work in it is the user's to resolve, not an invalid request.
             let dirty = in_checkout && matches!(e, delilah_git::GitError::Dirty { .. });
+            let missing = matches!(e, delilah_git::GitError::BaseMissing { .. });
             if dirty && fresh {
                 // Nothing started: the task made for this request goes, not an errored one.
                 app.store.delete_task(&key).await?;
@@ -533,6 +555,13 @@ pub(crate) async fn start_run_with(
             if dirty {
                 return Err(ApiError::conflict_reason(reason, "checkout-dirty"));
             }
+            if missing {
+                return Err(ApiError::refused(
+                    app.lang(),
+                    Refusal::ParentTaskBranchMissing,
+                    json!({ "branch": base }),
+                ));
+            }
             return Err(ApiError::unprocessable(reason));
         }
     };
@@ -541,6 +570,37 @@ pub(crate) async fn start_run_with(
         app.store.set_checkout_previous(&key, previous).await?;
     }
     report_bases(&app, &key, &project.name, &bases).await;
+    if plan.as_ref().is_some_and(|p| !p.launch_agent) {
+        // A parent task: a worktree and a pushed branch, no agent and no setup.
+        let (checkout, worktree) = (project.path.clone(), ws.path.clone());
+        let shared = project.settings.shared.clone();
+        let notes = tokio::task::spawn_blocking(move || {
+            delilah_git::share_entries(&checkout, &worktree, &shared)
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        log_share_notes(&app, &key, &notes);
+        ready(&app, &key).await?;
+        // The branch lives in the repo, or in each submodule of a parent project.
+        let (repos, branch) = (ws.repos(), ws.branch.clone());
+        let pushed = tokio::task::spawn_blocking(move || {
+            repos
+                .iter()
+                .try_for_each(|(_, dir)| delilah_git::push_branch(dir, &branch, &push_opts))
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        // The task runs either way; the push is retried from the task (`push-branch`).
+        if let Err(e) = pushed {
+            tracing::warn!(task = %key, "cannot push the parent task's branch: {e}");
+        }
+        let task = app
+            .store
+            .get_task(&key)
+            .await?
+            .expect("task was just created");
+        return Ok((StatusCode::CREATED, Json(task)));
+    }
     let launch = AgentLaunch {
         free: req.free,
         prompt,
@@ -602,6 +662,22 @@ pub(crate) async fn start_run_with(
         .await?
         .expect("task was just created");
     Ok((StatusCode::CREATED, Json(task)))
+}
+
+/// A refused start rule as the API answers it.
+fn start_rules_error(
+    app: &AppState,
+    task: &Task,
+    e: crate::integration::IntegrationError,
+) -> ApiError {
+    use crate::integration::IntegrationError;
+    match e {
+        IntegrationError::Refused(r) => {
+            let detail = json!({ "key": task.parent_task.as_ref().map(|k| k.to_string()) });
+            ApiError::refused(app.lang(), r, detail)
+        }
+        IntegrationError::Store(e) => e.into(),
+    }
 }
 
 /// What a free task's first analysis is told apart from: the spec folders present at
