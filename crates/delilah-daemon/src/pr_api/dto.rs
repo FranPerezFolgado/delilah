@@ -150,6 +150,9 @@ pub struct OpenRequest {
     pub(super) body: String,
     #[serde(default)]
     pub(super) draft: bool,
+    /// Parent task only: commit `chore: start <KEY> <title>` when the branch has none.
+    #[serde(default)]
+    pub(super) empty_commit: bool,
 }
 
 impl From<&Snapshot> for SnapshotView {

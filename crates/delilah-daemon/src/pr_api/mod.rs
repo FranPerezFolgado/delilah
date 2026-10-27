@@ -5,6 +5,7 @@ mod dto;
 pub(crate) mod forward;
 pub mod merge;
 mod open;
+pub mod ready;
 
 use axum::Json;
 use axum::extract::{Path, State};

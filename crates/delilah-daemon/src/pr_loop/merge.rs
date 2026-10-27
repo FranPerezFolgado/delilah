@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use delilah_core::hierarchy::TaskKind;
 use delilah_core::{Event, Task, TaskKey};
 use delilah_git::GitOptions;
 use serde_json::json;
@@ -14,6 +15,7 @@ use crate::archive::{
     stop_sessions,
 };
 use crate::events::Topic;
+use crate::inbox::KIND_PARENT_TASK_READY;
 use crate::pr_types::PrState;
 use crate::state::AppState;
 use crate::store::StoreError;
@@ -113,6 +115,70 @@ async fn archive_merged(app: &AppState, key: &TaskKey, rows: &[PrRow]) -> Result
         app.emit(topic);
     }
     Ok(())
+}
+
+/// A subtask's PRs are all merged: the parent task's progress changed (`changed`: this
+/// check saw it, so the UI is told), and it may be ready now.
+pub(super) async fn on_subtask_merged(app: &AppState, task: &Task, changed: bool) {
+    if task.kind != TaskKind::Subtask {
+        return;
+    }
+    if changed {
+        app.emit(Topic::Tasks);
+    }
+    if let Some(parent) = &task.parent_task {
+        parent_ready(app, parent).await;
+    }
+}
+
+/// Tells once that every subtask of the parent task merged while its PR is still a
+/// draft: the PR can go. Deduplicated by the parent task and the PR.
+pub(super) async fn parent_ready(app: &AppState, parent: &TaskKey) {
+    let ready = match crate::integration::progress(&app.store, parent).await {
+        Ok(p) => p.ready,
+        Err(e) => {
+            tracing::warn!(task = %parent, "parent task progress: {e}");
+            return;
+        }
+    };
+    if !ready {
+        return;
+    }
+    let rows = app.store.prs_of(parent).await.unwrap_or_default();
+    for row in rows.iter().filter(|r| {
+        r.snapshot
+            .as_ref()
+            .is_some_and(|s| s.state == PrState::Open && s.draft)
+    }) {
+        let text = app.lang().pick(
+            "Todas las subtareas están mergeadas: la PR de la tarea madre puede salir",
+            "Every subtask is merged: the parent task's PR can go",
+        );
+        let new = notice_for(app, parent, format!("pr {}", row.url), text.to_string()).await;
+        if matches!(new, Ok(true)) {
+            app.emit(Topic::Inbox);
+        }
+    }
+}
+
+async fn notice_for(
+    app: &AppState,
+    key: &TaskKey,
+    cause: String,
+    text: String,
+) -> Result<bool, StoreError> {
+    app.store
+        .insert_notice(
+            key,
+            &NewNotice {
+                repo: ".".into(),
+                kind: KIND_PARENT_TASK_READY.into(),
+                cause,
+                text,
+                detail: None,
+            },
+        )
+        .await
 }
 
 /// Checks that nothing of the task's would be lost, then archives its workspace and
@@ -924,5 +990,121 @@ mod tests {
         assert!(env.ws.path.exists());
         assert!(env.branch_exists(&env.root));
         assert_eq!(env.kinds().await, ["archive-blocked"]);
+    }
+
+    /// A parent task P-1 with subtasks C-1..C-n (one PR each, `states`), and a PR of
+    /// P-1's own (a draft when `draft`).
+    async fn hierarchy(states: &[PrState], draft: bool) -> AppState {
+        use crate::store_prs::NewPr;
+        use delilah_core::hierarchy::TaskKind;
+
+        let app = AppState::new(
+            crate::store::Store::in_memory().await.unwrap(),
+            crate::config::Config::test_defaults(),
+        );
+        let mut p = Task::new(TaskKey::new("P-1"), "parent", "app");
+        p.kind = TaskKind::ParentTask;
+        app.store.create_task(&p).await.unwrap();
+        let mut put = |key: String, n: i64, state: PrState, draft: bool| {
+            let app = app.clone();
+            async move {
+                let row = app
+                    .store
+                    .link_pr(
+                        &TaskKey::new(key),
+                        &NewPr {
+                            repo: ".".into(),
+                            host: "github.com".into(),
+                            owner_name: "me/repo".into(),
+                            number: n,
+                            url: format!("https://github.com/me/repo/pull/{n}"),
+                            linked_by: "detected".into(),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                let mut snap = crate::prs::tests::snapshot(state, vec![]);
+                snap.draft = draft;
+                app.store
+                    .save_check(
+                        row.id,
+                        &snap,
+                        &Default::default(),
+                        chrono::Utc::now(),
+                        &[],
+                        &[],
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        for (i, state) in states.iter().enumerate() {
+            let key = format!("C-{}", i + 1);
+            let mut c = Task::new(TaskKey::new(&key), "child", "app");
+            c.kind = TaskKind::Subtask;
+            c.parent_task = Some(TaskKey::new("P-1"));
+            app.store.create_task(&c).await.unwrap();
+            put(key, 10 + i as i64, *state, false).await;
+        }
+        put("P-1".into(), 1, PrState::Open, draft).await;
+        app
+    }
+
+    async fn ready_notices(app: &AppState) -> usize {
+        app.store
+            .open_notices()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|n| n.kind == KIND_PARENT_TASK_READY && n.task_key == "P-1")
+            .count()
+    }
+
+    #[tokio::test]
+    async fn a_subtask_merge_tells_the_tasks_topic_and_the_last_one_makes_the_parent_ready_once() {
+        let app = hierarchy(&[PrState::Merged, PrState::Merged], true).await;
+        let mut rx = app.events.subscribe();
+        let c = app
+            .store
+            .get_task(&TaskKey::new("C-2"))
+            .await
+            .unwrap()
+            .unwrap();
+        on_subtask_merged(&app, &c, true).await;
+        let mut seen = vec![];
+        while let Ok(t) = rx.try_recv() {
+            seen.push(t);
+        }
+        assert!(seen.contains(&Topic::Tasks) && seen.contains(&Topic::Inbox));
+        assert_eq!(ready_notices(&app).await, 1);
+        // Later ticks do not push it again.
+        on_subtask_merged(&app, &c, false).await;
+        parent_ready(&app, &TaskKey::new("P-1")).await;
+        assert_eq!(ready_notices(&app).await, 1);
+        assert!(rx.try_recv().is_err(), "nothing new to tell");
+    }
+
+    #[tokio::test]
+    async fn the_parent_is_not_ready_with_an_open_subtask_or_without_a_draft_pr() {
+        let app = hierarchy(&[PrState::Merged, PrState::Open], true).await;
+        parent_ready(&app, &TaskKey::new("P-1")).await;
+        assert_eq!(ready_notices(&app).await, 0);
+        let app = hierarchy(&[PrState::Merged, PrState::Merged], false).await;
+        parent_ready(&app, &TaskKey::new("P-1")).await;
+        assert_eq!(ready_notices(&app).await, 0);
+    }
+
+    #[tokio::test]
+    async fn two_subtasks_merged_in_one_tick_give_the_right_progress() {
+        let app = hierarchy(&[PrState::Merged, PrState::Merged, PrState::Open], true).await;
+        let p = crate::integration::progress(&app.store, &TaskKey::new("P-1"))
+            .await
+            .unwrap();
+        assert_eq!((p.merged, p.counted, p.ready), (2, 3, false));
+        for k in ["C-1", "C-2"] {
+            let c = app.store.get_task(&TaskKey::new(k)).await.unwrap().unwrap();
+            on_subtask_merged(&app, &c, true).await;
+        }
+        assert_eq!(ready_notices(&app).await, 0, "the third is still open");
     }
 }

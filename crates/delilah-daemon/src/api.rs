@@ -125,6 +125,10 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/prs/{id}/merge",
             post(crate::pr_api::merge::merge),
         )
+        .route(
+            "/api/v1/tasks/{key}/prs/{id}/ready",
+            post(crate::pr_api::ready::ready),
+        )
         .route("/api/v1/tasks/{key}/setup", get(crate::setup::info))
         .route("/api/v1/tasks/{key}/setup/log", get(crate::setup::log))
         .route(

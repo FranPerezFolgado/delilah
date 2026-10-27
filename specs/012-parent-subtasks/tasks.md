@@ -115,17 +115,17 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 ### Tests
 
-- [ ] T034 [P] [US3] Tests in `crates/delilah-daemon/src/pr_api/` (fake `gh`): parent task PR opened draft unless progress is ready; `no-commits` then `empty_commit: true` commits `chore: start <KEY> <title>`, pushes and opens; `empty_commit` on another kind ⇒ `empty-commit-not-allowed`; `ready` endpoint calls `gh pr ready`; merge with live subtasks and no confirmation ⇒ `live-subtasks`; with confirmation ⇒ merges with the setting's method
-- [ ] T035 [P] [US3] Tests in `crates/delilah-daemon/src/base_update.rs`: parent task Update branch merges `origin/<own branch>` then the default branch; `subtask_commits` counts commits on `origin/<own branch>` not in `HEAD`; tracked changes or a conflict ⇒ refused/undone
-- [ ] T036 [P] [US3] Tests in `crates/delilah-daemon/src/pr_loop/` : a subtask PR merge emits `Topic::Tasks` for the parent task; `parent-task-ready` notice pushed once when progress first becomes ready with a draft PR, not again on later ticks; two subtasks merged in one tick give the right progress
+- [X] T034 [P] [US3] Tests in `crates/delilah-daemon/src/pr_api/` (fake `gh`): parent task PR opened draft unless progress is ready; `no-commits` then `empty_commit: true` commits `chore: start <KEY> <title>`, pushes and opens; `empty_commit` on another kind ⇒ `empty-commit-not-allowed`; `ready` endpoint calls `gh pr ready`; merge with live subtasks and no confirmation ⇒ `live-subtasks`; with confirmation ⇒ merges with the setting's method
+- [X] T035 [P] [US3] Tests in `crates/delilah-daemon/src/base_update.rs`: parent task Update branch merges `origin/<own branch>` then the default branch; `subtask_commits` counts commits on `origin/<own branch>` not in `HEAD`; tracked changes or a conflict ⇒ refused/undone
+- [X] T036 [P] [US3] Tests in `crates/delilah-daemon/src/pr_loop/` : a subtask PR merge emits `Topic::Tasks` for the parent task; `parent-task-ready` notice pushed once when progress first becomes ready with a draft PR, not again on later ticks; two subtasks merged in one tick give the right progress
 
 ### Implementation
 
-- [ ] T037 [US3] `crates/delilah-daemon/src/pr_api/open.rs`: force `draft` for a parent task unless `progress.ready`; `OpenRequest.empty_commit` path with `delilah_git::commit_empty` + push; T034 (open part) passes
-- [ ] T038 [US3] `crates/delilah-daemon/src/gh/mod.rs`: `pr_ready(url)`; `POST /api/v1/tasks/{key}/prs/{id}/ready` handler in `crates/delilah-daemon/src/pr_api/` routed from `api.rs`; never called by the daemon on its own
-- [ ] T039 [US3] `crates/delilah-daemon/src/pr_api/merge.rs`: `MergeRequest.confirm_live_subtasks`; refuse with `live-subtasks` and the keys when false and `integration::live_subtasks` is not empty
-- [ ] T040 [US3] `crates/delilah-daemon/src/base_update.rs`: parent task refs = `origin/<own branch>` then default; `subtask_commits` in base-status; T035 passes
-- [ ] T041 [US3] `crates/delilah-daemon/src/pr_loop/mod.rs` / `pr_loop/merge.rs`: on a subtask merge emit `Topic::Tasks` for its parent task; push `parent-task-ready` once (dedupe by parent task key + PR); T036 passes
+- [X] T037 [US3] `crates/delilah-daemon/src/pr_api/open.rs`: force `draft` for a parent task unless `progress.ready`; `OpenRequest.empty_commit` path with `delilah_git::commit_empty` + push; T034 (open part) passes
+- [X] T038 [US3] `crates/delilah-daemon/src/gh/mod.rs`: `pr_ready(url)`; `POST /api/v1/tasks/{key}/prs/{id}/ready` handler in `crates/delilah-daemon/src/pr_api/` routed from `api.rs`; never called by the daemon on its own
+- [X] T039 [US3] `crates/delilah-daemon/src/pr_api/merge.rs`: `MergeRequest.confirm_live_subtasks`; refuse with `live-subtasks` and the keys when false and `integration::live_subtasks` is not empty
+- [X] T040 [US3] `crates/delilah-daemon/src/base_update.rs`: parent task refs = `origin/<own branch>` then default; `subtask_commits` in base-status; T035 passes
+- [X] T041 [US3] `crates/delilah-daemon/src/pr_loop/mod.rs` / `pr_loop/merge.rs`: on a subtask merge emit `Topic::Tasks` for its parent task; push `parent-task-ready` once (dedupe by parent task key + PR); T036 passes
 - [ ] T042 [P] [US3] `app/src/components/ProjectSettings.tsx`: "Parent task merge method" (merge / squash / rebase), noting it falls back to what the repository allows; vitest
 - [ ] T043 [US3] `app/src/components/PrView.tsx` for a parent task: draft badge; "Mark ready" suggestion when `subtask_progress.ready` and the PR is a draft; on `no-commits` offer "Add an empty commit and open"; on `live-subtasks` a confirmation dialog naming them, retrying with `confirm_live_subtasks`; base banner with "N merged subtask commits not in your workspace" (`subtask_commits`); i18n; vitest
 

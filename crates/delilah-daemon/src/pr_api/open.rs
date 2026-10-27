@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use delilah_core::TaskKey;
-use delilah_core::hierarchy::Refusal;
+use delilah_core::hierarchy::{Refusal, TaskKind};
 use delilah_git::GitOptions;
 use delilah_integrations::jira::JiraMode;
 
@@ -298,10 +298,43 @@ pub(crate) async fn open_for(
     body: &str,
     draft: bool,
 ) -> Result<PrRow, ApiError> {
+    open_with(app, key, repo, title, body, (draft, false)).await
+}
+
+/// [`open_for`] with `empty_commit`: a parent task whose branch has no commits gets
+/// `chore: start <KEY> <title>` first. A parent task's PR is a draft until every one of
+/// its subtasks is merged.
+async fn open_with(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+    title: &str,
+    body: &str,
+    (draft, empty_commit): (bool, bool),
+) -> Result<PrRow, ApiError> {
     let title = title.trim();
     if title.is_empty() {
         return Err(ApiError::bad_request("the PR needs a title"));
     }
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?;
+    let is_parent = task.kind == TaskKind::ParentTask;
+    if empty_commit && !is_parent {
+        return Err(ApiError::refused(
+            app.lang(),
+            Refusal::EmptyCommitNotAllowed,
+            serde_json::json!({}),
+        ));
+    }
+    let draft = draft
+        || (is_parent
+            && !integration::progress(&app.store, key)
+                .await
+                .map_err(|e| integration::api_error(app.lang(), &task, e))?
+                .ready);
     let (repo, branch, dir, _) = source_of(app, key, repo).await?;
     // Keeps a detection from linking the PR twice while it is being opened; the link
     // is an upsert anyway, so a check already running is not waited for.
@@ -318,6 +351,19 @@ pub(crate) async fn open_for(
             "has-pr",
         ));
     }
+    if empty_commit
+        && commits_of(app, key, &dir, &branch)
+            .await?
+            .subjects
+            .is_empty()
+    {
+        let opts = git_options(app);
+        let (d, message) = (dir.clone(), format!("chore: start {key} {}", task.title));
+        tokio::task::spawn_blocking(move || delilah_git::commit_empty(&d, &message, &opts))
+            .await
+            .map_err(join_error)?
+            .map_err(|e| ApiError::conflict(e.to_string()))?;
+    }
     push_if_needed(app, &dir, &branch).await?;
     create_and_link(app, key, (repo, &dir, &branch), (title, body, draft)).await
 }
@@ -329,13 +375,13 @@ pub async fn open(
     Json(req): Json<OpenRequest>,
 ) -> Result<(StatusCode, Json<PrView>), ApiError> {
     let key = known_task(&app, &key).await?;
-    let row = open_for(
+    let row = open_with(
         &app,
         &key,
         req.repo.as_deref(),
         &req.title,
         &req.body,
-        req.draft,
+        (req.draft, req.empty_commit),
     )
     .await?;
     let ctx = TaskContext::of(&app, &key).await?;
@@ -809,5 +855,68 @@ mod tests {
         assert_eq!(v["error"], "parent-task-branch-missing");
         assert!(gh.calls().iter().all(|c| c[..2] != ["pr", "create"]));
         assert!(app.store.prs_of(&key).await.unwrap().is_empty());
+    }
+
+    async fn as_parent(app: &AppState) {
+        app.store
+            .set_kind(
+                &TaskKey::new("PROJ-1"),
+                delilah_core::hierarchy::TaskKind::ParentTask,
+                None,
+            )
+            .await
+            .unwrap();
+    }
+
+    fn drafts(gh: &FakeGh) -> bool {
+        create_args(gh).iter().any(|a| a == "--draft")
+    }
+
+    #[tokio::test]
+    async fn a_parent_task_pr_is_a_draft_unless_progress_is_ready() {
+        let gh = opening_gh();
+        let (router, app, _dir) = git_setup(gh.clone(), &["first"]).await;
+        as_parent(&app).await;
+        // No subtasks: progress is not ready, so draft even if the request says not.
+        let body = json!({ "title": "T", "draft": false });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        assert!(drafts(&gh));
+    }
+
+    #[tokio::test]
+    async fn empty_commit_starts_a_parent_task_pr_and_pushes() {
+        let gh = opening_gh();
+        let (router, app, dir) = git_setup(gh.clone(), &[]).await;
+        as_parent(&app).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(
+            (s, v["reason"].as_str()),
+            (StatusCode::CONFLICT, Some("no-commits"))
+        );
+        let body = json!({ "title": "T", "empty_commit": true });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        let log = std::process::Command::new("git")
+            .args(["log", "-1", "--format=%s", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin"))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&log.stdout).trim(),
+            "chore: start PROJ-1 t"
+        );
+        assert!(drafts(&gh));
+    }
+
+    #[tokio::test]
+    async fn empty_commit_on_another_kind_is_refused() {
+        let gh = opening_gh();
+        let (router, _app, _dir) = git_setup(gh.clone(), &[]).await;
+        let body = json!({ "title": "T", "empty_commit": true });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert_eq!(v["error"], "empty-commit-not-allowed");
+        assert!(gh.calls().iter().all(|c| c[..2] != ["pr", "create"]));
     }
 }

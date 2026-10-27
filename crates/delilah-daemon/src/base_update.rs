@@ -2,7 +2,8 @@
 //! /tasks/{key}/base-status`) and merging the base into it (`POST
 //! /tasks/{key}/update-branch`). The base is the one a new branch starts from (decision
 //! 66: `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`), fetched first;
-//! for a subtask it is `origin/<parent task branch>`. The task's work is never rewritten: it is a merge, refused if the workspace has
+//! for a subtask it is `origin/<parent task branch>`. A parent task merges the merged
+//! subtasks first (`origin/<its own branch>`), then the default branch. The task's work is never rewritten: it is a merge, refused if the workspace has
 //! tracked changes, and undone if it conflicts.
 
 use std::path::{Path, PathBuf};
@@ -30,6 +31,8 @@ pub struct BaseStatus {
     pub base: Option<String>,
     /// Commits of the base the branch does not have yet (all the task's repos together).
     pub behind_by: u32,
+    /// Parent tasks: commits on `origin/<own branch>` (merged subtasks) not in `HEAD`.
+    pub subtask_commits: u32,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -46,6 +49,18 @@ struct RepoState {
     branch: String,
     base: Option<String>,
     behind: u32,
+    /// Parent task: `origin/<own branch>` when the remote has it.
+    own: Option<String>,
+    subtask_commits: u32,
+}
+
+impl RepoState {
+    /// The refs to merge, in order, with the commits each brings.
+    fn pending(&self) -> Vec<(&String, u32)> {
+        let own = self.own.iter().map(|r| (r, self.subtask_commits));
+        let base = self.base.iter().map(|r| (r, self.behind));
+        own.chain(base).filter(|(_, n)| *n > 0).collect()
+    }
 }
 
 /// Runs git in `dir` without ever prompting; (succeeded, stdout, stderr).
@@ -126,17 +141,20 @@ async fn states(
         Err(e) => return Err(integration::api_error(app.lang(), &task, e)),
     };
     let from = parent.clone();
-    let states = tokio::task::spawn_blocking(move || inspect(&ws, &opts, from.as_deref()))
+    let own = task.kind == delilah_core::hierarchy::TaskKind::ParentTask;
+    let states = tokio::task::spawn_blocking(move || inspect(&ws, &opts, from.as_deref(), own))
         .await
         .map_err(|e| ApiError::internal(e.to_string()))??;
     Ok((states, parent))
 }
 
 /// `parent`: the parent task's branch of a subtask, which is its base in every repo.
+/// `own`: a parent task, which also takes in `origin/<its own branch>`.
 fn inspect(
     ws: &Workspace,
     opts: &GitOptions,
     parent: Option<&str>,
+    own: bool,
 ) -> Result<Vec<RepoState>, ApiError> {
     let deadline = Deadline::after(FETCH_LIMIT);
     let mut out = Vec::new();
@@ -154,12 +172,26 @@ fn inspect(
             }
             None => 0,
         };
+        let own = if own {
+            parent_ref(&dir, &ws.branch)?
+        } else {
+            None
+        };
+        let subtask_commits = match &own {
+            Some(r) => {
+                let (ok, count, _) = run(&dir, &["rev-list", "--count", &format!("HEAD..{r}")])?;
+                if ok { count.parse().unwrap_or(0) } else { 0 }
+            }
+            None => 0,
+        };
         out.push(RepoState {
             label,
             dir,
             branch: ws.branch.clone(),
             base,
             behind,
+            own,
+            subtask_commits,
         });
     }
     Ok(out)
@@ -170,13 +202,21 @@ fn summary(states: &[RepoState]) -> (Option<String>, u32) {
     (base, states.iter().map(|s| s.behind).sum())
 }
 
+fn subtask_commits(states: &[RepoState]) -> u32 {
+    states.iter().map(|s| s.subtask_commits).sum()
+}
+
 pub async fn status(
     State(app): State<AppState>,
     UrlPath(key): UrlPath<String>,
 ) -> Result<Json<BaseStatus>, ApiError> {
     let (states, _) = states(&app, &TaskKey::new(key)).await?;
     let (base, behind_by) = summary(&states);
-    Ok(Json(BaseStatus { base, behind_by }))
+    Ok(Json(BaseStatus {
+        base,
+        behind_by,
+        subtask_commits: subtask_commits(&states),
+    }))
 }
 
 pub async fn update(
@@ -244,20 +284,31 @@ fn merge_all(states: Vec<RepoState>, opts: &GitOptions) -> Result<(Option<String
     // The repos already merged with the commit each started at.
     let mut done: Vec<(&RepoState, String)> = Vec::new();
     for s in &states {
-        let (Some(base), true) = (&s.base, s.behind > 0) else {
+        let pending = s.pending();
+        if pending.is_empty() {
             continue;
-        };
+        }
+        let refs: Vec<String> = pending.iter().map(|(r, _)| (*r).clone()).collect();
         let (_, start, _) = run(&s.dir, &["rev-parse", "HEAD"])?;
-        if let Err(e) = delilah_git::merge_refs(&s.dir, std::slice::from_ref(base), opts) {
+        if let Err(e) = delilah_git::merge_refs(&s.dir, &refs, opts) {
             for (d, start) in &done {
                 let _ = run(&d.dir, &["reset", "-q", "--hard", start]);
             }
             let text = e.to_string();
             // The merge was undone, so the files come from a dry run (exit 1: conflicts).
-            let (clean, out, _) = run(
-                &s.dir,
-                &["merge-tree", "--write-tree", "--name-only", "HEAD", base],
-            )?;
+            // Of the refs, the first that conflicts with the branch as it was.
+            let mut found = (true, String::new(), &refs[0]);
+            for r in &refs {
+                let (clean, out, _) = run(
+                    &s.dir,
+                    &["merge-tree", "--write-tree", "--name-only", "HEAD", r],
+                )?;
+                found = (clean, out, r);
+                if !clean {
+                    break;
+                }
+            }
+            let (clean, out, base) = found;
             let files: Vec<&str> = out.lines().skip(1).take_while(|l| !l.is_empty()).collect();
             return Err(if !clean && !files.is_empty() {
                 ApiError::conflict_reason(
@@ -276,7 +327,7 @@ fn merge_all(states: Vec<RepoState>, opts: &GitOptions) -> Result<(Option<String
             });
         }
         done.push((s, start));
-        merged += s.behind;
+        merged += pending.iter().map(|(_, n)| n).sum::<u32>();
     }
     Ok((summary(&states).0, merged))
 }
@@ -401,7 +452,8 @@ mod tests {
             s,
             BaseStatus {
                 base: Some("origin/main".into()),
-                behind_by: 3
+                behind_by: 3,
+                subtask_commits: 0
             }
         );
     }
@@ -551,7 +603,8 @@ mod tests {
             s,
             BaseStatus {
                 base: Some("origin/feature/P-1".into()),
-                behind_by: 2
+                behind_by: 2,
+                subtask_commits: 0
             }
         );
     }
@@ -602,5 +655,96 @@ mod tests {
             e.refusal.as_ref().unwrap()["error"],
             "parent-task-branch-missing"
         );
+    }
+
+    /// Makes the fixture's task a parent task whose branch on the origin has `merged`
+    /// commits from subtasks (each in `s<n>.txt`, or `conflict.txt` when `conflict`).
+    async fn as_parent_task(f: &Fixture, main_ahead: u32, merged: u32, conflict: bool) {
+        let root = f._tmp.path().canonicalize().unwrap();
+        let origin = root.join("origin.git");
+        sh(&root, &["clone", "-q", origin.to_str().unwrap(), "fourth"]);
+        let fourth = root.join("fourth");
+        let start = format!("origin/main~{main_ahead}");
+        sh(&fourth, &["checkout", "-q", "-b", "feature/PROJ-1", &start]);
+        for n in 0..merged {
+            let file = if conflict {
+                "conflict.txt".to_string()
+            } else {
+                format!("s{n}.txt")
+            };
+            std::fs::write(fourth.join(file), format!("subtask {n}\n")).unwrap();
+            sh(&fourth, &["add", "."]);
+            sh(&fourth, &["commit", "-qm", "subtask merged"]);
+        }
+        sh(&fourth, &["push", "-q", "origin", "feature/PROJ-1"]);
+        f.app
+            .store
+            .set_kind(&f.key, delilah_core::hierarchy::TaskKind::ParentTask, None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_parent_task_counts_the_commits_of_its_merged_subtasks() {
+        let f = fixture(2, false).await;
+        as_parent_task(&f, 2, 3, false).await;
+        let Ok(Json(s)) = call_status(&f).await else {
+            panic!("status failed")
+        };
+        assert_eq!(
+            s,
+            BaseStatus {
+                base: Some("origin/main".into()),
+                behind_by: 2,
+                subtask_commits: 3
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_parent_task_update_merges_its_own_branch_then_the_default_branch() {
+        let f = fixture(2, false).await;
+        as_parent_task(&f, 2, 2, false).await;
+        let Ok(Json(u)) = call_update(&f).await else {
+            panic!("update failed")
+        };
+        assert_eq!(u.merged, 4);
+        assert!(f.work.join("s1.txt").exists() && f.work.join("n1.txt").exists());
+        let parents = sh(&f.work, &["log", "--merges", "--format=%s", "-n2"]);
+        assert!(
+            parents.lines().next().unwrap().contains("origin/main"),
+            "default branch last: {parents}"
+        );
+        let Ok(Json(s)) = call_status(&f).await else {
+            panic!("status failed")
+        };
+        assert_eq!((s.behind_by, s.subtask_commits), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn a_parent_task_update_refuses_tracked_changes() {
+        let f = fixture(1, false).await;
+        as_parent_task(&f, 1, 1, false).await;
+        std::fs::write(f.work.join("conflict.txt"), "edited\n").unwrap();
+        let Err(e) = call_update(&f).await else {
+            panic!("must refuse")
+        };
+        assert_eq!(e.reason.as_deref(), Some("workspace-dirty"));
+        assert!(!f.work.join("s0.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_conflict_in_the_second_merge_undoes_the_first_too() {
+        // The subtasks' branch merges cleanly; the default branch conflicts.
+        let f = fixture(1, true).await;
+        as_parent_task(&f, 1, 1, false).await;
+        let before = sh(&f.work, &["rev-parse", "HEAD"]);
+        let Err(e) = call_update(&f).await else {
+            panic!("must refuse")
+        };
+        assert_eq!(e.reason.as_deref(), Some("update-conflict"));
+        assert_eq!(sh(&f.work, &["rev-parse", "HEAD"]), before);
+        assert_eq!(sh(&f.work, &["status", "--porcelain"]), "");
+        assert!(!f.work.join("s0.txt").exists());
     }
 }
