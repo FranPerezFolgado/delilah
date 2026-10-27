@@ -66,7 +66,7 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 ### Tests
 
 - [ ] T016 [P] [US1] API tests in `crates/delilah-daemon/src/api_hierarchy.rs` (or `crates/delilah-daemon/tests/`) for create: `kind: parent_task` stores workflow none and saving mode/autopilot/CI autofix off; `parent_task` set ⇒ subtask in the parent task's project; refusals `not-a-parent-task`, `parent-task-archived`, `nesting`, `project-mismatch`; free keys from `next_free_key`
-- [ ] T017 [P] [US1] Daemon e2e test in `crates/delilah-daemon/tests/parent_tasks.rs` (fake Claude, fixture repo with bare origin): starting a parent task makes a worktree (even with project workspace mode = checkout), pushes its branch, launches no session, status `Running`; restarting the daemon leaves it `Running` (startup recovery, idle/stale detection); an extra "+ Claude" session ending does not move it; starting a subtask before the parent task ⇒ `parent-task-not-started`; two subtasks start in parallel from `origin/<parent task branch>` with the parent task's submodules; missing remote branch ⇒ `parent-task-branch-missing`
+- [ ] T017 [P] [US1] Daemon e2e test in `crates/delilah-daemon/tests/parent_tasks.rs` (fake Claude, fixture repo with bare origin): starting a parent task makes a worktree (even with project workspace mode = checkout), pushes its branch, launches no session, status `Running`; restarting the daemon leaves it `Running` (startup recovery, idle/stale detection); an extra "+ Claude" session ending does not move it; a done parent task or subtask reopened keeps its kind and parent task; starting a subtask before the parent task ⇒ `parent-task-not-started`; two subtasks start in parallel from `origin/<parent task branch>` with the parent task's submodules; missing remote branch ⇒ `parent-task-branch-missing`
 
 ### Implementation
 
@@ -98,7 +98,7 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 
 ### Implementation
 
-- [ ] T030 [US2] Replace `base_of` (`crates/delilah-daemon/src/pr_api/open.rs` ~L85, used ~L102, ~L236) and the literal base (~L467) with `integration::base_for`; T028 passes
+- [ ] T030 [US2] Replace `base_of` (`crates/delilah-daemon/src/pr_api/open.rs` ~L85, used ~L102, ~L236) and the literal base (~L467) with `integration::base_for`; opening a subtask PR when `origin/<parent task branch>` is missing is refused with `parent-task-branch-missing` (spec edge case; test in T028); T028 passes
 - [ ] T031 [US2] In `crates/delilah-daemon/src/base_update.rs`, take the refs to compare and merge from `integration::base_for` (subtask: `origin/<parent task branch>`) in `inspect` (~L113), `update` (~L152) and `merge_all` (~L179) using `delilah_git::merge_refs`; base-status gains `base`; T029 passes
 - [ ] T032 [US2] `crates/delilah-daemon/src/pr_api/merge.rs` (~L97–112): without a method in the request use `integration::preferred_method`; `crates/delilah-daemon/src/pr_api/dto.rs` gains `method`, `base_branch`, `expected_base`; tests: subtask ⇒ squash, squash not allowed ⇒ `allowed[0]`
 - [ ] T033 [US2] `app/src/components/PrView.tsx`: show `pr.method` instead of `merge_methods[0]` (~L329, L448, L456); warning naming the target branch when `base_branch ≠ expected_base` for a subtask (no retarget action); vitest
@@ -140,7 +140,7 @@ Try changes only with `scripts/preview.sh` (never port 7420).
 **Independent Test**: spec US4 / quickstart step 6.
 
 - [ ] T044 [P] [US4] Tests: `actions::archive` and `actions::delete` on a parent task with a live subtask ⇒ 409 `live-subtasks` naming it (`--force` does not override); with only archived subtasks ⇒ allowed, and delete clears their `parent_task`; `archive_merged` on a parent task with live subtasks ⇒ `Done`, workspace kept, `parent-task-live` notice; a subtask's own archive/delete unchanged (`crates/delilah-daemon/src/actions.rs`, `crates/delilah-daemon/src/pr_loop/merge.rs` test modules)
-- [ ] T045 [US4] `crates/delilah-daemon/src/actions.rs` (~L103–170): `integration::live_subtasks` check in archive and delete; delete of a parent task calls `store.clear_parent_task_links`
+- [ ] T045 [US4] `crates/delilah-daemon/src/actions.rs` (~L103–170): `integration::live_subtasks` check in archive and delete; delete of a parent task calls `store.clear_parent_task_links`; archiving or deleting a subtask emits `Topic::Tasks` for its parent task so progress refreshes (SC-006)
 - [ ] T046 [US4] `crates/delilah-daemon/src/pr_loop/merge.rs::archive_merged` (~L51–116): after `MarkDone`, if the task is a parent task with live subtasks skip release/archive and push `parent-task-live`; T044 passes
 - [ ] T047 [P] [US4] CLI `archive`/`rm` and UI archive/delete actions (`app/src/components/TaskHeader.tsx`, `crates/delilah-cli/src/main.rs`) show the refusal naming the live subtasks; vitest
 

@@ -321,7 +321,7 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
 **Progress**
 
 - **FR-021**: A parent task MUST show "N/M subtasks merged", where M counts its subtasks
-  except those archived or deleted without being merged, in the task screen, the sidebar
+  except those archived without being merged (deleted ones no longer exist), in the task screen, the sidebar
   and the CLI.
 - **FR-022**: A parent task MUST list its subtasks with their state and PR state, and
   subtasks archived unmerged as dropped (deleted subtasks no longer exist and are not
