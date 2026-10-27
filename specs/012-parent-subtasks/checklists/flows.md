@@ -11,7 +11,7 @@
 - [x] CHK003 Does the spec say how the "behind" indicator of a parent task counts commits: default branch only, or also merged subtasks not yet in its workspace? [Gap, Spec §FR-015, §FR-016]
 - [x] CHK004 Is the behaviour of a parent task's "Update branch" defined when bringing in its remote commits conflicts with local, unpushed work? [Edge Case, Spec §FR-016]
 - [x] CHK005 Is it defined what happens to a subtask PR opened outside Delilah against the default branch? [Gap, Spec §FR-013]
-- [ ] CHK006 Is it defined whether the empty commit is pushed immediately and with what message? [Clarity, Spec §FR-014]
+- [x] CHK006 Is it defined whether the empty commit is pushed immediately and with what message? [Clarity, Spec §FR-014]
 - [x] CHK007 Is the requirement that the parent task's PR be a draft consistent with a user who wants to open it ready (all subtasks already merged)? [Consistency, Spec §FR-014, §FR-023]
 
 ## Hierarchy rules: consistency
@@ -26,7 +26,7 @@
 ## API and CLI contract
 
 - [x] CHK014 Is the CLI way to create a parent task named, not only "a way to"? [Clarity, Spec §FR-005]
-- [ ] CHK015 Are the CLI and API operations for turning a task into a parent task and attaching a subtask specified? [Completeness, Spec §FR-008]
+- [x] CHK015 Are the CLI and API operations for turning a task into a parent task and attaching a subtask specified? [Completeness, Spec §FR-008]
 - [x] CHK016 Is it stated that the API changes are additive, so older clients keep working? [Gap, Spec §FR-029]
 - [x] CHK017 Is the CLI listing of a parent task's subtasks and progress specified (which command)? [Clarity, Spec §FR-021]
 
@@ -35,7 +35,7 @@
 - [x] CHK018 Can SC-006 "with no manual refresh" be verified objectively (a time bound)? [Measurability, Spec §SC-006]
 - [x] CHK019 Does SC-003 account for repositories that allow only squash (as Delilah's own)? [Consistency, Spec §SC-003, §FR-017]
 - [x] CHK020 Are notifications defined for the parent task when a subtask is merged or dropped? [Gap]
-- [ ] CHK021 Are concurrent merges of two subtasks addressed (progress and "behind" of the others)? [Coverage, Spec §SC-006]
+- [x] CHK021 Are concurrent merges of two subtasks addressed (progress and "behind" of the others)? [Coverage, Spec §SC-006]
 
 ## Notes
 
@@ -45,3 +45,6 @@
   for one; the plan names it).
 - Open for the plan (research.md): CHK006 (empty commit message and push), CHK015 (names
   of the convert/attach operations), CHK021 (concurrent subtask merges).
+- Settled in research.md: CHK006 (R11: `chore: start <KEY> <title>`, pushed before the
+  PR opens), CHK014/CHK015 (R14: `new --parent-task`, `make-parent-task`, `attach`),
+  CHK021 (R14: progress derived on read, never stored).

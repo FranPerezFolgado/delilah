@@ -29,8 +29,9 @@ other, they all hang from the parent task.
 - **Live subtask**: a subtask that is neither archived nor deleted (backlog, running,
   waiting, done but not yet archived, including one merged whose archive was held back
   by leftover changes).
-- **Dropped subtask**: a subtask archived or deleted without its PR merged. A subtask
-  whose PR was closed without merging but that is still live is not dropped.
+- **Dropped subtask**: a subtask archived without its PR merged. A deleted subtask is
+  gone: it leaves the list and the count. A subtask whose PR was closed without merging
+  but that is still live is not dropped.
 
 ### Behaviour per kind
 
@@ -178,8 +179,9 @@ Archive the subtask and retry: it works.
    Inbox says why.
 3. **Given** a parent task whose subtasks are all archived or deleted, **When** its PR is
    merged, **Then** it is archived as normal tasks are today.
-4. **Given** a subtask, **When** it is archived or deleted without being merged, **Then**
-   the parent task's progress no longer counts it, and it shows as dropped in the list.
+4. **Given** a subtask, **When** it is archived without being merged, **Then** the parent
+   task's progress no longer counts it, and it shows as dropped in the list; **When** it is
+   deleted, **Then** it leaves both the count and the list.
 
 ---
 
@@ -322,7 +324,8 @@ a subtask; attach a backlog normal task to a parent task; check the refusals.
   except those archived or deleted without being merged, in the task screen, the sidebar
   and the CLI.
 - **FR-022**: A parent task MUST list its subtasks with their state and PR state, and
-  subtasks archived or deleted unmerged as dropped.
+  subtasks archived unmerged as dropped (deleted subtasks no longer exist and are not
+  listed).
 - **FR-023**: When every counted subtask is merged (and there is at least one), the
   parent task MUST suggest marking its PR ready for review, on its screen and as one
   Inbox notice. A parent task with no counted subtasks shows "0 subtasks" and no
