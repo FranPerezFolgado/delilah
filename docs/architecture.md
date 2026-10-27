@@ -86,6 +86,7 @@ done or pending is in [status.md](status.md).
 | `changes.rs`, `files.rs` | Changes (diffs) and the editor's file API, confined to the workspace and checked by file version. |
 | `projects.rs`, `store_projects.rs` | Registered projects (`parent` or `repo`), their settings (validation, `FieldError` with a stable `code`, localised by the daemon), submodules (`GET …/submodules` hides `never` ones unless `?all=true`), and the submodule suggestion. |
 | `setup.rs` | A project's setup command: runs `$SHELL -lc` in the worktree as a `Setup` session (10 min), cancel/retry/skip, recovery of interrupted setups at start. It also writes `tasks/<KEY>/setup.json` (command, exit code, times, `cancelled`, `timed_out`, tail, log size) at the end of each run and serves `GET /tasks/{key}/setup` and `/setup/log`. |
+| `hierarchy.rs`, `integration.rs`, `api_hierarchy.rs` | Parent tasks and subtasks (spec 012, [#102](decisions.md)). `hierarchy.rs`: the invariants (two levels, kind never goes back, project of the parent) checked on create, convert and attach, and the derived archived/merged/dropped/progress. `integration.rs`: the start rules (`start_rules`/`StartPlan`: base `origin/<parent branch>`, no checkout, no agent for a parent task), `base_for`, `preferred_method` (`parent_task_merge`) and `api_error` (refusals such as `parent-task-not-started`, `parent-task-branch-missing`). `api_hierarchy.rs`: `GET /tasks/{key}/subtasks`, `POST /tasks/{key}/push-branch`, `POST /tasks/{key}/make-parent-task`, `POST /tasks/{key}/attach`. |
 | `base_update.rs` | `GET /tasks/{key}/base-status` (how far `origin`'s default branch is ahead) and `POST /tasks/{key}/update-branch`: merges the base into the task's branch (never a rebase); refuses with `no-workspace`, `no-branch`, `not-on-branch`, `workspace-dirty` or `update-conflict` (the merge is aborted); settles the `base-stale` notice. |
 | `gh/` | The user's `gh` behind the `Gh` trait (`mod.rs`: `CliGh`, access problems, repo/user/PR calls), the GraphQL query and its parser (`graphql.rs`) and a canned `FakeGh` for tests (`fake.rs`). `DELILAH_GH_BIN` (absolute path, checked in `Config` at start) swaps the binary. |
 
@@ -136,6 +137,8 @@ Four environment variables exist only for the end-to-end tests (read in `Config:
 
 `TaskKey::parse` allows letters, digits, `-` and `_`, up to 64 characters. The key
 names folders and goes into hook commands. Free tasks are named `LIBRE-n`.
+
+**Kind.** `Task.kind` is `normal`, `parent_task` or `subtask` (`parent_task` holds the parent's key; migration `0025_task_hierarchy.sql`, an index on it, no foreign key). A parent task goes `Queued → PreparingWorkspace → Running` with no session and stays there until `MarkDone`; `branching::pending` and recovery skip it. A subtask is a normal task whose base is the parent's branch (`base_update.rs`, `pr_api/open.rs`). Progress is never stored. `pr_loop/merge.rs` archives a merged subtask, raises `parent-task-ready` when progress is ready and the parent PR is a draft, and keeps a merged parent task with live subtasks Done (`parent-task-live`). `pr_api/ready.rs` is `gh pr ready` ("Mark ready"). `actions.rs` refuses archive and delete with `live-subtasks`.
 
 **Status** (`delilah-core::task`) is a state machine driven by `Event`s:
 

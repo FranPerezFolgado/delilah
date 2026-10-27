@@ -82,6 +82,8 @@ export function App() {
   };
   const [selected, setSelected] = useState<string | null>(null);
   const [newTask, setNewTask] = useState(false);
+  // «Nueva subtarea»: the parent task the dialog creates a subtask of.
+  const [parentTask, setParentTask] = useState<Task | null>(null);
   const [draft, setDraft] = useState<TaskDraft | undefined>(undefined);
   const [bindings, setBindingsState] = useState<Bindings>(DEFAULTS);
   const [convertFrom, setConvertFrom] = useState<Session | null>(null);
@@ -461,6 +463,10 @@ export function App() {
                   askPosition={askPosition}
                   onChanged={refresh}
                   onNewTask={() => setNewTask(true)}
+                  onNewSubtask={(parent) => {
+                    setParentTask(parent);
+                    setNewTask(true);
+                  }}
                   onOpenTask={(key) => openTask(key)}
                   onOpenSettings={setSettingsOf}
                   onConvert={(s) => {
@@ -535,14 +541,17 @@ export function App() {
           project={project?.name ?? task?.project ?? undefined}
           fromSession={convertFrom ? { id: convertFrom.id, label: convertFrom.label } : undefined}
           existing={starting ?? undefined}
+          parentTask={parentTask ?? undefined}
           draft={draft}
           onClose={() => {
+            setParentTask(null);
             setNewTask(false);
             setDraft(undefined);
             setConvertFrom(null);
             setStarting(null);
           }}
           onStarted={(t) => {
+            setParentTask(null);
             setNewTask(false);
             setDraft(undefined);
             setConvertFrom(null);
@@ -551,11 +560,13 @@ export function App() {
             openTask(t.key);
           }}
           onConversation={(name, s) => {
+            setParentTask(null);
             setNewTask(false);
             setDraft(undefined);
             openConversation(name, s);
           }}
           onSaved={(saved) => {
+            setParentTask(null);
             setNewTask(false);
             setDraft(undefined);
             refresh();

@@ -747,3 +747,21 @@ describe("TaskScreen Oficina tab", () => {
     expect(screen.getByTestId("office")).not.toBeNull();
   });
 });
+
+describe("TaskScreen parent tasks", () => {
+  const open = (t: Task) => {
+    sessionFor(t.key).active = "\0overview";
+    return render(<TaskScreen owner={t.key} task={t} sessions={[]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} />);
+  };
+
+  it("lists the subtasks of a parent task on the Tarea tab and shows the progress in the header", () => {
+    open({ ...task({ type: "running" }), kind: "parent_task", subtask_progress: { merged: 0, counted: 0, dropped: 0, ready: false } });
+    expect(document.querySelector(".subtasks")).not.toBeNull();
+    expect(document.querySelector(".th-progress")).not.toBeNull();
+  });
+
+  it("shows no subtask list on a normal task", () => {
+    open(task({ type: "running" }));
+    expect(document.querySelector(".subtasks")).toBeNull();
+  });
+});

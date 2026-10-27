@@ -166,3 +166,47 @@ it("is full above 960", () => {
   expect(container.querySelector(".th.compact")).toBeNull();
   expect(container.querySelector(".phasebars .lbl")).not.toBeNull();
 });
+
+it("a parent task shows its subtask progress instead of the status", () => {
+  const { container } = setup({}, { kind: "parent_task", subtask_progress: { merged: 2, counted: 3, dropped: 0, ready: false } });
+  expect(container.querySelector(".th-progress")!.textContent).toBe("2 de 3 subtareas integradas");
+  expect(container.textContent).not.toContain("Trabajando");
+});
+
+it("a subtask links to its parent task", () => {
+  const { container, props } = setup({ onOpenTask: vi.fn() }, { kind: "subtask", parent_task: "DEL-1" });
+  fireEvent.click(container.querySelector(".th-parent button")!);
+  expect(props.onOpenTask).toHaveBeenCalledWith("DEL-1");
+  expect(container.textContent).toContain("Trabajando");
+});
+
+it("offers to push the parent task's branch again only when it is missing", async () => {
+  const push = vi.spyOn(api, "pushBranch").mockResolvedValue(null);
+  const none = setup({}, { kind: "parent_task" });
+  expect(none.queryByText("Volver a subir la rama")).toBeNull();
+  none.unmount();
+  const { getByText, props } = setup({ branchMissing: true }, { kind: "subtask", parent_task: "DEL-1" });
+  fireEvent.click(getByText("Volver a subir la rama"));
+  expect(push).toHaveBeenCalledWith("DEL-1");
+  await waitFor(() => expect(props.onChanged).toHaveBeenCalled());
+});
+
+it("offers «Convertir en tarea padre» on a started normal task and shows the refusal", async () => {
+  const make = vi.spyOn(api, "makeParentTask").mockResolvedValueOnce(task({ kind: "parent_task" })).mockRejectedValueOnce(new Error("Tiene un PR abierto"));
+  const { props } = setup({}, { kind: "normal" });
+  fireEvent.click(screen.getByRole("button", { name: "Tarea padre" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Convertir en tarea padre" }));
+  expect(make).toHaveBeenCalledWith("DEL-12");
+  await waitFor(() => expect(props.onChanged).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Tarea padre" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Convertir en tarea padre" }));
+  await waitFor(() => expect(props.onError).toHaveBeenCalledWith("Tiene un PR abierto"));
+});
+
+it("has no parent task menu on a parent task or a subtask", () => {
+  setup({}, { kind: "parent_task" });
+  expect(screen.queryByRole("button", { name: "Tarea padre" })).toBeNull();
+  cleanup();
+  setup({}, { kind: "subtask", parent_task: "DEL-1" });
+  expect(screen.queryByRole("button", { name: "Tarea padre" })).toBeNull();
+});

@@ -1,13 +1,18 @@
 //! What the PR routes send and receive.
 
 use chrono::{DateTime, Utc};
+use delilah_core::hierarchy::TaskKind;
+use delilah_core::{ProjectSettings, TaskKey};
 use serde::{Deserialize, Serialize};
 
+use crate::api::ApiError;
 use crate::autofix::{self, PrAutofix, State, StopReason};
+use crate::integration::{self, Base};
 use crate::pr_types::{
     Check, MergeMethod, PrState, ReviewComment, ReviewDecision, Rollup, Snapshot,
 };
 use crate::prs;
+use crate::state::AppState;
 use crate::store_prs::PrRow;
 
 #[derive(Serialize)]
@@ -39,6 +44,56 @@ pub struct PrView {
     snapshot: Option<SnapshotView>,
     /// `null` until CI autofix first acts on the PR.
     autofix: Option<PrAutofixView>,
+    /// What Merge will use; `null` while the repository's methods are unknown.
+    method: Option<MergeMethod>,
+    /// The branch the PR targets (`null` until it is read).
+    base_branch: Option<String>,
+    /// The branch it should target: the parent task's for a subtask, else `null`.
+    expected_base: Option<String>,
+}
+
+/// What a task's PRs need beyond the PR itself: its kind and project settings (the merge
+/// method) and, for a subtask, the parent task's branch.
+pub(super) struct TaskContext {
+    kind: TaskKind,
+    settings: ProjectSettings,
+    expected_base: Option<String>,
+}
+
+impl TaskContext {
+    pub(super) async fn of(app: &AppState, key: &TaskKey) -> Result<Self, ApiError> {
+        let Some(task) = app.store.get_task(key).await? else {
+            return Ok(Self {
+                kind: TaskKind::Normal,
+                settings: ProjectSettings::default(),
+                expected_base: None,
+            });
+        };
+        let settings = match &task.project {
+            Some(name) => app
+                .store
+                .project(name)
+                .await
+                .map(|p| p.settings)
+                .unwrap_or_default(),
+            None => ProjectSettings::default(),
+        };
+        // A subtask whose parent has no workspace has no expected base to compare.
+        let expected_base = match integration::base_for(&app.store, &task).await {
+            Ok(Base::Branch(b)) => Some(b),
+            _ => None,
+        };
+        Ok(Self {
+            kind: task.kind,
+            settings,
+            expected_base,
+        })
+    }
+
+    /// The method Merge uses when the request names none.
+    pub(super) fn method(&self, allowed: &[MergeMethod]) -> Option<MergeMethod> {
+        integration::preferred_method(self.kind, &self.settings, allowed)
+    }
 }
 
 /// What clients see of a PR's autofix state: the internal `session` stays out.
@@ -95,6 +150,9 @@ pub struct OpenRequest {
     pub(super) body: String,
     #[serde(default)]
     pub(super) draft: bool,
+    /// Parent task only: commit `chore: start <KEY> <title>` when the branch has none.
+    #[serde(default)]
+    pub(super) empty_commit: bool,
 }
 
 impl From<&Snapshot> for SnapshotView {
@@ -128,9 +186,27 @@ impl From<&PrAutofix> for PrAutofixView {
     }
 }
 
+impl PrView {
+    /// The PR with what the task's kind adds: the merge method and the expected base.
+    pub(super) fn with(row: &PrRow, ctx: &TaskContext) -> Self {
+        let method = row
+            .snapshot
+            .as_ref()
+            .and_then(|s| ctx.method(&s.merge_methods));
+        Self {
+            method,
+            expected_base: ctx.expected_base.clone(),
+            ..Self::from(row)
+        }
+    }
+}
+
 impl From<&PrRow> for PrView {
     fn from(row: &PrRow) -> Self {
         Self {
+            method: None,
+            base_branch: row.snapshot.as_ref().map(|s| s.base.clone()),
+            expected_base: None,
             id: row.id,
             repo: row.repo.clone(),
             host: row.host.clone(),

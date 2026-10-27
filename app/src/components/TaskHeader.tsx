@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { api, type PrSnapshot, type SpecPhase, type Task } from "../api";
+import { api, taskKind, type PrSnapshot, type SpecPhase, type Task } from "../api";
 import { t } from "../i18n";
 import { COLUMNS, phaseLabel, type HeaderPhase } from "../phases";
 import { keyOf } from "../shortcuts";
@@ -7,7 +7,8 @@ import { relativeTime } from "../time";
 import { COMPACT_MAIN, useContainerWidth } from "../useWidth";
 import { AutopilotControls } from "./AutopilotControls";
 import { PreviewControl } from "./PreviewControl";
-import { IconButton, Menu, PhaseBars, PrChip, StatusBadge } from "./ui";
+import { Button, IconButton, Menu, PhaseBars, PrChip, StatusBadge } from "./ui";
+import { progressLabel } from "./SubtaskList";
 import "./TaskHeader.css";
 
 export interface TaskHeaderProps {
@@ -31,6 +32,10 @@ export interface TaskHeaderProps {
   /** After a rename or phase change (the caller refreshes the task). */
   onChanged: () => void;
   onError: (message: string) => void;
+  /** Goes to a task (a subtask's parent task). */
+  onOpenTask?: (key: string) => void;
+  /** The parent task's integration branch is not on the remote: offers to push it again. */
+  branchMissing?: boolean;
 }
 
 /** The task screen's header: key, editable title, status, phase, controls. Compact when the
@@ -53,6 +58,15 @@ export function TaskHeader(p: TaskHeaderProps) {
     if (task.previous_title) api.updateTask(owner, { title: task.previous_title }).then(p.onChanged).catch(fail);
   };
   const setPhase = (column: SpecPhase) => api.setPhase(owner, column).then(p.onChanged).catch(fail);
+
+  const kind = taskKind(task);
+  // The parent task whose branch would be pushed: this task, or a subtask's parent task.
+  const parentKey = kind === "parent_task" ? task.key : task.parent_task;
+  const pushBranch = () => {
+    if (parentKey) api.pushBranch(parentKey).then(p.onChanged).catch(fail);
+  };
+
+  const makeParent = () => api.makeParentTask(task.key).then(p.onChanged).catch(fail);
 
   const bars = <PhaseBars phase={phase} status={task.status} labelInTooltip={compact} />;
   const phases = COLUMNS.filter((c) => c.id !== "done");
@@ -84,7 +98,28 @@ export function TaskHeader(p: TaskHeaderProps) {
           <button type="button" className="th-link" onClick={restore}>{t("Restaurar")}</button>
         </span>
       )}
-      <StatusBadge status={task.status} />
+      {kind === "subtask" && task.parent_task && (
+        <span className="th-parent">
+          {t("Subtarea de")}{" "}
+          <button type="button" className="th-link mono" onClick={() => p.onOpenTask?.(task.parent_task!)}>{task.parent_task}</button>
+        </span>
+      )}
+      {kind === "parent_task" ? (
+        <span className="badge neutral th-progress" title={t("Tarea padre")}>{progressLabel(task)}</span>
+      ) : (
+        <StatusBadge status={task.status} />
+      )}
+      {kind === "normal" && !done && (
+        <Menu
+          trigger={(m) => (
+            <button type="button" className="th-link" aria-label={t("Tarea padre")} title={t("Tarea padre")} {...m}>⋯</button>
+          )}
+          items={[{ label: t("Convertir en tarea padre"), onSelect: makeParent }]}
+        />
+      )}
+      {p.branchMissing && parentKey && (
+        <Button variant="secondary" size={28} onClick={pushBranch}>{t("Volver a subir la rama")}</Button>
+      )}
       {done ? (
         <>
           {p.pr && <PrChip pr={p.pr} />}

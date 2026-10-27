@@ -40,6 +40,7 @@ impl Fixture {
 
     pub fn spec(&self, submodules: &[&str]) -> WorkspaceSpec {
         WorkspaceSpec {
+            base: None,
             path: self.root.join("workspaces/PROJ-1234"),
             branch: Some(BRANCH.into()),
             kind: ProjectKind::Parent,
@@ -63,6 +64,7 @@ impl Fixture {
 
     pub fn repo_spec(&self) -> WorkspaceSpec {
         WorkspaceSpec {
+            base: None,
             path: self.root.join("workspaces/SIGNAL-12"),
             branch: Some("feature/SIGNAL-12".into()),
             kind: ProjectKind::Repo,

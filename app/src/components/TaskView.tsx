@@ -96,7 +96,9 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
         undoToast.current = null;
         setKeeps(null);
       } catch (e) {
-        if (e instanceof ApiError && e.status === 409 && !force) setKeeps(e.message);
+        // Live subtasks: forcing does not help; the message names them.
+        if (e instanceof ApiError && e.reason === "live-subtasks") setError(e.message);
+        else if (e instanceof ApiError && e.status === 409 && !force) setKeeps(e.message);
         else throw e;
       }
     });
@@ -125,6 +127,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
     } catch (e) {
       // Work that would be lost: the app's own dialog asks about forcing it.
       if (e instanceof ApiError && e.unpushed) askToDelete(task);
+      else if (e instanceof ApiError && e.reason === "live-subtasks") setError(e.message);
       else setError(humanError(e));
     }
   };

@@ -439,6 +439,16 @@ impl GhClient {
         self.inner.run(None, args, None).await.map(drop)
     }
 
+    /// Marks the draft PR at `url` ready for review (`gh pr ready`). Only ever called
+    /// from the user's explicit request, never by the daemon on its own.
+    pub async fn pr_ready(&self, url: &str) -> Result<(), GhError> {
+        if !url.starts_with("https://") {
+            return Err(GhError::Parse(format!("`{url}` is not an https URL")));
+        }
+        let args = strings(&["pr", "ready", "--", url]);
+        self.inner.run(None, args, None).await.map(drop)
+    }
+
     /// Creates the PR and returns its URL. The body goes through stdin.
     pub async fn pr_create(
         &self,

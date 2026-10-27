@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, isCheckoutDirty, type Project, type Task } from "../api";
+import { api, ApiError, isCheckoutDirty, taskKind, type Project, type Task } from "../api";
 import { t } from "../i18n";
 import { isPhased } from "../workflowPresets";
 import { relativeTime } from "../time";
@@ -7,7 +7,7 @@ import { AutofixControl, autofixDefault } from "./AutofixControl";
 import { AutopilotControls } from "./AutopilotControls";
 import { StartPicker, startChoiceOf, startFields, type StartChoice } from "./WorkflowEditor";
 import { WherePicker, whereOf, type Where } from "./WherePicker";
-import { Button, ConfirmDialog, StatusBadge, useToast } from "./ui";
+import { Button, ConfirmDialog, Dialog, StatusBadge, useToast } from "./ui";
 import "./BacklogTaskView.css";
 
 interface Props {
@@ -27,6 +27,29 @@ const startChange = (c: StartChoice): { workflow: string; start_message: string 
   return { workflow: f.workflow!, start_message: f.prompt ?? "" };
 };
 
+/** The project's parent tasks that can still take a subtask. */
+function AttachDialog({ task, onPick, onClose }: { task: Task; onPick: (parent: string) => void; onClose: () => void }) {
+  const [parents, setParents] = useState<Task[] | null>(null);
+  useEffect(() => {
+    api.tasks().then((all) => setParents(all.filter((o) => taskKind(o) === "parent_task" && !o.status.type.match(/^(done|failed)$/) && (!task.project || o.project === task.project)))).catch(() => setParents([]));
+  }, [task.project]);
+  return (
+    <Dialog title={t("Adjuntar a tarea padre")} onClose={onClose}>
+      {parents === null ? null : parents.length === 0 ? (
+        <p className="muted small">{t("No hay tareas padre abiertas en este proyecto.")}</p>
+      ) : (
+        <div className="bt-parents">
+          {parents.map((o) => (
+            <button key={o.key} type="button" className="btn" onClick={() => onPick(o.key)}>
+              <span className="mono">{o.key}</span> {o.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 /** A task saved to the backlog: what it is about, editable until it starts. */
 export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
   const toast = useToast();
@@ -43,8 +66,11 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
   const [autofix, setAutofix] = useState<boolean | null>(task.ci_autofix ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The start was refused because the parent task's branch is not on the remote.
+  const [branchMissing, setBranchMissing] = useState(false);
   const [refused, setRefused] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   /** The task as the daemon returned it after «Iniciar». */
   const [started, setStarted] = useState<Task | null>(null);
 
@@ -87,11 +113,13 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
     setError(null);
     setStartErrors([]);
     setRefused(false);
+    setBranchMissing(false);
     try {
       await run();
     } catch (e) {
       const message = (e as Error).message;
       if (e instanceof ApiError && e.fields.length > 0) setStartErrors(e.fields);
+      if (e instanceof ApiError && e.reason === "parent-task-branch-missing") setBranchMissing(true);
       if (isCheckoutDirty(e)) setRefused(true);
       else setError(message);
     } finally {
@@ -122,6 +150,20 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
       setStarted(run);
       toast({ text: t("{key} iniciada", { key: task.key }), action: { label: t("Abrir"), run: () => open(task.key) } });
     });
+
+  const makeParent = () =>
+    guard(async () => {
+      await api.makeParentTask(task.key);
+      onChanged();
+    });
+
+  const attach = (parent: string) => {
+    setAttaching(false);
+    return guard(async () => {
+      await api.attach(task.key, parent);
+      onChanged();
+    });
+  };
 
   const remove = () =>
     guard(async () => {
@@ -184,6 +226,11 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
           </div>
         )}
         {error && <div className="error selectable">{error}</div>}
+        {branchMissing && task.parent_task && (
+          <Button variant="secondary" size={28} disabled={busy} onClick={() => guard(async () => { await api.pushBranch(task.parent_task!); })}>
+            {t("Volver a subir la rama")}
+          </Button>
+        )}
         {started && <div className="bt-started" role="status">{t("{key} iniciada", { key: task.key })}</div>}
         <div className="bt-actions">
           <Button variant="primary" icon="run" disabled={locked || blankStart || !title.trim() || !project} onClick={() => start(where === "checkout")}>
@@ -192,11 +239,18 @@ export function BacklogTaskView({ task, projects, onChanged, onOpen }: Props) {
           <Button variant="secondary" disabled={locked || blankStart || !dirty || !title.trim()} onClick={save}>
             {t("Guardar")}
           </Button>
+          {taskKind(task) === "normal" && (
+            <>
+              <Button variant="secondary" disabled={locked} onClick={makeParent}>{t("Hacer tarea padre")}</Button>
+              <Button variant="secondary" disabled={locked} onClick={() => setAttaching(true)}>{t("Adjuntar a tarea padre…")}</Button>
+            </>
+          )}
           <Button variant="danger" className="bt-delete" disabled={locked} onClick={() => setDeleting(true)}>
             {t("Eliminar…")}
           </Button>
         </div>
       </div>
+      {attaching && <AttachDialog task={task} onPick={attach} onClose={() => setAttaching(false)} />}
       {deleting && (
         <ConfirmDialog
           danger

@@ -70,3 +70,8 @@ nav.sidebar.rail { width: 56px; align-items: center; padding: 10px 6px; }
 
 /* Moved from the pre-v2 stylesheet. */
 .sidebar { width: 232px; flex: none; background: var(--side); border-right: 1px solid var(--bd); display: flex; flex-direction: column; gap: 1px; padding: 10px 8px; overflow-y: auto; }
+
+/* A parent task: chevron + row, its subtasks indented below. */
+.sb-parent { display: flex; align-items: center; }
+.sb-parent-row { flex: 1; min-width: 0; }
+.sb-subtasks { margin-left: 16px; }

@@ -5,6 +5,7 @@ mod dto;
 pub(crate) mod forward;
 pub mod merge;
 mod open;
+pub mod ready;
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -117,10 +118,11 @@ pub async fn task_prs(
         Some(p) => Some(p),
         None => lookup_problem,
     };
+    let ctx = dto::TaskContext::of(&app, &key).await?;
     Ok(Json(TaskPrs {
         account,
         problem,
-        prs: rows.iter().map(PrView::from).collect(),
+        prs: rows.iter().map(|r| PrView::with(r, &ctx)).collect(),
     }))
 }
 
@@ -171,7 +173,8 @@ pub async fn link(
 ) -> Result<Json<PrView>, ApiError> {
     let key = known_task(&app, &key).await?;
     let row = pr_loop::link_by_url(&app, &key, req.url.trim(), "pasted").await?;
-    Ok(Json(PrView::from(&row)))
+    let ctx = dto::TaskContext::of(&app, &key).await?;
+    Ok(Json(PrView::with(&row, &ctx)))
 }
 
 pub async fn unlink(

@@ -22,4 +22,11 @@ export const EN: Record<string, string> = {
   "Según ajustes": "Per Settings",
   "Sugerencia: {model} · {reason}": "Suggestion: {model} · {reason}",
   Aplicar: "Apply",
+  "Nueva subtarea de {key}": "New subtask of {key}",
+  "Nueva tarea padre": "New parent task",
+  "Crear subtarea": "Create subtask",
+  "Crear tarea padre": "Create parent task",
+  "Tipo de tarea": "Task type",
+  "Tarea normal": "Normal task",
+  "Tarea padre": "Parent task",
 };

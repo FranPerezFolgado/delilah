@@ -7,13 +7,15 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use delilah_core::TaskKey;
+use delilah_core::hierarchy::{Refusal, TaskKind};
 use delilah_git::GitOptions;
 use delilah_integrations::jira::JiraMode;
 
-use super::dto::{OpenRequest, PrView, Proposal, ProposalQuery};
+use super::dto::{OpenRequest, PrView, Proposal, ProposalQuery, TaskContext};
 use super::known_task;
 use crate::api::ApiError;
 use crate::gh::parse_pr_url;
+use crate::integration::{self, Base};
 use crate::jira::{JiraSettings, SETTINGS_KEY};
 use crate::pr_loop;
 use crate::pr_types::PrState;
@@ -81,14 +83,46 @@ async fn jira_link(app: &AppState, key: &TaskKey) -> Option<String> {
     ))
 }
 
-/// The default branch of the repo at `dir`.
-async fn base_of(app: &AppState, dir: &FsPath) -> Result<String, ApiError> {
-    Ok(app
-        .gh
-        .repo_view(dir)
-        .await
-        .map_err(|e| ApiError::conflict(e.to_string()))?
-        .default_branch)
+/// The branch a PR of `key` from the repo at `dir` targets: the default branch of the
+/// repo, or for a subtask the parent task's branch, which the remote must have (refused
+/// as `parent-task-branch-missing` otherwise). The only place a PR base is chosen.
+async fn base_of(app: &AppState, key: &TaskKey, dir: &FsPath) -> Result<String, ApiError> {
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?;
+    match integration::base_for(&app.store, &task).await {
+        Ok(Base::Default) => Ok(app
+            .gh
+            .repo_view(dir)
+            .await
+            .map_err(|e| ApiError::conflict(e.to_string()))?
+            .default_branch),
+        Ok(Base::Branch(branch)) => {
+            let (d, spec) = (dir.to_path_buf(), format!("origin/{branch}^{{commit}}"));
+            let found = tokio::task::spawn_blocking(move || {
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(d)
+                    .args(["rev-parse", "--verify", "--quiet", &spec])
+                    .output()
+                    .is_ok_and(|o| o.status.success())
+            })
+            .await
+            .map_err(join_error)?;
+            if found {
+                Ok(branch)
+            } else {
+                Err(ApiError::refused(
+                    app.lang(),
+                    Refusal::ParentTaskBranchMissing,
+                    serde_json::json!({ "branch": branch }),
+                ))
+            }
+        }
+        Err(e) => Err(integration::api_error(app.lang(), &task, e)),
+    }
 }
 
 /// What the branch holds beyond the default branch of its repo.
@@ -98,8 +132,13 @@ struct Commits {
     needs_push: bool,
 }
 
-async fn commits_of(app: &AppState, dir: &FsPath, branch: &str) -> Result<Commits, ApiError> {
-    let base = base_of(app, dir).await?;
+async fn commits_of(
+    app: &AppState,
+    key: &TaskKey,
+    dir: &FsPath,
+    branch: &str,
+) -> Result<Commits, ApiError> {
+    let base = base_of(app, key, dir).await?;
     let opts = git_options(app);
     let (d, b, bs) = (dir.to_path_buf(), branch.to_string(), base.clone());
     let (subjects, needs_push) = tokio::task::spawn_blocking(move || {
@@ -173,7 +212,7 @@ async fn build_proposal(
                 "has-pr",
             ));
         }
-        let commits = commits_of(app, &dir, &branch).await?;
+        let commits = commits_of(app, key, &dir, &branch).await?;
         if commits.subjects.is_empty() {
             empty.get_or_insert((branch, commits.base));
         } else {
@@ -233,7 +272,7 @@ async fn create_and_link(
     (repo, dir, branch): (String, &FsPath, &str),
     (title, body, draft): (&str, &str, bool),
 ) -> Result<PrRow, ApiError> {
-    let base = base_of(app, dir).await?;
+    let base = base_of(app, key, dir).await?;
     let url = app
         .gh
         .pr_create(dir, branch, &base, title, body, draft)
@@ -259,10 +298,43 @@ pub(crate) async fn open_for(
     body: &str,
     draft: bool,
 ) -> Result<PrRow, ApiError> {
+    open_with(app, key, repo, title, body, (draft, false)).await
+}
+
+/// [`open_for`] with `empty_commit`: a parent task whose branch has no commits gets
+/// `chore: start <KEY> <title>` first. A parent task's PR is a draft until every one of
+/// its subtasks is merged.
+async fn open_with(
+    app: &AppState,
+    key: &TaskKey,
+    repo: Option<&str>,
+    title: &str,
+    body: &str,
+    (draft, empty_commit): (bool, bool),
+) -> Result<PrRow, ApiError> {
     let title = title.trim();
     if title.is_empty() {
         return Err(ApiError::bad_request("the PR needs a title"));
     }
+    let task = app
+        .store
+        .get_task(key)
+        .await?
+        .ok_or_else(|| crate::store::StoreError::NotFound(key.clone()))?;
+    let is_parent = task.kind == TaskKind::ParentTask;
+    if empty_commit && !is_parent {
+        return Err(ApiError::refused(
+            app.lang(),
+            Refusal::EmptyCommitNotAllowed,
+            serde_json::json!({}),
+        ));
+    }
+    let draft = draft
+        || (is_parent
+            && !integration::progress(&app.store, key)
+                .await
+                .map_err(|e| integration::api_error(app.lang(), &task, e))?
+                .ready);
     let (repo, branch, dir, _) = source_of(app, key, repo).await?;
     // Keeps a detection from linking the PR twice while it is being opened; the link
     // is an upsert anyway, so a check already running is not waited for.
@@ -279,6 +351,19 @@ pub(crate) async fn open_for(
             "has-pr",
         ));
     }
+    if empty_commit
+        && commits_of(app, key, &dir, &branch)
+            .await?
+            .subjects
+            .is_empty()
+    {
+        let opts = git_options(app);
+        let (d, message) = (dir.clone(), format!("chore: start {key} {}", task.title));
+        tokio::task::spawn_blocking(move || delilah_git::commit_empty(&d, &message, &opts))
+            .await
+            .map_err(join_error)?
+            .map_err(|e| ApiError::conflict(e.to_string()))?;
+    }
     push_if_needed(app, &dir, &branch).await?;
     create_and_link(app, key, (repo, &dir, &branch), (title, body, draft)).await
 }
@@ -290,16 +375,17 @@ pub async fn open(
     Json(req): Json<OpenRequest>,
 ) -> Result<(StatusCode, Json<PrView>), ApiError> {
     let key = known_task(&app, &key).await?;
-    let row = open_for(
+    let row = open_with(
         &app,
         &key,
         req.repo.as_deref(),
         &req.title,
         &req.body,
-        req.draft,
+        (req.draft, req.empty_commit),
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(PrView::from(&row))))
+    let ctx = TaskContext::of(&app, &key).await?;
+    Ok((StatusCode::CREATED, Json(PrView::with(&row, &ctx))))
 }
 
 #[cfg(test)]
@@ -670,5 +756,167 @@ mod tests {
         let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
         assert_eq!(s, StatusCode::CONFLICT);
         assert_eq!(v["reason"], "no-commits");
+    }
+
+    /// `PROJ-1` made a subtask of `P-1`, whose branch `feature/P-1` is at the base commit
+    /// and pushed, so `origin/feature/P-1` exists in the task's repo.
+    async fn as_subtask(app: &AppState, dir: &TempDir) {
+        let ws = dir.path().join("ws");
+        for args in [
+            &["branch", "feature/P-1", "main"][..],
+            &["push", "-q", "origin", "feature/P-1"],
+        ] {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&ws)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+        }
+        let parent = TaskKey::new("P-1");
+        let mut p = delilah_core::Task::new(parent.clone(), "parent", "project");
+        p.kind = delilah_core::hierarchy::TaskKind::ParentTask;
+        app.store.create_task(&p).await.unwrap();
+        let parent_ws = delilah_git::Workspace {
+            path: dir.path().join("parent-ws"),
+            branch: "feature/P-1".into(),
+            kind: delilah_core::ProjectKind::Repo,
+            submodules: vec![],
+        };
+        app.store
+            .save_workspace(&parent, Path::new("/parent"), &parent_ws)
+            .await
+            .unwrap();
+        app.store
+            .set_kind(
+                &TaskKey::new("PROJ-1"),
+                delilah_core::hierarchy::TaskKind::Subtask,
+                Some(&parent),
+            )
+            .await
+            .unwrap();
+    }
+
+    fn create_args(gh: &FakeGh) -> Vec<String> {
+        gh.calls()
+            .into_iter()
+            .find(|c| c.starts_with(&["pr".into(), "create".into()]))
+            .expect("gh pr create ran")
+    }
+
+    #[tokio::test]
+    async fn a_subtasks_pr_targets_the_parent_task_branch_on_every_path() {
+        let gh = opening_gh();
+        let (router, app, dir) = git_setup(gh.clone(), &["first"]).await;
+        as_subtask(&app, &dir).await;
+        let key = TaskKey::new("PROJ-1");
+
+        // The proposal (dialog and autopilot).
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["base"], "feature/P-1");
+        assert_eq!(v["body"], "- first");
+        assert!(proposal_for(&app, &key, None).await.is_ok());
+
+        // Opening (route, autopilot and hand-off all go through `open_for`).
+        let Ok(_) = open_for(&app, &key, None, "My PR", "", true).await else {
+            panic!("open_for failed");
+        };
+        let args = create_args(&gh);
+        let at = args.iter().position(|a| a == "--base").unwrap();
+        assert_eq!(args[at + 1], "feature/P-1", "{args:?}");
+        assert!(!args.iter().any(|a| a == "main"), "{args:?}");
+    }
+
+    #[tokio::test]
+    async fn opening_a_subtask_pr_needs_the_parent_task_branch_on_the_remote() {
+        let gh = opening_gh();
+        let (router, app, dir) = git_setup(gh.clone(), &["first"]).await;
+        as_subtask(&app, &dir).await;
+        let out = std::process::Command::new("git")
+            .args(["update-ref", "-d", "refs/remotes/origin/feature/P-1"])
+            .current_dir(dir.path().join("ws"))
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let key = TaskKey::new("PROJ-1");
+
+        let Err(err) = open_for(&app, &key, None, "My PR", "", false).await else {
+            panic!("must be refused");
+        };
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(
+            err.refusal.as_ref().unwrap()["error"],
+            "parent-task-branch-missing"
+        );
+        assert_eq!(err.refusal.as_ref().unwrap()["branch"], "feature/P-1");
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert_eq!(v["error"], "parent-task-branch-missing");
+        assert!(gh.calls().iter().all(|c| c[..2] != ["pr", "create"]));
+        assert!(app.store.prs_of(&key).await.unwrap().is_empty());
+    }
+
+    async fn as_parent(app: &AppState) {
+        app.store
+            .set_kind(
+                &TaskKey::new("PROJ-1"),
+                delilah_core::hierarchy::TaskKind::ParentTask,
+                None,
+            )
+            .await
+            .unwrap();
+    }
+
+    fn drafts(gh: &FakeGh) -> bool {
+        create_args(gh).iter().any(|a| a == "--draft")
+    }
+
+    #[tokio::test]
+    async fn a_parent_task_pr_is_a_draft_unless_progress_is_ready() {
+        let gh = opening_gh();
+        let (router, app, _dir) = git_setup(gh.clone(), &["first"]).await;
+        as_parent(&app).await;
+        // No subtasks: progress is not ready, so draft even if the request says not.
+        let body = json!({ "title": "T", "draft": false });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        assert!(drafts(&gh));
+    }
+
+    #[tokio::test]
+    async fn empty_commit_starts_a_parent_task_pr_and_pushes() {
+        let gh = opening_gh();
+        let (router, app, dir) = git_setup(gh.clone(), &[]).await;
+        as_parent(&app).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(
+            (s, v["reason"].as_str()),
+            (StatusCode::CONFLICT, Some("no-commits"))
+        );
+        let body = json!({ "title": "T", "empty_commit": true });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        let log = std::process::Command::new("git")
+            .args(["log", "-1", "--format=%s", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin"))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&log.stdout).trim(),
+            "chore: start PROJ-1 t"
+        );
+        assert!(drafts(&gh));
+    }
+
+    #[tokio::test]
+    async fn empty_commit_on_another_kind_is_refused() {
+        let gh = opening_gh();
+        let (router, _app, _dir) = git_setup(gh.clone(), &[]).await;
+        let body = json!({ "title": "T", "empty_commit": true });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CONFLICT);
+        assert_eq!(v["error"], "empty-commit-not-allowed");
+        assert!(gh.calls().iter().all(|c| c[..2] != ["pr", "create"]));
     }
 }

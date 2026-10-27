@@ -85,6 +85,16 @@ pub struct SubmoduleRules {
     pub never: Vec<String>,
 }
 
+/// How a parent task's PR is merged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergePreference {
+    #[default]
+    Merge,
+    Squash,
+    Rebase,
+}
+
 /// Which of a project's tasks start with CI autofix on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -114,6 +124,8 @@ pub struct ProjectSettings {
     pub ci_autofix: AutofixDefault,
     /// How tasks start; `None` (the default) is a single start with the built-in prompt.
     pub workflow: Option<ProjectWorkflow>,
+    /// Merge method for a parent task's PR.
+    pub parent_task_merge: MergePreference,
 }
 
 impl ProjectSettings {
@@ -311,6 +323,18 @@ pub fn branch_name(template: &str, key: &str, title: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn old_settings_json_reads_merge_preference_merge() {
+        let s: ProjectSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.parent_task_merge, MergePreference::Merge);
+        let s: ProjectSettings = serde_json::from_str(r#"{"parent_task_merge":"squash"}"#).unwrap();
+        assert_eq!(s.parent_task_merge, MergePreference::Squash);
+        assert_eq!(
+            serde_json::to_string(&MergePreference::Rebase).unwrap(),
+            "\"rebase\""
+        );
+    }
+
     fn settings() -> ProjectSettings {
         ProjectSettings::default()
     }
@@ -382,7 +406,7 @@ mod tests {
 
     #[test]
     fn full_settings_round_trip() {
-        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]},"ci_autofix":"always","workflow":null}"#;
+        let json = r#"{"workspace":"worktree","branch":"fix/{ticket}-{slug}","shared":[{"path":".env","mode":"copy"},{"path":"node_modules","mode":null}],"setup":"npm ci","submodules":{"always":["a"],"never":["b"]},"ci_autofix":"always","workflow":null,"parent_task_merge":"merge"}"#;
         let s: ProjectSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.workspace, Some(WorkspaceMode::Worktree));
         assert_eq!(s.shared[0].mode, Some(ShareMode::Copy));
@@ -401,7 +425,7 @@ mod tests {
         let json = serde_json::to_string(&ProjectSettings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]},"ci_autofix":"autopilot","workflow":null}"#
+            r#"{"workspace":null,"branch":null,"shared":[],"setup":null,"submodules":{"always":[],"never":[]},"ci_autofix":"autopilot","workflow":null,"parent_task_merge":"merge"}"#
         );
     }
 

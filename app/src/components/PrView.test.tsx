@@ -195,6 +195,29 @@ describe("PrView", () => {
     await waitFor(() => expect(merge).toHaveBeenCalledWith("PROJ-1", 7, "squash"));
   });
 
+  it("uses the PR's own method and warns when a subtask PR is mis-based", async () => {
+    prPending();
+    vi.spyOn(api, "taskPrs").mockResolvedValue(
+      data({ prs: [{ ...open({ merge_methods: ["squash", "merge"] }), method: "merge", base_branch: "main", expected_base: "feat/parent" }] }),
+    );
+    const merge = vi.spyOn(api, "mergePr").mockResolvedValue(pr);
+    const { findByText, getByRole } = render(<PrView owner="PROJ-1" />);
+    const alert = await findByText(/This PR targets main, but should target feat\/parent/);
+    expect(alert).toBeTruthy();
+    fireEvent.click(await findByText("Merge"));
+    const dialog = getByRole("dialog");
+    fireEvent.click(within(dialog).getByText("Merge"));
+    await waitFor(() => expect(merge).toHaveBeenCalledWith("PROJ-1", 7, "merge"));
+  });
+
+  it("shows no base warning when the base is the expected one", async () => {
+    prPending();
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...open({}), base_branch: "main", expected_base: "main" }] }));
+    const { findByText, queryByRole } = render(<PrView owner="PROJ-1" />);
+    await findByText("Reintentos");
+    expect(queryByRole("alert")).toBeNull();
+  });
+
   it("disables Merge with a reason while checks fail", async () => {
     prPending();
     vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [open({ ci: "failure", merge_methods: ["merge"] })] }));
@@ -299,6 +322,57 @@ describe("PrView", () => {
       cleanup();
       const off = render(<PrView owner="PROJ-1" task={{ ...task, ci_autofix: false }} />);
       await off.findByText("Autofix: off");
+    });
+  });
+
+  describe("parent task", () => {
+    const parentTask = {
+      key: "PROJ-1", title: "Big", status: { type: "running" }, kind: "parent_task",
+      subtask_progress: { merged: 2, counted: 2, dropped: 0, ready: true },
+    } as unknown as Task;
+    const draftPr = { ...pr, snapshot: { ...pr.snapshot!, draft: true, ci: "success", merge_methods: ["merge"] } } as PullRequest;
+
+    it("shows the draft badge and marks the PR ready", async () => {
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [draftPr] }));
+      vi.spyOn(api, "prProposal").mockResolvedValue({ repo: ".", title: "T", body: "", base: "main", needs_push: false, repos: ["."] });
+      vi.spyOn(api, "baseStatus").mockResolvedValue({ base: "origin/main", behind_by: 0, subtask_commits: 3 });
+      const ready = vi.spyOn(api, "markReady").mockResolvedValue(draftPr);
+      const { findByText, container } = render(<PrView owner="PROJ-1" task={parentTask} />);
+      await waitFor(() => expect(container.querySelector(".pr-draft")?.textContent).toBe("Draft"));
+      await waitFor(() => expect(container.textContent).toContain("3 merged subtask commits not in your workspace"));
+      fireEvent.click(await findByText("Mark ready"));
+      await waitFor(() => expect(ready).toHaveBeenCalledWith("PROJ-1", 7));
+    });
+
+    it("offers an empty commit when there is nothing to propose", async () => {
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [] }));
+      vi.spyOn(api, "baseStatus").mockResolvedValue({ base: "origin/main", behind_by: 0 });
+      vi.spyOn(api, "prProposal").mockRejectedValue(new ApiError("nothing", 409, false, "no-commits"));
+      const open = vi.spyOn(api, "openPr").mockResolvedValue(draftPr);
+      const { findByText } = render(<PrView owner="PROJ-1" task={parentTask} />);
+      fireEvent.click(await findByText("Add an empty commit and open"));
+      await waitFor(() => expect(open).toHaveBeenCalled());
+      expect(open.mock.calls[0][1]).toMatchObject({ empty_commit: true, draft: true });
+    });
+
+    it("asks before merging over live subtasks, then retries with the confirmation", async () => {
+      const openPr = { ...draftPr, snapshot: { ...draftPr.snapshot!, draft: false } } as PullRequest;
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [openPr] }));
+      vi.spyOn(api, "prProposal").mockResolvedValue({ repo: ".", title: "T", body: "", base: "main", needs_push: false, repos: ["."] });
+      vi.spyOn(api, "baseStatus").mockResolvedValue({ base: "origin/main", behind_by: 0 });
+      const merge = vi
+        .spyOn(api, "mergePr")
+        .mockRejectedValueOnce(new ApiError("live", 409, false, "live-subtasks", undefined, [], { subtasks: ["PROJ-2", "PROJ-3"] }))
+        .mockResolvedValue(openPr);
+      const { findByText, getAllByText, findByRole } = render(<PrView owner="PROJ-1" task={parentTask} />);
+      fireEvent.click(await findByText("Merge"));
+      fireEvent.click(within(await findByRole("dialog")).getByText("Merge"));
+      const dlg = await findByRole("dialog");
+      expect(dlg.textContent).toContain("PROJ-2, PROJ-3");
+      fireEvent.click(within(dlg).getByText("Merge anyway"));
+      await waitFor(() => expect(merge).toHaveBeenCalledTimes(2));
+      expect(merge.mock.calls[1][3]).toBe(true);
+      void getAllByText;
     });
   });
 });

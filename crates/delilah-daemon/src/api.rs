@@ -10,6 +10,7 @@ use axum::{Json, Router};
 use chrono::Utc;
 use delilah_core::{Event, Task, TaskKey};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::state::AppState;
@@ -124,8 +125,28 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/tasks/{key}/prs/{id}/merge",
             post(crate::pr_api::merge::merge),
         )
+        .route(
+            "/api/v1/tasks/{key}/prs/{id}/ready",
+            post(crate::pr_api::ready::ready),
+        )
         .route("/api/v1/tasks/{key}/setup", get(crate::setup::info))
         .route("/api/v1/tasks/{key}/setup/log", get(crate::setup::log))
+        .route(
+            "/api/v1/tasks/{key}/subtasks",
+            get(crate::api_hierarchy::subtasks),
+        )
+        .route(
+            "/api/v1/tasks/{key}/make-parent-task",
+            post(crate::api_hierarchy::make_parent_task),
+        )
+        .route(
+            "/api/v1/tasks/{key}/attach",
+            post(crate::api_hierarchy::attach),
+        )
+        .route(
+            "/api/v1/tasks/{key}/push-branch",
+            post(crate::api_hierarchy::push_branch),
+        )
         .route(
             "/api/v1/tasks/{key}/base-status",
             get(crate::base_update::status),
@@ -348,6 +369,12 @@ pub struct NewTask {
     /// The model of all its sessions; absent or `null`, each phase's (`agent-models`).
     #[serde(default)]
     pub model: Option<delilah_core::AgentModel>,
+    /// `parent_task` makes a parent task; a `parent_task` key makes a subtask of it.
+    #[serde(default)]
+    pub kind: Option<delilah_core::hierarchy::TaskKind>,
+    /// The parent task of a new subtask: it takes that task's project.
+    #[serde(default)]
+    pub parent_task: Option<String>,
 }
 
 /// Whether a new task has CI autofix on: the explicit value wins, else the project
@@ -460,8 +487,38 @@ fn running_binary() -> (Option<String>, Option<u64>) {
     (Some(exe.display().to_string()), mtime)
 }
 
-async fn list_tasks(State(store): State<Store>) -> Result<Json<Vec<Task>>, ApiError> {
-    Ok(Json(store.list_tasks().await?))
+/// A task as the API shows it: the stored task plus the progress of a parent task.
+#[derive(Debug, Serialize)]
+pub struct TaskDto {
+    #[serde(flatten)]
+    pub task: Task,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_progress: Option<delilah_core::hierarchy::Progress>,
+}
+
+/// Tasks with the progress of their parent tasks: one progress query per parent task.
+async fn with_progress(store: &Store, tasks: Vec<Task>) -> Result<Vec<TaskDto>, ApiError> {
+    let mut out = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let subtask_progress = match task.kind {
+            delilah_core::hierarchy::TaskKind::ParentTask => Some(
+                crate::integration::progress(store, &task.key)
+                    .await
+                    .map_err(|e| ApiError::internal(e.to_string()))?,
+            ),
+            _ => None,
+        };
+        out.push(TaskDto {
+            task,
+            subtask_progress,
+        });
+    }
+    Ok(out)
+}
+
+async fn list_tasks(State(store): State<Store>) -> Result<Json<Vec<TaskDto>>, ApiError> {
+    let tasks = store.list_tasks().await?;
+    Ok(Json(with_progress(&store, tasks).await?))
 }
 
 /// `POST /tasks`: a [`NewTask`] and, on create only, whether it runs in chat mode.
@@ -506,7 +563,41 @@ async fn build_task_with(
     }
     check_autopilot(new.autopilot, new.saving_mode)?;
     let view = new.view.as_deref().map(parse_view).transpose()?;
-    let project = match &new.project {
+    use delilah_core::hierarchy::{self, Refusal, TaskKind};
+    let refused = |r: Refusal, detail: Value| ApiError::refused(app.lang(), r, detail);
+    // The hierarchy rules, before anything is allocated: a subtask takes its parent
+    // task's project; a parent task cannot have a parent.
+    let parent_key = new.parent_task.as_deref().map(TaskKey::new);
+    let kind = match (new.kind, &parent_key) {
+        (Some(TaskKind::ParentTask), Some(_)) => {
+            return Err(refused(Refusal::Nesting, Value::Null));
+        }
+        (Some(TaskKind::ParentTask), None) => TaskKind::ParentTask,
+        (Some(TaskKind::Subtask), None) => {
+            return Err(refused(Refusal::NotAParentTask, Value::Null));
+        }
+        (_, Some(_)) => TaskKind::Subtask,
+        _ => TaskKind::Normal,
+    };
+    let mut project_name = new.project.clone();
+    if let Some(pk) = &parent_key {
+        let parent = app.store.get_task(pk).await?;
+        let archived = match &parent {
+            Some(p) => p.status.is_terminal() && app.store.workspace(&p.key).await?.is_none(),
+            None => false,
+        };
+        hierarchy::check_new_subtask(parent.as_ref(), archived, new.project.as_deref()).map_err(
+            |r| {
+                let detail = match r {
+                    Refusal::ProjectMismatch => json!({ "project": new.project }),
+                    _ => json!({ "key": pk.as_str() }),
+                };
+                refused(r, detail)
+            },
+        )?;
+        project_name = parent.and_then(|p| p.project);
+    }
+    let project = match &project_name {
         Some(name) => Some(app.store.project(name).await?),
         None => None,
     };
@@ -516,12 +607,17 @@ async fn build_task_with(
     };
     let key = TaskKey::parse(key).map_err(|e| ApiError::bad_request(e.to_string()))?;
     // Stored normalised: `feature` (the old name) becomes `project`.
-    let requested = new
-        .workflow
-        .as_deref()
-        .map(normalise_workflow)
-        .transpose()?;
-    let message = prompt.filter(|p| !p.trim().is_empty());
+    let requested = match kind {
+        // No agent runs phases on a parent task.
+        TaskKind::ParentTask => Some(delilah_core::workflow::TaskWorkflow::None),
+        _ => new
+            .workflow
+            .as_deref()
+            .map(normalise_workflow)
+            .transpose()?,
+    };
+    let is_parent_task = kind == TaskKind::ParentTask;
+    let message = prompt.filter(|p| !p.trim().is_empty() && !is_parent_task);
     if let Some(m) = &message {
         let fields = delilah_core::workflow::validate("prompt", m, false);
         if !fields.is_empty() {
@@ -546,12 +642,15 @@ async fn build_task_with(
         .as_ref()
         .is_some_and(|p| delilah_core::workflow::is_phased(workflow, &p.settings));
     let workflow = workflow.as_str().to_string();
-    if new.autopilot == Some(true)
+    let autopilot_on = new.autopilot == Some(true) && !is_parent_task;
+    if autopilot_on
         && !crate::autopilot::allowed(&key, &workflow, project.as_ref().map(|p| &p.settings))
     {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
     let mut task = Task::new(key, new.title.trim(), workflow);
+    task.kind = kind;
+    task.parent_task = parent_key;
     if crate::branching::is_free(&task.key) {
         task.title_source = delilah_core::TitleSource::Initial;
     }
@@ -561,21 +660,29 @@ async fn build_task_with(
             .as_ref()
             .map(|p| p.settings.ci_autofix)
             .unwrap_or_default(),
-        new.autopilot == Some(true),
+        autopilot_on,
     );
+    if is_parent_task {
+        task.ci_autofix = false;
+    }
     task.project = project.map(|p| p.name);
     task.notes = new.notes.filter(|n| !n.trim().is_empty());
-    task.in_checkout = new.in_checkout;
+    task.in_checkout = if kind == TaskKind::Normal {
+        new.in_checkout
+    } else {
+        Some(false)
+    };
     task.model = new.model;
     task.view = view.unwrap_or_default();
     task.start_message = start_message;
     // Saving mode, autopilot and hand-offs are for phased tasks only.
     task.saving_mode = phased
+        && !is_parent_task
         && match new.saving_mode {
             Some(on) => on,
             None => crate::handoff::saving_mode_preference(app).await,
         };
-    if new.autopilot == Some(true) {
+    if autopilot_on {
         task.saving_mode = true;
         task.autopilot = Some(crate::autopilot::fresh());
     }
@@ -792,13 +899,17 @@ struct UpdateTask {
 async fn get_task(
     State(store): State<Store>,
     Path(key): Path<String>,
-) -> Result<Json<Task>, ApiError> {
+) -> Result<Json<TaskDto>, ApiError> {
     let key = TaskKey::new(key);
     let task = store
         .get_task(&key)
         .await?
         .ok_or(StoreError::NotFound(key))?;
-    Ok(Json(task))
+    let dto = with_progress(&store, vec![task])
+        .await?
+        .pop()
+        .expect("one task in, one out");
+    Ok(Json(dto))
 }
 
 async fn list_events(
@@ -844,9 +955,25 @@ pub struct ApiError {
     pub(crate) fields: Vec<delilah_core::FieldError>,
     pub(crate) resume_at: Option<chrono::DateTime<Utc>>,
     pub(crate) reason: Option<String>,
+    /// A hierarchy refusal's own body (`{ error: <reason>, message, ...detail }`).
+    pub(crate) refusal: Option<Value>,
 }
 
 impl ApiError {
+    /// A 409 for a parent task / subtask rule, with the contract's body.
+    pub fn refused(
+        lang: crate::lang::Lang,
+        r: delilah_core::hierarchy::Refusal,
+        detail: Value,
+    ) -> Self {
+        let body = crate::lang::refusal_body(lang, r, detail);
+        let message = body["message"].as_str().unwrap_or_default().to_string();
+        Self {
+            refusal: Some(body),
+            ..Self::conflict(message)
+        }
+    }
+
     /// A 422 that names the fields at fault.
     pub fn invalid_fields(
         message: impl Into<String>,
@@ -922,6 +1049,7 @@ impl ApiError {
             fields: Vec::new(),
             resume_at: None,
             reason: None,
+            refusal: None,
         }
     }
 }
@@ -947,6 +1075,9 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         if self.status.is_server_error() {
             tracing::error!(error = %self.message, "request failed");
+        }
+        if let Some(body) = self.refusal {
+            return (self.status, Json(body)).into_response();
         }
         (
             self.status,

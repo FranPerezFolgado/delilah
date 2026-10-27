@@ -360,3 +360,34 @@ describe("Sidebar playground", () => {
     expect(onView).toHaveBeenCalledWith("playground");
   });
 });
+
+describe("Sidebar parent tasks and subtasks", () => {
+  const parent = (key: string, merged: number, counted: number): Task => ({
+    ...task(key, { type: "running" }), kind: "parent_task", subtask_progress: { merged, counted, dropped: 0, ready: false },
+  });
+  const sub = (key: string, of: string, status: TaskStatus = { type: "running" }): Task => ({
+    ...task(key, status), kind: "subtask", parent_task: of,
+  });
+
+  it("nests subtasks under their parent task with an N/M badge", () => {
+    const { container, keys } = setup([parent("P-1", 1, 3), sub("S-1", "P-1"), sub("S-2", "P-1", { type: "queued" }), task("N-1", { type: "running" })]);
+    expect(keys()).toEqual(["P-1", "S-1", "S-2", "N-1"]);
+    const nest = container.querySelector(".sb-subtasks")!;
+    expect([...nest.querySelectorAll(".sb-key")].map((k) => k.textContent)).toEqual(["S-1", "S-2"]);
+    expect(container.querySelector(".sb-taskrow .sb-count")!.textContent).toBe("1/3");
+  });
+
+  it("folds and unfolds the subtasks of a parent task", () => {
+    const { getByRole, container } = setup([parent("P-1", 0, 1), sub("S-1", "P-1")]);
+    fireEvent.click(getByRole("button", { name: "Plegar P-1" }));
+    expect(container.querySelector(".sb-subtasks")).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Desplegar P-1" }));
+    expect(container.querySelector(".sb-subtasks")).not.toBeNull();
+  });
+
+  it("shows a subtask whose parent task is not listed at top level", () => {
+    const { container, keys } = setup([sub("S-1", "GONE-1")]);
+    expect(keys()).toEqual(["S-1"]);
+    expect(container.querySelector(".sb-subtasks")).toBeNull();
+  });
+});

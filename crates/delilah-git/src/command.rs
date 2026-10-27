@@ -40,6 +40,8 @@ pub enum GitError {
         "`{0}` is not initialised in your checkout: run `git submodule update --init {0}` or use a worktree"
     )]
     NotInitialised(String),
+    #[error("the base branch `{branch}` is not on origin")]
+    BaseMissing { branch: String },
     #[error("`git {args}` in {dir} took too long")]
     Timeout { dir: PathBuf, args: String },
 }

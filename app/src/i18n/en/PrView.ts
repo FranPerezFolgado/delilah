@@ -35,4 +35,12 @@ export const EN: Record<string, string> = {
   "no hay sesión del agente": "no agent session",
   "La tarea ya terminó: el autofix no se puede cambiar": "The task has finished: autofix can no longer be changed",
   "Reintentar autofix": "Retry autofix",
+  "Esta PR apunta a {base}, pero debería apuntar a {expected}": "This PR targets {base}, but should target {expected}",
+  "{n} commits de subtareas fusionados que no están en tu workspace": "{n} merged subtask commits not in your workspace",
+  "Añadir un commit vacío y abrir": "Add an empty commit and open",
+  "Subtareas sin terminar": "Unfinished subtasks",
+  "Estas subtareas siguen activas: {names}. Se quedarán sin integrar. ¿Fusionar igualmente?": "These subtasks are still active: {names}. They will be left out. Merge anyway?",
+  "Fusionar igualmente": "Merge anyway",
+  "Todas las subtareas están fusionadas: la PR puede salir de borrador": "All subtasks are merged: the PR can leave draft",
+  "Marcar como lista": "Mark ready",
 };

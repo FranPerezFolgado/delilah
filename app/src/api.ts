@@ -101,6 +101,30 @@ export interface Task {
   previous_title: string | null;
   /** Why the branch could not be renamed, if it could not. */
   branch_error: string | null;
+  /** Normal task, parent task or subtask; absent from an older daemon: read with `taskKind`. */
+  kind?: TaskKind;
+  /** Subtasks only: the key of their parent task. */
+  parent_task?: string;
+  /** Parent tasks only (computed): how many subtasks are merged. */
+  subtask_progress?: SubtaskProgress;
+}
+
+export type TaskKind = "normal" | "parent_task" | "subtask";
+
+/** A task's kind; absent (older daemon) reads as "normal". */
+export const taskKind = (t: Pick<Task, "kind">): TaskKind => t.kind ?? "normal";
+
+/** A parent task's subtasks merged / counted (`Progress` in the contract; that name is taken below). */
+export interface SubtaskProgress { merged: number; counted: number; dropped: number; ready: boolean }
+
+/** One subtask of a parent task (`GET …/subtasks`). */
+export interface SubtaskSummary {
+  key: string;
+  title: string;
+  status: TaskStatus;
+  archived: boolean;
+  dropped: boolean;
+  pr: { url: string; state: "open" | "draft" | "merged" | "closed" } | null;
 }
 
 export type TaskView = "chat" | "terminal";
@@ -136,6 +160,8 @@ export interface ProjectSettings {
   workflow?: ProjectWorkflow | null;
   /** Absent (older daemon) reads as "autopilot". */
   ci_autofix?: CiAutofixMode;
+  /** How a parent task's PR into the base is merged. Absent (older daemon) reads as "merge". */
+  parent_task_merge?: MergeMethod;
 }
 
 /** What a single-session task sends first. */
@@ -172,6 +198,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   setup: null,
   submodules: { always: [], never: [] },
   ci_autofix: "autopilot",
+  parent_task_merge: "merge",
 };
 
 export interface Project {
@@ -207,6 +234,9 @@ export interface NewBacklogTask {
   title: string;
   project: string;
   notes?: string;
+  kind?: TaskKind;
+  /** Creates a subtask of this parent task. */
+  parent_task?: string;
   /** No Jira ticket: Delilah names it LIBRE-n. */
   free?: boolean;
   /** Where it will work once started: the project's checkout or a worktree. */
@@ -712,6 +742,12 @@ export interface PullRequest {
   checked_at: string | null;
   error: string | null;
   snapshot: PrSnapshot | null;
+  /** The branch the PR targets. */
+  base_branch?: string | null;
+  /** The branch it should target; differs from `base_branch` when the PR is mis-based. */
+  expected_base?: string | null;
+  /** What Merge will use. */
+  method?: MergeMethod;
 }
 export interface TaskPrs { account: string | null; problem: { kind: string; message: string } | null; prs: PullRequest[] }
 /** What `Abrir PR` starts from: the branch's last commit as title and body. */
@@ -747,6 +783,8 @@ export interface BaseStatus {
   base: string | null;
   /** Commits of the base the branch does not have. */
   behind_by: number;
+  /** Parent tasks: commits of the subtasks not yet in the integration branch. */
+  subtask_commits?: number;
 }
 /** What `POST …/update-branch` did: the commits it merged in (0: up to date). */
 export interface BranchUpdate { base: string | null; merged: number }
@@ -776,6 +814,8 @@ export class ApiError extends Error {
     readonly resumeAt?: string,
     /** A 422 from the settings endpoint: one message per invalid field. */
     readonly fields: SettingsError["fields"] = [],
+    /** The rest of a 409 refusal's body (`key`, `branch`, `project`, `subtasks`…). */
+    readonly detail?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -806,7 +846,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.text();
   const data = body ? JSON.parse(body) : null;
   if (!res.ok)
-    throw new ApiError(data?.error ?? t("delilahd respondió {status}", { status: res.status }), res.status, data?.unpushed === true, data?.reason, data?.resume_at, Array.isArray(data?.fields) ? data.fields : []);
+    // A refusal is `{error: <reason>, message, ...detail}`; other errors only carry `error`.
+    throw new ApiError(
+      data?.message ?? data?.error ?? t("delilahd respondió {status}", { status: res.status }),
+      res.status, data?.unpushed === true,
+      data?.reason ?? (data?.message ? data.error : undefined),
+      data?.resume_at, Array.isArray(data?.fields) ? data.fields : [],
+      data && typeof data === "object" ? data : undefined,
+    );
   return data as T;
 }
 
@@ -816,8 +863,20 @@ export const api = {
   health: () => request<Health>("/api/v1/health"),
   reopen: (key: string) => post<Task>(`/api/v1/tasks/${key}/reopen`),
   /** Merges a task's PR; `method` omitted: the daemon picks. */
-  mergePr: (key: string, id: number, method?: MergeMethod) =>
-    post<PullRequest>(`/api/v1/tasks/${key}/prs/${id}/merge`, method ? { method } : {}),
+  mergePr: (key: string, id: number, method?: MergeMethod, confirmLiveSubtasks?: boolean) =>
+    post<PullRequest>(`/api/v1/tasks/${key}/prs/${id}/merge`, {
+      ...(method ? { method } : {}),
+      ...(confirmLiveSubtasks ? { confirm_live_subtasks: true } : {}),
+    }),
+  /** A parent task's subtasks; 404 when the task is not a parent task. */
+  subtasks: (key: string) => request<SubtaskSummary[]>(`/api/v1/tasks/${key}/subtasks`),
+  makeParentTask: (key: string) => post<Task>(`/api/v1/tasks/${key}/make-parent-task`),
+  /** Attaches a never-started normal task to a parent task. */
+  attach: (key: string, parentTask: string) => post<Task>(`/api/v1/tasks/${key}/attach`, { parent_task: parentTask }),
+  /** Pushes a parent task's branch again. */
+  pushBranch: (key: string) => post<unknown>(`/api/v1/tasks/${key}/push-branch`),
+  /** Marks a draft PR ready for review (`gh pr ready`). */
+  markReady: (key: string, id: number) => post<PullRequest>(`/api/v1/tasks/${key}/prs/${id}/ready`),
   baseStatus: (key: string) => request<BaseStatus>(`/api/v1/tasks/${key}/base-status`),
   /** Merges the base into the task's branch; 409 with a `reason` (`workspace-dirty`, `update-conflict`…) when refused. */
   updateBranch: (key: string) => post<BranchUpdate>(`/api/v1/tasks/${key}/update-branch`),
@@ -913,7 +972,7 @@ export const api = {
   linkPr: (key: string, url: string) => post<PullRequest>(`/api/v1/tasks/${key}/prs/link`, { url }),
   prProposal: (key: string, repo = ".") =>
     request<PrProposal>(`/api/v1/tasks/${key}/prs/proposal?repo=${encodeURIComponent(repo)}`),
-  openPr: (key: string, req: { repo: string; title: string; body: string; draft: boolean }) =>
+  openPr: (key: string, req: { repo: string; title: string; body: string; draft: boolean; empty_commit?: boolean }) =>
     post<PullRequest>(`/api/v1/tasks/${key}/prs`, req),
   unlinkPr: (key: string, id: number) => request<null>(`/api/v1/tasks/${key}/prs/${id}`, { method: "DELETE" }),
   specs: () => request<Record<string, SpecSummary>>("/api/v1/specs"),

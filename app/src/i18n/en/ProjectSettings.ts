@@ -20,4 +20,10 @@ export const EN: Record<string, string> = {
   "En todas las tareas": "On every task",
   "Si falla el CI de una PR, el agente recibe el fallo y lo arregla. Cada tarea puede cambiarlo.":
     "If a PR's CI fails, the agent gets the failure and fixes it. Each task can change it.",
+  "Método de fusión de la tarea padre": "Parent task merge method",
+  "Merge commit": "Merge commit",
+  "Squash": "Squash",
+  "Rebase": "Rebase",
+  "Cómo se fusiona la PR de una tarea padre. Si el repositorio no lo permite, se usa el que permita.":
+    "How a parent task's PR is merged. If the repository doesn't allow it, the one it allows is used.",
 };

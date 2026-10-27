@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import { EditorView } from "@codemirror/view";
 import type { EditorState } from "@codemirror/state";
-import { api, ConflictError, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
+import { api, ApiError, ConflictError, taskKind, type AskPosition, type BaseStatus, type ChangeKind, type FileContent, type InboxItem, type Project, type PullRequest, type Session, type SessionKind, type SpecSummary, type Task, type TaskView as ViewMode } from "../api";
 import { sessionName } from "../chain";
 import { AskCard } from "./AskCard";
 import { ConversationView } from "./ConversationView";
@@ -20,6 +20,7 @@ import { Icon, IconButton, useToast } from "./ui";
 import { SessionChain } from "./SessionChain";
 import { SessionViewSwitch } from "./SessionViewSwitch";
 import { TaskHeader } from "./TaskHeader";
+import { SubtaskList } from "./SubtaskList";
 import { useBreakpoints } from "../useWidth";
 import { OfficeTab } from "../playground/OfficeTab";
 import { TaskTabs, type TaskTabItem } from "./TaskTabs";
@@ -48,6 +49,8 @@ interface Props {
   projects?: Project[];
   /** Opens the new task dialog (from a project). */
   onNewTask?: () => void;
+  /** «Nueva subtarea» on a parent task: opens the new task dialog for it. */
+  onNewSubtask?: (parent: Task) => void;
   /** "Convertir en tarea" on one of the project's Claude sessions. */
   onConvert?: (session: Session) => void;
   /** Goes to a task, e.g. the one a conversation created. */
@@ -151,7 +154,7 @@ function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: 
  * files, so open files follow the disk, and a save never overwrites what it wrote in
  * the meantime.
  */
-export function TaskScreen({ online, owner, task, spec, project, projects, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onConvert, onOpenTask, onOpenSettings }: Props) {
+export function TaskScreen({ online, owner, task, spec, project, projects, tasks, sessions, asks, notices, askPosition, onChanged, onNewTask, onNewSubtask, onConvert, onOpenTask, onOpenSettings }: Props) {
   const session = useMemo(() => sessionFor(owner), [owner]);
   // The settings of the project the task belongs to (`project` is set only for a project's own screen).
   const taskProjectSettings = (project ?? projects?.find((p) => p.name === task?.project))?.settings;
@@ -159,6 +162,12 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
   const view = useRef<EditorView | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [error, setError] = useState<string | null>(null);
+  // The parent task's integration branch is gone from the remote: the header offers to push it again.
+  const [branchMissing, setBranchMissing] = useState(false);
+  const reportHierarchyError = (e: unknown) => {
+    if (e instanceof ApiError && e.reason === "parent-task-branch-missing") setBranchMissing(true);
+    setError((e as Error).message);
+  };
   const [closing, setClosing] = useState<string | null>(null);
   const [changed, setChanged] = useState<Map<string, ChangeKind>>(new Map());
   const [treeRefresh, setTreeRefresh] = useState(0);
@@ -685,8 +694,13 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
           onSavingMode={setSaving}
           pr={pr}
           doneAt={task?.finished_at}
-          onChanged={onChanged}
-          onError={setError}
+          onChanged={() => {
+            setBranchMissing(false);
+            onChanged();
+          }}
+          onError={reportHierarchyError}
+          onOpenTask={onOpenTask}
+          branchMissing={branchMissing}
         />
       ) : (
         <div className="ts-head" data-tauri-drag-region>
@@ -732,6 +746,9 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
               onNewIdea={() => newSession("claude", undefined, undefined, true)}
               onNewTask={onNewTask}
             />
+          )}
+          {shown === OVERVIEW && task && taskKind(task) === "parent_task" && (
+            <SubtaskList task={task} onOpenTask={onOpenTask} onNewSubtask={onNewSubtask} onError={reportHierarchyError} />
           )}
           {shown === OVERVIEW && task && (
             <TaskView

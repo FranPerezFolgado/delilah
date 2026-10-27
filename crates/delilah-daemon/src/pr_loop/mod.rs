@@ -232,6 +232,10 @@ async fn run_check(app: &AppState, key: &TaskKey, force: bool, guard: CheckGuard
     let rows = app.store.prs_of(key).await.unwrap_or_default();
     if merge::all_merged(&rows) {
         merge::on_merged(app, key, &rows).await;
+        merge::on_subtask_merged(app, &task, changed).await;
+    }
+    if task.kind == delilah_core::hierarchy::TaskKind::ParentTask {
+        merge::parent_ready(app, key).await;
     }
     // Autofix looks at what this check saw, once the next check may start.
     drop(guard);

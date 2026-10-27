@@ -28,6 +28,11 @@ const MAX_TEXT: usize = 4000;
 /// The notice CI autofix leaves when it stops (`autofix::stop`).
 const KIND_AUTOFIX_STOPPED: &str = "autofix-stopped";
 
+/// A parent task's PR was acted on while it still has live subtasks. A plain notice.
+pub(crate) const KIND_PARENT_TASK_LIVE: &str = "parent-task-live";
+/// Every counted subtask of a parent task merged: its PR can go. A plain notice.
+pub(crate) const KIND_PARENT_TASK_READY: &str = "parent-task-ready";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AttentionKind {
@@ -155,6 +160,10 @@ pub enum ItemKind {
     PrBlocked,
     /// A task's branch started from a base that could not be refreshed.
     BaseStale,
+    /// A parent task's PR is being merged or closed while subtasks are still live.
+    ParentTaskLive,
+    /// All the subtasks of a parent task merged: its own PR is ready. A notice; removable.
+    ParentTaskReady,
     Paused,
     Failed,
     /// A non-primary session finished a turn. A notice; removable.
@@ -181,6 +190,8 @@ impl ItemKind {
             Self::SuggestReview => "suggest-review",
             Self::PrBlocked => "pr-blocked",
             Self::BaseStale => "base-stale",
+            Self::ParentTaskLive => "parent-task-live",
+            Self::ParentTaskReady => "parent-task-ready",
             Self::Paused => "paused",
             Self::Failed => "failed",
             Self::TurnDone => "turn-done",
@@ -214,6 +225,8 @@ pub(crate) fn notice_kind(kind: &str) -> Option<ItemKind> {
         KIND_AUTOFIX_STOPPED => ItemKind::PrAutofix,
         KIND_BLOCKED | KIND_PARTIAL => ItemKind::PrBlocked,
         KIND_BASE_STALE => ItemKind::BaseStale,
+        KIND_PARENT_TASK_LIVE => ItemKind::ParentTaskLive,
+        KIND_PARENT_TASK_READY => ItemKind::ParentTaskReady,
         KIND_TURN_DONE => ItemKind::TurnDone,
         KIND_PR_OPENED => ItemKind::PrOpened,
         _ => return None,
@@ -741,6 +754,11 @@ async fn collect(app: &AppState) -> Result<Vec<InboxItem>, ApiError> {
             items.push(stale_base_item(n, t));
             continue;
         }
+        // Task-level notices of a parent task: no PR of their own to point at.
+        if let KIND_PARENT_TASK_LIVE | KIND_PARENT_TASK_READY = n.kind.as_str() {
+            items.push(parent_task_item(n, t, kind));
+            continue;
+        }
         if n.kind == KIND_AUTOFIX_STOPPED {
             items.push(autofix_item(app, n, t));
             continue;
@@ -792,6 +810,16 @@ fn stale_base_item(n: NoticeRow, t: &Task) -> InboxItem {
         since: Some(n.created_at),
         notice: Some(n.id),
         ..InboxItem::new(ItemKind::BaseStale, n.task_key, t.title.clone())
+    }
+}
+
+/// A notice about a parent task as a whole (its subtasks), not about one PR.
+fn parent_task_item(n: NoticeRow, t: &Task, kind: ItemKind) -> InboxItem {
+    InboxItem {
+        text: Some(n.text),
+        since: Some(n.created_at),
+        notice: Some(n.id),
+        ..InboxItem::new(kind, n.task_key, t.title.clone())
     }
 }
 
@@ -1449,6 +1477,8 @@ mod tests {
             ItemKind::SuggestReview,
             ItemKind::PrBlocked,
             ItemKind::BaseStale,
+            ItemKind::ParentTaskLive,
+            ItemKind::ParentTaskReady,
             ItemKind::Paused,
             ItemKind::Failed,
             ItemKind::TurnDone,
@@ -1462,6 +1492,18 @@ mod tests {
         blocking.sort();
         fixture.sort();
         assert_eq!(blocking, fixture);
+        // The new notice kinds are listed, as their own items.
+        assert_eq!(
+            notice_kind(KIND_PARENT_TASK_LIVE),
+            Some(ItemKind::ParentTaskLive)
+        );
+        assert_eq!(
+            notice_kind(KIND_PARENT_TASK_READY),
+            Some(ItemKind::ParentTaskReady)
+        );
+        assert!(
+            !ItemKind::ParentTaskLive.is_blocking() && !ItemKind::ParentTaskReady.is_blocking()
+        );
         // `name` is the serde name.
         for k in all {
             assert_eq!(serde_json::to_value(k).unwrap(), k.name());
