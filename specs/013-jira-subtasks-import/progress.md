@@ -6,8 +6,8 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
 | WP-01 | 1 | 1A | done | 1 | afc4657 | |
-| WP-02 | 2 | 2A | verified | 1 | PEND | |
-| WP-03 | 2 | 2A | pending | 0 | | |
+| WP-02 | 2 | 2A | verified | 1 | 6751f04 | |
+| WP-03 | 2 | 2A | verified | 1 | PEND | |
 | WP-04 | 2 | 2A | pending | 0 | | |
 | WP-05 | 2 | 2A | pending | 0 | | |
 | WP-06 | 2 | 2A | pending | 0 | | |

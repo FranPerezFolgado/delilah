@@ -1,5 +1,7 @@
 mod jira_skips;
 
+pub(crate) use jira_skips::{add_jira_skips, remove_jira_skips};
+
 use std::path::Path;
 use std::str::FromStr;
 
@@ -512,20 +514,33 @@ impl Store {
         kind: TaskKind,
         parent_task: Option<&TaskKey>,
     ) -> Result<Task, StoreError> {
-        let updated =
-            sqlx::query("UPDATE tasks SET kind = ?, parent_task = ?, updated_at = ? WHERE key = ?")
-                .bind(kind_name(kind))
-                .bind(parent_task.map(TaskKey::as_str))
-                .bind(Utc::now().to_rfc3339())
-                .bind(key.as_str())
-                .execute(&self.pool)
-                .await?;
-        if updated.rows_affected() == 0 {
-            return Err(StoreError::NotFound(key.clone()));
-        }
+        set_kind_tx(&self.pool, key, kind, parent_task).await?;
         self.get_task(key)
             .await?
             .ok_or_else(|| StoreError::NotFound(key.clone()))
+    }
+
+    /// Starts a write transaction that takes the write lock up front (like
+    /// `create_task_from_conversation`), so callers can batch writes and commit once.
+    pub(crate) async fn begin_immediate(
+        &self,
+    ) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, StoreError> {
+        Ok(self.pool.begin_with("BEGIN IMMEDIATE").await?)
+    }
+
+    /// The tasks that exist among `keys`, of any kind and archived or not.
+    pub async fn tasks_by_keys(&self, keys: &[TaskKey]) -> Result<Vec<Task>, StoreError> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let marks = vec!["?"; keys.len()].join(", ");
+        let sql = format!("{TASK_SELECT} WHERE t.key IN ({marks}) ORDER BY t.created_at, t.key");
+        let mut q = sqlx::query(&sql);
+        for k in keys {
+            q = q.bind(k.as_str());
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+        rows.iter().map(task_from_row).collect()
     }
 
     /// Forgets a deleted parent task on its (archived) subtasks, so a reused key never
@@ -726,6 +741,48 @@ fn allowed_tools_from_json(json: Option<&str>) -> Vec<String> {
     })
 }
 
+/// Updates a task's kind and parent task on a pool or inside a transaction.
+pub(crate) async fn set_kind_tx<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    e: E,
+    key: &TaskKey,
+    kind: TaskKind,
+    parent_task: Option<&TaskKey>,
+) -> Result<(), StoreError> {
+    let updated =
+        sqlx::query("UPDATE tasks SET kind = ?, parent_task = ?, updated_at = ? WHERE key = ?")
+            .bind(kind_name(kind))
+            .bind(parent_task.map(TaskKey::as_str))
+            .bind(Utc::now().to_rfc3339())
+            .bind(key.as_str())
+            .execute(e)
+            .await?;
+    if updated.rows_affected() == 0 {
+        return Err(StoreError::NotFound(key.clone()));
+    }
+    Ok(())
+}
+
+/// Turns a task into a parent task: its agent settings are reset (it never runs an agent)
+/// and its kind changes, in one statement.
+pub(crate) async fn become_parent_task<'e, E: sqlx::Executor<'e, Database = sqlx::Sqlite>>(
+    e: E,
+    key: &TaskKey,
+) -> Result<(), StoreError> {
+    let updated = sqlx::query(
+        "UPDATE tasks SET workflow = 'none', saving_mode = 0, autopilot = NULL, ci_autofix = 0,
+         handoff = NULL, kind = ?, parent_task = NULL, updated_at = ? WHERE key = ?",
+    )
+    .bind(kind_name(TaskKind::ParentTask))
+    .bind(Utc::now().to_rfc3339())
+    .bind(key.as_str())
+    .execute(e)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(StoreError::NotFound(key.clone()));
+    }
+    Ok(())
+}
+
 fn kind_name(kind: TaskKind) -> &'static str {
     match kind {
         TaskKind::Normal => "normal",
@@ -812,6 +869,58 @@ fn task_from_row(row: &SqliteRow) -> Result<Task, StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn store_primitives_for_the_jira_import() {
+        let store = Store::in_memory().await.unwrap();
+        let mut t = task("PROJ-1");
+        t.saving_mode = true;
+        t.ci_autofix = true;
+        store.create_task(&t).await.unwrap();
+        sqlx::query("UPDATE tasks SET autopilot = '{}', handoff = 'x' WHERE key = 'PROJ-1'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.create_task(&task("PROJ-2")).await.unwrap();
+        let k1 = TaskKey::new("PROJ-1");
+        let k2 = TaskKey::new("PROJ-2");
+
+        super::become_parent_task(&store.pool, &k1).await.unwrap();
+        let got = store.get_task(&k1).await.unwrap().unwrap();
+        assert_eq!(got.kind, TaskKind::ParentTask);
+        assert_eq!(got.parent_task, None);
+        assert!(!got.saving_mode && !got.ci_autofix);
+        assert_eq!(got.autopilot, None);
+        assert_eq!(got.handoff, None);
+        assert!(
+            super::become_parent_task(&store.pool, &TaskKey::new("NOPE-1"))
+                .await
+                .is_err()
+        );
+
+        // A kind change inside a transaction goes away with a rollback, stays on commit.
+        let mut tx = store.begin_immediate().await.unwrap();
+        super::set_kind_tx(&mut *tx, &k2, TaskKind::Subtask, Some(&k1))
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+        let got = store.get_task(&k2).await.unwrap().unwrap();
+        assert_eq!(got.kind, TaskKind::Normal);
+        let mut tx = store.begin_immediate().await.unwrap();
+        super::set_kind_tx(&mut *tx, &k2, TaskKind::Subtask, Some(&k1))
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let got = store.get_task(&k2).await.unwrap().unwrap();
+        assert_eq!(got.kind, TaskKind::Subtask);
+
+        let found = store
+            .tasks_by_keys(&[k1.clone(), k2.clone(), TaskKey::new("NOPE-1")])
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(store.tasks_by_keys(&[]).await.unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn tasks_carry_their_stored_created_at() {
