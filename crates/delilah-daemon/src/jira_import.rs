@@ -1523,6 +1523,340 @@ mod tests {
         );
     }
 
+    async fn put_task(
+        state: &AppState,
+        key: &str,
+        project: &str,
+        kind: TaskKind,
+        parent: Option<&str>,
+    ) {
+        let mut t = Task::new(TaskKey::new(key), key, "project");
+        t.project = Some(project.into());
+        t.kind = kind;
+        t.parent_task = parent.map(TaskKey::new);
+        state.store.create_task(&t).await.unwrap();
+    }
+
+    async fn open_session(state: &AppState, key: &str) {
+        sqlx::query(
+            "INSERT INTO sessions (id, task_key, kind, label, is_primary, created_at)
+             VALUES (?, ?, 'claude', 'Main', 1, 'x')",
+        )
+        .bind(format!("s-{key}"))
+        .bind(key)
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn converting_keeps_the_status_and_an_existing_parent_only_adds() {
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        sqlx::query("UPDATE tasks SET status = '{\"type\":\"failed\",\"reason\":\"x\"}' WHERE key = 'PROJ-1242'")
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO workspaces (task_key, parent, path, branch, submodules)
+             VALUES ('PROJ-1242', '/w', '/w/t', 'b', '[]')",
+        )
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+        let (s, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "add": ["PROJ-1250"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        let t = stored(&state, "PROJ-1242").await.unwrap();
+        assert_eq!(t.kind, TaskKind::ParentTask);
+        assert!(matches!(t.status, TaskStatus::Failed { .. }));
+
+        // An existing parent task: the call only adds.
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::ParentTask, None).await;
+        let (s, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "add": ["PROJ-1250"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        assert_eq!(res["created"], json!(["PROJ-1250"]));
+        assert_eq!(res["attached"], json!([]));
+        assert_eq!(
+            stored(&state, "PROJ-1250").await.unwrap().kind,
+            TaskKind::Subtask
+        );
+
+        // Second run: nothing more is created (SC-003).
+        let (s, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "add": ["PROJ-1250", "PROJ-1251"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        assert_eq!(res["created"], json!(["PROJ-1251"]));
+        let (_, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "add": ["PROJ-1250", "PROJ-1251"] })),
+        )
+        .await;
+        assert_eq!(res["created"], json!([]));
+        assert_eq!(res["attached"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn a_converted_task_loses_nothing_but_its_agent_settings() {
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        sqlx::query("UPDATE tasks SET notes = 'keep me', saving_mode = 1, status = '{\"type\":\"running\"}' WHERE key = 'PROJ-1242'")
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (s, res) = call(&state, "POST", PREVIEW, Some(json!({}))).await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        let t = stored(&state, "PROJ-1242").await.unwrap();
+        assert_eq!(t.kind, TaskKind::ParentTask);
+        assert_eq!(t.status, TaskStatus::Running);
+        assert_eq!(t.notes.as_deref(), Some("keep me"));
+        assert_eq!(t.workflow, "none");
+        assert!(!t.saving_mode);
+    }
+
+    #[tokio::test]
+    async fn a_ticket_task_that_cannot_be_a_parent_is_a_409_and_writes_nothing() {
+        // A sub-task of another parent task.
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "OTHER-1", "web", TaskKind::ParentTask, None).await;
+        put_task(
+            &state,
+            "PROJ-1242",
+            "web",
+            TaskKind::Subtask,
+            Some("OTHER-1"),
+        )
+        .await;
+        let body = json!({ "add": ["PROJ-1250"] });
+        let (s, res) = call(&state, "POST", PREVIEW, Some(body.clone())).await;
+        assert_eq!(
+            (s, res["error"].as_str()),
+            (StatusCode::CONFLICT, Some("nesting"))
+        );
+        assert!(stored(&state, "PROJ-1250").await.is_none());
+
+        // An open PR.
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        sqlx::query(
+            "INSERT INTO pull_requests (task_key, repo, host, owner_name, number, url, linked_by, created_at)
+             VALUES ('PROJ-1242', '.', 'github.com', 'o/n', 1, 'u', 'pasted', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+        let (s, res) = call(&state, "POST", PREVIEW, Some(body.clone())).await;
+        assert_eq!(
+            (s, res["error"].as_str()),
+            (StatusCode::CONFLICT, Some("open-pr"))
+        );
+        assert!(stored(&state, "PROJ-1250").await.is_none());
+        assert_eq!(
+            stored(&state, "PROJ-1242").await.unwrap().kind,
+            TaskKind::Normal
+        );
+
+        // Archived: finished with no workspace.
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        sqlx::query("UPDATE tasks SET status = '{\"type\":\"done\"}' WHERE key = 'PROJ-1242'")
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (s, res) = call(&state, "POST", PREVIEW, Some(body)).await;
+        assert_eq!(
+            (s, res["error"].as_str()),
+            (StatusCode::CONFLICT, Some("archived"))
+        );
+        assert!(stored(&state, "PROJ-1250").await.is_none());
+        assert_eq!(
+            stored(&state, "PROJ-1242").await.unwrap().kind,
+            TaskKind::Normal
+        );
+    }
+
+    #[tokio::test]
+    async fn attach_leaves_out_started_other_project_and_taken_tasks() {
+        // A started task and one that already hangs from another parent task.
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "OTHER-1", "web", TaskKind::ParentTask, None).await;
+        put_task(&state, "PROJ-1250", "web", TaskKind::Normal, None).await;
+        open_session(&state, "PROJ-1250").await;
+        put_task(
+            &state,
+            "PROJ-1251",
+            "web",
+            TaskKind::Subtask,
+            Some("OTHER-1"),
+        )
+        .await;
+        let (s, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "project": "web", "add": ["PROJ-1250", "PROJ-1251"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        assert_eq!(res["attached"], json!([]));
+        assert_eq!(res["created"], json!([]));
+        let left = res["left_out"].as_array().unwrap();
+        assert_eq!(left.len(), 2, "{res}");
+        let reason = |k: &str| left.iter().find(|l| l["key"] == k).unwrap()["reason"].clone();
+        assert_eq!(reason("PROJ-1250"), "started");
+        assert!(reason("PROJ-1251").is_string());
+        assert_eq!(
+            stored(&state, "PROJ-1250").await.unwrap().kind,
+            TaskKind::Normal
+        );
+        assert_eq!(
+            stored(&state, "PROJ-1251").await.unwrap().parent_task,
+            Some(TaskKey::new("OTHER-1"))
+        );
+
+        // A task of another project than the parent task's.
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1250", "api", TaskKind::Normal, None).await;
+        let (s, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "project": "web", "add": ["PROJ-1250", "PROJ-1251"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        assert_eq!(res["created"], json!(["PROJ-1251"]));
+        assert_eq!(
+            res["left_out"],
+            json!([{ "key": "PROJ-1250", "reason": "other-project" }])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_insert_after_a_convert_rolls_the_convert_back() {
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        let plan = preview(&state, "PROJ-1242", None)
+            .await
+            .ok()
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.parent, ParentAction::Convert);
+        sqlx::query(
+            "CREATE TRIGGER boom BEFORE INSERT ON tasks WHEN NEW.key = 'PROJ-1250'
+             BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        )
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+        let req = ImportRequest {
+            add: vec!["PROJ-1250".into()],
+            skip: vec!["PROJ-1251".into()],
+            ..Default::default()
+        };
+        let mut rx = state.events.subscribe();
+        assert!(apply_jira_import(&state, &plan, &req).await.is_err());
+        assert_eq!(
+            stored(&state, "PROJ-1242").await.unwrap().kind,
+            TaskKind::Normal
+        );
+        assert!(stored(&state, "PROJ-1250").await.is_none());
+        assert!(
+            state
+                .store
+                .jira_skips_of(&TaskKey::new("PROJ-1242"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(tasks_events(&mut rx), 0);
+    }
+
+    #[tokio::test]
+    async fn a_session_started_after_the_preview_is_a_409_and_an_attach_target_is_left_out() {
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        put_task(&state, "PROJ-1250", "web", TaskKind::Normal, None).await;
+        let plan = preview(&state, "PROJ-1242", None)
+            .await
+            .ok()
+            .unwrap()
+            .unwrap();
+        let by = |k: &str| {
+            plan.subtasks
+                .iter()
+                .find(|r| r.key == k)
+                .unwrap()
+                .action
+                .clone()
+        };
+        assert_eq!(by("PROJ-1250"), SubtaskAction::Attach);
+
+        // The attach target starts first: left out, the rest goes through.
+        open_session(&state, "PROJ-1250").await;
+        let req = ImportRequest {
+            add: vec!["PROJ-1250".into(), "PROJ-1251".into()],
+            ..Default::default()
+        };
+        let res = apply_jira_import(&state, &plan, &req).await.ok().unwrap();
+        assert_eq!(res.left_out, vec![gone("PROJ-1250", "started")]);
+        assert_eq!(res.created, vec!["PROJ-1251".to_string()]);
+        assert!(res.attached.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_session_on_the_ticket_task_after_the_preview_writes_nothing() {
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::Normal, None).await;
+        let plan = preview(&state, "PROJ-1242", None)
+            .await
+            .ok()
+            .unwrap()
+            .unwrap();
+        open_session(&state, "PROJ-1242").await;
+        let req = ImportRequest {
+            add: vec!["PROJ-1250".into()],
+            ..Default::default()
+        };
+        let err = apply_jira_import(&state, &plan, &req).await.err().unwrap();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(
+            stored(&state, "PROJ-1242").await.unwrap().kind,
+            TaskKind::Normal
+        );
+        assert!(stored(&state, "PROJ-1250").await.is_none());
+    }
+
     #[test]
     fn the_chosen_project_decides_whether_a_task_attaches() {
         let ticket = issue("P-1", "new", None, false);
