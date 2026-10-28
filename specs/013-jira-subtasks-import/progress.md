@@ -15,7 +15,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-08 | 3 | 3A | verified | 1 | 2ea9c15 | |
 | WP-09 | 3 | 3B | pending | 0 | | |
 | WP-10 | 4 | 4A | pending | 0 | | |
-| WP-11 | 4 | 4A | pending | 0 | | |
+| WP-11 | 4 | 4A | verified | 1 | PEND | |
 | WP-12 | 5 | 5A | pending | 0 | | |
 | WP-13 | 5 | 5A | pending | 0 | | |
 | WP-14 | 5 | 5B | pending | 0 | | |

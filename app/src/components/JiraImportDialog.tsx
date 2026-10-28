@@ -20,6 +20,7 @@ type Linked = Extract<JiraImportPreview, { linked: true }>;
 
 /** Why a row can't be ticked: it already is a task, or conflicts with one. */
 const canTick = (r: JiraImportRow) => r.action === "create" || r.action === "attach";
+// (conflict and linked rows stay unticked and disabled)
 
 /** Imports a Jira ticket's sub-tasks as Delilah tasks, creating the parent task first.
  *  Rows come from the preview with their default ticks; the project is required. */
@@ -78,7 +79,8 @@ export function JiraImportDialog({ issueKey, mode = "create", onClose, onDone }:
 
   const linked = preview?.linked ? preview : null;
   const refused = linked?.parent.action === "refused" ? linked.parent : null;
-  const needsProject = mode === "create" && !project;
+  const parentAction = linked?.parent.action;
+  const needsProject = mode === "create" && (parentAction ?? "create") === "create" && !project;
   const unreachable = preview && !preview.linked && preview.reason === "unreachable";
 
   const footer = result ? (
@@ -129,13 +131,17 @@ export function JiraImportDialog({ issueKey, mode = "create", onClose, onDone }:
       ) : linked && (
         <>
           {refused && <p role="alert">{refused.message}</p>}
-          <label className="jid-project">
-            <span>{t("Proyecto")}</span>
-            <select className="input" aria-label={t("Proyecto")} value={project} onChange={(e) => setProject(e.target.value)}>
-              <option value="">{t("Elige un proyecto")}</option>
-              {projects.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-            </select>
-          </label>
+          {parentAction === "convert" && <p>{t("{key} pasa a ser la tarea padre.", { key: issueKey })}</p>}
+          {parentAction === "existing" && <p>{t("Se añade a la tarea padre {key}.", { key: issueKey })}</p>}
+          {parentAction === "create" && (
+            <label className="jid-project">
+              <span>{t("Proyecto")}</span>
+              <select className="input" aria-label={t("Proyecto")} value={project} onChange={(e) => setProject(e.target.value)}>
+                <option value="">{t("Elige un proyecto")}</option>
+                {projects.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
           <ul className="jid-rows">
             {linked.subtasks.map((r) => (
               <li key={r.key} className="jid-row">
@@ -147,7 +153,12 @@ export function JiraImportDialog({ issueKey, mode = "create", onClose, onDone }:
                 </label>
                 {r.status_category === "done" && <span className="b b-s sm">{t("hecha en Jira")}</span>}
                 {r.assignee && !r.mine && <span className="b b-s sm">{t("asignada a {name}", { name: r.assignee })}</span>}
-                {r.task && <span className="b b-s sm">{t("ya es una tarea")}</span>}
+                {r.action === "attach" ? (
+                  <span className="b b-s sm">{t("ya es una tarea, se unirá")}</span>
+                ) : (
+                  r.task && <span className="b b-s sm">{t("ya es una tarea")}</span>
+                )}
+                {r.action === "conflict" && r.reason && <span className="muted sm">{r.reason}</span>}
               </li>
             ))}
           </ul>

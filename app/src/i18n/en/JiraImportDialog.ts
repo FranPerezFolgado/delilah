@@ -11,4 +11,7 @@ export const EN: Record<string, string> = {
   "hecha en Jira": "done in Jira",
   "asignada a {name}": "assigned to {name}",
   "ya es una tarea": "already a task",
+  "ya es una tarea, se unirá": "already a task, will be attached",
+  "{key} pasa a ser la tarea padre.": "{key} becomes the parent task.",
+  "Se añade a la tarea padre {key}.": "Adds to the parent task {key}.",
 };

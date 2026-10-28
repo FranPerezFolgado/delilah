@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { api, DEFAULT_PROJECT_SETTINGS, type JiraImportPreview, type JiraImportRow, type Project } from "../api";
+import { api, DEFAULT_PROJECT_SETTINGS, type JiraImportParent, type JiraImportPreview, type JiraImportRow, type Project } from "../api";
 import { setLanguage } from "../i18n";
 import { JiraImportDialog } from "./JiraImportDialog";
 
@@ -19,6 +19,8 @@ const preview = (subtasks: JiraImportRow[]): JiraImportPreview => ({
   subtasks,
   gone: [],
 });
+
+const withParent = (parent: JiraImportParent): JiraImportPreview => ({ ...(preview(rows) as Extract<JiraImportPreview, { linked: true }>), parent });
 
 const rows = [
   row({}),
@@ -90,5 +92,37 @@ describe("JiraImportDialog create mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Crear" }));
     await screen.findByText("boom");
     expect((screen.getByRole("button", { name: "Crear" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("renders convert and existing parent lines without asking for a project", async () => {
+    open(withParent({ action: "convert" }));
+    await screen.findByText("API");
+    expect(screen.getByText("PROJ-10 pasa a ser la tarea padre.")).toBeTruthy();
+    expect(screen.queryByLabelText("Proyecto")).toBeNull();
+    expect((screen.getByRole("button", { name: "Crear" }) as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+    open(withParent({ action: "existing" }));
+    await screen.findByText("API");
+    expect(screen.getByText("Se añade a la tarea padre PROJ-10.")).toBeTruthy();
+  });
+
+  it("shows the refusal and disables confirm", async () => {
+    open(withParent({ action: "refused", code: "x", message: "No se puede" }));
+    await screen.findByText("No se puede");
+    expect((screen.getByRole("button", { name: "Crear" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("marks attach rows and leaves conflict rows unticked and disabled with the reason", async () => {
+    const task = { key: "PROJ-15", kind: "task", status: "queued", parent_task: null, archived: false };
+    open(preview([
+      row({ key: "PROJ-15", title: "Att", action: "attach", task }),
+      row({ key: "PROJ-16", title: "Bad", action: "conflict", task, reason: "ya tiene otro padre" }),
+    ]));
+    await screen.findByText("Att");
+    expect(screen.getByText("ya es una tarea, se unirá")).toBeTruthy();
+    expect(box("PROJ-15").checked).toBe(true);
+    expect(box("PROJ-16").checked).toBe(false);
+    expect(box("PROJ-16").disabled).toBe(true);
+    expect(screen.getByText("ya tiene otro padre")).toBeTruthy();
   });
 });

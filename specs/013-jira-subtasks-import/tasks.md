@@ -96,12 +96,12 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 
 - [ ] T028 [P] [US2] Handler tests in `crates/delilah-daemon/src/jira_import.rs`: convert (normal task with the ticket key → parent task, keeps status, agent settings cleared); existing parent task → only adds; refused (ticket task is a subtask / has an open PR / a running session / archived) → 409 with the refusal code and nothing written; attach of a never-started normal task in the same project; `left_out` for started / other project / other parent task with reasons, the rest created; second run on the same ticket creates nothing (SC-003)
 - [ ] T029 [P] [US2] Transaction tests in `crates/delilah-daemon/src/jira_import.rs`: a failing subtask insert after a convert rolls back the convert too (nothing converted, nothing created); a session started on the ticket task between preview and write → 409, nothing written; an attach target started between preview and write → `left_out` (`started`); a key taken meanwhile → `left_out` (`taken`)
-- [ ] T030 [P] [US2] `app/src/components/JiraImportDialog.test.tsx`: the parent line says "becomes the parent task" for `convert`, "adds to the parent task" for `existing`, and shows the refusal and disables confirm for `refused`; `attach` rows say "already a task, will be attached"; `conflict` rows are unticked and disabled with the reason
+- [X] T030 [P] [US2] `app/src/components/JiraImportDialog.test.tsx`: the parent line says "becomes the parent task" for `convert`, "adds to the parent task" for `existing`, and shows the refusal and disables confirm for `refused`; `attach` rows say "already a task, will be attached"; `conflict` rows are unticked and disabled with the reason
 
 ### Implementation
 
 - [ ] T031 [US2] In `apply_jira_import` (`crates/delilah-daemon/src/jira_import.rs`) add the convert path (`store::become_parent_task` on the transaction) and the in-transaction re-checks (ticket task kind, open PR, live session; each attach target still normal, never started, same project; created keys still free → else `left_out`), until T028 and T029 pass
-- [ ] T032 [US2] Render `convert` / `existing` / `refused` and `attach` / `conflict` in `app/src/components/JiraImportDialog.tsx` (+ i18n en/es), until T030 passes
+- [X] T032 [US2] Render `convert` / `existing` / `refused` and `attach` / `conflict` in `app/src/components/JiraImportDialog.tsx` (+ i18n en/es), until T030 passes
 
 **Checkpoint**: US1 + US2 cover every first import.
 
