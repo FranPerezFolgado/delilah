@@ -57,7 +57,7 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
   }, [task.key, stamp, check]);
 
   const rows: JiraImportRow[] = preview?.linked ? preview.subtasks : [];
-  const fresh = rows.filter((r) => (r.action === "create" || r.action === "attach") && !r.skipped && r.selected).length;
+  const fresh = rows.filter((r) => (r.action === "create" || r.action === "attach") && !r.skipped).length;
   const jiraStatus = new Map(rows.filter((r) => r.action === "linked").map((r) => [r.key, r.status]));
   const gone = new Set(preview?.linked ? preview.gone.map((g) => g.key) : []);
   const skipped = rows.filter((r) => (r.action === "create" || r.action === "attach") && r.skipped);
@@ -73,6 +73,7 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
         <h2 className="sec">{t("Subtareas")}</h2>
         <span className="muted">{progressLabel(task)}</span>
         <span className="subtasks-grow" />
+        <Button variant="secondary" size={28} onClick={() => setCheck((n) => n + 1)}>{t("Comprobar Jira")}</Button>
         <Button variant="secondary" size={28} onClick={() => onNewSubtask?.(task)} disabled={!onNewSubtask}>{t("Nueva subtarea")}</Button>
       </header>
       {fresh > 0 && (

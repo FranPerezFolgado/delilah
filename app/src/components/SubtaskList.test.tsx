@@ -128,3 +128,27 @@ it("shows the Jira status of linked subtasks, marks the ones gone from Jira, and
   expect(r.container.textContent).not.toContain("In Review");
   expect(r.container.textContent).not.toContain("ya no está en Jira");
 });
+
+it("shows the banner for new sub-tasks that are not ticked by default", async () => {
+  vi.spyOn(api, "jiraImportPreview").mockResolvedValue(prev([jrow({ key: "P-11", selected: false }), jrow({ key: "P-12", action: "attach", selected: false }), jrow({ key: "P-13", skipped: true, selected: false })]));
+  const { findByText, getByText } = render(<SubtaskList task={parent} />);
+  await findByText("2 subtareas nuevas de Jira");
+  expect(getByText("Añadir")).not.toBeNull();
+});
+
+it("re-fetches the Jira preview on 'Comprobar Jira' and stays quiet on error", async () => {
+  const spy = vi.spyOn(api, "jiraImportPreview").mockResolvedValue(prev([]));
+  const { findByText, getByText, queryByText } = render(<SubtaskList task={parent} />);
+  await findByText("One");
+  await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+  spy.mockResolvedValue(prev([jrow({ selected: false })]));
+  fireEvent.click(getByText("Comprobar Jira"));
+  await findByText("1 subtarea nueva de Jira");
+  expect(spy).toHaveBeenCalledTimes(2);
+  spy.mockRejectedValue(new Error("down"));
+  const onError = vi.fn();
+  fireEvent.click(getByText("Comprobar Jira"));
+  await waitFor(() => expect(spy).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(queryByText("1 subtarea nueva de Jira")).toBeNull());
+  expect(onError).not.toHaveBeenCalled();
+});

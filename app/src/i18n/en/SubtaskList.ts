@@ -11,6 +11,7 @@ export const EN: Record<string, string> = {
   "{merged} de {counted} subtareas integradas": "{merged} of {counted} subtasks merged",
   "{n} subtarea nueva de Jira": "{n} new Jira sub-task",
   "{n} subtareas nuevas de Jira": "{n} new Jira sub-tasks",
+  "Comprobar Jira": "Check Jira",
   Añadir: "Add",
   "Jira no está conectado.": "Jira is not connected.",
   "Omitidas ({n})": "Skipped ({n})",
