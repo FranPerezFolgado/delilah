@@ -37,6 +37,6 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | security | LOW | One bad Jira sub-task key fails whole import with 400 | jira_import.rs |
 | 3 | security | LOW | Parent summary written raw into ticket.md (same class as Epic line) | jira.rs write_ticket |
 | 3 | security | LOW | Raw sqlx error text returned to client | jira_import.rs |
-| 3 | contract | HIGH | JiraImportTask.status typed string vs tagged object — fix package WP-08F running | app/src/api.ts |
+| 3 | contract | HIGH (fixed in WP-08F) | JiraImportTask.status typed string vs tagged object | app/src/api.ts |
 | 3 | spec | MEDIUM | No Jira-view entry point for converting an existing normal task — in WP-08F | JiraView.tsx |
 | 3 | contract | RISK | contracts/api.md error body says {error, code?} but daemon sends {error:<code>, message}; undocumented 409 when Jira unlinked, undocumented ?project= on GET (fix spec text in WP-16 docs) | contracts/api.md |
