@@ -653,7 +653,7 @@ impl Store {
     }
 }
 
-async fn insert_task<'e>(
+pub(crate) async fn insert_task<'e>(
     executor: impl sqlx::Executor<'e, Database = sqlx::Sqlite>,
     task: &Task,
 ) -> Result<(), StoreError> {

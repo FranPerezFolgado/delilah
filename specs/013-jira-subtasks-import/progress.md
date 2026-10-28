@@ -11,7 +11,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2A | done | 1 | 2b6fdfc | |
 | WP-05 | 2 | 2A | done | 1 | f90b4cb | |
 | WP-06 | 2 | 2A | done | 1 | cd5ecc2 | |
-| WP-07 | 3 | 3A | pending | 0 | | |
+| WP-07 | 3 | 3A | verified | 1 | PEND | |
 | WP-08 | 3 | 3A | verified | 1 | 2ea9c15 | |
 | WP-09 | 3 | 3B | pending | 0 | | |
 | WP-10 | 4 | 4A | pending | 0 | | |

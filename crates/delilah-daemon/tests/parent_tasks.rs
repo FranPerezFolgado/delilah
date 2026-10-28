@@ -502,3 +502,64 @@ async fn a_subtask_takes_the_parent_task_submodules_in_a_parent_project() {
     );
     env.end().await;
 }
+
+#[tokio::test]
+async fn an_imported_subtask_takes_the_parent_task_submodules() {
+    // FR-005: nothing new for the import; the subtask it creates starts like any other.
+    let home = std::env::temp_dir().join(format!("delilah-parent-import-{}", uuid()));
+    let fixture = Command::new("bash")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/make-fixture-parent.sh"
+        ))
+        .arg(home.join("env"))
+        .output()
+        .unwrap();
+    assert!(fixture.status.success());
+    let checkout = home.join("env/parent");
+    let env = Env::on(
+        &home,
+        home.join("env/remotes/parent.git"),
+        checkout.clone(),
+        Store::open(&home.join("delilah.db")).await.unwrap(),
+    );
+    env.app
+        .store
+        .create_project(&Project {
+            name: "app".into(),
+            path: checkout,
+            kind: ProjectKind::Parent,
+            workflow: "project".into(),
+            settings: Default::default(),
+            preview_command: None,
+        })
+        .await
+        .unwrap();
+    let (status, body) = env
+        .call("PUT", "/api/v1/jira", json!({ "mode": "sample" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = env
+        .call(
+            "POST",
+            "/api/v1/jira/issues/PROJ-1242/import",
+            json!({ "project": "app", "add": ["PROJ-1250"] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["created"], json!(["PROJ-1250"]));
+
+    let (status, body) = env
+        .call("POST", "/api/v1/runs", json!({ "key": "PROJ-1242", "free": true, "branch": "feature/p", "submodules": ["svc-orders"] }))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = env.start("PROJ-1250").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let ws = env.workspace("PROJ-1250").await;
+    assert_eq!(ws.submodules, ["svc-orders"]);
+    assert_eq!(
+        git(&ws.path.join("svc-orders"), &["branch", "--show-current"]),
+        ws.branch
+    );
+    env.end().await;
+}

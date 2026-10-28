@@ -160,6 +160,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/inbox/restore", post(inbox::restore))
         .route("/api/v1/jira/issues/{key}/subtasks", get(jira::subtasks))
         .route(
+            "/api/v1/jira/issues/{key}/import",
+            get(crate::jira_import::get_preview).post(crate::jira_import::post_import),
+        )
+        .route(
             "/api/v1/sessions/{id}/runtime",
             post(crate::runtime_api::set_session_runtime),
         )
@@ -1667,7 +1671,13 @@ mod tests {
     async fn new_task_matches_post_tasks() {
         use delilah_core::hierarchy::TaskKind;
         let (app, state) = app_with_project().await;
-        let ci = state.store.project("web").await.unwrap().settings.ci_autofix;
+        let ci = state
+            .store
+            .project("web")
+            .await
+            .unwrap()
+            .settings
+            .ci_autofix;
         let post = |body: Value| {
             let app = app.clone();
             async move {
