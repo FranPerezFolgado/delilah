@@ -11,10 +11,10 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-04 | 2 | 2A | done | 1 | 2b6fdfc | |
 | WP-05 | 2 | 2A | done | 1 | f90b4cb | |
 | WP-06 | 2 | 2A | done | 1 | cd5ecc2 | |
-| WP-07 | 3 | 3A | verified | 1 | d14a1c0 | |
-| WP-08 | 3 | 3A | verified | 1 | 2ea9c15 | |
-| WP-09 | 3 | 3B | verified | 1 | 53ba2de | |
-| WP-10 | 4 | 4A | verified | 1 | PEND | |
+| WP-07 | 3 | 3A | done | 1 | d14a1c0 | |
+| WP-08 | 3 | 3A | done | 1 | 2ea9c15 | |
+| WP-09 | 3 | 3B | done | 1 | 53ba2de | |
+| WP-10 | 4 | 4A | verified | 1 | 0379b6c | |
 | WP-11 | 4 | 4A | verified | 1 | f034d1c | |
 | WP-12 | 5 | 5A | pending | 0 | | |
 | WP-13 | 5 | 5A | verified | 1 | 10c3198 | |
