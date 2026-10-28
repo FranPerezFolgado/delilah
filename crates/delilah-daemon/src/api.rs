@@ -558,6 +558,17 @@ async fn build_task_with(
     new: NewTask,
     prompt: Option<String>,
 ) -> Result<Task, ApiError> {
+    let (spec, defaults) = resolve_new_task(app, new, prompt).await?;
+    Ok(new_task(spec, &defaults))
+}
+
+/// The lookups and checks of a new task: project, free key, parent task, hierarchy
+/// rules, project defaults.
+pub(crate) async fn resolve_new_task(
+    app: &AppState,
+    new: NewTask,
+    prompt: Option<String>,
+) -> Result<(NewTaskSpec, Defaults), ApiError> {
     if new.title.trim().is_empty() {
         return Err(ApiError::bad_request("say what the task is about"));
     }
@@ -648,45 +659,114 @@ async fn build_task_with(
     {
         return Err(crate::autopilot::not_spec_workflow(&key));
     }
-    let mut task = Task::new(key, new.title.trim(), workflow);
-    task.kind = kind;
-    task.parent_task = parent_key;
-    if crate::branching::is_free(&task.key) {
-        task.title_source = delilah_core::TitleSource::Initial;
-    }
-    task.ci_autofix = resolve_ci_autofix(
-        new.ci_autofix,
-        project
-            .as_ref()
-            .map(|p| p.settings.ci_autofix)
-            .unwrap_or_default(),
-        autopilot_on,
-    );
-    if is_parent_task {
-        task.ci_autofix = false;
-    }
-    task.project = project.map(|p| p.name);
-    task.notes = new.notes.filter(|n| !n.trim().is_empty());
-    task.in_checkout = if kind == TaskKind::Normal {
-        new.in_checkout
-    } else {
-        Some(false)
-    };
-    task.model = new.model;
-    task.view = view.unwrap_or_default();
-    task.start_message = start_message;
+    let ci_autofix = !is_parent_task
+        && resolve_ci_autofix(
+            new.ci_autofix,
+            project
+                .as_ref()
+                .map(|p| p.settings.ci_autofix)
+                .unwrap_or_default(),
+            autopilot_on,
+        );
     // Saving mode, autopilot and hand-offs are for phased tasks only.
-    task.saving_mode = phased
+    let saving_mode = phased
         && !is_parent_task
         && match new.saving_mode {
             Some(on) => on,
             None => crate::handoff::saving_mode_preference(app).await,
         };
-    if autopilot_on {
+    let spec = NewTaskSpec {
+        key,
+        title: new.title,
+        kind,
+        parent_task: parent_key,
+        project: project.map(|p| p.name),
+    };
+    let defaults = Defaults {
+        workflow,
+        start_message,
+        ci_autofix,
+        saving_mode,
+        autopilot: autopilot_on,
+        notes: new.notes,
+        in_checkout: new.in_checkout,
+        model: new.model,
+        view: view.unwrap_or_default(),
+    };
+    Ok((spec, defaults))
+}
+
+/// What identifies a new task: all resolved, nothing left to look up.
+pub(crate) struct NewTaskSpec {
+    pub key: TaskKey,
+    pub title: String,
+    pub kind: delilah_core::hierarchy::TaskKind,
+    pub parent_task: Option<TaskKey>,
+    /// The project's name, already looked up.
+    pub project: Option<String>,
+}
+
+/// The values a new task starts with, already resolved against the project and the
+/// preferences (see [`resolve_new_task`]).
+#[derive(Debug, Clone)]
+pub(crate) struct Defaults {
+    /// The stored workflow name (`project`, `prompt` or `none`).
+    pub workflow: String,
+    pub start_message: Option<String>,
+    pub ci_autofix: bool,
+    pub saving_mode: bool,
+    /// Autopilot on: forces saving mode on.
+    pub autopilot: bool,
+    pub notes: Option<String>,
+    pub in_checkout: Option<bool>,
+    pub model: Option<delilah_core::AgentModel>,
+    pub view: delilah_core::TaskView,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Self {
+            workflow: delilah_core::workflow::TaskWorkflow::Project
+                .as_str()
+                .to_string(),
+            start_message: None,
+            ci_autofix: false,
+            saving_mode: false,
+            autopilot: false,
+            notes: None,
+            in_checkout: None,
+            model: None,
+            view: Default::default(),
+        }
+    }
+}
+
+/// The backlog task for a resolved spec and defaults; pure, no lookups.
+pub(crate) fn new_task(spec: NewTaskSpec, d: &Defaults) -> Task {
+    use delilah_core::hierarchy::TaskKind;
+    let mut task = Task::new(spec.key, spec.title.trim(), d.workflow.clone());
+    task.kind = spec.kind;
+    task.parent_task = spec.parent_task;
+    if crate::branching::is_free(&task.key) {
+        task.title_source = delilah_core::TitleSource::Initial;
+    }
+    task.ci_autofix = d.ci_autofix;
+    task.project = spec.project;
+    task.notes = d.notes.clone().filter(|n| !n.trim().is_empty());
+    task.in_checkout = if spec.kind == TaskKind::Normal {
+        d.in_checkout
+    } else {
+        Some(false)
+    };
+    task.model = d.model.clone();
+    task.view = d.view;
+    task.start_message = d.start_message.clone();
+    task.saving_mode = d.saving_mode;
+    if d.autopilot {
         task.saving_mode = true;
         task.autopilot = Some(crate::autopilot::fresh());
     }
-    Ok(task)
+    task
 }
 
 /// `autopilot: true` with `saving_mode: false` is a contradiction.
@@ -1579,6 +1659,74 @@ mod tests {
         )
         .await;
         assert_eq!(task["key"], "LIBRE-3");
+    }
+
+    /// The pure constructor gives the values `POST /tasks` stores, for a normal task, a
+    /// parent task and a subtask.
+    #[tokio::test]
+    async fn new_task_matches_post_tasks() {
+        use delilah_core::hierarchy::TaskKind;
+        let (app, state) = app_with_project().await;
+        let ci = state.store.project("web").await.unwrap().settings.ci_autofix;
+        let post = |body: Value| {
+            let app = app.clone();
+            async move {
+                let (status, task) = call(&app, "POST", "/api/v1/tasks", Some(body)).await;
+                assert_eq!(status, StatusCode::CREATED, "{task}");
+                task
+            }
+        };
+        let normal = post(json!({
+            "key": "PROJ-1", "title": "Normal", "project": "web",
+            "workflow": "project", "in_checkout": true, "model": null
+        }))
+        .await;
+        let parent = post(json!({
+            "key": "PROJ-2", "title": "Parent", "project": "web", "kind": "parent_task"
+        }))
+        .await;
+        let sub = post(json!({
+            "key": "PROJ-3", "title": "Sub", "parent_task": "PROJ-2", "workflow": "project"
+        }))
+        .await;
+
+        let spec = |key: &str, kind, parent: Option<&str>| NewTaskSpec {
+            key: TaskKey::new(key),
+            title: key.into(),
+            kind,
+            parent_task: parent.map(TaskKey::new),
+            project: Some("web".into()),
+        };
+        let defaults = Defaults {
+            ci_autofix: resolve_ci_autofix(None, ci, false),
+            in_checkout: Some(true),
+            ..Defaults::default()
+        };
+        let n = super::new_task(spec("PROJ-1", TaskKind::Normal, None), &defaults);
+        assert_eq!(n.workflow, normal["workflow"].as_str().unwrap());
+        assert_eq!(n.saving_mode, normal["saving_mode"].as_bool().unwrap());
+        assert_eq!(n.ci_autofix, normal["ci_autofix"].as_bool().unwrap());
+        assert_eq!(json!(n.model), normal["model"]);
+        assert_eq!(json!(n.in_checkout), normal["in_checkout"]);
+
+        let parent_defaults = Defaults {
+            workflow: "none".into(),
+            ..Defaults::default()
+        };
+        let p = super::new_task(spec("PROJ-2", TaskKind::ParentTask, None), &parent_defaults);
+        assert_eq!(p.workflow, parent["workflow"].as_str().unwrap());
+        assert_eq!(p.saving_mode, parent["saving_mode"].as_bool().unwrap());
+        assert_eq!(p.ci_autofix, parent["ci_autofix"].as_bool().unwrap());
+        assert_eq!(json!(p.model), parent["model"]);
+        assert_eq!(json!(p.in_checkout), parent["in_checkout"]);
+
+        let s = super::new_task(spec("PROJ-3", TaskKind::Subtask, Some("PROJ-2")), &defaults);
+        assert_eq!(s.workflow, sub["workflow"].as_str().unwrap());
+        assert_eq!(s.saving_mode, sub["saving_mode"].as_bool().unwrap());
+        assert_eq!(s.ci_autofix, sub["ci_autofix"].as_bool().unwrap());
+        assert_eq!(json!(s.model), sub["model"]);
+        assert_eq!(json!(s.in_checkout), sub["in_checkout"]);
+        assert_eq!(s.parent_task, Some(TaskKey::new("PROJ-2")));
     }
 
     #[tokio::test]
