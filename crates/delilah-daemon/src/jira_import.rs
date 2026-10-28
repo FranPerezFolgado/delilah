@@ -256,9 +256,14 @@ pub fn plan_import(
         .collect();
 
     let listed: HashSet<&str> = jira_subtasks.iter().map(|j| j.key.as_str()).collect();
+    // Only Jira-looking keys of the ticket's project can have left Jira; subtasks made by
+    // hand (free keys) were never there.
+    let project_of = |k: &str| k.rsplit_once('-').map(|(p, _)| p.to_ascii_uppercase());
+    let ticket_project = project_of(&ticket.key);
     let gone = children
         .iter()
         .filter(|c| !listed.contains(c.key.as_str()))
+        .filter(|c| is_issue_key(c.key.as_str()) && project_of(c.key.as_str()) == ticket_project)
         .map(|c| SubtaskGone {
             key: c.key.as_str().to_string(),
             title: c.title.clone(),
@@ -1099,6 +1104,9 @@ mod tests {
         let kids = vec![
             task("P-2", TaskKind::Subtask, None, Some("P-1")),
             task("P-9", TaskKind::Subtask, None, Some("P-1")),
+            // Made by hand: never in Jira, so never "gone".
+            task("by-hand", TaskKind::Subtask, None, Some("P-1")),
+            task("OTHER-5", TaskKind::Subtask, None, Some("P-1")),
         ];
         let plan = plan_import(
             &ticket,
