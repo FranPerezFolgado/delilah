@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { api, DEFAULT_PROJECT_SETTINGS, type JiraImportParent, type JiraImportPreview, type JiraImportRow, type Project } from "../api";
+import { api, DEFAULT_PROJECT_SETTINGS, type JiraImportParent, type JiraImportPreview, type JiraImportRow, type JiraImportTask, type Project } from "../api";
 import { setLanguage } from "../i18n";
 import { JiraImportDialog } from "./JiraImportDialog";
 
@@ -26,7 +26,7 @@ const rows = [
   row({}),
   row({ key: "PROJ-12", title: "UI", assignee: "Ana", mine: false, selected: false }),
   row({ key: "PROJ-13", title: "Docs", status: "Done", status_category: "done", selected: false }),
-  row({ key: "PROJ-14", title: "Old", action: "linked", task: { key: "PROJ-14", kind: "task", status: "queued", parent_task: null, archived: false }, selected: false }),
+  row({ key: "PROJ-14", title: "Old", action: "linked", task: { key: "PROJ-14", kind: "normal", status: { type: "queued" }, parent_task: null, archived: false }, selected: false }),
 ];
 
 const open = (p: JiraImportPreview = preview(rows)) => {
@@ -113,7 +113,7 @@ describe("JiraImportDialog create mode", () => {
   });
 
   it("marks attach rows and leaves conflict rows unticked and disabled with the reason", async () => {
-    const task = { key: "PROJ-15", kind: "task", status: "queued", parent_task: null, archived: false };
+    const task: JiraImportTask = { key: "PROJ-15", kind: "normal", status: { type: "queued" }, parent_task: null, archived: false };
     open(preview([
       row({ key: "PROJ-15", title: "Att", action: "attach", task }),
       row({ key: "PROJ-16", title: "Bad", action: "conflict", task, reason: "ya tiene otro padre" }),
@@ -128,7 +128,7 @@ describe("JiraImportDialog create mode", () => {
 });
 
 describe("JiraImportDialog add mode", () => {
-  const task = { key: "PROJ-15", kind: "task", status: "queued", parent_task: null, archived: false };
+  const task: JiraImportTask = { key: "PROJ-15", kind: "normal", status: { type: "queued" }, parent_task: null, archived: false };
   const addRows = [
     row({}),
     row({ key: "PROJ-15", title: "Att", action: "attach", task }),

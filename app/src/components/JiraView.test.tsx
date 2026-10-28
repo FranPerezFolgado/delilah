@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { api, ApiError, type JiraIssue, type JiraSettings } from "../api";
+import { api, ApiError, type JiraIssue, type JiraSettings, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { JiraView } from "./JiraView";
 
@@ -198,6 +198,22 @@ describe("JiraView parent task import", () => {
     vi.mocked(api.jiraIssues).mockResolvedValue([issue({ subtask_count: 0 }), issue({ key: "PROJ-3", subtask: true, subtask_count: null })]);
     view();
     await screen.findAllByText("Reintentos con backoff");
+    expect(screen.queryByRole("button", { name: "Crear tarea padre" })).toBeNull();
+  });
+
+  it("offers the dialog for an existing normal task with that key, not for a parent task", async () => {
+    vi.spyOn(api, "projects").mockResolvedValue([]);
+    const task = (kind: "normal" | "parent_task") => ({ key: "PROJ-1", kind, status: { type: "running" }, phase: "x" }) as unknown as Task;
+    vi.mocked(api.jiraIssues).mockResolvedValue([issue({ subtask_count: 2, task_status: "running" })]);
+    vi.mocked(api.tasks).mockResolvedValue([task("normal")]);
+    view();
+    expect(await screen.findByRole("button", { name: "Crear tarea padre" })).toBeTruthy();
+    cleanup();
+
+    vi.mocked(api.tasks).mockResolvedValue([task("parent_task")]);
+    view();
+    await screen.findByText("Subtareas");
+    await waitFor(() => expect(api.tasks).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("button", { name: "Crear tarea padre" })).toBeNull();
   });
 });

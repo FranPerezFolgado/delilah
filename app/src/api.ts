@@ -374,8 +374,8 @@ export interface JiraIssue {
 /** A task as the import preview sees it (`GET /jira/issues/{key}/import`). */
 export interface JiraImportTask {
   key: string;
-  kind: string;
-  status: string;
+  kind: TaskKind;
+  status: TaskStatus;
   parent_task: string | null;
   archived: boolean;
 }
@@ -389,7 +389,8 @@ export interface JiraImportRow {
   mine: boolean;
   task: JiraImportTask | null;
   action: "create" | "attach" | "linked" | "conflict";
-  reason: string | null;
+  /** Only on conflict rows; omitted otherwise. */
+  reason?: string | null;
   /** Left out on purpose earlier. */
   skipped: boolean;
   /** Ticked by default. */

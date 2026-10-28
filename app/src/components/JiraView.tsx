@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  api, ApiError, DEFAULT_JQL, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
+  api, ApiError, DEFAULT_JQL, taskKind, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
   type JiraSprintFilter, type JiraWho, type Task, type TaskStatus,
 } from "../api";
 import { Button, Icon, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
@@ -488,7 +488,7 @@ function Detail({ issue, expired, parentListed, drawer, onClose, onSelect, onAna
           <div className="sec jv-subs-head">
             <span>{t("Subtareas")}</span>
             {subs && subs.length > 0 && <span className="jv-progress">{t("{done}/{total} hechas", { done, total: subs.length })}</span>}
-            {!issue.task_status && !task && (
+            {(!issue.task_status || (task && taskKind(task) === "normal")) && (
               <Button variant="secondary" size={28} onClick={() => setImporting(true)}>{t("Crear tarea padre")}</Button>
             )}
           </div>
