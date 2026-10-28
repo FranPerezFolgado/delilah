@@ -124,7 +124,7 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 - [X] T036 [US3] Add skip/unskip to `apply_jira_import` and the `POST` validation in `crates/delilah-daemon/src/jira_import.rs` (`add_jira_skips` / `remove_jira_skips` on the same transaction), until T033 passes
 - [X] T037 [US3] Add add mode and per-row Skip/Undo to `app/src/components/JiraImportDialog.tsx` (+ i18n), until T035 passes
 - [X] T038 [US3] Load `jiraImportPreview(parentTask.key)` on mount (and on a "Check Jira" action) in `app/src/components/SubtaskList.tsx` without blocking the list; banner, quiet note and "Skipped (n)" (+ `app/src/i18n/en/SubtaskList.ts` and es), until T034 passes
-- [ ] T039 [US3] Add `--skip K,..` and `--unskip K,..` to `delilah jira import` in `crates/delilah-cli/src/main.rs`; on a parent task the preview shows only new and skipped rows; tests in the CLI's style
+- [X] T039 [US3] Add `--skip K,..` and `--unskip K,..` to `delilah jira import` in `crates/delilah-cli/src/main.rs`; on a parent task the preview shows only new and skipped rows; tests in the CLI's style
 
 **Checkpoint**: both sides stay in step on demand.
 

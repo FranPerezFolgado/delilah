@@ -410,12 +410,18 @@ struct JiraImportArgs {
     /// Imports exactly these sub-tasks (comma-separated keys).
     #[arg(long, value_delimiter = ',', value_name = "KEYS")]
     add: Vec<String>,
+    /// Skips these sub-tasks on the parent task, so later previews leave them out.
+    #[arg(long, value_delimiter = ',', value_name = "KEYS")]
+    skip: Vec<String>,
+    /// Takes these sub-tasks off the skipped list.
+    #[arg(long, value_delimiter = ',', value_name = "KEYS")]
+    unskip: Vec<String>,
 }
 
 impl JiraImportArgs {
-    /// Whether to write (`--defaults` or `--add`); otherwise only preview.
+    /// Whether to write (`--defaults`, `--add`, `--skip` or `--unskip`); otherwise only preview.
     fn writes(&self) -> bool {
-        self.defaults || !self.add.is_empty()
+        self.defaults || !self.add.is_empty() || !self.skip.is_empty() || !self.unskip.is_empty()
     }
 }
 
@@ -871,6 +877,10 @@ struct ImportOutcome {
     attached: Vec<String>,
     #[serde(default)]
     left_out: Vec<ImportLeftOut>,
+    #[serde(default)]
+    skipped: Vec<String>,
+    #[serde(default)]
+    unskipped: Vec<String>,
 }
 
 /// Percent-encodes a query value.
@@ -932,6 +942,11 @@ fn import_body(args: &JiraImportArgs, preview: &ImportPreview) -> serde_json::Va
         args.add.iter().map(|k| k.trim()).collect()
     };
     let mut body = json!({ "add": add });
+    for (field, keys) in [("skip", &args.skip), ("unskip", &args.unskip)] {
+        if !keys.is_empty() {
+            body[field] = json!(keys.iter().map(|k| k.trim()).collect::<Vec<_>>());
+        }
+    }
     if let Some(p) = args.project.as_deref().filter(|p| !p.is_empty()) {
         body["project"] = json!(p);
     }
@@ -977,7 +992,7 @@ fn preview_lines(p: &ImportPreview) -> Vec<String> {
         out.push(format!("  gone from Jira: {}  {}", g.key, g.title));
     }
     if p.subtasks.iter().any(|s| s.selected) {
-        out.push("(* = imported by --defaults; pick others with --add KEY,..)".into());
+        out.push("(* = imported by --defaults; pick others with --add KEY,..; hide rows with --skip KEY,..)".into());
     }
     out
 }
@@ -993,7 +1008,18 @@ fn outcome_lines(o: &ImportOutcome) -> Vec<String> {
     for l in &o.left_out {
         out.push(format!("left out: {} ({})", l.key, l.reason));
     }
-    if o.created.is_empty() && o.attached.is_empty() && o.left_out.is_empty() {
+    if !o.skipped.is_empty() {
+        out.push(format!("skipped: {}", o.skipped.join(", ")));
+    }
+    if !o.unskipped.is_empty() {
+        out.push(format!("unskipped: {}", o.unskipped.join(", ")));
+    }
+    if o.created.is_empty()
+        && o.attached.is_empty()
+        && o.left_out.is_empty()
+        && o.skipped.is_empty()
+        && o.unskipped.is_empty()
+    {
         out.push("nothing to import".into());
     }
     out
@@ -2046,6 +2072,25 @@ mod tests {
         );
         let a = import_args(&["P-10", "--add", "P-12"]).unwrap();
         assert_eq!(import_body(&a, &p), json!({ "add": ["P-12"] }));
+    }
+
+    #[test]
+    fn skip_and_unskip_are_write_flags_sent_in_the_body() {
+        let a = import_args(&["P-10", "--skip", "P-11, P-12", "--unskip", "P-13"]).unwrap();
+        assert!(a.writes() && a.skip == ["P-11", " P-12"] && a.unskip == ["P-13"]);
+        assert_eq!(
+            import_body(&a, &sample_preview()),
+            json!({ "add": [], "skip": ["P-11", "P-12"], "unskip": ["P-13"] })
+        );
+        assert!(import_args(&["P-10", "--unskip", "P-13"]).unwrap().writes());
+        let o: ImportOutcome = serde_json::from_value(json!({
+            "parent_task": "P-10", "skipped": ["P-11"], "unskipped": ["P-13"]
+        }))
+        .unwrap();
+        assert_eq!(
+            outcome_lines(&o),
+            ["Parent task P-10", "skipped: P-11", "unskipped: P-13"]
+        );
     }
 
     #[test]
