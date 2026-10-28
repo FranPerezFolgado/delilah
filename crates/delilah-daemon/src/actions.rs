@@ -177,6 +177,7 @@ pub async fn delete(
     // Its archived subtasks must not be adopted by a task that reuses the key.
     if task.kind == TaskKind::ParentTask {
         app.store.clear_parent_task_links(&key).await?;
+        app.store.delete_jira_skips(&key).await?;
     }
 
     app.asks.release_task(key.as_str());
@@ -493,6 +494,43 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(c.parent_task, None);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_parent_task_drops_its_jira_skips() {
+        let (app, _repo) = setup().await;
+        parent_with_child(&app, true).await;
+        let p = TaskKey::new("P-1");
+        let keys: std::collections::HashSet<String> = ["J-1".to_string()].into();
+        let mut conn = app.store.pool.acquire().await.unwrap();
+        crate::store::add_jira_skips(&mut conn, &p, &keys)
+            .await
+            .unwrap();
+        drop(conn);
+        assert_eq!(app.store.jira_skips_of(&p).await.unwrap(), ["J-1"]);
+        assert!(delete_task(&app, "P-1", false).await.is_ok());
+        assert!(app.store.jira_skips_of(&p).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn archiving_a_parent_task_keeps_its_jira_skips() {
+        let (app, _repo) = setup().await;
+        parent_with_child(&app, true).await;
+        let p = TaskKey::new("P-1");
+        let keys: std::collections::HashSet<String> = ["J-1".to_string()].into();
+        let mut conn = app.store.pool.acquire().await.unwrap();
+        crate::store::add_jira_skips(&mut conn, &p, &keys)
+            .await
+            .unwrap();
+        drop(conn);
+        for e in [Event::Start, Event::WorkspaceReady, Event::MarkDone] {
+            app.store
+                .apply_event(&p, e, chrono::Utc::now())
+                .await
+                .unwrap();
+        }
+        let _ = archive_task(&app, &p).await.map_err(|e| e.message).unwrap();
+        assert_eq!(app.store.jira_skips_of(&p).await.unwrap(), ["J-1"]);
     }
 
     #[tokio::test]
