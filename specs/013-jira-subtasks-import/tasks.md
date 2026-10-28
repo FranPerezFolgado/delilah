@@ -22,8 +22,8 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 
 ## Phase 1: Setup
 
-- [ ] T001 Add the empty module `crates/delilah-daemon/src/jira_import.rs` and declare it where the daemon declares modules (`crates/delilah-daemon/src/lib.rs` or `main.rs`); add the empty submodule `crates/delilah-daemon/src/store/jira_skips.rs` declared from `crates/delilah-daemon/src/store.rs` (`mod jira_skips;`, an `impl Store` block)
-- [ ] T002 Create `crates/delilah-daemon/migrations/0026_jira_subtask_skips.sql`: table `jira_subtask_skips(parent_task TEXT NOT NULL, jira_key TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (parent_task, jira_key))`, no foreign key, with a comment above as in 0025 (data-model §Stored)
+- [X] T001 Add the empty module `crates/delilah-daemon/src/jira_import.rs` and declare it where the daemon declares modules (`crates/delilah-daemon/src/lib.rs` or `main.rs`); add the empty submodule `crates/delilah-daemon/src/store/jira_skips.rs` declared from `crates/delilah-daemon/src/store.rs` (`mod jira_skips;`, an `impl Store` block)
+- [X] T002 Create `crates/delilah-daemon/migrations/0026_jira_subtask_skips.sql`: table `jira_subtask_skips(parent_task TEXT NOT NULL, jira_key TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (parent_task, jira_key))`, no foreign key, with a comment above as in 0025 (data-model §Stored)
 
 ---
 
