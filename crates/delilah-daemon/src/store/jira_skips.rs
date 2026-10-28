@@ -81,14 +81,14 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let p = TaskKey::new("P-1");
         add_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
+            &mut store.pool.acquire().await.unwrap(),
             &p,
             &set(&["J-1", "J-2"]),
         )
         .await
         .unwrap();
         add_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
+            &mut store.pool.acquire().await.unwrap(),
             &p,
             &set(&["J-2", "J-3"]),
         )
@@ -105,14 +105,14 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let p = TaskKey::new("P-1");
         add_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
+            &mut store.pool.acquire().await.unwrap(),
             &p,
             &set(&["J-1", "J-2"]),
         )
         .await
         .unwrap();
         remove_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
+            &mut store.pool.acquire().await.unwrap(),
             &p,
             &set(&["J-1", "J-9"]),
         )
@@ -126,7 +126,7 @@ mod tests {
         let store = Store::in_memory().await.unwrap();
         let p = TaskKey::new("P-1");
         add_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
+            &mut store.pool.acquire().await.unwrap(),
             &p,
             &set(&["J-3", "J-1", "J-2"]),
         )
@@ -142,20 +142,12 @@ mod tests {
     async fn delete_single_parent_only() {
         let store = Store::in_memory().await.unwrap();
         let (a, b) = (TaskKey::new("P-1"), TaskKey::new("P-2"));
-        add_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
-            &a,
-            &set(&["J-1"]),
-        )
-        .await
-        .unwrap();
-        add_jira_skips(
-            &mut *store.pool.acquire().await.unwrap(),
-            &b,
-            &set(&["J-1"]),
-        )
-        .await
-        .unwrap();
+        add_jira_skips(&mut store.pool.acquire().await.unwrap(), &a, &set(&["J-1"]))
+            .await
+            .unwrap();
+        add_jira_skips(&mut store.pool.acquire().await.unwrap(), &b, &set(&["J-1"]))
+            .await
+            .unwrap();
         store.delete_jira_skips(&a).await.unwrap();
         assert!(store.jira_skips_of(&a).await.unwrap().is_empty());
         assert_eq!(store.jira_skips_of(&b).await.unwrap(), ["J-1"]);

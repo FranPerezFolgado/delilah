@@ -1659,14 +1659,36 @@ mod tests {
         connect(&state).await;
         put_task(&state, "PROJ-1242", "web", TaskKind::ParentTask, None).await;
         // Not one of the sample ticket's sub-tasks: as if Jira moved it elsewhere.
-        put_task(&state, "PROJ-7777", "web", TaskKind::Subtask, Some("PROJ-1242")).await;
+        put_task(
+            &state,
+            "PROJ-7777",
+            "web",
+            TaskKind::Subtask,
+            Some("PROJ-1242"),
+        )
+        .await;
         let (_, body) = call(&state, "GET", PREVIEW, None).await;
-        assert_eq!(body["gone"], json!([{ "key": "PROJ-7777", "title": "PROJ-7777" }]));
-        assert!(body["subtasks"].as_array().unwrap().iter().all(|r| r["key"] != "PROJ-7777"));
+        assert_eq!(
+            body["gone"],
+            json!([{ "key": "PROJ-7777", "title": "PROJ-7777" }])
+        );
+        assert!(
+            body["subtasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["key"] != "PROJ-7777")
+        );
 
         // Applying an import neither archives nor changes it.
         let before = stored(&state, "PROJ-7777").await.unwrap();
-        let (s, res) = call(&state, "POST", PREVIEW, Some(json!({ "add": ["PROJ-1250"] }))).await;
+        let (s, res) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "add": ["PROJ-1250"] })),
+        )
+        .await;
         assert_eq!(s, StatusCode::OK, "{res}");
         let after = stored(&state, "PROJ-7777").await.unwrap();
         assert_eq!(after.status, before.status);

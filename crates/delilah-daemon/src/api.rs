@@ -762,7 +762,7 @@ pub(crate) fn new_task(spec: NewTaskSpec, d: &Defaults) -> Task {
     } else {
         Some(false)
     };
-    task.model = d.model.clone();
+    task.model = d.model;
     task.view = d.view;
     task.start_message = d.start_message.clone();
     task.saving_mode = d.saving_mode;
