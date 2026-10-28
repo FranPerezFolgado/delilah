@@ -385,6 +385,38 @@ enum Command {
     /// Acts on a task whose project setup failed or is running.
     #[command(subcommand)]
     Setup(SetupCommand),
+    /// Works with Jira tickets.
+    #[command(subcommand)]
+    Jira(JiraCommand),
+}
+
+#[derive(Subcommand)]
+enum JiraCommand {
+    /// Previews or imports the sub-tasks of a Jira ticket as subtasks of its parent task.
+    /// Without --defaults or --add it only prints the preview and writes nothing.
+    Import(JiraImportArgs),
+}
+
+#[derive(Args)]
+struct JiraImportArgs {
+    /// The Jira ticket whose sub-tasks to import.
+    key: String,
+    /// The project for the parent task, when the ticket has no task yet.
+    #[arg(long)]
+    project: Option<String>,
+    /// Imports the sub-tasks the preview marks with `*`.
+    #[arg(long, conflicts_with = "add")]
+    defaults: bool,
+    /// Imports exactly these sub-tasks (comma-separated keys).
+    #[arg(long, value_delimiter = ',', value_name = "KEYS")]
+    add: Vec<String>,
+}
+
+impl JiraImportArgs {
+    /// Whether to write (`--defaults` or `--add`); otherwise only preview.
+    fn writes(&self) -> bool {
+        self.defaults || !self.add.is_empty()
+    }
 }
 
 #[derive(Subcommand)]
@@ -769,6 +801,202 @@ impl From<RawErrorBody> for ErrorBody {
             fields: raw.fields,
         }
     }
+}
+
+/// `GET /api/v1/jira/issues/{key}/import`: the plan, or why there is none.
+#[derive(Deserialize)]
+struct ImportPreview {
+    #[serde(default)]
+    linked: bool,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    ticket: Option<PreviewTicket>,
+    #[serde(default)]
+    parent: Option<PreviewParent>,
+    #[serde(default)]
+    subtasks: Vec<PreviewSubtask>,
+    #[serde(default)]
+    gone: Vec<PreviewGone>,
+}
+
+#[derive(Deserialize)]
+struct PreviewTicket {
+    key: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct PreviewParent {
+    action: String,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PreviewSubtask {
+    key: String,
+    title: String,
+    status: String,
+    #[serde(default)]
+    assignee: Option<String>,
+    action: String,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    skipped: bool,
+    #[serde(default)]
+    selected: bool,
+}
+
+#[derive(Deserialize)]
+struct PreviewGone {
+    key: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct ImportLeftOut {
+    key: String,
+    reason: String,
+}
+
+/// `POST /api/v1/jira/issues/{key}/import`.
+#[derive(Deserialize)]
+struct ImportOutcome {
+    parent_task: String,
+    #[serde(default)]
+    created: Vec<String>,
+    #[serde(default)]
+    attached: Vec<String>,
+    #[serde(default)]
+    left_out: Vec<ImportLeftOut>,
+}
+
+/// Percent-encodes a query value.
+fn query_value(v: &str) -> String {
+    v.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+fn jira_import(api: &Api, args: &JiraImportArgs) -> Result<(), String> {
+    let key = args.key.trim();
+    let mut path = format!("/api/v1/jira/issues/{key}/import");
+    if let Some(p) = args.project.as_deref().filter(|p| !p.is_empty()) {
+        path.push_str(&format!("?project={}", query_value(p)));
+    }
+    let preview: ImportPreview = api.get(&path)?;
+    if !preview.linked {
+        return Err(unlinked_message(key, preview.reason.as_deref()));
+    }
+    if !args.writes() {
+        for line in preview_lines(&preview) {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+    let body = import_body(args, &preview);
+    let outcome: ImportOutcome = api.post(&format!("/api/v1/jira/issues/{key}/import"), &body)?;
+    for line in outcome_lines(&outcome) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn unlinked_message(key: &str, reason: Option<&str>) -> String {
+    match reason {
+        Some("not-connected") => "Jira is not connected; connect it in the app's settings.".into(),
+        Some("not-found") => format!("{key} was not found in Jira."),
+        Some("unreachable") => "Jira did not answer; try again in a moment.".into(),
+        Some(other) => format!("Jira preview unavailable: {other}"),
+        None => "Jira preview unavailable".into(),
+    }
+}
+
+/// The POST body: `--defaults` adds the preselected rows, `--add` exactly the given keys.
+fn import_body(args: &JiraImportArgs, preview: &ImportPreview) -> serde_json::Value {
+    let add: Vec<&str> = if args.defaults {
+        preview
+            .subtasks
+            .iter()
+            .filter(|s| s.selected)
+            .map(|s| s.key.as_str())
+            .collect()
+    } else {
+        args.add.iter().map(|k| k.trim()).collect()
+    };
+    let mut body = json!({ "add": add });
+    if let Some(p) = args.project.as_deref().filter(|p| !p.is_empty()) {
+        body["project"] = json!(p);
+    }
+    body
+}
+
+fn preview_lines(p: &ImportPreview) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(t) = &p.ticket {
+        out.push(format!("{}  {}", t.key, t.title));
+    }
+    if let Some(parent) = &p.parent {
+        out.push(match parent.action.as_str() {
+            "create" => "Parent task: will be created".to_string(),
+            "convert" => "Parent task: the existing task becomes a parent task".to_string(),
+            "existing" => "Parent task: already a parent task".to_string(),
+            _ => format!(
+                "Parent task: refused ({})",
+                parent.message.as_deref().unwrap_or(&parent.action)
+            ),
+        });
+    }
+    if p.subtasks.is_empty() {
+        out.push("No sub-tasks in Jira.".into());
+    }
+    for s in &p.subtasks {
+        let action = match (s.action.as_str(), s.reason.as_deref()) {
+            ("conflict", Some(r)) => format!("conflict: {r}"),
+            (a, _) if s.skipped => format!("{a} (skipped)"),
+            (a, _) => a.to_string(),
+        };
+        out.push(format!(
+            "{} {:<12} {:<14} {:<16} {:<22} {}",
+            if s.selected { "*" } else { " " },
+            s.key,
+            s.status,
+            s.assignee.as_deref().unwrap_or("-"),
+            action,
+            s.title
+        ));
+    }
+    for g in &p.gone {
+        out.push(format!("  gone from Jira: {}  {}", g.key, g.title));
+    }
+    if p.subtasks.iter().any(|s| s.selected) {
+        out.push("(* = imported by --defaults; pick others with --add KEY,..)".into());
+    }
+    out
+}
+
+fn outcome_lines(o: &ImportOutcome) -> Vec<String> {
+    let mut out = vec![format!("Parent task {}", o.parent_task)];
+    if !o.created.is_empty() {
+        out.push(format!("created: {}", o.created.join(", ")));
+    }
+    if !o.attached.is_empty() {
+        out.push(format!("attached: {}", o.attached.join(", ")));
+    }
+    for l in &o.left_out {
+        out.push(format!("left out: {} ({})", l.key, l.reason));
+    }
+    if o.created.is_empty() && o.attached.is_empty() && o.left_out.is_empty() {
+        out.push("nothing to import".into());
+    }
+    out
 }
 
 /// A task with what only the API adds: the progress of a parent task.
@@ -1197,6 +1425,7 @@ fn run(api: &Api, command: Command) -> Result<(), String> {
                 Err(e) => return Err(e.error),
             }
         }
+        Command::Jira(JiraCommand::Import(args)) => jira_import(api, &args)?,
         Command::Usage => {
             let report: Option<UsageReport> = api.get("/api/v1/usage")?;
             let Some(report) = report else {
@@ -1767,6 +1996,82 @@ mod tests {
         );
         let back = apply_change(always, change(&["unset", "p", "ci-autofix"])).unwrap();
         assert_eq!(back.ci_autofix, AutofixDefault::Autopilot);
+    }
+
+    fn import_args(argv: &[&str]) -> Result<JiraImportArgs, clap::Error> {
+        let mut v = vec!["delilah", "jira", "import"];
+        v.extend_from_slice(argv);
+        Cli::try_parse_from(v).map(|cli| match cli.command {
+            Command::Jira(JiraCommand::Import(a)) => a,
+            _ => panic!("not jira import"),
+        })
+    }
+
+    fn sample_preview() -> ImportPreview {
+        serde_json::from_value(json!({
+            "linked": true,
+            "ticket": { "key": "P-10", "title": "Checkout", "status": "To Do", "is_subtask": false },
+            "parent": { "action": "create" },
+            "subtasks": [
+                { "key": "P-11", "title": "API", "status": "To Do", "assignee": "Ana",
+                  "action": "create", "reason": null, "skipped": false, "selected": true },
+                { "key": "P-12", "title": "UI", "status": "Done", "assignee": null,
+                  "action": "conflict", "reason": "taken", "skipped": false, "selected": false }
+            ],
+            "gone": [ { "key": "P-9", "title": "Old" } ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_jira_import() {
+        let a = import_args(&["P-10"]).unwrap();
+        assert_eq!(a.key, "P-10");
+        assert!(!a.writes() && a.project.is_none());
+        let a = import_args(&["P-10", "--project", "sig", "--defaults"]).unwrap();
+        assert!(a.writes() && a.defaults && a.project.as_deref() == Some("sig"));
+        let a = import_args(&["P-10", "--add", "P-11,P-12"]).unwrap();
+        assert!(a.writes() && a.add == ["P-11", "P-12"]);
+        assert!(import_args(&["P-10", "--defaults", "--add", "P-11"]).is_err());
+        assert!(import_args(&[]).is_err());
+    }
+
+    #[test]
+    fn import_body_takes_the_preselected_or_the_given_keys() {
+        let p = sample_preview();
+        let a = import_args(&["P-10", "--defaults", "--project", "sig"]).unwrap();
+        assert_eq!(
+            import_body(&a, &p),
+            json!({ "add": ["P-11"], "project": "sig" })
+        );
+        let a = import_args(&["P-10", "--add", "P-12"]).unwrap();
+        assert_eq!(import_body(&a, &p), json!({ "add": ["P-12"] }));
+    }
+
+    #[test]
+    fn prints_the_preview_and_the_result() {
+        let lines = preview_lines(&sample_preview());
+        assert_eq!(lines[0], "P-10  Checkout");
+        assert!(lines[1].contains("will be created"));
+        assert!(lines[2].starts_with("* P-11") && lines[2].contains("Ana"));
+        assert!(lines[3].starts_with("  P-12") && lines[3].contains("conflict: taken"));
+        assert!(lines.iter().any(|l| l.contains("gone from Jira: P-9")));
+        let outcome: ImportOutcome = serde_json::from_value(json!({
+            "parent_task": "P-10", "created": ["P-11"], "attached": ["P-14"],
+            "left_out": [{ "key": "P-13", "reason": "started" }],
+            "skipped": [], "unskipped": []
+        }))
+        .unwrap();
+        assert_eq!(
+            outcome_lines(&outcome),
+            [
+                "Parent task P-10",
+                "created: P-11",
+                "attached: P-14",
+                "left out: P-13 (started)"
+            ]
+        );
+        assert_eq!(query_value("a b/c"), "a%20b%2Fc");
     }
 
     #[test]

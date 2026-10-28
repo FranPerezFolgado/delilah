@@ -80,7 +80,7 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 - [X] T024 [P] [US1] Add types `JiraImportPreview`, `JiraImportRow`, `JiraImportRequest`, `JiraImportResult` and functions `jiraImportPreview(key)`, `jiraImport(key, req)` to `app/src/api.ts` (contracts/api.md), with a case in `app/src/api.test.ts`
 - [X] T025 [US1] Create `app/src/components/JiraImportDialog.tsx` in create mode plus `app/src/i18n/en/JiraImportDialog.ts` and its Spanish counterpart (follow `NewTaskDialog.tsx` and its i18n files; register in `app/src/i18n/en/en.ts` and the es index), until T018 passes
 - [X] T026 [US1] Add "Create parent task" to the ticket in `app/src/components/JiraView.tsx` (near the sub-task listing ~L404–494) and its strings in `app/src/i18n/en/JiraView.ts` (+ es), until T019 passes
-- [ ] T027 [US1] Add `delilah jira import <KEY> [--project] [--defaults | --add K,..]` to `crates/delilah-cli/src/main.rs` (contracts §CLI): preview table when no write flag, result lines and exit code 1 on refusal; parsing and printing tests in the CLI's existing test style
+- [X] T027 [US1] Add `delilah jira import <KEY> [--project] [--defaults | --add K,..]` to `crates/delilah-cli/src/main.rs` (contracts §CLI): preview table when no write flag, result lines and exit code 1 on refusal; parsing and printing tests in the CLI's existing test style
 
 **Checkpoint**: US1 works end to end on sample data (quickstart steps 1–2, 5–6).
 

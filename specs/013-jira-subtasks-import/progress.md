@@ -13,7 +13,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 2 | 2A | done | 1 | cd5ecc2 | |
 | WP-07 | 3 | 3A | verified | 1 | d14a1c0 | |
 | WP-08 | 3 | 3A | verified | 1 | 2ea9c15 | |
-| WP-09 | 3 | 3B | pending | 0 | | |
+| WP-09 | 3 | 3B | verified | 1 | PEND | |
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4A | verified | 1 | f034d1c | |
 | WP-12 | 5 | 5A | pending | 0 | | |
@@ -34,3 +34,9 @@ Mode: format=markdown commits=yes autonomy=auto
 | 2 | architecture | MEDIUM | Free store fns vs impl Store; apply must open tx via Store::begin_immediate only | store.rs, store/jira_skips.rs |
 | 2 | architecture | LOW | begin_immediate duplicates BEGIN IMMEDIATE in 6 places; parent invariants live in resolve_new_task not new_task; refusal_text duplicates api_hierarchy messages; remove #![allow(dead_code)] when wired (WP-07) | various |
 | 5 | WP-13 | LOW | No CSS for .subtasks-banner/.subtasks-note (SubtaskList.css); fold into WP-15 | app/src/components/SubtaskList.css |
+| 3 | security | LOW | One bad Jira sub-task key fails whole import with 400 | jira_import.rs |
+| 3 | security | LOW | Parent summary written raw into ticket.md (same class as Epic line) | jira.rs write_ticket |
+| 3 | security | LOW | Raw sqlx error text returned to client | jira_import.rs |
+| 3 | contract | HIGH | JiraImportTask.status typed string vs tagged object — fix package WP-08F running | app/src/api.ts |
+| 3 | spec | MEDIUM | No Jira-view entry point for converting an existing normal task — in WP-08F | JiraView.tsx |
+| 3 | contract | RISK | contracts/api.md error body says {error, code?} but daemon sends {error:<code>, message}; undocumented 409 when Jira unlinked, undocumented ?project= on GET (fix spec text in WP-16 docs) | contracts/api.md |
