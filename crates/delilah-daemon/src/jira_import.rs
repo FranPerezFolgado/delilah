@@ -1380,6 +1380,128 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skips_and_unskips_need_a_parent_and_are_silent_writes() {
+        let state = app().await;
+        connect(&state).await;
+        // No parent task and no project to create one in: 400, nothing written.
+        let (s, body) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "skip": ["PROJ-1251"] })),
+        )
+        .await;
+        assert_eq!(
+            (s, body["error"].as_str()),
+            (StatusCode::BAD_REQUEST, Some("project-required"))
+        );
+        let (s, _) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "unskip": ["PROJ-1251"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert!(stored(&state, "PROJ-1242").await.is_none());
+
+        // A hand-made parent task whose key is a sample ticket gets the offer.
+        put_task(&state, "PROJ-1242", "web", TaskKind::ParentTask, None).await;
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        assert_eq!(body["parent"], json!({ "action": "existing" }));
+        let rows = body["subtasks"].as_array().unwrap();
+        let by = |k: &str| rows.iter().find(|r| r["key"] == k).unwrap();
+        assert_eq!(by("PROJ-1250")["action"], "create");
+        assert_eq!(by("PROJ-1250")["selected"], true);
+
+        // A skip-only write (empty `add`) is valid and announces nothing.
+        let mut rx = state.events.subscribe();
+        let (s, body) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "add": [], "skip": ["PROJ-1250"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        assert_eq!(body["skipped"], json!(["PROJ-1250"]));
+        assert_eq!(tasks_events(&mut rx), 0);
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        let rows = body["subtasks"].as_array().unwrap();
+        let row = rows.iter().find(|r| r["key"] == "PROJ-1250").unwrap();
+        assert_eq!(
+            (row["skipped"].clone(), row["selected"].clone()),
+            (json!(true), json!(false))
+        );
+
+        // Unskipping reverses it.
+        let (s, _) = call(
+            &state,
+            "POST",
+            PREVIEW,
+            Some(json!({ "unskip": ["PROJ-1250"] })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        let rows = body["subtasks"].as_array().unwrap();
+        let row = rows.iter().find(|r| r["key"] == "PROJ-1250").unwrap();
+        assert_eq!(
+            (row["skipped"].clone(), row["selected"].clone()),
+            (json!(false), json!(true))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_libre_parent_is_not_found_and_deleted_or_archived_subtasks_follow_the_store() {
+        let state = app().await;
+        connect(&state).await;
+        let (s, body) = call(&state, "GET", "/api/v1/jira/issues/LIBRE-5/import", None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(body, json!({ "linked": false, "reason": "not-found" }));
+
+        put_task(&state, "PROJ-1242", "web", TaskKind::ParentTask, None).await;
+        put_task(
+            &state,
+            "PROJ-1250",
+            "web",
+            TaskKind::Subtask,
+            Some("PROJ-1242"),
+        )
+        .await;
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        let rows = body["subtasks"].as_array().unwrap();
+        assert_eq!(
+            rows.iter().find(|r| r["key"] == "PROJ-1250").unwrap()["action"],
+            "linked"
+        );
+
+        // Archived (finished, no workspace): still linked.
+        sqlx::query("UPDATE tasks SET status = '{\"type\":\"done\"}' WHERE key = 'PROJ-1250'")
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        let rows = body["subtasks"].as_array().unwrap();
+        let row = rows.iter().find(|r| r["key"] == "PROJ-1250").unwrap();
+        assert_eq!(row["action"], "linked");
+        assert_eq!(row["task"]["archived"], true);
+
+        // Deleted: offered again.
+        sqlx::query("DELETE FROM tasks WHERE key = 'PROJ-1250'")
+            .execute(&state.store.pool)
+            .await
+            .unwrap();
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        let rows = body["subtasks"].as_array().unwrap();
+        let row = rows.iter().find(|r| r["key"] == "PROJ-1250").unwrap();
+        assert_eq!(
+            (row["action"].clone(), row["selected"].clone()),
+            (json!("create"), json!(true))
+        );
+    }
+
+    #[tokio::test]
     async fn a_normal_ticket_task_converts_and_a_backlog_task_attaches() {
         let state = app().await;
         connect(&state).await;

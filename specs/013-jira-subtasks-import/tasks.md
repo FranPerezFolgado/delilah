@@ -115,13 +115,13 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 
 ### Tests
 
-- [ ] T033 [P] [US3] Handler tests in `crates/delilah-daemon/src/jira_import.rs`: `POST` with `skip` writes skips and the next preview marks them `skipped`, `selected:false`; `unskip` reverses it; skip/unskip without an existing or created parent task → 400; an empty `add` is valid; skip-only writes emit no `Topic::Tasks`; a hand-made parent task whose key is a sample ticket gets the offer (US3-5); a `LIBRE-n` parent task → `linked:false, not-found` without a Jira call; a deleted subtask's Jira sub-task is offered again, an archived one is `linked`
+- [X] T033 [P] [US3] Handler tests in `crates/delilah-daemon/src/jira_import.rs`: `POST` with `skip` writes skips and the next preview marks them `skipped`, `selected:false`; `unskip` reverses it; skip/unskip without an existing or created parent task → 400; an empty `add` is valid; skip-only writes emit no `Topic::Tasks`; a hand-made parent task whose key is a sample ticket gets the offer (US3-5); a `LIBRE-n` parent task → `linked:false, not-found` without a Jira call; a deleted subtask's Jira sub-task is offered again, an archived one is `linked`
 - [X] T034 [P] [US3] `app/src/components/SubtaskList.test.tsx`: the banner "N new Jira sub-tasks · Add" counts selectable non-skipped `create`/`attach` rows, hides at 0; it renders the subtask list before the preview resolves (never waits); `not-connected` shows a quiet note, `not-found`/`unreachable` show nothing; "Skipped (n)" lists skips with Undo; "Add" opens `JiraImportDialog` in add mode
 - [X] T035 [P] [US3] `app/src/components/JiraImportDialog.test.tsx`: add mode lists only `create`/`attach` rows plus the skipped ones with Undo; a per-row "Skip" goes to the request's `skip`
 
 ### Implementation
 
-- [ ] T036 [US3] Add skip/unskip to `apply_jira_import` and the `POST` validation in `crates/delilah-daemon/src/jira_import.rs` (`add_jira_skips` / `remove_jira_skips` on the same transaction), until T033 passes
+- [X] T036 [US3] Add skip/unskip to `apply_jira_import` and the `POST` validation in `crates/delilah-daemon/src/jira_import.rs` (`add_jira_skips` / `remove_jira_skips` on the same transaction), until T033 passes
 - [X] T037 [US3] Add add mode and per-row Skip/Undo to `app/src/components/JiraImportDialog.tsx` (+ i18n), until T035 passes
 - [X] T038 [US3] Load `jiraImportPreview(parentTask.key)` on mount (and on a "Check Jira" action) in `app/src/components/SubtaskList.tsx` without blocking the list; banner, quiet note and "Skipped (n)" (+ `app/src/i18n/en/SubtaskList.ts` and es), until T034 passes
 - [ ] T039 [US3] Add `--skip K,..` and `--unskip K,..` to `delilah jira import` in `crates/delilah-cli/src/main.rs`; on a parent task the preview shows only new and skipped rows; tests in the CLI's style
