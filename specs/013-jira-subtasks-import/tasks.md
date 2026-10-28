@@ -144,10 +144,10 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 
 ## Phase 7: Polish & docs
 
-- [ ] T043 [P] `docs/usage.md`: under "Parent tasks and subtasks" and "Jira", the "Create parent task" flow, default ticks (done / someone else's unticked), reuse of existing tasks, the offer on the parent task screen, skips, Jira status, one-way sync, and `delilah jira import`
-- [ ] T044 [P] `docs/status.md`: drop "Not yet: the Jira adapter" from the parent tasks entry and add this feature (spec 013); add it under **Jira**
-- [ ] T045 [P] `docs/decisions.md`: new decision (next number after 102) — Jira → Delilah only, pull on open, never background, never writes to Jira; default selection rules; reuse via convert/attach with in-transaction re-checks; skips table (0026); no stored Jira link (the key is the link); ruled out: background polling, writing to Jira, syncing titles, a stored link column
-- [ ] T046 [P] `docs/architecture.md`: `jira_import.rs`, `store/jira_skips.rs`, migration 0026, the two routes
+- [X] T043 [P] `docs/usage.md`: under "Parent tasks and subtasks" and "Jira", the "Create parent task" flow, default ticks (done / someone else's unticked), reuse of existing tasks, the offer on the parent task screen, skips, Jira status, one-way sync, and `delilah jira import`
+- [X] T044 [P] `docs/status.md`: drop "Not yet: the Jira adapter" from the parent tasks entry and add this feature (spec 013); add it under **Jira**
+- [X] T045 [P] `docs/decisions.md`: new decision (next number after 102) — Jira → Delilah only, pull on open, never background, never writes to Jira; default selection rules; reuse via convert/attach with in-transaction re-checks; skips table (0026); no stored Jira link (the key is the link); ruled out: background polling, writing to Jira, syncing titles, a stored link column
+- [X] T046 [P] `docs/architecture.md`: `jira_import.rs`, `store/jira_skips.rs`, migration 0026, the two routes
 - [ ] T047 Run `cargo test --workspace`, `cargo test --manifest-path app/src-tauri/Cargo.toml`, `cd app && npx tsc --noEmit && npx vitest run`; walk through `specs/013-jira-subtasks-import/quickstart.md` in `scripts/preview.sh --fresh`
 
 ---

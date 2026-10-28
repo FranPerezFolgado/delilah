@@ -19,7 +19,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-12 | 5 | 5A | verified | 1 | 32809d2 | |
 | WP-13 | 5 | 5A | verified | 1 | 10c3198 | |
 | WP-14 | 5 | 5B | verified | 1 | 74add05 | |
-| WP-15 | 6 | 6A | verified | 1 | 880c15f | |
+| WP-15 | 6 | 6A | done | 1 | 880c15f | |
 | WP-16 | 7 | 7A | pending | 0 | | |
 | WP-17 | 7 | 7B | pending | 0 | | |
 
@@ -40,3 +40,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | 3 | contract | HIGH (fixed in WP-08F) | JiraImportTask.status typed string vs tagged object | app/src/api.ts |
 | 3 | spec | MEDIUM | No Jira-view entry point for converting an existing normal task — in WP-08F | JiraView.tsx |
 | 3 | contract | RISK | contracts/api.md error body says {error, code?} but daemon sends {error:<code>, message}; undocumented 409 when Jira unlinked, undocumented ?project= on GET (fix spec text in WP-16 docs) | contracts/api.md |
+| 5 | contract | RISK | Result echoes requested skip/unskip keys, not the keys that changed | jira_import.rs |
+| 5 | contract | RISK | CLI arg struct keeps untrimmed values (wire body is trimmed) | crates/delilah-cli/src/main.rs |
+| 4-6 | spec | LOW | Convert path doesn't re-check archived inside the transaction | crates/delilah-daemon/src/jira_import.rs |
+| 4-6 | spec | LOW | Explicitly added Linked rows come back in left_out with reason "linked" | crates/delilah-daemon/src/jira_import.rs |

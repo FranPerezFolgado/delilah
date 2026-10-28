@@ -674,6 +674,7 @@ submodules.)
 - **Convert.** On a backlog task, "Make parent task" and "Attach to parent task…"; on a
   started task, the "Parent task" menu in its header converts it (a running task keeps its
   workspace). Attaching a task that already started is refused (`already-started`).
+- **From Jira.** A ticket's Jira sub-tasks can become subtasks; see [Jira](#jira).
 - **Not supported.** A subtask based on another subtask (stacked PRs) and more than two levels.
 
 ## Jira
@@ -684,6 +685,38 @@ kept in the macOS Keychain. "Analyse with Claude" opens a new task prefilled fro
 the ticket; for parent projects, "Suggest with Claude" runs a quick read-only
 Claude pass (haiku) that picks the submodules and says why. The agent gets the
 ticket as `~/.delilah/tasks/<KEY>/ticket.md`.
+
+**Sub-tasks as subtasks.** A ticket with Jira sub-tasks shows "Create parent task" in the
+Jira view. The dialog lists the sub-tasks and asks for a project; confirming creates the
+parent task for the ticket and a subtask for each ticked sub-task (the ticket's key is the
+task's key, so there is no other link). Which rows start ticked:
+
+- Ticked: not done, and assigned to you or to nobody.
+- Unticked: done, or assigned to someone else (you can tick them).
+- Not offered: a sub-task whose task cannot be reused (shown as a conflict with the reason).
+
+Tasks that already exist are reused, not duplicated. If the ticket already has a task, it is
+**converted** into the parent task (it keeps its status; refused with a reason if it has an
+open PR or a running session, or is archived or already a subtask). If a sub-task already has
+a backlog task in the same project, it is **attached** to the parent task; one that started,
+belongs to another project, or is already someone's subtask is left out and the dialog says
+why.
+
+On a parent task whose ticket has new sub-tasks, the subtask list shows a banner ("N new
+sub-tasks in Jira") that opens the same dialog. The preview is pulled when the screen opens
+(and after the dialog); nothing polls Jira in the background. A row can be **skipped**
+("Skip"): it is not offered again, appears under "Skipped (n)" and has "Undo". Each linked
+subtask shows its Jira status, and "not in Jira any more" when it was moved or deleted there
+(the subtask is left alone). Without a Jira connection the list stays quiet, with a note.
+
+The sync is one way: nothing is ever written to Jira, and a renamed Jira sub-task does not
+rename the subtask.
+
+From the CLI, `delilah jira import KEY` prints the preview (parent action, and per sub-task
+its status, assignee, action and a `*` for the ticked ones) and writes nothing. To write:
+`--defaults` (the ticked ones) or `--add K1,K2` (exactly those), `--project P` (needed when
+the parent task is created), `--skip K1,K2` and `--unskip K1,K2`. It prints what was created,
+attached and left out, and exits 1 on a refusal.
 
 ## Sessions
 
