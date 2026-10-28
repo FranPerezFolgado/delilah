@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { api, type SubtaskSummary, type Task } from "../api";
-import { t } from "../i18n";
+import { api, type JiraImportPreview, type JiraImportRow, type SubtaskSummary, type Task } from "../api";
+import { t, tn } from "../i18n";
 import { Button, StatusBadge } from "./ui";
+import { JiraImportDialog } from "./JiraImportDialog";
 import "./SubtaskList.css";
 
 interface Props {
@@ -28,6 +29,9 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
   const [subtasks, setSubtasks] = useState<SubtaskSummary[] | null>(null);
   // Reload when the parent task changes (its progress moves when a subtask merges or is added).
   const p = task.subtask_progress;
+  const [preview, setPreview] = useState<JiraImportPreview | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [check, setCheck] = useState(0);
   const stamp = p ? `${p.merged}/${p.counted}/${p.dropped}` : "";
   useEffect(() => {
     let stale = false;
@@ -40,6 +44,27 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
     };
   }, [task.key, stamp]);
 
+  // The Jira preview never blocks the list; failures are silent (the list is the truth).
+  useEffect(() => {
+    let stale = false;
+    api
+      .jiraImportPreview(task.key)
+      .then((p) => !stale && setPreview(p))
+      .catch(() => !stale && setPreview(null));
+    return () => {
+      stale = true;
+    };
+  }, [task.key, stamp, check]);
+
+  const rows: JiraImportRow[] = preview?.linked ? preview.subtasks : [];
+  const fresh = rows.filter((r) => (r.action === "create" || r.action === "attach") && !r.skipped && r.selected).length;
+  const skipped = rows.filter((r) => (r.action === "create" || r.action === "attach") && r.skipped);
+  const undo = (key: string) =>
+    api
+      .jiraImport(task.key, { add: [], skip: [], unskip: [key] })
+      .then(() => setCheck((n) => n + 1))
+      .catch((e) => onError?.(e));
+
   return (
     <section className="subtasks" aria-label={t("Subtareas")}>
       <header className="subtasks-hd">
@@ -48,6 +73,13 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
         <span className="subtasks-grow" />
         <Button variant="secondary" size={28} onClick={() => onNewSubtask?.(task)} disabled={!onNewSubtask}>{t("Nueva subtarea")}</Button>
       </header>
+      {fresh > 0 && (
+        <div className="subtasks-banner" role="status">
+          <span>{tn(fresh, "{n} subtarea nueva de Jira", "{n} subtareas nuevas de Jira")}</span>
+          <Button variant="secondary" size={28} onClick={() => setAdding(true)}>{t("Añadir")}</Button>
+        </div>
+      )}
+      {preview && !preview.linked && preview.reason === "not-connected" && <p className="muted subtasks-note">{t("Jira no está conectado.")}</p>}
       {subtasks && subtasks.length === 0 && <p className="muted">{t("Aún no hay subtareas.")}</p>}
       <ul className="subtasks-list">
         {(subtasks ?? []).map((s) => (
@@ -61,6 +93,28 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
           </li>
         ))}
       </ul>
+      {skipped.length > 0 && (
+        <div className="subtasks-skipped">
+          <p className="muted">{t("Omitidas ({n})", { n: skipped.length })}</p>
+          <ul className="subtasks-list">
+            {skipped.map((r) => (
+              <li key={r.key} className="subtask">
+                <span className="mono">{r.key}</span>
+                <span className="trunc subtasks-title">{r.title}</span>
+                <Button variant="secondary" size={28} aria-label={t("Deshacer {key}", { key: r.key })} onClick={() => undo(r.key)}>{t("Deshacer")}</Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {adding && (
+        <JiraImportDialog
+          issueKey={task.key}
+          mode="add"
+          onClose={() => setAdding(false)}
+          onDone={() => setCheck((n) => n + 1)}
+        />
+      )}
     </section>
   );
 }

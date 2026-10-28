@@ -126,3 +126,44 @@ describe("JiraImportDialog create mode", () => {
     expect(screen.getByText("ya tiene otro padre")).toBeTruthy();
   });
 });
+
+describe("JiraImportDialog add mode", () => {
+  const task = { key: "PROJ-15", kind: "task", status: "queued", parent_task: null, archived: false };
+  const addRows = [
+    row({}),
+    row({ key: "PROJ-15", title: "Att", action: "attach", task }),
+    row({ key: "PROJ-14", title: "Old", action: "linked", task: { ...task, key: "PROJ-14", parent_task: "PROJ-10" }, selected: false }),
+    row({ key: "PROJ-16", title: "Bad", action: "conflict", task, reason: "otro padre", selected: false }),
+    row({ key: "PROJ-17", title: "Left", skipped: true, selected: false }),
+  ];
+  const openAdd = () => {
+    vi.spyOn(api, "jiraImportPreview").mockResolvedValue({ ...(preview(addRows) as Extract<JiraImportPreview, { linked: true }>), parent: { action: "existing" } });
+    vi.spyOn(api, "projects").mockResolvedValue([web]);
+    const props = { onClose: vi.fn(), onDone: vi.fn() };
+    render(<JiraImportDialog issueKey="PROJ-10" mode="add" {...props} />);
+    return props;
+  };
+
+  it("lists only create/attach rows plus the skipped ones, with no project picker", async () => {
+    openAdd();
+    await screen.findByText("API");
+    expect(screen.getByText("Att")).toBeTruthy();
+    expect(screen.queryByText("Old")).toBeNull();
+    expect(screen.queryByText("Bad")).toBeNull();
+    expect(screen.queryByLabelText("Proyecto")).toBeNull();
+    expect(screen.getByText("Omitidas (1)")).toBeTruthy();
+    expect(screen.getByText("Left")).toBeTruthy();
+  });
+
+  it("sends a per-row Skip in `skip` and an Undo in `unskip`", async () => {
+    openAdd();
+    const imp = vi.spyOn(api, "jiraImport").mockResolvedValue({ parent_task: "PROJ-10", created: [], attached: [], left_out: [], skipped: [], unskipped: [] });
+    await screen.findByText("API");
+    fireEvent.click(screen.getByRole("button", { name: "Omitir PROJ-15" }));
+    expect(screen.getByText("Omitidas (2)")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Deshacer PROJ-17" }));
+    expect(screen.getByText("Omitidas (1)")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Añadir" }));
+    await waitFor(() => expect(imp).toHaveBeenCalledWith("PROJ-10", { add: ["PROJ-11"], skip: ["PROJ-15"], unskip: ["PROJ-17"] }));
+  });
+});

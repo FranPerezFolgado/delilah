@@ -14,4 +14,7 @@ export const EN: Record<string, string> = {
   "ya es una tarea, se unirá": "already a task, will be attached",
   "{key} pasa a ser la tarea padre.": "{key} becomes the parent task.",
   "Se añade a la tarea padre {key}.": "Adds to the parent task {key}.",
+  "Añadir subtareas de {key}": "Add sub-tasks of {key}",
+  "Omitir {key}": "Skip {key}",
+  Omitir: "Skip",
 };
