@@ -24,6 +24,7 @@ mod idea;
 pub mod inbox;
 mod integration;
 mod jira;
+mod jira_import;
 pub mod lang;
 mod live;
 pub mod logs;

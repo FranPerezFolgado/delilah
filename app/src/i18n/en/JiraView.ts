@@ -27,4 +27,5 @@ export const EN: Record<string, string> = {
   "Falta el email": "The email is missing",
   "Falta el token": "The token is missing",
   Conexión: "Connection",
+  "Crear tarea padre": "Create parent task",
 };

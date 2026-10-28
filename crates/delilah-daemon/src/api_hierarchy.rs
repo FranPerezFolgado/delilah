@@ -127,18 +127,8 @@ pub async fn make_parent_task(
     if task.kind == TaskKind::ParentTask {
         return Ok(Json(task));
     }
-    sqlx::query(
-        "UPDATE tasks SET workflow = 'none', saving_mode = 0, autopilot = NULL, ci_autofix = 0,
-         handoff = NULL WHERE key = ?",
-    )
-    .bind(task.key.as_str())
-    .execute(&app.store.pool)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
-    let updated = app
-        .store
-        .set_kind(&task.key, TaskKind::ParentTask, None)
-        .await?;
+    crate::store::become_parent_task(&app.store.pool, &task.key).await?;
+    let updated = known(&app, &key).await?;
     app.emit(crate::events::Topic::Tasks);
     Ok(Json(updated))
 }

@@ -238,6 +238,18 @@ pub fn write_ticket(
             .unwrap_or_default();
         md.push_str(&format!("- {}: {}{title}\n", l("Épica", "Epic"), epic.key));
     }
+    if let Some(parent) = &issue.parent {
+        let title = parent
+            .summary
+            .as_deref()
+            .map(|s| format!(" {s}"))
+            .unwrap_or_default();
+        md.push_str(&format!(
+            "- {}: {}{title}\n",
+            l("Padre", "Parent"),
+            parent.key
+        ));
+    }
     if !issue.components.is_empty() {
         md.push_str(&format!(
             "- {}: {}\n",
@@ -258,7 +270,7 @@ pub fn write_ticket(
     std::fs::write(path, md)
 }
 
-async fn client(app: &AppState) -> Result<(JiraSettings, JiraClient), ApiError> {
+pub(crate) async fn client(app: &AppState) -> Result<(JiraSettings, JiraClient), ApiError> {
     let settings: JiraSettings = app
         .store
         .setting(SETTINGS_KEY)
@@ -490,6 +502,41 @@ mod tests {
         );
         assert!(md.contains("- Componentes: svc-payments, svc-orders"));
         assert!(md.contains("## Descripción"));
+    }
+
+    #[test]
+    fn the_ticket_names_its_parent_when_it_is_a_subtask() {
+        let issue = |parent: serde_json::Value| -> super::JiraIssue {
+            serde_json::from_value(json!({
+                "key": "P-2", "summary": "Sub", "issue_type": "Task",
+                "status": "Open", "status_category": "new", "assignee": null,
+                "subtask": true, "components": [], "description": "", "url": null,
+                "parent": parent,
+            }))
+            .unwrap()
+        };
+        let write = |issue: &super::JiraIssue, lang| {
+            let path = std::env::temp_dir()
+                .join(format!("delilah-ticket-{}/ticket.md", uuid::Uuid::new_v4()));
+            super::write_ticket(&path, issue, lang).unwrap();
+            std::fs::read_to_string(&path).unwrap()
+        };
+        let with_title = issue(json!({ "key": "P-1", "summary": "The story" }));
+        assert!(
+            write(&with_title, crate::lang::Lang::En).contains("- Parent: P-1 The story\n"),
+            "english"
+        );
+        assert!(
+            write(&with_title, crate::lang::Lang::Es).contains("- Padre: P-1 The story\n"),
+            "spanish"
+        );
+        let key_only = write(
+            &issue(json!({ "key": "P-1", "summary": null })),
+            crate::lang::Lang::En,
+        );
+        assert!(key_only.contains("- Parent: P-1\n"), "{key_only}");
+        let none = write(&issue(Value::Null), crate::lang::Lang::En);
+        assert!(!none.contains("Parent:"), "{none}");
     }
 
     #[test]

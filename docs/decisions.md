@@ -920,3 +920,22 @@ submodules) is unrelated and keeps its name; the pattern is called "integration 
 user docs. *Ruled out:* stacked PRs (a subtask based on another subtask: not supported, the
 two-level tree has one base); storing progress (it would go stale on every archive or merge);
 more than two levels. See the [spec](../specs/012-parent-subtasks/spec.md).
+
+**103. Jira sub-tasks import as Delilah subtasks: one way, on demand (2026-10-28).** The
+sub-tasks of a Jira ticket can become the subtasks of a parent task (decision 102). *Direction:*
+Jira → Delilah only. The state is pulled when a screen opens (the parent task screen, the
+dialog, `delilah jira import`), never in the background, and Delilah never writes to Jira.
+*Default selection:* a sub-task starts ticked when it is not done and is assigned to the user
+or to nobody (`parent = KEY AND assignee = currentUser()` gives "mine"); done ones and other
+people's start unticked; skipped ones are never ticked. *Reuse:* an existing task is never
+duplicated: the ticket's task is converted to a parent task (`make-parent-task` rules) and a
+sub-task's backlog task in the same project is attached; the write runs in one transaction that
+re-checks what changed since the preview (a convert that stopped being allowed is a 409 with
+nothing written; an attach or create that stopped being possible goes to `left_out`).
+*Skips:* the table `jira_subtask_skips` (migration 0026, key (parent task, Jira key), no foreign
+key); deleting the parent task drops them, archiving keeps them. *No stored link:* the task key
+is the Jira key, so the key is the link; there is no link column. *Ruled out:* background
+polling (it would make Jira a moving source of truth and spend rate limit); writing to Jira
+(status or sub-task creation); syncing titles after the import (the task's title is the user's);
+a stored Jira link column (it would go stale and the key already says it). See the
+[spec](../specs/013-jira-subtasks-import/spec.md).

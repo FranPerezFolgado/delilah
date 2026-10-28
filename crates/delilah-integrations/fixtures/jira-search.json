@@ -235,6 +235,50 @@
         "components": [],
         "description": "Con un cliente dado de alta antes de 2024."
       }
+    },
+    {
+      "key": "PROJ-1255",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Validar la cabecera en el gateway",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1246", "fields": { "summary": "Idempotency-Key en POST /payments", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Sub-tarea de ejemplo."
+      }
+    },
+    {
+      "key": "PROJ-1256",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Probar reintentos con la misma clave",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "En curso", "statusCategory": { "key": "indeterminate" } },
+        "assignee": { "displayName": "Fran" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1246", "fields": { "summary": "Idempotency-Key en POST /payments", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Sub-tarea de ejemplo."
+      }
+    },
+    {
+      "key": "PROJ-1257",
+      "fields": {
+        "customfield_10020": [{ "id": 42, "name": "Sprint 42", "state": "active" }],
+        "summary": "Revisar el TTL de la clave",
+        "issuetype": { "name": "Subtarea", "subtask": true, "hierarchyLevel": -1 },
+        "priority": { "name": "Media" },
+        "status": { "name": "Por hacer", "statusCategory": { "key": "new" } },
+        "assignee": { "displayName": "Ana" },
+        "reporter": { "displayName": "Ana" },
+        "parent": { "key": "PROJ-1246", "fields": { "summary": "Idempotency-Key en POST /payments", "issuetype": { "name": "Historia", "hierarchyLevel": 0 } } },
+        "components": [],
+        "description": "Sub-tarea de ejemplo."
+      }
     }
   ]
 }

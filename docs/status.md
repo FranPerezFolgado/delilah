@@ -6,7 +6,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 ## Built
 
-**Parent tasks and subtasks** (spec `012-parent-subtasks`, decision [#102](decisions.md)): the integration branch pattern. Task `kind` (`normal` | `parent_task` | `subtask`) and `parent_task` (migration 0025); a parent task has a worktree and a pushed branch but no agent; subtasks start from `origin/<parent branch>` and their PRs target it; progress is derived on read; the parent task PR is a draft with "Mark ready" and the project setting `parent_task_merge`; update branch against the parent task's branch; archive/delete refused while subtasks are live; `make-parent-task` and `attach --parent` (API, CLI, UI); nested sidebar, subtask list, CLI `new --parent-task/--parent`, `ls` nesting. Not yet: the Jira adapter (Jira sub-tasks do not become Delilah subtasks), stacked PRs, more than two levels.
+**Parent tasks and subtasks** (spec `012-parent-subtasks`, decision [#102](decisions.md)): the integration branch pattern. Task `kind` (`normal` | `parent_task` | `subtask`) and `parent_task` (migration 0025); a parent task has a worktree and a pushed branch but no agent; subtasks start from `origin/<parent branch>` and their PRs target it; progress is derived on read; the parent task PR is a draft with "Mark ready" and the project setting `parent_task_merge`; update branch against the parent task's branch; archive/delete refused while subtasks are live; `make-parent-task` and `attach --parent` (API, CLI, UI); nested sidebar, subtask list, CLI `new --parent-task/--parent`, `ls` nesting. Jira sub-tasks import as Delilah subtasks (spec `013-jira-subtasks-import`, decision [#103](decisions.md)). Not yet: stacked PRs, more than two levels.
 
 **Agent model per phase and per task** (decision [#100](decisions.md)): Settings › "Agent model" maps specify/plan/implement/review to opus, sonnet, opusplan, haiku or Claude's default (defaults: Opus to specify and plan, Sonnet to implement and review); a task may set its own model (new-task dialog, `model` on `POST /tasks`, `/runs` and `PATCH /tasks/{key}`). The model is chosen when each task session starts and stored on the session, so a resume never switches it. Optional, off by default: "Suggest a model when creating a task" (`POST /api/v1/model-suggestion`, a heuristic refined by a Haiku one-shot; the user applies it). Project sessions and idea conversations stay on Claude's default. Not yet: a model flag in the CLI.
 
@@ -50,6 +50,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Cloud, Data Center and sample data, with the token in the Keychain.
 - An Orca-style list: assigned or reported, open or done, grouped by status or epic, with sub-tasks under their parent and a current-sprint filter.
 - "Analyse with Claude", and submodule suggestions from a read-only Claude pass.
+- Import of a ticket's sub-tasks (spec `013-jira-subtasks-import`, decision [#103](decisions.md)): "Create parent task" in the Jira view, an offer on the parent task screen for sub-tasks that appeared later, skips, the Jira status on each subtask, and `delilah jira import`. One way (Jira → Delilah), pulled when a screen opens, never in the background, never writes to Jira.
 
 **Desktop app** (Tauri + React):
 - The daemon is bundled and run by launchd.

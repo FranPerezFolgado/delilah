@@ -120,6 +120,17 @@ describe("v2 calls", () => {
     await api.jiraSubtasks("K-1");
     expect(path()).toBe("/api/v1/jira/issues/K-1/subtasks");
   });
+  it("jiraImportPreview and jiraImport", async () => {
+    reply(200, '{"linked":false,"reason":"unreachable"}');
+    expect(await api.jiraImportPreview("K-1")).toEqual({ linked: false, reason: "unreachable" });
+    expect(path()).toBe("/api/v1/jira/issues/K-1/import");
+    reply(200, '{"parent_task":"K-1","created":["K-2"],"attached":[],"left_out":[],"skipped":[],"unskipped":[]}');
+    const r = await api.jiraImport("K-1", { project: "web", add: ["K-2"], skip: [], unskip: [] });
+    expect(r.created).toEqual(["K-2"]);
+    expect(path()).toBe("/api/v1/jira/issues/K-1/import");
+    expect(last().init?.method).toBe("POST");
+    expect(JSON.parse(last().init?.body as string)).toEqual({ project: "web", add: ["K-2"], skip: [], unskip: [] });
+  });
   it("setSessionRuntime", async () => {
     reply(204, "");
     await api.setSessionRuntime("s1", "chat");

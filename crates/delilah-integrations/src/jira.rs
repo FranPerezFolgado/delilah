@@ -525,6 +525,68 @@ impl JiraClient {
         }
     }
 
+    /// Keys of the sub-tasks of `parent` assigned to the current user.
+    /// Fails if the parent does not exist.
+    pub async fn my_subtask_keys(&self, parent: &str) -> Result<HashSet<String>, JiraError> {
+        // The key goes into a JQL string: only an issue key may.
+        if !is_issue_key(parent) {
+            return Err(JiraError::BadKey(parent.into()));
+        }
+        self.issue(parent).await?;
+        match self {
+            Self::Sample => {
+                let custom = self.custom_fields().await;
+                let all = self.query("", MAX_RESULTS, &custom).await?;
+                Ok(all
+                    .into_iter()
+                    .filter(|i| {
+                        i.parent.as_ref().is_some_and(|p| p.key == parent)
+                            && i.assignee.as_deref() == Some(SAMPLE_ME)
+                    })
+                    .map(|i| i.key)
+                    .collect())
+            }
+            Self::Remote { mode, .. } => {
+                let jql = format!("parent = {parent} AND assignee = currentUser()");
+                let mut keys = HashSet::new();
+                let mut token: Option<String> = None;
+                loop {
+                    let start = keys.len().to_string();
+                    let mut query = vec![
+                        ("jql", jql.as_str()),
+                        ("fields", "key"),
+                        ("maxResults", "100"),
+                    ];
+                    let body = if matches!(mode, JiraMode::Cloud) {
+                        if let Some(token) = &token {
+                            query.push(("nextPageToken", token));
+                        }
+                        self.get("search/jql", &query).await?
+                    } else {
+                        query.push(("startAt", &start));
+                        self.get("search", &query).await?
+                    };
+                    let page = body["issues"]
+                        .as_array()
+                        .ok_or_else(|| JiraError::Parse("no `issues` list".into()))?;
+                    keys.extend(
+                        page.iter()
+                            .filter_map(|i| i["key"].as_str().map(str::to_string)),
+                    );
+                    let more = if matches!(mode, JiraMode::Cloud) {
+                        token = body["nextPageToken"].as_str().map(str::to_string);
+                        body["isLast"] != true && token.is_some()
+                    } else {
+                        body["total"].as_u64().unwrap_or(0) > keys.len() as u64
+                    };
+                    if !more || page.is_empty() {
+                        return Ok(keys);
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn issue(&self, key: &str) -> Result<JiraIssue, JiraError> {
         match self {
             Self::Sample => self
@@ -943,12 +1005,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn my_subtask_keys_are_only_those_assigned_to_me() {
+        let jira = JiraClient::sample();
+        let mine = jira.my_subtask_keys("PROJ-1246").await.unwrap();
+        assert_eq!(mine, HashSet::from(["PROJ-1256".to_string()]));
+
+        // The parent also has an unassigned, someone else's and a done sub-task.
+        let kids = jira.subtasks("PROJ-1246").await.unwrap();
+        let by = |k: &str| kids.iter().find(|i| i.key == k).unwrap();
+        assert_eq!(by("PROJ-1255").assignee, None);
+        assert_eq!(by("PROJ-1256").assignee.as_deref(), Some(SAMPLE_ME));
+        assert_eq!(by("PROJ-1257").assignee.as_deref(), Some("Ana"));
+        assert_eq!(by("PROJ-1252").status_category, "done");
+        for open in ["PROJ-1255", "PROJ-1256", "PROJ-1257"] {
+            assert_ne!(by(open).status_category, "done");
+        }
+
+        assert!(jira.my_subtask_keys("PROJ-1238").await.unwrap().is_empty());
+        assert!(matches!(
+            jira.my_subtask_keys("X; DROP").await,
+            Err(JiraError::BadKey(_))
+        ));
+    }
+
+    #[tokio::test]
     async fn parents_carry_subtask_and_done_counts() {
         let jira = JiraClient::sample();
         let parent = jira.issue("PROJ-1242").await.unwrap();
         assert_eq!((parent.subtask_count, parent.subtasks_done), (2, 0));
         let story = jira.issue("PROJ-1246").await.unwrap();
-        assert_eq!((story.subtask_count, story.subtasks_done), (1, 1));
+        assert_eq!((story.subtask_count, story.subtasks_done), (4, 1));
         let bare = jira.issue("PROJ-1238").await.unwrap();
         assert_eq!((bare.subtask_count, bare.subtasks_done), (0, 0));
 
