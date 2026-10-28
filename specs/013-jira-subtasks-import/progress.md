@@ -17,7 +17,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-10 | 4 | 4A | pending | 0 | | |
 | WP-11 | 4 | 4A | verified | 1 | f034d1c | |
 | WP-12 | 5 | 5A | pending | 0 | | |
-| WP-13 | 5 | 5A | verified | 1 | PEND | |
+| WP-13 | 5 | 5A | verified | 1 | 10c3198 | |
 | WP-14 | 5 | 5B | pending | 0 | | |
 | WP-15 | 6 | 6A | pending | 0 | | |
 | WP-16 | 7 | 7A | pending | 0 | | |
@@ -33,3 +33,4 @@ Mode: format=markdown commits=yes autonomy=auto
 | 2 | architecture | MEDIUM | Planner builds hypothetical parent with project=None; check_attach same_project may give false other-project conflicts (handed to WP-07) | jira_import.rs ~150 |
 | 2 | architecture | MEDIUM | Free store fns vs impl Store; apply must open tx via Store::begin_immediate only | store.rs, store/jira_skips.rs |
 | 2 | architecture | LOW | begin_immediate duplicates BEGIN IMMEDIATE in 6 places; parent invariants live in resolve_new_task not new_task; refusal_text duplicates api_hierarchy messages; remove #![allow(dead_code)] when wired (WP-07) | various |
+| 5 | WP-13 | LOW | No CSS for .subtasks-banner/.subtasks-note (SubtaskList.css); fold into WP-15 | app/src/components/SubtaskList.css |
