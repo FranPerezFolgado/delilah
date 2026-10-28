@@ -107,3 +107,24 @@ it("lists the skipped rows with an Undo that unskips them", async () => {
   fireEvent.click(getByRole("button", { name: "Deshacer P-13" }));
   await waitFor(() => expect(imp).toHaveBeenCalledWith("P-1", { add: [], skip: [], unskip: ["P-13"] }));
 });
+
+it("shows the Jira status of linked subtasks, marks the ones gone from Jira, and nothing when not linked", async () => {
+  vi.spyOn(api, "subtasks").mockResolvedValue([sub({}), sub({ key: "S-2", title: "Two" }), sub({ key: "S-3", title: "Three" })]);
+  vi.spyOn(api, "jiraImportPreview").mockResolvedValue({
+    ...prev([jrow({ key: "S-1", action: "linked", status: "In Review" })]),
+    gone: [{ key: "S-2", title: "Two" }],
+  } as JiraImportPreview);
+  const { findByText, container } = render(<SubtaskList task={parent} />);
+  await findByText("In Review");
+  const li = (k: string) => [...container.querySelectorAll(".subtask")].find((e) => e.textContent!.includes(k))!;
+  expect(li("S-1").textContent).toContain("In Review");
+  expect(li("S-2").textContent).toContain("ya no está en Jira");
+  expect(li("S-3").textContent).not.toContain("Jira");
+  cleanup();
+  vi.mocked(api.jiraImportPreview).mockResolvedValue({ linked: false, reason: "unreachable" });
+  const r = render(<SubtaskList task={parent} />);
+  await r.findByText("Three");
+  await waitFor(() => expect(api.jiraImportPreview).toHaveBeenCalledTimes(2));
+  expect(r.container.textContent).not.toContain("In Review");
+  expect(r.container.textContent).not.toContain("ya no está en Jira");
+});

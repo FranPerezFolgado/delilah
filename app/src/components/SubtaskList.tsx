@@ -58,6 +58,8 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
 
   const rows: JiraImportRow[] = preview?.linked ? preview.subtasks : [];
   const fresh = rows.filter((r) => (r.action === "create" || r.action === "attach") && !r.skipped && r.selected).length;
+  const jiraStatus = new Map(rows.filter((r) => r.action === "linked").map((r) => [r.key, r.status]));
+  const gone = new Set(preview?.linked ? preview.gone.map((g) => g.key) : []);
   const skipped = rows.filter((r) => (r.action === "create" || r.action === "attach") && r.skipped);
   const undo = (key: string) =>
     api
@@ -87,6 +89,8 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
             <button type="button" className="th-link mono" onClick={() => onOpenTask?.(s.key)}>{s.key}</button>
             <span className="trunc subtasks-title">{s.title}</span>
             {s.dropped ? <span className="badge neutral">{t("descartada")}</span> : <StatusBadge status={s.status} />}
+            {jiraStatus.has(s.key) && <span className="badge neutral subtasks-jira">{jiraStatus.get(s.key)}</span>}
+            {gone.has(s.key) && <span className="badge neutral subtasks-jira">{t("ya no está en Jira")}</span>}
             {s.pr && (
               <a className="muted" href={s.pr.url} target="_blank" rel="noreferrer">{prLabel(s.pr.state)}</a>
             )}

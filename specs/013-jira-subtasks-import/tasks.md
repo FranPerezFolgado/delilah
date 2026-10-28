@@ -136,9 +136,9 @@ Try changes only with `scripts/preview.sh` (never port 7420). Never write to Jir
 
 **Independent Test**: With a parent task from Jira, the list shows each subtask's Jira status; removing a sub-task from the sample data marks that subtask "not in Jira any more" and leaves it as it is.
 
-- [ ] T040 [P] [US4] `app/src/components/SubtaskList.test.tsx`: Jira status next to each subtask whose key is in the preview's `subtasks` (`linked` rows); "not in Jira any more" for keys in `gone`; nothing when `linked:false`
-- [ ] T041 [P] [US4] Handler test in `crates/delilah-daemon/src/jira_import.rs`: a subtask whose Jira sub-task moved to another ticket is in `gone` and is neither archived nor changed
-- [ ] T042 [US4] Render the Jira status and the `gone` mark in `app/src/components/SubtaskList.tsx` (+ i18n), until T040 and T041 pass
+- [X] T040 [P] [US4] `app/src/components/SubtaskList.test.tsx`: Jira status next to each subtask whose key is in the preview's `subtasks` (`linked` rows); "not in Jira any more" for keys in `gone`; nothing when `linked:false`
+- [X] T041 [P] [US4] Handler test in `crates/delilah-daemon/src/jira_import.rs`: a subtask whose Jira sub-task moved to another ticket is in `gone` and is neither archived nor changed
+- [X] T042 [US4] Render the Jira status and the `gone` mark in `app/src/components/SubtaskList.tsx` (+ i18n), until T040 and T041 pass
 
 ---
 

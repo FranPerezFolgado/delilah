@@ -1645,6 +1645,29 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_subtask_moved_to_another_ticket_in_jira_is_gone_and_left_alone() {
+        let state = app().await;
+        connect(&state).await;
+        put_task(&state, "PROJ-1242", "web", TaskKind::ParentTask, None).await;
+        // Not one of the sample ticket's sub-tasks: as if Jira moved it elsewhere.
+        put_task(&state, "PROJ-7777", "web", TaskKind::Subtask, Some("PROJ-1242")).await;
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        assert_eq!(body["gone"], json!([{ "key": "PROJ-7777", "title": "PROJ-7777" }]));
+        assert!(body["subtasks"].as_array().unwrap().iter().all(|r| r["key"] != "PROJ-7777"));
+
+        // Applying an import neither archives nor changes it.
+        let before = stored(&state, "PROJ-7777").await.unwrap();
+        let (s, res) = call(&state, "POST", PREVIEW, Some(json!({ "add": ["PROJ-1250"] }))).await;
+        assert_eq!(s, StatusCode::OK, "{res}");
+        let after = stored(&state, "PROJ-7777").await.unwrap();
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.kind, TaskKind::Subtask);
+        assert_eq!(after.parent_task, before.parent_task);
+        let (_, body) = call(&state, "GET", PREVIEW, None).await;
+        assert_eq!(body["gone"].as_array().unwrap().len(), 1);
+    }
+
     async fn put_task(
         state: &AppState,
         key: &str,

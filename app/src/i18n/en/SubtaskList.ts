@@ -16,4 +16,5 @@ export const EN: Record<string, string> = {
   "Omitidas ({n})": "Skipped ({n})",
   "Deshacer {key}": "Undo {key}",
   Deshacer: "Undo",
+  "ya no está en Jira": "not in Jira any more",
 };
