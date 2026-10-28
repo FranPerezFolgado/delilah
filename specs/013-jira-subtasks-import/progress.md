@@ -5,8 +5,8 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 1 | 1A | verified | 1 | afc4657 | |
-| WP-02 | 2 | 2A | pending | 0 | | |
+| WP-01 | 1 | 1A | done | 1 | afc4657 | |
+| WP-02 | 2 | 2A | verified | 1 | PEND | |
 | WP-03 | 2 | 2A | pending | 0 | | |
 | WP-04 | 2 | 2A | pending | 0 | | |
 | WP-05 | 2 | 2A | pending | 0 | | |
@@ -27,3 +27,5 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+| 1 | migration | LOW | No down script (forward-only by project convention) | migrations/0026_jira_subtask_skips.sql |
+| 1 | migration | LOW | Skip rows must be deleted with the parent task in code (no FK); check in WP-04 | store/jira_skips.rs, actions.rs |

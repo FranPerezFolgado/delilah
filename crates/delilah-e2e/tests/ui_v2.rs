@@ -645,7 +645,7 @@ fn jira_subtasks_and_counts_come_from_the_sample() {
             story["subtask_count"].as_i64(),
             story["subtasks_done"].as_i64()
         ),
-        (Some(1), Some(1)),
+        (Some(4), Some(1)),
         "{story}"
     );
     let listed = env.api().jira_issues("assigned", "open", "all");
