@@ -5,6 +5,7 @@ import {
 } from "../api";
 import { Button, Icon, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
 import { Markdown } from "./Markdown";
+import { JiraImportDialog } from "./JiraImportDialog";
 import { openExternal } from "../platform";
 import { t, tn } from "../i18n";
 import { useBreakpoints } from "../useWidth";
@@ -396,6 +397,7 @@ function Detail({ issue, expired, parentListed, drawer, onClose, onSelect, onAna
 }) {
   const [subs, setSubs] = useState<JiraIssue[] | null>(null);
   const [task, setTask] = useState<Task | null>(null);
+  const [importing, setImporting] = useState(false);
   const hasSubs = !issue.subtask && (issue.subtask_count ?? 0) > 0;
 
   useEffect(() => {
@@ -486,11 +488,18 @@ function Detail({ issue, expired, parentListed, drawer, onClose, onSelect, onAna
           <div className="sec jv-subs-head">
             <span>{t("Subtareas")}</span>
             {subs && subs.length > 0 && <span className="jv-progress">{t("{done}/{total} hechas", { done, total: subs.length })}</span>}
+            {!issue.task_status && !task && (
+              <Button variant="secondary" size={28} onClick={() => setImporting(true)}>{t("Crear tarea padre")}</Button>
+            )}
           </div>
           {subs === null ? <Skeleton lines={3} /> : bySubStatus.map(([status, g]) => (
             <SubGroup key={status} status={status} category={g.category} items={g.items} />
           ))}
         </div>
+      )}
+      {importing && (
+        <JiraImportDialog issueKey={issue.key} onClose={() => setImporting(false)}
+          onDone={() => api.tasks().then((r) => setTask(r.find((x) => x.key === issue.key) ?? null)).catch(() => {})} />
       )}
     </aside>
   );

@@ -371,6 +371,62 @@ export interface JiraIssue {
   subtasks_done?: number | null;
 }
 
+/** A task as the import preview sees it (`GET /jira/issues/{key}/import`). */
+export interface JiraImportTask {
+  key: string;
+  kind: string;
+  status: string;
+  parent_task: string | null;
+  archived: boolean;
+}
+
+export interface JiraImportRow {
+  key: string;
+  title: string;
+  status: string;
+  status_category: string;
+  assignee: string | null;
+  mine: boolean;
+  task: JiraImportTask | null;
+  action: "create" | "attach" | "linked" | "conflict";
+  reason: string | null;
+  /** Left out on purpose earlier. */
+  skipped: boolean;
+  /** Ticked by default. */
+  selected: boolean;
+}
+
+export type JiraImportParent =
+  | { action: "create" | "convert" | "existing" }
+  | { action: "refused"; code: string; message: string };
+
+export type JiraImportPreview =
+  | {
+      linked: true;
+      ticket: { key: string; title: string; status: string; is_subtask: boolean };
+      parent: JiraImportParent;
+      subtasks: JiraImportRow[];
+      gone: { key: string; title: string }[];
+    }
+  | { linked: false; reason: "not-connected" | "not-found" | "unreachable" };
+
+export interface JiraImportRequest {
+  /** Required when the parent task is created; ignored otherwise. */
+  project?: string;
+  add: string[];
+  skip: string[];
+  unskip: string[];
+}
+
+export interface JiraImportResult {
+  parent_task: string;
+  created: string[];
+  attached: string[];
+  left_out: { key: string; reason: string }[];
+  skipped: string[];
+  unskipped: string[];
+}
+
 export interface JiraConnect {
   mode: JiraMode;
   site?: string;
@@ -887,6 +943,10 @@ export const api = {
   /** Dismisses every non-blocking item; returns their ids (for undo). */
   clearInbox: () => post<{ ids: string[] }>("/api/v1/inbox/clear"),
   restoreInbox: (ids: string[]) => post<null>("/api/v1/inbox/restore", { ids }),
+  jiraImportPreview: (key: string) =>
+    request<JiraImportPreview>(`/api/v1/jira/issues/${encodeURIComponent(key)}/import`),
+  jiraImport: (key: string, req: JiraImportRequest) =>
+    post<JiraImportResult>(`/api/v1/jira/issues/${encodeURIComponent(key)}/import`, req),
   jiraSubtasks: (key: string) => request<JiraIssue[]>(`/api/v1/jira/issues/${key}/subtasks`),
   setSessionRuntime: (id: string, mode: "chat" | "terminal") => post<null>(`/api/v1/sessions/${id}/runtime`, { mode }),
   tasks: () => request<Task[]>("/api/v1/tasks"),

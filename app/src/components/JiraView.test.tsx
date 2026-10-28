@@ -182,3 +182,22 @@ describe("JiraView at width", () => {
     expect(screen.getByText("Filtros · 0")).toBeTruthy();
   });
 });
+
+describe("JiraView parent task import", () => {
+  it("offers «Crear tarea padre» only for a ticket with sub-tasks that is not one, and opens the dialog", async () => {
+    vi.spyOn(api, "jiraImportPreview").mockResolvedValue({ linked: false, reason: "unreachable" });
+    vi.spyOn(api, "projects").mockResolvedValue([]);
+    view();
+    await screen.findByText("Otra cosa");
+    // PROJ-1 (selected first) has 20 sub-tasks.
+    await screen.findByRole("button", { name: "Crear tarea padre" });
+    fireEvent.click(screen.getByRole("button", { name: "Crear tarea padre" }));
+    expect(await screen.findByRole("dialog", { name: "Crear tarea padre de PROJ-1" })).toBeTruthy();
+    cleanup();
+
+    vi.mocked(api.jiraIssues).mockResolvedValue([issue({ subtask_count: 0 }), issue({ key: "PROJ-3", subtask: true, subtask_count: null })]);
+    view();
+    await screen.findAllByText("Reintentos con backoff");
+    expect(screen.queryByRole("button", { name: "Crear tarea padre" })).toBeNull();
+  });
+});
