@@ -63,8 +63,8 @@ For a project, the fallback changes from `"chat"` to a value based on the kind o
 ```
 
 The comment above `views` (~L191, "a project's sessions open in chat") is updated to match. The
-`runtime === "stream"` branch stays, with a comment that marks it as defensive: the daemon never
-runs a project session on a stream (`run.rs::runtime_kind`).
+`runtime === "stream"` branch was dropped in review: the daemon never runs a project session on a
+stream (`run.rs::runtime_kind`), and the branch would have overridden the user's choice.
 
 ### 2. View-only mode of `SessionViewSwitch` (`app/src/components/SessionViewSwitch.tsx`)
 

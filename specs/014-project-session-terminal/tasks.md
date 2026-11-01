@@ -47,7 +47,7 @@ None. No new dependencies, files or configuration: the change sits in existing c
 **Independent Test**: open a project session. `terminal` is shown and `conversation` is not.
 
 - [X] T004 [US1] In app/src/components/TaskScreen.test.tsx (project block, ~L295), replace "opens a project session in chat even when it is not an idea conversation" with "opens a project session in the terminal": `open({ ...conv, conversation: false })` shows `terminal` and not `conversation`. Add a case for a read-only session (`read_only: true`) and one for a session that is not live (`live: false`): both show `terminal`, and the not-live one also shows the "Reabrir" bar. These tests must fail first.
-- [X] T005 [US1] In app/src/components/TaskScreen.tsx `viewOf` (~L197), change the project fallback to `views.get(s.id) ?? (s.conversation ? "chat" : "terminal")`. Comment the `s.runtime === "stream"` branch as defensive (the daemon never runs a project session on a stream, see `run.rs::runtime_kind`). Update the comment above `views` (~L191) that says a project's sessions open in chat. T004 passes, and the existing "shows the conversation view…" test for an idea conversation still passes.
+- [X] T005 [US1] In app/src/components/TaskScreen.tsx `viewOf` (~L197), change the project fallback to `views.get(s.id) ?? (s.conversation ? "chat" : "terminal")`. The `s.runtime === "stream"` branch is dropped (review): the daemon never runs a project session on a stream, see `run.rs::runtime_kind`. Update the comment above `views` (~L191) that says a project's sessions open in chat. T004 passes, and the existing "shows the conversation view…" test for an idea conversation still passes.
 
 **Checkpoint**: the reported bug is fixed. This slice is shippable on its own.
 
