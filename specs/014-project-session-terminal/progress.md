@@ -14,3 +14,10 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|
+
+Phase review (all phases): spec-compliance COMPLIANT, 0 CRITICAL/HIGH/MEDIUM.
+T013 NOT done: ui-verifier had no browser tools, scenarios 1-7 unchecked (preview was up on 1501). Needs a manual walkthrough of quickstart.md.
+
+| Phase | Reviewer | Severity | Finding | File |
+|-------|----------|----------|---------|------|
+| all | spec-compliance | LOW | no dedicated test for "restart in normal mode keeps terminal" (holds by construction) | TaskScreen.test.tsx |
