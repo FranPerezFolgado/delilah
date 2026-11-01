@@ -198,10 +198,7 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
     s.kind === "shell"
       ? "terminal"
       : project
-        ? // Defensive: the daemon never runs a project session on a stream (run.rs::runtime_kind).
-          s.runtime === "stream"
-          ? "chat"
-          : (views.get(s.id) ?? (s.conversation ? "chat" : "terminal"))
+        ? (views.get(s.id) ?? (s.conversation ? "chat" : "terminal"))
         : (s.live ? s.runtime : (s.effective_runtime ?? s.runtime)) === "stream"
           ? "chat"
           : "terminal";

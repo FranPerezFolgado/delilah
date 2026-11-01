@@ -327,6 +327,9 @@ describe("TaskScreen conversation sessions", () => {
     fireEvent.click(r.getByText("Beta"));
     expect(termBtn(r).getAttribute("aria-pressed")).toBe("true");
     expect(r.queryByTestId("terminal")).not.toBeNull();
+    fireEvent.click(r.getByText("Alpha"));
+    expect(chatBtn(r).getAttribute("aria-pressed")).toBe("true");
+    expect(r.queryByTestId("conversation")).not.toBeNull();
   });
 
   it("the chat's own open-terminal button leaves Terminal pressed", () => {
@@ -339,12 +342,14 @@ describe("TaskScreen conversation sessions", () => {
 
   it("an idea conversation opens in chat and offers the view-only switch", () => {
     sessionRuntime.calls.mockClear();
+    updateTask.mockClear();
     const r = open(conv);
     expect(r.queryByTestId("conversation")).not.toBeNull();
     expect(chatBtn(r).getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(termBtn(r));
     expect(r.queryByTestId("terminal")).not.toBeNull();
     expect(sessionRuntime.calls).not.toHaveBeenCalled();
+    expect(updateTask).not.toHaveBeenCalled();
   });
 
   it("opens a project session in the terminal", () => {
