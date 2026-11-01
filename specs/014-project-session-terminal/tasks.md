@@ -27,14 +27,14 @@ None. No new dependencies, files or configuration: the change sits in existing c
 **Purpose**: `SessionViewSwitch` gets the discriminated-union props from
 `contracts/session-view-switch.md`, so `TaskScreen` can render the view-only mode on projects.
 
-- [ ] T001 Update the runtime-mode tests in app/src/components/SessionViewSwitch.test.tsx: remove the `view` and `chooseView` props from every existing render (L22, 45, 56, 63, 68, 76) and keep their assertions. Also drop the `chooseView` spy and its `not.toHaveBeenCalled` check at L19/L26, since the runtime mode no longer takes it. They must still pass against today's component.
-- [ ] T002 Add failing view-only tests in app/src/components/SessionViewSwitch.test.tsx. Render `<SessionViewSwitch mode="view" view="terminal" chooseView={spy} />`:
+- [X] T001 Update the runtime-mode tests in app/src/components/SessionViewSwitch.test.tsx: remove the `view` and `chooseView` props from every existing render (L22, 45, 56, 63, 68, 76) and keep their assertions. Also drop the `chooseView` spy and its `not.toHaveBeenCalled` check at L19/L26, since the runtime mode no longer takes it. They must still pass against today's component.
+- [X] T002 Add failing view-only tests in app/src/components/SessionViewSwitch.test.tsx. Render `<SessionViewSwitch mode="view" view="terminal" chooseView={spy} />`:
   (a) Terminal shows as pressed;
   (b) clicking Chat calls `spy("chat")` once, shows no `ConfirmDialog`, and `api.setSessionRuntime` is not called;
   (c) clicking the pressed Terminal does not call `spy`;
   (d) with `view="chat"`, Chat is pressed and clicking Terminal calls `spy("terminal")`;
   (e) the options are never disabled (the view-only props have no `busy`).
-- [ ] T003 Implement the props union in app/src/components/SessionViewSwitch.tsx: `{ mode: "view"; view; chooseView } | { mode?: "runtime"; session; busy?; onChanged?; onError? }`. Remove the deprecated `view`/`chooseView` from the runtime arm. Render one shared `Segmented` (same label "Vista de la sesión", same options and beta tag, same `.svs` wrapper). In view mode: `value = view`, and `onChange` calls `chooseView(next)` when `next !== view`, with no dialog and no disabled options. Runtime mode stays exactly as today. Update the doc comments as in the contract. T001 and T002 must pass, and `npx tsc --noEmit` must be clean (the existing task caller in TaskScreen.tsx type-checks against the runtime arm).
+- [X] T003 Implement the props union in app/src/components/SessionViewSwitch.tsx: `{ mode: "view"; view; chooseView } | { mode?: "runtime"; session; busy?; onChanged?; onError? }`. Remove the deprecated `view`/`chooseView` from the runtime arm. Render one shared `Segmented` (same label "Vista de la sesión", same options and beta tag, same `.svs` wrapper). In view mode: `value = view`, and `onChange` calls `chooseView(next)` when `next !== view`, with no dialog and no disabled options. Runtime mode stays exactly as today. Update the doc comments as in the contract. T001 and T002 must pass, and `npx tsc --noEmit` must be clean (the existing task caller in TaskScreen.tsx type-checks against the runtime arm).
 
 **Checkpoint**: the switch supports both modes, and task screens behave as before.
 
