@@ -24,7 +24,7 @@
 - [ ] T003 [P] Add a `Playground` screen as a new serial test at the end of `app/e2e/screens.spec.ts` that opens the view and captures it through `shot()`. Run it per `quickstart.md` to a scratch directory (`DELILAH_SCREENS_OUT`), with `DELILAH_SCREENS_LANG=en`. Inspect the result through the `ui-verifier` agent rather than opening images in the main thread. If the seed doesn't show several states (typing, reading, terminal, waiting, paused), add a `page.route` on `GET /api/v1/activity` inside that test only, with demo names (research R2). Run `cd app && npx tsc --noEmit`
 - [ ] T004 Timeboxed to 45 minutes: attempt the GIF (research R3). Add `DELILAH_SCREENS_MOTION=1`, read by `open()` in `app/e2e/screens.spec.ts`, and a multi-frame screenshot loop in the Playground test that doesn't use `shot()`. Assemble frames with Pillow in a script in the session scratchpad, not committed. Accept only if it is under 5 MB, the characters visibly move and it loops cleanly. Otherwise revert the switch and the loop, and use the fallback: stills plus the recording instructions in `quickstart.md`. Without the env var, existing screens must behave as they do today
 - [ ] T005 Write the final images to `docs/images/` as `playground-light.png` and `playground-dark.png`, plus `playground.gif` if T004 passed. Confirm that only demo data appears (FR-004) and record the outcome for the PR description. Remove `docs/images/board-*.png` only if the new README doesn't use them
-- [ ] T006 [P] In `docs/usage.md`, add `## Install` (manual download, why the app is unsigned, verify a download, moved from `README.md` lines 33-70 with meaning unchanged, including the links to decisions 79 and 80) and `## Getting started` (`README.md` lines 89-109), and add both to the Contents list at the top. `Building from source`, `Uninstall` and `Updates` already exist there. Don't touch `scripts/install.sh` or any release tooling
+- [X] T006 [P] In `docs/usage.md`, add `## Install` (manual download, why the app is unsigned, verify a download, moved from `README.md` lines 33-70 with meaning unchanged, including the links to decisions 79 and 80) and `## Getting started` (`README.md` lines 89-109), and add both to the Contents list at the top. `Building from source`, `Uninstall` and `Updates` already exist there. Don't touch `scripts/install.sh` or any release tooling
 
 **Checkpoint**: Images exist and the install detail has a home.
 
@@ -56,8 +56,8 @@
 
 **Independent Test**: Nothing contributor-facing promises more than the personal-project stance.
 
-- [ ] T011 [P] [US3] In `CONTRIBUTING.md`, open with the stance: a personal project, issues and PRs welcome, no commitment to support, response times or a roadmap. Reword "Thanks for helping" (line 3) and "A maintainer reviews and squash-merges" (line 73) to match. Keep previews, checks, commits, versioning and PR rules unchanged in substance
-- [ ] T012 [P] [US3] In `SECURITY.md`, change line 9 only to a best-effort response with no time target. Keep the private reporting route, supported versions and threat model. Leave `CODE_OF_CONDUCT.md` and the issue and PR templates as they are (research R8)
+- [X] T011 [P] [US3] In `CONTRIBUTING.md`, open with the stance: a personal project, issues and PRs welcome, no commitment to support, response times or a roadmap. Reword "Thanks for helping" (line 3) and "A maintainer reviews and squash-merges" (line 73) to match. Keep previews, checks, commits, versioning and PR rules unchanged in substance
+- [X] T012 [P] [US3] In `SECURITY.md`, change line 9 only to a best-effort response with no time target. Keep the private reporting route, supported versions and threat model. Leave `CODE_OF_CONDUCT.md` and the issue and PR templates as they are (research R8)
 
 **Checkpoint**: Stance is consistent across public files.
 

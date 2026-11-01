@@ -5,6 +5,8 @@ sessions. For what Delilah is, see the [README](../README.md).
 
 ## Contents
 
+- [Install](#install)
+- [Getting started](#getting-started)
 - [Command line](#command-line)
 - [Desktop app](#desktop-app)
 - [Parent tasks and subtasks](#parent-tasks-and-subtasks)
@@ -14,6 +16,84 @@ sessions. For what Delilah is, see the [README](../README.md).
 - [Building from source](#building-from-source)
 - [Uninstall](#uninstall)
 - [Updates](#updates)
+
+## Install
+
+One line, which downloads the latest release, verifies its checksum and installs
+`Delilah.app` in `/Applications` (use `DELILAH_INSTALL_DIR=~/Applications` if that is not
+writable):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FranPerezFolgado/delilah/main/scripts/install.sh | bash
+```
+
+### Why the app is unsigned
+
+Delilah is not signed with a paid Apple Developer account, so macOS blocks a copy
+downloaded with a browser. Trust comes from checksums and build attestation instead
+(see decisions [#79 and #80](decisions.md)). The script above is not affected: it
+downloads with `curl`, which does not quarantine files.
+
+### Manual download
+
+1. Download the DMG from the [latest release](https://github.com/FranPerezFolgado/delilah/releases/latest)
+   and drag Delilah to `/Applications`.
+2. Allow it to open, by either route:
+   - run `xattr -dr com.apple.quarantine /Applications/Delilah.app`, or
+   - open it once, then go to System Settings › Privacy & Security and choose
+     **Open Anyway**. Right-click › Open no longer works since macOS Sequoia.
+
+### Verify a download
+
+From the folder with the downloaded assets:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing
+gh attestation verify Delilah_aarch64.app.tar.gz --repo FranPerezFolgado/delilah
+```
+
+The checksum only shows the download is intact (`SHA256SUMS` comes from the same
+release). The attestation shows the file was built by this repository's release
+workflow; `SHA256SUMS` itself is attested too.
+
+### Build from source
+
+You need the Xcode Command Line Tools, Rust and Node 22 or later:
+
+```bash
+git clone https://github.com/FranPerezFolgado/delilah.git && cd delilah/app
+npm install && npm run dist
+cp -R src-tauri/target/release/bundle/macos/Delilah.app /Applications/
+```
+
+Details in [Building from source](#building-from-source).
+
+### Updates and uninstall
+
+Updates install from inside the app and are not quarantined; see
+[Updates](#updates). To remove Delilah, see [Uninstall](#uninstall).
+
+## Getting started
+
+1. Install (see [Install](#install)) and open Delilah.app: it starts the daemon.
+2. On first run, "Getting started" opens: choose "Add a project" and pick a git repo
+   (or a parent repo with submodules).
+3. Press "New task", type the ticket, a title and what you want done, then "Start":
+   Delilah builds the task's workspace and starts Claude Code on it.
+4. Follow it on the board and answer its questions and permission requests from the Inbox.
+
+A new task starts with a built-in prompt (the ticket and title, no skill needed). To start
+with your own skill or workflow instead, open the project's Settings › "Flujo de trabajo",
+pick a skill from the list or write a message, or choose a preset; see
+[Project settings](#desktop-app).
+
+The desktop app is described in [Desktop app](#desktop-app).
+
+### Command line (optional)
+
+The `delilah` command is not installed by the app. Build it from source (needs Rust):
+`cargo build --release -p delilah-cli`, then use `target/release/delilah` or put it on your
+PATH. See [Command line](#command-line).
 
 ## Command line
 
