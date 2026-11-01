@@ -12,8 +12,8 @@
 
 ## Phase 1: Setup and owner gate
 
-- [ ] T001 Check whether `main` has moved past `e336e24`. If so, rebase this branch on it and recompute every figure with the commands in `specs/014-portfolio-readme/quickstart.md`, updating `specs/014-portfolio-readme/outline.md`
-- [ ] T002 **GATE (FR-019)**: present `specs/014-portfolio-readme/outline.md` with its figures to the owner and wait for explicit approval, using AskUserQuestion with "Approve the outline (Recommended)" as the first option. Apply any changes they request to `outline.md`. Do not start T003 or later without this approval
+- [X] T001 Check whether `main` has moved past `e336e24`. If so, rebase this branch on it and recompute every figure with the commands in `specs/014-portfolio-readme/quickstart.md`, updating `specs/014-portfolio-readme/outline.md`
+- [X] T002 **GATE (FR-019)**: present `specs/014-portfolio-readme/outline.md` with its figures to the owner and wait for explicit approval, using AskUserQuestion with "Approve the outline (Recommended)" as the first option. Apply any changes they request to `outline.md`. Do not start T003 or later without this approval
 
 **Checkpoint**: Outline approved by the owner.
 

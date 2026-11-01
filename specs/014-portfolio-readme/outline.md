@@ -1,6 +1,6 @@
 # README outline, for the owner's approval (FR-019)
 
-**Status: NOT approved by the owner.** Autopilot self-approved the workflow phases, not this outline. T002 in `tasks.md` is the gate.
+**Status: approved by the owner on 2026-11-01** (answer to the T002 gate question, no changes requested).
 
 Figures taken at `e336e24` (v1.3.0).
 
