@@ -189,8 +189,8 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
   // Terminals stay mounted once shown, so switching tabs keeps their scrollback.
   const [mounted, setMounted] = useState<Set<string>>(() => new Set());
   // Per Claude session, the view the user picked with the Chat / Terminal switch (in the
-  // header); without one, the task's setting decides (a project's sessions open in chat).
-  // Kept while the screen is open.
+  // header); without one, the task's setting decides (a project's sessions open in the
+  // terminal, except an idea conversation, which opens in chat). Kept while the screen is open.
   const [views, setViews] = useState<Map<string, ViewMode>>(() => new Map());
   // A task's Claude shows what its runtime is (the switch changes the runtime); a project's
   // sessions have no runtime to choose, so they only change what is shown.
@@ -198,9 +198,10 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
     s.kind === "shell"
       ? "terminal"
       : project
-        ? s.runtime === "stream"
+        ? // Defensive: the daemon never runs a project session on a stream (run.rs::runtime_kind).
+          s.runtime === "stream"
           ? "chat"
-          : (views.get(s.id) ?? "chat")
+          : (views.get(s.id) ?? (s.conversation ? "chat" : "terminal"))
         : (s.live ? s.runtime : (s.effective_runtime ?? s.runtime)) === "stream"
           ? "chat"
           : "terminal";

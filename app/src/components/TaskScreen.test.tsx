@@ -292,10 +292,23 @@ describe("TaskScreen conversation sessions", () => {
     expect(queryByRole("button", { name: /^Terminal$/ })).toBeNull();
   });
 
-  it("opens a project session in chat even when it is not an idea conversation", () => {
+  it("opens a project session in the terminal", () => {
     const { queryByTestId } = open({ ...conv, conversation: false });
-    expect(queryByTestId("conversation")).not.toBeNull();
-    expect(queryByTestId("terminal")).toBeNull();
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
+  });
+
+  it("opens a read-only project session in the terminal", () => {
+    const { queryByTestId } = open({ ...conv, conversation: false, read_only: true });
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
+  });
+
+  it("opens a project session that is not live in the terminal, with the reopen bar", () => {
+    const { queryByTestId, getByText } = open({ ...conv, conversation: false, live: false });
+    expect(queryByTestId("terminal")).not.toBeNull();
+    expect(queryByTestId("conversation")).toBeNull();
+    expect(getByText("Reabrir")).toBeTruthy();
   });
 
   it("always shows the terminal for a shell session, without the switch", () => {
