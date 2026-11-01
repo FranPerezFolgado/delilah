@@ -16,7 +16,7 @@ Mode: format=markdown commits=yes autonomy=auto
 |-------|----------|----------|---------|------|
 
 Phase review (all phases): spec-compliance COMPLIANT, 0 CRITICAL/HIGH/MEDIUM.
-T013 NOT done: ui-verifier had no browser tools, scenarios 1-7 unchecked (preview was up on 1501). Needs a manual walkthrough of quickstart.md.
+T013 done by hand: the user walked through the quickstart in the preview and confirmed it works ("todo perfecto"). ui-verifier had no browser tools.
 
 | Phase | Reviewer | Severity | Finding | File |
 |-------|----------|----------|---------|------|

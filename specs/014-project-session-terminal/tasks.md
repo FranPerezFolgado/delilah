@@ -91,7 +91,7 @@ switch, and a shell has no switch.
 - [X] T010 [P] Update docs/usage.md. Near L239 ("Project sessions and idea conversations always use the terminal"): project sessions run in a terminal and open in the Terminal view, and their Chat | Terminal switch only changes the view (no restart, no confirmation, kept while the screen is open). Idea conversations open in Chat. In the **Projects** paragraph (~L415), mention that "Ask Claude" opens in the terminal and the header switch shows the chat of the same session.
 - [X] T011 [P] Add one line to the "Built" section of docs/status.md: project Claude sessions open in the terminal and have a view-only Chat | Terminal switch (LIBRE-32).
 - [X] T012 [P] Add decision **104** to docs/decisions.md (after 103): "A project's sessions open in the terminal; their switch only changes the view (2026-11-01)". Include the why (they always run on a PTY per decisions 16 and 36, and the chat over the PTY is only a reading of the transcript), idea conversations keep Chat, the choice is not stored (unlike the task's `view` setting), and what was ruled out: a sibling component, storing the choice, and a daemon-side runtime switch for projects.
-- [ ] T013 Walk through specs/014-project-session-terminal/quickstart.md in a preview (`scripts/preview.sh --fresh`, in the background, never the installed daemon on 7420). Have `ui-verifier` check scenarios 1–7 against the preview URL.
+- [X] T013 Walk through specs/014-project-session-terminal/quickstart.md in a preview (`scripts/preview.sh --fresh`, in the background, never the installed daemon on 7420). Have `ui-verifier` check scenarios 1–7 against the preview URL.
 
 ---
 
