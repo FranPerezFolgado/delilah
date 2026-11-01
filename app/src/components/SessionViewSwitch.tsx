@@ -6,17 +6,20 @@ import "./SessionViewSwitch.css";
 
 export type SessionView = "chat" | "terminal";
 
-export interface SessionViewSwitchProps {
-  session: Pick<Session, "id" | "live" | "runtime" | "effective_runtime">;
-  /** @deprecated The view follows the runtime: both directions change it. */
-  view?: SessionView;
-  chooseView?: (view: SessionView) => void;
-  /** A turn is running: switching would cut it. */
-  busy?: boolean;
-  /** After the runtime changed (the caller refreshes its sessions). */
-  onChanged?: () => void;
-  onError?: (message: string) => void;
-}
+export type SessionViewSwitchProps =
+  /** View-only, for sessions whose runtime can't change (a project's): no confirmation,
+   *  no daemon call, never disabled. */
+  | { mode: "view"; view: SessionView; chooseView: (view: SessionView) => void }
+  /** Runtime (default): changes the session's runtime, after a confirmation. */
+  | {
+      mode?: "runtime";
+      session: Pick<Session, "id" | "live" | "runtime" | "effective_runtime">;
+      /** A turn is running: switching would cut it. */
+      busy?: boolean;
+      /** After the runtime changed (the caller refreshes its sessions). */
+      onChanged?: () => void;
+      onError?: (message: string) => void;
+    };
 
 /** A failed action as human Spanish text: the daemon's English messages never reach the screen. */
 export function humanError(e: unknown): string {
@@ -29,25 +32,35 @@ export function humanError(e: unknown): string {
   return t("No se pudo completar la acción");
 }
 
-/** Chat | Terminal for the open session. Changing the runtime asks first. */
-export function SessionViewSwitch({ session, busy, onChanged, onError }: SessionViewSwitchProps) {
+/** Chat | Terminal for the open session. In runtime mode, changing it asks first. */
+export function SessionViewSwitch(props: SessionViewSwitchProps) {
   const [target, setTarget] = useState<SessionView | null>(null);
-  const running = session.runtime ?? "pty";
-  // The next launch decides what a stopped session will be.
-  const runtime = session.live ? running : (session.effective_runtime ?? running);
-  const value: SessionView = runtime === "stream" ? "chat" : "terminal";
+  let value: SessionView;
+  let busy = false;
+  if (props.mode === "view") {
+    value = props.view;
+  } else {
+    const { session } = props;
+    busy = !!props.busy;
+    const running = session.runtime ?? "pty";
+    // The next launch decides what a stopped session will be.
+    const runtime = session.live ? running : (session.effective_runtime ?? running);
+    value = runtime === "stream" ? "chat" : "terminal";
+  }
   const reason = busy ? t("Espera a que termine el turno") : undefined;
 
   const pick = (v: string) => {
     const next = v as SessionView;
     if (next === value) return;
-    setTarget(next);
+    if (props.mode === "view") props.chooseView(next);
+    else setTarget(next);
   };
 
   const confirm = () => {
     const mode = target;
     setTarget(null);
-    if (!mode) return;
+    if (!mode || props.mode === "view") return;
+    const { session, onChanged, onError } = props;
     api.setSessionRuntime(session.id, mode).then(
       () => onChanged?.(),
       (e) => onError?.(t("No se pudo cambiar: {error}", { error: humanError(e) })),

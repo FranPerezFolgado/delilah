@@ -236,8 +236,10 @@ flow. There is no terminal in that mode (`delilah attach` says so). "Terminal" i
 switch (or `delilah runtime <KEY> terminal`) restarts the agent in a terminal with
 `--resume`, keeping the conversation; it is refused, with the reason next to the switch,
 while the agent works or waits for you (wait, answer, or press "Stop"). A terminal
-task goes the other way with the switch (or `delilah runtime <KEY> chat`). Project sessions and
-idea conversations always use the terminal.
+task goes the other way with the switch (or `delilah runtime <KEY> chat`). Project sessions
+always run in a terminal and open in the Terminal view; their Chat | Terminal switch only
+changes the view (no restart, no confirmation, kept while the screen is open). Idea
+conversations open in Chat.
 
 While Claude works the chat shows what it is doing ("Working" with a clock and the current
 step), sub-agents appear as cards with their latest steps (one line each, not their whole
@@ -414,7 +416,7 @@ daemon notifies as before.
 **Projects.** The sidebar groups everything by project, as in Orca: the project,
 its sessions, then its tasks by urgency. A project's screen works like a task's,
 but on your own checkout: "Ask Claude" (or "+" on the project) starts
-Claude in **read-only** mode (`--permission-mode plan`). It reads, searches and
+Claude in a terminal (the header switch shows the chat of the same session), in **read-only** mode (`--permission-mode plan`). It reads, searches and
 explains, but does not edit, and nothing is created. "Permitir cambios en esta
 session" restarts it in normal mode on the same conversation. "Turn into a task" turns
 that Claude into a free task's primary session, keeping its conversation: the task
