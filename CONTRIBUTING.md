@@ -1,8 +1,10 @@
 # Contributing to Delilah
 
-Thanks for helping. This page is the short version; the practical detail (running,
-testing, conventions, releasing, gotchas) is in [docs/development.md](docs/development.md),
-and how the pieces fit together is in [docs/architecture.md](docs/architecture.md).
+Delilah is a personal project. Issues and pull requests are welcome, but there is no
+commitment to support, to response times or to a roadmap. This page is the short version;
+the practical detail (running, testing, conventions, releasing, gotchas) is in
+[docs/development.md](docs/development.md), and how the pieces fit together is in
+[docs/architecture.md](docs/architecture.md).
 
 ## Prerequisites
 
@@ -70,7 +72,7 @@ publishing are the maintainer's job (see the releasing section of
    it breaks anything already in use. Write the title as a
    [Conventional Commit](https://www.conventionalcommits.org/) (`feat: …`, `fix: …`):
    PRs are squash-merged, so the title becomes the commit on `main` and the changelog line.
-4. CI must be green. A maintainer reviews and squash-merges.
+4. CI must be green. When it is green, I review it as time allows and squash-merge it, or say why not.
 
 ## Spec Kit (optional)
 
