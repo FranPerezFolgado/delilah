@@ -35,8 +35,8 @@
 **Independent Test**: A reader new to the project can state the problem, three capabilities and how it was built after the rendered page alone.
 
 - [ ] T007 [US1] Rewrite `README.md` following the approved `outline.md`, in its section order: hero, problem, what it does, Mermaid architecture, decisions, how it was built, status, install and links. At most about 200 lines, in English. Use `<picture>` for the light and dark hero. Re-check each "what it does" bullet against `docs/usage.md` (FR-013), and check the Mermaid edges against `docs/architecture.md`. Describe decision 67 as adjusted by a spike, not ruled out, and name the decision number in each section link. Keep the problem statement generic: no work repository, company or ticket names. Link `docs/status.md`, not `docs/project-state.md`. Include the pixtuoid credit (research R4), MIT and the non-affiliation disclaimer. Keep an `## Install` heading with the requirements, the one-line command and a link to `docs/usage.md#install`
-- [ ] T008 [P] [US1] Add the "Portfolio positioning" decision to `docs/decisions.md`: the next free number (104 unless taken), what changed and why, and what was ruled out (keeping the README as a newcomer page). Add an inline italic note to decision 82, in the style of the "Superseded by 85" note on decision 58
-- [ ] T009 [P] [US1] In `docs/status.md`, record this feature and correct line 18, which describes the README as rewritten for newcomers
+- [X] T008 [P] [US1] Add the "Portfolio positioning" decision to `docs/decisions.md`: the next free number (104 unless taken), what changed and why, and what was ruled out (keeping the README as a newcomer page). Add an inline italic note to decision 82, in the style of the "Superseded by 85" note on decision 58
+- [X] T009 [P] [US1] In `docs/status.md`, record this feature and correct line 18, which describes the README as rewritten for newcomers
 
 **Checkpoint**: The README stands on its own as a portfolio page.
 

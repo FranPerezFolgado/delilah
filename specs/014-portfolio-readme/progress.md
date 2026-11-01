@@ -8,7 +8,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-01 | 2 | 2A | implementing | 0 | | T003-T005 |
 | WP-02 | 2 | 2A | verified | 0 | | T006 |
 | WP-03 | 3 | 3A | pending | 0 | | T007, needs 01+02 |
-| WP-04 | 3 | 3A | implementing | 0 | | T008, T009 |
+| WP-04 | 3 | 3A | verified | 0 | | T008, T009 |
 | WP-05 | 4 | 4A | pending | 0 | | T010 |
 | WP-06 | 5 | 5A | verified | 0 | | T011, T012 |
 | WP-07 | 6 | 6A | verified | 0 | | T013 |
