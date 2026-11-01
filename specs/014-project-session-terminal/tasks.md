@@ -62,13 +62,13 @@ daemon call is made and no dialog appears.
 
 **Depends on**: T003 (view mode) and T005 (default view).
 
-- [ ] T006 [US2] In app/src/components/TaskScreen.test.tsx (project block, ~L289), replace "offers no Chat / Terminal switch on a project conversation" with tests that must fail first:
+- [X] T006 [US2] In app/src/components/TaskScreen.test.tsx (project block, ~L289), replace "offers no Chat / Terminal switch on a project conversation" with tests that must fail first:
   (a) a project session (`conversation: false`) shows `.svs` with Terminal pressed; clicking Chat shows `conversation`; clicking Terminal shows `terminal` again;
   (b) through all of it, `api.setSessionRuntime` and `api.updateTask` are never called, and no confirm dialog appears;
   (c) with the session in `state: "working"`, the switch options are enabled and clicking Chat flips the view;
   (d) with two project sessions, picking Chat on the first leaves the second in `terminal` when its tab is selected;
   (e) the chat's own "open the terminal" button (`onOpenTerminal` from ConversationView; use the mocked component's hook or a session state that renders the button) leaves Terminal pressed in the switch.
-- [ ] T007 [US2] In app/src/components/TaskScreen.tsx `sessionSwitch` (~L668), render `<SessionViewSwitch mode="view" view={viewOf(shownClaude)} chooseView={(v) => chooseView(shownClaude, v)} />` when `project` is set, and today's runtime switch otherwise. Replace the comment "Not for a project's sessions: the daemon refuses to change their runtime" with one saying that on a project the switch only changes the view. In `chooseView` (~L633), call `rememberView(v)` only when `!project`, and update its comment "(the switch is not offered there)". T006 passes.
+- [X] T007 [US2] In app/src/components/TaskScreen.tsx `sessionSwitch` (~L668), render `<SessionViewSwitch mode="view" view={viewOf(shownClaude)} chooseView={(v) => chooseView(shownClaude, v)} />` when `project` is set, and today's runtime switch otherwise. Replace the comment "Not for a project's sessions: the daemon refuses to change their runtime" with one saying that on a project the switch only changes the view. In `chooseView` (~L633), call `rememberView(v)` only when `!project`, and update its comment "(the switch is not offered there)". T006 passes.
 
 **Checkpoint**: US1 and US2 both work. Project sessions open in the terminal and flip freely.
 
@@ -81,8 +81,8 @@ daemon call is made and no dialog appears.
 **Independent Test**: the task runtime switch still confirms, an idea conversation opens in chat with a
 switch, and a shell has no switch.
 
-- [ ] T008 [US3] In app/src/components/TaskScreen.test.tsx, add "an idea conversation opens in chat and offers the view-only switch": `open(conv)` shows `conversation` and `.svs` with Chat pressed, and clicking Terminal shows `terminal` with no `setSessionRuntime` call. Keep "always shows the terminal for a shell session, without the switch" and "shows a task session in the view of its runtime" unchanged. Add to the task block: on a task Claude session, clicking the other option of the switch opens the confirm dialog (runtime mode), as a regression guard.
-- [ ] T009 [US3] Run the full UI suite (`cd app && npx tsc --noEmit && npx vitest run`) and fix any test that assumed project sessions open in chat. Search app/src for "open in chat" or `?? "chat"` and for tests asserting no `.svs` on projects.
+- [X] T008 [US3] In app/src/components/TaskScreen.test.tsx, add "an idea conversation opens in chat and offers the view-only switch": `open(conv)` shows `conversation` and `.svs` with Chat pressed, and clicking Terminal shows `terminal` with no `setSessionRuntime` call. Keep "always shows the terminal for a shell session, without the switch" and "shows a task session in the view of its runtime" unchanged. Add to the task block: on a task Claude session, clicking the other option of the switch opens the confirm dialog (runtime mode), as a regression guard.
+- [X] T009 [US3] Run the full UI suite (`cd app && npx tsc --noEmit && npx vitest run`) and fix any test that assumed project sessions open in chat. Search app/src for "open in chat" or `?? "chat"` and for tests asserting no `.svs` on projects.
 
 ---
 

@@ -630,10 +630,10 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
   const rememberView = (v: ViewMode) => {
     if (task && task.view !== v) api.updateTask(owner, { view: v }).then(onChanged, () => {});
   };
-  // A project session's view only changes what is shown (the switch is not offered there).
+  // A project session's view only changes what is shown: there is no task setting to remember.
   const chooseView = (s: Session, v: ViewMode) => {
     showView(s.id, v);
-    rememberView(v);
+    if (!project) rememberView(v);
   };
 
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
@@ -663,10 +663,13 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
   ];
 
   // Chat | Terminal for the session of the open tab: not on the Tarea tab nor plain terminals.
-  // Not for a project's sessions: the daemon refuses to change their runtime.
+  // On a project the switch only changes the view (the daemon refuses to change a project
+  // session's runtime); on a task it changes the runtime.
   const turnRunning =
     !!shownClaude && (shownClaude.state === "working" || asks.some((a) => a.session?.id === shownClaude.id && a.ask));
-  const sessionSwitch = shownClaude && !project ? (
+  const sessionSwitch = shownClaude && project ? (
+    <SessionViewSwitch mode="view" view={viewOf(shownClaude)} chooseView={(v) => chooseView(shownClaude, v)} />
+  ) : shownClaude ? (
     <SessionViewSwitch
       session={shownClaude}
       busy={turnRunning}

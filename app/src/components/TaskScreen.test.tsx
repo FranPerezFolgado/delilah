@@ -34,8 +34,9 @@ vi.mock("./ConversationView", async () => {
   const { ToolCard } = await vi.importActual<typeof import("./ToolCard")>("./ToolCard");
   return {
     // A tool entry as the daemon serves it: its path relative to the workspace.
-    ConversationView: (p: { onOpenFile: (path: string) => void }) => (
+    ConversationView: (p: { onOpenFile: (path: string) => void; onOpenTerminal?: () => void }) => (
       <div data-testid="conversation">
+        <button onClick={p.onOpenTerminal}>open-terminal-hook</button>
         <ToolCard
           sessionId="s1"
           onOpenFile={p.onOpenFile}
@@ -286,10 +287,64 @@ describe("TaskScreen conversation sessions", () => {
     expect(fileApi).toHaveBeenCalledWith("@web", "src/a.rs");
   });
 
-  it("offers no Chat / Terminal switch on a project conversation: the daemon refuses it", () => {
-    const { container, queryByRole } = open(conv);
-    expect(container.querySelector(".svs")).toBeNull();
-    expect(queryByRole("button", { name: /^Terminal$/ })).toBeNull();
+  const term = { ...conv, conversation: false };
+  const chatBtn = (r: ReturnType<typeof render>) => r.getByRole("button", { name: /^Chat/ });
+  const termBtn = (r: ReturnType<typeof render>) => r.getByRole("button", { name: /^Terminal$/ });
+
+  it("a project session flips between terminal and chat with the view-only switch", () => {
+    sessionRuntime.calls.mockClear();
+    updateTask.mockClear();
+    const r = open(term);
+    expect(r.container.querySelector(".svs")).not.toBeNull();
+    expect(termBtn(r).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(chatBtn(r));
+    expect(r.queryByTestId("conversation")).not.toBeNull();
+    expect(r.queryByTestId("terminal")).toBeNull();
+    fireEvent.click(termBtn(r));
+    expect(r.queryByTestId("terminal")).not.toBeNull();
+    expect(r.queryByTestId("conversation")).toBeNull();
+    expect(sessionRuntime.calls).not.toHaveBeenCalled();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(r.queryByRole("button", { name: "Cambiar" })).toBeNull();
+  });
+
+  it("the project switch stays enabled while the session is working", () => {
+    const r = open({ ...term, state: "working" });
+    expect((chatBtn(r) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(chatBtn(r));
+    expect(r.queryByTestId("conversation")).not.toBeNull();
+  });
+
+  it("each project session keeps its own view", () => {
+    const a = { ...term, id: "s1", label: "Alpha" };
+    const b = { ...term, id: "s2", label: "Beta" };
+    sessionFor("@web").active = sessionTab("s1");
+    const r = render(
+      <TaskScreen owner="@web" project={project} sessions={[a, b]} asks={[]} notices={[]} askPosition="right" onChanged={() => {}} onConvert={() => {}} />,
+    );
+    fireEvent.click(chatBtn(r));
+    expect(r.queryByTestId("conversation")).not.toBeNull();
+    fireEvent.click(r.getByText("Beta"));
+    expect(termBtn(r).getAttribute("aria-pressed")).toBe("true");
+    expect(r.queryByTestId("terminal")).not.toBeNull();
+  });
+
+  it("the chat's own open-terminal button leaves Terminal pressed", () => {
+    const r = open(term);
+    fireEvent.click(chatBtn(r));
+    fireEvent.click(r.getByText("open-terminal-hook"));
+    expect(r.queryByTestId("terminal")).not.toBeNull();
+    expect(termBtn(r).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("an idea conversation opens in chat and offers the view-only switch", () => {
+    sessionRuntime.calls.mockClear();
+    const r = open(conv);
+    expect(r.queryByTestId("conversation")).not.toBeNull();
+    expect(chatBtn(r).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(termBtn(r));
+    expect(r.queryByTestId("terminal")).not.toBeNull();
+    expect(sessionRuntime.calls).not.toHaveBeenCalled();
   });
 
   it("opens a project session in the terminal", () => {
@@ -335,6 +390,12 @@ describe("TaskScreen conversation sessions", () => {
     fireEvent.click(b.getByRole("button", { name: /^Chat/ }));
     expect(b.getByText("Pasar a chat")).toBeTruthy();
     expect(b.queryByTestId("terminal")).not.toBeNull();
+  });
+
+  it("on a task Claude session the switch opens the runtime confirm dialog", () => {
+    const r = inTask({ ...conv, runtime: "pty" }, "terminal");
+    fireEvent.click(r.getByRole("button", { name: /^Chat/ }));
+    expect(r.getByText("Pasar a chat")).toBeTruthy();
   });
 
   it("Terminal on a stream task session asks to confirm instead of showing a terminal it has not", () => {
