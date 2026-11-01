@@ -67,7 +67,7 @@
 
 **Independent Test**: `git diff main -- .github/dependabot.yml` is empty unless the owner approved.
 
-- [ ] T013 [P] [US4] Refresh the counts and dates in `specs/014-portfolio-readme/dependabot-proposal.md` (`gh pr list --state all --author app/dependabot`), since a weekly run was due about 2026-11-02, and revise the assessment if the new data changes it. Confirm the `gh` account first. Re-check the vulnerability-alerts status, and say so if it can't be determined
+- [X] T013 [P] [US4] Refresh the counts and dates in `specs/014-portfolio-readme/dependabot-proposal.md` (`gh pr list --state all --author app/dependabot`), since a weekly run was due about 2026-11-02, and revise the assessment if the new data changes it. Confirm the `gh` account first. Re-check the vulnerability-alerts status, and say so if it can't be determined
 - [ ] T014 [US4] **GATE (FR-017)**: present the proposal to the owner in the final report or PR description. Change `.github/dependabot.yml` only on their explicit approval, and only as the proposal's "If approved" section describes. No approval means no change, and this task is still complete. Don't change the repository's alert settings or touch the open dependabot PRs
 
 **Checkpoint**: The proposal is delivered.
