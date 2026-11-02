@@ -83,6 +83,18 @@ describe("SessionChain", () => {
     expect(getByText("Seguir aquí")).toBeTruthy();
   });
 
+  it("shows one paused banner, outside the steps, when autopilot pauses during a handoff", () => {
+    const paused = { ...task({ to: "review", stage: "saving" }), autopilot: { state: "paused", reason: "1 task unchecked", since: "2026-01-01T00:00:00Z" } } as Task;
+    const { container, getAllByText, getByLabelText } = render(
+      <SessionChain task={paused} sessions={[sess("a", "plan", false), sess("b", "implement", true)]} onOpenSession={() => {}} onChanged={() => {}} />,
+    );
+    expect(getAllByText("Autopiloto en pausa")).toHaveLength(1);
+    expect(getAllByText("Guardando las notas de la sesión…")).toHaveLength(1);
+    expect(getByLabelText("Revisión, esperando")).toBeTruthy();
+    expect(container.querySelector(".chain-step .ha-banner")).toBeNull();
+    expect(container.querySelector(".chain-actions .ha-banner")).not.toBeNull();
+  });
+
   it("shows the saving state without buttons", () => {
     const { getByText, queryByRole } = render(
       <SessionChain task={task({ to: "implement", stage: "saving" })} sessions={[sess("a", "plan", true)]} onOpenSession={() => {}} onChanged={() => {}} />,

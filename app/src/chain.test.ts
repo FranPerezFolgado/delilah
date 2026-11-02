@@ -102,6 +102,13 @@ describe("chainOf", () => {
       expect(d.find((x) => x.state === "waiting")).toMatchObject({ step: "review", error: "no consigo avanzar" });
     });
 
+    it("keeps a single waiting step when paused during a handoff", () => {
+      const sessions = [sess("a", "plan", false), sess("b", "implement", true)];
+      const c = chainOf({ ...task(true, { to: "review", stage: "saving" }), autopilot: { state: "paused", reason: "1 task unchecked", since: "2026-01-01T00:00:00Z" } }, sessions)!;
+      expect(c.map((x) => x.state)).toEqual(["done", "active", "waiting", "pending"]);
+      expect(c[2]).toMatchObject({ step: "review", error: "1 task unchecked" });
+    });
+
     it("marks the last unfinished step waiting when paused with nothing active", () => {
       const none = [sess("a", "plan", false), sess("b", "implement", false), sess("c", "review", false)];
       const c = chainOf(ap({ state: "paused", reason: "parado" }), none)!;

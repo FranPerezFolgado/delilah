@@ -11,7 +11,8 @@ vi.mock("./WherePicker", async (orig) => ({ ...(await orig<typeof import("./Wher
 const web: Project = { name: "web", path: "/w/web", kind: "repo", workflow: "feature", settings: { ...DEFAULT_PROJECT_SETTINGS, workflow: { kind: "phased", plan: "/p", implement: "/i", review: "/r" } } };
 const task: Task = {
   key: "LIBRE-9",
-  created_at: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+  // Yesterday at this time: a fixed number of hours back crosses two days just after midnight.
+  created_at: new Date(new Date().setDate(new Date().getDate() - 1)).toISOString(),
   finished_at: null,
   title: "Algo",
   project: "web",
