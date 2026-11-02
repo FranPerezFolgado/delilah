@@ -14,7 +14,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-07 | 6 | 6A | verified | 0 | | T013 |
 | WP-08 | 6 | 6B | done | 0 | | no owner approval: dependabot.yml unchanged; proposal goes in the PR |
 | WP-09 | 7 | 7A | verified | 0 | | T015 |
-| WP-10 | 7 | 7B | pending | 0 | | T016 |
+| WP-10 | 7 | 7B | verified | 0 | | T016 |
 | WP-11 | 7 | 7C | pending | 0 | | T017, T018, orchestrator |
 
 ## Open findings
