@@ -5,7 +5,7 @@ Mode: format=markdown commits=yes autonomy=auto
 
 | WP | Phase | Group | Status | Attempts | Commit | Notes |
 |----|-------|-------|--------|----------|--------|-------|
-| WP-01 | 2 | 2A | implementing | 0 | | T003-T005 |
+| WP-01 | 2 | 2A | verified | 0 | | T003-T005; no GIF, stills fallback |
 | WP-02 | 2 | 2A | verified | 0 | | T006 |
 | WP-03 | 3 | 3A | pending | 0 | | T007, needs 01+02 |
 | WP-04 | 3 | 3A | verified | 0 | | T008, T009 |
