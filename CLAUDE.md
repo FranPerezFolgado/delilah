@@ -21,7 +21,7 @@ Read these before changing anything; keep them true when you change behaviour:
 - [docs/development.md](docs/development.md): running, testing, conventions,
   releasing, gotchas.
 - [docs/vision.md](docs/vision.md): the original plan, for what is not built yet.
-- [docs/usage.md](docs/usage.md): every feature as the user sees it (the README is a short newcomer page).
+- [docs/usage.md](docs/usage.md): every feature as the user sees it (the README is the portfolio page: pitch, screenshots, quick start).
 
 When a feature lands, update `docs/status.md` (and docs/usage.md for user-facing
 behaviour); when a decision is taken, add it to `docs/decisions.md`.

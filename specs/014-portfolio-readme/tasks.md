@@ -74,7 +74,7 @@
 
 ## Phase 7: Polish
 
-- [ ] T015 [P] In `CLAUDE.md` line 24, replace "the README is a short newcomer page" with wording that matches the new positioning
+- [X] T015 [P] In `CLAUDE.md` line 24, replace "the README is a short newcomer page" with wording that matches the new positioning
 - [ ] T016 Run every check in `specs/014-portfolio-readme/quickstart.md` ("Checks before the PR"): line count, the empty diffs, the `README|newcomer` grep, and all relative links and anchors in `README.md`, `CONTRIBUTING.md` and the new `docs/usage.md` sections. Have every figure in `README.md` match a fresh run of the figure commands at the revision it states. Fix what fails
 - [ ] T017 Confirm the active `gh` account is `FranPerezFolgado`, push the branch and check on GitHub, in light and dark, that the Mermaid diagram renders and the hero reads well (via `ui-verifier`; SC-007)
 - [ ] T018 Open the PR with the title `docs: rewrite README as a portfolio page and set personal-project tone`, with the GIF outcome and the dependabot proposal in the body. Don't bump the version. Merging is the owner's call, squash only

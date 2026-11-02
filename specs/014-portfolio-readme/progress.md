@@ -13,7 +13,7 @@ Mode: format=markdown commits=yes autonomy=auto
 | WP-06 | 5 | 5A | verified | 0 | | T011, T012 |
 | WP-07 | 6 | 6A | verified | 0 | | T013 |
 | WP-08 | 6 | 6B | pending | 0 | | T014 gate, orchestrator |
-| WP-09 | 7 | 7A | pending | 0 | | T015 |
+| WP-09 | 7 | 7A | verified | 0 | | T015 |
 | WP-10 | 7 | 7B | pending | 0 | | T016 |
 | WP-11 | 7 | 7C | pending | 0 | | T017, T018, orchestrator |
 
