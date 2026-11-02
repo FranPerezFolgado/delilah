@@ -71,12 +71,12 @@ links land on the section; the decision is the bold paragraph with that number.
 ## How it was built
 
 Delilah is built with Delilah: one person directing Claude Code agents, with larger features
-going through a written spec and plan first. Figures are as of 2026-11-02 at commit `b07a66b`.
+going through a written spec and plan first. Figures are as of 2026-11-02 at commit `b07a66b3`.
 
 | Figure | Value | What it counts |
 |---|---|---|
 | Active days | 12, between 2026-10-19 and 2026-11-02 | Days with at least one commit |
-| Commits | 597 | Reachable from `b07a66b`, 33 of them merges |
+| Commits | 597 | Reachable from `b07a66b3`, 33 of them merges |
 | Releases | 11 tags | Up to v1.3.0 |
 | Daemon, CLI and libraries | 94,526 lines | `crates/`: 93,073 of Rust, tests included, plus migrations and other files |
 | TypeScript and CSS | 35,488 lines | `app/src`, tests included |
