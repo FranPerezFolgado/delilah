@@ -320,9 +320,13 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
   await waitStatus(env, K.running, "running");
   await waitStatus(env, K.paused, "paused-by-limit");
   await waitStatus(env, K.jira, "waiting-for-user");
-  await expect
-    .poll(async () => JSON.stringify(await call(env, "GET", "/api/v1/inbox")), { message: "the permission card in the inbox", timeout: 30_000 })
-    .toContain("ls -la");
+  // The Playground capture needs neither the permission card nor the PRs, which don't settle on a fresh daemon any more.
+  const playgroundOnly = ONLY.length === 1 && ONLY[0] === "Playground";
+  if (!playgroundOnly) {
+    await expect
+      .poll(async () => JSON.stringify(await call(env, "GET", "/api/v1/inbox")), { message: "the permission card in the inbox", timeout: 30_000 })
+      .toContain("ls -la");
+  }
 
   // Phases, so the board has something in each column.
   for (const [key, phase] of [[K.live, "implement"], [K.running, "plan"], [K.paused, "implement"], [K.jira, "review"], [K.done, "review"]] as const) {
@@ -339,6 +343,7 @@ test("seed: projects, tasks in every state, PRs, a terminal", async ({ env, scen
   // A terminal next to the agent.
   const shell = await call<{ label: string }>(env, "POST", `/api/v1/tasks/${K.live}/sessions`, { kind: "shell" });
   seeded.shellLabel = shell.label;
+  if (playgroundOnly) return;
 
   // LIBRE-5's PR is linked, then LIBRE-4's: its merged PR marks it done by itself. The fake gh
   // answers `--head <branch>` with that branch's PR only, and a lookup below review needs
@@ -370,6 +375,7 @@ test("Jira-conectar", async ({ browser, env }) => {
 
 for (const theme of THEMES) {
   test(`pantallas (${theme.suffix})`, async ({ browser, env }) => {
+    test.skip(ONLY.length === 1 && ONLY[0] === "Playground", "only the Playground was asked for");
     test.setTimeout(240_000);
     const { ctx, page } = await open(browser, env, theme);
 
@@ -505,5 +511,63 @@ for (const theme of THEMES) {
       await shot(page, "Jira1024", theme);
       await ctx.close();
     }
+  });
+}
+
+// ---------- Playground: the floors, with demo activity ----------
+
+type DemoSession = { id: string; task: string; kind: string; label: string; live: boolean; state: string | null };
+
+/** The Playground scene. */
+async function playgroundScene(page: Page, env: E2eEnv) {
+  const real = (await call<DemoSession[]>(env, "GET", "/api/v1/sessions")).filter((s) => s.kind === "claude" && s.live);
+  // The fake agents leave few states on a fresh daemon and activity is in memory, so the capture alone
+  // sees a routed response: one floor (LIBRE-6) with five demo desks, one per state, and a tool each.
+  const base = real.find((s) => s.task === K.running)!;
+  const desks: [string, string | null, { kind: string; tool: string; target: string } | null][] = [
+    ["Main", "working", { kind: "edit", tool: "Edit", target: "src/pagination.rs" }],
+    ["Reviewer", "working", { kind: "read", tool: "Read", target: "docs/plan.md" }],
+    ["Tests", "working", { kind: "run", tool: "Bash", target: "cargo test" }],
+    ["Docs", "waiting", null],
+    ["Spike", "paused", null],
+  ];
+  const sessions = desks.map(([label, state], i) => ({ ...base, id: i === 0 ? base.id : `demo-session-${i}`, primary: i === 0, label, state }));
+  const activity: Record<string, unknown> = {};
+  const tokens: Record<string, unknown> = {};
+  const now = new Date().toISOString();
+  desks.forEach(([, , tool], i) => {
+    const id = sessions[i].id;
+    if (tool) {
+      activity[id] = {
+        action: { id: `demo-${i}`, ...tool, background: false, since: now },
+        helpers: i === 0 ? [{ id: "demo-helper", role: "researcher", action: { id: "demo-h", kind: "read", tool: "Grep", target: "paginate", background: false, since: now } }] : [],
+      };
+    }
+    tokens[id] = { total: 30_000 + 90_000 * i, input: 20_000 + 60_000 * i, output: 10_000 + 30_000 * i, cache_write: 0, cache_read: 0 };
+  });
+  await page.route("**/api/v1/sessions", async (route) => {
+    const all = (await (await route.fetch()).json()) as DemoSession[];
+    await route.fulfill({ json: [...all.filter((s) => s.task !== K.running), ...sessions] });
+  });
+  await page.route("**/api/v1/activity", (route) => route.fulfill({ json: { sessions: activity, tokens } }));
+  await page.reload();
+  await nav(page).getByRole("button", { name: /^(Bandeja|Inbox)/ }).waitFor();
+  await page.keyboard.press("ControlOrMeta+4");
+  // A click on the floor opens the task's Office tab.
+  await page.getByTitle(tr("Paginación por cursor en GET /invoices", "Cursor pagination in GET /invoices")).click();
+  const office = page.getByRole("tab", { name: /^(Oficina|Office)/ });
+  await expect(office).toBeVisible();
+  await office.click();
+  await expect(page.getByText("Edit · src/pagination.rs").first()).toBeVisible();
+}
+
+for (const theme of THEMES) {
+  test(`Playground (${theme.suffix})`, async ({ browser, env }) => {
+    test.skip(ONLY.length > 0 && !ONLY.includes("Playground"), "not in DELILAH_SCREENS_ONLY");
+    test.setTimeout(90_000);
+    const { ctx, page } = await open(browser, env, theme);
+    await playgroundScene(page, env);
+    await shot(page, "Playground", theme);
+    await ctx.close();
   });
 }

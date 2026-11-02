@@ -6,7 +6,7 @@ Please do not open a public issue for a vulnerability. Use GitHub private vulner
 reporting instead: on the repository page, open the **Security** tab and choose
 **Report a vulnerability**. Include what you found, how to reproduce it and the version.
 
-We aim to acknowledge a report within about 7 days and will keep you informed of the fix.
+This is a personal project, so reports are handled on a best-effort basis, with no time target.
 
 ## Supported versions
 

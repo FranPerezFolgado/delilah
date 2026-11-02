@@ -657,6 +657,7 @@ indexes the rest. History is labelled or archived, not deleted: `docs/archive/` 
 `CLAUDE.local.md`, so the checked-in `CLAUDE.md` is safe to publish. The changelog is
 generated with git-cliff inside the version bump, so a release cannot go out without its
 section. *Ruled out:* a hand-written changelog and keeping personal notes in `CLAUDE.md`.
+*(README purpose superseded in part by 105: it is now a portfolio page; the rest stands.)*
 
 **83. Pull requests are squash-merged.** Each PR lands on `main` as one commit whose title
 is the PR title and whose message is the PR body; the GitHub repo allows only squash
@@ -941,3 +942,14 @@ a stored Jira link column (it would go stale and the key already says it). See t
 [spec](../specs/013-jira-subtasks-import/spec.md).
 
 **104. A project's sessions open in the terminal; their switch only changes the view (2026-11-01).** Project Claude sessions always run on a PTY (decisions 16 and 36), and the chat over the PTY is only a reading of the transcript, so the Chat | Terminal switch in a project's header changes what is shown and nothing else: no restart, no confirmation, no busy lock. "Ask Claude" sessions open in the Terminal view; idea conversations keep opening in Chat (the idea flow is a chat with question and proposal cards). The choice is not stored: it lives in the screen's memory per session while it is open (unlike the task's `view` setting, which is saved). No daemon change: `POST /sessions/{id}/runtime` still refuses project sessions. *Ruled out:* a sibling component for the view-only switch (it would duplicate markup and styles; `SessionViewSwitch` got a view-only mode instead); storing the choice (no need yet, and it would need a setting or migration); a daemon-side runtime switch for projects (they have no chat runtime to switch to). See the [spec](../specs/014-project-session-terminal/spec.md).
+
+**105. Portfolio positioning (2026-11-01).** Delilah is presented as a personal project and a
+portfolio piece, not as an open source product. *What changed:* `README.md` sells the project
+instead of documenting it (at most about 200 lines: the problem, what it does, architecture,
+key decisions, how it was built with reproducible figures, status, install); the install detail
+moved to `docs/usage.md#install`; `CONTRIBUTING.md` says up front that issues and PRs are
+welcome with no support commitment. *Why:* the repo is read by people judging the author, and a
+newcomer quickstart answers a question they are not asking. It replaces what decision 82 says
+about the README's purpose; the rest of 82 stands. *Ruled out:* keeping the README as a newcomer
+page, and changing the dependabot setup without the owner's approval (a proposal was written
+instead). See the [spec](../specs/014-portfolio-readme/spec.md).
