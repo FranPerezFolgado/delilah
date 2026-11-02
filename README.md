@@ -110,8 +110,9 @@ curl -fsSL https://raw.githubusercontent.com/FranPerezFolgado/delilah/main/scrip
 ```
 
 The app is not signed with a paid Apple Developer account; why, manual download,
-verification and building from source are in [docs/usage.md](docs/usage.md#install). First
-steps are in [Getting started](docs/usage.md#getting-started).
+verification, building from source, updates and uninstall are in
+[docs/usage.md](docs/usage.md#install). First steps and the optional command line are in
+[Getting started](docs/usage.md#getting-started).
 
 ## Documentation
 

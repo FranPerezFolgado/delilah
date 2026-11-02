@@ -46,7 +46,7 @@
 
 **Independent Test**: From the README alone, reach every route that exists today in at most one link.
 
-- [ ] T010 [US2] Walk through the routes from the old `README.md` (one-line script, `DELILAH_INSTALL_DIR`, manual DMG, quarantine and Open Anyway, verify, build from source, updates, uninstall, the optional CLI) and confirm each is reachable from the new `README.md` in at most one link with meaning unchanged, fixing `docs/usage.md` if not. Confirm that the line count of the install section is at most a quarter of the page (SC-002)
+- [X] T010 [US2] Walk through the routes from the old `README.md` (one-line script, `DELILAH_INSTALL_DIR`, manual DMG, quarantine and Open Anyway, verify, build from source, updates, uninstall, the optional CLI) and confirm each is reachable from the new `README.md` in at most one link with meaning unchanged, fixing `docs/usage.md` if not. Confirm that the line count of the install section is at most a quarter of the page (SC-002)
 
 **Checkpoint**: Every install route is reachable.
 
@@ -68,7 +68,7 @@
 **Independent Test**: `git diff main -- .github/dependabot.yml` is empty unless the owner approved.
 
 - [X] T013 [P] [US4] Refresh the counts and dates in `specs/014-portfolio-readme/dependabot-proposal.md` (`gh pr list --state all --author app/dependabot`), since a weekly run was due about 2026-11-02, and revise the assessment if the new data changes it. Confirm the `gh` account first. Re-check the vulnerability-alerts status, and say so if it can't be determined
-- [ ] T014 [US4] **GATE (FR-017)**: present the proposal to the owner in the final report or PR description. Change `.github/dependabot.yml` only on their explicit approval, and only as the proposal's "If approved" section describes. No approval means no change, and this task is still complete. Don't change the repository's alert settings or touch the open dependabot PRs
+- [X] T014 [US4] **GATE (FR-017)**: present the proposal to the owner in the final report or PR description. Change `.github/dependabot.yml` only on their explicit approval, and only as the proposal's "If approved" section describes. No approval means no change, and this task is still complete. Don't change the repository's alert settings or touch the open dependabot PRs
 
 **Checkpoint**: The proposal is delivered.
 
