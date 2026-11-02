@@ -94,8 +94,9 @@ export function TaskHeader(p: TaskHeaderProps) {
       )}
       {task.previous_title && (
         <span className="th-before">
-          {t("Antes: {title}", { title: task.previous_title })} ·{" "}
-          <button type="button" className="th-link" onClick={restore}>{t("Restaurar")}</button>
+          <span className="th-before-text" title={task.previous_title}>{t("Antes: {title}", { title: task.previous_title })}</span>
+          <span className="th-before-sep" aria-hidden="true">·</span>
+          <button type="button" className="th-link" title={task.previous_title} onClick={restore}>{t("Restaurar")}</button>
         </span>
       )}
       {kind === "subtask" && task.parent_task && (

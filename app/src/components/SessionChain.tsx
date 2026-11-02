@@ -57,7 +57,6 @@ export function SessionChain({ task, sessions, onOpenSession, onChanged }: Props
 
   return (
     <div className="chain" role="list" aria-label={t("Modo ahorro")}>
-      {/* One handoff per task: only its target step can be waiting. */}
       {chain.map((c, i) => {
         const label = stepLabel(c.step);
         const s = c.session;
@@ -76,12 +75,15 @@ export function SessionChain({ task, sessions, onOpenSession, onChanged }: Props
                 {s.live ? t("Abrir") : t("Reabrir")}
               </button>
             )}
-            {c.state === "waiting" && (
-              <HandoffActions task={task.key} handoff={task.handoff} autopilot={task.autopilot} onDone={onChanged} />
-            )}
           </div>
         );
       })}
+      {/* In a row of its own, so the banner doesn't break the steps' line; chainOf leaves one step waiting. */}
+      {chain.some((c) => c.state === "waiting") && (
+        <div className="chain-actions">
+          <HandoffActions task={task.key} handoff={task.handoff} autopilot={task.autopilot} onDone={onChanged} />
+        </div>
+      )}
       {error && <div className="error selectable">{error}</div>}
     </div>
   );
