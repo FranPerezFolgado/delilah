@@ -85,7 +85,7 @@ going through a written spec and plan first. Figures are as of 2026-11-02 at com
 | Scripts | 2,635 lines | `scripts/` |
 | Specs | 31 features, 40,452 lines | `specs/` |
 | Docs | 4,214 lines | `docs/` |
-| Decisions | 106 entries | `docs/decisions.md` |
+| Decisions | 107 entries | `docs/decisions.md` |
 | Tests | 1,689 Rust, 1,175 vitest, 39 Playwright | Static count of declarations, not runs |
 | Migrations | 26 | `crates/delilah-daemon/migrations` |
 
