@@ -69,13 +69,20 @@ export function chainOf(task: Task, sessions: Session[], opts: ChainOpts = {}): 
   steps.push({ step: "pr", state: finished ? "done" : ap.stage === "opening_pr" ? "active" : "pending" });
 
   if (ap.state === "paused") {
+    // A pending handoff's target goes before the active step: only one step ever waits.
     const current =
       (ap.stage && steps.find((c) => c.step === (ap.stage === "preview" ? "preview" : "pr"))) ||
-      steps.find((c) => c.state === "active") ||
       steps.find((c) => c.state === "waiting") ||
+      steps.find((c) => c.state === "active") ||
       // Nothing active, waiting or staged: the last unfinished step carries the banner.
       [...steps].reverse().find((c) => c.state !== "done");
     if (current && current.state !== "done") {
+      for (const c of steps) {
+        if (c !== current && c.state === "waiting") {
+          c.state = c.session ? "done" : "pending";
+          c.error = undefined;
+        }
+      }
       current.state = "waiting";
       current.error = ap.reason ?? current.error;
     }
