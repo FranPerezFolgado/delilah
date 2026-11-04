@@ -646,6 +646,19 @@ mod tests {
             .count()
     }
 
+    /// The status flips to Running before the agent's session is stored, so
+    /// wait for the session instead of reading it right after the status.
+    async fn wait_for_agent_session(e: &Env) -> usize {
+        for _ in 0..200 {
+            let n = agent_sessions(e).await;
+            if n > 0 {
+                return n;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        0
+    }
+
     fn failed_reason(s: TaskStatus) -> String {
         match s {
             TaskStatus::SetupFailed { reason } => reason,
@@ -660,7 +673,7 @@ mod tests {
             .await
             .unwrap();
         wait_for(&e, |s| *s == TaskStatus::Running).await;
-        assert_eq!(agent_sessions(&e).await, 1);
+        assert_eq!(wait_for_agent_session(&e).await, 1);
         let dir = e.app.config.task_dir("PROJ-1");
         assert!(!dir.join(LAUNCH_FILE).exists());
         // The full output stays with the task's logs; the session is closed.
@@ -713,7 +726,7 @@ mod tests {
         assert!(e.worktree.join("ran").exists());
         retry(&e.app, &e.key).await.unwrap();
         wait_for(&e, |s| *s == TaskStatus::Running).await;
-        assert_eq!(agent_sessions(&e).await, 1);
+        assert_eq!(wait_for_agent_session(&e).await, 1);
     }
 
     #[tokio::test]
