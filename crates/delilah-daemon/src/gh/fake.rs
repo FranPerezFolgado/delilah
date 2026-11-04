@@ -18,7 +18,7 @@ pub(crate) const PR_URL: &str = "https://github.com/o/r/pull/7";
 pub(crate) fn bare_snapshot(state: &str, merged: bool) -> String {
     format!(
         r#"{{"data":{{"repository":{{"pullRequest":{{"state":"{state}","isDraft":false,"merged":{merged},
-      "headRefOid":"abc","baseRefName":"main","title":"t","url":"u","reviewDecision":null,
+      "headRefOid":"abc","headRefName":"feat/x","baseRefName":"main","title":"t","url":"u","reviewDecision":null,
       "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":null}}}}]}},
       "reviews":{{"nodes":[]}},"comments":{{"nodes":[]}},"reviewThreads":{{"nodes":[]}}}}}}}}}}"#
     )
@@ -30,7 +30,7 @@ pub(crate) fn ci_snapshot(state: &str, head: &str, conclusion: &str) -> String {
     format!(
         r#"{{"data":{{"repository":{{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":false,
       "pullRequest":{{"state":"{state}","isDraft":false,"merged":{merged},
-      "headRefOid":"{head}","baseRefName":"main","title":"Add things","url":"u","reviewDecision":null,
+      "headRefOid":"{head}","headRefName":"feat/x","baseRefName":"main","title":"Add things","url":"u","reviewDecision":null,
       "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":{{"contexts":{{"nodes":[
         {{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"{conclusion}","detailsUrl":"https://ci/1",
           "startedAt":"2026-10-20T09:00:00Z","completedAt":"2026-10-20T09:01:30Z"}}
@@ -50,7 +50,7 @@ pub(crate) fn custom_snapshot(
 ) -> String {
     format!(
         r#"{{"data":{{"repository":{{"pullRequest":{{"state":"OPEN","isDraft":false,"merged":false,
-      "headRefOid":"{head}","baseRefName":"main","title":{title},"url":"u","reviewDecision":null,
+      "headRefOid":"{head}","headRefName":"feat/x","baseRefName":"main","title":{title},"url":"u","reviewDecision":null,
       "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":{{"contexts":{{"nodes":[{checks}]}}}}}}}}]}},
       "reviews":{{"nodes":[]}},"comments":{{"nodes":[{comments}]}},"reviewThreads":{{"nodes":[]}}}}}}}}}}"#,
         title = serde_json::Value::from(title),
@@ -84,6 +84,7 @@ pub(crate) struct FakeGh {
     replies: Mutex<Vec<Reply>>,
     calls: Mutex<Vec<Vec<String>>>,
     stdins: Mutex<Vec<Option<String>>>,
+    creates: std::sync::atomic::AtomicI64,
 }
 
 impl FakeGh {
@@ -92,6 +93,7 @@ impl FakeGh {
             replies: Mutex::default(),
             calls: Mutex::default(),
             stdins: Mutex::default(),
+            creates: std::sync::atomic::AtomicI64::new(0),
         }
     }
 
@@ -153,6 +155,17 @@ impl Gh for FakeGh {
                     replies[i].1.clone()
                 }
             })
+        };
+        // Each `pr create` answered with `PR_URL` gets its own number (7, 8, ...), as
+        // GitHub would give each created PR its own URL.
+        let reply = match reply {
+            Some(Ok(url)) if url == PR_URL && args.starts_with(&strings(&["pr", "create"])) => {
+                let n = self
+                    .creates
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Some(Ok(format!("https://github.com/o/r/pull/{}", 7 + n)))
+            }
+            other => other,
         };
         let unsupported = format!("fake gh: unsupported: {}", args.join(" "));
         self.stdins.lock().unwrap().push(stdin);

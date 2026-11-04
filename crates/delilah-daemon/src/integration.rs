@@ -143,7 +143,8 @@ pub async fn subtask_facts(
     }
     let prs = sqlx::query(
         "SELECT p.task_key, p.url, p.snapshot FROM pull_requests p
-         JOIN tasks t ON t.key = p.task_key WHERE t.parent_task = ? ORDER BY p.id",
+         JOIN tasks t ON t.key = p.task_key
+         WHERE t.parent_task = ? AND p.replaced_by IS NULL ORDER BY p.id",
     )
     .bind(parent.as_str())
     .fetch_all(&store.pool)
@@ -401,6 +402,29 @@ mod tests {
         let c2 = facts.iter().find(|f| f.task.key.as_str() == "C-2").unwrap();
         assert!(!c2.facts.merged);
         assert_eq!(c2.pr.as_ref().unwrap().state, Some(PrState::Open));
+    }
+
+    #[tokio::test]
+    async fn a_replaced_pr_does_not_count_in_the_rollup() {
+        let store = store().await;
+        let parent = TaskKey::new("P-1");
+        child(&store, "C-1").await;
+        pr(&store, "C-1", 1, Some(PrState::Closed)).await;
+        pr(&store, "C-1", 2, Some(PrState::Merged)).await;
+        let before = subtask_facts(&store, &parent).await.unwrap();
+        assert!(!before[0].facts.merged, "the closed PR still counts");
+        sqlx::query(
+            "UPDATE pull_requests SET replaced_by = (SELECT id FROM pull_requests WHERE number = 2)
+             WHERE number = 1",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let facts = subtask_facts(&store, &parent).await.unwrap();
+        assert!(facts[0].facts.merged);
+        assert_eq!(facts[0].pr.as_ref().unwrap().state, Some(PrState::Merged));
+        let p = progress(&store, &parent).await.unwrap();
+        assert_eq!((p.merged, p.counted, p.ready), (1, 1, true));
     }
 
     #[tokio::test]

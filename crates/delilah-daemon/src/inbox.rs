@@ -281,6 +281,9 @@ pub struct InboxItem {
     /// The repo of the PR whose autofix stopped (`pr-autofix` items).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
+    /// The PR whose autofix stopped (`pr-autofix` items; absent for an old notice).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
     /// Why autofix stopped: `limit`, `no-push` or `no-session` (`pr-autofix` items).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -317,6 +320,7 @@ impl InboxItem {
             permission: None,
             notice: None,
             repo: None,
+            pr_url: None,
             reason: None,
             attempts: None,
         }
@@ -771,7 +775,7 @@ async fn collect(app: &AppState) -> Result<Vec<InboxItem>, ApiError> {
         }
         // An unlinked PR resolves its notices; one still open without its PR is stale.
         let prs = app.store.prs_of(&t.key).await?;
-        let same_repo = prs.iter().find(|p| p.repo == n.repo);
+        let same_repo = prs.iter().find(|p| p.url == n.pr_url);
         let Some(pr) = same_repo.or(if archive { prs.first() } else { None }) else {
             continue;
         };
@@ -864,6 +868,7 @@ fn autofix_item(app: &AppState, n: NoticeRow, t: &Task) -> InboxItem {
         since: Some(n.created_at),
         notice: Some(n.id),
         repo: Some(n.repo),
+        pr_url: Some(n.pr_url).filter(|u| !u.is_empty()),
         reason,
         attempts,
         ..InboxItem::new(ItemKind::PrAutofix, n.task_key, t.title.clone())
@@ -1528,7 +1533,7 @@ mod tests {
             .await
             .unwrap();
         app.store
-            .insert_notice(
+            .insert_task_notice(
                 &delilah_core::TaskKey::new("PROJ-1"),
                 &crate::store_prs::NewNotice {
                     repo: ".".into(),
@@ -1590,9 +1595,21 @@ mod tests {
 
     async fn notify(app: &AppState, kind: &str, cause: &str) {
         use crate::store_prs::NewNotice;
+        let key = delilah_core::TaskKey::new("PROJ-1");
+        let pr_url = match kind {
+            "ci-failed" | "changes-requested" | "comments" => app
+                .store
+                .prs_of(&key)
+                .await
+                .unwrap()
+                .first()
+                .map(|p| p.url.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
         app.store
-            .insert_notice(
-                &delilah_core::TaskKey::new("PROJ-1"),
+            .insert_notice_for(
+                &key,
                 &NewNotice {
                     repo: ".".into(),
                     kind: kind.into(),
@@ -1600,6 +1617,7 @@ mod tests {
                     text: format!("{kind} text"),
                     detail: None,
                 },
+                &pr_url,
             )
             .await
             .unwrap();
@@ -1647,10 +1665,74 @@ mod tests {
         assert_eq!(json["pr"]["notice"], pr.notice);
     }
 
+    async fn second_pr_in_the_repo(app: &AppState) {
+        app.store
+            .link_pr(
+                &delilah_core::TaskKey::new("PROJ-1"),
+                &crate::store_prs::NewPr {
+                    repo: ".".into(),
+                    host: "github.com".into(),
+                    owner_name: "me/repo".into(),
+                    number: 8,
+                    url: "https://github.com/me/repo/pull/8".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn notice_of(app: &AppState, kind: &str, pr_url: &str) {
+        use crate::store_prs::NewNotice;
+        app.store
+            .insert_notice_for(
+                &delilah_core::TaskKey::new("PROJ-1"),
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: kind.into(),
+                    cause: pr_url.into(),
+                    text: format!("{kind} text"),
+                    detail: Some(serde_json::json!({ "reason": "limit", "attempts": 3 })),
+                },
+                pr_url,
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn two_prs_in_one_repo_each_have_their_own_items() {
+        let app = app_with_pr_task().await;
+        second_pr_in_the_repo(&app).await;
+        let (a, b) = (
+            "https://github.com/me/repo/pull/7",
+            "https://github.com/me/repo/pull/8",
+        );
+        notice_of(&app, "ci-failed", a).await;
+        notice_of(&app, "comments", b).await;
+        notice_of(&app, "autofix-stopped", b).await;
+        let Ok(Json(items)) = list(State(app)).await else {
+            panic!("the inbox failed");
+        };
+        let url_of = |kind: ItemKind| {
+            items
+                .iter()
+                .find(|i| i.kind == kind)
+                .and_then(|i| i.pr.as_ref().map(|p| p.url.clone()))
+        };
+        assert_eq!(url_of(ItemKind::PrFailed).as_deref(), Some(a));
+        assert_eq!(url_of(ItemKind::PrReview).as_deref(), Some(b));
+        let autofix = items
+            .iter()
+            .find(|i| i.kind == ItemKind::PrAutofix)
+            .unwrap();
+        assert_eq!(autofix.pr_url.as_deref(), Some(b));
+    }
+
     async fn stopped_notice(app: &AppState, reason: &str, attempts: u32) {
         use crate::store_prs::NewNotice;
         app.store
-            .insert_notice(
+            .insert_notice_for(
                 &delilah_core::TaskKey::new("PROJ-1"),
                 &NewNotice {
                     repo: ".".into(),
@@ -1661,6 +1743,7 @@ mod tests {
                         "reason": reason, "attempts": attempts, "checks": ["build"]
                     })),
                 },
+                "https://github.com/me/repo/pull/1",
             )
             .await
             .unwrap();
@@ -1725,7 +1808,7 @@ mod tests {
         let row = app.store.prs_of(&key).await.unwrap().remove(0);
         app.store.unlink_pr(row.id).await.unwrap();
         app.store
-            .insert_notice(
+            .insert_task_notice(
                 &key,
                 &NewNotice {
                     repo: ".".into(),
@@ -1837,7 +1920,7 @@ mod tests {
         app.store.unlink_pr(row.id).await.unwrap();
         for kind in ["archive-partial", "archive-blocked"] {
             app.store
-                .insert_notice(
+                .insert_task_notice(
                     &key,
                     &NewNotice {
                         repo: ".".into(),

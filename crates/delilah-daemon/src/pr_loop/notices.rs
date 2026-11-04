@@ -86,7 +86,7 @@ pub(super) async fn record(
     let key = TaskKey::new(row.task_key.clone());
     // A merged or closed PR is nothing to fix: autofix lets go of it.
     if snap.state != PrState::Open {
-        crate::autofix::cancel_logged(app, &key, Some(&row.repo)).await;
+        crate::autofix::cancel_pr_logged(app, &key, row.id).await;
     }
     // The merge that archives (or refuses to archive) the task tells it in one
     // notification of its own, so this PR's is held back.
@@ -99,6 +99,7 @@ pub(super) async fn record(
                 !before.contains(&n.id)
                     && n.task_key == row.task_key
                     && n.repo == notice.repo
+                    && n.pr_url == row.url
                     && n.kind == notice.kind
                     && n.cause == notice.cause
             });

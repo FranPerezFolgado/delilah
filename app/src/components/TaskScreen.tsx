@@ -215,7 +215,7 @@ export function TaskScreen({ online, owner, task, spec, project, projects, tasks
     const load = () =>
       api
         .taskPrs(owner)
-        .then((d) => alive && setPrs(d.prs))
+        .then((d) => alive && setPrs(d.prs.filter((p) => p.replaced_by == null)))
         .catch(() => {});
     api.refreshPrs(owner).catch(() => {});
     load();

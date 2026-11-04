@@ -66,7 +66,7 @@ async fn report_bases(app: &AppState, key: &TaskKey, project: &str, bases: &[Rep
                 "refname": b.refname, "sha": b.sha, "reason": reason
             })),
         };
-        match app.store.insert_notice(key, &notice).await {
+        match app.store.insert_task_notice(key, &notice).await {
             Ok(new) => warned |= new,
             Err(e) => tracing::warn!(task = %key, "cannot record the stale base: {e}"),
         }

@@ -210,6 +210,23 @@ describe("PrView", () => {
     await waitFor(() => expect(merge).toHaveBeenCalledWith("PROJ-1", 7, "merge"));
   });
 
+  it("heads an outside repo with host/owner/name and marks agent-opened PRs", async () => {
+    const outside: PullRequest = { ...pr, id: 9, repo: "github.com/acme/lib", owner_name: "acme/lib", linked_by: "agent" };
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [outside] }));
+    const { findByText, container } = render(<PrView owner="PROJ-1" />);
+    await findByText("Reintentos");
+    expect(container.querySelector(".pr-group-title")?.textContent).toBe("github.com/acme/lib");
+    expect(container.textContent).toContain("agent");
+  });
+
+  it("shows no outside heading or agent mark for a workspace PR", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({}));
+    const { findByText, container } = render(<PrView owner="PROJ-1" />);
+    await findByText("Reintentos");
+    expect(container.querySelector(".pr-group-title")).toBeNull();
+    expect(container.querySelector(".pr-source")).toBeNull();
+  });
+
   it("shows no base warning when the base is the expected one", async () => {
     prPending();
     vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...open({}), base_branch: "main", expected_base: "main" }] }));
@@ -302,7 +319,19 @@ describe("PrView", () => {
       const { findByText } = render(<PrView owner="PROJ-1" task={task} />);
       await findByText(/Autofix: stopped · reached the attempt limit/);
       fireEvent.click(await findByText("Retry autofix"));
-      await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "retry", "api"));
+      await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "retry", undefined, 7));
+    });
+
+    it("two PRs of one repo render two cards and retry on the second sends its id", async () => {
+      const stopped = { state: "stopped" as const, attempts: 3, limit: 3, sha: "abc", sent_at: null, reason: "limit" as const };
+      const second = { ...pr, id: 9, number: 43, url: "https://github.com/me/repo/pull/43", autofix: stopped };
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [pr, second] }));
+      const set = vi.spyOn(api, "setAutofix").mockResolvedValue(task);
+      const { findByText, container } = render(<PrView owner="PROJ-1" task={task} />);
+      await findByText("Retry autofix");
+      expect(container.querySelectorAll(".pr-card").length).toBe(2);
+      fireEvent.click(await findByText("Retry autofix"));
+      await waitFor(() => expect(set).toHaveBeenCalledWith("PROJ-1", "retry", undefined, 9));
     });
 
     it("a fixing PR shows the attempt, the failed checks and when it was sent", async () => {
@@ -374,5 +403,17 @@ describe("PrView", () => {
       expect(merge.mock.calls[1][3]).toBe(true);
       void getAllByText;
     });
+  });
+
+  it("shows a replaced PR muted with a label", async () => {
+    const newer = { ...pr, id: 8, number: 43, url: "https://github.com/me/repo/pull/43" };
+    vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [{ ...pr, replaced_by: 8 }, newer] }));
+    const { findAllByText, container } = render(<PrView owner="PROJ-1" />);
+    await findAllByText("Reintentos");
+    const cards = container.querySelectorAll(".pr-card");
+    expect(cards[0].classList.contains("pr-replaced")).toBe(true);
+    expect(cards[0].textContent).toContain("replaced");
+    expect(cards[1].classList.contains("pr-replaced")).toBe(false);
+    expect(cards[1].textContent).not.toContain("replaced");
   });
 });

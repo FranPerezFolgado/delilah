@@ -407,9 +407,17 @@ is more than one toast, collapsed or expanded. Timers pause while it is expanded
 last 6 s; errors and the waiting toast stay until closed.
 
 **Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
-token) and checks every 30 s. When the task's branch has a PR, it links it, per
-submodule for a parent, and moves the task to Review. You can also paste a PR's URL
-("Link by URL") or "Unlink" one. Pointing `DELILAH_GH_BIN` at another
+token) and checks every 30 s. Every PR a task opens is tracked, one card each: those of
+the task's branch (per submodule, and the parent repo itself, for a parent), several in
+the same repo, those of other repos, and the ones the agent opens with `gh pr create`
+(tagged "agent"; also when `gh` says the PR already exists). The task moves to Review
+when it has one. "Link by URL" accepts a PR of any repo `gh` can read (outside repos show
+as `host/owner/name`); "Unlink" removes one. A closed PR replaced by a newer one on the
+same branch stays on screen, muted and marked "replaced", and no longer counts. The task
+is archived only when every counted PR is merged, and never while the agent is mid-turn
+(the next check after its turn ends does it). Before archiving, Delilah searches the
+repos once more for a PR it had missed. "Ask the agent to fix it" and the retry of CI
+autofix act on the PR you chose, not on the repo's first one. Pointing `DELILAH_GH_BIN` at another
 binary swaps `gh` (previews use a fake one).
 
 - **The "PR" tab** (next to Changes) shows the title, number and link, draft, open,

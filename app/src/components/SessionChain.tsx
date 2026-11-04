@@ -35,7 +35,7 @@ export function SessionChain({ task, sessions, onOpenSession, onChanged }: Props
     if (!autopilot || !task.saving_mode) return;
     let live = true;
     api.projects().then((ps) => live && setHasPreview(!!ps.find((p) => p.name === task.project)?.preview_command)).catch(() => {});
-    api.taskPrs(task.key).then((r) => live && setPrLinked(r.prs.length > 0)).catch(() => {});
+    api.taskPrs(task.key).then((r) => live && setPrLinked(r.prs.some((p) => p.replaced_by == null))).catch(() => {});
     return () => {
       live = false;
     };

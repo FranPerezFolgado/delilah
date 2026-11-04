@@ -305,6 +305,30 @@ impl Store {
             .ok_or_else(|| StoreError::NotFound(key.clone()))
     }
 
+    /// Takes a permission rule out of the task's allowed tools (a no-op when absent).
+    pub async fn remove_allowed_tool(&self, key: &TaskKey, rule: &str) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT allowed_tools FROM tasks WHERE key = ?")
+                .bind(key.as_str())
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| StoreError::NotFound(key.clone()))?;
+        let mut tools = allowed_tools_from_json(json.as_deref());
+        let before = tools.len();
+        tools.retain(|t| t != rule);
+        if tools.len() != before {
+            sqlx::query("UPDATE tasks SET allowed_tools = ?, updated_at = ? WHERE key = ?")
+                .bind(allowed_tools_json(&tools)?)
+                .bind(Utc::now().to_rfc3339())
+                .bind(key.as_str())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Records where the title came from and the title it replaced (if any).
     pub async fn set_title_source(
         &self,

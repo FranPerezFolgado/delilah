@@ -8,12 +8,15 @@ use serde::Deserialize;
 use crate::api::ApiError;
 use crate::state::AppState;
 
-/// `{ "action": "on" | "off" | "retry", "repo": "." }`; `repo` only for `retry`.
+/// `{ "action": "on" | "off" | "retry", "pr": 7, "repo": "." }`; `pr` (a PR id) or `repo`
+/// only for `retry`; `pr` wins.
 #[derive(Debug, Deserialize)]
 pub(crate) struct AutofixReq {
     action: String,
     #[serde(default)]
     repo: Option<String>,
+    #[serde(default)]
+    pr: Option<i64>,
 }
 
 /// `POST /api/v1/tasks/{key}/autofix`: `on`, `off` or `retry` (of one PR).
@@ -26,7 +29,7 @@ pub(crate) async fn act(
     match req.action.as_str() {
         "on" => super::set(&app, &key, true).await?,
         "off" => super::set(&app, &key, false).await?,
-        "retry" => super::retry(&app, &key, req.repo.as_deref()).await?,
+        "retry" => super::retry_pr(&app, &key, req.repo.as_deref(), req.pr).await?,
         other => return Err(ApiError::bad_request(format!("unknown action `{other}`"))),
     }
     let task = app
@@ -133,6 +136,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_accepts_a_pr_id_and_refuses_an_unknown_one() {
+        let (app, key, _dir) = setup().await;
+        write(&app, &key, state(State::Stopped, 3, "old")).await;
+        let id = app.store.prs_of(&key).await.unwrap().remove(0).id;
+        let (status, _) = post(&app, key.as_str(), json!({"action": "retry", "pr": 9999})).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let (status, _) = post(&app, key.as_str(), json!({"action": "retry", "pr": id})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_ne!(stored(&app, &key).await.unwrap().state, State::Stopped);
+    }
+
+    #[tokio::test]
     async fn on_with_a_failed_finished_head_and_an_idle_agent_sends_attempt_one() {
         let (app, key, _dir) = setup().await;
         let (status, task) = post(&app, key.as_str(), json!({"action": "on"})).await;
@@ -147,9 +162,10 @@ mod tests {
     async fn on_resets_stopped_prs_and_their_notice() {
         let (app, key, _dir) = setup().await;
         write(&app, &key, state(State::Stopped, 3, "old")).await;
-        let repo = app.store.prs_of(&key).await.unwrap().remove(0).repo;
+        let pr = app.store.prs_of(&key).await.unwrap().remove(0);
+        let repo = pr.repo.clone();
         app.store
-            .insert_notice(
+            .insert_notice_for(
                 &key,
                 &crate::store_prs::NewNotice {
                     repo: repo.clone(),
@@ -158,6 +174,7 @@ mod tests {
                     text: "stopped".into(),
                     detail: None,
                 },
+                &pr.url,
             )
             .await
             .unwrap();

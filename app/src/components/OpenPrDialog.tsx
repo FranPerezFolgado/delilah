@@ -90,7 +90,7 @@ export function OpenPrDialog({ owner, onClose, onOpened }: Props) {
             <span>{t("Submódulo")}</span>
             <select className="input" value={proposal.repo} onChange={(e) => pick(e.target.value)} disabled={busy}>
               {proposal.repos.map((r) => (
-                <option key={r} value={r}>{r}</option>
+                <option key={r} value={r}>{r === "." ? t("Repositorio padre") : r}</option>
               ))}
             </select>
           </label>

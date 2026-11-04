@@ -31,9 +31,6 @@ impl From<LinkError> for ApiError {
         match e {
             LinkError::NotAPr => ApiError::bad_request("that is not the URL of a pull request"),
             LinkError::Gh(e) => ApiError::conflict(e.to_string()),
-            LinkError::NotFromTask => {
-                ApiError::conflict("the PR is not from any repo of this task")
-            }
             LinkError::Store(e) => e.into(),
         }
     }
@@ -112,7 +109,8 @@ pub async fn task_prs(
     Path(key): Path<String>,
 ) -> Result<Json<TaskPrs>, ApiError> {
     let key = known_task(&app, &key).await?;
-    let rows = app.store.prs_of(&key).await?;
+    let mut rows = app.store.prs_of(&key).await?;
+    prs::sort_for_display(&mut rows);
     let (account, lookup_problem) = account_of(&app, &key, &rows).await;
     let problem = match problem_of(&app, &key, &rows).await {
         Some(p) => Some(p),
@@ -505,12 +503,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn linking_a_pr_of_another_repo_is_409() {
+    async fn linking_a_pr_of_another_repo_is_linked_with_the_host_label() {
         let (router, _app, _dir) = setup(fake()).await;
         let body = json!({ "url": "https://github.com/other/repo/pull/3" });
         let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs/link", Some(body)).await;
-        assert_eq!(s, StatusCode::CONFLICT);
-        assert!(v["error"].as_str().unwrap().contains("not from any repo"));
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v["repo"], "github.com/other/repo");
+    }
+
+    #[tokio::test]
+    async fn unlinking_one_of_two_prs_leaves_the_other() {
+        let (router, app, _dir) = setup(fake()).await;
+        let key = TaskKey::new("PROJ-1");
+        for url in [PR_URL, "https://github.com/other/repo/pull/3"] {
+            let body = json!({ "url": url });
+            let (s, _) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs/link", Some(body)).await;
+            assert_eq!(s, StatusCode::OK);
+        }
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        let gone = rows.iter().find(|r| r.repo != ".").unwrap().id;
+        let uri = format!("/api/v1/tasks/PROJ-1/prs/{gone}");
+        let (s, _) = call(&router, "DELETE", &uri, None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+
+        pr_loop::check_task(&app, &key, true).await;
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].repo, ".");
     }
 
     #[tokio::test]

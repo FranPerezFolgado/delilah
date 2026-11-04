@@ -162,8 +162,19 @@ pub(crate) async fn on_hook(
         let key = key.clone();
         tokio::spawn(async move { crate::branching::on_activity(&app, &key).await });
     }
+    // A turn ended on a task with PRs: the agent may have pushed to or commented on them.
+    if signal == Signal::TurnEnded && app.store.prs_of(&key).await.is_ok_and(|p| !p.is_empty()) {
+        crate::pr_loop::nudge(app, &key);
+    }
     match signal {
         Signal::Working => {
+            // The PR the agent just opened: read and linked in the background.
+            if crate::pr_loop::capture::is_pr_create(hook) {
+                let (app, key, hook) = (app.clone(), key.clone(), hook.clone());
+                tokio::spawn(async move {
+                    crate::pr_loop::capture::on_bash_output(&app, &key, &hook).await;
+                });
+            }
             if let Some(phase) = signal_phase(hook) {
                 if primary && phase == SpecPhase::Implement {
                     crate::handoff::on_code_edit(app, &key).await;
@@ -505,6 +516,45 @@ mod tests {
         )
         .await;
         // The check itself waits for GitHub: what is asked of the loop is one pending nudge.
+        assert!(app.pr_nudges.lock().unwrap().contains("PROJ-1"));
+    }
+
+    #[tokio::test]
+    async fn a_turn_end_nudges_the_pr_loop_only_for_a_task_with_prs() {
+        use delilah_agents::claude::Signal;
+        let fake = std::sync::Arc::new(crate::gh::fake::FakeGh::new());
+        let (app, key) = running().await;
+        let app = app.with_gh(fake);
+        let end = |app: AppState| async move {
+            on_hook(
+                &app,
+                "PROJ-1",
+                Signal::TurnEnded,
+                &serde_json::json!({}),
+                true,
+                false,
+                Default::default(),
+            )
+            .await;
+        };
+        end(app.clone()).await;
+        assert!(app.pr_nudges.lock().unwrap().is_empty());
+
+        app.store
+            .link_pr(
+                &key,
+                &crate::store_prs::NewPr {
+                    repo: ".".into(),
+                    host: "github.com".into(),
+                    owner_name: "me/repo".into(),
+                    number: 7,
+                    url: "https://github.com/me/repo/pull/7".into(),
+                    linked_by: "detected".into(),
+                },
+            )
+            .await
+            .unwrap();
+        end(app.clone()).await;
         assert!(app.pr_nudges.lock().unwrap().contains("PROJ-1"));
     }
 }

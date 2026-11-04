@@ -265,7 +265,7 @@ pub async fn forward(
         .prs_of(&key)
         .await?
         .into_iter()
-        .find(|p| p.repo == notice.repo);
+        .find(|p| p.url == notice.pr_url);
     let url = pr.as_ref().map(|p| p.url.clone()).unwrap_or_default();
     let detail = notice.detail.clone().unwrap_or(Value::Null);
     let prompt = match notice.kind.as_str() {
@@ -315,9 +315,22 @@ mod tests {
 
     async fn notice(app: &AppState, kind: &str, detail: Value) -> i64 {
         use crate::store_prs::NewNotice;
+        let key = TaskKey::new("PROJ-1");
+        // Task-level kinds and PR-less tasks carry no PR.
+        let url = match kind {
+            "ci-failed" | "changes-requested" | "comments" => app
+                .store
+                .prs_of(&key)
+                .await
+                .unwrap()
+                .first()
+                .map(|p| p.url.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
         app.store
-            .insert_notice(
-                &TaskKey::new("PROJ-1"),
+            .insert_notice_for(
+                &key,
                 &NewNotice {
                     repo: ".".into(),
                     kind: kind.into(),
@@ -325,6 +338,7 @@ mod tests {
                     text: "t".into(),
                     detail: Some(detail),
                 },
+                &url,
             )
             .await
             .unwrap();
@@ -371,6 +385,49 @@ mod tests {
 
     async fn link_pr(app: &AppState) {
         pr_loop::check_task(app, &TaskKey::new("PROJ-1"), true).await;
+    }
+
+    #[tokio::test]
+    async fn forwarding_the_notice_of_the_second_pr_of_a_repo_names_that_pr() {
+        use crate::store_prs::{NewNotice, NewPr};
+        let (router, app, _dir) = setup(fake()).await;
+        let key = TaskKey::new("PROJ-1");
+        for n in [41, 42] {
+            app.store
+                .link_pr(
+                    &key,
+                    &NewPr {
+                        repo: ".".into(),
+                        host: "github.com".into(),
+                        owner_name: "me/repo".into(),
+                        number: n,
+                        url: format!("https://github.com/me/repo/pull/{n}"),
+                        linked_by: "detected".into(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let mut out = cat_session(&app);
+        app.store
+            .insert_notice_for(
+                &key,
+                &NewNotice {
+                    repo: ".".into(),
+                    kind: "comments".into(),
+                    cause: "c1".into(),
+                    text: "t".into(),
+                    detail: Some(json!({ "comments": [] })),
+                },
+                "https://github.com/me/repo/pull/42",
+            )
+            .await
+            .unwrap();
+        let id = app.store.open_notices().await.unwrap().last().unwrap().id;
+        let uri = format!("/api/v1/pr-notices/{id}/forward");
+        let (s, _) = call(&router, "POST", &uri, None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        read_until(&mut out, &["https://github.com/me/repo/pull/42"]).await;
     }
 
     #[tokio::test]

@@ -726,6 +726,8 @@ export interface InboxItem {
   notice?: number;
   /** The repo, reason and attempts of a pr-autofix item (autofix stopped on a PR). */
   repo?: string;
+  /** The PR a pr-autofix item is about. */
+  pr_url?: string;
   reason?: "limit" | "no-push" | "no-session";
   attempts?: number;
 }
@@ -793,7 +795,10 @@ export interface PullRequest {
   owner_name: string;
   number: number;
   url: string;
-  linked_by: "detected" | "opened" | "pasted";
+  linked_by: "detected" | "opened" | "pasted" | "agent";
+  /** Id of the PR that replaced this closed one; null/absent when none. */
+  replaced_by?: number | null;
+  head_branch?: string | null;
   /** What CI autofix did on this PR; null/absent when it never acted. */
   autofix?: PrAutofix | null;
   checked_at: string | null;
@@ -997,8 +1002,12 @@ export const api = {
   setSavingMode: (key: string, on: boolean) => post<Task>(`/api/v1/tasks/${key}/saving-mode`, { on }),
   /** Moves the task between chat mode and terminal; its sessions resume in the new runtime. */
   setRuntime: (key: string, mode: "chat" | "terminal") => post<null>(`/api/v1/tasks/${key}/runtime`, { mode }),
-  setAutofix: (key: string, action: "on" | "off" | "retry", repo?: string) =>
-    post<Task>(`/api/v1/tasks/${key}/autofix`, repo === undefined ? { action } : { action, repo }),
+  setAutofix: (key: string, action: "on" | "off" | "retry", repo?: string, pr?: number) =>
+    post<Task>(`/api/v1/tasks/${key}/autofix`, {
+      action,
+      ...(repo === undefined ? {} : { repo }),
+      ...(pr === undefined ? {} : { pr }),
+    }),
   setAutopilot: (key: string, action: "on" | "off" | "resume") => post<Task>(`/api/v1/tasks/${key}/autopilot`, { action }),
   /** Answers the offer to continue in a fresh session, or retries a failed one. */
   handoff: (key: string, action: "confirm" | "decline" | "retry") => post<Task>(`/api/v1/tasks/${key}/handoff`, { action }),

@@ -47,7 +47,7 @@ async fn source_of(
         ));
     }
     let repo = repo.unwrap_or(".");
-    let repos = ws.repos();
+    let repos = pr_repos_of(app, &ws).await?;
     let dir = repos
         .iter()
         .find(|(label, _)| label == repo)
@@ -55,6 +55,46 @@ async fn source_of(
         .ok_or_else(|| ApiError::bad_request(format!("{key} has no repo {repo}")))?;
     let labels = repos.into_iter().map(|(label, _)| label).collect();
     Ok((repo.to_string(), ws.branch, dir, labels))
+}
+
+/// The repos a PR of the task can come from: `Workspace::pr_repos`, which adds `.` for a
+/// parent that is on the task's branch too.
+async fn pr_repos_of(
+    app: &AppState,
+    ws: &delilah_git::Workspace,
+) -> Result<Vec<(String, PathBuf)>, ApiError> {
+    let (ws, opts) = (ws.clone(), git_options(app));
+    tokio::task::spawn_blocking(move || ws.pr_repos(&opts))
+        .await
+        .map_err(join_error)
+}
+
+/// Whether `repo` has an open PR. In a parent's own repo (`.` of a parent workspace,
+/// `parent_branch` = the task's branch), which also holds PRs linked by hand from other
+/// branches, only one from the task's branch counts (a snapshot from before the head was
+/// read does too).
+fn has_open_pr(rows: &[PrRow], repo: &str, parent_branch: Option<&str>) -> bool {
+    crate::store_prs::counted(rows).any(|r| {
+        r.repo == repo
+            && is_open(r)
+            && (repo != "."
+                || parent_branch.is_none_or(|branch| {
+                    r.snapshot
+                        .as_ref()
+                        .and_then(|s| s.head_branch.as_deref())
+                        .is_none_or(|b| b == branch)
+                }))
+    })
+}
+
+/// The task's branch when its workspace is a parent's (see [`has_open_pr`]).
+async fn parent_branch_of(app: &AppState, key: &TaskKey) -> Result<Option<String>, ApiError> {
+    Ok(app
+        .store
+        .workspace(key)
+        .await?
+        .filter(|(_, ws)| ws.kind == delilah_core::ProjectKind::Parent)
+        .map(|(_, ws)| ws.branch))
 }
 
 fn git_options(app: &AppState) -> GitOptions {
@@ -184,15 +224,20 @@ async fn build_proposal(
 ) -> Result<Proposal, ApiError> {
     let q = ProposalQuery { repo };
     let rows = app.store.prs_of(key).await?;
-    let has_open = |label: &str| rows.iter().any(|r| r.repo == label && is_open(r));
+    let parent_branch = parent_branch_of(app, key).await?;
+    let has_open = |label: &str| has_open_pr(&rows, label, parent_branch.as_deref());
     let mut candidates = vec![q.repo.clone().unwrap_or_else(|| ".".into())];
-    if candidates[0] == "."
+    if q.repo.is_none()
         && let Some((_, ws)) = app.store.workspace(key).await?
     {
-        // A parent has no "." repo: the default is its first submodule without a PR
-        // that has commits to open one with.
-        let labels: Vec<String> = ws.repos().into_iter().map(|(l, _)| l).collect();
-        if !labels.iter().any(|l| l == ".") {
+        // A parent has no plain "." repo: the default is its first repo (submodules,
+        // then `.` when on the branch) without a PR that has commits to open one with.
+        if ws.kind == delilah_core::ProjectKind::Parent {
+            let labels: Vec<String> = pr_repos_of(app, &ws)
+                .await?
+                .into_iter()
+                .map(|(l, _)| l)
+                .collect();
             candidates = labels.into_iter().filter(|l| !has_open(l)).collect();
             if candidates.is_empty() {
                 return Err(ApiError::conflict_reason(
@@ -339,13 +384,12 @@ async fn open_with(
     // Keeps a detection from linking the PR twice while it is being opened; the link
     // is an upsert anyway, so a check already running is not waited for.
     let _claim = pr_loop::claim(app, key);
-    if app
-        .store
-        .prs_of(key)
-        .await?
-        .iter()
-        .any(|r| r.repo == repo && is_open(r))
-    {
+    let parent_branch = parent_branch_of(app, key).await?;
+    if has_open_pr(
+        &app.store.prs_of(key).await?,
+        &repo,
+        parent_branch.as_deref(),
+    ) {
         return Err(ApiError::conflict_reason(
             format!("{repo} already has an open PR"),
             "has-pr",
@@ -730,6 +774,87 @@ mod tests {
             .output()
             .unwrap();
         assert!(!untouched.status.success());
+    }
+
+    /// `parent_setup` with the parent's own folder a repo on the task branch (own origin).
+    async fn parent_on_branch_setup(gh: Arc<FakeGh>) -> (Router, AppState, TempDir) {
+        let (router, app, dir) = setup(gh).await;
+        let ws_path = dir.path().join("ws");
+        crate::pr_testkit::git_repo_with_origin(
+            &ws_path,
+            &dir.path().join("origin-parent"),
+            "feature/PROJ-1",
+            &["root"],
+        );
+        crate::pr_testkit::git_repo_with_origin(
+            &ws_path.join("svc-a"),
+            &dir.path().join("origin-svc-a"),
+            "feature/PROJ-1",
+            &["svc-a"],
+        );
+        let ws = delilah_git::Workspace {
+            path: ws_path,
+            branch: "feature/PROJ-1".into(),
+            kind: delilah_core::ProjectKind::Parent,
+            submodules: vec!["svc-a".into()],
+        };
+        app.store
+            .save_workspace(&TaskKey::new("PROJ-1"), Path::new("/parent"), &ws)
+            .await
+            .unwrap();
+        (router, app, dir)
+    }
+
+    #[tokio::test]
+    async fn a_parent_on_its_branch_offers_dot_and_opens_from_the_parent_folder() {
+        let gh = opening_gh();
+        let (router, app, dir) = parent_on_branch_setup(gh.clone()).await;
+        let (s, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs/proposal", None).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["repos"], json!(["svc-a", "."]));
+        let (s, v) = call(
+            &router,
+            "GET",
+            "/api/v1/tasks/PROJ-1/prs/proposal?repo=.",
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(v["repo"], ".");
+        assert_eq!(v["body"], "- root");
+
+        let body = json!({ "repo": ".", "title": "T" });
+        let (s, v) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        let rows = app.store.prs_of(&TaskKey::new("PROJ-1")).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].repo, ".");
+        let pushed = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin-parent"))
+            .output()
+            .unwrap();
+        assert!(pushed.status.success());
+        let untouched = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feature/PROJ-1"])
+            .current_dir(dir.path().join("origin-svc-a"))
+            .output()
+            .unwrap();
+        assert!(!untouched.status.success());
+
+        // The fake gh reports another head branch, so the parent's repo is still free;
+        // with the task's branch as head it has a PR, and "svc-a" is unaffected.
+        let mut rows = rows;
+        let snap = rows[0].snapshot.as_mut().unwrap();
+        snap.head_branch = Some("other".into());
+        assert!(!has_open_pr(&rows, ".", Some("feature/PROJ-1")));
+        assert!(has_open_pr(&rows, ".", None));
+        rows[0].snapshot.as_mut().unwrap().head_branch = Some("feature/PROJ-1".into());
+        assert!(has_open_pr(&rows, ".", Some("feature/PROJ-1")));
+        assert!(!has_open_pr(&rows, "svc-a", Some("feature/PROJ-1")));
+        let body = json!({ "repo": "nope", "title": "T" });
+        let (s, _) = call(&router, "POST", "/api/v1/tasks/PROJ-1/prs", Some(body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

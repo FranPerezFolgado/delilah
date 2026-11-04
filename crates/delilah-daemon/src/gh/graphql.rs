@@ -18,7 +18,7 @@ pub(super) const SNAPSHOT_QUERY: &str = "query($owner: String!, $name: String!, 
   repository(owner: $owner, name: $name) {
     mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
     pullRequest(number: $number) {
-      state isDraft merged headRefOid baseRefName title url reviewDecision
+      state isDraft merged headRefOid headRefName baseRefName title url reviewDecision
       commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
         __typename
         ... on CheckRun { name status conclusion detailsUrl startedAt completedAt }
@@ -95,6 +95,8 @@ struct RawPr {
     state: PrState,
     is_draft: bool,
     head_ref_oid: String,
+    #[serde(default)]
+    head_ref_name: Option<String>,
     base_ref_name: String,
     title: String,
     review_decision: Option<ReviewDecision>,
@@ -295,6 +297,7 @@ pub(crate) fn parse_snapshot(out: &str) -> Result<Snapshot, GhError> {
         title: pr.title,
         head: pr.head_ref_oid,
         base: pr.base_ref_name,
+        head_branch: pr.head_ref_name,
         checks,
         review_decision: pr.review_decision,
         reviews,
@@ -312,7 +315,7 @@ pub(crate) mod tests {
     pub(crate) const GRAPHQL: &str = r#"{"data":{"repository":{
       "mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":false,
       "pullRequest":{
-      "state":"OPEN","isDraft":true,"merged":false,"headRefOid":"abc123","baseRefName":"main",
+      "state":"OPEN","isDraft":true,"merged":false,"headRefOid":"abc123","headRefName":"feat/x","baseRefName":"main",
       "title":"Add things","url":"https://github.com/me/repo/pull/42","reviewDecision":"CHANGES_REQUESTED",
       "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
         {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://ci/1","startedAt":"2026-10-20T09:00:00Z","completedAt":"2026-10-20T09:02:30Z"},
@@ -339,6 +342,7 @@ pub(crate) mod tests {
         assert_eq!(s.state, PrState::Open);
         assert!(s.draft);
         assert_eq!((s.head.as_str(), s.base.as_str()), ("abc123", "main"));
+        assert_eq!(s.head_branch.as_deref(), Some("feat/x"));
         assert_eq!(s.review_decision, Some(ReviewDecision::ChangesRequested));
         let outcomes: Vec<_> = s
             .checks

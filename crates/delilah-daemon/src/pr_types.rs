@@ -140,6 +140,9 @@ pub struct Snapshot {
     /// Head commit sha.
     pub head: String,
     pub base: String,
+    /// Head branch name; snapshots stored before it was read lack the field.
+    #[serde(default)]
+    pub head_branch: Option<String>,
     pub checks: Vec<Check>,
     pub review_decision: Option<ReviewDecision>,
     pub reviews: Vec<Review>,
@@ -198,6 +201,7 @@ mod tests {
         let s: Snapshot = serde_json::from_str(old).unwrap();
         assert!(s.merge_methods.is_empty());
         assert!(s.review_comments.is_empty());
+        assert_eq!(s.head_branch, None);
         assert_eq!(
             (s.checks[0].started_at, s.checks[0].finished_at),
             (None, None)

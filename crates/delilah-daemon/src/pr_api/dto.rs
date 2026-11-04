@@ -39,6 +39,10 @@ pub struct PrView {
     number: i64,
     url: String,
     linked_by: String,
+    /// The id of the PR that replaced this closed one.
+    replaced_by: Option<i64>,
+    /// The PR's head branch, from its snapshot.
+    head_branch: Option<String>,
     checked_at: Option<DateTime<Utc>>,
     error: Option<String>,
     snapshot: Option<SnapshotView>,
@@ -214,6 +218,8 @@ impl From<&PrRow> for PrView {
             number: row.number,
             url: row.url.clone(),
             linked_by: row.linked_by.clone(),
+            replaced_by: row.replaced_by,
+            head_branch: row.snapshot.as_ref().and_then(|s| s.head_branch.clone()),
             checked_at: row.checked_at,
             error: row.error.clone(),
             snapshot: row.snapshot.as_ref().map(SnapshotView::from),
@@ -228,6 +234,38 @@ mod tests {
     use crate::pr_api::support::{call, fake, setup};
     use crate::pr_loop;
     use delilah_core::TaskKey;
+
+    #[tokio::test]
+    async fn each_pr_carries_replaced_by_and_head_branch_and_comes_ordered() {
+        let (router, app, _dir) = setup(fake()).await;
+        let key = TaskKey::new("PROJ-1");
+        pr_loop::check_task(&app, &key, true).await;
+        let new = |repo: &str, n: i64, by: &str| crate::store_prs::NewPr {
+            repo: repo.into(),
+            host: "github.com".into(),
+            owner_name: "me/other".into(),
+            number: n,
+            url: format!("https://github.com/me/other/pull/{n}"),
+            linked_by: by.into(),
+        };
+        app.store
+            .link_pr(&key, &new("github.com/me/other", 90, "agent"))
+            .await
+            .unwrap();
+        app.store
+            .link_pr(&key, &new(".", 91, "agent"))
+            .await
+            .unwrap();
+        let (_, v) = call(&router, "GET", "/api/v1/tasks/PROJ-1/prs", None).await;
+        let prs = v["prs"].as_array().unwrap();
+        assert_eq!(prs.first().unwrap()["repo"], ".");
+        assert_eq!(prs.last().unwrap()["repo"], "github.com/me/other");
+        assert_eq!(prs.last().unwrap()["linked_by"], "agent");
+        for p in prs {
+            let o = p.as_object().unwrap();
+            assert!(o.contains_key("replaced_by") && o.contains_key("head_branch"));
+        }
+    }
 
     #[tokio::test]
     async fn each_pr_carries_autofix_without_the_session_and_null_when_it_never_acted() {
