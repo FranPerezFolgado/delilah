@@ -39,12 +39,25 @@ pub struct Workspace {
 
 impl Workspace {
     /// The repos where the task's branch lives, by path in the workspace: each
-    /// submodule of a parent, or `.` for a plain repo.
+    /// submodule of a parent, or `.` for a plain repo. Used for work on the branch
+    /// itself (uncommitted changes, pushes, archive checks); the repos that can hold a
+    /// PR are [`Workspace::pr_repos`].
     pub fn repos(&self) -> Vec<(String, PathBuf)> {
         match self.kind {
             ProjectKind::Parent => self.branch_dirs(),
             ProjectKind::Repo => vec![(".".into(), self.path.clone())],
         }
+    }
+
+    /// The repos that can hold a PR of the task: [`Workspace::repos`] plus `.`, the
+    /// parent's own repo, when a parent workspace is on the task's branch there too (see
+    /// [`Workspace::parent_has_branch`]). Used by PR detection and by the archive heads.
+    pub fn pr_repos(&self, opts: &GitOptions) -> Vec<(String, PathBuf)> {
+        let mut repos = self.repos();
+        if self.parent_has_branch(opts) {
+            repos.push((".".into(), self.path.clone()));
+        }
+        repos
     }
 
     /// The folder that holds the task's branch once the workspace is gone, for the repo
@@ -835,7 +848,7 @@ pub fn fetch(dir: &Path, opts: &GitOptions, deadline: Deadline) -> Result<(), St
 
 /// Fails, touching nothing, if archiving after a merged PR would lose work: uncommitted
 /// changes, or local commits of the task's branch beyond the PR's head. `heads` maps
-/// each repo label (see [`Workspace::repos`]) to the head the merged PR had; repos
+/// each repo label (see [`Workspace::pr_repos`]) to the head the merged PR had; repos
 /// without an entry are not checked. A squash merge leaves the PR head out of the
 /// base branch, so the check is against that head, not against the base.
 pub fn check_merged(
@@ -859,11 +872,15 @@ pub fn check_merged(
             location: "the parent".into(),
         });
     }
-    for (location, dir) in ws.repos() {
+    // The repos that can hold a PR, the parent's own included when it has the branch:
+    // those are the branches the archive deletes, so each needs this check.
+    for (location, dir) in ws.pr_repos(opts) {
         let Some(head) = heads.get(&location) else {
             continue;
         };
-        if !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
+        // The parent was checked above (submodule pointers aside).
+        let parent_own = ws.kind == ProjectKind::Parent && location == ".";
+        if !parent_own && !git(&dir, &["status", "--porcelain"], opts)?.is_empty() {
             return Err(GitError::Dirty { location });
         }
         let args = ["merge-base", "--is-ancestor", ws.branch.as_str(), head];
@@ -967,6 +984,49 @@ mod tests {
         commit_empty(dir, &format!("{file}={content}"), &o()).unwrap();
     }
 
+    fn parent_ws(dir: &Path, branch: &str) -> Workspace {
+        Workspace {
+            path: dir.to_path_buf(),
+            branch: branch.into(),
+            kind: ProjectKind::Parent,
+            submodules: vec!["svc-a".into(), "svc-b".into()],
+        }
+    }
+
+    fn labels(repos: Vec<(String, PathBuf)>) -> Vec<String> {
+        repos.into_iter().map(|(l, _)| l).collect()
+    }
+
+    #[test]
+    fn pr_repos_adds_the_parent_when_it_is_on_the_task_branch() {
+        let r = repo();
+        git(r.path(), &["checkout", "-q", "-b", "feature/x"], &o()).unwrap();
+        let ws = parent_ws(r.path(), "feature/x");
+        assert_eq!(labels(ws.pr_repos(&o())), ["svc-a", "svc-b", "."]);
+        assert_eq!(labels(ws.repos()), ["svc-a", "svc-b"]);
+    }
+
+    #[test]
+    fn pr_repos_are_only_the_submodules_when_the_parent_is_not_on_the_branch() {
+        let r = repo();
+        let ws = parent_ws(r.path(), "feature/x");
+        assert_eq!(labels(ws.pr_repos(&o())), ["svc-a", "svc-b"]);
+        git(r.path(), &["checkout", "-q", "-b", "other"], &o()).unwrap();
+        assert_eq!(labels(ws.pr_repos(&o())), ["svc-a", "svc-b"]);
+    }
+
+    #[test]
+    fn pr_repos_of_a_plain_repo_is_the_repo() {
+        let r = repo();
+        let ws = Workspace {
+            path: r.path().to_path_buf(),
+            branch: "main".into(),
+            kind: ProjectKind::Repo,
+            submodules: vec![],
+        };
+        assert_eq!(labels(ws.pr_repos(&o())), ["."]);
+    }
+
     #[test]
     fn commit_empty_adds_a_commit_without_changes() {
         let r = repo();
@@ -1013,5 +1073,43 @@ mod tests {
         assert!(!d.join("f.txt").exists());
         assert!(git(d, &["status", "--porcelain"], &o()).unwrap().is_empty());
         assert!(git(d, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], &o()).is_err());
+    }
+    /// A parent on `feature/x` (also in its own repo) with a pushed task branch.
+    fn merged_parent() -> (tempfile::TempDir, tempfile::TempDir, Workspace, String) {
+        let remote = tempfile::TempDir::new().unwrap();
+        git(remote.path(), &["init", "-q", "--bare", "-b", "main"], &o()).unwrap();
+        let r = repo();
+        let d = r.path();
+        let url = remote.path().to_str().unwrap();
+        git(d, &["remote", "add", "origin", url], &o()).unwrap();
+        git(d, &["push", "-q", "origin", "main"], &o()).unwrap();
+        git(d, &["checkout", "-q", "-b", "feature/x"], &o()).unwrap();
+        write_commit(d, "w.txt", "w");
+        git(d, &["push", "-q", "origin", "feature/x"], &o()).unwrap();
+        let head = git(d, &["rev-parse", "HEAD"], &o()).unwrap();
+        let mut ws = parent_ws(d, "feature/x");
+        ws.submodules.clear();
+        (r, remote, ws, head)
+    }
+
+    fn only_parent(head: &str) -> HashMap<String, String> {
+        HashMap::from([(".".to_string(), head.to_string())])
+    }
+
+    #[test]
+    fn check_merged_covers_the_parents_own_branch() {
+        let (r, _remote, ws, head) = merged_parent();
+        check_merged(&ws, &only_parent(&head), &o()).unwrap();
+        // Work beyond the merged PR head must block.
+        write_commit(r.path(), "late.txt", "late");
+        let err = check_merged(&ws, &only_parent(&head), &o()).unwrap_err();
+        assert!(matches!(err, GitError::NotMerged { ref location } if location == "."));
+    }
+
+    #[test]
+    fn check_merged_skips_the_parent_without_a_head() {
+        let (r, _remote, ws, _head) = merged_parent();
+        write_commit(r.path(), "late.txt", "late");
+        check_merged(&ws, &HashMap::new(), &o()).unwrap();
     }
 }

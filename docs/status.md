@@ -87,6 +87,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 
 **PR loop:**
 - Delilah finds the PR of a task's branch with the user's `gh` (no token of its own), per repo for a parent, and the user can link one by URL or unlink it.
+- Multiple PRs per task (feature 015): links are per PR URL (several in one repo, the parent repo `.`, repos outside the workspace labelled `host/owner/name`); the agent's own `gh pr create` output, read from the PostToolUse hook (`pr_loop/capture.rs`), is a link source (`linked_by` `agent`); a closed PR is marked `replaced_by` when a newer one on the same head branch is linked; notices, autofix retry and the Inbox act per PR (`pr_url`); archive needs every counted PR merged, waits out a working turn, and runs a forced detection first (`pre_archive_detect`); the release heads come from `archive_heads`; Link by URL accepts any readable repo. Migration 0027.
 - A "PR" tab with the title, state, CI checks, review state and comments, and a PR badge on the board and the sidebar.
 - The Inbox shows failed CI, changes requested and new comments (from anyone but the signed-in account), and "Ask the agent to fix it" sends them to the agent, only when the user chooses.
 - "Open PR": pushes the branch and opens the PR from a proposal, per submodule for a parent; offered while any repo of the task has no open PR.
@@ -152,6 +153,11 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - `make release` / `make release-dry-run` and the tag workflow `.github/workflows/release.yml`.
 
 ## Pending and known problems
+
+- **Multiple PRs, known limits:**
+  - the capture of `gh pr create` output works on the Bash call's output as a whole: in a chained command such as `cat f; gh pr create`, the outputs of both parts can mix, and a PR URL printed by the other part would be linked;
+  - `autopilot/finish.rs` and the open-PR head check (`has_open_pr` in `pr_api/open.rs`) still look only at the repo, not the head branch, for repos that are not the parent's `.` (the fake `gh` cannot set a head branch);
+  - migration 0027 is one-way (decision 106).
 
 - **Public repo, pending:**
   - the first tagged release, to verify `SHA256SUMS` and the attestation end to end (SC-007);

@@ -73,6 +73,18 @@ describe("OpenPrDialog", () => {
     await waitFor(() => expect(open).toHaveBeenCalledWith("K-1", expect.objectContaining({ repo: "svc-b" })));
   });
 
+  it("offers the parent repo, labelled, next to the submodules", async () => {
+    const repos = [".", "svc-a"];
+    vi.spyOn(api, "prProposal").mockResolvedValue({ ...proposal, repos });
+    const { findByDisplayValue, container } = render(<OpenPrDialog owner="K-1" onClose={() => {}} onOpened={() => {}} />);
+    await findByDisplayValue("Add retries");
+    const select = container.querySelector("select")!;
+    const options = Array.from(select.options);
+    expect(options.map((o) => o.value)).toEqual(repos);
+    expect(options[0].textContent).toBe("Parent repository");
+    expect(options[1].textContent).toBe("svc-a");
+  });
+
   it("is a modal dialog that closes on Esc and with Cancel", async () => {
     vi.spyOn(api, "prProposal").mockResolvedValue(proposal);
     const onClose = vi.fn();

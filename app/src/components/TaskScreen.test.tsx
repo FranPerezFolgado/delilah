@@ -16,6 +16,7 @@ const setAutopilot = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const updateTask = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 // A spy that returns a rejected promise reports it as unhandled: record the calls apart.
 const fileApi = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+const taskPrsApi = vi.hoisted(() => vi.fn((): Promise<unknown> => new Promise(() => {})));
 const openSession = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 const sessionRuntime = vi.hoisted(() => ({ calls: vi.fn(), result: (): Promise<unknown> => Promise.resolve(null) }));
 const setSessionRuntime = vi.hoisted(() => (...a: unknown[]) => {
@@ -26,7 +27,7 @@ vi.mock("../api", async (orig) => {
   const mod = await orig<typeof import("../api")>();
   return {
     ...mod,
-    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setSessionRuntime" ? setSessionRuntime : name === "openSession" ? openSession : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : name === "baseStatus" ? baseStatus : name === "updateBranch" ? updateBranch : () => new Promise(() => {})) }),
+    api: new Proxy({}, { get: (_, name) => (name === "setSavingMode" ? setSavingMode : name === "setAutopilot" ? setAutopilot : name === "updateTask" ? updateTask : name === "setSessionRuntime" ? setSessionRuntime : name === "openSession" ? openSession : name === "taskPrs" ? taskPrsApi : name === "file" ? fileApi : name === "dismissNotice" ? dismissNotice : name === "baseStatus" ? baseStatus : name === "updateBranch" ? updateBranch : () => new Promise(() => {})) }),
   };
 });
 vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div data-testid="terminal" /> }));
@@ -158,6 +159,15 @@ describe("TaskScreen tabs", () => {
     localStorage.clear();
     sessionFor("PROJ-1").active = "\0overview";
     sessionFor("PROJ-1").changesOpen = false;
+  });
+
+  it("shows the header PR chip of the live PR, not of a replaced one", async () => {
+    const mk = (id: number, n: number, over = {}) => ({ id, number: n, repo: ".", snapshot: { state: "open", draft: false, checks: [], ci: "none", review_comments: [], merge_methods: [], title: "t", head: "h", base: "main", review_decision: null, comments: 0 }, ...over });
+    taskPrsApi.mockResolvedValue({ account: null, problem: null, prs: [mk(1, 41, { replaced_by: 2 }), mk(2, 42)] });
+    const { container } = taskScreen([sess("a", { primary: true })], task({ type: "done" }));
+    await waitFor(() => expect(container.textContent).toContain("#42"));
+    expect(container.textContent).not.toContain("#41");
+    taskPrsApi.mockImplementation(() => new Promise(() => {}));
   });
 
   it("lists Tarea, the primary as Claude principal and the other sessions", () => {

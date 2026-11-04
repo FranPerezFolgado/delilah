@@ -42,5 +42,7 @@ export const EN: Record<string, string> = {
   "Estas subtareas siguen activas: {names}. Se quedarán sin integrar. ¿Fusionar igualmente?": "These subtasks are still active: {names}. They will be left out. Merge anyway?",
   "Fusionar igualmente": "Merge anyway",
   "Todas las subtareas están fusionadas: la PR puede salir de borrador": "All subtasks are merged: the PR can leave draft",
+  "agente": "agent",
+  "reemplazada": "replaced",
   "Marcar como lista": "Mark ready",
 };

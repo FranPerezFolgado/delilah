@@ -257,9 +257,24 @@ pub fn pick(prs: &[ListedPr]) -> Option<&ListedPr> {
         .min_by_key(|p| (rank(p.state), std::cmp::Reverse(p.updated_at)))
 }
 
+/// Orders PRs for clients: by repo (`.`, then submodule paths, then repos outside the
+/// workspace, labelled `host/owner/name`), then by id.
+pub(crate) fn sort_for_display(rows: &mut [PrRow]) {
+    let outside = |r: &PrRow| r.repo == format!("{}/{}", r.host, r.owner_name);
+    rows.sort_by(|a, b| {
+        let rank = |r: &PrRow| match (r.repo == ".", outside(r)) {
+            (true, _) => 0,
+            (_, false) => 1,
+            _ => 2,
+        };
+        (rank(a), &a.repo, a.id).cmp(&(rank(b), &b.repo, b.id))
+    });
+}
+
 /// The badge of a task's PRs; `None` if it has none. A PR not checked yet counts as
 /// open.
 pub(crate) fn summary(task: &str, rows: &[PrRow]) -> Option<PrSummary> {
+    let rows: Vec<&PrRow> = crate::store_prs::counted(rows).collect();
     if rows.is_empty() {
         return None;
     }
@@ -335,6 +350,7 @@ pub(crate) mod tests {
             title: "t".into(),
             head: "abc".into(),
             base: "main".into(),
+            head_branch: None,
             checks,
             review_decision: None,
             reviews: vec![],
@@ -361,6 +377,7 @@ pub(crate) mod tests {
             error_kind: None,
             created_at: Utc::now(),
             autofix: None,
+            replaced_by: None,
         }
     }
 
@@ -615,6 +632,45 @@ pub(crate) mod tests {
             PrState::Open
         );
         assert!(summary("PROJ-1", &[]).is_none());
+    }
+
+    #[test]
+    fn summary_counts_only_prs_that_are_not_replaced() {
+        let mut replaced = row(Some(snapshot(
+            PrState::Open,
+            vec![check("a", Outcome::Failure)],
+        )));
+        replaced.id = 2;
+        replaced.number = 2;
+        replaced.replaced_by = Some(3);
+        let kept = row(Some(snapshot(PrState::Merged, vec![])));
+        let s = summary("PROJ-1", &[replaced.clone(), kept]).unwrap();
+        assert_eq!(
+            (s.count, s.state, s.ci, s.number),
+            (1, PrState::Merged, Rollup::None, 1)
+        );
+        assert!(summary("PROJ-1", &[replaced]).is_none());
+    }
+
+    #[test]
+    fn prs_are_ordered_by_repo_then_id() {
+        let mk = |id: i64, repo: &str, owner_name: &str| {
+            let mut r = row(None);
+            r.id = id;
+            r.repo = repo.into();
+            r.owner_name = owner_name.into();
+            r
+        };
+        let mut rows = vec![
+            mk(1, "github.com/o/x", "o/x"),
+            mk(2, "svc-b", "me/b"),
+            mk(3, ".", "me/p"),
+            mk(4, "svc-a", "me/a"),
+            mk(5, ".", "me/p"),
+        ];
+        sort_for_display(&mut rows);
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        assert_eq!(ids, [3, 5, 4, 2, 1]);
     }
 
     #[test]

@@ -499,7 +499,12 @@ function Item({ item, nav, projects, onOpenTask, onOpenChanges, onChanged }: { i
         )}
         {item.kind === "pr-autofix" && (
           <>
-            <button className="btn btn-p" disabled={busy || paused} onClick={() => act(() => api.setAutofix(item.task, "retry", item.repo))}>
+            <button className="btn btn-p" disabled={busy || paused} onClick={() => act(async () => {
+                  // Two PRs can share a repo: pick the one the item is about, by URL.
+                  const { prs } = item.pr_url ? await api.taskPrs(item.task) : { prs: [] };
+                  const target = prs.find((p) => p.url === item.pr_url);
+                  return target ? api.setAutofix(item.task, "retry", undefined, target.id) : api.setAutofix(item.task, "retry", item.repo);
+                })}>
               {t("Reintentar autofix")}
             </button>
             {item.notice != null && (

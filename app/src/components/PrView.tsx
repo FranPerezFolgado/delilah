@@ -297,7 +297,7 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
       )}
       {groups.map(([repo, prs]) => (
         <div key={repo} className="pr-group">
-          {grouped && <h3 className="pr-group-title mono">{repo}</h3>}
+          {(grouped || prs.some(isOutside)) && <h3 className="pr-group-title mono">{repo}</h3>}
           {prs.map((pr) => (
             <PrCard
               key={pr.id}
@@ -305,7 +305,7 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
               disabled={busy || finished}
               grouped={grouped}
               taskAutofix={autofix}
-              onRetryAutofix={() => setAutofixMode(() => api.setAutofix(owner, "retry", pr.repo))}
+              onRetryAutofix={() => setAutofixMode(() => api.setAutofix(owner, "retry", undefined, pr.id))}
               onUnlink={() => run(() => api.unlinkPr(owner, pr.id))}
               onMerge={(method) => merge(pr, method)}
               readyHint={isParent && !!task?.subtask_progress?.ready}
@@ -347,6 +347,11 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
 }
 
 /** The one-line state of autofix on a PR; no record means "watching" if the task has it on. */
+/** A PR in a repo outside the workspace: its `repo` is `host/owner/name`. */
+function isOutside(pr: PullRequest): boolean {
+  return pr.repo === `${pr.host}/${pr.owner_name}`;
+}
+
 function autofixText(a: PrAutofix | null | undefined, taskOn: boolean): string {
   if (!taskOn) return t("Autofix: apagado");
   if (!a) return t("Autofix: vigilando");
@@ -393,10 +398,11 @@ function PrCard({
           ? t("Hay checks fallando")
           : t("Los checks aún no han terminado correctamente")
         : null;
+  const replaced = pr.replaced_by != null;
   const comments = s?.review_comments ?? [];
   const failedChecks = (s?.checks ?? []).filter((c) => c.outcome === "failure").map((c) => c.name);
   return (
-    <section className="pr-card">
+    <section className={`pr-card${replaced ? " pr-replaced" : ""}`} style={replaced ? { opacity: 0.6 } : undefined}>
       <div className="pr-card-top">
         <span className="pr-chip">
           <PrChip pr={{ number: pr.number, snapshot: s }} />
@@ -412,13 +418,15 @@ function PrCard({
           {s?.title ?? pr.owner_name}
         </a>
         {s?.draft && s.state === "open" && <span className="pr-draft">{t("Borrador")}</span>}
+        {replaced && <span className="pr-source">{t("reemplazada")}</span>}
         <span className="pr-grow" />
         <Button variant="ghost" size={28} disabled={disabled} onClick={onUnlink}>
           {t("Desvincular")}
         </Button>
       </div>
       <div className="muted pr-meta">
-        {!grouped && pr.repo !== "." && <span className="mono">{pr.repo}</span>}
+        {!grouped && !isOutside(pr) && pr.repo !== "." && <span className="mono">{pr.repo}</span>}
+        {pr.linked_by === "agent" && <span className="pr-source">{t("agente")}</span>}
         {s && <span>{t("hacia {base}", { base: s.base })}</span>}
         {s?.review_decision && <span>{t(REVIEWS[s.review_decision])}</span>}
         {s && <span>{t("{n} comentarios", { n: s.comments })}</span>}

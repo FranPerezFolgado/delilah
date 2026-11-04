@@ -890,7 +890,7 @@ mod tests {
         let key = TaskKey::new("PROJ-1");
         for (repo, kind) in [(".", "ci-failed"), ("api", "comments")] {
             app.store
-                .insert_notice(
+                .insert_notice_for(
                     &key,
                     &NewNotice {
                         repo: repo.into(),
@@ -899,6 +899,7 @@ mod tests {
                         text: "t".into(),
                         detail: None,
                     },
+                    &format!("https://github.com/me/{repo}/pull/1"),
                 )
                 .await
                 .unwrap();
@@ -956,7 +957,7 @@ mod tests {
             }],
         };
         app.store
-            .insert_notice(
+            .insert_task_notice(
                 &key,
                 &NewNotice {
                     repo: ".".into(),
@@ -1048,14 +1049,31 @@ mod tests {
         let (key, ws) = parent_with_a_branch(&app, &repo).await;
         git(&ws.path, &["push", "-q", "origin", "feature/PROJ-1"]);
 
-        // A submodule's PR merged (no such repo is set up here: nothing to delete there).
-        let verified = HashMap::from([("svc".to_string(), "0".repeat(40))]);
+        // A submodule's PR merged (no such repo is set up here: nothing to delete there),
+        // and the parent's own PR too, verified at the branch tip.
+        let tip = git(&repo, &["rev-parse", "feature/PROJ-1"]);
+        let verified = HashMap::from([("svc".to_string(), "0".repeat(40)), (".".to_string(), tip)]);
         let outcome = archive_workspace(&app, &key, false, &verified)
             .await
             .map_err(|e| e.message)
             .unwrap();
         assert!(outcome.left.is_empty(), "{:?}", outcome.problems);
         assert!(git(&repo, &["branch", "--list", "feature/PROJ-1"]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_merge_archive_keeps_the_parents_branch_when_the_parent_had_no_merged_pr() {
+        let (app, repo) = setup().await;
+        let (key, ws) = parent_with_a_branch(&app, &repo).await;
+        git(&ws.path, &["push", "-q", "origin", "feature/PROJ-1"]);
+
+        let verified = HashMap::from([("svc".to_string(), "0".repeat(40))]);
+        let outcome = archive_workspace(&app, &key, false, &verified)
+            .await
+            .map_err(|e| e.message)
+            .unwrap();
+        assert!(outcome.left.is_empty(), "{:?}", outcome.problems);
+        assert!(!git(&repo, &["branch", "--list", "feature/PROJ-1"]).is_empty());
     }
 
     fn start_preview(app: &AppState, key: &str) {
@@ -1137,7 +1155,7 @@ mod tests {
         let notice = app.store.open_notices().await.unwrap().remove(0);
         app.store.resolve_notice(notice.id).await.unwrap();
         app.store
-            .insert_notice(
+            .insert_task_notice(
                 &key,
                 &crate::store_prs::NewNotice {
                     repo: ".".into(),
@@ -1175,7 +1193,7 @@ mod tests {
         let notice = app.store.open_notices().await.unwrap().remove(0);
         app.store.resolve_notice(notice.id).await.unwrap();
         app.store
-            .insert_notice(
+            .insert_task_notice(
                 &key,
                 &crate::store_prs::NewNotice {
                     repo: ".".into(),

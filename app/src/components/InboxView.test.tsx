@@ -462,6 +462,7 @@ describe("InboxView pr-autofix", () => {
     render(<InboxView items={[stopped]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
 
   it("retries autofix on its repo", async () => {
+    vi.spyOn(api, "taskPrs").mockResolvedValue({ account: null, problem: null, prs: [] });
     const set = vi.spyOn(api, "setAutofix").mockResolvedValue({} as Task);
     const onChanged = vi.fn();
     show(onChanged);
@@ -469,6 +470,18 @@ describe("InboxView pr-autofix", () => {
     fireEvent.click(screen.getByText("Retry autofix"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(set).toHaveBeenCalledWith("PROJ-1", "retry", "api");
+  });
+
+  it("retries on the PR matching pr_url when the task has several in the repo", async () => {
+    const mk = (id: number, n: number) =>
+      ({ id, repo: "api", number: n, url: `https://github.com/me/repo/pull/${n}` }) as never;
+    vi.spyOn(api, "taskPrs").mockResolvedValue({ account: null, problem: null, prs: [mk(7, 42), mk(8, 43)] });
+    const set = vi.spyOn(api, "setAutofix").mockResolvedValue({} as Task);
+    const onChanged = vi.fn();
+    render(<InboxView items={[{ ...stopped, pr_url: "https://github.com/me/repo/pull/43" }]} onOpenTask={() => {}} onOpenChanges={() => {}} onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("Retry autofix"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(set).toHaveBeenCalledWith("PROJ-1", "retry", undefined, 8);
   });
 
   it("dismisses the notice", async () => {

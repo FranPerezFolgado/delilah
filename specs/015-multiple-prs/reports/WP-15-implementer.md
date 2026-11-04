@@ -1,0 +1,5 @@
+## WP-15 — done
+Tasks:    T036 ✓ (pure-level), T038 ✓ (pure-level), T040 ✓ (done in WP-06, covered by test), T042 ✓
+Files:    crates/delilah-daemon/src/pr_loop/merge.rs — new archive_heads(rows, labels, branch); release builds heads from ws.pr_repos labels; tests
+Tests:    all_merged_needs_every_counted_pr_merged_and_at_least_one, heads_come_from_merged_task_branch_prs_of_the_workspace_repos, a_merged_parent_pr_gives_the_parent_a_head_and_none_gives_it_nothing, the_highest_id_of_a_label_gives_the_head. cargo test -p delilah-daemon -- pr_loop: 64 pass; cargo clippy -p delilah-daemon --all-targets: clean.
+Notes:    archive_heads: counted + Merged + repo in pr_repos labels + head_branch None or == ws.branch, highest id per label. Test fakes emit headRefName "feat/x"; merge.rs test helpers now rewrite it to BRANCH (on_task_branch) since fake.rs is out of scope. The "merged + closed -> notice" and "both -> archived once" flows are covered by existing end-to-end tests (changeset, closed-PR tests). Parent-branch deletion with a merged parent PR is tested at head level only (no end-to-end git test with a "." PR).

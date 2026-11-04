@@ -102,4 +102,19 @@ describe("SessionChain", () => {
     expect(getByText("Guardando las notas de la sesión…")).toBeTruthy();
     expect(queryByRole("button", { name: "Seguir aquí" })).toBeNull();
   });
+
+  it("does not count a replaced PR as linked, but a live one does", async () => {
+    const ap = { ...task(), autopilot: { state: "running", since: "2026-10-21T10:00:00Z" } } as Task;
+    const sessions = [sess("a", "plan", false), sess("b", "implement", false), sess("c", "review", true)];
+    vi.spyOn(api, "projects").mockResolvedValue([]);
+    const taskPrs = vi.spyOn(api, "taskPrs").mockResolvedValue({ account: null, problem: null, prs: [{ id: 1, replaced_by: 2 } as never] });
+    const { getByLabelText, unmount } = render(<SessionChain task={ap} sessions={sessions} onOpenSession={() => {}} onChanged={() => {}} />);
+    await waitFor(() => expect(taskPrs).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getByLabelText(/^PR, (pendiente|en curso)/)).toBeTruthy();
+    unmount();
+    taskPrs.mockResolvedValue({ account: null, problem: null, prs: [{ id: 1, replaced_by: 2 } as never, { id: 2 } as never] });
+    const again = render(<SessionChain task={ap} sessions={sessions} onOpenSession={() => {}} onChanged={() => {}} />);
+    await waitFor(() => expect(again.getByLabelText(/^PR, terminada/)).toBeTruthy());
+  });
 });

@@ -386,7 +386,11 @@ async fn note_turn_done(app: &AppState, task: &str, session: Option<&str>, hook:
         text,
         detail: Some(serde_json::json!({ "session": record.id })),
     };
-    match app.store.insert_notice(&TaskKey::new(task), &notice).await {
+    match app
+        .store
+        .insert_task_notice(&TaskKey::new(task), &notice)
+        .await
+    {
         Ok(true) => app.emit(Topic::Inbox),
         Ok(false) => {}
         Err(e) => tracing::warn!(task, "cannot record the finished turn: {e}"),

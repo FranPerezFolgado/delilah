@@ -953,3 +953,16 @@ newcomer quickstart answers a question they are not asking. It replaces what dec
 about the README's purpose; the rest of 82 stands. *Ruled out:* keeping the README as a newcomer
 page, and changing the dependabot setup without the owner's approval (a proposal was written
 instead). See the [spec](../specs/014-portfolio-readme/spec.md).
+
+**106. A task's PR links are per PR, not per repo (2026-11-04).** A task can have several PRs,
+also in one repo, in the parent repo itself and in repos outside its workspace. *What changed:*
+`pull_requests` is unique per (task, URL) and `pr_notices` carry the `pr_url`; the agent's
+`gh pr create` output (PostToolUse hook, strict whole-URL match) is a link source; a closed PR
+of the same head branch is marked `replaced_by` when a new one is linked and stops counting;
+the task is archived only when every counted PR is merged and the agent is not mid-turn, after
+one forced detection; Link by URL accepts any repo `gh` can read. *Why:* one PR per repo lost
+work the agent had done and let a task be archived with PRs still open. *Migration 0027 is
+one-way:* it rebuilds both tables and cannot be undone by an older binary, so a database backup
+is advised before upgrading (the daemon also copies the database to `backups/` after a version
+change). *Ruled out:* keeping one row per repo with a list of URLs. See the
+[spec](../specs/015-multiple-prs/spec.md).

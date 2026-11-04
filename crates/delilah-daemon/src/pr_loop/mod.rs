@@ -3,6 +3,7 @@
 //! for the problems the user can fix).
 
 pub(crate) mod access;
+pub(crate) mod capture;
 mod merge;
 mod notices;
 
@@ -34,8 +35,6 @@ pub(crate) enum LinkError {
     NotAPr,
     /// `gh` could not read the PR.
     Gh(GhError),
-    /// The PR belongs to none of the repos of the task.
-    NotFromTask,
     Store(StoreError),
 }
 
@@ -195,17 +194,27 @@ async fn run_check(app: &AppState, key: &TaskKey, force: bool, guard: CheckGuard
         .is_some_and(|p| p >= SpecPhase::Review);
     let mut changed = false;
     let mut inbox = false;
+    // Whether every repo that had to be searched was, without error.
+    let mut searched = true;
 
     if let Ok(Some((_, ws))) = app.store.workspace(key).await {
         let rows = app.store.prs_of(key).await.unwrap_or_default();
         // A task without a branch has no PR to find.
-        for (repo, dir) in ws.repos().into_iter().filter(|_| ws.has_branch()) {
-            let has_row = rows.iter().any(|r| r.repo == repo);
-            if !force && (has_row || !in_review) {
+        let opts = delilah_git::GitOptions {
+            allow_file_protocol: app.config.allow_file_protocol,
+        };
+        let repos = if ws.has_branch() {
+            ws.pr_repos(&opts)
+        } else {
+            vec![]
+        };
+        for (repo, dir) in repos {
+            if !force && (has_task_pr(&rows, &repo, &ws.branch) || !in_review) {
                 continue;
             }
-            if let Ok(linked) = detect(app, key, &project, &repo, &dir, &ws.branch, force).await {
-                changed |= linked;
+            match detect(app, key, &project, &repo, &dir, &ws.branch, force).await {
+                Ok(linked) => changed |= linked,
+                Err(()) => searched = false,
             }
         }
     }
@@ -228,11 +237,31 @@ async fn run_check(app: &AppState, key: &TaskKey, force: bool, guard: CheckGuard
     if inbox {
         app.emit(Topic::Inbox);
     }
-    // Every PR merged (none open or closed unmerged): the task is done and archived.
-    let rows = app.store.prs_of(key).await.unwrap_or_default();
-    if merge::all_merged(&rows) {
-        merge::on_merged(app, key, &rows).await;
-        merge::on_subtask_merged(app, &task, changed).await;
+    // Every PR merged (none open or closed unmerged): the task is done and archived,
+    // unless its agent is mid-turn (it may still open another PR) or a PR it opened in
+    // another repo is not linked yet.
+    let mut rows = app.store.prs_of(key).await.unwrap_or_default();
+    if merge::all_merged(&rows) && !primary_working(app, key) {
+        // Fail closed: archive only if every repo was searched, and re-check once the
+        // slow search is over (the agent may have started a turn or opened a PR).
+        let mut safe = searched && !primary_working(app, key);
+        if !force {
+            let (linked, saved, searched) = pre_archive_detect(app, key, &project).await;
+            if linked {
+                changed = true;
+                app.emit(Topic::Prs);
+            }
+            fresh |= saved;
+            rows = app.store.prs_of(key).await.unwrap_or_default();
+            safe = searched && !primary_working(app, key);
+            if !searched {
+                tracing::warn!(task = %key, "PR search failed before archive; retrying next poll");
+            }
+        }
+        if safe && merge::all_merged(&rows) {
+            merge::on_merged(app, key, &rows).await;
+            merge::on_subtask_merged(app, &task, changed).await;
+        }
     }
     if task.kind == delilah_core::hierarchy::TaskKind::ParentTask {
         merge::parent_ready(app, key).await;
@@ -242,6 +271,56 @@ async fn run_check(app: &AppState, key: &TaskKey, force: bool, guard: CheckGuard
     let (app, key) = (app.clone(), key.clone());
     tokio::spawn(async move { crate::autofix::evaluate(&app, &key).await });
     fresh
+}
+
+/// Whether the task's primary session is in the middle of a turn.
+fn primary_working(app: &AppState, key: &TaskKey) -> bool {
+    app.sessions
+        .primary(key.as_str())
+        .is_some_and(|l| l.state() == crate::sessions::LiveState::Working)
+}
+
+/// One forced detection over the task's `pr_repos` before it is archived, so a PR from
+/// its branch in another repo is linked first. Whether one was linked, and whether a
+/// snapshot was saved, and whether every repo was searched without error.
+async fn pre_archive_detect(app: &AppState, key: &TaskKey, project: &str) -> (bool, bool, bool) {
+    let Ok(Some((_, ws))) = app.store.workspace(key).await else {
+        return (false, false, true);
+    };
+    if !ws.has_branch() {
+        return (false, false, true);
+    }
+    let opts = delilah_git::GitOptions {
+        allow_file_protocol: app.config.allow_file_protocol,
+    };
+    let mut linked = false;
+    let mut searched = true;
+    for (repo, dir) in ws.pr_repos(&opts) {
+        match detect(app, key, project, &repo, &dir, &ws.branch, true).await {
+            Ok(l) => linked |= l,
+            Err(()) => searched = false,
+        }
+    }
+    let mut saved = false;
+    if linked {
+        for row in app.store.prs_of(key).await.unwrap_or_default() {
+            if row.snapshot.is_none() {
+                saved |= snapshot(app, project, &row, true).await.1;
+            }
+        }
+    }
+    (linked, saved, searched)
+}
+
+/// Whether `repo` already has a counted `Open` or `Merged` PR from `branch`, so there is
+/// nothing to look for. A repo with only closed PRs, or PRs from other branches (linked
+/// by hand), is still searched. A snapshot from before the head branch was read counts
+/// as the task's.
+fn has_task_pr(rows: &[PrRow], repo: &str, branch: &str) -> bool {
+    crate::store_prs::counted(rows)
+        .filter(|r| r.repo == repo)
+        .filter_map(|r| r.snapshot.as_ref())
+        .any(|s| s.state != PrState::Closed && s.head_branch.as_deref().is_none_or(|b| b == branch))
 }
 
 /// Looks for the PR of `branch` in one repo and links it. Whether the rows changed;
@@ -287,7 +366,7 @@ async fn detect(
         return Ok(false);
     }
     let existing = app.store.prs_of(key).await.unwrap_or_default();
-    if existing.iter().any(|r| r.repo == repo && r.url == url) {
+    if existing.iter().any(|r| r.url == url) {
         return Ok(false);
     }
     let new = NewPr {
@@ -298,7 +377,7 @@ async fn detect(
         url,
         linked_by: "detected".into(),
     };
-    match app.store.link_pr(key, &new).await {
+    match app.store.link_pr_on_branch(key, &new, Some(branch)).await {
         Ok(_) => {
             phases::advance(app, key, SpecPhase::Review).await;
             Ok(true)
@@ -394,7 +473,10 @@ pub(crate) async fn link_known(
         number: pr.number,
         linked_by: linked_by.to_string(),
     };
-    let row = app.store.link_pr(key, &new).await?;
+    let row = app
+        .store
+        .link_pr_on_branch(key, &new, snapshot.head_branch.as_deref())
+        .await?;
     let checked = record(app, &row, snapshot).await?;
     phases::advance(app, key, SpecPhase::Review).await;
     app.emit(Topic::Prs);
@@ -404,9 +486,14 @@ pub(crate) async fn link_known(
     Ok(app.store.pr(row.id).await?.unwrap_or(row))
 }
 
-/// The repo of the task's workspace that `pr` belongs to. A task without a workspace
-/// can only link PRs of its project's own checkout, when that is a plain repo.
-async fn repo_of(app: &AppState, key: &TaskKey, pr: &PrRef) -> Result<String, LinkError> {
+/// The repo of the task that `pr` belongs to: `.` or a submodule of its workspace (or,
+/// without one, of its project's checkout), else the label `host/owner/name`, which is
+/// how a PR of any other repo is told apart.
+pub(super) async fn repo_of(
+    app: &AppState,
+    key: &TaskKey,
+    pr: &PrRef,
+) -> Result<String, LinkError> {
     let is_pr_repo = |dir: &Path| {
         let dir = dir.to_path_buf();
         async move {
@@ -416,25 +503,48 @@ async fn repo_of(app: &AppState, key: &TaskKey, pr: &PrRef) -> Result<String, Li
             })
         }
     };
+    let foreign = || format!("{}/{}", pr.host, pr.owner_name);
     if let Some((_, ws)) = app.store.workspace(key).await? {
-        for (name, dir) in ws.repos() {
+        let opts = delilah_git::GitOptions {
+            allow_file_protocol: app.config.allow_file_protocol,
+        };
+        let repos = if ws.has_branch() {
+            ws.pr_repos(&opts)
+        } else {
+            ws.repos()
+        };
+        for (name, dir) in repos {
             if is_pr_repo(&dir).await {
                 return Ok(name);
             }
         }
-        return Err(LinkError::NotFromTask);
+        return Ok(foreign());
     }
-    let project = app
-        .store
-        .get_task(key)
-        .await?
-        .and_then(|t| t.project)
-        .ok_or(LinkError::NotFromTask)?;
-    let project = app.store.project(&project).await?;
-    if project.kind == ProjectKind::Repo && is_pr_repo(&project.path).await {
+    let project = match app.store.get_task(key).await?.and_then(|t| t.project) {
+        Some(name) => app.store.project(&name).await?,
+        None => return Ok(foreign()),
+    };
+    if is_pr_repo(&project.path).await {
         return Ok(".".into());
     }
-    Err(LinkError::NotFromTask)
+    if project.kind == ProjectKind::Parent {
+        let root = project.path.clone();
+        let subs = tokio::task::spawn_blocking(move || delilah_git::list_submodules(&root))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        for sub in subs {
+            // Only a set-up submodule has a folder to ask `gh` in.
+            let Some(dir) = delilah_git::Workspace::home_of(&project.path, &sub.path) else {
+                continue;
+            };
+            if is_pr_repo(&dir).await {
+                return Ok(sub.path);
+            }
+        }
+    }
+    Ok(foreign())
 }
 
 #[cfg(test)]
@@ -549,8 +659,17 @@ mod tests {
 
     #[tokio::test]
     async fn a_network_error_keeps_the_snapshot_and_backs_off() {
-        let (app, key, _dir) =
-            task_with_workspace(Arc::new(FakeGh::happy()), Some(SpecPhase::Review)).await;
+        // The PR is from the task's branch, so detection leaves the repo alone.
+        let from_branch = Arc::new(
+            FakeGh::new()
+                .on(&["repo", "view"], Ok(REPO_VIEW))
+                .on(&["pr", "list"], Ok(crate::gh::fake::PR_LIST))
+                .on(
+                    &["api", "graphql"],
+                    Ok(&bare_snapshot("OPEN", false).replace("feat/x", "feature/PROJ-1")),
+                ),
+        );
+        let (app, key, _dir) = task_with_workspace(from_branch, Some(SpecPhase::Review)).await;
         check_task(&app, &key, false).await;
         let before = app.store.prs_of(&key).await.unwrap().remove(0);
         assert!(before.snapshot.is_some());
@@ -706,18 +825,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn linking_refuses_urls_that_are_not_prs_or_not_the_tasks() {
+    async fn linking_refuses_urls_that_are_not_prs_and_labels_other_repos_by_host() {
         let fake = Arc::new(FakeGh::happy());
         let (app, key, _dir) = task_with_workspace(fake.clone(), Some(SpecPhase::Implement)).await;
         let err = link_by_url(&app, &key, "https://example.com/x", "pasted").await;
         assert!(matches!(err, Err(LinkError::NotAPr)));
 
-        // The repo of the workspace is o/r: another repo's PR is not the task's.
-        let err = link_by_url(&app, &key, "https://github.com/other/repo/pull/7", "pasted").await;
-        assert!(matches!(err, Err(LinkError::NotFromTask)));
-        let err = link_by_url(&app, &key, "https://ghe.corp/o/r/pull/7", "pasted").await;
-        assert!(matches!(err, Err(LinkError::NotFromTask)));
-        assert!(app.store.prs_of(&key).await.unwrap().is_empty());
+        // The repo of the workspace is o/r: another repo's PR is linked by where it lives.
+        let row = link_by_url(&app, &key, "https://github.com/other/repo/pull/7", "pasted")
+            .await
+            .unwrap();
+        assert_eq!(row.repo, "github.com/other/repo");
+        let row = link_by_url(&app, &key, "https://ghe.corp/o/r/pull/7", "pasted")
+            .await
+            .unwrap();
+        assert_eq!(row.repo, "ghe.corp/o/r");
 
         let unreadable = Arc::new(FakeGh::new().on(&["api", "graphql"], Err(gh_failed("boom"))));
         let app = app.with_gh(unreadable);
@@ -726,7 +848,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn without_a_workspace_only_a_repo_projects_own_repo_matches() {
+    async fn without_a_workspace_the_projects_checkout_is_dot_and_others_are_labelled() {
         let fake = Arc::new(FakeGh::happy());
         let (app, _key, _dir) = task_with_workspace(fake, None).await;
         app.store
@@ -749,8 +871,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row.repo, ".");
-        let err = link_by_url(&app, &TaskKey::new("PROJ-3"), PR_URL, "pasted").await;
-        assert!(matches!(err, Err(LinkError::NotFromTask)));
+        let row = link_by_url(&app, &TaskKey::new("PROJ-3"), PR_URL, "pasted")
+            .await
+            .unwrap();
+        assert_eq!(row.repo, ".");
 
         // The checkout is another repo than the PR's.
         let other = Arc::new(
@@ -759,7 +883,287 @@ mod tests {
                 .on(&["api", "graphql"], Ok(&bare_snapshot("OPEN", false))),
         );
         let app = app.with_gh(other);
-        let err = link_by_url(&app, &TaskKey::new("PROJ-2"), PR_URL, "pasted").await;
-        assert!(matches!(err, Err(LinkError::NotFromTask)));
+        let row = link_by_url(&app, &TaskKey::new("PROJ-2"), PR_URL, "pasted")
+            .await
+            .unwrap();
+        assert_eq!(row.repo, "github.com/o/r");
+    }
+
+    #[tokio::test]
+    async fn without_a_workspace_a_parents_submodule_is_matched_before_the_host_label() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "OPEN", "def"));
+        let (app, _key, dir) = task_with_workspace(Arc::new(FakeGh::new()), None).await;
+        let (root, _ws) =
+            crate::pr_testkit::parent_workspace(&dir.path().join("pw"), "feature/PROJ-1");
+        let app = app.with_gh(gh);
+        app.store
+            .create_project(&Project {
+                name: "par".into(),
+                path: root,
+                kind: ProjectKind::Parent,
+                workflow: "project".into(),
+                settings: Default::default(),
+                preview_command: None,
+            })
+            .await
+            .unwrap();
+        let mut task = Task::new(TaskKey::new("PROJ-3"), "t", "project");
+        task.project = Some("par".into());
+        app.store.create_task(&task).await.unwrap();
+        let key = TaskKey::new("PROJ-3");
+        let row = link_by_url(&app, &key, "https://github.com/o/svc-a/pull/9", "pasted")
+            .await
+            .unwrap();
+        assert_eq!(row.repo, "svc-a");
+        let row = link_by_url(&app, &key, "https://github.com/o/parent/pull/9", "pasted").await;
+        // DirGh only knows svc-a's PR: the parent's own is unreadable, not mislabelled.
+        assert!(matches!(row, Err(LinkError::Gh(_))));
+    }
+
+    /// A review-phase task whose parent workspace is on the task's branch in the parent
+    /// too, talking to `gh`.
+    async fn parent_task(
+        gh: Arc<crate::pr_testkit::DirGh>,
+    ) -> (AppState, TaskKey, crate::pr_testkit::TempDir) {
+        let (app, key, dir) =
+            task_with_workspace(Arc::new(FakeGh::new()), Some(SpecPhase::Review)).await;
+        let (root, ws) =
+            crate::pr_testkit::parent_workspace(&dir.path().join("pw"), "feature/PROJ-1");
+        app.store.save_workspace(&key, &root, &ws).await.unwrap();
+        (app.with_gh(gh), key, dir)
+    }
+
+    fn urls(rows: &[PrRow]) -> Vec<(String, String)> {
+        let mut v: Vec<_> = rows
+            .iter()
+            .map(|r| (r.repo.clone(), r.url.clone()))
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn a_pr_in_the_parents_own_repo_is_detected_as_dot() {
+        // The parent's workspace folder is `ws`.
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("ws", 5, "OPEN", "abc"));
+        let (app, key, _dir) = parent_task(gh).await;
+        check_task(&app, &key, false).await;
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_eq!(
+            urls(&rows),
+            [(
+                ".".to_string(),
+                "https://github.com/o/ws/pull/5".to_string()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pr_of_another_branch_in_a_submodule_does_not_stop_detection() {
+        let gh = Arc::new(
+            crate::pr_testkit::DirGh::new()
+                .with_pr("ws", 5, "OPEN", "abc")
+                .with_pr("svc-a", 9, "OPEN", "def"),
+        );
+        let (app, key, _dir) = parent_task(gh).await;
+        // Linked by hand; its head branch (`feat/x` in the fake) is not the task's.
+        link_by_url(&app, &key, "https://github.com/o/svc-a/pull/9", "pasted")
+            .await
+            .unwrap();
+        check_task(&app, &key, false).await;
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert!(rows.iter().all(|r| r.replaced_by.is_none()), "{rows:?}");
+        assert_eq!(
+            urls(&rows),
+            [
+                (
+                    ".".to_string(),
+                    "https://github.com/o/ws/pull/5".to_string()
+                ),
+                (
+                    "svc-a".to_string(),
+                    "https://github.com/o/svc-a/pull/9".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repo_whose_only_pr_is_closed_is_still_searched() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "CLOSED", "def"));
+        let (app, key, _dir) = parent_task(gh.clone()).await;
+        link_by_url(&app, &key, "https://github.com/o/svc-a/pull/9", "pasted")
+            .await
+            .unwrap();
+        check_task(&app, &key, false).await;
+        gh.set_pr("svc-a", 10, "OPEN", "ghi");
+        check_task(&app, &key, false).await;
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert!(
+            rows.iter()
+                .any(|r| r.url == "https://github.com/o/svc-a/pull/10"),
+            "{rows:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_detected_pr_replaces_the_closed_one_of_the_same_branch() {
+        let gh = Arc::new(
+            crate::pr_testkit::DirGh::new()
+                .with_pr("svc-a", 9, "CLOSED", "def")
+                .with_head_ref("feature/PROJ-1"),
+        );
+        let (app, key, _dir) = parent_task(gh.clone()).await;
+        link_by_url(&app, &key, "https://github.com/o/svc-a/pull/9", "pasted")
+            .await
+            .unwrap();
+        check_task(&app, &key, false).await;
+        gh.set_pr("svc-a", 10, "OPEN", "ghi");
+        check_task(&app, &key, false).await;
+        let rows = app.store.prs_of(&key).await.unwrap();
+        let old = rows.iter().find(|r| r.number == 9).unwrap();
+        let new = rows.iter().find(|r| r.number == 10).unwrap();
+        assert_eq!(old.replaced_by, Some(new.id), "{rows:?}");
+        assert_eq!(crate::store_prs::counted(&rows).count(), 1);
+    }
+
+    /// A primary session played by `cat`, in `state`.
+    fn primary_session(app: &AppState, state: crate::sessions::LiveState) {
+        use delilah_agents::pty::PtySession;
+        use portable_pty::CommandBuilder;
+
+        let mut cmd = CommandBuilder::new("cat");
+        cmd.args(["-u"]);
+        let pty = PtySession::spawn(cmd, 200, 24, None).unwrap();
+        app.sessions.insert(
+            "s-1",
+            "PROJ-1",
+            crate::store_sessions::SessionKind::Claude,
+            true,
+            pty,
+        );
+        app.sessions.primary("PROJ-1").unwrap().set_state(state);
+    }
+
+    async fn status(app: &AppState, key: &TaskKey) -> delilah_core::TaskStatus {
+        app.store.get_task(key).await.unwrap().unwrap().status
+    }
+
+    #[tokio::test]
+    async fn the_pre_archive_detection_links_a_pr_the_normal_search_missed() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "MERGED", "abc"));
+        let (mut app, key, _dir) = parent_task(gh.clone()).await;
+        let mut config = (*app.config).clone();
+        config.allow_file_protocol = true;
+        app.config = Arc::new(config);
+        // While the agent works nothing is archived.
+        primary_session(&app, crate::sessions::LiveState::Working);
+        check_task(&app, &key, false).await;
+        assert_eq!(app.store.prs_of(&key).await.unwrap().len(), 1);
+
+        // Another repo gets an open PR; its search is backed off, so only the forced
+        // detection before the archive can see it.
+        gh.set_pr("svc-b", 3, "OPEN", "def");
+        let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        app.pr_backoff.lock().unwrap().fail(
+            &format!("dir:{}", ws.path.join("svc-b").display()),
+            Instant::now(),
+            None,
+        );
+        app.sessions
+            .primary("PROJ-1")
+            .unwrap()
+            .set_state(crate::sessions::LiveState::Waiting);
+        check_task(&app, &key, false).await;
+
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert!(
+            rows.iter()
+                .any(|r| r.url == "https://github.com/o/svc-b/pull/3"),
+            "{rows:?}"
+        );
+        assert_ne!(status(&app, &key).await, delilah_core::TaskStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_archived_mid_turn_but_the_next_check_after_it_archives() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "MERGED", "abc"));
+        let (mut app, key, _dir) = parent_task(gh).await;
+        let mut config = (*app.config).clone();
+        config.allow_file_protocol = true;
+        app.config = Arc::new(config);
+        primary_session(&app, crate::sessions::LiveState::Working);
+
+        check_task(&app, &key, true).await;
+        assert_ne!(status(&app, &key).await, delilah_core::TaskStatus::Done);
+        assert!(app.store.workspace(&key).await.unwrap().is_some());
+
+        app.sessions
+            .primary("PROJ-1")
+            .unwrap()
+            .set_state(crate::sessions::LiveState::Waiting);
+        check_task(&app, &key, true).await;
+        assert!(
+            app.store.workspace(&key).await.unwrap().is_none()
+                || status(&app, &key).await == delilah_core::TaskStatus::Done
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_search_before_the_archive_keeps_the_task() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "MERGED", "abc"));
+        let (mut app, key, _dir) = parent_task(gh.clone()).await;
+        let mut config = (*app.config).clone();
+        config.allow_file_protocol = true;
+        app.config = Arc::new(config);
+        // The normal pass skips svc-b (backed off); the forced search of it fails.
+        let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        gh.fail_list("svc-b");
+        app.pr_backoff.lock().unwrap().fail(
+            &format!("dir:{}", ws.path.join("svc-b").display()),
+            Instant::now(),
+            None,
+        );
+        check_task(&app, &key, false).await;
+        assert_ne!(status(&app, &key).await, delilah_core::TaskStatus::Done);
+        assert!(app.store.workspace(&key).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_failed_search_on_a_forced_check_keeps_the_task() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "MERGED", "abc"));
+        let (mut app, key, _dir) = parent_task(gh.clone()).await;
+        let mut config = (*app.config).clone();
+        config.allow_file_protocol = true;
+        app.config = Arc::new(config);
+        gh.fail_list("svc-b");
+        check_task(&app, &key, true).await;
+        assert_ne!(status(&app, &key).await, delilah_core::TaskStatus::Done);
+        assert!(app.store.workspace(&key).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_starts_a_turn_during_the_search_is_not_archived() {
+        let gh = Arc::new(crate::pr_testkit::DirGh::new().with_pr("svc-a", 9, "MERGED", "abc"));
+        let (mut app, key, _dir) = parent_task(gh.clone()).await;
+        let mut config = (*app.config).clone();
+        config.allow_file_protocol = true;
+        app.config = Arc::new(config);
+        primary_session(&app, crate::sessions::LiveState::Waiting);
+        let (_, ws) = app.store.workspace(&key).await.unwrap().unwrap();
+        app.pr_backoff.lock().unwrap().fail(
+            &format!("dir:{}", ws.path.join("svc-b").display()),
+            Instant::now(),
+            None,
+        );
+        let sessions = app.sessions.clone();
+        gh.on_list(move || {
+            if let Some(l) = sessions.primary("PROJ-1") {
+                l.set_state(crate::sessions::LiveState::Working);
+            }
+        });
+        check_task(&app, &key, false).await;
+        assert_ne!(status(&app, &key).await, delilah_core::TaskStatus::Done);
+        assert!(app.store.workspace(&key).await.unwrap().is_some());
     }
 }

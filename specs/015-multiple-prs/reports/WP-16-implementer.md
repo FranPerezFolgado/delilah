@@ -1,0 +1,5 @@
+## WP-16 — done
+Tasks:    T037 ✓, T041 ✓
+Files:    crates/delilah-daemon/src/pr_loop/mod.rs — `run_check` skips the archive while the primary session is `Working`; unless forced, runs one forced `pre_archive_detect` over `pr_repos` (new `primary_working`, `pre_archive_detect` helpers), re-reads rows and re-checks `all_merged` before `on_merged`; 2 tests.
+Tests:    the_pre_archive_detection_links_a_pr_the_normal_search_missed, nothing_is_archived_mid_turn_but_the_next_check_after_it_archives. `cargo test -p delilah-daemon -- pr_loop`: 66 passed; `cargo clippy -p delilah-daemon --all-targets`: clean.
+Notes:    Implementation was written before the tests (not strict RED first). Mid-turn only skips the merged block (parent_ready and autofix still run) rather than returning early. Newly linked PRs from the pre-archive detection get a forced snapshot. The "archived after the turn" assertion is loose (workspace gone OR status Done) because the fake head sha may block the archive. Full suite not run.

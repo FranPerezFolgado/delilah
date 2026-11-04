@@ -463,7 +463,7 @@ mod tests {
         let f = fixture(2, false).await;
         f.app
             .store
-            .insert_notice(
+            .insert_task_notice(
                 &f.key,
                 &crate::store_prs::NewNotice {
                     repo: ".".into(),

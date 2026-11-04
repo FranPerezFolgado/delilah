@@ -384,7 +384,7 @@ async fn round(app: &AppState, key: &TaskKey) -> Result<bool, StoreError> {
         }
         if prev.as_ref().is_some_and(|p| p.state == State::Stopped) {
             // The `autofix-stopped` notice of a stopped PR that went green.
-            inbox |= resolve_stopped(app, key, &row.repo).await?;
+            inbox |= resolve_stopped(app, key, &row).await?;
         }
     }
     if !retry && !pending.is_empty() {
@@ -468,7 +468,7 @@ async fn deliver(
                 app.transition(key, event).await?;
                 resolved |= app
                     .store
-                    .resolve_notices_of(key, &p.row.repo, &["ci-failed"])
+                    .resolve_notices_of_pr(key, &p.row.repo, &p.row.url, &["ci-failed"])
                     .await?
                     > 0;
             }
@@ -619,7 +619,7 @@ async fn stop(
             "checks": checks,
         })),
     };
-    if !app.store.insert_notice(key, &notice).await? {
+    if !app.store.insert_notice_for(key, &notice, &row.url).await? {
         tracing::debug!(%key, "autofix: the stop was already raised");
     }
     if !app.events.listening() {
@@ -663,16 +663,16 @@ fn reason_text(lang: Lang, reason: StopReason, attempts: u32) -> String {
     }
 }
 
-/// Resolves the `autofix-stopped` notice of the task's PR in `repo` (green head, retry,
-/// toggle, merge) and tells the open clients. Whether any was open.
+/// Resolves the `autofix-stopped` notice of one PR (green head, retry, toggle, merge) and
+/// tells the open clients. The notices of its siblings stay. Whether any was open.
 pub(crate) async fn resolve_stopped(
     app: &AppState,
     key: &TaskKey,
-    repo: &str,
+    row: &PrRow,
 ) -> Result<bool, StoreError> {
     let n = app
         .store
-        .resolve_notices_of(key, repo, &["autofix-stopped"])
+        .resolve_notices_of_pr(key, &row.repo, &row.url, &["autofix-stopped"])
         .await?;
     if n > 0 {
         app.emit(Topic::Inbox);
@@ -729,6 +729,13 @@ async fn no_session(app: &AppState, key: &TaskKey) -> bool {
 /// `cancel` for the callers that can only log a failure.
 pub(crate) async fn cancel_logged(app: &AppState, key: &TaskKey, repo: Option<&str>) {
     if let Err(e) = cancel(app, key, repo).await {
+        tracing::warn!(task = %key, "autofix: cannot cancel: {e}");
+    }
+}
+
+/// `cancel_pr` for the callers that can only log a failure.
+pub(crate) async fn cancel_pr_logged(app: &AppState, key: &TaskKey, pr_id: i64) {
+    if let Err(e) = cancel_pr(app, key, pr_id).await {
         tracing::warn!(task = %key, "autofix: cannot cancel: {e}");
     }
 }
@@ -840,17 +847,35 @@ async fn judge(
 /// Autofix stops for the task (toggle off, PR merged or closed, task archived or deleted):
 /// every PR that was `fixing` goes back to `watching` (the sent sha stays, so the same
 /// head is not sent again if autofix is turned back on) and the `autofix-stopped` notices
-/// of those PRs are resolved, whatever their state. `repo` limits it to one PR. Nothing is
-/// sent and a running turn is never interrupted. Each write is a compare-and-set, and
-/// `AutofixCancelled` is recorded only when it won. Whether anything changed.
+/// of those PRs are resolved, whatever their state. `repo` limits it to the PRs of that
+/// repo; [`cancel_pr`] to one PR. Nothing is sent and a running turn is never
+/// interrupted. Each write is a compare-and-set, and `AutofixCancelled` is recorded only
+/// when it won. Whether anything changed.
 pub(crate) async fn cancel(
     app: &AppState,
     key: &TaskKey,
     repo: Option<&str>,
 ) -> Result<bool, StoreError> {
+    cancel_where(app, key, |row| repo.is_none_or(|r| r == row.repo)).await
+}
+
+/// `cancel` for one PR: its siblings, in the same repo or not, are left alone.
+pub(crate) async fn cancel_pr(
+    app: &AppState,
+    key: &TaskKey,
+    pr_id: i64,
+) -> Result<bool, StoreError> {
+    cancel_where(app, key, |row| row.id == pr_id).await
+}
+
+async fn cancel_where(
+    app: &AppState,
+    key: &TaskKey,
+    chosen: impl Fn(&PrRow) -> bool,
+) -> Result<bool, StoreError> {
     let mut changed = false;
     for row in app.store.prs_of(key).await? {
-        if repo.is_some_and(|r| r != row.repo) {
+        if !chosen(&row) {
             continue;
         }
         if let Some(a) = row.autofix.as_ref()
@@ -863,7 +888,7 @@ pub(crate) async fn cancel(
             app.transition(key, event).await?;
             changed = true;
         }
-        changed |= resolve_stopped(app, key, &row.repo).await?;
+        changed |= resolve_stopped(app, key, &row).await?;
     }
     if changed {
         app.emit(Topic::Prs);
@@ -907,7 +932,7 @@ pub(crate) async fn set(app: &AppState, key: &TaskKey, on: bool) -> Result<(), A
         {
             changed |= claim(app, row.id, Some(a), &watching(Some(a))).await?;
         }
-        changed |= resolve_stopped(app, key, &row.repo).await?;
+        changed |= resolve_stopped(app, key, &row).await?;
     }
     if changed {
         app.emit(Topic::Prs);
@@ -919,17 +944,17 @@ pub(crate) async fn set(app: &AppState, key: &TaskKey, on: bool) -> Result<(), A
 /// Tries of the compare-and-set that resets a PR on retry before giving up with a 409.
 const RETRY_TRIES: usize = 3;
 
-/// Sets the PR in `repo` back to watching, re-reading its row for each of `tries`
-/// attempts; false when another write won every one.
+/// Sets the PR `pr_id` back to watching, re-reading its row for each of `tries`
+/// attempts; false when another write won every one or the PR is gone.
 async fn reset_row(
     app: &AppState,
     key: &TaskKey,
-    repo: &str,
+    pr_id: i64,
     tries: usize,
 ) -> Result<bool, ApiError> {
     for _ in 0..tries {
         let rows = app.store.prs_of(key).await?;
-        let Some(row) = rows.iter().find(|r| r.repo == repo) else {
+        let Some(row) = rows.iter().find(|r| r.id == pr_id) else {
             return Ok(false);
         };
         if claim(app, row.id, row.autofix.as_ref(), &PrAutofix::watching()).await? {
@@ -939,38 +964,51 @@ async fn reset_row(
     Ok(false)
 }
 
-/// Retry of the PR in `repo`: attempts and the forwarded sha are reset, its stopped
-/// notice resolved and the current failure evaluated at once. Turns autofix on.
-pub(crate) async fn retry(
+/// Retry of one PR, by `pr` id or else by `repo` (the first counted PR of that repo):
+/// attempts and the forwarded sha are reset, its stopped notice resolved and the current
+/// failure evaluated at once. Its siblings are left alone. Turns autofix on.
+pub(crate) async fn retry_pr(
     app: &AppState,
     key: &TaskKey,
     repo: Option<&str>,
+    pr: Option<i64>,
 ) -> Result<(), ApiError> {
     open_task(app, key).await?;
-    let field = |code: &str, message: &str| {
+    let field = |name: &str, code: &str, message: &str| {
         ApiError::invalid_fields(
             message,
             vec![delilah_core::FieldError {
-                field: "repo".into(),
+                field: name.into(),
                 code: code.into(),
                 message: message.into(),
             }],
         )
     };
-    let Some(repo) = repo.filter(|r| !r.is_empty()) else {
-        return Err(field("required", "retry needs the `repo` of the PR"));
-    };
+    let repo = repo.filter(|r| !r.is_empty());
     let rows = app.store.prs_of(key).await?;
-    if !rows.iter().any(|r| r.repo == repo) {
-        return Err(field("unknown", &format!("{repo} is not a PR of {key}")));
-    }
-    if !reset_row(app, key, repo, RETRY_TRIES).await? {
+    let row = match (pr, repo) {
+        (Some(id), _) => rows
+            .iter()
+            .find(|r| r.id == id)
+            .ok_or_else(|| field("pr", "unknown", &format!("{id} is not a PR of {key}")))?,
+        (None, Some(repo)) => crate::store_prs::counted(&rows)
+            .find(|r| r.repo == repo)
+            .ok_or_else(|| field("repo", "unknown", &format!("{repo} is not a PR of {key}")))?,
+        (None, None) => {
+            return Err(field(
+                "repo",
+                "required",
+                "retry needs the `pr` or the `repo` of the PR",
+            ));
+        }
+    };
+    if !reset_row(app, key, row.id, RETRY_TRIES).await? {
         return Err(ApiError::conflict(
             "autofix state keeps changing, try again",
         ));
     }
     app.store.set_ci_autofix(key, true).await?;
-    resolve_stopped(app, key, repo).await?;
+    resolve_stopped(app, key, row).await?;
     app.emit(Topic::Tasks);
     app.emit(Topic::Prs);
     evaluate(app, key).await;
@@ -999,6 +1037,7 @@ mod tests {
             title: "t".into(),
             head: head.into(),
             base: "main".into(),
+            head_branch: None,
             checks,
             review_decision: None,
             reviews: vec![],
@@ -1310,20 +1349,10 @@ mod tests {
     async fn reset_row_gives_up_when_it_never_wins_the_cas() {
         let (app, key, _dir) = task_with_workspace(gh_heads(&[("abc", "failure")]), None).await;
         pr_loop::check_task(&app, &key, true).await;
-        let repo = app.store.prs_of(&key).await.unwrap().remove(0).repo;
-        assert!(!reset_row(&app, &key, &repo, 0).await.ok().unwrap());
-        assert!(
-            reset_row(&app, &key, &repo, RETRY_TRIES)
-                .await
-                .ok()
-                .unwrap()
-        );
-        assert!(
-            !reset_row(&app, &key, "nowhere", RETRY_TRIES)
-                .await
-                .ok()
-                .unwrap()
-        );
+        let repo = app.store.prs_of(&key).await.unwrap().remove(0).id;
+        assert!(!reset_row(&app, &key, repo, 0).await.ok().unwrap());
+        assert!(reset_row(&app, &key, repo, RETRY_TRIES).await.ok().unwrap());
+        assert!(!reset_row(&app, &key, 9999, RETRY_TRIES).await.ok().unwrap());
     }
 
     fn gh_heads(heads: &[(&str, &str)]) -> Arc<FakeGh> {
@@ -1743,8 +1772,8 @@ mod tests {
         assert!(app.notifier.recorded().is_empty());
         let notices = app.store.open_notices().await.unwrap();
         assert!(notices.iter().any(|n| n.kind == "autofix-stopped"));
-        assert!(resolve_stopped(&app, &key, &row.repo).await.unwrap());
-        assert!(!resolve_stopped(&app, &key, &row.repo).await.unwrap());
+        assert!(resolve_stopped(&app, &key, &row).await.unwrap());
+        assert!(!resolve_stopped(&app, &key, &row).await.unwrap());
     }
 
     fn two_reads(first: &str, second: Result<&str, crate::gh::GhError>) -> Arc<FakeGh> {
@@ -1877,7 +1906,7 @@ mod tests {
         );
         assert_eq!(open(&app).await, 1);
         // Retry: resolved, back to watching with the sha cleared; sent again at abc.
-        assert!(resolve_stopped(&app, &key, &row.repo).await.unwrap());
+        assert!(resolve_stopped(&app, &key, &row).await.unwrap());
         let retried = PrAutofix {
             sha: Some("abc".into()),
             sent_at: Some(Utc::now().to_rfc3339()),
@@ -2013,6 +2042,121 @@ mod tests {
         let (app, key, _dir, _row) = seeded(gh, fixing_since(1, "s-1")).await;
         assert!(!cancel(&app, &key, Some("elsewhere")).await.unwrap());
         assert_eq!(stored(&app, &key).await.state, State::Fixing);
+    }
+
+    /// A task with two PRs in one repo, both `fixing` (first) / `stopped` (second) with
+    /// an `autofix-stopped` notice each. Returns (first, second).
+    async fn two_prs_in_one_repo() -> (AppState, TaskKey, crate::pr_testkit::TempDir, PrRow, PrRow)
+    {
+        let gh = two_reads("abc", Ok(&ci_snapshot("OPEN", "abc", "FAILURE")));
+        let (app, key, dir, first) = seeded(gh, fixing_since(1, "s-1")).await;
+        let second = app
+            .store
+            .link_pr(
+                &key,
+                &crate::store_prs::NewPr {
+                    repo: first.repo.clone(),
+                    host: first.host.clone(),
+                    owner_name: first.owner_name.clone(),
+                    number: first.number + 1,
+                    url: format!("{}-second", first.url),
+                    linked_by: "agent".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let stopped = PrAutofix {
+            state: State::Stopped,
+            reason: Some(StopReason::Limit),
+            ..fixing_since(1, "s-1")
+        };
+        assert!(claim(&app, second.id, None, &stopped).await.unwrap());
+        for row in [&first, &second] {
+            let notice = NewNotice {
+                repo: row.repo.clone(),
+                kind: "autofix-stopped".into(),
+                cause: "abc:limit:x".into(),
+                text: "stopped".into(),
+                detail: None,
+            };
+            app.store
+                .insert_notice_for(&key, &notice, &row.url)
+                .await
+                .unwrap();
+        }
+        (app, key, dir, first, second)
+    }
+
+    async fn open_stopped_notices(app: &AppState) -> Vec<String> {
+        app.store
+            .open_notices()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|n| n.kind == "autofix-stopped")
+            .map(|n| n.pr_url)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn cancel_of_one_pr_leaves_its_sibling_in_the_repo_alone() {
+        let (app, key, _dir, first, second) = two_prs_in_one_repo().await;
+        let fixing = PrAutofix {
+            state: State::Fixing,
+            ..fixing_since(1, "s-1")
+        };
+        let second_row = app.store.pr(second.id).await.unwrap().unwrap();
+        assert!(
+            claim(&app, second.id, second_row.autofix.as_ref(), &fixing)
+                .await
+                .unwrap()
+        );
+        assert!(cancel_pr(&app, &key, second.id).await.unwrap());
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_eq!(rows[0].autofix.as_ref().unwrap().state, State::Fixing);
+        assert_eq!(rows[1].autofix.as_ref().unwrap().state, State::Watching);
+        assert_eq!(
+            open_stopped_notices(&app).await,
+            std::slice::from_ref(&first.url)
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_by_pr_id_resets_only_that_pr() {
+        let (app, key, _dir, first, second) = two_prs_in_one_repo().await;
+        assert!(retry_pr(&app, &key, None, Some(second.id)).await.is_ok());
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_eq!(rows[0].autofix.as_ref().unwrap().state, State::Fixing);
+        assert_ne!(rows[1].autofix.as_ref().unwrap().state, State::Stopped);
+        assert_eq!(
+            open_stopped_notices(&app).await,
+            std::slice::from_ref(&first.url)
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_by_repo_alone_picks_the_first_counted_pr_of_the_repo() {
+        let (app, key, _dir, first, second) = two_prs_in_one_repo().await;
+        // The first PR was replaced by the second: it is not counted any more.
+        sqlx::query("UPDATE pull_requests SET replaced_by = ? WHERE id = ?")
+            .bind(second.id)
+            .bind(first.id)
+            .execute(&app.store.pool)
+            .await
+            .unwrap();
+        assert!(retry_pr(&app, &key, Some(&second.repo), None).await.is_ok());
+        assert_eq!(
+            open_stopped_notices(&app).await,
+            std::slice::from_ref(&first.url)
+        );
+        let rows = app.store.prs_of(&key).await.unwrap();
+        assert_ne!(rows[1].autofix.as_ref().unwrap().state, State::Stopped);
+    }
+
+    #[tokio::test]
+    async fn retry_of_a_pr_that_is_not_the_tasks_is_unknown() {
+        let (app, key, _dir, _first, _second) = two_prs_in_one_repo().await;
+        assert!(retry_pr(&app, &key, None, Some(9999)).await.is_err());
     }
 
     #[tokio::test]

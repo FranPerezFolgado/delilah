@@ -22,10 +22,11 @@ use crate::store::StoreError;
 use crate::store_prs::{NewNotice, PrRow};
 
 /// Whether the task's PRs are all merged: it has some, and none is open, closed
-/// unmerged or not read yet (FR-017, FR-039).
+/// unmerged or not read yet (FR-017, FR-039). A PR replaced by a newer one does not count.
 pub(super) fn all_merged(rows: &[PrRow]) -> bool {
-    !rows.is_empty()
-        && rows.iter().all(|r| {
+    let mut counted = crate::store_prs::counted(rows).peekable();
+    counted.peek().is_some()
+        && counted.all(|r| {
             r.snapshot
                 .as_ref()
                 .is_some_and(|s| s.state == PrState::Merged)
@@ -202,7 +203,7 @@ async fn notice_for(
     text: String,
 ) -> Result<bool, StoreError> {
     app.store
-        .insert_notice(
+        .insert_task_notice(
             key,
             &NewNotice {
                 repo: ".".into(),
@@ -213,6 +214,31 @@ async fn notice_for(
             },
         )
         .await
+}
+
+/// The head to check per repo of the workspace (`labels`, see `Workspace::pr_repos`): that
+/// of the highest-id merged PR from the task's `branch` (FR-013). PRs of other branches
+/// or of repos outside the workspace say nothing about the local branches; a snapshot
+/// without its head branch counts.
+fn archive_heads(rows: &[PrRow], labels: &[String], branch: &str) -> HashMap<String, String> {
+    let mut best: HashMap<&str, &PrRow> = HashMap::new();
+    for r in crate::store_prs::counted(rows) {
+        let Some(s) = r.snapshot.as_ref() else {
+            continue;
+        };
+        if s.state != PrState::Merged
+            || !labels.contains(&r.repo)
+            || s.head_branch.as_deref().is_some_and(|b| b != branch)
+        {
+            continue;
+        }
+        if best.get(r.repo.as_str()).is_none_or(|b| b.id < r.id) {
+            best.insert(&r.repo, r);
+        }
+    }
+    best.into_iter()
+        .filter_map(|(l, r)| Some((l.to_string(), r.snapshot.as_ref()?.head.clone())))
+        .collect()
 }
 
 /// Checks that nothing of the task's would be lost, then archives its workspace and
@@ -226,10 +252,8 @@ async fn release(
     let opts = GitOptions {
         allow_file_protocol: app.config.allow_file_protocol,
     };
-    let heads: HashMap<String, String> = rows
-        .iter()
-        .filter_map(|r| Some((r.repo.clone(), r.snapshot.as_ref()?.head.clone())))
-        .collect();
+    let labels: Vec<String> = ws.pr_repos(&opts).into_iter().map(|(l, _)| l).collect();
+    let heads = archive_heads(rows, &labels, &ws.branch);
     if let Some((repo, head)) = heads.iter().find(|(_, h)| !delilah_git::is_sha(h)) {
         return Verdict::Blocked(format!("the PR of {repo} has no valid head ({head:?})"));
     }
@@ -260,7 +284,8 @@ fn verify(
     heads: &HashMap<String, String>,
     opts: &GitOptions,
 ) -> Result<HashMap<String, String>, String> {
-    let repos = ws.repos();
+    // The parent's own repo too when it has the branch: its branch is deleted as well.
+    let repos = ws.pr_repos(opts);
     // All the fetches together, like a task's start.
     let deadline = delilah_git::Deadline::after(delilah_git::NETWORK_LIMIT);
     for (label, dir) in &repos {
@@ -302,7 +327,7 @@ async fn notice(
     detail: Option<serde_json::Value>,
 ) -> Result<bool, StoreError> {
     app.store
-        .insert_notice(
+        .insert_task_notice(
             key,
             &NewNotice {
                 repo: ".".into(),
@@ -358,6 +383,139 @@ mod tests {
 
     const BRANCH: &str = "feature/PROJ-1";
 
+    #[test]
+    fn a_closed_pr_replaced_by_a_merged_one_does_not_block_all_merged() {
+        let row = |id: i64, state: PrState, replaced_by: Option<i64>| PrRow {
+            id,
+            task_key: "PROJ-1".into(),
+            repo: ".".into(),
+            host: "github.com".into(),
+            owner_name: "me/repo".into(),
+            number: id,
+            url: format!("https://github.com/me/repo/pull/{id}"),
+            linked_by: "detected".into(),
+            snapshot: Some(crate::prs::tests::snapshot(state, vec![])),
+            marks: Default::default(),
+            checked_at: None,
+            error: None,
+            error_kind: None,
+            created_at: chrono::Utc::now(),
+            autofix: None,
+            replaced_by,
+        };
+        let rows = [
+            row(1, PrState::Closed, Some(2)),
+            row(2, PrState::Merged, None),
+        ];
+        assert!(all_merged(&rows));
+        assert!(!all_merged(
+            &rows[..1]
+                .iter()
+                .cloned()
+                .map(|mut r| {
+                    r.replaced_by = None;
+                    r
+                })
+                .collect::<Vec<_>>()
+        ));
+        assert!(!all_merged(&[row(1, PrState::Closed, Some(2))]));
+    }
+
+    fn pr_row(
+        id: i64,
+        repo: &str,
+        state: PrState,
+        head: &str,
+        head_branch: Option<&str>,
+        replaced_by: Option<i64>,
+    ) -> PrRow {
+        let mut snapshot = crate::prs::tests::snapshot(state, vec![]);
+        snapshot.head = head.into();
+        snapshot.head_branch = head_branch.map(Into::into);
+        PrRow {
+            id,
+            task_key: "PROJ-1".into(),
+            repo: repo.into(),
+            host: "github.com".into(),
+            owner_name: "me/repo".into(),
+            number: id,
+            url: format!("https://github.com/me/repo/pull/{id}"),
+            linked_by: "detected".into(),
+            snapshot: Some(snapshot),
+            marks: Default::default(),
+            checked_at: None,
+            error: None,
+            error_kind: None,
+            created_at: chrono::Utc::now(),
+            autofix: None,
+            replaced_by,
+        }
+    }
+
+    fn labels(l: &[&str]) -> Vec<String> {
+        l.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn all_merged_needs_every_counted_pr_merged_and_at_least_one() {
+        let merged = |id| pr_row(id, ".", PrState::Merged, "a", None, None);
+        let open = |id| pr_row(id, "svc", PrState::Open, "b", None, None);
+        assert!(!all_merged(&[]));
+        assert!(!all_merged(&[merged(1), open(2)]));
+        assert!(all_merged(&[merged(1), merged(2)]));
+        let closed = pr_row(3, "svc", PrState::Closed, "c", None, None);
+        assert!(!all_merged(&[merged(1), closed.clone()]));
+        let mut replaced = closed;
+        replaced.replaced_by = Some(2);
+        assert!(all_merged(&[merged(1), replaced]));
+    }
+
+    #[test]
+    fn heads_come_from_merged_task_branch_prs_of_the_workspace_repos() {
+        let rows = [
+            pr_row(1, "svc-a", PrState::Merged, "aaa", Some(BRANCH), None),
+            // Not merged, from another branch, and outside the workspace: nothing.
+            pr_row(2, "svc-b", PrState::Open, "bbb", Some(BRANCH), None),
+            pr_row(3, ".", PrState::Merged, "ccc", Some("other"), None),
+            pr_row(
+                4,
+                "github.com/x/y",
+                PrState::Merged,
+                "ddd",
+                Some(BRANCH),
+                None,
+            ),
+            // Snapshot without the head branch: counts.
+            pr_row(5, "svc-c", PrState::Merged, "eee", None, None),
+        ];
+        let heads = archive_heads(&rows, &labels(&["svc-a", "svc-b", "svc-c", "."]), BRANCH);
+        assert_eq!(
+            heads,
+            HashMap::from([
+                ("svc-a".to_string(), "aaa".to_string()),
+                ("svc-c".to_string(), "eee".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_merged_parent_pr_gives_the_parent_a_head_and_none_gives_it_nothing() {
+        let with = [pr_row(1, ".", PrState::Merged, "ppp", Some(BRANCH), None)];
+        let l = labels(&["svc-a", "."]);
+        assert_eq!(archive_heads(&with, &l, BRANCH)["."], "ppp");
+        assert!(archive_heads(&[], &l, BRANCH).is_empty());
+    }
+
+    #[test]
+    fn the_highest_id_of_a_label_gives_the_head() {
+        let rows = [
+            pr_row(7, "svc-a", PrState::Merged, "new", Some(BRANCH), None),
+            pr_row(3, "svc-a", PrState::Merged, "old", Some(BRANCH), None),
+        ];
+        let heads = archive_heads(&rows, &labels(&["svc-a"]), BRANCH);
+        assert_eq!(heads["svc-a"], "new");
+    }
+
     fn git(dir: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
             .args(["-c", "user.name=t", "-c", "user.email=t@t"])
@@ -410,6 +568,11 @@ mod tests {
         git(dir, &["rev-parse", "HEAD"])
     }
 
+    /// The fake snapshots come from `feat/x`; these PRs come from the task's branch.
+    fn on_task_branch(snapshot: String) -> String {
+        snapshot.replace("feat/x", BRANCH)
+    }
+
     fn merged_gh(head: &str, state: &str) -> Arc<FakeGh> {
         Arc::new(
             FakeGh::new()
@@ -417,7 +580,7 @@ mod tests {
                 .on(&["pr", "list"], Ok(PR_LIST))
                 .on(
                     &["api", "graphql"],
-                    Ok(&ci_snapshot(state, head, "SUCCESS")),
+                    Ok(&on_task_branch(ci_snapshot(state, head, "SUCCESS"))),
                 ),
         )
     }
@@ -678,7 +841,7 @@ mod tests {
                 ("api", "graphql") => {
                     let name = args.iter().find_map(|a| a.strip_prefix("name=")).unwrap();
                     let (_, state, head) = &prs[name];
-                    Ok(ci_snapshot(state, head, "SUCCESS"))
+                    Ok(on_task_branch(ci_snapshot(state, head, "SUCCESS")))
                 }
                 _ => Err(GhError::Failed {
                     code: None,
