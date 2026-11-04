@@ -471,18 +471,35 @@ pub async fn answer(
     {
         live.set_state(LiveState::Working);
     }
+    // Remembered before the agent has the answer: its next identical command can arrive
+    // before this returns and must find the rule. If the reply fails it is taken back.
+    let remembered = match (&ask.rule, body.decision == "allow_always") {
+        (Some(rule), true) => {
+            let key = TaskKey::new(&ask.task);
+            let was_there = matches!(
+                app.store.get_task(&key).await,
+                Ok(Some(t)) if t.allowed_tools.iter().any(|r| r == rule)
+            );
+            match app.store.add_allowed_tool(&key, rule).await {
+                Ok(_) => Some((rule, !was_there)),
+                Err(e) => {
+                    tracing::warn!(task = %ask.task, "cannot remember the rule `{rule}`: {e}");
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
     let result = reply(&app, &session, &ask.request_id, decision).await;
-    // Remembered only once the agent has the answer.
-    if result.is_ok()
-        && body.decision == "allow_always"
-        && let Some(rule) = &ask.rule
-    {
-        if let Err(e) = app
-            .store
-            .add_allowed_tool(&TaskKey::new(&ask.task), rule)
-            .await
+    if let Some((rule, added)) = remembered {
+        if result.is_err()
+            && added
+            && let Err(e) = app
+                .store
+                .remove_allowed_tool(&TaskKey::new(&ask.task), rule)
+                .await
         {
-            tracing::warn!(task = %ask.task, "cannot remember the rule `{rule}`: {e}");
+            tracing::warn!(task = %ask.task, "cannot take back the rule `{rule}`: {e}");
         }
         app.emit(Topic::Tasks);
     }
