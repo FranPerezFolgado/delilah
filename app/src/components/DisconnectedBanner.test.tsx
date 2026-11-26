@@ -9,7 +9,7 @@ afterEach(cleanup);
 
 it("says it is retrying, how to start it, and retries on click", () => {
   const onRetry = vi.fn();
-  render(<DisconnectedBanner lastOk={null} onRetry={onRetry} />);
+  render(<DisconnectedBanner lastOk={null} onRetry={onRetry} onClose={() => {}} />);
   expect(screen.getByRole("alert").textContent).toContain("Sin conexión con delilahd · reintentando…");
   expect(screen.getByRole("alert").textContent).toContain("delilahd");
   expect(document.body.textContent).not.toContain("Datos de");
@@ -17,6 +17,14 @@ it("says it is retrying, how to start it, and retries on click", () => {
   expect(onRetry).toHaveBeenCalled();
 });
 it("shows how old the data is", () => {
-  render(<DisconnectedBanner lastOk={Date.now() - 4 * 60_000} onRetry={() => {}} />);
+  render(<DisconnectedBanner lastOk={Date.now() - 4 * 60_000} onRetry={() => {}} onClose={() => {}} />);
   expect(screen.getByRole("alert").textContent).toMatch(/Datos de hace 4 min/);
+});
+it("has the shared close button and calls onClose", () => {
+  const onClose = vi.fn();
+  render(<DisconnectedBanner lastOk={null} onRetry={() => {}} onClose={onClose} />);
+  const x = screen.getByRole("button", { name: "Cerrar" });
+  expect(x.classList.contains("ntc-x")).toBe(true);
+  fireEvent.click(x);
+  expect(onClose).toHaveBeenCalledTimes(1);
 });

@@ -16,7 +16,7 @@ import { TreeResizer } from "./TreeResizer";
 import { FileTree } from "./FileTree";
 import { Markdown } from "./Markdown";
 import { QuickOpen } from "./QuickOpen";
-import { Icon, IconButton, useToast } from "./ui";
+import { Icon, IconButton, Notice, useDismissals, useToast } from "./ui";
 import { SessionChain } from "./SessionChain";
 import { SessionViewSwitch } from "./SessionViewSwitch";
 import { TaskHeader } from "./TaskHeader";
@@ -120,10 +120,14 @@ function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: 
   };
 
   const behind = status?.behind_by ?? 0;
+  const idOf = (n: InboxItem, i: number) => (n.notice != null ? String(n.notice) : `local:${i}:${n.text}`);
+  const { hidden, dismiss } = useDismissals(Object.fromEntries(notices.map((n, i) => [idOf(n, i), n.text ?? ""])));
+  const close = (n: InboxItem, id: string) => (n.notice != null ? api.dismissNotice(n.notice).then(onChanged, () => {}) : dismiss(id));
+  const visible = notices.map((n, i) => ({ n, id: idOf(n, i) })).filter(({ id }) => !hidden(id));
   return (
     <>
-      {notices.map((n, i) => (
-        <div key={n.notice} className="ts-bar base-stale">
+      {visible.map(({ n, id }, i) => (
+        <Notice key={id} className="ts-bar base-stale" onClose={() => close(n, id)}>
           <span className="ts-grow">{n.text}</span>
           {i === 0 && behind > 0 && (
             <>
@@ -137,12 +141,7 @@ function BaseStaleBars({ owner, notices, onChanged }: { owner: string; notices: 
               </button>
             </>
           )}
-          {n.notice != null && (
-            <button className="btn btn-ghost" onClick={() => api.dismissNotice(n.notice!).then(onChanged, () => {})}>
-              {t("Descartar")}
-            </button>
-          )}
-        </div>
+        </Notice>
       ))}
     </>
   );

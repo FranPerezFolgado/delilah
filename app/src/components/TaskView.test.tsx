@@ -310,3 +310,55 @@ describe("failed task", () => {
     expect(resume).toHaveBeenCalledWith("PROJ-1");
   });
 });
+
+describe("closable notices", () => {
+  const view = (tk: Task, asks?: InboxItem[]) => (
+    <TaskView task={tk} sessions={[session()]} asks={asks} onOpenSession={noop} onNewSession={async () => {}} onChanged={noop} onViewChanges={noop} />
+  );
+  const closeBtns = (c: HTMLElement) => c.querySelectorAll(".tv-notice .ntc-x");
+  const closeFirst = (c: HTMLElement) => fireEvent.click(c.querySelector<HTMLElement>(".tv-notice .ntc-x")!);
+  const limit = (at: string): Task => ({ ...running, status: { type: "paused-by-limit", resume_at: at } as Task["status"] });
+  const failedTask = (reason: string): Task => ({ ...running, status: { type: "failed", reason } });
+  const waiting: Task = { ...running, status: { type: "waiting-for-user" } as Task["status"] };
+  const review: Task = { ...running, phase: "review" };
+
+  it("paused-by-limit: has the X, hides on click with no API call, shows again with a new resume_at", () => {
+    const { container, rerender, getByText } = render(view(limit("2026-01-01T10:00:00Z")));
+    expect(closeBtns(container)).toHaveLength(1);
+    expect(getByText("Resume now")).toBeTruthy();
+    closeFirst(container);
+    expect(container.querySelector(".tv-pause")).toBeNull();
+    expect(resume).not.toHaveBeenCalled();
+    rerender(view(limit("2026-01-01T11:00:00Z")));
+    expect(container.querySelector(".tv-pause")).not.toBeNull();
+  });
+
+  it("failed: hides on click, shows again with a new reason", () => {
+    const { container, rerender, getByText } = render(view(failedTask("boom")));
+    expect(getByText("Resume")).toBeTruthy();
+    closeFirst(container);
+    expect(container.querySelector(".tv-err")).toBeNull();
+    expect(resume).not.toHaveBeenCalled();
+    rerender(view(failedTask("other")));
+    expect(container.querySelector(".tv-err")).not.toBeNull();
+  });
+
+  it("waiting-for-user: hides on click, shows again after the status changes away and back", () => {
+    const { container, rerender } = render(view(waiting));
+    closeFirst(container);
+    expect(container.querySelector(".tv-wait")).toBeNull();
+    rerender(view(running));
+    rerender(view(waiting));
+    expect(container.querySelector(".tv-wait")).not.toBeNull();
+  });
+
+  it("review: hides on click, shows again after leaving the review", () => {
+    const { container, rerender } = render(view(review));
+    expect(closeBtns(container)).toHaveLength(1);
+    closeFirst(container);
+    expect(container.querySelectorAll(".tv-notice")).toHaveLength(0);
+    rerender(view(running));
+    rerender(view(review));
+    expect(container.querySelectorAll(".tv-notice")).toHaveLength(1);
+  });
+});

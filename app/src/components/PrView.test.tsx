@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { api, ApiError, type PullRequest, type Task, type TaskPrs } from "../api";
 import * as platform from "../platform";
@@ -415,5 +415,69 @@ describe("PrView", () => {
     expect(cards[0].textContent).toContain("replaced");
     expect(cards[1].classList.contains("pr-replaced")).toBe(false);
     expect(cards[1].textContent).not.toContain("replaced");
+  });
+
+  describe("dismissable notices", () => {
+    beforeEach(() => {
+      vi.spyOn(api, "refreshPrs").mockResolvedValue(null);
+    });
+    const closeIn = (el: Element | null) => within(el as HTMLElement).getByRole("button", { name: /Close|Cerrar/ });
+    const parentTask = {
+      key: "PROJ-1", title: "Big", status: { type: "running" }, kind: "parent_task",
+      subtask_progress: { merged: 2, counted: 2, dropped: 0, ready: true },
+    } as unknown as Task;
+
+    it("the problem notice hides on X without an API call, keeps its buttons, and returns for another kind", async () => {
+      const taskPrs = vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [], problem: { kind: "signed-out", message: "x" } }));
+      const refresh = vi.mocked(api.refreshPrs);
+      const { findByText, getByText, container, queryByText } = render(<PrView owner="PROJ-1" onOpenTerminal={() => {}} />);
+      await findByText("Run gh auth login");
+      expect(getByText("Retry")).toBeTruthy();
+      expect(getByText("Open a terminal")).toBeTruthy();
+      const calls = taskPrs.mock.calls.length;
+      fireEvent.click(closeIn(container.querySelector(".pr-problem")));
+      expect(container.querySelector(".pr-problem")).toBeNull();
+      expect(taskPrs.mock.calls.length).toBe(calls);
+      expect(refresh).not.toHaveBeenCalled();
+      taskPrs.mockResolvedValue(data({ prs: [], problem: { kind: "missing", message: "x" } }));
+      fireEvent.click(getByText("Reload"));
+      await waitFor(() => expect(container.querySelector(".pr-problem")?.textContent).toContain("Install gh"));
+      expect(queryByText("Retry")).toBeTruthy();
+    });
+
+    it("the subtask-commits warning hides on X and returns for another count", async () => {
+      vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [] }));
+      vi.spyOn(api, "prProposal").mockRejectedValue(new ApiError("nothing", 409, false, "no-commits"));
+      const base = vi.spyOn(api, "baseStatus").mockResolvedValue({ base: "origin/main", behind_by: 0, subtask_commits: 3 });
+      const { findByText, container, rerender } = render(<PrView owner="PROJ-1" task={parentTask} />);
+      const warn = await findByText(/3 merged subtask commits/);
+      fireEvent.click(closeIn(warn.closest(".pr-base-warning")));
+      expect(container.querySelector(".pr-base-warning")).toBeNull();
+      base.mockResolvedValue({ base: "origin/main", behind_by: 0, subtask_commits: 4 });
+      rerender(<PrView owner="PROJ-2" task={parentTask} />);
+      await findByText(/4 merged subtask commits/);
+    });
+
+    it("the wrong-base warning and the ready hint hide per PR on X and return when their data changes", async () => {
+      const draft = { ...pr, snapshot: { ...pr.snapshot!, draft: true, ci: "success", merge_methods: ["merge"] }, base_branch: "main", expected_base: "feat/parent" } as PullRequest;
+      const taskPrs = vi.spyOn(api, "taskPrs").mockResolvedValue(data({ prs: [draft] }));
+      vi.spyOn(api, "prProposal").mockRejectedValue(new ApiError("nothing", 409, false, "no-commits"));
+      vi.spyOn(api, "baseStatus").mockResolvedValue({ base: "origin/main", behind_by: 0 });
+      const ready = vi.spyOn(api, "markReady").mockResolvedValue(draft);
+      const { findByText, container, getByText } = render(<PrView owner="PROJ-1" task={parentTask} />);
+      await findByText(/This PR targets main/);
+      expect(getByText("Mark ready")).toBeTruthy();
+      fireEvent.click(closeIn(container.querySelector(".pr-base-warning")));
+      expect(container.querySelector(".pr-base-warning")).toBeNull();
+      expect(container.querySelector(".pr-ready-hint")).not.toBeNull();
+      fireEvent.click(closeIn(container.querySelector(".pr-ready-hint")));
+      expect(container.querySelector(".pr-ready-hint")).toBeNull();
+      expect(ready).not.toHaveBeenCalled();
+      // A different base brings the warning back; the hint stays hidden.
+      taskPrs.mockResolvedValue(data({ prs: [{ ...draft, base_branch: "develop" }] }));
+      fireEvent.click(getByText("Reload"));
+      await findByText(/This PR targets develop/);
+      expect(container.querySelector(".pr-ready-hint")).toBeNull();
+    });
   });
 });

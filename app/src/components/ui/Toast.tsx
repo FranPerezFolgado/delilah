@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
+import { CloseButton } from "./Notice";
 import "./Toast.css";
 
 export interface ToastInput {
@@ -190,9 +191,7 @@ function ToastView({ item }: { item: ToastItem }) {
           {item.action.label}
         </button>
       )}
-      <button type="button" className="btn btn-ghost" aria-label={t("Cerrar")} onClick={() => closeToast(item.id)}>
-        ×
-      </button>
+      <CloseButton onClick={() => closeToast(item.id)} />
     </div>
   );
 }

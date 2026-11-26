@@ -1,18 +1,19 @@
 import { relativeTime } from "../time";
 import { t } from "../i18n";
-import { Button } from "./ui";
+import { Button, Notice } from "./ui";
 import "./DisconnectedBanner.css";
 
 export interface DisconnectedBannerProps {
   /** Epoch ms of the last successful request, or null if none yet. */
   lastOk: number | null;
   onRetry: () => void;
+  onClose: () => void;
 }
 
 /** Shown over the main area while delilahd is unreachable; the shell greys the content and disables actions. */
-export function DisconnectedBanner({ lastOk, onRetry }: DisconnectedBannerProps) {
+export function DisconnectedBanner({ lastOk, onRetry, onClose }: DisconnectedBannerProps) {
   return (
-    <div className="dcb" role="alert">
+    <Notice className="dcb" role="alert" onClose={onClose}>
       <span className="dot dcb-dot" />
       <div className="dcb-text">
         <strong>{t("Sin conexión con delilahd · reintentando…")}</strong>
@@ -22,6 +23,6 @@ export function DisconnectedBanner({ lastOk, onRetry }: DisconnectedBannerProps)
         </span>
       </div>
       <Button variant="primary" size={28} onClick={onRetry}>{t("Reintentar ahora")}</Button>
-    </div>
+    </Notice>
   );
 }

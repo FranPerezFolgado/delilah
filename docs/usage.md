@@ -406,6 +406,18 @@ click expands the stack and the button becomes "Hide notices". "Close all" shows
 is more than one toast, collapsed or expanded. Timers pause while it is expanded. Info toasts
 last 6 s; errors and the waiting toast stay until closed.
 
+**Closing notifications.** Every notification in the app has an X: the toasts, the bars above
+the views (usage, paused autopilot, update, disconnected), the base-stale, setup, status, Jira
+and PR notices on the task screen. Usually the X only hides it. Where there is a matching
+action it does that: on a toast it closes the toast, on the update notice it dismisses the
+"up to date", error, available or confirm state, and on a base-stale bar it does what
+"Discard" did. A closed bar comes back when what it reports changes (a different status, a
+new count of Jira sub-tasks, another PR problem). Closing is kept in memory only: it can reset
+when you reopen the screen, and on restart. While the daemon is offline the global bars are
+not reachable; the disconnected banner has an X, but the screen stays greyed and the status
+bar still shows the lost connection. Inbox cards keep their own buttons and native
+notifications are not affected.
+
 **Pull requests.** Delilah uses your own `gh` (signed in as you; it stores no
 token) and checks every 30 s. Every PR a task opens is tracked, one card each: those of
 the task's branch (per submodule, and the parent repo itself, for a parent), several in

@@ -123,6 +123,39 @@ describe("SetupBanner", () => {
     expect(isSetupRunning([s("setup", false)])).toBe(false);
   });
 
+  it("has the X on the failed and running banners; it hides without calling any action", async () => {
+    vi.spyOn(api, "setupInfo").mockResolvedValue(info);
+    const retry = vi.spyOn(api, "setupRetry").mockResolvedValue(failed);
+    const skip = vi.spyOn(api, "setupSkip").mockResolvedValue(failed);
+    const cancel = vi.spyOn(api, "setupCancel").mockResolvedValue(failed);
+    const f = render(<SetupBanner task={failed} running={false} onChanged={() => {}} />);
+    expect(f.container.querySelectorAll(".ntc-x")).toHaveLength(1);
+    fireEvent.click(f.getByRole("button", { name: "Cerrar" }));
+    expect(f.container.innerHTML).toBe("");
+    cleanup();
+    const r = render(<SetupBanner task={task({ type: "preparing-workspace" })} running onChanged={() => {}} />);
+    expect(r.getByText("Cancelar setup")).toBeTruthy();
+    fireEvent.click(r.getByRole("button", { name: "Cerrar" }));
+    expect(r.container.innerHTML).toBe("");
+    expect(retry).not.toHaveBeenCalled();
+    expect(skip).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("shows again when it goes from running to failed", () => {
+    vi.spyOn(api, "setupInfo").mockRejectedValue(new ApiError("none", 404));
+    const running = task({ type: "preparing-workspace" });
+    const { container, getByRole, rerender } = render(<SetupBanner task={running} running onChanged={() => {}} />);
+    fireEvent.click(getByRole("button", { name: "Cerrar" }));
+    expect(container.innerHTML).toBe("");
+    rerender(<SetupBanner task={failed} running={false} onChanged={() => {}} />);
+    expect(container.querySelector(".setup-panel")).not.toBeNull();
+    fireEvent.click(getByRole("button", { name: "Cerrar" }));
+    rerender(<SetupBanner task={task({ type: "running" })} running={false} onChanged={() => {}} />);
+    rerender(<SetupBanner task={failed} running={false} onChanged={() => {}} />);
+    expect(container.querySelector(".setup-panel")).not.toBeNull();
+  });
+
   it("renders nothing otherwise", () => {
     const { container } = render(<SetupBanner task={task({ type: "running" })} running={false} onChanged={() => {}} />);
     expect(container.innerHTML).toBe("");

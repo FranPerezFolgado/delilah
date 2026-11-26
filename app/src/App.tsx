@@ -22,7 +22,7 @@ import { UpdateNotice } from "./components/UpdateNotice";
 import { useUpdates } from "./useUpdates";
 import { canUpdate } from "./platform";
 import { StatusBar, type StatusFilter } from "./components/StatusBar";
-import { pushToast, ToastHost } from "./components/ui";
+import { pushToast, ToastHost, useDismissal } from "./components/ui";
 import { useBreakpoints } from "./useWidth";
 import "./App.css";
 import { DisconnectedBanner } from "./components/DisconnectedBanner";
@@ -345,6 +345,7 @@ export function App() {
     crumbs.push({ text: VIEW_LABEL[view]() });
   }
   const offline = conn.status === "down";
+  const [bannerHidden, closeBanner] = useDismissal(offline ? "offline" : null);
 
   return (
     <div className="window">
@@ -399,9 +400,9 @@ export function App() {
           waiting={inbox.filter((i) => BLOCKING.includes(i.kind)).length}
         />
         <main className="shell-main">
-          {offline && (
+          {offline && !bannerHidden && (
             <div className="shell-banner">
-              <DisconnectedBanner lastOk={conn.lastOk} onRetry={conn.retry} />
+              <DisconnectedBanner lastOk={conn.lastOk} onRetry={conn.retry} onClose={closeBanner} />
             </div>
           )}
           <div className={`shell-content${offline ? " is-offline" : ""}`} aria-disabled={offline || undefined} {...(offline ? { inert: true } : {})}>

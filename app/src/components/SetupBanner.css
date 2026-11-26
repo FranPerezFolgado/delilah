@@ -8,3 +8,7 @@
 
 /* Moved from the pre-v2 stylesheet. */
 .setup-reason { margin: 6px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 12px; padding: 8px; border-radius: 7px; border: 1px solid var(--bd); }
+
+/* The shared X sits top-right instead of on its own row under the column layout. */
+.setup-panel { position: relative; padding-right: 44px; }
+.setup-panel > .ntc-x { position: absolute; top: 8px; right: 8px; margin-left: 0; }

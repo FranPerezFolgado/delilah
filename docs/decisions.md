@@ -966,3 +966,17 @@ one-way:* it rebuilds both tables and cannot be undone by an older binary, so a 
 is advised before upgrading (the daemon also copies the database to `backups/` after a version
 change). *Ruled out:* keeping one row per repo with a list of URLs. See the
 [spec](../specs/015-multiple-prs/spec.md).
+
+**107. Every notification has an X, closed on the client (2026-11-26).** All notifications in
+the web UI (toasts, global bars, task-screen bars, notices) show the same close button.
+*What changed:* a shared `Notice` and `CloseButton`, and a `useDismissals` hook that keeps a
+signature of what the notice reports, in memory; a closed notice returns when its signature
+changes. The X maps to the existing close-like action where there is one (toast close, update
+dismissal, base-stale `api.dismissNotice`); otherwise it only hides. The disconnected banner is
+included, its content still inert (the app stays greyed and the status bar keeps showing the
+loss). *Excluded:* Inbox ask and permission cards (they are work to answer) and native
+notifications. *Known limits:* global bars are not reachable while offline; an A to B to A
+change within one React batch is not observed; the `keeps` bar in `TaskView` is not in the
+inventory and keeps its own button. *Ruled out:* storing dismissals in the daemon or
+localStorage (no need, and a stale hide would hide a real problem). See the
+[spec](../specs/016-notification-close-button/spec.md).

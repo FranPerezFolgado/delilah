@@ -49,7 +49,7 @@ describe("UpdateNotice", () => {
     expect(screen.getByText("No se pudo actualizar: sin red")).toBeTruthy();
     fireEvent.click(screen.getByText("Reintentar"));
     expect(dispatch).toHaveBeenCalledWith({ type: "retry" });
-    fireEvent.click(screen.getByText("Cerrar"));
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "close" });
   });
 
@@ -96,5 +96,57 @@ describe("UpdateNotice", () => {
     const { dispatch } = setup({ kind: "error", reason: "sin red", manual: true });
     fireEvent.click(screen.getByText("Reintentar"));
     expect(dispatch).toHaveBeenCalledWith({ type: "retry" });
+  });
+
+  const X = () => screen.getByRole("button", { name: "Cerrar" });
+
+  it("upToDate: the X dispatches close and no text Cerrar button remains", () => {
+    const { dispatch } = setup({ kind: "upToDate", manual: true });
+    expect(screen.getAllByRole("button", { name: "Cerrar" })).toHaveLength(1);
+    expect(X().className).toContain("ntc-x");
+    fireEvent.click(X());
+    expect(dispatch).toHaveBeenCalledWith({ type: "close" });
+  });
+
+  it("error: only the icon X is named Cerrar", () => {
+    setup({ kind: "error", reason: "x", manual: true, version: "1.2.0" });
+    expect(screen.getAllByRole("button", { name: "Cerrar" })).toHaveLength(1);
+  });
+
+  it("available: the X dispatches later and Más tarde stays", () => {
+    const { dispatch } = setup({ kind: "available", version: "1.2.0", notes: "" });
+    expect(screen.getByText("Más tarde")).toBeTruthy();
+    fireEvent.click(X());
+    expect(dispatch).toHaveBeenCalledWith({ type: "later" });
+  });
+
+  it("confirmSessions: the X dispatches cancel and Cancelar stays", () => {
+    const { dispatch } = setup({ kind: "confirmSessions", version: "1.2.0", notes: "", running: 2 });
+    expect(screen.getByText("Cancelar")).toBeTruthy();
+    fireEvent.click(X());
+    expect(dispatch).toHaveBeenCalledWith({ type: "cancel" });
+  });
+
+  it.each<[string, UpdateState, string]>([
+    ["checking", { kind: "checking", manual: true }, "Buscando actualizaciones…"],
+    ["downloading", { kind: "downloading", version: "1.2.0", received: 1, total: 10 }, "Descargando… 10%"],
+    ["installing", { kind: "installing", version: "1.2.0" }, "Instalando y reiniciando…"],
+    ["waiting", { kind: "waiting", version: "1.2.0", notes: "", running: 1 }, "Se actualizará cuando termine 1 sesión"],
+  ])("%s: the X hides the bar without dispatching", (_k, state, text) => {
+    const { dispatch } = setup(state);
+    expect(screen.getByText(text)).toBeTruthy();
+    fireEvent.click(X());
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(screen.queryByText(text)).toBeNull();
+  });
+
+  it("stays hidden on a progress update and returns on another kind", () => {
+    const dispatch = vi.fn();
+    const { rerender } = render(<UpdateNotice state={{ kind: "downloading", version: "1.2.0", received: 1, total: 10 }} dispatch={dispatch} />);
+    fireEvent.click(X());
+    rerender(<UpdateNotice state={{ kind: "downloading", version: "1.2.0", received: 5, total: 10 }} dispatch={dispatch} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender(<UpdateNotice state={{ kind: "installing", version: "1.2.0" }} dispatch={dispatch} />);
+    expect(screen.getByText("Instalando y reiniciando…")).toBeTruthy();
   });
 });

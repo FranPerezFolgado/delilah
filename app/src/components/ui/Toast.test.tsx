@@ -2,6 +2,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { setLanguage } from "../../i18n";
 import { ToastHost, useToast, clearToasts, pushToast, dismissToast, dismissToastByKey } from "./Toast";
 
 const MORE = /Mostrar 2 avisos más|Show 2 more notices/;
@@ -27,7 +28,10 @@ function expand() {
   if (host) fireEvent.mouseEnter(host);
 }
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  setLanguage("es");
+  vi.useFakeTimers();
+});
 afterEach(() => {
   act(() => clearToasts());
   cleanup();
@@ -85,7 +89,20 @@ describe("Toast", () => {
   it("can be dismissed by hand", () => {
     mount();
     act(() => void toast({ text: "x", kind: "error" }));
-    fireEvent.click(screen.getByRole("button", { name: /Cerrar|Close/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(qt("x")).toBeNull();
+  });
+
+  it("a toast's close is the shared X and still calls onDismiss", () => {
+    mount();
+    const onDismiss = vi.fn();
+    act(() => void toast({ text: "x", kind: "error", onDismiss }));
+    const x = document.querySelector(".toast .ntc-x") as HTMLButtonElement;
+    expect(x).not.toBeNull();
+    expect(x.getAttribute("aria-label")).toBe("Cerrar");
+    expect(x.textContent).toBe("");
+    fireEvent.click(x);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(qt("x")).toBeNull();
   });
 
@@ -98,7 +115,7 @@ describe("Toast", () => {
     expect(qt("uno")).toBeNull();
     expect(gt("dos")).not.toBeNull();
     expect(gt("Ir")).not.toBeNull();
-    expect(gat("×").length).toBe(1);
+    expect(document.querySelectorAll(".toast .ntc-x").length).toBe(1);
   });
 
   it("dismissToastByKey removes without onDismiss", () => {
@@ -114,7 +131,7 @@ describe("Toast", () => {
     mount();
     const onDismiss = vi.fn();
     act(() => void toast({ text: "x", kind: "error", onDismiss }));
-    fireEvent.click(screen.getByRole("button", { name: /Cerrar|Close/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
     const o2 = vi.fn();
     let id = 0;
@@ -238,7 +255,7 @@ describe("Toast", () => {
     act(() => void toast({ key: "k", text: "uno", kind: "error", action: { label: "Ir", run: () => {} }, onDismiss }));
     act(() => void toast({ key: "k", text: "dos", kind: "error" }));
     expect(qt("Ir")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Cerrar|Close/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
     expect(onDismiss).not.toHaveBeenCalled();
   });
 

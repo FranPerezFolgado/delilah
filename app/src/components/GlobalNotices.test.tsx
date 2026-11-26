@@ -29,8 +29,7 @@ it("shows nothing below 90 %", () => {
 
 it("warns from 90 % with a tooltip", () => {
   render(<GlobalNotices tasks={[]} usage={usage(93)} current={null} onOpenTask={noop} onOpenInbox={noop} />);
-  const bar = screen.getByText("Claude 5 h al 93 %").parentElement!;
-  expect(bar.getAttribute("title")).toBeTruthy();
+  expect(screen.getByText("Claude 5 h al 93 %").getAttribute("title")).toBeTruthy();
 });
 
 it("announces the reached limit with the resume time and the paused tasks", () => {
@@ -146,4 +145,46 @@ it("announces the waiting toast once per change, not on every refresh", () => {
   expect(status().firstElementChild).toBe(first);
   to([wait("A-0"), wait("A-1")]);
   expect(status().textContent).toBe("2 tareas te esperan");
+});
+
+const ap = (reason: string) => ({ state: "paused" as const, reason, since: "" });
+const gn = (tasks: Task[], u: UsageReport | null, onOpen = noop) => (
+  <GlobalNotices tasks={tasks} usage={u} current={null} onOpenTask={onOpen} onOpenInbox={noop} />
+);
+
+it("closes the usage bar and brings it back when it reaches the limit", () => {
+  const { rerender } = render(gn([], usage(93)));
+  expect(document.querySelectorAll(".gn-bar .ntc-x")).toHaveLength(1);
+  fireEvent.click(screen.getByLabelText("Cerrar"));
+  expect(screen.queryByText("Claude 5 h al 93 %")).toBeNull();
+  rerender(gn([], usage(95)));
+  expect(screen.queryByText("Claude 5 h al 95 %")).toBeNull();
+  rerender(gn([], usage(100)));
+  expect(document.body.textContent).toMatch(/Límite de 5 h alcanzado/);
+  rerender(gn([], usage(50)));
+  rerender(gn([], usage(93)));
+  expect(screen.getByText("Claude 5 h al 93 %")).toBeTruthy();
+});
+
+it("closes one paused bar without opening the task; a new reason shows it again", () => {
+  const onOpen = vi.fn();
+  const tasks = (r: string) => [task("A-1", { type: "running" }, ap(r)), task("A-2", { type: "running" }, ap("x"))];
+  const { rerender } = render(gn(tasks("a"), null, onOpen));
+  fireEvent.click(screen.getAllByLabelText("Cerrar")[0]);
+  expect(onOpen).not.toHaveBeenCalled();
+  expect(screen.queryByText("A-1 · autopiloto en pausa: a")).toBeNull();
+  expect(screen.getByText("A-2 · autopiloto en pausa: x")).toBeTruthy();
+  rerender(gn(tasks("b"), null, onOpen));
+  expect(screen.getByText("A-1 · autopiloto en pausa: b")).toBeTruthy();
+});
+
+it("closes the «y N más» bar; a different count shows it again", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => task(`A-${i}`, { type: "running" }, ap("r")));
+  const { rerender } = render(gn(many(5), null));
+  expect(screen.getAllByLabelText("Cerrar")).toHaveLength(4);
+  fireEvent.click(screen.getAllByLabelText("Cerrar")[3]);
+  expect(screen.queryByText("y 2 más con el autopiloto en pausa")).toBeNull();
+  expect(screen.getAllByLabelText("Cerrar")).toHaveLength(3);
+  rerender(gn(many(6), null));
+  expect(screen.getByText("y 3 más con el autopiloto en pausa")).toBeTruthy();
 });

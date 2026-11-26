@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type JiraImportPreview, type JiraImportRow, type SubtaskSummary, type Task } from "../api";
 import { t, tn } from "../i18n";
-import { Button, StatusBadge } from "./ui";
+import { Button, Notice, StatusBadge, useDismissal } from "./ui";
 import { JiraImportDialog } from "./JiraImportDialog";
 import "./SubtaskList.css";
 
@@ -58,6 +58,7 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
 
   const rows: JiraImportRow[] = preview?.linked ? preview.subtasks : [];
   const fresh = rows.filter((r) => (r.action === "create" || r.action === "attach") && !r.skipped).length;
+  const [bannerHidden, closeBanner] = useDismissal(fresh > 0 ? String(fresh) : null);
   const jiraStatus = new Map(rows.filter((r) => r.action === "linked").map((r) => [r.key, r.status]));
   const gone = new Set(preview?.linked ? preview.gone.map((g) => g.key) : []);
   const skipped = rows.filter((r) => (r.action === "create" || r.action === "attach") && r.skipped);
@@ -76,11 +77,11 @@ export function SubtaskList({ task, onOpenTask, onNewSubtask, onError }: Props) 
         <Button variant="secondary" size={28} onClick={() => setCheck((n) => n + 1)}>{t("Comprobar Jira")}</Button>
         <Button variant="secondary" size={28} onClick={() => onNewSubtask?.(task)} disabled={!onNewSubtask}>{t("Nueva subtarea")}</Button>
       </header>
-      {fresh > 0 && (
-        <div className="subtasks-banner" role="status">
+      {fresh > 0 && !bannerHidden && (
+        <Notice className="subtasks-banner" role="status" onClose={closeBanner}>
           <span>{tn(fresh, "{n} subtarea nueva de Jira", "{n} subtareas nuevas de Jira")}</span>
           <Button variant="secondary" size={28} onClick={() => setAdding(true)}>{t("Añadir")}</Button>
-        </div>
+        </Notice>
       )}
       {preview && !preview.linked && preview.reason === "not-connected" && <p className="muted subtasks-note">{t("Jira no está conectado.")}</p>}
       {subtasks && subtasks.length === 0 && <p className="muted">{t("Aún no hay subtareas.")}</p>}
