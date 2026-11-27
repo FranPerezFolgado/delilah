@@ -7,7 +7,7 @@ import { t } from "../i18n";
 import { relativeTime } from "../time";
 import { AutofixControl } from "./AutofixControl";
 import { OpenPrDialog } from "./OpenPrDialog";
-import { Button, ConfirmDialog, PrChip, pushToast } from "./ui";
+import { Button, ConfirmDialog, Notice, PrChip, pushToast, useDismissal } from "./ui";
 import "./PrView.css";
 
 // What to do about each problem the daemon can report with `gh`.
@@ -209,6 +209,8 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
   const grouped = groups.length > 1;
 
   const problem = data?.problem;
+  const [problemHidden, dismissProblem] = useDismissal(problem ? problem.kind : null);
+  const [commitsHidden, dismissCommits] = useDismissal(isParent && base?.subtask_commits ? String(base.subtask_commits) : null);
   // Without a usable gh session nothing can be opened, whatever the proposal says.
   const why = problem && BLOCKING.has(problem.kind) ? t(FIXES[problem.kind]) : cannot;
   const checked = data?.prs.map((p) => p.checked_at).filter((c): c is string => !!c).sort().pop();
@@ -238,8 +240,8 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
         </Button>
       </div>
 
-      {problem && (
-        <div className="notice pr-problem" role="alert">
+      {problem && !problemHidden && (
+        <Notice className="notice pr-problem" role="alert" onClose={dismissProblem}>
           <span className="c-err">●</span>
           <div className="pr-problem-body">
             <b>{HEADLINES[problem.kind] ? t(HEADLINES[problem.kind]) : problem.message}</b>
@@ -258,13 +260,13 @@ export function PrView({ owner, task, onTaskChanged, onOpenTerminal }: { owner: 
               </Button>
             </div>
           </div>
-        </div>
+        </Notice>
       )}
       {error && <div className="error">{error}</div>}
-      {isParent && !!base?.subtask_commits && (
-        <div className="pr-base-warning" role="status">
+      {isParent && !!base?.subtask_commits && !commitsHidden && (
+        <Notice className="pr-base-warning" role="status" onClose={dismissCommits}>
           {t("{n} commits de subtareas fusionados que no están en tu workspace", { n: base.subtask_commits })}
-        </div>
+        </Notice>
       )}
 
       {none && (
@@ -388,6 +390,9 @@ function PrCard({
   const method = pr.method ?? s?.merge_methods?.[0];
   // A subtask's PR aimed somewhere other than its parent's branch (no retarget action).
   const misbased = !!pr.base_branch && !!pr.expected_base && pr.base_branch !== pr.expected_base;
+  const showReady = readyHint && !!s?.draft && s.state === "open";
+  const [baseHidden, dismissBase] = useDismissal(misbased ? `${pr.base_branch}→${pr.expected_base}` : null);
+  const [readyHidden, dismissReady] = useDismissal(showReady ? `${pr.id}` : null);
   // Why "Fusionar" is unavailable, or null when it can go ahead.
   const blocked = !s
     ? null
@@ -433,18 +438,18 @@ function PrCard({
         {s && <span>{t(PR_CI[s.ci])}</span>}
         {pr.checked_at && <span>{t("comprobado {when}", { when: relativeTime(pr.checked_at) })}</span>}
       </div>
-      {misbased && (
-        <div className="pr-base-warning" role="alert">
+      {misbased && !baseHidden && (
+        <Notice className="pr-base-warning" role="alert" onClose={dismissBase}>
           {t("Esta PR apunta a {base}, pero debería apuntar a {expected}", { base: pr.base_branch ?? "", expected: pr.expected_base ?? "" })}
-        </div>
+        </Notice>
       )}
-      {readyHint && s?.draft && s.state === "open" && (
-        <div className="pr-ready-hint">
+      {showReady && !readyHidden && (
+        <Notice className="pr-ready-hint" onClose={dismissReady}>
           <span>{t("Todas las subtareas están fusionadas: la PR puede salir de borrador")}</span>
           <Button variant="primary" size={28} disabled={disabled} onClick={onReady}>
             {t("Marcar como lista")}
           </Button>
-        </div>
+        </Notice>
       )}
       {(pr.autofix || taskAutofix !== null) && (
         <div className="muted pr-meta pr-autofix">

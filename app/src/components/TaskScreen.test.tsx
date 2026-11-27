@@ -599,14 +599,43 @@ describe("TaskScreen base-stale banner", () => {
       </>,
     );
 
-  it("shows the notice text and dismisses it", async () => {
+  it("shows the notice text and dismisses it with the shared X, with no Descartar button", async () => {
     dismissNotice.mockClear();
     const onChanged = vi.fn();
-    const { getByText } = screenWith([stale], onChanged);
+    const { getByText, getByRole, queryByText } = screenWith([stale], onChanged);
     expect(getByText("No se pudo actualizar r (sin red); se usó main")).toBeTruthy();
-    fireEvent.click(getByText("Descartar"));
+    expect(queryByText("Descartar")).toBeNull();
+    fireEvent.click(getByRole("button", { name: "Cerrar" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     expect(dismissNotice).toHaveBeenCalledWith(9);
+  });
+
+  it("keeps Actualizar rama next to the X when the base moved", async () => {
+    baseStatus.mockResolvedValueOnce({ base: "origin/main", behind_by: 2 });
+    const { findByText, getByRole, container } = screenWith([stale]);
+    await findByText("main avanzó 2 commits");
+    expect(getByRole("button", { name: "Actualizar rama" })).toBeTruthy();
+    expect(container.querySelectorAll(".base-stale .ntc-x").length).toBe(1);
+  });
+
+  it("hides a notice without an id locally, with no API call", () => {
+    dismissNotice.mockClear();
+    const local = { ...stale, notice: null } as unknown as InboxItem;
+    const { getByRole, container } = screenWith([local]);
+    fireEvent.click(getByRole("button", { name: "Cerrar" }));
+    expect(container.querySelector(".base-stale")).toBeNull();
+    expect(dismissNotice).not.toHaveBeenCalled();
+  });
+
+  it("keeps Actualizar rama on the first visible bar when the first id-less notice is hidden", async () => {
+    baseStatus.mockResolvedValueOnce({ base: "origin/main", behind_by: 2 });
+    const a = { ...stale, notice: null, text: "primero" } as unknown as InboxItem;
+    const b = { ...stale, notice: null, text: "segundo" } as unknown as InboxItem;
+    const { findByText, getAllByRole, getByRole, queryByText } = screenWith([a, b]);
+    await findByText("main avanzó 2 commits");
+    fireEvent.click(getAllByRole("button", { name: "Cerrar" })[0]);
+    expect(queryByText("primero")).toBeNull();
+    expect(getByRole("button", { name: "Actualizar rama" })).toBeTruthy();
   });
 
   it("says how far the base moved and merges it in, with the result as a toast", async () => {

@@ -152,3 +152,17 @@ it("re-fetches the Jira preview on 'Comprobar Jira' and stays quiet on error", a
   await waitFor(() => expect(queryByText("1 subtarea nueva de Jira")).toBeNull());
   expect(onError).not.toHaveBeenCalled();
 });
+
+it("closes the new-subtasks banner with the X, shows it again for a different count, and Añadir still works", async () => {
+  const spy = vi.spyOn(api, "jiraImportPreview").mockResolvedValue(prev([jrow({}), jrow({ key: "P-12", action: "attach" })]));
+  vi.spyOn(api, "projects").mockResolvedValue([]);
+  const { findByText, getByRole, getByText, queryByText } = render(<SubtaskList task={parent} />);
+  await findByText("2 subtareas nuevas de Jira");
+  fireEvent.click(getByRole("button", { name: "Cerrar" }));
+  expect(queryByText(/nuevas? de Jira/)).toBeNull();
+  spy.mockResolvedValue(prev([jrow({}), jrow({ key: "P-12", action: "attach" }), jrow({ key: "P-15" })]));
+  fireEvent.click(getByText("Comprobar Jira"));
+  await findByText("3 subtareas nuevas de Jira");
+  fireEvent.click(getByRole("button", { name: "Añadir" }));
+  await findByText("Añadir subtareas de P-1");
+});

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Task, UsageReport } from "../api";
 import { t, tn } from "../i18n";
-import { Button, dismissToastByKey, pushToast } from "./ui";
+import { Button, Notice, dismissToastByKey, pushToast, useDismissals } from "./ui";
 import "./GlobalNotices.css";
 
 const HOT = 90;
@@ -78,16 +78,24 @@ export function GlobalNotices({ tasks, usage, current, onOpenTask, onOpenInbox }
   const hot = Object.entries(usage?.rate_limits ?? {}).filter(([, w]) => (w.used_percentage ?? 0) >= HOT);
   const paused = tasks.filter((k) => k.autopilot?.state === "paused");
   const limited = tasks.filter((k) => k.status.type === "paused-by-limit").length;
+  const shown = paused.slice(0, MAX_PAUSED);
+
+  // A closed bar stays closed until what it says changes.
+  const sigs: Record<string, string> = {};
+  for (const [name, w] of hot) sigs[`usage:${name}`] = (w.used_percentage ?? 0) >= 100 ? "full" : "hot";
+  for (const k of shown) sigs[`pause:${k.key}`] = `${k.autopilot?.reason ?? ""}|${k.autopilot?.since ?? ""}`;
+  if (paused.length > MAX_PAUSED) sigs.more = String(paused.length - MAX_PAUSED);
+  const { hidden, dismiss } = useDismissals(sigs);
 
   return (
     <div className="gn">
-      {hot.map(([name, w]) => {
+      {hot.filter(([name]) => !hidden(`usage:${name}`)).map(([name, w]) => {
         const used = Math.round(w.used_percentage ?? 0);
         const win = WINDOWS[name] ? t(WINDOWS[name]) : name;
         const full = used >= 100;
         return (
-          <div key={name} className="gn-bar gn-wait" role="status" title={t("Quedan pocas peticiones en esta ventana de uso")}>
-            <span className="grow">
+          <Notice key={name} className="gn-bar gn-wait" role="status" onClose={() => dismiss(`usage:${name}`)}>
+            <span className="grow" title={t("Quedan pocas peticiones en esta ventana de uso")}>
               {full
                 ? w.resets_at
                   ? t("Límite de {window} alcanzado · se reanuda a las {time}", { window: win, time: clock(w.resets_at) })
@@ -95,21 +103,23 @@ export function GlobalNotices({ tasks, usage, current, onOpenTask, onOpenInbox }
                 : t("Claude {window} al {pct} %", { window: win, pct: used })}
             </span>
             {full && limited > 0 && <span>{tn(limited, "{n} tarea en pausa", "{n} tareas en pausa")}</span>}
-          </div>
+          </Notice>
         );
       })}
-      {paused.slice(0, MAX_PAUSED).map((k) => (
-        <div key={k.key} className="gn-bar gn-pause" role="status">
+      {shown.filter((k) => !hidden(`pause:${k.key}`)).map((k) => (
+        <Notice key={k.key} className="gn-bar gn-pause" role="status" onClose={() => dismiss(`pause:${k.key}`)}>
           <span className="grow gn-reason" title={k.autopilot?.reason}>
             {k.autopilot?.reason
               ? t("{key} · autopiloto en pausa: {reason}", { key: k.key, reason: k.autopilot.reason })
               : t("{key} · autopiloto en pausa", { key: k.key })}
           </span>
           <Button variant="ghost" size={28} onClick={() => onOpenTask(k.key)}>{t("Abrir")}</Button>
-        </div>
+        </Notice>
       ))}
-      {paused.length > MAX_PAUSED && (
-        <div className="gn-bar gn-pause" role="status">{t("y {n} más con el autopiloto en pausa", { n: paused.length - MAX_PAUSED })}</div>
+      {paused.length > MAX_PAUSED && !hidden("more") && (
+        <Notice className="gn-bar gn-pause" role="status" onClose={() => dismiss("more")}>
+          <span className="grow">{t("y {n} más con el autopiloto en pausa", { n: paused.length - MAX_PAUSED })}</span>
+        </Notice>
       )}
     </div>
   );

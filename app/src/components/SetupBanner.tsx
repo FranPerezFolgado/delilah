@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type SetupInfo, type Task } from "../api";
 import { t } from "../i18n";
 import { openExternal } from "../platform";
-import { Button, Icon, pushToast } from "./ui";
+import { Button, Icon, Notice, pushToast, useDismissal } from "./ui";
 import "./SetupBanner.css";
 
 interface Props {
@@ -46,6 +46,7 @@ export function SetupBanner({ task, running, onChanged, onOpenTerminal, onOpenSe
   const [info, setInfo] = useState<SetupInfo | null>(null);
   const s = task.status;
   const failed = s.type === "setup-failed";
+  const [hidden, dismiss] = useDismissal(failed ? "failed" : running ? "running" : null);
 
   // The last run's command, exit code and output tail (the status only keeps a short reason).
   useEffect(() => {
@@ -60,7 +61,7 @@ export function SetupBanner({ task, running, onChanged, onOpenTerminal, onOpenSe
     };
   }, [failed, task.key]);
 
-  if (!failed && !running) return null;
+  if ((!failed && !running) || hidden) return null;
 
   const act = async (action: (key: string) => Promise<unknown>) => {
     setBusy(true);
@@ -89,7 +90,7 @@ export function SetupBanner({ task, running, onChanged, onOpenTerminal, onOpenSe
   const output = info ? info.tail : stable ? "" : (reason ?? "");
 
   return (
-    <div className="notice err setup-panel">
+    <Notice className="notice err setup-panel" onClose={dismiss}>
       <div className="setup-top">
         <Icon name={failed ? "failed" : "run"} className={failed ? "c-err" : "c-run"} />
         <span className="setup-title">
@@ -152,6 +153,6 @@ export function SetupBanner({ task, running, onChanged, onOpenTerminal, onOpenSe
         </>
       )}
       {error && <div className="error selectable">{error}</div>}
-    </div>
+    </Notice>
   );
 }

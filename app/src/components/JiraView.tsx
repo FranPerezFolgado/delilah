@@ -3,7 +3,7 @@ import {
   api, ApiError, DEFAULT_JQL, taskKind, type JiraConnect, type JiraIssue, type JiraMode, type JiraProgress, type JiraSettings,
   type JiraSprintFilter, type JiraWho, type Task, type TaskStatus,
 } from "../api";
-import { Button, Icon, IconButton, Menu, Segmented, Skeleton, StatusBadge } from "./ui";
+import { Button, Icon, IconButton, Menu, Notice, Segmented, Skeleton, StatusBadge, useDismissal } from "./ui";
 import { Markdown } from "./Markdown";
 import { JiraImportDialog } from "./JiraImportDialog";
 import { openExternal } from "../platform";
@@ -148,6 +148,7 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
+  const [bannerHidden, dismissBanner] = useDismissal(expired ? "expired" : null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   // Below 1200 px the detail is a drawer that only opens when a row is chosen.
@@ -333,12 +334,12 @@ export function JiraView({ onAnalyze, onOpenTask }: Props) {
             options={[{ value: "status", label: t("Estado") }, { value: "epic", label: t("Épica") }]} />
         </span>
       </div>
-      {expired && (
-        <div className="jv-banner" role="alert">
+      {expired && !bannerHidden && (
+        <Notice className="jv-banner" role="alert" onClose={dismissBanner}>
           <strong>{t("Jira rechazó el token (401)")}</strong>
           <span>{t("Lo que ves son los últimos datos conocidos.")}</span>
           <Button variant="primary" size={28} onClick={() => setEditing(true)}>{t("Reconectar")}</Button>
-        </div>
+        </Notice>
       )}
       {error && <div className="error selectable jv-error">{error}</div>}
       <div className={`jv-body ${expired ? "stale" : ""}`}>

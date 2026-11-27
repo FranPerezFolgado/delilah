@@ -151,6 +151,7 @@ page when a feature lands or a decision is taken. Last updated: 2026-10-26
 - Tauri updater against GitHub Releases: a notice with the open-session count, "Later" / "When they finish", menu item and Settings › Updates; release builds only.
 - The daemon copies the database to `backups/` before migrating after a version change.
 - `make release` / `make release-dry-run` and the tag workflow `.github/workflows/release.yml`.
+- **Close button on every notification** (spec `016-notification-close-button`, decision [#107](decisions.md)): a shared `Notice` and `CloseButton` in the kit and a `useDismissals` hook; every toast, global bar, task-screen bar and notice (N1-N12) has an X. Dismissal is client-side, by signature, in memory. Known limits: the `keeps` bar ("not archived") in `TaskView` keeps its own close button; an A to B to A change inside one React batch is not observed, so the bar stays closed.
 
 ## Pending and known problems
 

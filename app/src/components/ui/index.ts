@@ -29,3 +29,4 @@ export { PhaseBars } from "./PhaseBars";
 export type { PhaseBarsProps } from "./PhaseBars";
 export { Icon } from "./Icon";
 export type { IconName } from "./Icon";
+export { CloseButton, Notice, useDismissals, useDismissal } from "./Notice";

@@ -4,7 +4,7 @@ import { api, ApiError, hhmm, isActive, reviewPrompt, type EventRecord, type Inb
 import { SetupBanner } from "./SetupBanner";
 import { isSetupRunning, kindLabel } from "./sessionLabels";
 import { on } from "../live";
-import { Button, ConfirmDialog, dismissToast, Icon, Menu, pushToast, Skeleton, StatusBadge } from "./ui";
+import { Button, ConfirmDialog, dismissToast, Icon, Menu, Notice, pushToast, useDismissals, Skeleton, StatusBadge } from "./ui";
 import { SpecPanel } from "./SpecPanel";
 import { AskCard } from "./AskCard";
 import { historyEntry } from "../history";
@@ -142,6 +142,13 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
   const pending = asks.filter((a) => a.ask || a.permission);
   const at = Math.min(askAt, Math.max(0, pending.length - 1));
   const current = pending[at];
+  const showReview = task.phase === "review" && isActive(s) && hasWorkspace;
+  const sigs: Record<string, string> = {};
+  if (s.type === "paused-by-limit") sigs.limit = `limit:${s.resume_at}`;
+  if (s.type === "failed") sigs.failed = `failed:${s.reason}`;
+  if (s.type === "waiting-for-user" && !current) sigs.waiting = "waiting";
+  if (showReview) sigs.review = `review:${task.phase}`;
+  const { hidden, dismiss } = useDismissals(sigs);
   const menu = [
     { label: t("Abrir cambios"), onSelect: onViewChanges, disabled: !hasWorkspace },
     { label: t("Archivar workspace"), onSelect: () => archive(false), disabled: !canArchive(s) || busy },
@@ -187,8 +194,8 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
 
       {error && <div className="tv-error selectable">{error}</div>}
 
-      {s.type === "paused-by-limit" && (
-        <div className="tv-notice tv-pause">
+      {s.type === "paused-by-limit" && !hidden("limit") && (
+        <Notice className="tv-notice tv-pause" onClose={() => dismiss("limit")}>
           <Icon name="pause" className="c-pause" />
           <span className="tv-grow">
             {t("Claude llegó al límite de uso. Se reanuda sola a las {time}; el contexto y el workspace se conservan.", { time: hhmm(s.resume_at) })}
@@ -196,19 +203,19 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
           <Button variant="secondary" size={28} disabled={busy} onClick={() => act(() => api.resume(task.key))}>
             {t("Reanudar ahora")}
           </Button>
-        </div>
+        </Notice>
       )}
       {(s.type === "setup-failed" || isSetupRunning(sessions)) && (
         <SetupBanner task={task} running={isSetupRunning(sessions)} onChanged={onChanged} />
       )}
-      {s.type === "failed" && (
-        <div className="tv-notice tv-err">
+      {s.type === "failed" && !hidden("failed") && (
+        <Notice className="tv-notice tv-err" onClose={() => dismiss("failed")}>
           <Icon name="failed" className="c-err" />
           <span className="tv-grow selectable">{s.reason}</span>
           <Button variant="primary" size={28} disabled={busy} onClick={() => act(() => api.resume(task.key))}>
             {t("Reanudar")}
           </Button>
-        </div>
+        </Notice>
       )}
       {current && (
         <AskCard
@@ -222,17 +229,17 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
           onDone={onChanged}
         />
       )}
-      {s.type === "waiting-for-user" && !current && (
-        <div className="tv-notice tv-wait">
+      {s.type === "waiting-for-user" && !current && !hidden("waiting") && (
+        <Notice className="tv-notice tv-wait" onClose={() => dismiss("waiting")}>
           <Icon name="wait" className="c-wait" />
           <span className="tv-grow">{t("El agente terminó su turno y te espera. Contéstale en su pestaña.")}</span>
           <Button variant="primary" size={28} onClick={() => onOpenSession()}>
             {t("Contestar")}
           </Button>
-        </div>
+        </Notice>
       )}
-      {task.phase === "review" && isActive(s) && hasWorkspace && (
-        <div className="tv-notice">
+      {showReview && !hidden("review") && (
+        <Notice className="tv-notice" onClose={() => dismiss("review")}>
           <Icon name="review" className="c-done" />
           <span className="tv-grow">{t("La tarea está en revisión: toca revisar los cambios de la rama.")}</span>
           <Button variant="secondary" size={28} icon="diff" onClick={onViewChanges}>
@@ -241,7 +248,7 @@ export function TaskView({ task, sessions, asks = [], onOpenSession, onNewSessio
           <Button variant={current ? "secondary" : "primary"} size={28} disabled={busy} onClick={review}>
             {t("Revisar con Claude")}
           </Button>
-        </div>
+        </Notice>
       )}
       {keeps && (
         <div className="tv-notice">

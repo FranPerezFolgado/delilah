@@ -85,6 +85,28 @@ describe("App shell", () => {
     expect(document.querySelector("main")!.contains(screen.getByRole("alert"))).toBe(true);
   });
 
+  it("closing the banner keeps the content disabled; it returns on a new disconnection", async () => {
+    conn.status = "down";
+    const { rerender } = render(<App />);
+    await act(async () => {});
+    const inactive = () => {
+      const c = document.querySelector(".shell-content")!;
+      return c.classList.contains("is-offline") && c.getAttribute("aria-disabled") === "true" && c.hasAttribute("inert");
+    };
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Cerrar" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(inactive()).toBe(true);
+    conn.status = "up";
+    rerender(<App />);
+    await act(async () => {});
+    expect(screen.queryByRole("alert")).toBeNull();
+    conn.status = "down";
+    rerender(<App />);
+    await act(async () => {});
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(inactive()).toBe(true);
+  });
+
   it("is not greyed when connected", async () => {
     await mount();
     expect(document.querySelector(".shell-content")!.classList.contains("is-offline")).toBe(false);

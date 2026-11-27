@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, type Autopilot, type Handoff } from "../api";
 import { t } from "../i18n";
 import { relativeTime } from "../time";
-import { Button } from "./ui";
+import { Button, Notice, useDismissal } from "./ui";
 import "./HandoffActions.css";
 
 interface Props {
@@ -46,10 +46,12 @@ export function HandoffActions({ task, handoff, autopilot, onDone, hideError }: 
     }
   };
   const stage = handoff?.stage;
+  const paused = autopilot?.state === "paused";
+  const [hidden, dismiss] = useDismissal(paused ? `${autopilot.reason ?? ""}|${autopilot.since}` : null);
   return (
     <>
-      {autopilot?.state === "paused" && (
-        <div className="ha-banner">
+      {paused && !hidden && (
+        <Notice className="ha-banner" onClose={dismiss}>
           <strong>{t("Autopiloto en pausa")}</strong>
           {autopilot.reason && <span className="selectable">{autopilot.reason}</span>}
           {autopilot.since && <span className="muted">{t("en pausa desde {when}", { when: relativeTime(autopilot.since) })}</span>}
@@ -59,7 +61,7 @@ export function HandoffActions({ task, handoff, autopilot, onDone, hideError }: 
           <Button variant="secondary" size={28} disabled={busy} onClick={() => autopilotAct("off")}>
             {t("Seguir a mano")}
           </Button>
-        </div>
+        </Notice>
       )}
       {stage === "saving" && <span className="muted">{t("Guardando las notas de la sesión…")}</span>}
       {stage === "starting" && <span className="muted">{t("Empezando la sesión nueva…")}</span>}

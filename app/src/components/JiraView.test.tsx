@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api, ApiError, type JiraIssue, type JiraSettings, type Task } from "../api";
 import { setLanguage } from "../i18n";
 import { JiraView } from "./JiraView";
@@ -93,6 +93,30 @@ describe("JiraView list", () => {
     expect(screen.getByRole("button", { name: "Analizar con Claude" }).className).toContain("b-s");
     fireEvent.click(screen.getByRole("button", { name: "Reconectar" }));
     expect(screen.getByText("Conectar Jira")).toBeTruthy();
+  });
+});
+
+describe("JiraView expired banner", () => {
+  const expire = async () => {
+    vi.mocked(api.jiraIssues).mockRejectedValue(new ApiError("unauthorized", 401));
+    fireEvent.click(screen.getByLabelText("Recargar"));
+    await screen.findByText("Jira rechazó el token (401)");
+  };
+
+  it("has the X; clicking hides it while the list stays stale; a good load and a new 401 show it again", async () => {
+    view();
+    await screen.findByText("Otra cosa");
+    await expire();
+    const banner = document.querySelector(".jv-banner") as HTMLElement;
+    expect(banner.getAttribute("role")).toBe("alert");
+    fireEvent.click(within(banner).getByRole("button", { name: "Cerrar" }));
+    expect(document.querySelector(".jv-banner")).toBeNull();
+    expect(document.querySelector(".jv-body")!.classList.contains("stale")).toBe(true);
+    vi.mocked(api.jiraIssues).mockResolvedValue(rows);
+    fireEvent.click(screen.getByLabelText("Recargar"));
+    await waitFor(() => expect(document.querySelector(".jv-body")!.classList.contains("stale")).toBe(false));
+    await expire();
+    expect(document.querySelector(".jv-banner")).not.toBeNull();
   });
 });
 
